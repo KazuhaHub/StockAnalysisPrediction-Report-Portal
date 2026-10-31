@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { Grid } from 'antd'
 import { MemoryRouter, Route, Routes, useNavigate, useLocation } from 'react-router'
 import { useState } from 'react'
+import { CLOSE_TASKS_EVENT } from '../lib/jobDetailStore'
 import AppLayout from './AppLayout'
 import ForecastRecordPage from '../pages/ForecastRecordPage'
 import { notifyExportsChanged } from '../lib/exportJobs'
@@ -165,12 +166,13 @@ describe('AppLayout queue badge', () => {
     expect(shown(container, '.ant-badge-dot')).toBeNull()
   })
 
-  // Same module-global tag store as the queue table: the badge must not be told "unchanged" about
-  // a count it has never held.
-  it('drops the summary tag before its first ask', async () => {
+  // The queue views poll the same summary URL: the badge must not be told "unchanged" about a
+  // count it has never held, so it revalidates against tags of its own and drops them before its
+  // first ask.
+  it('drops its own summary tag before its first ask', async () => {
     queueState.answer = { running: 0, waiting: 0, scheduled: 0, budget: 3 }
     renderAt('/queue')
-    await vi.waitFor(() => expect(forgetTags).toHaveBeenCalledWith('/api/admin/batch/queue'))
+    await vi.waitFor(() => expect(forgetTags).toHaveBeenCalledWith('/api/admin/batch/queue', expect.any(Object)))
   })
 })
 
@@ -409,6 +411,18 @@ describe('AppLayout Tasks entry', () => {
     expect((await screen.findByTestId('tasks-drawer')).getAttribute('data-tab')).toBe('exports')
   })
 
+  it('puts the Tasks drawer away when asked to by a notification', async () => {
+    answer(exportPolicy(true))
+    renderAt('/queue')
+    await screen.findByText('queue-body')
+    act(() => notifyExportsChanged({ open: true }))
+    await screen.findByTestId('tasks-drawer')
+    act(() => {
+      window.dispatchEvent(new Event(CLOSE_TASKS_EVENT))
+    })
+    await vi.waitFor(() => expect(screen.queryByTestId('tasks-drawer')).toBeNull())
+  })
+
   it('keeps the tool buttons quiet and uniform, with a separator before the account', async () => {
     answer(exportPolicy(true))
     renderAt('/queue')
@@ -468,6 +482,33 @@ describe('AppLayout mobile chat focus mode', () => {
     expect(screen.getByTitle('nav.runAnalysis')).toBeTruthy()
     expect(screen.getByText('nav.home')).toBeTruthy()
   })
+
+// A phone could not fit the logo, the header version pill and the controls on one row: the controls
+// wrapped to a second line under the logo. On a phone the version moves into the account menu.
+describe('AppLayout header version on a phone', () => {
+  afterEach(() => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'hidden' }
+  })
+
+  it('keeps the version pill out of the compact header and offers it in the account menu', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'header' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: false } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    const header = container.querySelector('#rp-app-header') as HTMLElement
+    expect(header.querySelector('.rp-version-label')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Alice' }))
+    expect(document.querySelector('.ant-popover .rp-version-label')).not.toBeNull()
+  })
+
+  it('keeps the version pill in the header at desktop width', async () => {
+    siteState.settings = { footerText: '', footerShowInfo: false, versionDisplay: 'header' }
+    vi.spyOn(Grid, 'useBreakpoint').mockReturnValue({ md: true } as ReturnType<typeof Grid.useBreakpoint>)
+    const { container } = renderAt('/queue')
+    expect(await screen.findByText('queue-body')).toBeTruthy()
+    expect(container.querySelector('#rp-app-header .rp-version-label')).not.toBeNull()
+  })
+})
 
 describe('AppLayout header centring', () => {
   beforeEach(() => {
@@ -680,7 +721,14 @@ it.each([['/manage', true], ['/manage/overview', true], ['/manage', false], ['/m
   expect(await screen.findByText('manage-body')).toBeTruthy()
   expect(container.querySelector('#rp-app-header .rp-header-search')).toBeNull()
   expect(screen.queryByLabelText('global-search')).toBeNull()
-  expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
+  if (desktop) {
+    expect((await screen.findByText('version.label:2026.38.1')).closest('#rp-app-header')).not.toBeNull()
+  } else {
+    // A phone keeps the header to one row; the version is in the account menu instead.
+    expect(container.querySelector('#rp-app-header .rp-version-label')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Alice' }))
+    expect((await screen.findByText('version.label:2026.38.1')).closest('.ant-popover')).not.toBeNull()
+  }
 })
 
 it('retains an application across its subroutes but retires it for another installation',async()=>{

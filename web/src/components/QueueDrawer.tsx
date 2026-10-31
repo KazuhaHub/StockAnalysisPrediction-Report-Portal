@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tabs, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
 import { InputsPreview, isTerminal, jobProgressPresentation } from '../lib/batchUi'
-import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
+import { UNCHANGED, forgetTags, getIfChanged, type TagHolder } from '../lib/conditionalGet'
 import { fmtBytes, notifyExportsChanged } from '../lib/exportJobs'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
@@ -17,12 +17,18 @@ import { startVisiblePoll } from '../lib/visiblePoll'
 import { loadFailure } from '../lib/loadFailure'
 import LoadGate from './LoadGate'
 import TaskRow, { type TaskTone } from './TaskRow'
+import RunningFor from './RunningFor'
+import ExportDetailModal from './ExportDetailModal'
+import { openJobDetail, pageShowsJob } from '../lib/jobDetailStore'
 
 export type DrawerTab = 'runs' | 'exports'
 
 // Finished exports are kept this long (exportFileTTL in internal/app/export_jobs.go).
 const EXPORT_KEPT_DAYS = 7
 const RECENT_MAX = 5
+
+// One scope's last answer: null until its first summary / jobs call has landed.
+type ScopeView = { summary: BatchQueueSummary | null; jobs: BatchJob[] | null; err: string }
 
 export interface TasksDrawerProps {
   open: boolean
@@ -49,6 +55,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const { message } = App.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  const loc = useLocation()
   const { admin } = useAuth()
   const showRuns = canRun
   const showExports = canExport || admin
@@ -56,65 +63,79 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   // The queue is asked for only while the Runs tab is on screen; switching back asks at once.
   // The row whose cancel confirmation is open keeps its actions on screen.
   const [confirming, setConfirming] = useState<string | null>(null)
+  // The export whose compact detail is open.
+  const [exportDetail, setExportDetail] = useState<string | null>(null)
+  // It belongs to this open of the drawer and this page: closing the drawer or changing route puts it away.
+  const here = loc.pathname + loc.search
+  useEffect(() => {
+    setExportDetail(null)
+  }, [open, here])
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
-  const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
-  const [jobs, setJobs] = useState<BatchJob[]>([])
+  // Each scope keeps its own last answer, so the Mine / All switch shows the other at once and
+  // never shows one scope's runs under the other's label. A scope with no answer yet has no
+  // entry: `[]` and a wall of zeros are where the state starts, not an answer, so nothing is said
+  // about the queue until that scope's jobs call has landed at least once.
+  const [views, setViews] = useState<Partial<Record<QueueScope, ScopeView>>>({})
   const [targets, setTargets] = useState<BatchTarget[]>([])
-  // Same rule as the full queue page: `[]` and a wall of zeros are where the state starts, not
-  // an answer. Nothing is said about the queue until the jobs call has landed at least once.
-  const [loaded, setLoaded] = useState(false)
-  const [loadErr, setLoadErr] = useState('')
-  // What this drawer is actually holding. The tag store is module-global, and the header badge
-  // polls the same summary URL — so on the first open a 304 would answer "unchanged" about a
-  // summary the drawer has never seen, leaving all four tiles on a dash for good.
-  // The URLs whose answers the drawer holds (they change with the scope).
-  const heldSummary = useRef<string | null>(null)
-  const heldJobs = useRef<string | null>(null)
+  const view = views[scope]
+  const summary = view?.summary ?? null
+  const jobs = useMemo(() => view?.jobs ?? [], [view])
+  const loaded = !!view?.jobs
+  const loadErr = view?.err ?? ''
+  // The drawer's own revalidation tags. The header badge and the queue page poll the same summary
+  // URL, so with shared tags a 304 could answer "unchanged" about a summary the drawer never had.
+  // Each scope's URLs are fixed and its view keeps the last answer, so whatever tag the drawer
+  // holds for a URL came with the answer it is showing.
+  const [tagHolder] = useState<TagHolder>(() => ({}))
+  // Also when the viewer's admin role changes: the plain URL then means another scope (everyone's
+  // for an administrator, their own otherwise), so a tag kept across that would answer for the wrong one.
+  useEffect(() => () => forgetTags(undefined, tagHolder), [tagHolder, admin])
 
-  const load = async () => {
-    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
-    const jobsUrl = withQueueScope('/api/admin/batch/jobs', scope, admin)
-    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
-    if (heldJobs.current !== jobsUrl) forgetTags(jobsUrl)
-    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
+  const loadScope = async (sc: QueueScope) => {
+    const patch = (p: Partial<ScopeView>) => setViews((v) => ({ ...v, [sc]: { summary: null, jobs: null, err: '', ...v[sc], ...p } }))
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', sc, admin)
+    const jobsUrl = withQueueScope('/api/admin/batch/jobs', sc, admin)
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl, tagHolder)
       .then((r) => {
-        if (r === UNCHANGED) return
-        setSummary(r)
-        heldSummary.current = summaryUrl
+        if (r !== UNCHANGED) patch({ summary: r })
       })
       .catch(() => {})
-    const jobsRequest = getIfChanged<{ jobs: BatchJob[] }>(jobsUrl).then((r) => {
-      if (r === UNCHANGED) return
-      setJobs(r.jobs || [])
-      heldJobs.current = jobsUrl
-    })
     try {
-      await jobsRequest
-      if (heldJobs.current === jobsUrl) {
-        setLoaded(true)
-        setLoadErr('')
-      }
+      const r = await getIfChanged<{ jobs: BatchJob[] }>(jobsUrl, tagHolder)
+      if (r !== UNCHANGED) patch({ jobs: r.jobs || [], err: '' })
     } catch (e) {
-      // Read only while !loaded: a poll that fails once the list is on screen changes nothing,
-      // since those runs are still the last thing the server said about the queue.
+      // Read only while that scope has no rows: a poll that fails once the list is on screen
+      // changes nothing, since those runs are still the last thing the server said.
       const text = loadFailure(e, t)
-      if (text !== null) setLoadErr(text)
+      if (text !== null) patch({ err: text })
     }
     await summaryRequest
   }
+  const load = () => loadScope(scope)
+  // The scope not on screen is asked once per open of the Runs tab, so switching to it has an
+  // answer ready; the poll then keeps whichever scope is showing current.
+  const askedOther = useRef(false)
+  useEffect(() => {
+    if (!open || !runsShown) askedOther.current = false
+  }, [open, runsShown])
 
   useEffect(() => {
     if (!open) return
     void refreshTasks()
     if (!runsShown) return
-    // Reopening asks again, so the drawer must not present the previous open's answer as this
-    // one's — but it keeps the rows it has so a reopen is not a flash of spinner.
-    setLoadErr('')
+    // Reopening, switching scope or returning to Runs asks again, so an earlier failure is not
+    // presented as this ask's answer (a scope that never loaded shows its spinner until the poll
+    // answers or fails again) — but the rows are kept so none of these is a flash of spinner.
+    setViews((v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, { ...x, err: '' }])))
     api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setTargets(r.targets || [])).catch(() => {})
     const unwatch = watchQueue() // the badge stands down while the drawer shows the same thing
     const stop = startVisiblePoll(load, 3000)
+    if (admin && !askedOther.current) {
+      askedOther.current = true
+      void loadScope(scope === 'all' ? 'mine' : 'all')
+    }
     return () => {
       stop()
       unwatch()
@@ -165,7 +186,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <Button type="text" size="small" icon={icon} aria-label={label} {...props} />
     </Tooltip>
   )
-  const openAction = (label: string, to: string) => iconAction(label, <ArrowRightOutlined />, { onClick: () => { onClose(); navigate(to) } })
 
   // null = not answered yet; a dash rather than a 0, which would read as a settled idle queue.
   const stat = (label: string, value: number | null) => (
@@ -197,8 +217,13 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     let percent: number | undefined
     if (j.status === 'running' || j.status === 'cancelling') {
       tone = 'running'
-      percent = progress.percent
-      detail = t('tasks.rows', { done: progress.done, total: j.total })
+      if (j.status === 'running' && j.total === 1) {
+        // One row: a bar and "0 / 1 rows" say nothing, so say how long it has been going.
+        detail = <RunningFor since={j.started_at_ms ?? 0} />
+      } else {
+        percent = progress.percent
+        detail = t('tasks.rows', { done: progress.done, total: j.total })
+      }
     } else if (j.status === 'queued') {
       tone = 'waiting'
       detail = j.window_blocked
@@ -240,6 +265,12 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={j.id}
         pinned={confirming === `run-${j.id}`}
+        label={`${targetName(j.target_id)}, ${t(`batch.status.${j.status}`, j.status)}`}
+        onOpen={() => {
+          // The queue page already shows this run in its own drawer: step aside rather than stack a second one.
+          if (pageShowsJob(loc, j.id)) onClose()
+          else openJobDetail(j.id)
+        }}
         tone={tone}
         name={
           <>
@@ -260,7 +291,6 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
                 </Tooltip>
               </Popconfirm>
             )}
-            {openAction(t('tasks.open'), '/queue')}
           </>
         }
       />
@@ -296,6 +326,8 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       <TaskRow
         key={taskKey(x)}
         pinned={confirming === `export-${taskKey(x)}`}
+        label={`${x.name}, ${t(`export.status.${x.status}`, x.status)}`}
+        onOpen={() => setExportDetail(taskKey(x))}
         tone={tone}
         name={x.name}
         sub={x.format ? <Typography.Text type="secondary" ellipsis style={{ fontSize: 12 }}>{t(`export.format.${x.format}`, x.format)}</Typography.Text> : undefined}
@@ -354,12 +386,19 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
     </>
   )
 
-  const count = (n: number | null) =>
-    n ? <span style={{ marginLeft: 4, fontSize: 12, color: token.colorTextSecondary }}>{n}</span> : null
+  // The two views switch with a full-width segmented control, like Mine / All. An in-progress
+  // count is a small pill, shown only when there is something in progress.
+  const viewLabel = (label: string, n: number | null) => (
+    <span className="rp-task-views__label">
+      {label}
+      {n ? <span className="rp-task-views__count">{n}</span> : null}
+    </span>
+  )
   const tabItems = [
-    ...(showRuns ? [{ key: 'runs', label: <span>{t('tasks.tab.runs')}{count(loaded ? activeJobs.length : null)}</span>, children: runsPane }] : []),
-    ...(showExports ? [{ key: 'exports', label: <span>{t('tasks.tab.exports')}{count(activeExports.length)}</span>, children: exportsPane }] : []),
+    ...(showRuns ? [{ key: 'runs' as const, label: viewLabel(t('tasks.tab.runs'), loaded ? activeJobs.length : null), children: runsPane }] : []),
+    ...(showExports ? [{ key: 'exports' as const, label: viewLabel(t('tasks.tab.exports'), activeExports.length), children: exportsPane }] : []),
   ]
+  const activePane = (tabItems.find((item) => item.key === activeTab) ?? tabItems[0])?.children
 
   const onRuns = activeTab === 'runs'
   const footerTo = onRuns ? '/queue' : admin ? '/manage/exports' : '/exports'
@@ -390,11 +429,21 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         </Button>
       }
     >
-      {tabItems.length > 1 ? (
-        <Tabs size="small" activeKey={activeTab} onChange={(k) => onTabChange(k as DrawerTab)} items={tabItems} tabBarStyle={{ margin: '0 8px' }} />
-      ) : (
-        tabItems[0]?.children
+      {tabItems.length > 1 && (
+        <Segmented
+          block
+          className="rp-task-views"
+          value={activeTab}
+          onChange={(k) => onTabChange(k as DrawerTab)}
+          options={tabItems.map((item) => ({ value: item.key, label: item.label }))}
+        />
       )}
+      {activePane}
+      <ExportDetailModal
+        task={exportDetail ? (exportTasks.find((x) => taskKey(x) === exportDetail) ?? null) : null}
+        onClose={() => setExportDetail(null)}
+        onCancel={cancelExport}
+      />
     </Drawer>
   )
 }

@@ -200,7 +200,7 @@ body {
   }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-ou-console {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -209,9 +209,8 @@ body {
     width: 100% !important;
     max-width: none;
   }
-  .rp-ou-picker--manage .rp-ou-picker__tree {
-    max-height: 300px !important;
-  }
+  .rp-scope-fold .rp-ou-picker { width: 100% !important; }
+  .rp-scope-fold .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-ou-profile-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -300,7 +299,6 @@ body {
 }
 .rp-policy-scope, .rp-policy-content { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
 .rp-policy-scope { border-inline-end: 1px solid var(--ant-color-border-secondary); padding-inline-end: 16px; }
-.rp-policy-scope > .ant-btn { margin-bottom: 16px; text-align: start; justify-content: flex-start; }
 .rp-policy-scope > .ant-typography { margin-top: 16px; font-size: 12px; }
 .rp-policy-scope .rp-ou-picker--manage { position: static; width: 100% !important; border: 0 !important; }
 .rp-policy-scope .rp-ou-picker__tree { max-height: none !important; }
@@ -460,19 +458,25 @@ body {
   min-width: 0;
   overflow-anchor: none;
 }
+/* The bar scrolls sideways on narrow screens. The baseline is an inset shadow rather than a border
+   so the selected tab's underline (.rp-settings-tab-ink) can sit on it without a negative margin: with one, every tab stood
+   1px taller than the bar, and overflow-x: auto turned that pixel into a vertical scrollbar. */
 .rp-settings-tabs {
+  position: relative;
   display: flex;
   gap: 4px;
   min-width: 0;
   overflow-x: auto;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  box-shadow: inset 0 -1px 0 var(--ant-color-border-secondary);
 }
 .rp-settings-tab {
   flex: 0 0 auto;
   padding: 8px 12px;
-  margin-bottom: -1px;
   border: 0;
   border-bottom: 2px solid transparent;
+  transition: color var(--ant-motion-duration-mid, 0.2s);
   background: transparent;
   color: var(--ant-color-text-secondary);
   font: inherit;
@@ -480,7 +484,30 @@ body {
   white-space: nowrap;
 }
 .rp-settings-tab:hover { color: var(--ant-color-text); }
-.rp-settings-tab--active { color: var(--ant-color-primary); border-bottom-color: var(--ant-color-primary); }
+.rp-settings-tab--active { color: var(--ant-color-primary); }
+/* The selected tab's underline: one bar that slides between tabs, timed like antd's ink bar. It
+   sits on the baseline inside the scroller, so it scrolls with the tabs on narrow screens. */
+.rp-settings-tab-ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--ant-color-primary);
+  pointer-events: none;
+}
+.rp-settings-tab-ink--animated {
+  transition: transform var(--ant-motion-duration-slow, 0.3s) var(--ant-motion-ease-in-out, ease-in-out),
+    width var(--ant-motion-duration-slow, 0.3s) var(--ant-motion-ease-in-out, ease-in-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-settings-tab { transition: none; }
+  .rp-settings-tab-ink--animated { transition: none; }
+}
+/* Forced colours repaint backgrounds with the canvas colour, which would erase the bar and leave
+   no visible selection; draw it in the system highlight instead. */
+@media (forced-colors: active) {
+  .rp-settings-tab-ink { background: Highlight; forced-color-adjust: none; }
+}
 .rp-settings-tab:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-admin-list-page {
   display: flex;
@@ -555,11 +582,38 @@ body {
   gap: 8px;
   margin-inline-start: auto;
 }
+.rp-reader-export-policy { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; align-items: start; }
+.rp-table-scroll { max-width: 100%; }
+.rp-scope-fold { min-width: 0; width: 100%; }
+.rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
+.rp-scope-fold__body { margin-top: 8px; }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover,
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active {
+  color: var(--ant-color-text-light-solid) !important;
+  background: var(--ant-color-primary) !important;
+}
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover { background: var(--ant-color-primary-hover) !important; }
+.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active { background: var(--ant-color-primary-active) !important; }
+/* Wide screens: the fold wrappers vanish so the tree is laid out exactly as if they were not there. */
+.rp-scope-fold--inline, .rp-scope-fold--inline > .rp-scope-fold__body { display: contents; }
+.rp-policy-scope-toggle { min-width: 0; }
+.rp-policy-scope-toggle__label { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) {
-  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 16px; }
-  .rp-policy-scope { max-height: 180px; border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  /* One scroll region: the page body. The workspace grows with its content and neither pane clips. */
+  .rp-admin-page-body:has(> .rp-policy-workspace) { overflow: auto; }
+  .rp-policy-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto; gap: 16px; height: auto; }
+  .rp-policy-scope, .rp-policy-content { overflow: visible; max-height: none; }
+  .rp-policy-scope { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
+  .rp-policy-content { padding-inline-end: 0; scrollbar-gutter: auto; }
+  .rp-policy-scope-header > .rp-policy-scope-toggle { max-width: 60%; }
+  .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
+  .rp-batch-targets-section > .ant-space-item { min-width: 0; }
+  .rp-table-scroll { overflow-x: auto; }
+  .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
+  .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
+  .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }
-  .rp-policy-scope > .ant-btn { margin-bottom: 8px; }
 }
 
 .rp-plain-list {
@@ -1159,6 +1213,8 @@ body {
   width: min(620px, calc(100vw - 48px));
   max-height: calc(100vh - 180px);
   overflow-y: auto;
+  /* The form row's gutter reaches 8px past the edge; with overflow-y set, that would scroll sideways. */
+  overflow-x: hidden;
   padding-top: 4px;
 }
 .rp-home-advanced-popover .ant-form-item {
@@ -1355,6 +1411,17 @@ body {
   gap: 10px;
   padding: 10px 12px;
 }
+/* The dot and the two text lines: the row's button, which opens the task's detail. */
+.rp-task-row__main {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  border-radius: 6px;
+  -webkit-tap-highlight-color: transparent;
+}
+.rp-task-row__main[role='button'] { cursor: pointer; }
 /* The divider starts under the text (padding 12 + dot 8 + gap 10), not under the dot. */
 .rp-task-row + .rp-task-row::before {
   content: '';
@@ -1362,10 +1429,6 @@ body {
   top: 0;
   inset-inline: 30px 0;
   border-top: 1px solid var(--ant-color-border-secondary);
-}
-.rp-task-row:hover,
-.rp-task-row:focus-within {
-  background: var(--ant-color-fill-tertiary);
 }
 /* Centred on the first line (22px line box). */
 .rp-task-row__dot {
@@ -1375,26 +1438,69 @@ body {
   margin-top: 7px;
   border-radius: 50%;
 }
-/* Hidden actions are inert but stay in the tab order: focusing one shows the row's actions. */
-.rp-task-row__acts {
-  display: flex;
+/* The time and the actions share one cell at the row end, so the time is flush with the right edge
+   on every row. The actions wait off to the right, inert; the time gives way when they arrive.
+   Hidden actions stay in the tab order on a hover device: focusing one shows the row's actions. */
+.rp-task-row__end {
+  display: grid;
   flex: none;
+  align-self: stretch;
+  justify-items: end;
+}
+.rp-task-row__time {
+  grid-area: 1 / 1;
+  align-self: start;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.rp-task-row__acts {
+  grid-area: 1 / 1;
   align-self: center;
+  display: flex;
   gap: 2px;
   opacity: 0;
+  transform: translateX(14px);
   pointer-events: none;
-  transition: opacity 0.15s;
+  transition: opacity 0.16s ease, transform 0.16s ease;
 }
-.rp-task-row:hover .rp-task-row__acts,
-.rp-task-row:focus-within .rp-task-row__acts,
 .rp-task-row.is-active .rp-task-row__acts {
   opacity: 1;
+  transform: none;
   pointer-events: auto;
 }
-@media (hover: none), (any-pointer: coarse) {
-  .rp-task-row__acts {
+.rp-task-row.is-active .rp-task-row__time {
+  opacity: 0;
+  transform: translateX(-10px);
+}
+/* Hover and focus reveal the actions where the primary input can hover. A click or tap anywhere on the
+   row opens the task's detail instead. */
+@media (hover: hover) {
+  .rp-task-row:hover,
+  .rp-task-row:has(:focus-visible) {
+    background: var(--ant-color-fill-tertiary);
+  }
+  .rp-task-row:hover .rp-task-row__acts,
+  .rp-task-row:has(:focus-visible) .rp-task-row__acts {
     opacity: 1;
+    transform: none;
     pointer-events: auto;
+  }
+  .rp-task-row:hover .rp-task-row__time,
+  .rp-task-row:has(:focus-visible) .rp-task-row__time {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+}
+.rp-task-row.is-active {
+  background: var(--ant-color-fill-tertiary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-task-row__time,
+  .rp-task-row__acts {
+    transition: none;
+    transform: none !important;
   }
 }
 /* Specific enough to beat antd's text-button hover colour. */
@@ -2260,10 +2366,13 @@ body {
   -webkit-backdrop-filter: blur(24px) saturate(160%);
   backdrop-filter: blur(24px) saturate(160%);
   animation: rp-notify-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Let the page scroll vertically; a sideways drag is the card's own swipe-to-dismiss. */
+  touch-action: pan-y;
 }
 .rp-notify-card.is-leaving { animation: rp-notify-out 0.25s ease-in forwards; }
 @keyframes rp-notify-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes rp-notify-out { to { transform: translateX(24px); opacity: 0; } }
+/* A swipe sets --rp-swipe-x / --rp-swipe-end so the exit carries on from where the finger left the card. */
+@keyframes rp-notify-out { from { transform: translateX(var(--rp-swipe-x, 0px)); } to { transform: translateX(var(--rp-swipe-end, 24px)); opacity: 0; } }
 .rp-notify-icon {
   flex: none;
   width: 34px;
@@ -2317,6 +2426,27 @@ body {
   -webkit-backdrop-filter: blur(24px);
   backdrop-filter: blur(24px);
   cursor: pointer;
+}
+/* Touch: the close button is always there, and big enough to hit. */
+@media (hover: none) {
+  .rp-notify-close {
+    width: 28px;
+    height: 28px;
+    top: -9px;
+    right: -9px;
+    font-size: 12px;
+    opacity: 1;
+    transform: none;
+  }
+}
+/* A phone: the stack spans the screen below the header with a 12px margin on each side. */
+@media (max-width: 575px) {
+  .rp-notify-stack {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .rp-notify-card, .rp-notify-card.is-leaving { animation: none; }
@@ -2413,7 +2543,7 @@ body {
 .rp-dashboard-shortcut-options > .ant-btn { justify-content: flex-start; white-space: normal; height: auto; min-height: 36px; text-align: start; }
 .rp-sso-page > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
 @media (max-width: 767px) { .rp-dashboard-shortcut-options { grid-template-columns: minmax(0, 1fr); } }
-@media (min-width: 768px) { .rp-users-directory > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
+@media (min-width: 768px) { .rp-users-directory > .rp-scope-fold--inline > .rp-scope-fold__body > .rp-ou-picker { width: 232px !important; flex-basis: 232px !important; } }
 .rp-users-page > .ant-tabs-nav { margin-bottom: 12px; }
 
 .rp-dashboard-catalog-modal .rp-dashboard-preview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2491,6 +2621,7 @@ body {
 .rp-dashboard-data-scroll thead { position: sticky; top: 0; background: var(--ant-color-bg-elevated); z-index: 1; }
 .rp-dashboard-data-pagination { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
 
+.rp-batch-targets-table { max-width: 100%; min-width: 0; }
 .rp-batch-targets-table td { overflow-wrap: anywhere; }
 .rp-batch-targets-table .ant-space { max-width: 100%; }
 .rp-statistics-page { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
@@ -2563,16 +2694,18 @@ body {
 .rp-app-access__tree .rp-ou-picker--manage { width: 100% !important; border: 0 !important; }
 .rp-app-access__tree .rp-ou-picker__tree { max-height: 360px; }
 .rp-app-access__setting { padding: 24px 28px; min-width: 0; }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-app-detail, .rp-app-access { grid-template-columns: minmax(0, 1fr); }
+  .rp-app-access { min-height: 0; }
+  .rp-app-access__tree .rp-ou-picker__tree { max-height: none !important; overflow: visible !important; }
   .rp-app-access__tree { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); }
   .rp-app-access__setting { padding: 16px; }
 }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-apps-col-type { display: none; }
 }
 .rp-apps-col-chevron { width: 40px; }
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .rp-apps-col-chevron { display: none; }
 }
 .rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
@@ -2590,3 +2723,12 @@ body {
 
 /* The back-to-top button sits above the unsaved-changes dock while it is shown. */
 body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
+
+/* Tasks drawer: Runs / Exports switch, full width like Mine / All, with a count pill. */
+.rp-task-views { margin: 12px 0 4px; }
+.rp-task-views__label { display: inline-flex; align-items: center; gap: 6px; }
+.rp-task-views__count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--ant-color-primary); color: var(--ant-color-white);
+  font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
+}

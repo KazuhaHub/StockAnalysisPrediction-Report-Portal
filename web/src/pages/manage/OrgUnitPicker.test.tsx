@@ -146,3 +146,40 @@ describe('OrgUnitPicker', () => {
     expect(onManage).toHaveBeenCalled()
   })
 })
+
+describe('OrgUnitPicker onPick', () => {
+  const mountPick = (props: Partial<React.ComponentProps<typeof OrgUnitPicker>> = {}) => {
+    const onPick = vi.fn()
+    render(<App><OrgUnitPicker groups={TREE} unassigned={0} scoped={false} onScopedChange={() => {}} selected={[]} onSelect={() => {}} onManage={() => {}} onPick={onPick} {...props} /></App>)
+    return onPick
+  }
+  it('reports a single-unit pick', () => {
+    const onPick = mountPick()
+    fireEvent.click(screen.getByText('Clients'))
+    expect(onPick).toHaveBeenCalledTimes(1)
+  })
+  it('stays quiet while several units are being picked', () => {
+    const onPick = mountPick()
+    fireEvent.click(screen.getByText('ou.multi'))
+    fireEvent.click(screen.getByText('Clients'))
+    expect(onPick).not.toHaveBeenCalled()
+  })
+  it('reports a re-click of the selected unit in manage mode, which keeps the selection', () => {
+    const onSelect = vi.fn()
+    const onPick = mountPick({ mode: 'manage', selected: [2], onSelect })
+    fireEvent.click(screen.getByText('Clients'))
+    expect(onSelect).not.toHaveBeenCalled()
+    expect(onPick).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('OrgUnitPicker collapsed state', () => {
+  it('shows the tree again when it stops being collapsible', () => {
+    const props = { groups: TREE, unassigned: 0, scoped: false, onScopedChange: () => {}, selected: [], onSelect: () => {}, onManage: () => {} }
+    const view = render(<App><OrgUnitPicker {...props} /></App>)
+    fireEvent.click(screen.getByRole('button', { name: 'ou.collapse' }))
+    expect(screen.queryByText('Detached')).toBeNull()
+    view.rerender(<App><OrgUnitPicker {...props} collapsible={false} /></App>)
+    expect(screen.getByText('Detached')).toBeTruthy()
+  })
+})

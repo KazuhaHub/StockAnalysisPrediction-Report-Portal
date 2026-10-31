@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import QueueTable from './QueueTable'
 import { INPUT_VALUE_MAX } from '../lib/batchUi'
 import type { BatchJob } from '../api/types'
@@ -9,7 +9,7 @@ import type { BatchJob } from '../api/types'
 // Mutable so a test can inject jobs into the mocked API. vi.hoisted keeps it reachable from
 // the hoisted vi.mock factory below. `hold` makes every polled GET hang, which is what a slow
 // link looks like for the seconds that matter: the page is up and nothing has answered yet.
-const store = vi.hoisted(() => ({ urls: [] as string[], jobs: [] as BatchJob[], hold: false, fail: '', unchanged: false, admin: true, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
+const store = vi.hoisted(() => ({ urls: [] as string[], holders: [] as unknown[], jobs: [] as BatchJob[], hold: false, detail404: false, fail: '', unchanged: false, admin: true, jobsMine: null as BatchJob[] | null, pendMine: false, summary: { running: 0, waiting: 0, scheduled: 0, budget: 0 } as Record<string, number> }))
 const forgetTags = vi.hoisted(() => vi.fn())
 
 // Smoke test: the queue page must mount without crashing (it renders on load, before any
@@ -19,6 +19,10 @@ vi.mock('../api/client', () => ({
   api: {
     get: (url: string) => {
       if (url.includes('/queue')) return Promise.resolve(store.summary)
+      if (/\/jobs\/\d+$/.test(url)) {
+        if (store.detail404) return Promise.reject(Object.assign(new Error('not found'), { status: 404 }))
+        return Promise.resolve({ job: job({ id: Number(url.split('/').pop()) }), counts: {}, running_in_process: true, items: [] })
+      }
       if (url.includes('/targets')) return Promise.resolve({ targets: [] })
       return Promise.resolve({ jobs: store.jobs })
     },
@@ -35,8 +39,12 @@ const UNCHANGED = vi.hoisted(() => Symbol('unchanged'))
 vi.mock('../lib/conditionalGet', () => ({
   UNCHANGED,
   forgetTags,
-  getIfChanged: (url: string) => {
+  getIfChanged: (url: string, holder?: unknown) => {
     store.urls.push(String(url))
+    store.holders.push(holder)
+    const mine = String(url).includes('scope=mine')
+    if (mine && store.pendMine) return new Promise(() => {})
+    if (mine && store.jobsMine && String(url).includes('/jobs')) return Promise.resolve({ jobs: store.jobsMine })
     if (store.hold) return new Promise(() => {})
     if (store.fail) return Promise.reject(new Error(store.fail))
     if (store.unchanged) return Promise.resolve(UNCHANGED)
@@ -80,6 +88,7 @@ describe('QueueTable', () => {
   beforeEach(() => {
     store.jobs = []
     store.hold = false
+    store.detail404 = false
     store.fail = ''
     store.unchanged = false
     store.admin = true
@@ -212,14 +221,23 @@ describe('QueueTable', () => {
     expect(screen.queryByText('common.loading')).toBeNull()
   })
 
-  // The ETag store is module-global and outlives any one mount, so a component that holds nothing
-  // can be told "nothing changed" — about data it has never had. Two guards, both pinned here.
-  it('asks unconditionally for what it is not holding', async () => {
+  // A 304 means "unchanged since the tag you sent", and the header badge and the Tasks drawer poll
+  // the same summary URL. A view that revalidated against their tags could be told "nothing
+  // changed" about data it has never had. Two guards, both pinned here.
+  it('revalidates only against tags of its own, kept apart for each mount', async () => {
+    store.holders = []
     mount()
     await screen.findByText('queue.empty')
-    const asked = forgetTags.mock.calls.map((c) => String(c[0]))
-    expect(asked.some((u) => u.includes('/api/admin/batch/jobs'))).toBe(true)
-    expect(asked).toContain('/api/admin/batch/queue')
+    const first = store.holders[0]
+    expect(first).toBeTypeOf('object')
+    expect(store.holders.every((h) => h === first)).toBe(true)
+    cleanup()
+    store.holders = []
+    mount()
+    await screen.findByText('queue.empty')
+    expect(store.holders[0]).not.toBe(first)
+    // A mount lets its tags go when it goes.
+    expect(forgetTags).toHaveBeenCalledWith(undefined, first)
   })
 
   it('does not open the gate on a 304 for rows it never received', async () => {
@@ -246,7 +264,34 @@ describe('QueueTable', () => {
   describe('mine / all (ADR 0047)', () => {
     beforeEach(() => {
       store.urls = []
+      store.jobsMine = null
+      store.pendMine = false
       localStorage.clear()
+    })
+
+    it("shows a spinner, not the other scope's runs, until the picked scope has answered", async () => {
+      store.admin = true
+      store.jobs = [job({ id: 1, target_id: 71 })]
+      store.pendMine = true
+      mount()
+      await screen.findAllByText('#71')
+      fireEvent.click(screen.getByText('queue.scope.mine'))
+      expect(screen.queryAllByText('#71')).toHaveLength(0)
+      expect(document.querySelector('.ant-spin-spinning')).not.toBeNull()
+    })
+
+    it('shows a scope it has already loaded at once when switched back', async () => {
+      store.admin = true
+      store.jobs = [job({ id: 1, target_id: 71 })]
+      store.jobsMine = [job({ id: 2, target_id: 33 })]
+      mount()
+      await screen.findAllByText('#71')
+      fireEvent.click(screen.getByText('queue.scope.mine'))
+      await screen.findAllByText('#33')
+      store.hold = true // the refresh on switching back has not answered yet
+      fireEvent.click(screen.getByText('queue.scope.all'))
+      expect(screen.getAllByText('#71').length).toBeGreaterThan(0)
+      expect(screen.queryAllByText('#33')).toHaveLength(0)
     })
 
     it('lets an administrator switch to their own runs, for the list and the tiles', async () => {
@@ -265,6 +310,51 @@ describe('QueueTable', () => {
       await waitFor(() => expect(store.urls.length).toBeGreaterThan(0))
       expect(screen.queryByText('queue.scope.mine')).toBeNull()
       expect(store.urls.every((u) => !u.includes('scope='))).toBe(true)
+    })
+  })
+
+  describe('job deep link (?job=id)', () => {
+    const Search = () => <span data-testid="search">{useLocation().search}</span>
+    const mountAt = (entry: string) =>
+      render(
+        <App>
+          <MemoryRouter initialEntries={[entry]}>
+            <Search />
+            <QueueTable showStats />
+          </MemoryRouter>
+        </App>,
+      )
+
+    it('opens the detail drawer of the job named in the url', async () => {
+      store.jobs = [job({ id: 5 })]
+      mountAt('/queue?job=5')
+      expect(await screen.findByText('batch.jobTitle:{"id":5}')).toBeTruthy()
+    })
+
+    it("says so, without crashing, when the job is unknown or not the reader's", async () => {
+      store.detail404 = true
+      mountAt('/queue?job=999')
+      expect(await screen.findByText('batch.jobNotFound')).toBeTruthy()
+    })
+
+    it('clears the parameter when the drawer closes and keeps other parameters', async () => {
+      mountAt('/queue?job=5&tab=x')
+      await screen.findByText('batch.jobTitle:{"id":5}')
+      fireEvent.click(document.querySelector('.ant-drawer-close')!)
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?tab=x'))
+    })
+
+    it('puts the job in the url when a row is opened', async () => {
+      store.jobs = [job({ id: 8 })]
+      mountAt('/queue')
+      fireEvent.click(await screen.findByTitle('batch.view'))
+      await waitFor(() => expect(screen.getByTestId('search').textContent).toBe('?job=8'))
+    })
+
+    it('ignores a job parameter that is not a number', async () => {
+      mountAt('/queue?job=abc')
+      await waitFor(() => expect(store.urls.length).toBeGreaterThan(0))
+      expect(document.querySelector('.ant-drawer-open')).toBeNull()
     })
   })
 })

@@ -1,15 +1,23 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
-import { MemoryRouter, useLocation } from 'react-router'
+import { Link, MemoryRouter, useLocation } from 'react-router'
 import type { BatchJob, TaskItem } from '../api/types'
 import QueueDrawer, { type DrawerTab } from './QueueDrawer'
+import JobDetailHost from './JobDetailHost'
+import { closeJobDetail } from '../lib/jobDetailStore'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 const store = vi.hoisted(() => ({
   urls: [] as string[],
   admin: true,
   jobs: [] as unknown[],
+  // What an administrator's own scope answers; null means the same as everyone's.
+  jobsMine: null as unknown[] | null,
+  // Leave every scope=mine request unanswered.
+  pendMine: false,
   summary: { running: 0, waiting: 0, scheduled: 0, budget: 3 },
 }))
 // Counts the live pollers: started minus stopped. The first tick runs at once, as the real one does.
@@ -21,6 +29,9 @@ vi.mock('../lib/conditionalGet', () => ({
   forgetTags: () => {},
   getIfChanged: (url: string) => {
     store.urls.push(String(url))
+    const mine = String(url).includes('scope=mine')
+    if (mine && store.pendMine) return new Promise(() => {})
+    if (mine && store.jobsMine && String(url).includes('/jobs')) return Promise.resolve({ jobs: store.jobsMine })
     return String(url).includes('/queue') ? Promise.resolve(store.summary) : Promise.resolve({ jobs: store.jobs })
   },
 }))
@@ -35,7 +46,11 @@ vi.mock('../lib/visiblePoll', () => ({
 }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: store.admin, user: 'alice' }) }))
 vi.mock('react-i18next', () => {
-  const t = (k: string, o?: unknown) => (typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`)
+  const t = (k: string, o?: unknown) => {
+    const unit = /^tasks\.elapsed\.([hms])$/.exec(k)
+    if (unit) return `${(o as { n: number }).n}${unit[1]}`
+    return typeof o === 'string' || o === undefined ? k : `${k}:${JSON.stringify(o)}`
+  }
   const hook = { t, i18n: { language: 'en-US' } }
   return { useTranslation: () => hook }
 })
@@ -53,19 +68,27 @@ type Props = Partial<React.ComponentProps<typeof QueueDrawer>>
 const refreshTasks = vi.fn()
 const onTabChange = vi.fn()
 function Where() {
-  return <span data-testid="where">{useLocation().pathname}</span>
+  const loc = useLocation()
+  return (
+    <>
+      <span data-testid="where">{loc.pathname}</span>
+      <span data-testid="search">{loc.search}</span>
+    </>
+  )
 }
-function Harness(props: Props) {
+function Harness({ entry, ...props }: Props & { entry?: string }) {
   return (
     <App>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[entry ?? '/']}>
         <Where />
+        <Link to="/elsewhere">go-elsewhere</Link>
+        <JobDetailHost />
         <QueueDrawer open onClose={() => {}} canRun canExport tasks={[]} refreshTasks={refreshTasks} tab="runs" onTabChange={onTabChange} {...props} />
       </MemoryRouter>
     </App>
   )
 }
-const mount = (props: Props = {}) => render(<Harness {...props} />)
+const mount = (props: Props & { entry?: string } = {}) => render(<Harness {...props} />)
 const rows = (section: string) => within(screen.getByRole('list', { name: section })).queryAllByRole('listitem')
 
 beforeEach(() => {
@@ -73,9 +96,18 @@ beforeEach(() => {
   poll.live = 0
   store.admin = true
   store.jobs = []
+  store.jobsMine = null
+  store.pendMine = false
   store.summary = { running: 0, waiting: 0, scheduled: 0, budget: 3 }
   localStorage.clear()
-  apiMock.get.mockReset().mockResolvedValue({ targets: [{ id: 9, name: 'Deep Research' }] })
+  closeJobDetail()
+  apiMock.get.mockReset().mockImplementation(async (url: string) => {
+    if (/\/batch\/jobs\/\d+$/.test(url)) {
+      const id = Number(url.split('/').pop())
+      return { job: job({ id }), counts: {}, running_in_process: true, items: [{ id: 1, row_index: 0, inputs: '{}', status: 'running', attempts: 1, run_id: '', conversation_id: '', task_id: '', error: '', started_at: '', finished_at: '' }] }
+    }
+    return { targets: [{ id: 9, name: 'Deep Research' }] }
+  })
   apiMock.post.mockReset().mockResolvedValue({})
   refreshTasks.mockReset()
   onTabChange.mockReset()
@@ -90,6 +122,37 @@ describe('Tasks drawer mine / all (ADR 0047)', () => {
     await waitFor(() => expect(store.urls.some((u) => u.includes('/queue') && u.includes('scope=mine'))).toBe(true))
   })
 
+  it('loads both scopes when it opens, so switching shows the other at once', async () => {
+    store.jobs = [job({ id: 1, inputs: JSON.stringify({ symbol: '111111' }) })]
+    store.jobsMine = [job({ id: 2, inputs: JSON.stringify({ symbol: '222222' }) })]
+    mount()
+    await screen.findByText(/111111/)
+    await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs') && u.includes('scope=mine'))).toBe(true))
+    await act(async () => {})
+    fireEvent.click(screen.getByText('queue.scope.mine'))
+    // No wait: the answer is already held.
+    expect(screen.getByText(/222222/)).toBeTruthy()
+    expect(screen.queryByText(/111111/)).toBeNull()
+  })
+
+  it("never shows one scope's runs under the other while the other is still loading", async () => {
+    store.jobs = [job({ id: 1, inputs: JSON.stringify({ symbol: '111111' }) })]
+    store.pendMine = true
+    mount()
+    await screen.findByText(/111111/)
+    fireEvent.click(screen.getByText('queue.scope.mine'))
+    expect(screen.queryByText(/111111/)).toBeNull()
+    expect(screen.queryByText('tasks.emptyRuns')).toBeNull()
+  })
+
+  it('asks for the other scope only once per open, not on every poll', async () => {
+    mount()
+    await waitFor(() => expect(store.urls.some((u) => u.includes('scope=mine'))).toBe(true))
+    await act(async () => {})
+    const mineAsks = store.urls.filter((u) => u.includes('/jobs') && u.includes('scope=mine')).length
+    expect(mineAsks).toBe(1)
+  })
+
   it('offers no toggle to a non-administrator', async () => {
     store.admin = false
     mount()
@@ -99,12 +162,28 @@ describe('Tasks drawer mine / all (ADR 0047)', () => {
 })
 
 describe('Tasks drawer tabs', () => {
-  it('shows Runs and Exports tabs with their in-progress counts', async () => {
+  // The two views switch with a full-width segmented control (like Mine / All), not small
+  // left-aligned tabs; an in-progress count is a small pill, shown only when there is one.
+  it('switches Runs and Exports with a full-width segmented control carrying count pills', async () => {
     store.jobs = [job(), job({ id: 2, status: 'queued', ahead: 1 }), job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
     mount({ tasks: [exp()] })
-    expect(await screen.findByRole('tab', { name: /tasks\.tab\.runs/ })).toBeTruthy()
-    await waitFor(() => expect(screen.getByRole('tab', { name: /tasks\.tab\.runs/ }).textContent).toContain('2'))
-    expect(screen.getByRole('tab', { name: /tasks\.tab\.exports/ }).textContent).toContain('1')
+    const views = await waitFor(() => {
+      const el = document.querySelector('.rp-task-views')
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(document.querySelector('.ant-drawer .ant-tabs')).toBeNull()
+    expect(views.classList.contains('ant-segmented-block')).toBe(true)
+    await waitFor(() => expect(within(views).getByRole('radio', { name: /tasks\.tab\.runs/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('2'))
+    expect(within(views).getByRole('radio', { name: /tasks\.tab\.exports/ }).closest('label')?.querySelector('.rp-task-views__count')?.textContent).toBe('1')
+  })
+
+  it('shows no count pill on a view with nothing in progress', async () => {
+    store.jobs = [job({ id: 3, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount({ tasks: [] })
+    const views = await waitFor(() => document.querySelector('.rp-task-views') as HTMLElement)
+    await screen.findByText('Deep Research')
+    expect(views.querySelectorAll('.rp-task-views__count')).toHaveLength(0)
   })
 
   it('lays the four figures out as a grid, one column each', async () => {
@@ -126,7 +205,7 @@ describe('Tasks drawer tabs', () => {
     store.admin = false
     mount({ canRun: false, canExport: true, tab: 'exports', tasks: [exp()] })
     expect(await screen.findByText('Audit Q3')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
     expect(store.urls).toEqual([]) // the run queue is not asked for
     expect(screen.queryByText('queue.running')).toBeNull()
   })
@@ -136,13 +215,14 @@ describe('Tasks drawer tabs', () => {
     store.jobs = [job()]
     mount({ canRun: true, canExport: false })
     expect(await screen.findByText('Deep Research')).toBeTruthy()
-    expect(screen.queryByRole('tab')).toBeNull()
+    expect(document.querySelector('.rp-task-views')).toBeNull()
   })
 
   it('reports a tab change to its owner', async () => {
     const user = userEvent.setup()
     mount()
-    await user.click(await screen.findByRole('tab', { name: /tasks\.tab\.exports/ }))
+    // The radio itself is pointer-events: none in antd's Segmented; people click its label.
+    await user.click((await screen.findByRole('radio', { name: /tasks\.tab\.exports/ })).closest('label') as HTMLElement)
     expect(onTabChange).toHaveBeenCalledWith('exports' satisfies DrawerTab)
   })
 })
@@ -365,5 +445,331 @@ describe('Tasks drawer Exports tab', () => {
   it('says there are no exports', () => {
     mount({ tab: 'exports' })
     expect(screen.getByText('tasks.emptyExports')).toBeTruthy()
+  })
+})
+
+function stubHover(hover: boolean) {
+  vi.stubGlobal('matchMedia', (query: string): MediaQueryList => ({
+    matches: !hover && query.includes('(hover: none)'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  }))
+}
+
+const rowButton = (row: HTMLElement) => row.querySelector<HTMLElement>('.rp-task-row__main[role="button"]')!
+
+describe('Tasks drawer row layout', () => {
+  beforeEach(() => stubHover(true))
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('ends every row with the time, in a trailing cell that also holds the actions', async () => {
+    store.jobs = [job({ id: 1 }), job({ id: 2, status: 'finished', finished_at: '2026-10-29 09:30:00' })]
+    mount()
+    await screen.findAllByText('Deep Research')
+    const all = [...rows('tasks.section.active'), ...rows('tasks.section.finished')]
+    expect(all.length).toBe(2)
+    for (const row of all) {
+      const end = row.lastElementChild as HTMLElement
+      expect(end.classList.contains('rp-task-row__end')).toBe(true)
+      expect(end.querySelector('.rp-task-row__time')).not.toBeNull()
+    }
+  })
+
+  it('keeps the actions reachable on a device that hovers, and drops the arrow action', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(false)
+    expect(within(row).getByRole('button', { name: 'tasks.cancel' })).toBeTruthy()
+    expect(within(row).queryByRole('button', { name: 'tasks.open' })).toBeNull()
+  })
+
+  it('describes the row by its second line and time, keeping the name short', async () => {
+    store.jobs = [job({ id: 1, total: 5 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    const ids = (rowButton(row).getAttribute('aria-describedby') ?? '').split(' ').filter(Boolean)
+    expect(ids.length).toBeGreaterThan(0)
+    const text = ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ')
+    expect(text).toContain('tasks.rows:{"done":2,"total":5}')
+  })
+
+  it('is a button named after the task and its status', async () => {
+    store.jobs = [job({ id: 1 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(rowButton(row).getAttribute('aria-label')).toBe('Deep Research, batch.status.running')
+    expect(rowButton(row).tabIndex).toBe(0)
+    expect(rowButton(row).hasAttribute('aria-expanded')).toBe(false)
+  })
+})
+
+describe('Tasks drawer rows open the run in place', () => {
+  beforeEach(() => stubHover(true))
+  afterEach(() => vi.unstubAllGlobals())
+  const title = (id: number) => `batch.jobTitle:{"id":${id}}`
+
+  it('opens the detail of that run when the row is clicked, without leaving the page', async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(await screen.findByText(title(41))).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/')
+    expect(screen.getByTestId('search').textContent).toBe('')
+    expect(screen.getByRole('list', { name: 'tasks.section.active' })).toBeTruthy() // the list stays underneath
+  })
+
+  it('opens from the time cell too, anywhere on the row', async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    fireEvent.click(rows('tasks.section.active')[0].querySelector('.rp-task-row__time')!)
+    expect(await screen.findByText(title(41))).toBeTruthy()
+  })
+
+  it('opens from the keyboard with Enter and Space', async () => {
+    store.jobs = [job({ id: 41 }), job({ id: 42 })]
+    mount()
+    await screen.findAllByText('Deep Research')
+    const [a, b] = rows('tasks.section.active')
+    fireEvent.keyDown(rowButton(a), { key: 'Enter' })
+    expect(await screen.findByText(title(41))).toBeTruthy()
+    closeJobDetail()
+    await waitFor(() => expect(screen.queryByText(title(41))).toBeNull())
+    fireEvent.keyDown(rowButton(b), { key: ' ' })
+    expect(await screen.findByText(title(42))).toBeTruthy()
+  })
+
+  it('does not open when an action button is pressed', async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    fireEvent.click(within(rows('tasks.section.active')[0]).getByRole('button', { name: 'tasks.cancel' }))
+    await screen.findByRole('button', { name: 'OK' }) // its own confirmation opened
+    expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
+  })
+
+  it('opens on a plain tap where hover does not exist, with no reveal step', async () => {
+    vi.unstubAllGlobals()
+    stubHover(false)
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(row.querySelector('.rp-task-row__acts')!.hasAttribute('inert')).toBe(true)
+    fireEvent.click(rowButton(row))
+    expect(await screen.findByText(title(41))).toBeTruthy()
+    expect(row.classList.contains('is-open')).toBe(false)
+  })
+
+  it("does not stack a second drawer when the page's own drawer already shows that run", async () => {
+    store.jobs = [job({ id: 41 })]
+    const onClose = vi.fn()
+    mount({ entry: '/queue?job=41', onClose })
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(onClose).toHaveBeenCalled() // the Tasks drawer steps aside for the page's detail
+    expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
+  })
+
+  it("also steps aside on the batch console's own ?job= drawer", async () => {
+    store.jobs = [job({ id: 41 })]
+    const onClose = vi.fn()
+    mount({ entry: '/apps/batch?job=41', onClose })
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(onClose).toHaveBeenCalled()
+    expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
+  })
+
+  it('returns to the Tasks list on close, which stays mounted', async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText(title(41))
+    act(() => closeJobDetail())
+    await waitFor(() => expect(screen.queryByText(title(41))).toBeNull())
+    expect(rows('tasks.section.active')).toHaveLength(1)
+  })
+
+  it('offers Open in queue in the detail, which goes to that run on the queue page', async () => {
+    store.jobs = [job({ id: 41 })]
+    mount()
+    await screen.findByText('Deep Research')
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    fireEvent.click(await screen.findByRole('button', { name: /queue\.openInQueue/ }))
+    await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/queue'))
+    expect(screen.getByTestId('search').textContent).toBe('?job=41')
+  })
+})
+
+describe('Tasks drawer running row of a single run', () => {
+  it('says how long it has been running, from the start instant, with no progress bar', async () => {
+    // The zoneless wall-clock string is deliberately far off: only the instant may be used.
+    store.jobs = [job({ id: 1, total: 1, succeeded: 0, started_at: '2020-01-01 00:00:00', started_at_ms: Date.now() - 133_000 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(row.textContent).toMatch(/tasks\.runningFor:\{"elapsed":"2m 1\ds"\}/)
+    expect(row.textContent).not.toContain('tasks.rows')
+    expect(row.querySelector('.ant-progress')).toBeNull()
+  })
+
+  it('keeps the bar and the row count on a multi-row run', async () => {
+    store.jobs = [job({ id: 1, total: 5 })]
+    mount()
+    await screen.findByText('Deep Research')
+    const row = rows('tasks.section.active')[0]
+    expect(row.querySelector('.ant-progress')).not.toBeNull()
+    expect(row.textContent).toContain('tasks.rows:{"done":2,"total":5}')
+  })
+})
+
+describe('Tasks drawer rows open the export in place', () => {
+  beforeEach(() => stubHover(true))
+  afterEach(() => vi.unstubAllGlobals())
+  const exportJob = (over: Record<string, unknown> = {}) => ({
+    id: 'e1', source: 'reports', format: 'csv', name: 'Audit Q3', requested_by: 'alice', status: 'running', rows_estimate: 34, rows_done: 22,
+    bytes: 0, file_name: '', error: '', created_at: Date.now() - 60_000, started_at: Date.now() - 50_000, finished_at: 0, expires_at: 0, columns: [],
+    filter: { op: 'and', items: [{ field: 'symbol', operator: 'is', values: ['1'] }, { field: 'kind', operator: 'is', values: ['x'] }] }, ...over,
+  })
+  const modalEl = () => document.querySelector('.ant-modal') as HTMLElement
+  // antd keeps a closed modal's DOM until its leave animation ends (never, under jsdom): closed = leaving.
+  const modalShut = () => !document.querySelector('.ant-modal') || modalEl().classList.contains('ant-zoom-leave')
+  const withExport = (job: Record<string, unknown>) => {
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => (/\/exports\/e\d$/.test(url) ? job : base(url)))
+  }
+
+  it('opens a compact detail with the filter summary, and cancels after confirming', async () => {
+    withExport(exportJob())
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    expect(await screen.findByText('tasks.detail.title')).toBeTruthy()
+    expect(apiMock.get).toHaveBeenCalledWith('/api/exports/e1')
+    expect(await screen.findByText('export.source.reports')).toBeTruthy()
+    expect(screen.getByText('tasks.detail.conditions:{"n":2}')).toBeTruthy()
+    expect(within(modalEl()).getByText('tasks.rows:{"done":22,"total":34}')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/')
+    fireEvent.click(within(modalEl()).getByRole('button', { name: /tasks\.cancel/ }))
+    expect(apiMock.post).not.toHaveBeenCalled()
+    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/exports/e1/cancel'))
+  })
+
+  it("reads an administrator's export from the admin family and offers Download when done", async () => {
+    withExport(exportJob({ status: 'done', bytes: 2048, finished_at: Date.now(), expires_at: Date.now() + 86_400_000 }))
+    mount({ tab: 'exports', tasks: [exp({ status: 'done', link: '/manage/exports', download: '/api/admin/exports/e1/file', cancel: undefined, finished_at: Date.now() })] })
+    fireEvent.click(rowButton(rows('tasks.section.finished')[0]))
+    await screen.findByText('tasks.detail.title')
+    expect(apiMock.get).toHaveBeenCalledWith('/api/admin/exports/e1')
+    const dl = await within(modalEl()).findByRole('link', { name: /tasks\.download/ })
+    expect(dl.getAttribute('href')).toBe('/api/admin/exports/e1/file')
+    expect(within(modalEl()).queryByRole('button', { name: /tasks\.cancel/ })).toBeNull()
+  })
+
+  it('closes the export detail when the Tasks drawer closes', async () => {
+    withExport(exportJob())
+    const view = mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    view.rerender(<Harness tab="exports" tasks={[exp({ link: '/exports' })]} open={false} />)
+    await waitFor(() => expect(modalShut()).toBe(true))
+    view.rerender(<Harness tab="exports" tasks={[exp({ link: '/exports' })]} open />)
+    await screen.findAllByText('Audit Q3')
+    expect(modalShut()).toBe(true) // reopening does not resurrect it
+  })
+
+  it('closes the export detail on a route change', async () => {
+    withExport(exportJob())
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    fireEvent.click(screen.getByRole('link', { name: 'go-elsewhere' }))
+    await waitFor(() => expect(modalShut()).toBe(true))
+  })
+
+  it('says so with a retry when the export record cannot be read, and recovers', async () => {
+    let fail = true
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) {
+        if (fail) throw Object.assign(new Error('boom'), { status: 500 })
+        return exportJob()
+      }
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    const retry = await within(modalEl()).findByRole('button', { name: /common\.retry/ })
+    fail = false
+    fireEvent.click(retry)
+    expect(await within(modalEl()).findByText('export.source.reports')).toBeTruthy()
+  })
+
+  it('keeps a spinner, with no error, while the connection is down', async () => {
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(within(modalEl()).queryByRole('button', { name: /common\.retry/ })).toBeNull()
+    expect(modalEl().querySelector('.ant-spin')).not.toBeNull()
+  })
+
+  it('loads the detail once the connection is back, after a connection loss', async () => {
+    let down = true
+    const base = apiMock.get.getMockImplementation()!
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (/\/exports\/e\d$/.test(url)) {
+        if (down) throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
+        return exportJob()
+      }
+      return base(url)
+    })
+    mount({ tab: 'exports', tasks: [exp({ link: '/exports' })] })
+    fireEvent.click(rowButton(rows('tasks.section.active')[0]))
+    await screen.findByText('tasks.detail.title')
+    await waitFor(() => expect(modalEl().querySelector('.ant-spin')).not.toBeNull())
+    down = false
+    act(() => {
+      window.dispatchEvent(new Event('rp:connection-restored'))
+    })
+    expect(await within(modalEl()).findByText('export.source.reports')).toBeTruthy()
+    expect(modalEl().querySelector('.ant-spin')).toBeNull()
+  })
+
+  it('shows the failure reason', async () => {
+    withExport(exportJob({ status: 'failed', error: 'over the limit', finished_at: Date.now() }))
+    mount({ tab: 'exports', tasks: [exp({ status: 'failed', error: 'over the limit', cancel: undefined, finished_at: Date.now() })] })
+    fireEvent.click(rowButton(rows('tasks.section.finished')[0]))
+    await screen.findByText('tasks.detail.title')
+    expect((await within(modalEl()).findAllByText('over the limit')).length).toBeGreaterThan(0)
+  })
+})
+
+describe('Tasks drawer row styles', () => {
+  const css = readFileSync(resolve(__dirname, '../index.css'), 'utf8')
+  it('reveals the actions from the keyboard only, so a mouse click never pins them', () => {
+    expect(css).not.toMatch(/\.rp-task-row:focus-within/)
+    expect(css).toMatch(/\.rp-task-row:has\(:focus-visible\) \.rp-task-row__acts/)
+  })
+  it('looks clickable: a pointer and a hover background', () => {
+    expect(css).toMatch(/\.rp-task-row__main\[role='button'\] \{ cursor: pointer; \}/)
+    expect(css).toMatch(/\.rp-task-row:hover[^{]*\{\s*background/)
   })
 })

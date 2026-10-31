@@ -1,7 +1,7 @@
 import { App, ConfigProvider } from 'antd'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { createMemoryRouter, RouterProvider } from 'react-router'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AdminDraftBoundary from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
 
@@ -81,5 +81,98 @@ describe('Feature-owned organizational policy', () => {
     mount('/manage/security?scope=ou&ou=999')
     await screen.findByText('ou.scopeMissing')
     expect(screen.queryByRole('button', { name: 'common.save' })).toBeNull()
+  })
+})
+
+describe('Scope rail across breakpoints', () => {
+  const realMatchMedia = window.matchMedia
+  let listeners: Array<() => void> = []
+  let matches = true
+  beforeEach(() => {
+    matches = true
+    listeners = []
+    Object.defineProperty(window, 'matchMedia', { configurable: true, value: (query: string) => ({
+      get matches() { return matches && query.includes('767') }, media: query,
+      addEventListener: (_: string, fn: () => void) => { listeners.push(fn) }, removeEventListener: () => {},
+    }) })
+  })
+  afterEach(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: realMatchMedia }) })
+  const toggle = () => screen.getByRole('button', { name: /Research|Default|ou.unitScope/ })
+
+  it('starts compact, names the current unit, and reports its state with aria-expanded', async () => {
+    mount('/manage/security?scope=ou&ou=7')
+    await screen.findByText('ou.sectionSecurity')
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(toggle().getAttribute('aria-expanded')).toBe('false')
+    expect(toggle().getAttribute('aria-controls')).toBe(document.querySelector('.rp-policy-scope [hidden]')?.id)
+    fireEvent.click(toggle())
+    expect(toggle().getAttribute('aria-expanded')).toBe('true')
+    expect(await screen.findByRole('tree')).toBeTruthy()
+  })
+  it('folds back after choosing a unit, including the one already shown', async () => {
+    const router = mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(router.state.location.search).toContain('ou=7'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+    fireEvent.click(toggle())
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+  })
+  it('switches to the desktop rail when the viewport widens while open, and desktop collapse still works', async () => {
+    mount('/manage/security?scope=ou&ou=7')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    matches = false
+    act(() => { listeners.forEach((fn) => fn()) })
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ou.collapse' }))
+    expect(screen.queryByRole('tree')).toBeNull()
+    expect(document.querySelector('.rp-policy-workspace--collapsed')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'ou.expand' }))
+    expect(await screen.findByRole('tree')).toBeTruthy()
+  })
+  it('hands focus back to the toggle after a pick, even though the pick remounts the workspace', async () => {
+    mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+    await waitFor(() => expect(document.activeElement).toBe(toggle()))
+  })
+  it('keeps the rail mounted across a pick and leaves focus on Global when Global is chosen', async () => {
+    mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    const before = toggle()
+    fireEvent.click(before)
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+    expect(toggle()).toBe(before)
+    const global = screen.getByRole('button', { name: /ou.globalScope/ })
+    global.focus()
+    fireEvent.click(global)
+    expect(await screen.findByText('Global security controls')).toBeTruthy()
+    expect(document.activeElement).toBe(global)
+  })
+  it('folds the open tree when the scope changes without a pick, such as browser Back', async () => {
+    const router = mount('/manage/security?scope=ou&ou=1')
+    await screen.findByText('ou.sectionSecurity')
+    fireEvent.click(toggle())
+    expect(await screen.findByRole('tree')).toBeTruthy()
+    await act(async () => { await router.navigate('/manage/security?scope=ou&ou=7') })
+    await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
+  })
+  it('marks Global as selected with a class on the same button, never switching variants', async () => {
+    mount('/manage/security')
+    const global = screen.getByRole('button', { name: /ou.globalScope/ })
+    expect(global.className).toContain('rp-policy-scope-global--active')
+    expect(global.getAttribute('aria-current')).toBe('true')
+    fireEvent.click(await screen.findByRole('button', { name: /Default|ou.unitScope/ }))
+    fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
+    await waitFor(() => expect(screen.getByRole('button', { name: /ou.globalScope/ })).toBe(global))
+    expect(global.className).not.toContain('rp-policy-scope-global--active')
+    expect(global.className).toContain('ant-btn-variant-text')
   })
 })

@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 //
 // A notification must not vanish while its reader is away, so its countdown is gated on the
 // notification having been SEEN: the page is visible and the person has interacted since it
-// appeared. Time only counts while the page is visible, and hovering or focusing the card holds it.
+// appeared. Time only counts while the page is visible, and hovering, focusing or pressing the card holds it.
 
 export type NotifyKind = 'security' | 'failure' | 'partial' | 'actionable' | 'success'
 
@@ -27,7 +27,7 @@ export const ASSERTIVE_KINDS: ReadonlySet<NotifyKind> = new Set<NotifyKind>(['fa
 const EXIT_MS = 250
 const TICK_MS = 100
 
-export type NotifyCloseReason = 'manual' | 'action' | 'timeout'
+export type NotifyCloseReason = 'manual' | 'action' | 'timeout' | 'swipe'
 
 export interface NotifyAction {
   label: ReactNode
@@ -68,6 +68,8 @@ interface Timer {
   seen: boolean
   hover: boolean
   focus: boolean
+  /** A finger (or pen) is down on the card. */
+  press: boolean
 }
 
 let seq = 0
@@ -152,7 +154,7 @@ export function notify(opts: NotifyOptions): string {
     onClose: opts.onClose,
   })
   // A replacement keeps the holds of the card it replaces: the pointer is still over it.
-  timers.set(key, { remaining: NOTIFICATION_DURATIONS[opts.kind], seen: false, hover: held?.hover ?? false, focus: held?.focus ?? false })
+  timers.set(key, { remaining: NOTIFICATION_DURATIONS[opts.kind], seen: false, hover: held?.hover ?? false, focus: held?.focus ?? false, press: held?.press ?? false })
   publish()
   return key
 }
@@ -178,8 +180,8 @@ export function dismissNotification(key: string, reason: NotifyCloseReason = 'ma
   item.onClose?.(reason)
 }
 
-/** Hold or release a notification's countdown (hover or keyboard focus). */
-export function holdNotification(key: string, source: 'hover' | 'focus', on: boolean): void {
+/** Hold or release a notification's countdown (hover, keyboard focus, or a finger held down on it). */
+export function holdNotification(key: string, source: 'hover' | 'focus' | 'press', on: boolean): void {
   const timer = timers.get(key)
   if (timer) timer[source] = on
 }
@@ -217,7 +219,7 @@ function tick() {
   const expired: string[] = []
   shown.forEach((key) => {
     const t = timers.get(key)
-    if (!t || t.remaining === null || !t.seen || t.hover || t.focus) return
+    if (!t || t.remaining === null || !t.seen || t.hover || t.focus || t.press) return
     t.remaining -= dt
     if (t.remaining <= 0) expired.push(key)
   })

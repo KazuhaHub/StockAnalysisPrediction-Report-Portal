@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type Key } from 'react'
 import {
-  Alert,
   App,
   Button,
   Card,
   DatePicker,
-  Descriptions,
-  Drawer,
   Empty,
   Grid,
   Input,
@@ -28,243 +25,47 @@ import {
   DeleteOutlined,
   ExportOutlined,
   EyeOutlined,
-  InfoCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined,
-  SyncOutlined,
 } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
 import { exportLink, runsFilterToTree } from '../lib/exportFilter'
 import { useAuth } from '../auth'
-import type { BatchItem, BatchJob, BatchJobDetail, BatchQueueSummary, BatchTarget } from '../api/types'
+import type { BatchJob, BatchQueueSummary, BatchTarget } from '../api/types'
 import {
   BASE_MAX,
   executionTags,
   queueStatusTag,
-  clampText,
-  fmtInputs,
-  INPUT_TOTAL_MAX,
   InputsPreview,
   isTerminal,
   isUrgent,
   jobProgressPresentation,
   priorityNum,
   priorityTag,
-  statusTag,
-  TOOLTIP_STYLES,
 } from '../lib/batchUi'
-import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
+import { UNCHANGED, forgetTags, getIfChanged, type TagHolder } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import JobDetailDrawer from './JobDetailDrawer'
 import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
-
-// itemActive reports whether a run (row) can still be cancelled — it hasn't reached a
-// terminal state (succeeded / partial / failed / cancelled).
-const itemActive = (s: string) => s === 'queued' || s === 'running'
-
-// Detail drawer: a run's rows, inputs, errors + a link to the stock's reports. Rows can be
-// cancelled individually (per-row ⊘) or several at once (checkbox multi-select), by the
-// job's owner or an admin.
-function DetailDrawer({ jobId, admin, user, onClose }: { jobId: number | null; admin: boolean; user: string | null; onClose: () => void }) {
-  const { t } = useTranslation()
-  const { message } = App.useApp()
-  const fullWidth = !Grid.useBreakpoint().md // phone: the 680px drawer would overflow the screen
-  const [detail, setDetail] = useState<BatchJobDetail | null>(null)
-  const [selected, setSelected] = useState<Key[]>([])
-  const [detailItem, setDetailItem] = useState<BatchItem | null>(null)
-  const open = jobId != null
-  const load = () => (jobId == null ? Promise.resolve() : api.get<BatchJobDetail>(`/api/admin/batch/jobs/${jobId}`).then(setDetail).catch(() => {}))
-  useEffect(() => {
-    if (jobId == null) return
-    setDetail(null)
-    setSelected([])
-    return startVisiblePoll(load, 2500)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
-
-  const canCancel = detail != null && (admin || detail.job.created_by === user)
-  const cancelRows = async (ids: Key[]) => {
-    if (jobId == null || ids.length === 0) return
-    try {
-      await api.post(`/api/admin/batch/jobs/${jobId}/items/cancel`, { item_ids: ids.map(Number) })
-      message.success(t('batch.msg.rowsCancelled', { n: ids.length }))
-      setSelected([])
-      await load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
-
-  // A row that has a Dify handle can be reconciled: fetch its true outcome from Dify without
-  // re-running it. Rescues a run wrongly marked failed by a short timeout / dropped stream.
-  const hasHandle = (it: BatchItem) => !!(it.run_id || it.conversation_id)
-  const canReconcile = (it: BatchItem) => admin && hasHandle(it) && !itemActive(it.status) && it.status !== 'succeeded'
-  const reconcile = async (it: BatchItem) => {
-    try {
-      const r = await api.post<{ status: string; note?: string }>(`/api/admin/batch/items/${it.id}/reconcile`)
-      message.success(r.note ? t('queue.reconcileStillRunning') : t('queue.reconcileDone', { status: t(`batch.status.${r.status}`) }))
-      await load()
-    } catch (e) {
-      message.error(errText(e, t))
-    }
-  }
-  const idCell = (v: string) =>
-    v ? (
-      <Typography.Text copyable style={{ fontSize: 12 }}>
-        {v}
-      </Typography.Text>
-    ) : (
-      <Typography.Text type="secondary">—</Typography.Text>
-    )
-
-  const symbolOf = (it: BatchItem) => {
-    try {
-      const o = JSON.parse(it.inputs) as Record<string, string>
-      return o.symbol || o.code || ''
-    } catch {
-      return ''
-    }
-  }
-  const cols: ColumnsType<BatchItem> = [
-    { title: t('batch.col.row'), dataIndex: 'row_index', width: 48 },
-    { title: t('batch.col.inputs'), render: (_: unknown, it) => <InputsPreview inputs={it.inputs} rows={3} secondary={false} /> },
-    { title: t('batch.col.status'), dataIndex: 'status', width: 92, render: (s: string) => statusTag(t, s) },
-    {
-      title: t('batch.col.error'),
-      render: (_: unknown, it) =>
-        it.error ? (
-          // Same bound as the inputs preview: a raw provider error can run to thousands of
-          // characters, and an overlay that tall gets clipped by the viewport and flickers.
-          // The full text is in this row's detail modal.
-          <Typography.Paragraph
-            type="danger"
-            ellipsis={{ rows: 3, tooltip: { title: clampText(it.error, INPUT_TOTAL_MAX), styles: TOOLTIP_STYLES } }}
-            style={{ fontSize: 12, marginBottom: 0 }}
-          >
-            {it.error}
-          </Typography.Paragraph>
-        ) : it.status === 'succeeded' && symbolOf(it) ? (
-          <Link to={`/stock/${encodeURIComponent(symbolOf(it))}`}>{t('queue.viewReport')}</Link>
-        ) : (
-          ''
-        ),
-    },
-    {
-      title: '',
-      width: 96,
-      render: (_: unknown, it) => (
-        <Space size={0}>
-          <Button
-            size="small"
-            type="text"
-            icon={<InfoCircleOutlined />}
-            title={t('queue.itemDetails')}
-            onClick={() => setDetailItem(it)}
-          />
-          {canReconcile(it) ? (
-            <Popconfirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(it)}>
-              <Button size="small" type="text" icon={<SyncOutlined />} title={t('queue.reconcile')} />
-            </Popconfirm>
-          ) : null}
-          {canCancel && itemActive(it.status) ? (
-            <Popconfirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])}>
-              <Button size="small" type="text" danger icon={<StopOutlined />} title={t('queue.cancelRow')} />
-            </Popconfirm>
-          ) : null}
-        </Space>
-      ),
-    },
-  ]
-  const rowSelection = canCancel
-    ? {
-        selectedRowKeys: selected,
-        onChange: setSelected,
-        getCheckboxProps: (it: BatchItem) => ({ disabled: !itemActive(it.status) }),
-      }
-    : undefined
-  return (
-    <Drawer
-      title={detail ? t('batch.jobTitle', { id: detail.job.id }) : t('batch.jobDetail')}
-      size={fullWidth ? '100%' : 680}
-      open={open}
-      onClose={onClose}
-      destroyOnHidden
-      extra={
-        selected.length > 0 ? (
-          <Popconfirm title={t('queue.cancelRowsConfirm', { n: selected.length })} onConfirm={() => cancelRows(selected)}>
-            <Button danger size="small" icon={<StopOutlined />}>
-              {t('queue.cancelSelected', { n: selected.length })}
-            </Button>
-          </Popconfirm>
-        ) : null
-      }
-    >
-      {detail && <Space wrap style={{ marginBottom: 12 }}>{executionTags(t, detail.job)}</Space>}
-      {/* A job the queue calls "running" is not necessarily running HERE: after a restart the row
-          survives while the goroutine driving it does not, and the portal reconciles it by polling
-          rather than by executing. The server has always computed this; nothing rendered it, so the
-          one signal that tells an admin whether a stuck job is stuck in THIS process or merely
-          being watched was unreachable. Only said when it is worth saying — a running job. */}
-      {detail && detail.job.status === 'running' && !detail.running_in_process && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 12 }}
-          title={t('queue.notInProcess')}
-          description={t('queue.notInProcessHint')}
-        />
-      )}
-      {detail && (
-        <Table
-          rowKey="id"
-          size="small"
-          rowSelection={rowSelection}
-          dataSource={detail.items}
-          columns={cols}
-          pagination={{ pageSize: 20, size: 'small' }}
-          scroll={{ x: 560 }}
-        />
-      )}
-      <Modal open={detailItem != null} title={t('queue.itemDetails')} footer={null} width={560} onCancel={() => setDetailItem(null)}>
-        {detailItem && (
-          <Descriptions bordered size="small" column={1}>
-            <Descriptions.Item label={t('batch.col.row')}>{detailItem.row_index}</Descriptions.Item>
-            <Descriptions.Item label={t('batch.col.status')}>{statusTag(t, detailItem.status)}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.attempts')}>{detailItem.attempts}</Descriptions.Item>
-            <Descriptions.Item label="run_id">{idCell(detailItem.run_id)}</Descriptions.Item>
-            <Descriptions.Item label="conversation_id">{idCell(detailItem.conversation_id)}</Descriptions.Item>
-            <Descriptions.Item label="task_id">{idCell(detailItem.task_id)}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.startedAt')}>{detailItem.started_at || '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('queue.finishedAt')}>{detailItem.finished_at || '—'}</Descriptions.Item>
-            <Descriptions.Item label={t('batch.col.inputs')}>{fmtInputs(detailItem.inputs)}</Descriptions.Item>
-            {detailItem.error ? (
-              <Descriptions.Item label={t('batch.col.error')}>
-                <Typography.Text type="danger" style={{ fontSize: 12 }}>
-                  {detailItem.error}
-                </Typography.Text>
-              </Descriptions.Item>
-            ) : null}
-          </Descriptions>
-        )}
-      </Modal>
-    </Drawer>
-  )
-}
 
 // The full run queue: filters + jobs table + all queue actions + detail drawer +
 // reschedule modal. Shared by the Run/queue page (with stats) and the batch console
 // (embedded under the run form) so both show the same complete view. Queue mutations
 // are gated to match the server: a non-admin sees only "cancel" and only on their own
 // runs; admins see cancel/terminate/retry/reschedule/reprioritize/delete on any job.
+// One scope's last answer: null until its first jobs / summary call has landed.
+type ScopeView = { jobs: BatchJob[] | null; total: number; summary: BatchQueueSummary | null; err: string }
+
 export default function QueueTable({ showStats = false }: { showStats?: boolean }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -273,32 +74,53 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const [scope, setScope] = useQueueScope(admin)
   const mobile = !Grid.useBreakpoint().md
   const navigate = useNavigate()
-  const [jobs, setJobs] = useState<BatchJob[]>([])
-  const [total, setTotal] = useState(0)
-  const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
   const [targets, setTargets] = useState<BatchTarget[]>([])
   const [auto, setAuto] = useState(true)
   const [fStatus, setFStatus] = useState<string>('')
   const [fUser, setFUser] = useState<string>('')
   const [fTarget, setFTarget] = useState<number | undefined>()
   const [search, setSearch] = useState('')
-  const [detailId, setDetailId] = useState<number | null>(null)
+  // The open job lives in the url (?job=id) so a link, a reload and the back button all land on it.
+  const [params, setParams] = useSearchParams()
+  const jobParam = Number(params.get('job'))
+  const detailId = Number.isInteger(jobParam) && jobParam > 0 ? jobParam : null
+  const setDetailId = (id: number | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (id === null) next.delete('job')
+        else next.set('job', String(id))
+        return next
+      },
+      { replace: id === null },
+    )
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedAt, setReschedAt] = useState<Dayjs | null>(null)
   const [selectedJobs, setSelectedJobs] = useState<Key[]>([])
-  // Has the first jobs answer landed? `jobs` starts at [] because that is where a useState
-  // starts, not because the queue is empty — and "Queue is empty" is a claim about the server.
-  const [loaded, setLoaded] = useState(false)
-  const [loadErr, setLoadErr] = useState('')
+  // Each scope keeps its own last answer, so switching back to one shows it at once and switching
+  // to one not yet asked shows the spinner — never the other scope's runs under this one's label.
+  // A scope with no entry has not answered: `[]` is where state starts, not an empty queue, and
+  // "Queue is empty" is a claim about the server.
+  const [views, setViews] = useState<Partial<Record<QueueScope, ScopeView>>>({})
+  const view = views[scope]
+  const jobs = useMemo(() => view?.jobs ?? [], [view])
+  const total = view?.total ?? 0
+  const summary = view?.summary ?? null
+  const loaded = !!view?.jobs
+  const loadErr = view?.err ?? ''
   const [targetsLoaded, setTargetsLoaded] = useState(false) // the workflow filter's option list
-  // Which answers this component is actually holding. A 304 means "unchanged since the tag YOU
-  // sent", and the tag store is module-global and outlives any one mount — so without these,
-  // arriving on /queue after the header badge has tagged the summary, or clearing the search box
-  // back to a URL tagged before the current rows, is answered "nothing changed" about data this
-  // component does not have. Refs, not state: `load` is captured by a poll started in an effect.
-  const heldJobsUrl = useRef('')
-  // The summary URL whose answer this view holds (it changes with the scope).
-  const heldSummary = useRef<string | null>(null)
+  // This view's own revalidation tags: the header badge and the Tasks drawer poll the same summary
+  // URL, and a 304 means "unchanged since the tag YOU sent", so shared tags would let them answer
+  // "nothing changed" about a summary this view never had.
+  const [tagHolder] = useState<TagHolder>(() => ({}))
+  // Also when the viewer's admin role changes: the plain URL then means another scope (everyone's
+  // for an administrator, their own otherwise), so a tag kept across that would answer for the wrong one.
+  useEffect(() => () => forgetTags(undefined, tagHolder), [tagHolder, admin])
+  // The jobs URL whose answer each scope's view holds. The search box changes that URL within a
+  // scope, so clearing it back to a URL tagged before the current rows would otherwise be answered
+  // "nothing changed" about rows this view no longer has. A ref, not state: `load` is captured by
+  // a poll started in an effect.
+  const heldJobsUrl = useRef<Partial<Record<QueueScope, string>>>({})
 
   const load = async () => {
     // Bounded poll: the server returns every active job + the most recent terminal jobs (not the whole
@@ -308,41 +130,32 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     // whole.
     // Conditional: a queue in which nothing happened answers 304, and keeping the objects we
     // already have is what stops a 3-second poll from re-rendering the table for no reason.
-    const jobsUrl = withQueueScope(`/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`, scope, admin)
-    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
-    // Drop the tag for anything we are not holding, so this request has to come back as an answer.
-    if (heldJobsUrl.current !== jobsUrl) forgetTags(jobsUrl)
-    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
-    const jobsRequest = getIfChanged<{ jobs: BatchJob[]; total?: number }>(jobsUrl).then((r) => {
+    const sc = scope
+    const patch = (p: Partial<ScopeView>) => setViews((v) => ({ ...v, [sc]: { jobs: null, total: 0, summary: null, err: '', ...v[sc], ...p } }))
+    const jobsUrl = withQueueScope(`/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`, sc, admin)
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', sc, admin)
+    // Drop the tag for rows we are not holding, so this request has to come back as an answer.
+    if (heldJobsUrl.current[sc] !== jobsUrl) forgetTags(jobsUrl, tagHolder)
+    const jobsRequest = getIfChanged<{ jobs: BatchJob[]; total?: number }>(jobsUrl, tagHolder).then((r) => {
       if (r === UNCHANGED) return
-      setJobs(r.jobs || [])
-      setTotal(r.total ?? (r.jobs || []).length)
-      heldJobsUrl.current = jobsUrl
+      patch({ jobs: r.jobs || [], total: r.total ?? (r.jobs || []).length, err: '' })
+      heldJobsUrl.current[sc] = jobsUrl
     })
-    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl, tagHolder)
       .then((r) => {
-        if (r === UNCHANGED) return
-        setSummary(r)
-        heldSummary.current = summaryUrl
+        if (r !== UNCHANGED) patch({ summary: r })
       })
       .catch(() => {})
     try {
       await jobsRequest
-      // Only once rows for THIS url have actually landed. The guard above means an UNCHANGED can
-      // no longer arrive for a url we are not holding, but the gate is what stands between the
-      // reader and "Queue is empty", so it does not take that on trust.
-      if (heldJobsUrl.current === jobsUrl) {
-        setLoaded(true)
-        setLoadErr('')
-      }
     } catch (e) {
-      // Only the first load has anything to report. Once rows are on screen a failed poll is
+      // Only a scope's first load has anything to report. Once rows are on screen a failed poll is
       // not news — they are still the last thing the server said, and swapping them for an
       // error page would be the worse answer. The render below reads this only while !loaded.
       // A lost connection is not news either: the table keeps its spinner and the next poll (which
       // also runs when the connection returns) asks again.
       const text = loadFailure(e, t)
-      if (text !== null) setLoadErr(text)
+      if (text !== null) patch({ err: text })
     }
     await summaryRequest
   }
@@ -693,7 +506,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </LoadGate>
       </Card>
 
-      <DetailDrawer jobId={detailId} admin={admin} user={user} onClose={() => setDetailId(null)} />
+      <JobDetailDrawer jobId={detailId} onClose={() => setDetailId(null)} />
 
       <Modal
         title={t('queue.reschedule')}

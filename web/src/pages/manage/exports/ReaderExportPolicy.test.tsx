@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import type { ExportPolicyEntry, ExportPolicyResult, UserGroupRow } from '../../../api/types'
 import ReaderExportPolicy from './ReaderExportPolicy'
+import { mockNarrowViewport } from '../../../test/narrow'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn() }))
 vi.mock('../../../api/client', () => ({ api: apiMock, errText: (e: unknown) => String(e) }))
@@ -71,5 +72,22 @@ describe('ReaderExportPolicy', () => {
     expect(await screen.findByText('export.reader.quotaBelowMax:{"quota":50,"max":200}')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/exports/policy/1', { daily_quota: 50 }))
+  })
+})
+
+describe('ReaderExportPolicy on a phone', () => {
+  mockNarrowViewport()
+  it('folds the unit tree behind a current-unit button and folds it after a pick', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    expect(screen.queryByRole('tree')).toBeNull()
+    await user.click(screen.getByRole('button', { name: /Default/ }))
+    await user.click(await screen.findByText('Research'))
+    expect(await screen.findByRole('heading', { name: 'Research' })).toBeTruthy()
+    expect(screen.queryByRole('tree')).toBeNull()
+    const after = screen.getByRole('button', { name: /Research/ })
+    expect(after.getAttribute('aria-expanded')).toBe('false')
+    expect(document.activeElement).toBe(after)
   })
 })

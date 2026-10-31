@@ -171,6 +171,30 @@ func TestOpenAPIIngestRequestDocumentsEveryWireField(t *testing.T) {
 		if !wire[name] {
 			t.Errorf("IngestRequest.properties.%s is documented but v1IngestRequest does not decode it", name)
 		}
+	} // The localized blocks describe the same fields: a field missing from one reads, in that
+	// language, as a field the endpoint does not take (issue #115).
+	i18n, _ := schema["x-i18n"].(map[string]any)
+	if len(i18n) == 0 {
+		t.Fatalf("IngestRequest has no x-i18n blocks")
+	}
+	for locale, raw := range i18n {
+		block, _ := raw.(map[string]any)
+		localized, _ := block["properties"].(map[string]any)
+		for name := range properties {
+			entry, ok := localized[name].(map[string]any)
+			if !ok {
+				t.Errorf("IngestRequest x-i18n.%s.properties is missing %q", locale, name)
+				continue
+			}
+			if desc, _ := entry["description"].(string); strings.TrimSpace(desc) == "" {
+				t.Errorf("IngestRequest x-i18n.%s.properties.%s has no description", locale, name)
+			}
+		}
+		for name := range localized {
+			if _, ok := properties[name]; !ok {
+				t.Errorf("IngestRequest x-i18n.%s.properties.%s is not a documented property", locale, name)
+			}
+		}
 	}
 }
 

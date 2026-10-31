@@ -211,6 +211,7 @@ export default function ForecastEvaluatorStatus({
             {t('forecast.eval.sample.title')}
           </Typography.Title>
           {hb && (hb.dry_sample?.length ?? 0) > 0 ? (
+            <div className="rp-table-scroll">
             <Table
               size="small"
               rowKey={(r) => `${r.set_id}-${r.kind}-${r.mark ?? ''}-${r.code}`}
@@ -218,6 +219,7 @@ export default function ForecastEvaluatorStatus({
               dataSource={hb.dry_sample}
               columns={sampleColumns}
             />
+            </div>
           ) : (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('forecast.eval.sample.empty')} />
           )}
