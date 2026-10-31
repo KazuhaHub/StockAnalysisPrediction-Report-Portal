@@ -14,7 +14,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from fixture_http import SAFE_RESPONSE_HEADERS, fixture_cookie, safe_response_header
+from fixture_http import fixture_cookie
 
 PORTAL = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -47,10 +47,8 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
                 response = connection.getresponse()
                 content = response.read()
                 self.send_response(response.status)
-                for key in SAFE_RESPONSE_HEADERS:
-                    value = response.getheader(key)
-                    if value is not None and isinstance(value, str) and "\r" not in value and "\n" not in value and safe_response_header(key, value):
-                        self.send_header(key, value)
+                self.send_header("Content-Type", "application/json" if self.path.startswith("/api/") else "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(content)
             finally:

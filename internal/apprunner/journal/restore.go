@@ -336,10 +336,11 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 func (s *Store) settleRestore(ctx context.Context, source restoreSource, observation data.RestoreObservation) (RestoreReceipt, error) {
 	var zero RestoreReceipt
 	snapshot, err := observation.Snapshot()
+	projectID, projectErr := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil || snapshot.NamespaceID != source.command.Payload.NamespaceID ||
 		snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
 		snapshot.ManifestSHA256 != source.command.Payload.ManifestSHA256 ||
-		snapshot.ProjectID != uint32(mustDataInt(source.command.Payload.ProjectID)) ||
+		projectErr != nil || snapshot.ProjectID != projectID ||
 		snapshot.DataFormat != mustDataInt(source.command.Payload.DataFormat) ||
 		snapshot.NamespaceDevice != mustDataUint(source.command.Payload.Device) ||
 		snapshot.NamespaceInode != mustDataUint(source.command.Payload.NamespaceInode) ||
@@ -454,12 +455,16 @@ func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, data
 	if replay {
 		return s.ReadRestoreReceipt(ctx, raw, signature)
 	}
+	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
+	if err != nil {
+		return zero, ErrFenceReconciliation
+	}
 	request := data.RestoreRequest{
 		CheckpointID:           source.command.Payload.CheckpointID,
 		NamespaceID:            source.command.Payload.NamespaceID,
 		ReleaseSHA256:          source.command.Payload.ReleaseSHA256,
 		ManifestSHA256:         source.command.Payload.ManifestSHA256,
-		ProjectID:              uint32(mustDataInt(source.command.Payload.ProjectID)),
+		ProjectID:              projectID,
 		DataFormat:             mustDataInt(source.command.Payload.DataFormat),
 		ArchiveBytes:           mustDataInt(source.command.Payload.ArchiveBytes),
 		MaxArchiveBytes:        maxCheckpointArchiveBytes,
