@@ -68,7 +68,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
-		AND o.stage IN ('start','probe','activate')`, expected.id, expected.installationID).
+		AND o.stage IN ('start','probe','activate','recovery_required')`, expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
 			&sourceGeneration, &targetGeneration); err != nil {
 		return zero, nil, errAppPlatformStageEvidence

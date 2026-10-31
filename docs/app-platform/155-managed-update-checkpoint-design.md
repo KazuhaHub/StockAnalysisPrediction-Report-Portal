@@ -7,7 +7,9 @@ document also claims verified native restore, Portal restore admission and the
 generation-2 `update-start` admission/reservation, native launch, running receipt,
 native readiness, protected registration, boot handshake and the atomic active
 tuple swap. It does not claim native A-to-B acceptance or a reviewed rollback
-executor.
+executor. The recovery path now claims a reviewed restore, stops and removes the
+exact failed update candidate, then advances to verified data restore; restarting
+the restored source release remains outstanding.
 Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
@@ -254,6 +256,10 @@ No stage may be skipped because an earlier update happened to succeed.
   verified restore.
 - After target activation commits, the old generation is retired. Rollback is a
   new reviewed operation, not an implicit mutation of completed history.
+- A restored operation first stops and removes the exact failed running
+  update-start candidate. Unknown stop/remove outcomes remain
+  `recovery_required`; restore data is never issued while a live namespace
+  container exists.
 - Lost native acknowledgements preserve unknown effects and never trigger an
   automatic repeated start, checkpoint or restore.
 
@@ -296,6 +302,8 @@ Disposable Linux/XFS/Docker tests:
    are implemented; native acceptance and rollback remain.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
-   the disposable Linux/XFS/Docker probe; binding them to the managed update
-   executor remains.
+   the disposable Linux/XFS/Docker probe. Reviewed restore queueing, exact
+   failed-target stop/remove, quiesce completion and transition to
+   `restore_data` are implemented; source restart/probe/activation and the
+   disposable update-failure acceptance remain.
 7. Only then expose managed update through scheduler and management HTTP.

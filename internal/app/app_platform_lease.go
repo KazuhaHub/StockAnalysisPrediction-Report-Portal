@@ -178,7 +178,9 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 	if source < 0 || target < 1 || stateRevision < 1 || (managed != 0 && managed != 1) || installation != lease.installationID || epoch != lease.controllerEpoch || completed.Valid {
 		return zero, errAppPlatformLeaseConflict
 	}
-	if phase == "review_required" || phase == "recovery_required" || phase == "quarantined" || (desired == "removed" && action != string(appplatform.ActionUninstall)) {
+	if phase == "review_required" || phase == "quarantined" ||
+		(phase == "recovery_required" && action != string(appplatform.ActionRestore)) ||
+		(desired == "removed" && action != string(appplatform.ActionUninstall)) {
 		return zero, errAppPlatformLeaseConflict
 	}
 	if (action == string(appplatform.ActionInstall)) != (source == 0) || source == math.MaxInt64 || target != source+1 || (generation != source && generation != target) || controlFence < lease.fence {

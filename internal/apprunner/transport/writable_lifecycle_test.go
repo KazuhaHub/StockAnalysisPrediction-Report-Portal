@@ -349,6 +349,66 @@ func TestWritableLifecycleUpdateStartRegistration(t *testing.T) {
 	}
 }
 
+func TestWritableLifecycleUpdateStartRemoval(t *testing.T) {
+	authority, start, startRaw, startSignature, descriptor, _ :=
+		updateStartTransportFixture(t)
+	now := time.Now()
+	command := control.UpdateStartRemovalCommand{
+		Format:      control.UpdateStartRemovalFormat,
+		EffectID:    "11111111-1111-4111-8111-111111119975",
+		OperationID: "11111111-1111-4111-8111-111111119976",
+		Stage:       "stop", InstallationFence: start.InstallationFence,
+		StartRaw: startRaw, StartSignature: startSignature,
+		RunningReceiptSHA256: strings.Repeat("c", 64),
+	}
+	command.PayloadSHA256, _ =
+		control.UpdateStartRemovalLogicalDigest(command)
+	raw, signature, err := control.SignUpdateStartRemoval(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := verifyWritableLifecycle(
+		UpdateStartRemovalStop, raw, signature, descriptor, authority,
+		now.UnixMilli())
+	if err != nil || ref.updateStartRemoval.EffectID != command.EffectID {
+		t.Fatal("update-start removal reference", ref, err)
+	}
+	receipt := journal.ManagedRemovalReceipt{
+		Format:            "portal.runner.managed-removal-receipt/1-dev.1",
+		DeploymentID:      start.DeploymentID,
+		ControllerEpoch:   start.ControllerEpoch,
+		InstallationID:    start.InstallationID,
+		OperationID:       command.OperationID,
+		SourceOperationID: start.OperationID,
+		SourceEffectID:    start.EffectID,
+		TargetGeneration:  start.TargetGeneration,
+		Stage:             "stop", EffectID: command.EffectID,
+		PayloadSHA256:       command.PayloadSHA256,
+		SourceReceiptSHA256: command.RunningReceiptSHA256,
+		ResourceID:          start.Payload.ResourceID,
+		DataNamespaceID:     start.Payload.NamespaceID,
+		ReleaseSHA256:       start.Payload.TargetReleaseSHA256,
+		NativeID:            strings.Repeat("d", 64), State: "stopped",
+		ObservedMS: strconv.FormatInt(now.UnixMilli(), 10),
+		SettledMS:  strconv.FormatInt(now.UnixMilli(), 10),
+	}
+	body, _ := json.Marshal(receipt)
+	if !validWritableLifecycleReply(
+		UpdateStartRemovalStop, body, ref,
+		now.Add(-time.Millisecond), time.Now()) {
+		t.Fatal("exact update-start removal refused")
+	}
+	receipt.ResourceID = "11111111-1111-4111-8111-111111119977"
+	body, _ = json.Marshal(receipt)
+	if validWritableLifecycleReply(
+		UpdateStartRemovalStop, body, ref,
+		now.Add(-time.Millisecond), time.Now()) {
+		t.Fatal("changed update-start removal accepted")
+	}
+}
+
 func TestWritableLifecycleIndependentActionReferences(t *testing.T) {
 	a, c, raw, sig, descriptor, _ := writableHandshakeRequestFixture(t)
 	v, err := control.VerifyWritableBackendRegistration(raw, sig, a, time.Now().UnixMilli())

@@ -27,6 +27,30 @@ type platformUpdateStartTestObservation struct {
 	commandSHA   string
 }
 
+type platformUpdateTargetRemovalTestObservation struct {
+	receipt    journal.ManagedRemovalReceipt
+	authority  control.Authority
+	endpoint   transport.CandidateReceiptEndpoint
+	receivedAt time.Time
+	commandSHA string
+}
+
+func (o platformUpdateTargetRemovalTestObservation) ManagedRemovalReceipt() (journal.ManagedRemovalReceipt, error) {
+	return o.receipt, nil
+}
+func (o platformUpdateTargetRemovalTestObservation) Controller() control.Authority {
+	return o.authority
+}
+func (o platformUpdateTargetRemovalTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
+	return o.endpoint
+}
+func (o platformUpdateTargetRemovalTestObservation) ReceivedAt() time.Time {
+	return o.receivedAt
+}
+func (o platformUpdateTargetRemovalTestObservation) CommandSHA256() string {
+	return o.commandSHA
+}
+
 type platformUpdateStartHandshakeTestObservation struct {
 	evidence   journal.UpdateStartBackendHandshakeEvidence
 	authority  control.Authority
@@ -548,6 +572,111 @@ func platformUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Serve
 	return s, lease, intent, endpoint, observation
 }
 
+func platformUpdateRecoveryRestoreFixture(t *testing.T, pg bool) (*Server, platformOperationLease, journal.CheckpointReceipt) {
+	t.Helper()
+	s, updateLease, registrationIntent, _, _ :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operations
+		SET stage='recovery_required',state_revision=10,row_revision=row_revision+1,
+		error_code='update_recovery_required',completed_ms=?,updated_ms=?,
+		lease_owner=NULL,lease_until_ms=NULL WHERE id=?`,
+		now, now, updateLease.id)
+	mustExec(t, s.st, `UPDATE app_platform_installations
+		SET phase='recovery_required',revision=revision+1,updated_ms=?
+		WHERE id=?`, now, updateLease.installationID)
+	var checkpointRaw string
+	if err := s.st.queryRow(`SELECT receipt_json FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='snapshot' AND state='applied'`,
+		updateLease.id).Scan(&checkpointRaw); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := journal.ParseCheckpointReceipt([]byte(checkpointRaw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recoverySetID string
+	if err := s.st.queryRow(`SELECT id FROM app_platform_recovery_sets
+		WHERE operation_id=? AND state='verified'`, updateLease.id).
+		Scan(&recoverySetID); err != nil {
+		t.Fatal(err)
+	}
+	var sourcePlanID, actorScope, epoch string
+	if err := s.st.queryRow(`SELECT review_plan_id,actor_scope,controller_epoch
+		FROM app_platform_operations WHERE id=?`, updateLease.id).
+		Scan(&sourcePlanID, &actorScope, &epoch); err != nil {
+		t.Fatal(err)
+	}
+	restorePlanID, err := platformNewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`INSERT INTO app_platform_review_plans(
+		id,installation_id,app_id,publisher_id,action,source_release_sha256,
+		target_release_sha256,installation_revision,policy_revision,
+		trust_revision,controller_epoch,actor_scope,username,account_created,
+		account_generation,authority_fingerprint,plan_sha256,plan_json,
+		expires_ms,consumed_ms,created_ms,updated_ms)
+		SELECT ?,installation_id,app_id,publisher_id,'restore',
+		source_release_sha256,source_release_sha256,installation_revision,
+		policy_revision,trust_revision,controller_epoch,actor_scope,username,
+		account_created,account_generation,authority_fingerprint,plan_sha256,
+		plan_json,expires_ms,consumed_ms,created_ms,updated_ms
+		FROM app_platform_review_plans WHERE id=?`, restorePlanID, sourcePlanID); err != nil {
+		t.Fatal(err)
+	}
+	restorePlan := platformManagedRestorePlan{
+		Format:                platformManagedRestoreFormat,
+		InstallationID:        updateLease.installationID,
+		RecoverySetID:         recoverySetID,
+		CheckpointOperationID: checkpoint.OperationID,
+		CheckpointEffectID:    checkpoint.EffectID,
+		CheckpointID:          checkpoint.CheckpointID,
+		ReleaseSHA256:         checkpoint.ReleaseSHA256,
+		ManifestSHA256:        checkpoint.ManifestSHA256,
+		ArchiveBytes:          mustPlatformCheckpointInt(checkpoint.ArchiveBytes),
+		SourceGeneration:      1, TargetGeneration: 2,
+		ControllerEpoch: epoch,
+	}
+	restorePlanRaw, _ := json.Marshal(restorePlan)
+	mustExec(t, s.st, `UPDATE app_platform_review_plans
+		SET installation_id=?,target_release_sha256=?,plan_json=?,plan_sha256=?
+		WHERE id=?`, updateLease.installationID, checkpoint.ReleaseSHA256,
+		string(restorePlanRaw), platformDigest(restorePlanRaw), restorePlanID)
+	restoreID, err := platformNewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.st.exec(`INSERT INTO app_platform_operations(
+		id,installation_id,review_plan_id,actor_scope,idempotency_sha256,
+		request_sha256,action,managed,source_generation,target_generation,
+		stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,
+		controller_epoch,error_code,completed_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,?,?,'restore',1,1,2,'quiesce',4,1,NULL,NULL,0,?,
+		NULL,NULL,?,?)`, restoreID, updateLease.installationID, restorePlanID,
+		actorScope, strings.Repeat("5", 64), strings.Repeat("6", 64),
+		epoch, now, now); err != nil {
+		t.Fatal(err)
+	}
+	selected, err := s.claimNextPlatformManagedRestore(
+		context.Background(), platformFixtureID(1601))
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreLease := selected.lease
+	if restoreLease.id != restoreID ||
+		restoreLease.snapshot.Action != appplatform.ActionRestore ||
+		!restoreLease.snapshot.Managed ||
+		restoreLease.snapshot.Stage != appplatform.StageQuiesce {
+		t.Fatal("restore quiesce lease", restoreLease, err)
+	}
+	_ = registrationIntent
+	return s, restoreLease, checkpoint
+}
+
 func platformUpdateStartBootFixture(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint) (platformUpdateStartRegistrationIntent, platformUpdateStartBootObservation) {
 	t.Helper()
 	applied, err := s.preparePlatformUpdateStartRegistration(
@@ -600,6 +729,44 @@ func platformUpdateStartBootFixture(t *testing.T, s *Server, lease platformOpera
 	return applied, boot
 }
 
+func platformUpdateTargetRemovalObservationFixture(intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint, state string) platformUpdateTargetRemovalTestObservation {
+	now := time.Now().UnixMilli()
+	issued, _ := strconv.ParseInt(
+		intent.start.command.IssuedMS, 10, 64)
+	if now < issued {
+		now = issued
+	}
+	receipt := journal.ManagedRemovalReceipt{
+		Format:            "portal.runner.managed-removal-receipt/1-dev.1",
+		DeploymentID:      intent.start.command.DeploymentID,
+		ControllerEpoch:   intent.start.command.ControllerEpoch,
+		InstallationID:    intent.start.command.InstallationID,
+		OperationID:       intent.command.OperationID,
+		SourceOperationID: intent.start.command.OperationID,
+		SourceEffectID:    intent.start.effectID,
+		TargetGeneration:  intent.start.command.TargetGeneration,
+		Stage:             intent.command.Stage, EffectID: intent.command.EffectID,
+		PayloadSHA256:       intent.command.PayloadSHA256,
+		SourceReceiptSHA256: intent.command.RunningReceiptSHA256,
+		ResourceID:          intent.start.resourceID,
+		DataNamespaceID:     intent.start.command.Payload.NamespaceID,
+		ReleaseSHA256:       intent.start.command.Payload.TargetReleaseSHA256,
+		NativeID:            intent.nativeID, State: state,
+		ObservedMS: strconv.FormatInt(now, 10),
+		SettledMS:  strconv.FormatInt(now, 10),
+	}
+	return platformUpdateTargetRemovalTestObservation{
+		receipt: receipt, authority: intent.authority,
+		endpoint: transport.CandidateReceiptEndpoint{
+			Path: endpoint.path, RunnerUID: 0,
+			ControllerUID:  endpoint.controllerUID,
+			ControllerGID:  endpoint.controllerGID,
+			RootController: true,
+		},
+		receivedAt: time.Now(), commandSHA: platformDigest(intent.raw),
+	}
+}
+
 func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
 	s, lease, intent, endpoint, observation := platformUpdateStartRegistrationCommitFixture(t, false)
 	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
@@ -650,6 +817,76 @@ func testPlatformUpdateStartBootBindsRegistration(t *testing.T, pg bool) {
 
 func TestPlatformUpdateStartActivationSQLite(t *testing.T) {
 	testPlatformUpdateStartActivation(t, false)
+}
+
+func TestPlatformUpdateTargetRemovalSQLite(t *testing.T) {
+	testPlatformUpdateTargetRemoval(t, false)
+}
+
+func TestPlatformUpdateTargetRemovalPostgres(t *testing.T) {
+	testPlatformUpdateTargetRemoval(t, true)
+}
+
+func testPlatformUpdateTargetRemoval(t *testing.T, pg bool) {
+	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, pg)
+	endpoint := platformUpdateStartEndpointFixture()
+	stop, err := s.preparePlatformUpdateTargetRemoval(
+		context.Background(), lease, "stop", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopProof := platformUpdateTargetRemovalObservationFixture(
+		stop, endpoint, "stopped")
+	next, err := s.commitPlatformUpdateTargetRemoval(
+		context.Background(), lease, stop, endpoint, stopProof)
+	if err != nil || next.rowRevision != lease.rowRevision+1 {
+		t.Fatal("stop update target", next, err)
+	}
+	if scalar[string](t, s.st, `SELECT state
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='quiesce' AND effect_number=1`,
+		lease.id) != "applied" {
+		t.Fatal("stop effect not applied")
+	}
+	remove, err := s.preparePlatformUpdateTargetRemoval(
+		context.Background(), next, "remove_code", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeProof := platformUpdateTargetRemovalObservationFixture(
+		remove, endpoint, "absent")
+	removed, err := s.commitPlatformUpdateTargetRemoval(
+		context.Background(), next, remove, endpoint, removeProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='quiesce' AND state='applied'`,
+		lease.id) != 2 {
+		t.Fatal("remove-code effect not applied")
+	}
+	snapshot, err := s.advancePlatformRestoreStage(
+		context.Background(), removed, appplatform.StageSnapshot)
+	if err != nil || snapshot.snapshot.Stage != appplatform.StageSnapshot {
+		t.Fatal("restore quiesce completion", snapshot, err)
+	}
+	restoreData, err := s.advancePlatformRestoreStage(
+		context.Background(), snapshot, appplatform.StageRestoreData)
+	if err != nil || restoreData.snapshot.Stage != appplatform.StageRestoreData {
+		t.Fatal("restore snapshot progression", restoreData, err)
+	}
+	if err := s.finishPlatformManagedRestoreForReview(
+		context.Background(), restoreData); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code
+		FROM app_platform_operations WHERE id=?`, lease.id) !=
+		"recovery_required:restore_recovery_required" ||
+		scalar[string](t, s.st, `SELECT phase
+			FROM app_platform_installations WHERE id=?`,
+			lease.installationID) != "recovery_required" {
+		t.Fatal("restore retry exhaustion was not retained")
+	}
 }
 
 func TestPlatformUpdateStartActivationPostgres(t *testing.T) {

@@ -87,6 +87,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
 			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRestore(ctx, w.worker)
+			}
 		} else if w.endpoint.path == "" {
 			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -99,6 +102,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRestore(ctx, w.worker)
 			}
 		}
 		if err != nil {
@@ -133,7 +139,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	w.active = renewed
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
-	if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
+	if w.active.snapshot.Action == appplatform.ActionRestore &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedRestore(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
 		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
 	} else if w.writable {
 		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
@@ -166,6 +176,9 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	finish := w.server.finishPlatformInstallForReview
 	if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedRestoreForReview
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedUninstallForReview
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall {

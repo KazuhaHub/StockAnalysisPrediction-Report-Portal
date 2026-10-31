@@ -111,7 +111,9 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 		Scan(&appID, &publisher, &desired, &phase, &installationGeneration, &policyRevision, &installedEpoch, &runtimeID); err != nil {
 		return zero, fmt.Errorf("%w: checkpoint current installation", errAppPlatformStageEvidence)
 	}
-	if appID != plan.AppID || publisher != plan.PublisherID || desired != "enabled" || phase != "ready" ||
+	if appID != plan.AppID || publisher != plan.PublisherID || desired != "enabled" ||
+		!(phase == "ready" || (phase == "recovery_required" &&
+			expected.snapshot.Action == appplatform.ActionRestore)) ||
 		installedEpoch != expected.controllerEpoch || !runtimeID.Valid || runtimeID.String != runtime.id ||
 		installationGeneration != sourceGeneration || policyRevision < 1 {
 		return zero, fmt.Errorf("%w: checkpoint activation", errAppPlatformStageEvidence)

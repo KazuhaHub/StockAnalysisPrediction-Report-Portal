@@ -78,7 +78,7 @@ func loadPlatformRestoreCheckpoint(e migExec, expected platformOperationLease) (
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='restore' AND o.managed=1
-		AND o.stage='restore_data'`, expected.id, expected.installationID).
+		`, expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &planInstallation, &planEpoch, &planSource, &planTarget); err != nil {
 		return "", "", journal.CheckpointReceipt{}, 0, fmt.Errorf("%w: restore plan row: %v", errAppPlatformStageEvidence, err)
 	}

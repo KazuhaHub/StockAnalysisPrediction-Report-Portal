@@ -572,3 +572,73 @@ func TestUpdateStartRegistrationRefusesChangedTargetEvidence(t *testing.T) {
 		}
 	})
 }
+
+func updateStartRemovalCommandFixture(t *testing.T, command control.UpdateStartCommand, startRaw, startSignature, runningRaw []byte, stage string) (control.UpdateStartRemovalCommand, []byte, []byte) {
+	t.Helper()
+	removal := control.UpdateStartRemovalCommand{
+		Format: control.UpdateStartRemovalFormat, EffectID: fixtureID(1532),
+		OperationID: fixtureID(1533), Stage: stage,
+		InstallationFence: command.InstallationFence,
+		StartRaw:          startRaw, StartSignature: startSignature,
+		RunningReceiptSHA256: candidateHash(runningRaw),
+	}
+	var err error
+	removal.PayloadSHA256, err =
+		control.UpdateStartRemovalLogicalDigest(removal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID:    enrollment.DeploymentID,
+		ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision,
+		PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+	}
+	raw, signature, err := control.SignUpdateStartRemoval(
+		removal, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, time.Now().UTC().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return removal, raw, signature
+}
+
+func TestUpdateStartRemovalBindsRunningCandidate(t *testing.T) {
+	f, _, command, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	_, raw, signature := updateStartRemovalCommandFixture(
+		t, command, startRaw, startSignature, runningRaw, "stop")
+	tx, facts, err := beginUpdateStartRemoval(
+		context.Background(), f.store, raw, signature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Rollback()
+	if facts.running.NativeID == "" ||
+		facts.resource.id != command.Payload.ResourceID ||
+		facts.verified.Command().OperationID ==
+			facts.verified.Start().Command().OperationID {
+		t.Fatal("removal source binding", facts)
+	}
+}
+
+func TestUpdateStartRemovalRefusesChangedCandidate(t *testing.T) {
+	f, _, command, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	_, raw, signature := updateStartRemovalCommandFixture(
+		t, command, startRaw, startSignature, runningRaw, "stop")
+	if _, err := f.store.db.Exec(
+		`UPDATE runner_resources SET observed_state='stopped',revision=3 WHERE id=?`,
+		command.Payload.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := beginUpdateStartRemoval(
+		context.Background(), f.store, raw, signature); err == nil {
+		t.Fatal("changed candidate state admitted for stop")
+	}
+}

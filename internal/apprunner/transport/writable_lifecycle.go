@@ -39,13 +39,16 @@ const (
 	UpdateStartProbe
 	UpdateStartRegistrationDeliver
 	UpdateStartRegistrationRead
+	UpdateStartRemovalStop
+	UpdateStartRemovalRemoveCode
+	UpdateStartRemovalRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= UpdateStartRegistrationRead
+	return a >= WritableWriterExecute && a <= UpdateStartRemovalRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -145,6 +148,12 @@ func (o WritableLifecycleObservation) UpdateStartRegistrationReceipt() (journal.
 	}
 	return journal.ParseUpdateStartRegistrationReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) UpdateStartRemovalReceipt() (journal.ManagedRemovalReceipt, error) {
+	if o.action < UpdateStartRemovalStop || o.action > UpdateStartRemovalRead {
+		return journal.ManagedRemovalReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseManagedRemovalReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer                  control.DataWriterCommand
@@ -155,6 +164,7 @@ type writableLifecycleReference struct {
 	restore                 control.RestoreCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
+	updateStartRemoval      control.UpdateStartRemovalCommand
 	index                   control.Command
 	release                 string
 }
@@ -219,6 +229,14 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 			return r, err
 		}
 		r.updateStartRegistration = v.Command()
+		r.updateStart = v.Start().Command()
+		r.release = r.updateStart.Payload.TargetReleaseSHA256
+	case action >= UpdateStartRemovalStop && action <= UpdateStartRemovalRead:
+		v, err := control.VerifyUpdateStartRemoval(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.updateStartRemoval = v.Command()
 		r.updateStart = v.Start().Command()
 		r.release = r.updateStart.Payload.TargetReleaseSHA256
 	default:
@@ -410,6 +428,25 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			!lifecycleRevisionWithin(v.Claim.ControlRevision, r.updateStart.ControlRevision) ||
 			(v.RecoveryControlRevision != "" &&
 				!lifecycleRevisionWithin(v.RecoveryControlRevision, r.updateStart.ControlRevision)) {
+			return false
+		}
+		settled = v.SettledMS
+	case action >= UpdateStartRemovalStop && action <= UpdateStartRemovalRead:
+		v, e := journal.ParseManagedRemovalReceipt(body)
+		c := r.updateStartRemoval
+		if e != nil || v.DeploymentID != r.updateStart.DeploymentID ||
+			v.ControllerEpoch != r.updateStart.ControllerEpoch ||
+			v.InstallationID != r.updateStart.InstallationID ||
+			v.OperationID != c.OperationID ||
+			v.Stage != c.Stage || v.EffectID != c.EffectID ||
+			v.PayloadSHA256 != c.PayloadSHA256 ||
+			v.SourceReceiptSHA256 != c.RunningReceiptSHA256 ||
+			v.SourceOperationID != r.updateStart.OperationID ||
+			v.SourceEffectID != r.updateStart.EffectID ||
+			v.TargetGeneration != r.updateStart.TargetGeneration ||
+			v.ResourceID != r.updateStart.Payload.ResourceID ||
+			v.DataNamespaceID != r.updateStart.Payload.NamespaceID ||
+			v.ReleaseSHA256 != r.updateStart.Payload.TargetReleaseSHA256 {
 			return false
 		}
 		settled = v.SettledMS
