@@ -226,7 +226,7 @@ def main(args):
                     report["native_writer_intent_and_claim_verified"] = True
                 if phase == "prepare":
                     if "NATIVE_JOURNAL_RESTORE_VERIFIED" not in result.stdout:
-                        raise RuntimeError("signed journal restore verification missing")
+                        raise RuntimeError("signed journal restore verification missing: " + (result.stdout+result.stderr)[-32768:])
                     report["native_journal_checkpoint_verified"] = True
                     report["native_journal_restore_verified"] = True
 
