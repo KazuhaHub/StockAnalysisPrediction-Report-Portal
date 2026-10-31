@@ -226,8 +226,9 @@ describe('ForecastPage', () => {
     expect(screen.queryByText('forecast.tab.custom')).toBeNull()
     expect(screen.queryByText('forecast.export.button')).toBeNull()
     expect(screen.queryByText('forecast.methodology.title')).toBeNull()
-    // The statistics live on the reader page, one click away.
-    expect(screen.getByRole('link', { name: 'nav.forecast_record' }).getAttribute('href')).toBe('/forecast')
+    // The statistics live on the reader page, reached from the header's related menu (ManageLayout),
+    // not from a text link among this page's own action buttons.
+    expect(screen.queryByRole('link', { name: 'nav.forecast_record' })).toBeNull()
   })
 
   it('keeps every operation: status, settings, ledger start, alerts and the backlog', async () => {
