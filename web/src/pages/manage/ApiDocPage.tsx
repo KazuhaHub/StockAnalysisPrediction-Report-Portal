@@ -22,7 +22,9 @@ const CODE_BLOCK: CSSProperties = {
   fontSize: 12,
   lineHeight: 1.6,
   margin: '4px 0 0',
-  whiteSpace: 'pre',
+  // Wrapped rather than scrolled sideways: a command is still readable broken across lines on a phone.
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
 }
 
 function EndpointCard({ e }: { e: ApiEndpoint }) {

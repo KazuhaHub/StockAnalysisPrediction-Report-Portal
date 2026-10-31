@@ -1,3 +1,4 @@
+import { useScrollEdges } from '../../lib/useScrollEdges'
 import { createContext, useContext, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -51,18 +52,9 @@ export default function SettingsWorkspace({ sections, active, onChange, children
     ink.style.transform = `translateX(${tab.offsetLeft}px)`
     ink.style.width = `${tab.offsetWidth}px`
   }
-  // A row wider than its space scrolls without a scrollbar (index.css); a fade marks each side that
-  // has more tabs. Read from the list itself, so it holds after a resize, a scroll or a new label.
-  const markEdges = () => {
-    const list = listRef.current
-    if (!list) return
-    const more = (on: boolean, side: 'start' | 'end') => {
-      if (on) list.dataset[side] = 'true'
-      else delete list.dataset[side]
-    }
-    more(list.scrollLeft > 1, 'start')
-    more(list.scrollLeft + list.clientWidth < list.scrollWidth - 1, 'end')
-  }
+  // A row wider than its space scrolls without a scrollbar; the shared hook marks the sides that have
+  // more tabs, which .rp-scroll-row fades (index.css).
+  useScrollEdges(listRef, [shape])
   // The chosen tab is brought fully into view, with a little of its neighbour showing past it.
   const reveal = (smooth: boolean) => {
     const list = listRef.current
@@ -82,7 +74,6 @@ export default function SettingsWorkspace({ sections, active, onChange, children
     placedFor.current = active
     placeInk(animate)
     reveal(animate)
-    markEdges()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, shape])
   // Labels change width with the language and once web fonts land, and a bar mounted while hidden
@@ -95,7 +86,6 @@ export default function SettingsWorkspace({ sections, active, onChange, children
     const ro = new ResizeObserver(() => {
       placeInk(false)
       reveal(false)
-      markEdges()
     })
     ro.observe(list)
     for (const tab of list.querySelectorAll('[role="tab"]')) ro.observe(tab)
@@ -118,8 +108,7 @@ export default function SettingsWorkspace({ sections, active, onChange, children
   }
   return (
     <div className="rp-settings-workspace">
-      <div ref={listRef} role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}
-        onScroll={markEdges}>
+      <div ref={listRef} role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs rp-scroll-row" onKeyDown={move}>
         {sections.map((section) => {
           const selected = section.key === active
           return (

@@ -108,16 +108,18 @@ describe('SettingsWorkspace', () => {
         </SettingsWorkspace>
       )
       const { container, rerender } = render(view('a'))
+      const atMount = created
       rerender(view('b'))
       const bar = container.querySelector('.rp-settings-tab-ink') as HTMLElement
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
       rerender(view('b'))
-      expect(created).toBe(1)
-      // A callback that finds the tab unmoved (only the list changed) leaves the slide running.
-      observers[0]()
+      expect(created).toBe(atMount)
+      // A callback that finds the tab unmoved (only the list changed) leaves the slide running. The
+      // underline's observer is the last one made; the edge-fade hook's comes first.
+      observers[observers.length - 1]()
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
       boxes.Beta = { left: 70, width: 52 }
-      observers[0]()
+      observers[observers.length - 1]()
       expect(bar.style.transform).toBe('translateX(70px)')
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(false)
     })

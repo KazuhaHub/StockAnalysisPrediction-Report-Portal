@@ -1,6 +1,8 @@
+import { useRef } from 'react'
 import { Timeline, Typography, theme } from 'antd'
 import type { TimelineNode } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useScrollEdges } from '../lib/useScrollEdges'
 import { useTranslation } from 'react-i18next'
 
 interface Props {
@@ -15,12 +17,17 @@ interface Props {
 export default function TimelinePanel({ nodes, selected, onSelect, horizontal }: Props) {
   const { token } = theme.useToken()
   const { t } = useTranslation()
+  // One swipeable line of dates, faded at the side that has more (shared with the settings tab row).
+  const row = useRef<HTMLDivElement>(null)
+  useScrollEdges(row, [nodes])
 
   if (horizontal) {
     return (
       <div
+        ref={row}
         data-testid="timeline-hscroll"
-        style={{ display: 'flex', gap: 8, overflowX: 'auto', padding: '2px 0 6px', WebkitOverflowScrolling: 'touch' }}
+        className="rp-scroll-row"
+        style={{ display: 'flex', gap: 8, padding: '2px 0 6px' }}
       >
         {nodes.map((n) => {
           const active = n.date === selected

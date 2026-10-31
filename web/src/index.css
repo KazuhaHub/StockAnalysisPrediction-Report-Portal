@@ -468,16 +468,15 @@ body {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  /* Swipe or wheel through a row wider than its space; a scrollbar under tabs reads as a second
-     underline, so the edge fades (below) say there is more instead. */
-  scrollbar-width: none;
-  overscroll-behavior-x: contain;
   box-shadow: inset 0 -1px 0 var(--ant-color-border-secondary);
 }
-.rp-settings-tabs::-webkit-scrollbar { display: none; }
-.rp-settings-tabs[data-start] { mask-image: linear-gradient(to right, transparent, #000 32px); }
-.rp-settings-tabs[data-end] { mask-image: linear-gradient(to left, transparent, #000 32px); }
-.rp-settings-tabs[data-start][data-end] {
+/* One swipeable line (useScrollEdges): no scrollbar, which under tabs reads as a second underline,
+   and a fade at each side that has more instead. */
+.rp-scroll-row { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.rp-scroll-row::-webkit-scrollbar { display: none; }
+.rp-scroll-row[data-start] { mask-image: linear-gradient(to right, transparent, #000 32px); }
+.rp-scroll-row[data-end] { mask-image: linear-gradient(to left, transparent, #000 32px); }
+.rp-scroll-row[data-start][data-end] {
   mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
 }
 .rp-settings-tab {

@@ -186,7 +186,7 @@ export default function ReviewPage() {
         {!loading && total === 0 && !err ? (
           // Empty is the expected state until the workflow emits any. Say what is missing and
           // exactly what to send, so nobody has to read the API docs to find out.
-          <Space orientation="vertical" size={12} style={{ maxWidth: 720 }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%', maxWidth: 720 }}>
             <Typography.Title level={5} style={{ margin: 0 }}>
               {t('review.emptyTitle')}
             </Typography.Title>

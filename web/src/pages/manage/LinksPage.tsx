@@ -337,6 +337,8 @@ export default function LinksPage() {
         style={{
           display: 'flex',
           alignItems: 'center',
+          // Wraps on a narrow screen rather than pushing the actions past the edge.
+          flexWrap: 'wrap',
           gap: 10,
           padding: '6px 10px',
           paddingInlineStart: grouped ? 30 : 10, // indent grouped links to show nesting
@@ -348,11 +350,11 @@ export default function LinksPage() {
       >
         <DragHandle label={t('common.reorder')} />
         <Icon />
-        <Typography.Text style={{ minWidth: 120, flexShrink: 0 }} ellipsis>
+        <Typography.Text style={{ minWidth: 0, flex: '0 1 auto' }} ellipsis>
           {linkDisplayLabel(l, t)}
         </Typography.Text>
         {!l.label.trim() && <Tag style={{ flexShrink: 0 }}>{t('links.labelAuto')}</Tag>}
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
+        <span style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
         {l.newTab === false ? null : (
           <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
             {t('links.newTab')}
