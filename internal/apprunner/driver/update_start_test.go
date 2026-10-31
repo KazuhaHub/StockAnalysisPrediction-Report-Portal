@@ -14,6 +14,7 @@ func updateStartBindingFixture() UpdateStartBinding {
 		PayloadSHA256:           strings.Repeat("a", 64),
 		OwnershipSHA256:         strings.Repeat("b", 64),
 		CheckpointReceiptSHA256: strings.Repeat("c", 64),
+		PolicyRevision:          "2",
 	}
 }
 

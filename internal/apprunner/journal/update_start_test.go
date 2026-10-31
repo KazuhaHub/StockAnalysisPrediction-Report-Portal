@@ -369,3 +369,206 @@ func TestUpdateStartReadinessBindsRunningReceipt(t *testing.T) {
 		})
 	}
 }
+
+func seedUpdateStartRunningFixture(t *testing.T, f checkpointFixture, command control.UpdateStartCommand, startRaw, startSignature []byte) []byte {
+	t.Helper()
+	reservation, err := f.store.ReserveUpdateStart(
+		context.Background(), startRaw, startSignature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preflight := UpdateStartPreflightEvidence{
+		Format:       "portal.runner.update-start-preflight/1-dev.1",
+		ImageID:      "sha256:" + strings.Repeat("a", 64),
+		Platform:     command.Payload.Platform,
+		PolicySHA256: strings.Repeat("b", 64), MountsSHA256: strings.Repeat("c", 64),
+		RootFilesystemUUID: command.Payload.RootFilesystemUUID,
+		RootInode:          command.Payload.RootInode, ProjectID: command.Payload.ProjectID,
+		Device: command.Payload.Device, NamespaceInode: command.Payload.NamespaceInode,
+		QuotaBytes: command.Payload.QuotaBytes, QuotaInodes: command.Payload.QuotaInodes,
+		SeccompSHA256: driver.UpdateStartSeccompSHA256(command.Payload.SandboxProfile),
+	}
+	observed := time.Now().UTC().UnixMilli()
+	marker := UpdateStartClaimMarker{
+		Format:  "portal.runner.update-start-claim/1-dev.1",
+		ClaimID: fixtureID(1530), EffectID: command.EffectID,
+		ResourceID: command.Payload.ResourceID, PayloadSHA256: command.PayloadSHA256,
+		OwnershipSHA256:         reservation.OwnershipSHA256,
+		CheckpointReceiptSHA256: command.Payload.SourceCheckpointReceiptSHA256,
+		ControlRevision:         command.ControlRevision,
+		AdmittedFence:           command.InstallationFence,
+		SandboxProfile:          command.Payload.SandboxProfile,
+		ClaimedMS:               strconv.FormatInt(observed, 10), ExpiresMS: command.ExpiresMS,
+		Preflight:        &preflight,
+		PreflightBoundMS: strconv.FormatInt(observed, 10),
+	}
+	running := UpdateStartRunningReceipt{
+		Format: updateStartRunningFormat, Claim: marker,
+		DeploymentID: command.DeploymentID, ControllerEpoch: command.ControllerEpoch,
+		InstallationID: command.InstallationID, OperationID: command.OperationID,
+		NamespaceID:         command.Payload.NamespaceID,
+		SourceReleaseSHA256: command.Payload.SourceReleaseSHA256,
+		TargetReleaseSHA256: command.Payload.TargetReleaseSHA256,
+		SourceGeneration:    command.Payload.SourceGeneration,
+		TargetGeneration:    command.TargetGeneration,
+		ControlFence:        command.InstallationFence,
+		SourceWriterFence:   command.Payload.SourceWriterFence,
+		TargetWriterFence:   command.Payload.TargetWriterFence,
+		DataFormat:          command.Payload.DataFormat,
+		NativeID:            strings.Repeat("e", 64),
+		NativeObservedMS:    strconv.FormatInt(observed, 10),
+		SettledMS:           strconv.FormatInt(observed, 10),
+	}
+	raw, err := json.Marshal(running)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.db.Exec(`UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=?`,
+		string(raw), observed, command.EffectID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.db.Exec(`UPDATE runner_resources SET native_id=?,release_sha256=?,generation=?,control_fence=?,writer_fence=?,desired_state='present',observed_state='running',ownership_sha256=?,revision=2,observed_ms=?,updated_ms=? WHERE id=?`,
+		running.NativeID, command.Payload.TargetReleaseSHA256, 2,
+		command.InstallationFence, command.Payload.TargetWriterFence,
+		reservation.OwnershipSHA256, observed, observed, command.Payload.ResourceID); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func updateStartRegistrationCommandFixture(t *testing.T, command control.UpdateStartCommand, startRaw, startSignature, runningRaw []byte) (control.UpdateStartRegistrationCommand, []byte, []byte) {
+	t.Helper()
+	registration := control.UpdateStartRegistrationCommand{
+		Format: control.UpdateStartRegistrationFormat, EffectID: fixtureID(1531),
+		StartRaw: startRaw, StartSignature: startSignature,
+		RunningReceiptSHA256: candidateHash(runningRaw),
+		DocumentSHA256:       strings.Repeat("f", 64),
+	}
+	var err error
+	registration.PayloadSHA256, err = control.UpdateStartRegistrationLogicalDigest(registration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey,
+		Fingerprint: enrollment.Fingerprint,
+	}
+	raw, signature, err := control.SignUpdateStartRegistration(
+		registration, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, time.Now().UTC().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registration, raw, signature
+}
+
+func TestUpdateStartRegistrationAdmissionBindsAppliedTarget(t *testing.T) {
+	f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	registration, raw, signature := updateStartRegistrationCommandFixture(
+		t, command, startRaw, startSignature, runningRaw)
+	admitted, err := f.store.AdmitUpdateStartRegistrationCommand(
+		context.Background(), raw, signature)
+	if err != nil || admitted.State != "prepared" ||
+		admitted.EffectID != registration.EffectID {
+		t.Fatal("update-start registration admission", admitted, err)
+	}
+	if scalarJournalInt(t, f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE effect_id=? AND stage='activate' AND effect_number=1 AND kind='activate' AND state='prepared' AND payload_sha256=? AND target_generation=2`,
+		registration.EffectID, registration.PayloadSHA256) != 1 {
+		t.Fatal("registration intent not persisted exactly")
+	}
+	replay, err := f.store.AdmitUpdateStartRegistrationCommand(
+		context.Background(), raw, signature)
+	if err != nil || !replay.Replayed || replay.EffectID != admitted.EffectID {
+		t.Fatal("registration replay", replay, err)
+	}
+}
+
+func TestUpdateStartRegistrationRefusesChangedTargetEvidence(t *testing.T) {
+	t.Run("running receipt hash", func(t *testing.T) {
+		f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+		runningRaw := seedUpdateStartRunningFixture(
+			t, f, command, startRaw, startSignature)
+		registration, _, _ := updateStartRegistrationCommandFixture(
+			t, command, startRaw, startSignature, runningRaw)
+		registration.RunningReceiptSHA256 = strings.Repeat("1", 64)
+		var err error
+		registration.PayloadSHA256, err =
+			control.UpdateStartRegistrationLogicalDigest(registration)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enrollment := enrollmentFixture(30)
+		authority := control.Authority{
+			DeploymentID:    enrollment.DeploymentID,
+			ControllerEpoch: enrollment.ControllerEpoch,
+			ControlRevision: enrollment.ControlRevision,
+			PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+		}
+		raw, signature, err := control.SignUpdateStartRegistration(
+			registration,
+			ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+			authority, time.Now().UTC().UnixMilli())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.AdmitUpdateStartRegistrationCommand(
+			context.Background(), raw, signature); err == nil {
+			t.Fatal("changed running receipt admitted")
+		}
+	})
+	t.Run("native identity", func(t *testing.T) {
+		f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+		runningRaw := seedUpdateStartRunningFixture(
+			t, f, command, startRaw, startSignature)
+		_, raw, signature := updateStartRegistrationCommandFixture(
+			t, command, startRaw, startSignature, runningRaw)
+		if _, err := f.store.db.Exec(
+			`UPDATE runner_resources SET native_id=? WHERE id=?`,
+			strings.Repeat("d", 62)+"01", command.Payload.ResourceID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.store.AdmitUpdateStartRegistrationCommand(
+			context.Background(), raw, signature); err == nil {
+			t.Fatal("changed native identity admitted")
+		}
+	})
+	t.Run("target policy", func(t *testing.T) {
+		f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+		runningRaw := seedUpdateStartRunningFixture(
+			t, f, command, startRaw, startSignature)
+		changed := command
+		changed.Payload.TargetPolicyRevision = "3"
+		var err error
+		changed.PayloadSHA256, err = control.UpdateStartLogicalDigest(changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enrollment := enrollmentFixture(30)
+		authority := control.Authority{
+			DeploymentID:    enrollment.DeploymentID,
+			ControllerEpoch: enrollment.ControllerEpoch,
+			ControlRevision: enrollment.ControlRevision,
+			PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+		}
+		changedRaw, changedSignature, err := control.SignUpdateStart(
+			changed,
+			ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+			authority, time.Now().UTC().UnixMilli())
+		if err != nil {
+			t.Fatal(err)
+		}
+		registration, raw, signature := updateStartRegistrationCommandFixture(
+			t, changed, changedRaw, changedSignature, runningRaw)
+		if registration.StartRaw == nil {
+			t.Fatal("changed start fixture missing")
+		}
+		if _, err := f.store.AdmitUpdateStartRegistrationCommand(
+			context.Background(), raw, signature); err == nil {
+			t.Fatal("changed target policy admitted")
+		}
+	})
+}

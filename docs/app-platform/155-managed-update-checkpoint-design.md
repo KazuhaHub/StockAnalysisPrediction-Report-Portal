@@ -4,9 +4,10 @@ Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
 document also claims verified native restore, Portal restore admission and the
-generation-2 `update-start` admission/reservation, native launch, running receipt
-and native readiness boundary. It does not claim a completed managed update
-executor, generation-2 registration/activation or a reviewed rollback executor.
+generation-2 `update-start` admission/reservation, native launch, running receipt,
+native readiness, protected registration, boot handshake and the atomic active
+tuple swap. It does not claim native A-to-B acceptance or a reviewed rollback
+executor.
 Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
@@ -177,6 +178,23 @@ native identity, then records canonical readiness evidence on the candidate
 activation and advances only `probe -> activate`. A stale or changed running
 receipt, native ID, protocol, format or timestamp is refused.
 
+Registration is a separate generation-2 command. It embeds a freshly signed
+reference to the applied update-start effect, the running-receipt digest and the
+private registration digest. The runner journals one unknown delivery intent,
+rechecks the exact container, pinned policy/data profile and private readiness
+socket, then writes the protected file once and settles an opaque receipt.
+Portal binds that receipt to the same operation, target activation, release,
+generation, policy, namespace, control fence and native ID. Registration does not
+make the candidate active or grant viewer access.
+
+Activation additionally requires a fresh boot handshake over the installed
+registration key. Portal re-derives the verifier from encrypted installation
+identity, checks the exact registration document and boot answer, then swaps one
+active generation/policy tuple. The same transaction retires the source
+activation, advances the namespace writer fence, updates the installation tuple,
+replaces capability rows and completes the operation. Any failure leaves the
+source active and the target candidate unchanged.
+
 ## Portal operation tuple
 
 A managed update review binds:
@@ -274,8 +292,8 @@ Disposable Linux/XFS/Docker tests:
 4. Distinct update-start admission with source-checkpoint binding and durable
    Portal reservation recovery. Implemented.
 5. Managed update executor and activation transaction. Native generation-2
-   launch/receipt, readiness and Portal `start -> activate` progression are
-   implemented; registration, activation and rollback remain.
+   launch/receipt, readiness, registration, boot and the Portal active tuple swap
+   are implemented; native acceptance and rollback remain.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
    the disposable Linux/XFS/Docker probe; binding them to the managed update

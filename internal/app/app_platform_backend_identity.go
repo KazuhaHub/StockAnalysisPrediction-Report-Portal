@@ -88,13 +88,13 @@ func platformBackendRegistrationMaterial(e migExec, expected platformOperationLe
 }
 
 func platformBackendRegistrationForSource(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, candidate platformCandidateIntent, dek []byte) (appplatform.BackendRegistration, error) {
-	return platformBackendRegistrationForRelease(e, source, runtime, candidate.descriptor, candidate.command.Payload.ReleaseSHA256, dek)
+	return platformBackendRegistrationForRelease(e, source, runtime, candidate.descriptor, candidate.command.Payload.ReleaseSHA256, 1, dek)
 }
 
-func platformBackendRegistrationForRelease(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, descriptor []byte, release string, dek []byte) (appplatform.BackendRegistration, error) {
+func platformBackendRegistrationForRelease(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, descriptor []byte, release string, policyRevision int64, dek []byte) (appplatform.BackendRegistration, error) {
 	var zero appplatform.BackendRegistration
 	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || parsed.SHA256 != release {
+	if err != nil || parsed.SHA256 != release || policyRevision < 1 {
 		return zero, errAppPlatformStageEvidence
 	}
 	var sealed string
@@ -109,7 +109,7 @@ func platformBackendRegistrationForRelease(e migExec, source platformManagedSour
 	if err != nil || len(seed) != 32 {
 		return zero, errAppPlatformStageEvidence
 	}
-	registration, err := appplatform.NewBackendRegistration(appplatform.BackendIdentity{AppID: parsed.Manifest.ID, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, InstallationID: source.installationID, Generation: strconv.FormatUint(source.generation, 10), PolicyRevision: "1", ReleaseSHA256: release}, seed)
+	registration, err := appplatform.NewBackendRegistration(appplatform.BackendIdentity{AppID: parsed.Manifest.ID, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, InstallationID: source.installationID, Generation: strconv.FormatUint(source.generation, 10), PolicyRevision: strconv.FormatInt(policyRevision, 10), ReleaseSHA256: release}, seed)
 	if err != nil {
 		return zero, err
 	}

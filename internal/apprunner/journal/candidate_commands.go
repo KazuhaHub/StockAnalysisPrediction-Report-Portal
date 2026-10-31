@@ -38,6 +38,12 @@ func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verifie
 		}
 		return false, nil
 	}
+	if verified.updateStartRegistration != nil {
+		if _, err := loadUpdateStartRegistrationSource(ctx, tx, *verified.updateStartRegistration, now); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	var count, conflicts int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE id=?`, verified.containerResourceID).Scan(&count); err != nil {

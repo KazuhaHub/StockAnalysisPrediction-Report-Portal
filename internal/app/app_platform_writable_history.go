@@ -164,7 +164,7 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	if err != nil {
 		return zero, err
 	}
-	registration, err := platformBackendRegistrationForRelease(e, source, runtime, descriptor, b.release, dek)
+	registration, err := platformBackendRegistrationForRelease(e, source, runtime, descriptor, b.release, 1, dek)
 	if err != nil {
 		return zero, err
 	}

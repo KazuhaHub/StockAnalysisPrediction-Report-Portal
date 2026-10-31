@@ -119,7 +119,7 @@ func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointC
 	return loadCheckpointSourceExcluding(ctx, tx, c, now, c.EffectID)
 }
 
-func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string) (checkpointSource, error) {
+func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions ...string) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
 	var startRaw, startOperation, startState, storedPayload string
@@ -201,8 +201,15 @@ func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.Ch
 		result.resource.revision != 3 || result.resource.observed != "stopped" || result.resource.desired != "stopped" {
 		return result, fmt.Errorf("%w: checkpoint stopped resource", ErrFenceReconciliation)
 	}
+	additional := ""
+	if len(additionalExclusions) > 1 {
+		return result, fmt.Errorf("%w: checkpoint exclusions", ErrFenceReconciliation)
+	}
+	if len(additionalExclusions) == 1 {
+		additional = additionalExclusions[0]
+	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, excludeEffect).Scan(&pending); err != nil || pending != 0 {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND (?='' OR effect_id<>?) AND state IN ('prepared','unknown')`, c.InstallationID, excludeEffect, additional, additional).Scan(&pending); err != nil || pending != 0 {
 		return result, fmt.Errorf("%w: checkpoint pending command", ErrFenceReconciliation)
 	}
 	if now <= 0 {

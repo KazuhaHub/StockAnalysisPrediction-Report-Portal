@@ -423,8 +423,11 @@ func (s *Server) runPlatformStaticUpdate(ctx context.Context, expected platformO
 }
 
 func (s *Server) finishPlatformUpdateForReview(ctx context.Context, expected platformOperationLease) error {
-	if expected.snapshot.Action != appplatform.ActionUpdate || expected.snapshot.Managed || expected.id == "" {
+	if expected.snapshot.Action != appplatform.ActionUpdate || expected.id == "" {
 		return errAppPlatformStageEvidence
+	}
+	if expected.snapshot.Managed {
+		return s.finishPlatformManagedUpdateForReview(ctx, expected)
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {

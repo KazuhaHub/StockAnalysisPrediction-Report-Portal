@@ -28,6 +28,7 @@ type platformCheckpointSource struct {
 	writerFence, platform, sandboxProfile         string
 	appID, publisherID                            string
 	descriptor                                    []byte
+	runtimeTarget                                 *platformManagedInstallTarget
 }
 
 type platformCheckpointIntent struct {
@@ -131,7 +132,7 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 		releaseSHA256: sourceRelease, dataFormat: strconv.FormatInt(activeFormat, 10),
 		writerFence: "1", descriptor: descriptor, platform: plan.Runtime.Profile.Platform,
 		sandboxProfile: control.CandidateSandboxProfile, appID: plan.AppID,
-		publisherID: plan.PublisherID,
+		publisherID: plan.PublisherID, runtimeTarget: plan.Runtime,
 	}
 	if plan.Format == platformWritableInstallFormat {
 		source.sandboxProfile = control.WritableCandidateSandboxProfile

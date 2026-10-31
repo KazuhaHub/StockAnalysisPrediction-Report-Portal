@@ -55,6 +55,8 @@ type platformUpdateStartIntent struct {
 	targetDescriptor     []byte
 	reservation          *journal.UpdateStartReservation
 	running              *journal.UpdateStartRunningReceipt
+	readiness            *journal.UpdateStartReadiness
+	activationObserved   int64
 	raw, signature       []byte
 }
 
@@ -66,7 +68,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
-		AND o.stage IN ('start','probe')`, expected.id, expected.installationID).
+		AND o.stage IN ('start','probe','activate')`, expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
 			&sourceGeneration, &targetGeneration); err != nil {
 		return zero, nil, errAppPlatformStageEvidence
@@ -336,12 +338,112 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 	return result, false, nil
 }
 
+// loadPlatformUpdateStartActivation reads only the exact candidate selected by
+// probe. The stored readiness receipt must still match the applied running
+// receipt and immutable update-start payload.
+func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan) (platformUpdateStartIntent, error) {
+	var zero platformUpdateStartIntent
+	lock := ""
+	if e.s.driver == "postgres" {
+		lock = " FOR UPDATE"
+	}
+	var activation, release, namespace, state, readinessRaw string
+	var generation, policy, format, observed int64
+	if err := e.queryRow(`SELECT id,release_sha256,generation,policy_revision,data_namespace_id,
+		data_format,state,readiness_evidence,observed_ms
+		FROM app_platform_activations WHERE installation_id=? AND generation=?`+lock,
+		expected.installationID, expected.snapshot.Generation).
+		Scan(&activation, &release, &generation, &policy, &namespace, &format,
+			&state, &readinessRaw, &observed); err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	if release != plan.TargetReleaseSHA256 ||
+		generation != int64(expected.snapshot.Generation) ||
+		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
+		format != plan.DataFormat || state != "candidate" ||
+		readinessRaw == "{}" || observed <= 0 {
+		return zero, fmt.Errorf("update-start activation tuple: %w", errAppPlatformStageEvidence)
+	}
+	var effectID, kind, digest, effectEpoch, effectState, runningRaw string
+	var admitted, observedFence int64
+	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,controller_epoch,
+		admitted_fence,observed_fence,state,receipt_json
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start' AND effect_number=1`+lock,
+		expected.id).
+		Scan(&effectID, &kind, &digest, &effectEpoch, &admitted,
+			&observedFence, &effectState, &runningRaw); err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	if kind != "update-start" ||
+		effectEpoch != expected.controllerEpoch || admitted != expected.fence ||
+		observedFence != expected.fence || effectState != "applied" {
+		return zero, fmt.Errorf("update-start activation effect: %w", errAppPlatformStageEvidence)
+	}
+	command, err := platformUpdateStartCommand(
+		expected, runtime, source, checkpoint, plan, activation, effectID)
+	if err != nil || command.PayloadSHA256 != digest {
+		return zero, fmt.Errorf("update-start activation digest: %w", errAppPlatformStageEvidence)
+	}
+	running, err := journal.ParseUpdateStartRunningReceipt([]byte(runningRaw))
+	if err != nil || !platformUpdateStartRunningMatches(
+		running, command, activation, effectID, nil) {
+		return zero, fmt.Errorf("update-start activation running receipt: %w", errAppPlatformStageEvidence)
+	}
+	reservation := journal.UpdateStartReservation{
+		ResourceID:     running.Claim.ResourceID,
+		InstallationID: running.InstallationID, NamespaceID: running.NamespaceID,
+		EffectID: running.Claim.EffectID, OwnershipSHA256: running.Claim.OwnershipSHA256,
+		SourceGeneration:    mustPlatformCheckpointInt(running.SourceGeneration),
+		TargetGeneration:    mustPlatformCheckpointInt(running.TargetGeneration),
+		SourceReleaseSHA256: running.SourceReleaseSHA256,
+		TargetReleaseSHA256: running.TargetReleaseSHA256,
+		ControlFence:        mustPlatformCheckpointInt(running.ControlFence),
+		SourceWriterFence:   mustPlatformCheckpointInt(running.SourceWriterFence),
+		TargetWriterFence:   mustPlatformCheckpointInt(running.TargetWriterFence),
+	}
+	if !platformUpdateStartReservationMatches(
+		reservation, command, activation, effectID) {
+		return zero, fmt.Errorf("update-start activation reservation: %w", errAppPlatformStageEvidence)
+	}
+	readiness, err := journal.ParseUpdateStartReadiness([]byte(readinessRaw))
+	readinessObserved := mustPlatformCheckpointInt(readiness.ObservedMS)
+	runningObserved := mustPlatformCheckpointInt(running.NativeObservedMS)
+	if err != nil || readinessObserved != observed ||
+		readinessObserved < runningObserved ||
+		readiness.PayloadSHA256 != command.PayloadSHA256 ||
+		readiness.RunningReceiptSHA256 != platformDigest([]byte(runningRaw)) ||
+		readiness.NativeID != running.NativeID ||
+		readiness.Protocol != "portal.backend/1" ||
+		readiness.DataFormat != command.Payload.DataFormat {
+		return zero, fmt.Errorf("update-start activation readiness: %w", errAppPlatformStageEvidence)
+	}
+	return platformUpdateStartIntent{
+		resourceID: activation, effectID: effectID, runtime: runtime,
+		authority: control.Authority{
+			DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch,
+			ControlRevision: runtime.controlRevision,
+			PublicKey:       bytes.Clone(runtime.publicKey), Fingerprint: runtime.fingerprint,
+		},
+		command: command, checkpoint: checkpoint,
+		checkpointRaw: []byte(mustMarshalPlatformCheckpointReceipt(checkpoint)),
+		source:        source, plan: plan,
+		targetDescriptor: bytes.Clone(source.descriptor),
+		reservation:      &reservation, running: &running, readiness: &readiness,
+		activationObserved: observed,
+	}, nil
+}
+
 func (s *Server) preparePlatformUpdateStart(ctx context.Context, expected platformOperationLease) (platformUpdateStartIntent, error) {
 	return s.preparePlatformUpdateStartMode(ctx, expected, appplatform.StageStart)
 }
 
 func (s *Server) preparePlatformUpdateProbe(ctx context.Context, expected platformOperationLease) (platformUpdateStartIntent, error) {
 	return s.preparePlatformUpdateStartMode(ctx, expected, appplatform.StageProbe)
+}
+
+func (s *Server) preparePlatformUpdateRegistrationSource(ctx context.Context, expected platformOperationLease) (platformUpdateStartIntent, error) {
+	return s.preparePlatformUpdateStartMode(ctx, expected, appplatform.StageActivate)
 }
 
 func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected platformOperationLease, stage appplatform.Stage) (platformUpdateStartIntent, error) {
@@ -390,7 +492,15 @@ func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected pl
 	if err != nil {
 		return zero, err
 	}
-	result, fresh, err := loadPlatformUpdateStartIntent(e, expected, runtime, source, checkpoint, plan, facts.now, true)
+	var result platformUpdateStartIntent
+	var fresh bool
+	if stage == appplatform.StageActivate {
+		result, err = loadPlatformUpdateStartActivation(
+			e, expected, runtime, source, checkpoint, plan)
+	} else {
+		result, fresh, err = loadPlatformUpdateStartIntent(
+			e, expected, runtime, source, checkpoint, plan, facts.now, true)
+	}
 	if err != nil {
 		return zero, fmt.Errorf("update-start intent: %w", err)
 	}

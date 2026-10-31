@@ -418,6 +418,7 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 			PayloadSHA256:           c.PayloadSHA256,
 			OwnershipSHA256:         marker.OwnershipSHA256,
 			CheckpointReceiptSHA256: c.Payload.SourceCheckpointReceiptSHA256,
+			PolicyRevision:          c.Payload.TargetPolicyRevision,
 		},
 		SandboxProfile: c.Payload.SandboxProfile,
 	}

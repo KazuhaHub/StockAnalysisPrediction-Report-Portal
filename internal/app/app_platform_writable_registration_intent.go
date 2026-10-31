@@ -88,7 +88,7 @@ func loadPlatformWritableRegistration(e migExec, lease platformOperationLease, r
 		return zero, false, errAppPlatformStageEvidence
 	}
 	source := platformManagedSource{operationID: lease.id, installationID: lease.installationID, epoch: lease.controllerEpoch, generation: lease.snapshot.Generation, fence: lease.fence}
-	registration, err := platformBackendRegistrationForRelease(e, source, runtime, start.writer.descriptor, start.writer.data.ReleaseSHA256, dek)
+	registration, err := platformBackendRegistrationForRelease(e, source, runtime, start.writer.descriptor, start.writer.data.ReleaseSHA256, 1, dek)
 	if err != nil {
 		return zero, false, err
 	}

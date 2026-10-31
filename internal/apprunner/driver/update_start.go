@@ -14,6 +14,7 @@ const (
 // native execution authority.
 type UpdateStartBinding struct {
 	EffectID, ClaimID, PayloadSHA256, OwnershipSHA256, CheckpointReceiptSHA256 string
+	PolicyRevision                                                             string
 }
 
 type UpdateStartLaunchRequest struct {
@@ -69,6 +70,9 @@ func validUpdateStartBinding(b UpdateStartBinding) bool {
 		if !containerUUID.MatchString(id) || id == "00000000-0000-0000-0000-000000000000" {
 			return false
 		}
+	}
+	if !positiveContainerCounter(b.PolicyRevision) {
+		return false
 	}
 	for _, sha := range []string{b.PayloadSHA256, b.OwnershipSHA256, b.CheckpointReceiptSHA256} {
 		if !containerSHA.MatchString(sha) {
@@ -126,6 +130,7 @@ func updateStartLabels(owner containerOwner, b UpdateStartBinding, profile strin
 	labels[containerLabelPrefix+"start-payload"] = b.PayloadSHA256
 	labels[containerLabelPrefix+"start-ownership"] = b.OwnershipSHA256
 	labels[containerLabelPrefix+"checkpoint-receipt"] = b.CheckpointReceiptSHA256
+	labels[containerLabelPrefix+"policy-revision"] = b.PolicyRevision
 	return labels
 }
 

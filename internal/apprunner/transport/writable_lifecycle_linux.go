@@ -36,7 +36,7 @@ func RunControllerWritableLifecycle(ctx context.Context, path string, uid, gid u
 }
 func writableLifecycleFrame(parent context.Context, path string, profile endpointProfile, action WritableLifecycleAction, raw, sig []byte, a control.Authority, descriptor, document []byte) (WritableLifecycleObservation, error) {
 	var zero WritableLifecycleObservation
-	if !action.valid() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 || len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes || len(document) > 4096 || (action == WritableRegistrationDeliver) != (len(document) > 0) {
+	if !action.valid() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 || len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes || len(document) > 4096 || action.registrationDelivery() != (len(document) > 0) {
 		return zero, driver.ErrContainerUncertain
 	}
 	raw, sig, descriptor, document, a.PublicKey = bytes.Clone(raw), bytes.Clone(sig), bytes.Clone(descriptor), bytes.Clone(document), bytes.Clone(a.PublicKey)
@@ -52,6 +52,17 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 			return zero, driver.ErrContainerUncertain
 		}
 		private, err := control.ValidateWritableBackendRegistrationDocument(v, descriptor, document)
+		if err != nil {
+			return zero, driver.ErrContainerUncertain
+		}
+		private.Close()
+	}
+	if action == UpdateStartRegistrationDeliver {
+		v, err := control.VerifyUpdateStartRegistration(raw, sig, a, started.UnixMilli())
+		if err != nil {
+			return zero, driver.ErrContainerUncertain
+		}
+		private, err := control.ValidateUpdateStartRegistrationDocument(v, descriptor, document)
 		if err != nil {
 			return zero, driver.ErrContainerUncertain
 		}
@@ -160,7 +171,7 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		return
 	}
 	n := binary.BigEndian.Uint32(size[:])
-	if n > 4096 || (action == WritableRegistrationDeliver) != (n > 0) {
+	if n > 4096 || action.registrationDelivery() != (n > 0) {
 		return
 	}
 	document := make([]byte, int(n))
@@ -222,6 +233,10 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.ReadUpdateStartRunningReceipt(ctx, raw, sig)
 	case UpdateStartProbe:
 		result, err = provider.store.ObserveUpdateStartReadiness(ctx, raw, sig, provider.native, descriptor)
+	case UpdateStartRegistrationDeliver:
+		result, err = provider.store.DispatchUpdateStartRegistration(ctx, raw, sig, descriptor, document, provider.native)
+	case UpdateStartRegistrationRead:
+		result, err = provider.store.ReadUpdateStartRegistrationReceipt(ctx, raw, sig)
 	default:
 		return
 	}

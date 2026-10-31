@@ -284,6 +284,71 @@ func updateStartRunningReceiptFixture(command control.UpdateStartCommand, reserv
 	}
 }
 
+func TestWritableLifecycleUpdateStartRegistration(t *testing.T) {
+	a, start, startRaw, startSignature, descriptor, _ :=
+		updateStartTransportFixture(t)
+	now := time.Now()
+	command := control.UpdateStartRegistrationCommand{
+		Format:   control.UpdateStartRegistrationFormat,
+		EffectID: "11111111-1111-4111-8111-111111119973",
+		StartRaw: startRaw, StartSignature: startSignature,
+		RunningReceiptSHA256: strings.Repeat("a", 64),
+		DocumentSHA256:       strings.Repeat("b", 64),
+	}
+	command.PayloadSHA256, _ =
+		control.UpdateStartRegistrationLogicalDigest(command)
+	raw, signature, err := control.SignUpdateStartRegistration(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		a, now.UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := verifyWritableLifecycle(
+		UpdateStartRegistrationDeliver, raw, signature, descriptor, a,
+		now.UnixMilli())
+	if err != nil || ref.updateStartRegistration.EffectID != command.EffectID ||
+		ref.updateStart.EffectID != start.EffectID {
+		t.Fatal("update-start registration reference", ref, err)
+	}
+	var receipt journal.UpdateStartRegistrationReceipt
+	if err := json.Unmarshal([]byte(`{"claim":{}}`), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	receipt.Format = "portal.runner.update-start-registration-delivery/1-dev.1"
+	receipt.Claim.Format = "portal.runner.update-start-registration-claim/1-dev.1"
+	receipt.Claim.ClaimID = "11111111-1111-4111-8111-111111119974"
+	receipt.Claim.EffectID = command.EffectID
+	receipt.Claim.PayloadSHA256 = command.PayloadSHA256
+	receipt.Claim.SourceSHA256 = command.RunningReceiptSHA256
+	receipt.Claim.DocumentSHA256 = command.DocumentSHA256
+	receipt.Claim.NativeID = strings.Repeat("c", 64)
+	receipt.Claim.ControlRevision = start.ControlRevision
+	receipt.Claim.ClaimedMS = strconv.FormatInt(now.UnixMilli(), 10)
+	receipt.Claim.ExpiresMS = start.ExpiresMS
+	claimRaw, _ := json.Marshal(receipt.Claim)
+	receipt.BindingSHA256 = func() string {
+		sum := sha256.Sum256(claimRaw)
+		return hex.EncodeToString(sum[:])
+	}()
+	receipt.Device = "9"
+	receipt.Inode = "10"
+	receipt.ObservedMS = strconv.FormatInt(now.UnixMilli(), 10)
+	receipt.SettledMS = receipt.ObservedMS
+	body, _ := json.Marshal(receipt)
+	if !validWritableLifecycleReply(
+		UpdateStartRegistrationDeliver, body, ref,
+		now.Add(-time.Millisecond), time.Now()) {
+		t.Fatal("exact update-start registration reply refused")
+	}
+	receipt.Claim.NativeID = strings.Repeat("d", 64)
+	body, _ = json.Marshal(receipt)
+	if validWritableLifecycleReply(
+		UpdateStartRegistrationDeliver, body, ref,
+		now.Add(-time.Millisecond), time.Now()) {
+		t.Fatal("changed registration reply accepted")
+	}
+}
+
 func TestWritableLifecycleIndependentActionReferences(t *testing.T) {
 	a, c, raw, sig, descriptor, _ := writableHandshakeRequestFixture(t)
 	v, err := control.VerifyWritableBackendRegistration(raw, sig, a, time.Now().UnixMilli())

@@ -16,13 +16,39 @@ import (
 )
 
 type platformUpdateStartTestObservation struct {
-	reservation journal.UpdateStartReservation
-	running     journal.UpdateStartRunningReceipt
-	readiness   journal.UpdateStartReadiness
-	authority   control.Authority
-	endpoint    transport.CandidateReceiptEndpoint
-	receivedAt  time.Time
-	commandSHA  string
+	reservation  journal.UpdateStartReservation
+	running      journal.UpdateStartRunningReceipt
+	readiness    journal.UpdateStartReadiness
+	registration journal.UpdateStartRegistrationReceipt
+	action       transport.WritableLifecycleAction
+	authority    control.Authority
+	endpoint     transport.CandidateReceiptEndpoint
+	receivedAt   time.Time
+	commandSHA   string
+}
+
+type platformUpdateStartHandshakeTestObservation struct {
+	evidence   journal.UpdateStartBackendHandshakeEvidence
+	authority  control.Authority
+	endpoint   transport.CandidateReceiptEndpoint
+	receivedAt time.Time
+	commandSHA string
+}
+
+func (o platformUpdateStartHandshakeTestObservation) Evidence() journal.UpdateStartBackendHandshakeEvidence {
+	return o.evidence
+}
+func (o platformUpdateStartHandshakeTestObservation) Controller() control.Authority {
+	return o.authority
+}
+func (o platformUpdateStartHandshakeTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
+	return o.endpoint
+}
+func (o platformUpdateStartHandshakeTestObservation) ReceivedAt() time.Time {
+	return o.receivedAt
+}
+func (o platformUpdateStartHandshakeTestObservation) CommandSHA256() string {
+	return o.commandSHA
 }
 
 func (o platformUpdateStartTestObservation) UpdateStartReservation() (journal.UpdateStartReservation, error) {
@@ -34,12 +60,18 @@ func (o platformUpdateStartTestObservation) UpdateStartRunningReceipt() (journal
 func (o platformUpdateStartTestObservation) UpdateStartReadiness() (journal.UpdateStartReadiness, error) {
 	return o.readiness, nil
 }
+func (o platformUpdateStartTestObservation) UpdateStartRegistrationReceipt() (journal.UpdateStartRegistrationReceipt, error) {
+	return o.registration, nil
+}
 func (o platformUpdateStartTestObservation) Controller() control.Authority { return o.authority }
 func (o platformUpdateStartTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
 	return o.endpoint
 }
 func (o platformUpdateStartTestObservation) ReceivedAt() time.Time { return o.receivedAt }
 func (o platformUpdateStartTestObservation) CommandSHA256() string { return o.commandSHA }
+func (o platformUpdateStartTestObservation) Action() transport.WritableLifecycleAction {
+	return o.action
+}
 
 func platformUpdateStartEndpointFixture() platformRuntimeEndpoint {
 	return platformRuntimeEndpoint{path: "/run/portal-test/update-start.sock", controllerUID: 1000, controllerGID: 1001}
@@ -469,6 +501,472 @@ func TestPlatformUpdateStartCommitsReadinessSQLite(t *testing.T) {
 
 func TestPlatformUpdateStartCommitsReadinessPostgres(t *testing.T) {
 	testPlatformUpdateStartCommitsReadiness(t, true)
+}
+
+func platformUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartRegistrationIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, probeLease, probeIntent, endpoint, readinessObservation := platformUpdateStartReadinessCommitFixture(t, pg)
+	lease, err := s.commitPlatformUpdateStartReadiness(
+		context.Background(), probeLease, probeIntent, endpoint, readinessObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent, err := s.preparePlatformUpdateStartRegistration(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt journal.UpdateStartRegistrationReceipt
+	if err := json.Unmarshal([]byte(`{"claim":{}}`), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	receipt.Format = "portal.runner.update-start-registration-delivery/1-dev.1"
+	claim := &receipt.Claim
+	claim.Format = "portal.runner.update-start-registration-claim/1-dev.1"
+	claim.ClaimID = platformFixtureID(1410)
+	claim.EffectID = intent.command.EffectID
+	claim.PayloadSHA256 = intent.command.PayloadSHA256
+	claim.SourceSHA256 = intent.command.RunningReceiptSHA256
+	claim.DocumentSHA256 = intent.command.DocumentSHA256
+	claim.NativeID = intent.start.running.NativeID
+	claim.ControlRevision = intent.start.command.ControlRevision
+	claim.ClaimedMS = strconv.FormatInt(now, 10)
+	claim.ExpiresMS = intent.start.command.ExpiresMS
+	claimRaw, _ := json.Marshal(receipt.Claim)
+	receipt.BindingSHA256 = platformDigest(claimRaw)
+	receipt.Device = "9"
+	receipt.Inode = "10"
+	receipt.ObservedMS = strconv.FormatInt(now, 10)
+	receipt.SettledMS = receipt.ObservedMS
+	observation := platformUpdateStartReservationFixture(intent.start, endpoint)
+	observation.commandSHA = platformDigest(intent.raw)
+	observation.action = transport.UpdateStartRegistrationDeliver
+	observation.registration = receipt
+	if !validPlatformUpdateStartRegistrationObservation(observation, intent, endpoint) {
+		t.Fatal("registration observation fixture refused")
+	}
+	return s, lease, intent, endpoint, observation
+}
+
+func platformUpdateStartBootFixture(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint) (platformUpdateStartRegistrationIntent, platformUpdateStartBootObservation) {
+	t.Helper()
+	applied, err := s.preparePlatformUpdateStartRegistration(
+		context.Background(), lease)
+	if err != nil || !applied.applied {
+		t.Fatal("prepare applied registration", err)
+	}
+	signer, err := applied.registration.Signer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(signer.Key)
+	now := time.Now()
+	challenge, err := signer.NewChallenge(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootID := "update-boot/42"
+	answer, err := signer.AnswerChallenge(challenge, bootID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptRaw, _ := json.Marshal(applied.receipt)
+	proof := platformUpdateStartHandshakeTestObservation{
+		evidence: journal.UpdateStartBackendHandshakeEvidence{
+			Format:                "portal.runner.update-start-backend-handshake/1-dev.1",
+			PayloadSHA256:         applied.command.PayloadSHA256,
+			DeliveryReceiptSHA256: platformDigest(receiptRaw),
+			NativeID:              applied.start.running.NativeID,
+			ChallengeSHA256:       platformDigest([]byte(challenge)),
+			Answer:                answer, ObservedMS: strconv.FormatInt(now.UnixMilli(), 10),
+		},
+		authority: applied.start.authority,
+		endpoint: transport.CandidateReceiptEndpoint{
+			Path: endpoint.path, RunnerUID: 0,
+			ControllerUID: endpoint.controllerUID,
+			ControllerGID: endpoint.controllerGID, RootController: true,
+		},
+		receivedAt: time.Now(), commandSHA: platformDigest(applied.raw),
+	}
+	if !validPlatformUpdateStartHandshakeObservation(
+		proof, applied, endpoint, challenge) {
+		t.Fatal("update-start handshake fixture refused")
+	}
+	boot, err := s.finishPlatformUpdateStartBoot(
+		context.Background(), lease, applied, endpoint, challenge, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return applied, boot
+}
+
+func TestPlatformUpdateStartRegistrationCommitSQLite(t *testing.T) {
+	s, lease, intent, endpoint, observation := platformUpdateStartRegistrationCommitFixture(t, false)
+	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil || next.snapshot.Stage != appplatform.StageActivate ||
+		next.rowRevision != lease.rowRevision+1 {
+		t.Fatal("update-start registration commit", next, err)
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "applied" ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" ||
+		scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != grants {
+		t.Fatal("registration advanced activation or grants")
+	}
+	applied, err := s.preparePlatformUpdateStartRegistration(context.Background(), next)
+	if err != nil || !applied.applied || applied.receipt != observation.registration {
+		t.Fatal("registration replay", applied.applied, err)
+	}
+	defer applied.registration.Close()
+}
+
+func TestPlatformUpdateStartBootBindsRegistrationSQLite(t *testing.T) {
+	testPlatformUpdateStartBootBindsRegistration(t, false)
+}
+
+func TestPlatformUpdateStartBootBindsRegistrationPostgres(t *testing.T) {
+	testPlatformUpdateStartBootBindsRegistration(t, true)
+}
+
+func testPlatformUpdateStartBootBindsRegistration(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+	defer applied.registration.Close()
+	receiptRaw, _ := json.Marshal(applied.receipt)
+	if boot.bootID != "update-boot/42" ||
+		boot.nativeID != applied.start.running.NativeID ||
+		boot.deliverySHA256 != platformDigest(receiptRaw) {
+		t.Fatal("update-start boot", boot)
+	}
+}
+
+func TestPlatformUpdateStartActivationSQLite(t *testing.T) {
+	testPlatformUpdateStartActivation(t, false)
+}
+
+func TestPlatformUpdateStartActivationPostgres(t *testing.T) {
+	testPlatformUpdateStartActivation(t, true)
+}
+
+func testPlatformUpdateStartActivation(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, registrationObservation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint,
+		registrationObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+	defer applied.registration.Close()
+	accessBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID)
+	result, err := s.commitPlatformUpdateStartActivation(
+		context.Background(), next, applied, boot)
+	if err != nil || result.snapshot.Stage != appplatform.StageComplete ||
+		result.activationID != applied.start.resourceID {
+		t.Fatal("update activation", result, err)
+	}
+	if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready:2:2" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active' AND generation=2 AND policy_revision=2`, lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='retired' AND generation=1`, lease.installationID) != 1 ||
+		scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 2 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=2`, lease.installationID) == 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != accessBefore ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "complete" {
+		t.Fatal("active generation tuple not committed atomically")
+	}
+}
+
+func TestPlatformUpdateStartActivationRefusesChangedBootSQLite(t *testing.T) {
+	testPlatformUpdateStartActivationRefusesChangedBoot(t, false)
+}
+
+func TestPlatformUpdateStartActivationRefusesChangedBootPostgres(t *testing.T) {
+	testPlatformUpdateStartActivationRefusesChangedBoot(t, true)
+}
+
+func testPlatformUpdateStartActivationRefusesChangedBoot(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, registrationObservation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint,
+		registrationObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+	defer applied.registration.Close()
+	for name, mutate := range map[string]func(*platformUpdateStartBootObservation){
+		"native":   func(b *platformUpdateStartBootObservation) { b.nativeID = strings.Repeat("1", 64) },
+		"document": func(b *platformUpdateStartBootObservation) { b.documentSHA256 = strings.Repeat("2", 64) },
+		"delivery": func(b *platformUpdateStartBootObservation) { b.deliverySHA256 = strings.Repeat("3", 64) },
+		"boot":     func(b *platformUpdateStartBootObservation) { b.bootID = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := boot
+			mutate(&changed)
+			if _, err := s.commitPlatformUpdateStartActivation(
+				context.Background(), next, applied, changed); err == nil {
+				t.Fatal("changed boot activated")
+			}
+			if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready:1:1" ||
+				scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND generation=2`, lease.installationID) != 1 {
+				t.Fatal("refused boot changed active tuple")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartActivationRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartActivationRollback(t, false)
+}
+
+func TestPlatformUpdateStartActivationRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartActivationRollback(t, true)
+}
+
+func testPlatformUpdateStartActivationRollback(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, registrationObservation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint,
+		registrationObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformUpdateStartBootFixture(t, s, next, endpoint)
+	defer applied.registration.Close()
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_managed_update_activation_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture managed update activation failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_update_activation_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.managed_update_activated') EXECUTE FUNCTION fixture_managed_update_activation_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_managed_update_activation_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_managed_update_activation_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_update_activation_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.managed_update_activated' BEGIN SELECT RAISE(ABORT,'fixture managed update activation failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_managed_update_activation_failure`)
+	}
+	if _, err := s.commitPlatformUpdateStartActivation(
+		context.Background(), next, applied, boot); err == nil {
+		t.Fatal("failed update activation audit committed")
+	}
+	if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready:1:1" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active' AND generation=1`, lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND generation=2`, lease.installationID) != 1 ||
+		scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != 1 ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" {
+		t.Fatal("failed update activation was partial")
+	}
+}
+
+func TestPlatformManagedUpdateRetryExhaustionSQLite(t *testing.T) {
+	testPlatformManagedUpdateRetryExhaustion(t, false)
+}
+
+func TestPlatformManagedUpdateRetryExhaustionPostgres(t *testing.T) {
+	testPlatformManagedUpdateRetryExhaustion(t, true)
+}
+
+func testPlatformManagedUpdateRetryExhaustion(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeBefore := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, lease.installationID)
+	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=1`, lease.installationID)
+	if err := s.finishPlatformUpdateForReview(
+		context.Background(), next); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, lease.id) != "recovery_required:update_recovery_required" ||
+		scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "recovery_required" ||
+		scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, lease.installationID) != activeBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate' AND generation=2`, lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=1`, lease.installationID) != capabilitiesBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_recovery_required' AND target_id=?`, lease.id) == 0 {
+		t.Fatal("managed update exhaustion did not preserve source/recovery state")
+	}
+}
+
+func TestPlatformUpdateStartRegistrationCommitPostgres(t *testing.T) {
+	testPlatformUpdateStartRegistrationCommit(t, true)
+}
+
+func testPlatformUpdateStartRegistrationCommit(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil || next.rowRevision != lease.rowRevision+1 ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "applied" {
+		t.Fatal("update-start registration commit", next, err)
+	}
+}
+
+func testPlatformUpdateStartRegistrationRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*journal.UpdateStartRegistrationReceipt){
+		"payload": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.PayloadSHA256 = strings.Repeat("1", 64)
+		},
+		"running": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.SourceSHA256 = strings.Repeat("2", 64)
+		},
+		"document": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.DocumentSHA256 = strings.Repeat("3", 64)
+		},
+		"native": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.NativeID = strings.Repeat("4", 64)
+		},
+		"future": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.ObservedMS = strconv.FormatInt(time.Now().Add(10*time.Second).UnixMilli(), 10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, lease, intent, endpoint, observation :=
+				platformUpdateStartRegistrationCommitFixture(t, pg)
+			mutate(&observation.registration)
+			if _, err := s.commitPlatformUpdateStartRegistration(
+				context.Background(), lease, intent, endpoint,
+				observation); err == nil {
+				t.Fatal("changed registration receipt committed")
+			}
+			if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "prepared" ||
+				scalar[int64](t, s.st, `SELECT row_revision FROM app_platform_operations WHERE id=?`, lease.id) != lease.rowRevision {
+				t.Fatal("refused registration changed durable state")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartRegistrationRefusalsSQLite(t *testing.T) {
+	testPlatformUpdateStartRegistrationRefusals(t, false)
+}
+
+func TestPlatformUpdateStartRegistrationRefusalsPostgres(t *testing.T) {
+	testPlatformUpdateStartRegistrationRefusals(t, true)
+}
+
+func testPlatformUpdateStartRegistrationSourceRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*testing.T, *Server, platformOperationLease){
+		"stale readiness": func(t *testing.T, s *Server, lease platformOperationLease) {
+			mustExec(t, s.st, `UPDATE app_platform_activations SET observed_ms=? WHERE installation_id=? AND generation=2`,
+				time.Now().Add(-10*time.Second).UnixMilli(), lease.installationID)
+		},
+		"candidate tuple": func(t *testing.T, s *Server, lease platformOperationLease) {
+			mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=policy_revision+1 WHERE installation_id=? AND generation=2`,
+				lease.installationID)
+		},
+		"running receipt": func(t *testing.T, s *Server, lease platformOperationLease) {
+			mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}' WHERE operation_id=? AND stage='start'`, lease.id)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, probeLease, probeIntent, endpoint, readinessObservation :=
+				platformUpdateStartReadinessCommitFixture(t, pg)
+			lease, err := s.commitPlatformUpdateStartReadiness(
+				context.Background(), probeLease, probeIntent, endpoint,
+				readinessObservation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate(t, s, lease)
+			if _, err := s.preparePlatformUpdateStartRegistration(
+				context.Background(), lease); err == nil {
+				t.Fatal("changed registration source admitted")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartRegistrationSourceRefusalsSQLite(t *testing.T) {
+	testPlatformUpdateStartRegistrationSourceRefusals(t, false)
+}
+
+func TestPlatformUpdateStartRegistrationSourceRefusalsPostgres(t *testing.T) {
+	testPlatformUpdateStartRegistrationSourceRefusals(t, true)
+}
+
+func testPlatformUpdateStartRegistrationPrepareRollback(t *testing.T, pg bool) {
+	s, probeLease, probeIntent, endpoint, readinessObservation :=
+		platformUpdateStartReadinessCommitFixture(t, pg)
+	lease, err := s.commitPlatformUpdateStartReadiness(
+		context.Background(), probeLease, probeIntent, endpoint,
+		readinessObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	auditBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_registration_intent' AND target_id=?`, lease.id)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_update_registration_prepare_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture registration prepare failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_registration_prepare_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.update_start_registration_intent') EXECUTE FUNCTION fixture_update_registration_prepare_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_registration_prepare_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_update_registration_prepare_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_registration_prepare_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_registration_intent' BEGIN SELECT RAISE(ABORT,'fixture registration prepare failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_registration_prepare_failure`)
+	}
+	if _, err := s.preparePlatformUpdateStartRegistration(
+		context.Background(), lease); err == nil {
+		t.Fatal("failed registration audit committed")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_registration_intent' AND target_id=?`, lease.id) != auditBefore {
+		t.Fatal("failed registration preparation left partial rows")
+	}
+}
+
+func TestPlatformUpdateStartRegistrationPrepareRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartRegistrationPrepareRollback(t, false)
+}
+
+func TestPlatformUpdateStartRegistrationPrepareRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartRegistrationPrepareRollback(t, true)
+}
+
+func testPlatformUpdateStartRegistrationCommitRollback(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_update_registration_commit_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture registration commit failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_registration_commit_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.update_start_registration_observed') EXECUTE FUNCTION fixture_update_registration_commit_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_registration_commit_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_update_registration_commit_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_registration_commit_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_registration_observed' BEGIN SELECT RAISE(ABORT,'fixture registration commit failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_registration_commit_failure`)
+	}
+	if _, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation); err == nil {
+		t.Fatal("failed registration commit audit succeeded")
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='activate'`, lease.id) != "prepared" ||
+		scalar[int64](t, s.st, `SELECT row_revision FROM app_platform_operations WHERE id=?`, lease.id) != lease.rowRevision {
+		t.Fatal("failed registration commit was partial")
+	}
+}
+
+func TestPlatformUpdateStartRegistrationCommitRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartRegistrationCommitRollback(t, false)
+}
+
+func TestPlatformUpdateStartRegistrationCommitRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartRegistrationCommitRollback(t, true)
 }
 
 func testPlatformUpdateStartReadinessRefusals(t *testing.T, pg bool) {

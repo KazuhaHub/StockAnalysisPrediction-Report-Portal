@@ -116,6 +116,10 @@ func updateStartOwnership(c control.UpdateStartCommand, fence int64) string {
 }
 
 func loadUpdateStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, now int64) (updateStartSource, error) {
+	return loadUpdateStartSourceExcludingRegistration(ctx, tx, c, now, "")
+}
+
+func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, now int64, registrationEffect string) (updateStartSource, error) {
 	var zero updateStartSource
 	p := c.Payload
 	var operation, state, payload, raw, installation string
@@ -188,7 +192,8 @@ func loadUpdateStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateStar
 		archiveBytes != mustDataInt(checkpoint.ArchiveBytes) {
 		return zero, ErrFenceReconciliation
 	}
-	source, err := loadCheckpointSourceExcluding(ctx, tx, checkpointCommand, now, c.EffectID)
+	source, err := loadCheckpointSourceExcluding(
+		ctx, tx, checkpointCommand, now, c.EffectID, registrationEffect)
 	if err != nil {
 		return zero, ErrFenceReconciliation
 	}

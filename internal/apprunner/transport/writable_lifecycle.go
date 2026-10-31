@@ -37,13 +37,18 @@ const (
 	UpdateStartExecute
 	UpdateStartReceipt
 	UpdateStartProbe
+	UpdateStartRegistrationDeliver
+	UpdateStartRegistrationRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= UpdateStartProbe
+	return a >= WritableWriterExecute && a <= UpdateStartRegistrationRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver
+}
+func (a WritableLifecycleAction) registrationDelivery() bool {
+	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -134,17 +139,24 @@ func (o WritableLifecycleObservation) UpdateStartReadiness() (journal.UpdateStar
 	}
 	return journal.ParseUpdateStartReadiness([]byte(o.body))
 }
+func (o WritableLifecycleObservation) UpdateStartRegistrationReceipt() (journal.UpdateStartRegistrationReceipt, error) {
+	if o.action != UpdateStartRegistrationDeliver && o.action != UpdateStartRegistrationRead {
+		return journal.UpdateStartRegistrationReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseUpdateStartRegistrationReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
-	writer       control.DataWriterCommand
-	candidate    control.WritableCandidateCommand
-	registration control.WritableBackendRegistrationCommand
-	removal      control.ManagedRemovalCommand
-	checkpoint   control.CheckpointCommand
-	restore      control.RestoreCommand
-	updateStart  control.UpdateStartCommand
-	index        control.Command
-	release      string
+	writer                  control.DataWriterCommand
+	candidate               control.WritableCandidateCommand
+	registration            control.WritableBackendRegistrationCommand
+	removal                 control.ManagedRemovalCommand
+	checkpoint              control.CheckpointCommand
+	restore                 control.RestoreCommand
+	updateStart             control.UpdateStartCommand
+	updateStartRegistration control.UpdateStartRegistrationCommand
+	index                   control.Command
+	release                 string
 }
 
 func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descriptor []byte, a control.Authority, now int64) (writableLifecycleReference, error) {
@@ -201,6 +213,14 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		}
 		r.restore = v.Command()
 		r.release = r.restore.Payload.ReleaseSHA256
+	case action == UpdateStartRegistrationDeliver || action == UpdateStartRegistrationRead:
+		v, err := control.VerifyUpdateStartRegistration(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.updateStartRegistration = v.Command()
+		r.updateStart = v.Start().Command()
+		r.release = r.updateStart.Payload.TargetReleaseSHA256
 	default:
 		v, err := control.VerifyUpdateStart(raw, sig, a, now)
 		if err != nil {
@@ -380,6 +400,19 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return false
 		}
 		return true
+	case action == UpdateStartRegistrationDeliver || action == UpdateStartRegistrationRead:
+		v, e := journal.ParseUpdateStartRegistrationReceipt(body)
+		if e != nil ||
+			v.Claim.EffectID != r.updateStartRegistration.EffectID ||
+			v.Claim.PayloadSHA256 != r.updateStartRegistration.PayloadSHA256 ||
+			v.Claim.SourceSHA256 != r.updateStartRegistration.RunningReceiptSHA256 ||
+			v.Claim.DocumentSHA256 != r.updateStartRegistration.DocumentSHA256 ||
+			!lifecycleRevisionWithin(v.Claim.ControlRevision, r.updateStart.ControlRevision) ||
+			(v.RecoveryControlRevision != "" &&
+				!lifecycleRevisionWithin(v.RecoveryControlRevision, r.updateStart.ControlRevision)) {
+			return false
+		}
+		settled = v.SettledMS
 	default:
 		return false
 	}

@@ -291,6 +291,9 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	case writableBackendHandshakeQueryMagic:
 		s.handleWritableBackendHandshake(ctx, conn)
 		return
+	case updateStartBackendHandshakeQueryMagic:
+		s.handleUpdateStartBackendHandshake(ctx, conn)
+		return
 	case backendHandshakeQueryMagic:
 		s.handleBackendHandshake(ctx, conn)
 		return

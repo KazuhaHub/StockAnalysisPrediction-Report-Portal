@@ -22,7 +22,7 @@ func (r *CandidateRuntime) CheckUpdateStartReadiness(ctx context.Context, reques
 		return zero, ErrCandidateNotReady
 	}
 	var response appplatform.BackendReadiness
-	actual, err := r.withVerifiedUpdateStartCandidate(ctx, request, expected, nativeID, func(ctx context.Context) error {
+	actual, err := r.withVerifiedUpdateStartCandidate(ctx, request, expected, nativeID, func(ctx context.Context, _ *candidateMountPins) error {
 		bounded, cancel := context.WithTimeout(ctx, 2*time.Second)
 		defer cancel()
 		path := filepath.Join(r.roots.Sockets, request.Identity.InstallationID, request.Identity.Generation, "http", "app.sock")
@@ -50,7 +50,7 @@ func (r *CandidateRuntime) CheckUpdateStartReadiness(ctx context.Context, reques
 	return result, nil
 }
 
-func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context, request UpdateStartLaunchRequest, expected UpdateStartLaunchSnapshot, nativeID string, action func(context.Context) error) (UpdateStartRunningSnapshot, error) {
+func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context, request UpdateStartLaunchRequest, expected UpdateStartLaunchSnapshot, nativeID string, action func(context.Context, *candidateMountPins) error) (UpdateStartRunningSnapshot, error) {
 	var zero UpdateStartRunningSnapshot
 	if r == nil || os.Geteuid() != 0 {
 		return zero, ErrUnsupported
@@ -110,7 +110,7 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 	if err != nil || state != "running" {
 		return zero, errors.Join(ErrContainerUncertain, err)
 	}
-	if err := action(ctx); err != nil {
+	if err := action(ctx, pins); err != nil {
 		return zero, err
 	}
 	if err := pins.validate(ctx, plan); err != nil {
