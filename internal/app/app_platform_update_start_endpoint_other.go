@@ -15,3 +15,11 @@ func platformReserveUpdateStart(context.Context, platformRuntimeEndpoint, platfo
 func platformReadUpdateStartReservation(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (transport.WritableLifecycleObservation, error) {
 	return transport.WritableLifecycleObservation{}, errAppPlatformRuntimeConflict
 }
+
+func platformExecuteUpdateStart(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (transport.WritableLifecycleObservation, error) {
+	return transport.WritableLifecycleObservation{}, errAppPlatformRuntimeConflict
+}
+
+func platformReadUpdateStartReceipt(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (transport.WritableLifecycleObservation, error) {
+	return transport.WritableLifecycleObservation{}, errAppPlatformRuntimeConflict
+}

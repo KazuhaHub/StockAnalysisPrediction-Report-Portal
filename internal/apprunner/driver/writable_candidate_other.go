@@ -31,3 +31,25 @@ func (*CandidateRuntime) ObserveWritableCandidate(context.Context, WritableCandi
 func (*CandidateRuntime) CheckWritableCandidateReadiness(context.Context, WritableCandidateLaunchRequest, WritableCandidateLaunchSnapshot, string, string) (WritableCandidateReadinessObservation, error) {
 	return WritableCandidateReadinessObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) ProvisionUpdateStartSockets(context.Context, UpdateStartLaunchRequest) error {
+	return ErrUnsupported
+}
+func (*CandidateRuntime) PrepareUpdateStart(context.Context, UpdateStartLaunchRequest) (UpdateStartLaunch, error) {
+	return UpdateStartLaunch{}, ErrUnsupported
+}
+func (*CandidateRuntime) PrepareUpdateStartRemoval(context.Context, UpdateStartLaunchRequest) (UpdateStartLaunch, error) {
+	return UpdateStartLaunch{}, ErrUnsupported
+}
+func (UpdateStartLaunch) Snapshot() (UpdateStartLaunchSnapshot, error) {
+	return UpdateStartLaunchSnapshot{}, ErrUnsupported
+}
+func (*CandidateRuntime) StartUpdateStart(context.Context, UpdateStartLaunch) (UpdateStartRunningObservation, error) {
+	return UpdateStartRunningObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) StopUpdateStart(context.Context, UpdateStartLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) RemoveUpdateStart(context.Context, UpdateStartLaunch, string) (CandidateRemovalObservation, error) {
+	return CandidateRemovalObservation{}, ErrUnsupported
+}

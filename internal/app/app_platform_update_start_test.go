@@ -10,12 +10,14 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 type platformUpdateStartTestObservation struct {
 	reservation journal.UpdateStartReservation
+	running     journal.UpdateStartRunningReceipt
 	authority   control.Authority
 	endpoint    transport.CandidateReceiptEndpoint
 	receivedAt  time.Time
@@ -24,6 +26,9 @@ type platformUpdateStartTestObservation struct {
 
 func (o platformUpdateStartTestObservation) UpdateStartReservation() (journal.UpdateStartReservation, error) {
 	return o.reservation, nil
+}
+func (o platformUpdateStartTestObservation) UpdateStartRunningReceipt() (journal.UpdateStartRunningReceipt, error) {
+	return o.running, nil
 }
 func (o platformUpdateStartTestObservation) Controller() control.Authority { return o.authority }
 func (o platformUpdateStartTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
@@ -149,6 +154,51 @@ func platformUpdateStartReservationFixture(intent platformUpdateStartIntent, end
 	}
 }
 
+func platformUpdateStartRunningFixture(intent platformUpdateStartIntent, reservation journal.UpdateStartReservation, endpoint platformRuntimeEndpoint) platformUpdateStartTestObservation {
+	command := intent.command
+	observed := mustPlatformCheckpointInt(command.IssuedMS)
+	running := journal.UpdateStartRunningReceipt{
+		Format: "portal.runner.update-start-running-receipt/1-dev.1",
+		Claim: journal.UpdateStartClaimMarker{
+			Format:   "portal.runner.update-start-claim/1-dev.1",
+			ClaimID:  "70000000-0000-4000-8000-000000001401",
+			EffectID: intent.effectID, ResourceID: intent.resourceID,
+			PayloadSHA256: command.PayloadSHA256, OwnershipSHA256: reservation.OwnershipSHA256,
+			CheckpointReceiptSHA256: command.Payload.SourceCheckpointReceiptSHA256,
+			ControlRevision:         command.ControlRevision, AdmittedFence: command.InstallationFence,
+			SandboxProfile: command.Payload.SandboxProfile,
+			ClaimedMS:      command.IssuedMS, ExpiresMS: command.ExpiresMS,
+			Preflight: &journal.UpdateStartPreflightEvidence{
+				Format:       "portal.runner.update-start-preflight/1-dev.1",
+				ImageID:      "sha256:" + strings.Repeat("a", 64),
+				Platform:     command.Payload.Platform,
+				PolicySHA256: strings.Repeat("b", 64), MountsSHA256: strings.Repeat("c", 64),
+				RootFilesystemUUID: command.Payload.RootFilesystemUUID,
+				RootInode:          command.Payload.RootInode, ProjectID: command.Payload.ProjectID,
+				Device: command.Payload.Device, NamespaceInode: command.Payload.NamespaceInode,
+				QuotaBytes: command.Payload.QuotaBytes, QuotaInodes: command.Payload.QuotaInodes,
+				SeccompSHA256: driver.UpdateStartSeccompSHA256(command.Payload.SandboxProfile),
+			},
+			PreflightBoundMS: command.IssuedMS,
+		},
+		DeploymentID: command.DeploymentID, ControllerEpoch: command.ControllerEpoch,
+		InstallationID: command.InstallationID, OperationID: command.OperationID,
+		NamespaceID:         command.Payload.NamespaceID,
+		SourceReleaseSHA256: command.Payload.SourceReleaseSHA256,
+		TargetReleaseSHA256: command.Payload.TargetReleaseSHA256,
+		SourceGeneration:    command.Payload.SourceGeneration,
+		TargetGeneration:    command.TargetGeneration, ControlFence: command.InstallationFence,
+		SourceWriterFence: command.Payload.SourceWriterFence,
+		TargetWriterFence: command.Payload.TargetWriterFence,
+		DataFormat:        command.Payload.DataFormat, NativeID: strings.Repeat("e", 64),
+		NativeObservedMS: strconv.FormatInt(observed, 10),
+		SettledMS:        strconv.FormatInt(observed, 10),
+	}
+	observation := platformUpdateStartReservationFixture(intent, endpoint)
+	observation.running = running
+	return observation
+}
+
 func testPlatformUpdateStartPreparesExactIntent(t *testing.T, pg bool) {
 	s, lease, checkpoint, plan := platformManagedUpdateStartFixture(t, pg)
 	intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
@@ -238,6 +288,136 @@ func TestPlatformUpdateStartPersistsReservationSQLite(t *testing.T) {
 
 func TestPlatformUpdateStartPersistsReservationPostgres(t *testing.T) {
 	testPlatformUpdateStartPersistsReservation(t, true)
+}
+
+func platformUpdateStartRunningCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, lease, _, _ := platformManagedUpdateStartFixture(t, pg)
+	endpoint := platformUpdateStartEndpointFixture()
+	intent, err := s.preparePlatformUpdateStart(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservationObservation := platformUpdateStartReservationFixture(intent, endpoint)
+	reservation, ok := validPlatformUpdateStartObservation(reservationObservation, intent, endpoint)
+	if !ok {
+		t.Fatal("reservation observation refused")
+	}
+	admission, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, reservationObservation, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent = admission.intent
+	return s, lease, intent, endpoint, platformUpdateStartRunningFixture(intent, reservation, endpoint)
+}
+
+func testPlatformUpdateStartCommitsRunningReceipt(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation := platformUpdateStartRunningCommitFixture(t, pg)
+	next, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, intent, endpoint, observation)
+	if err != nil || next.snapshot.Stage != appplatform.StageProbe ||
+		next.snapshot.Revision != lease.snapshot.Revision+1 {
+		t.Fatal("update-start running commit", next.snapshot, err)
+	}
+	var raw string
+	if err := s.st.queryRow(`SELECT receipt_json FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start'`, lease.id).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := journal.ParseUpdateStartRunningReceipt([]byte(raw))
+	if err != nil || receipt.NativeID != observation.running.NativeID ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "applied" ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "probe" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_running' AND target_id=?`, lease.id) != 1 {
+		t.Fatal("running receipt did not commit with stage advance", receipt, err)
+	}
+}
+
+func TestPlatformUpdateStartCommitsRunningReceiptSQLite(t *testing.T) {
+	testPlatformUpdateStartCommitsRunningReceipt(t, false)
+}
+
+func TestPlatformUpdateStartCommitsRunningReceiptPostgres(t *testing.T) {
+	testPlatformUpdateStartCommitsRunningReceipt(t, true)
+}
+
+func testPlatformUpdateStartRunningReceiptRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*journal.UpdateStartRunningReceipt){
+		"deployment":     func(r *journal.UpdateStartRunningReceipt) { r.DeploymentID = platformFixtureID(1410) },
+		"operation":      func(r *journal.UpdateStartRunningReceipt) { r.OperationID = platformFixtureID(1411) },
+		"namespace":      func(r *journal.UpdateStartRunningReceipt) { r.NamespaceID = platformFixtureID(1412) },
+		"target release": func(r *journal.UpdateStartRunningReceipt) { r.TargetReleaseSHA256 = strings.Repeat("f", 64) },
+		"target gen":     func(r *journal.UpdateStartRunningReceipt) { r.TargetGeneration = "3" },
+		"control fence":  func(r *journal.UpdateStartRunningReceipt) { r.ControlFence = "3" },
+		"source writer":  func(r *journal.UpdateStartRunningReceipt) { r.SourceWriterFence = "2" },
+		"target writer":  func(r *journal.UpdateStartRunningReceipt) { r.TargetWriterFence = "3" },
+		"resource":       func(r *journal.UpdateStartRunningReceipt) { r.Claim.ResourceID = platformFixtureID(1413) },
+		"effect":         func(r *journal.UpdateStartRunningReceipt) { r.Claim.EffectID = platformFixtureID(1414) },
+		"payload":        func(r *journal.UpdateStartRunningReceipt) { r.Claim.PayloadSHA256 = strings.Repeat("a", 64) },
+		"ownership":      func(r *journal.UpdateStartRunningReceipt) { r.Claim.OwnershipSHA256 = strings.Repeat("b", 64) },
+		"checkpoint":     func(r *journal.UpdateStartRunningReceipt) { r.Claim.CheckpointReceiptSHA256 = strings.Repeat("c", 64) },
+		"preflight":      func(r *journal.UpdateStartRunningReceipt) { r.Claim.Preflight = nil },
+		"preflight data": func(r *journal.UpdateStartRunningReceipt) {
+			r.Claim.Preflight.NamespaceInode = "12"
+		},
+		"future observed": func(r *journal.UpdateStartRunningReceipt) {
+			future := strconv.FormatInt(time.Now().Add(10*time.Second).UnixMilli(), 10)
+			r.NativeObservedMS, r.SettledMS = future, future
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, lease, intent, endpoint, observation := platformUpdateStartRunningCommitFixture(t, pg)
+			preflight := *observation.running.Claim.Preflight
+			observation.running.Claim.Preflight = &preflight
+			mutate(&observation.running)
+			if _, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, intent, endpoint, observation); err == nil {
+				t.Fatal("changed running receipt committed")
+			}
+			if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "prepared" ||
+				scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" {
+				t.Fatal("refused running receipt changed durable state")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateStartRunningReceiptRefusalsSQLite(t *testing.T) {
+	testPlatformUpdateStartRunningReceiptRefusals(t, false)
+}
+
+func TestPlatformUpdateStartRunningReceiptRefusalsPostgres(t *testing.T) {
+	testPlatformUpdateStartRunningReceiptRefusals(t, true)
+}
+
+func testPlatformUpdateStartRunningRollback(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, observation := platformUpdateStartRunningCommitFixture(t, pg)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_update_start_running_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture running failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_running_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.update_start_running') EXECUTE FUNCTION fixture_update_start_running_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_running_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_update_start_running_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_running_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_running' BEGIN SELECT RAISE(ABORT,'fixture running failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_running_failure`)
+	}
+	auditBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_running' AND target_id=?`, lease.id)
+	if _, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, intent, endpoint, observation); err == nil {
+		t.Fatal("failed update-start running audit committed")
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "prepared" ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "start" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_running' AND target_id=?`, lease.id) != auditBefore {
+		t.Fatal("failed running receipt commit was partial")
+	}
+}
+
+func TestPlatformUpdateStartRunningRollbackSQLite(t *testing.T) {
+	testPlatformUpdateStartRunningRollback(t, false)
+}
+
+func TestPlatformUpdateStartRunningRollbackPostgres(t *testing.T) {
+	testPlatformUpdateStartRunningRollback(t, true)
 }
 
 func testPlatformUpdateStartReservationRefusals(t *testing.T, pg bool) {

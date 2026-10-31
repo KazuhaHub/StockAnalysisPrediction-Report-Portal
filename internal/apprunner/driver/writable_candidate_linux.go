@@ -51,7 +51,7 @@ func (r *CandidateRuntime) ProvisionWritableCandidateSockets(ctx context.Context
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	binding := request.Binding
-	return r.provisionCandidateSocketsProfile(ctx, request.CandidateLaunchRequest, &binding)
+	return r.provisionCandidateSocketsProfile(ctx, request.CandidateLaunchRequest, &binding, nil, "")
 }
 
 // PrepareWritableCandidate only pins native facts. Caller must persist its

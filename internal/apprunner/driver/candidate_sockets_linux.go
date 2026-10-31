@@ -16,33 +16,43 @@ import (
 // It creates fixed platform-owned names below the protected runtime root. It
 // never accepts paths from the app or repairs unexpected existing ownership.
 func (r *CandidateRuntime) ProvisionCandidateSockets(ctx context.Context, request CandidateLaunchRequest) error {
-	return r.provisionCandidateSocketsProfile(ctx, request, nil)
+	return r.provisionCandidateSocketsProfile(ctx, request, nil, nil, "")
 }
-func (r *CandidateRuntime) provisionCandidateSocketsProfile(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding) error {
+func (r *CandidateRuntime) provisionCandidateSocketsProfile(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding, updateStart *UpdateStartBinding, updateStartProfile string) error {
 	if r == nil || os.Geteuid() != 0 {
 		return ErrUnsupported
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || !candidateRequestValid(request) || request.Platform != "linux/"+runtime.GOARCH {
+	accessWritable := writable != nil || updateStart != nil
+	if r.closed || (writable != nil && updateStart != nil) || !candidateRequestValid(request) ||
+		request.Platform != "linux/"+runtime.GOARCH {
 		return ErrInvalidResponse
 	}
-	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, writable != nil); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
 		return err
 	}
 	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
 	if err != nil {
 		return err
 	}
-	if writable == nil {
+	switch {
+	case writable == nil && updateStart == nil:
 		if _, err := planCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots); err != nil {
 			return err
 		}
-	} else {
+	case writable != nil:
 		if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
 			return err
 		}
 		if _, err := planWritableCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *writable); err != nil {
+			return err
+		}
+	default:
+		if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
+			return err
+		}
+		if _, err := planUpdateStartContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *updateStart, updateStartProfile); err != nil {
 			return err
 		}
 	}

@@ -34,13 +34,15 @@ const (
 	RestoreRead
 	UpdateStartReserve
 	UpdateStartRead
+	UpdateStartExecute
+	UpdateStartReceipt
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= UpdateStartRead
+	return a >= WritableWriterExecute && a <= UpdateStartReceipt
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -118,6 +120,12 @@ func (o WritableLifecycleObservation) UpdateStartReservation() (journal.UpdateSt
 		return journal.UpdateStartReservation{}, driver.ErrContainerUncertain
 	}
 	return journal.ParseUpdateStartReservation([]byte(o.body))
+}
+func (o WritableLifecycleObservation) UpdateStartRunningReceipt() (journal.UpdateStartRunningReceipt, error) {
+	if o.action < UpdateStartExecute || o.action > UpdateStartReceipt {
+		return journal.UpdateStartRunningReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseUpdateStartRunningReceipt([]byte(o.body))
 }
 
 type writableLifecycleReference struct {
@@ -322,6 +330,35 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return false
 		}
 		return true
+	case action >= UpdateStartExecute && action <= UpdateStartReceipt:
+		v, e := journal.ParseUpdateStartRunningReceipt(body)
+		c := r.updateStart
+		if e != nil || v.Claim.Preflight == nil ||
+			v.Claim.EffectID != c.EffectID || v.Claim.ResourceID != c.Payload.ResourceID ||
+			v.Claim.PayloadSHA256 != c.PayloadSHA256 ||
+			v.Claim.CheckpointReceiptSHA256 != c.Payload.SourceCheckpointReceiptSHA256 ||
+			v.Claim.AdmittedFence != c.InstallationFence ||
+			v.Claim.SandboxProfile != c.Payload.SandboxProfile ||
+			!lifecycleRevisionWithin(v.Claim.ControlRevision, c.ControlRevision) ||
+			v.DeploymentID != c.DeploymentID || v.ControllerEpoch != c.ControllerEpoch ||
+			v.InstallationID != c.InstallationID || v.OperationID != c.OperationID ||
+			v.NamespaceID != c.Payload.NamespaceID ||
+			v.SourceReleaseSHA256 != c.Payload.SourceReleaseSHA256 ||
+			v.TargetReleaseSHA256 != c.Payload.TargetReleaseSHA256 ||
+			v.SourceGeneration != c.Payload.SourceGeneration ||
+			v.TargetGeneration != c.TargetGeneration || v.ControlFence != c.InstallationFence ||
+			v.SourceWriterFence != c.Payload.SourceWriterFence ||
+			v.TargetWriterFence != c.Payload.TargetWriterFence ||
+			v.DataFormat != c.Payload.DataFormat {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.NativeObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued ||
+			observed > received.UnixMilli() {
+			return false
+		}
+		settled = v.SettledMS
 	default:
 		return false
 	}

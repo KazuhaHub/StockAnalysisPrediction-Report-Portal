@@ -4,9 +4,10 @@ Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
 document also claims verified native restore, Portal restore admission and the
-generation-2 `update-start` admission/reservation boundary. It does not claim
-the managed update executor, native generation-2 launch or a completed reviewed
-rollback executor around that primitive. Portal now persists the exact
+generation-2 `update-start` admission/reservation, native launch and running
+receipt boundary. It does not claim a completed managed update executor,
+generation-2 readiness/registration/activation or a reviewed rollback executor.
+Portal now persists the exact
 runner-acknowledged target reservation on the prepared start effect, so a
 restart can distinguish the same reserved resource from an unreserved intent.
 
@@ -159,6 +160,16 @@ effect in one transaction and verifies it again on intent reload. The runner's
 replay marker is descriptive rather than authority; a changed resource, effect,
 namespace, release, generation, fence or writer fence is refused.
 
+The native execution claim is a separate durable step. The runner writes one
+unknown marker for the reserved target before any Docker mutation, binds the
+exact native preflight, starts only that pinned container, and atomically
+settles a running receipt. The receipt binds the full installation/operation,
+namespace, source/target releases, generations, control/source/target writer
+fences, data format, checkpoint and native ID. A timeout or post-effect failure
+remains uncertain and is never retried under the same or a fresh identity.
+Portal verifies the receipt against the persisted reservation and then advances
+only `start -> probe`. Running is not readiness, registration or activation.
+
 ## Portal operation tuple
 
 A managed update review binds:
@@ -255,7 +266,9 @@ Disposable Linux/XFS/Docker tests:
 3. Portal recovery-set preparation/verification transaction. Implemented.
 4. Distinct update-start admission with source-checkpoint binding and durable
    Portal reservation recovery. Implemented.
-5. Managed update executor and activation transaction.
+5. Managed update executor and activation transaction. Native generation-2
+   launch/receipt and Portal `start -> probe` are implemented; readiness,
+   registration, activation and rollback remain.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
    the disposable Linux/XFS/Docker probe; binding them to the managed update

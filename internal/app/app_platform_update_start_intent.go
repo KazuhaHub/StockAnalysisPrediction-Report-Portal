@@ -54,6 +54,7 @@ type platformUpdateStartIntent struct {
 	plan                 platformManagedUpdatePlan
 	targetDescriptor     []byte
 	reservation          *journal.UpdateStartReservation
+	running              *journal.UpdateStartRunningReceipt
 	raw, signature       []byte
 }
 
@@ -276,7 +277,7 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
 		format != plan.DataFormat || state != "candidate" || readiness != "{}" ||
 		observed.Valid || kind != "update-start" || effectEpoch != expected.controllerEpoch ||
-		admitted != expected.fence || effectState != "prepared" {
+		admitted != expected.fence || (effectState != "prepared" && effectState != "applied") {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
@@ -291,14 +292,44 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		command: command, checkpoint: checkpoint, checkpointRaw: []byte(mustMarshalPlatformCheckpointReceipt(checkpoint)),
 		source: source, plan: plan, targetDescriptor: bytes.Clone(source.descriptor),
 	}
-	switch {
-	case observedFence == 0 && receipt == "{}":
-	case observedFence == expected.fence:
+	switch effectState {
+	case "prepared":
+		if receipt == "{}" {
+			if observedFence != 0 {
+				return zero, false, errAppPlatformStageEvidence
+			}
+			return result, false, nil
+		}
+		if observedFence != expected.fence {
+			return zero, false, errAppPlatformStageEvidence
+		}
 		reservation, err := journal.ParseUpdateStartReservation([]byte(receipt))
 		if err != nil || !platformUpdateStartReservationMatches(reservation, command, activation, effectID) {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		result.reservation = &reservation
+	case "applied":
+		if observedFence != expected.fence {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		running, err := journal.ParseUpdateStartRunningReceipt([]byte(receipt))
+		if err != nil || !platformUpdateStartRunningMatches(running, command, activation, effectID, nil) {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		reservation := journal.UpdateStartReservation{
+			ResourceID: running.Claim.ResourceID, InstallationID: running.InstallationID,
+			NamespaceID: running.NamespaceID, EffectID: running.Claim.EffectID,
+			OwnershipSHA256:     running.Claim.OwnershipSHA256,
+			SourceGeneration:    mustPlatformCheckpointInt(running.SourceGeneration),
+			TargetGeneration:    mustPlatformCheckpointInt(running.TargetGeneration),
+			SourceReleaseSHA256: running.SourceReleaseSHA256,
+			TargetReleaseSHA256: running.TargetReleaseSHA256,
+			ControlFence:        mustPlatformCheckpointInt(running.ControlFence),
+			SourceWriterFence:   mustPlatformCheckpointInt(running.SourceWriterFence),
+			TargetWriterFence:   mustPlatformCheckpointInt(running.TargetWriterFence),
+		}
+		result.reservation = &reservation
+		result.running = &running
 	default:
 		return zero, false, errAppPlatformStageEvidence
 	}
@@ -403,6 +434,14 @@ type platformUpdateStartObservation interface {
 	CommandSHA256() string
 }
 
+type platformUpdateStartRunningObservation interface {
+	UpdateStartRunningReceipt() (journal.UpdateStartRunningReceipt, error)
+	Controller() control.Authority
+	Endpoint() transport.CandidateReceiptEndpoint
+	ReceivedAt() time.Time
+	CommandSHA256() string
+}
+
 func validPlatformUpdateStartObservation(observation platformUpdateStartObservation, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint) (journal.UpdateStartReservation, bool) {
 	reservation, err := observation.UpdateStartReservation()
 	command := intent.command
@@ -422,6 +461,87 @@ func validPlatformUpdateStartObservation(observation platformUpdateStartObservat
 		return journal.UpdateStartReservation{}, false
 	}
 	return reservation, true
+}
+
+func validPlatformUpdateStartRunningObservation(observation platformUpdateStartRunningObservation, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint) (journal.UpdateStartRunningReceipt, bool) {
+	receipt, err := observation.UpdateStartRunningReceipt()
+	if err != nil || !platformUpdateStartRunningMatches(receipt, intent.command, intent.resourceID, intent.effectID, intent.reservation) ||
+		observation.CommandSHA256() != platformDigest(intent.raw) || observation.ReceivedAt().IsZero() {
+		return journal.UpdateStartRunningReceipt{}, false
+	}
+	received := observation.ReceivedAt()
+	observed, observedErr := strconv.ParseInt(receipt.NativeObservedMS, 10, 64)
+	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
+	bound, boundErr := strconv.ParseInt(receipt.Claim.PreflightBoundMS, 10, 64)
+	if observedErr != nil || settledErr != nil || boundErr != nil ||
+		observed < bound || observed > received.UnixMilli() ||
+		settled < observed || settled > received.UnixMilli() {
+		return journal.UpdateStartRunningReceipt{}, false
+	}
+	a, b := observation.Controller(), intent.authority
+	peer := observation.Endpoint()
+	age := time.Since(observation.ReceivedAt())
+	if a.DeploymentID != b.DeploymentID || a.ControllerEpoch != b.ControllerEpoch ||
+		a.ControlRevision != b.ControlRevision || a.Fingerprint != b.Fingerprint ||
+		!bytes.Equal(a.PublicKey, b.PublicKey) || !peer.RootController ||
+		peer.Path != endpoint.path || peer.RunnerUID != 0 ||
+		peer.ControllerUID != endpoint.controllerUID || peer.ControllerGID != endpoint.controllerGID ||
+		age < 0 || age > 3*time.Second {
+		return journal.UpdateStartRunningReceipt{}, false
+	}
+	return receipt, true
+}
+
+func platformUpdateStartRunningMatches(receipt journal.UpdateStartRunningReceipt, command control.UpdateStartCommand, resourceID, effectID string, reservation *journal.UpdateStartReservation) bool {
+	claim := receipt.Claim
+	if claim.Preflight == nil || claim.EffectID != effectID || claim.ResourceID != resourceID ||
+		claim.PayloadSHA256 != command.PayloadSHA256 ||
+		claim.CheckpointReceiptSHA256 != command.Payload.SourceCheckpointReceiptSHA256 ||
+		claim.ControlRevision != command.ControlRevision ||
+		claim.AdmittedFence != command.InstallationFence ||
+		claim.SandboxProfile != command.Payload.SandboxProfile ||
+		receipt.DeploymentID != command.DeploymentID ||
+		receipt.ControllerEpoch != command.ControllerEpoch ||
+		receipt.InstallationID != command.InstallationID ||
+		receipt.OperationID != command.OperationID ||
+		receipt.NamespaceID != command.Payload.NamespaceID ||
+		receipt.SourceReleaseSHA256 != command.Payload.SourceReleaseSHA256 ||
+		receipt.TargetReleaseSHA256 != command.Payload.TargetReleaseSHA256 ||
+		receipt.SourceGeneration != command.Payload.SourceGeneration ||
+		receipt.TargetGeneration != command.TargetGeneration ||
+		receipt.ControlFence != command.InstallationFence ||
+		receipt.SourceWriterFence != command.Payload.SourceWriterFence ||
+		receipt.TargetWriterFence != command.Payload.TargetWriterFence ||
+		receipt.DataFormat != command.Payload.DataFormat {
+		return false
+	}
+	preflight := claim.Preflight
+	if preflight.Platform != command.Payload.Platform ||
+		preflight.RootFilesystemUUID != command.Payload.RootFilesystemUUID ||
+		preflight.RootInode != command.Payload.RootInode ||
+		preflight.ProjectID != command.Payload.ProjectID ||
+		preflight.Device != command.Payload.Device ||
+		preflight.NamespaceInode != command.Payload.NamespaceInode ||
+		preflight.QuotaBytes != command.Payload.QuotaBytes ||
+		preflight.QuotaInodes != command.Payload.QuotaInodes {
+		return false
+	}
+	if reservation != nil {
+		value := *reservation
+		if claim.OwnershipSHA256 != value.OwnershipSHA256 ||
+			claim.ResourceID != value.ResourceID || claim.EffectID != value.EffectID ||
+			receipt.NamespaceID != value.NamespaceID ||
+			receipt.SourceReleaseSHA256 != value.SourceReleaseSHA256 ||
+			receipt.TargetReleaseSHA256 != value.TargetReleaseSHA256 ||
+			mustPlatformCheckpointInt(receipt.SourceGeneration) != value.SourceGeneration ||
+			mustPlatformCheckpointInt(receipt.TargetGeneration) != value.TargetGeneration ||
+			mustPlatformCheckpointInt(receipt.ControlFence) != value.ControlFence ||
+			mustPlatformCheckpointInt(receipt.SourceWriterFence) != value.SourceWriterFence ||
+			mustPlatformCheckpointInt(receipt.TargetWriterFence) != value.TargetWriterFence {
+			return false
+		}
+	}
+	return true
 }
 
 func platformUpdateStartReservationMatches(reservation journal.UpdateStartReservation, command control.UpdateStartCommand, resourceID, effectID string) bool {

@@ -155,20 +155,26 @@ func (r *CandidateRuntime) PrepareCandidate(ctx context.Context, request Candida
 	return r.prepareCandidateProfile(ctx, request, nil)
 }
 func (r *CandidateRuntime) prepareCandidateProfile(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding) (CandidateLaunch, error) {
-	return r.prepareCandidateProfileMode(ctx, request, writable, true)
+	return r.prepareCandidateProfileAccess(ctx, request, writable, nil, "", true)
 }
 func (r *CandidateRuntime) prepareCandidateProfileMode(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding, enforceExclusion bool) (CandidateLaunch, error) {
+	return r.prepareCandidateProfileAccess(ctx, request, writable, nil, "", enforceExclusion)
+}
+func (r *CandidateRuntime) prepareCandidateProfileAccess(ctx context.Context, request CandidateLaunchRequest, writable *WritableCandidateBinding, updateStart *UpdateStartBinding, updateStartProfile string, enforceExclusion bool) (CandidateLaunch, error) {
 	var zero CandidateLaunch
 	if r == nil {
 		return zero, ErrUnsupported
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.root == nil || r.launches == nil || len(r.launches) >= 32 || !candidateRequestValid(request) || request.Platform != "linux/"+runtime.GOARCH {
+	accessWritable := writable != nil || updateStart != nil
+	if r.closed || r.root == nil || r.launches == nil || len(r.launches) >= 32 ||
+		(writable != nil && updateStart != nil) || !candidateRequestValid(request) ||
+		request.Platform != "linux/"+runtime.GOARCH {
 		return zero, ErrInvalidResponse
 	}
 	request.Descriptor = bytes.Clone(request.Descriptor)
-	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, writable != nil); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
 		return zero, err
 	}
 	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
@@ -176,15 +182,23 @@ func (r *CandidateRuntime) prepareCandidateProfileMode(ctx context.Context, requ
 		return zero, err
 	}
 	var plan containerPlan
-	if writable == nil {
+	switch {
+	case writable == nil && updateStart == nil:
 		plan, err = planCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots)
-	} else {
+	case writable != nil:
 		if enforceExclusion {
 			if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
 				return zero, err
 			}
 		}
 		plan, err = planWritableCandidateContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *writable)
+	default:
+		if enforceExclusion {
+			if err := r.requireWritableCandidateExclusion(ctx, request, nil); err != nil {
+				return zero, err
+			}
+		}
+		plan, err = planUpdateStartContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, *updateStart, updateStartProfile)
 	}
 	if err != nil {
 		return zero, err
@@ -205,6 +219,9 @@ func (r *CandidateRuntime) StartCandidate(ctx context.Context, launch CandidateL
 	return r.startCandidateProfile(ctx, launch, nil)
 }
 func (r *CandidateRuntime) startCandidateProfile(ctx context.Context, launch CandidateLaunch, writable *WritableCandidateBinding) (CandidateRunningObservation, error) {
+	return r.startCandidateProfileAccess(ctx, launch, writable, nil)
+}
+func (r *CandidateRuntime) startCandidateProfileAccess(ctx context.Context, launch CandidateLaunch, writable *WritableCandidateBinding, updateStart *UpdateStartBinding) (CandidateRunningObservation, error) {
 	var zero CandidateRunningObservation
 	if r == nil || launch.state == nil || launch.state.owner != r {
 		return zero, ErrInvalidResponse
@@ -214,7 +231,12 @@ func (r *CandidateRuntime) startCandidateProfile(ctx context.Context, launch Can
 	state := launch.state
 	state.mu.Lock()
 	defer state.mu.Unlock()
-	if r.closed || state.closed || state.used || (state.plan.writable == nil) != (writable == nil) || (writable != nil && *state.plan.writable != *writable) {
+	accessWritable := writable != nil || updateStart != nil
+	if r.closed || state.closed || state.used ||
+		(state.plan.writable == nil) != (writable == nil) ||
+		(writable != nil && *state.plan.writable != *writable) ||
+		(state.plan.updateStart == nil) != (updateStart == nil) ||
+		(updateStart != nil && *state.plan.updateStart != *updateStart) {
 		return zero, ErrContainerUncertain
 	}
 	if err := ctx.Err(); err != nil {
@@ -227,13 +249,13 @@ func (r *CandidateRuntime) startCandidateProfile(ctx context.Context, launch Can
 	if !report.MetadataCompatible {
 		return zero, ErrUnsupported
 	}
-	if err := r.checkCandidateDataProfile(ctx, state.snapshot.Identity, state.snapshot.Data, writable != nil); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, state.snapshot.Identity, state.snapshot.Data, accessWritable); err != nil {
 		return zero, err
 	}
 	if err := state.pins.validate(ctx, state.plan); err != nil {
 		return zero, err
 	}
-	if writable != nil {
+	if accessWritable {
 		request := CandidateLaunchRequest{Identity: state.snapshot.Identity, Data: state.snapshot.Data}
 		if err := r.requireWritableCandidateExclusion(ctx, request, state); err != nil {
 			return zero, err
@@ -250,7 +272,7 @@ func (r *CandidateRuntime) startCandidateProfile(ctx context.Context, launch Can
 	if err != nil || observed != "running" {
 		return zero, errors.Join(ErrContainerUncertain, err)
 	}
-	if err := r.checkCandidateDataProfile(ctx, state.snapshot.Identity, state.snapshot.Data, writable != nil); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, state.snapshot.Identity, state.snapshot.Data, accessWritable); err != nil {
 		return zero, errors.Join(ErrContainerUncertain, err)
 	}
 	if err := ctx.Err(); err != nil {
@@ -431,7 +453,7 @@ func (r *CandidateRuntime) pinCandidatePreflight(ctx context.Context, request Ca
 	if len(metadata) != 3 {
 		return fail(ErrUnsafeSocket)
 	}
-	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, plan.writable != nil); err != nil {
+	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, plan.writable != nil || plan.updateStart != nil); err != nil {
 		return fail(err)
 	}
 	return pins, CandidateLaunchSnapshot{Identity: request.Identity, ImageID: image.ImageID, Platform: image.Platform, PolicySHA256: plan.bodySHA, MountsSHA256: candidateSnapshotHash(metadata), Data: request.Data}, nil

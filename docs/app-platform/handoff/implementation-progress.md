@@ -39,6 +39,14 @@ reservation update back. Focused SQLite tests and the full `internal/app`,
 `internal/apprunner/...` and `internal/appplatform` suites pass. PostgreSQL and
 native execution still require their dedicated environments.
 
+Generation-2 native launch now has a separate `update-start` claim and running
+receipt. The runner persists unknown intent before Docker mutation, pins the
+exact project-quota namespace and sandbox, starts once, and settles the running
+container atomically. Portal validates the complete receipt against the stored
+reservation and advances only `start -> probe`; readiness, registration,
+activation and rollback remain outstanding. Focused SQLite and PostgreSQL 18.6
+tests pass, including changed receipt refusal and audit-failure rollback.
+
 Production remains out of scope for this record. No real credential was imported,
 no legacy application was migrated, no market release was published, and the
 server beta channel was not pinned or changed.

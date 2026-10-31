@@ -69,6 +69,9 @@ type updateStartFacts struct {
 	stored         admittedCommand
 	authority      control.Authority
 	source         updateStartSource
+	receipt        string
+	created        int64
+	updated        int64
 	raw, signature []byte
 	now            int64
 }

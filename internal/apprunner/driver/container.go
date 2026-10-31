@@ -38,11 +38,13 @@ type containerRoots struct{ Data, Sockets string }
 // They are not signed execution authority. No production caller dispatches them
 // until managed-command admission, native path pins and quota proofs are wired.
 type containerPlan struct {
-	name     string
-	body     []byte
-	bodySHA  string
-	owner    containerOwner
-	writable *WritableCandidateBinding
+	name        string
+	body        []byte
+	bodySHA     string
+	owner       containerOwner
+	writable    *WritableCandidateBinding
+	updateStart *UpdateStartBinding
+	profile     string
 }
 type containerMount struct {
 	Type        string
@@ -132,6 +134,19 @@ func validContainerPlan(plan containerPlan) bool {
 			return false
 		}
 		labels = writableCandidateLabels(plan.owner, *plan.writable)
+	}
+	if plan.updateStart != nil {
+		profile := request.Labels[containerLabelPrefix+"sandbox-profile"]
+		if plan.writable != nil || !validUpdateStartBinding(*plan.updateStart) ||
+			!positiveContainerCounter(plan.owner.Generation) || plan.owner.Generation == "1" ||
+			!positiveContainerCounter(plan.owner.WriterFence) || plan.owner.WriterFence == "1" ||
+			(profile != UpdateStartReadOnlySandboxProfile && profile != UpdateStartWritableSandboxProfile) ||
+			profile != plan.profile ||
+			len(request.HostConfig.Mounts) != 3 || request.HostConfig.Mounts[0].Target != "/data" ||
+			request.HostConfig.Mounts[0].ReadOnly != (profile == UpdateStartReadOnlySandboxProfile) {
+			return false
+		}
+		labels = updateStartLabels(plan.owner, *plan.updateStart, profile)
 	}
 	for name, value := range labels {
 		if request.Labels[name] != value {

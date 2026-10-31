@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -240,6 +241,49 @@ func updateStartTransportFixture(t *testing.T) (control.Authority, control.Updat
 	return a, command, signed, signature, descriptor, reservation
 }
 
+func updateStartRunningReceiptFixture(command control.UpdateStartCommand, reservation journal.UpdateStartReservation) journal.UpdateStartRunningReceipt {
+	issued, _ := strconv.ParseInt(command.IssuedMS, 10, 64)
+	observed := issued
+	return journal.UpdateStartRunningReceipt{
+		Format: "portal.runner.update-start-running-receipt/1-dev.1",
+		Claim: journal.UpdateStartClaimMarker{
+			Format:   "portal.runner.update-start-claim/1-dev.1",
+			ClaimID:  "11111111-1111-4111-8111-111111119973",
+			EffectID: command.EffectID, ResourceID: reservation.ResourceID,
+			PayloadSHA256: command.PayloadSHA256, OwnershipSHA256: reservation.OwnershipSHA256,
+			CheckpointReceiptSHA256: command.Payload.SourceCheckpointReceiptSHA256,
+			ControlRevision:         command.ControlRevision, AdmittedFence: command.InstallationFence,
+			SandboxProfile: command.Payload.SandboxProfile,
+			ClaimedMS:      command.IssuedMS, ExpiresMS: command.ExpiresMS,
+			Preflight: &journal.UpdateStartPreflightEvidence{
+				Format:       "portal.runner.update-start-preflight/1-dev.1",
+				ImageID:      "sha256:" + strings.Repeat("e", 64),
+				Platform:     command.Payload.Platform,
+				PolicySHA256: strings.Repeat("f", 64), MountsSHA256: strings.Repeat("1", 64),
+				RootFilesystemUUID: command.Payload.RootFilesystemUUID,
+				RootInode:          command.Payload.RootInode, ProjectID: command.Payload.ProjectID,
+				Device: command.Payload.Device, NamespaceInode: command.Payload.NamespaceInode,
+				QuotaBytes: command.Payload.QuotaBytes, QuotaInodes: command.Payload.QuotaInodes,
+				SeccompSHA256: driver.UpdateStartSeccompSHA256(command.Payload.SandboxProfile),
+			},
+			PreflightBoundMS: strconv.FormatInt(observed, 10),
+		},
+		DeploymentID: command.DeploymentID, ControllerEpoch: command.ControllerEpoch,
+		InstallationID: command.InstallationID, OperationID: command.OperationID,
+		NamespaceID:         command.Payload.NamespaceID,
+		SourceReleaseSHA256: command.Payload.SourceReleaseSHA256,
+		TargetReleaseSHA256: command.Payload.TargetReleaseSHA256,
+		SourceGeneration:    command.Payload.SourceGeneration,
+		TargetGeneration:    command.TargetGeneration, ControlFence: command.InstallationFence,
+		SourceWriterFence: command.Payload.SourceWriterFence,
+		TargetWriterFence: command.Payload.TargetWriterFence,
+		DataFormat:        command.Payload.DataFormat,
+		NativeID:          strings.Repeat("3", 64),
+		NativeObservedMS:  strconv.FormatInt(observed, 10),
+		SettledMS:         strconv.FormatInt(observed, 10),
+	}
+}
+
 func TestWritableLifecycleIndependentActionReferences(t *testing.T) {
 	a, c, raw, sig, descriptor, _ := writableHandshakeRequestFixture(t)
 	v, err := control.VerifyWritableBackendRegistration(raw, sig, a, time.Now().UnixMilli())
@@ -458,6 +502,67 @@ func TestWritableLifecycleUpdateStartReferenceAndReply(t *testing.T) {
 			body, _ := json.Marshal(changed)
 			if validWritableLifecycleReply(UpdateStartReserve, body, ref, time.Now().Add(-time.Second), time.Now()) {
 				t.Fatal("changed update-start reservation accepted")
+			}
+		})
+	}
+}
+
+func TestWritableLifecycleUpdateStartRunningReceipt(t *testing.T) {
+	a, command, raw, sig, descriptor, reservation := updateStartTransportFixture(t)
+	now := time.Now().UnixMilli()
+	receipt := updateStartRunningReceiptFixture(command, reservation)
+	body, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.ParseUpdateStartRunningReceipt(body); err != nil {
+		t.Fatal("parse running receipt", err)
+	}
+	for _, action := range []WritableLifecycleAction{UpdateStartExecute, UpdateStartReceipt} {
+		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		if err != nil || ref.updateStart.EffectID != command.EffectID {
+			t.Fatal("update-start running reference", action, err)
+		}
+		if !validWritableLifecycleReply(action, body, ref, time.Now().Add(-time.Second), time.Now()) {
+			t.Fatal("exact update-start running receipt refused", action)
+		}
+	}
+	ref, err := verifyWritableLifecycle(UpdateStartExecute, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*journal.UpdateStartRunningReceipt){
+		"deployment":     func(v *journal.UpdateStartRunningReceipt) { v.DeploymentID = "11111111-1111-4111-8111-111111119980" },
+		"operation":      func(v *journal.UpdateStartRunningReceipt) { v.OperationID = "11111111-1111-4111-8111-111111119981" },
+		"namespace":      func(v *journal.UpdateStartRunningReceipt) { v.NamespaceID = "11111111-1111-4111-8111-111111119982" },
+		"source release": func(v *journal.UpdateStartRunningReceipt) { v.SourceReleaseSHA256 = strings.Repeat("4", 64) },
+		"target release": func(v *journal.UpdateStartRunningReceipt) { v.TargetReleaseSHA256 = strings.Repeat("5", 64) },
+		"target gen":     func(v *journal.UpdateStartRunningReceipt) { v.TargetGeneration = "3" },
+		"control fence":  func(v *journal.UpdateStartRunningReceipt) { v.ControlFence = "3" },
+		"source writer":  func(v *journal.UpdateStartRunningReceipt) { v.SourceWriterFence = "2" },
+		"target writer":  func(v *journal.UpdateStartRunningReceipt) { v.TargetWriterFence = "3" },
+		"effect":         func(v *journal.UpdateStartRunningReceipt) { v.Claim.EffectID = "11111111-1111-4111-8111-111111119983" },
+		"resource": func(v *journal.UpdateStartRunningReceipt) {
+			v.Claim.ResourceID = "11111111-1111-4111-8111-111111119984"
+		},
+		"payload":        func(v *journal.UpdateStartRunningReceipt) { v.Claim.PayloadSHA256 = strings.Repeat("6", 64) },
+		"checkpoint":     func(v *journal.UpdateStartRunningReceipt) { v.Claim.CheckpointReceiptSHA256 = strings.Repeat("7", 64) },
+		"claim revision": func(v *journal.UpdateStartRunningReceipt) { v.Claim.ControlRevision = "99" },
+		"claim fence":    func(v *journal.UpdateStartRunningReceipt) { v.Claim.AdmittedFence = "3" },
+		"preflight":      func(v *journal.UpdateStartRunningReceipt) { v.Claim.Preflight = nil },
+		"future observed": func(v *journal.UpdateStartRunningReceipt) {
+			v.NativeObservedMS = strconv.FormatInt(time.Now().Add(time.Second).UnixMilli(), 10)
+			v.SettledMS = v.NativeObservedMS
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := receipt
+			preflight := *receipt.Claim.Preflight
+			changed.Claim.Preflight = &preflight
+			mutate(&changed)
+			encoded, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(UpdateStartExecute, encoded, ref, time.Now().Add(-time.Second), time.Now()) {
+				t.Fatal("changed update-start running receipt accepted")
 			}
 		})
 	}
