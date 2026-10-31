@@ -183,6 +183,9 @@ def main(args):
             if "NATIVE_DATA_CHECKPOINT_VERIFIED" not in native.stdout:
                 raise RuntimeError("native quiescent checkpoint missing")
             report["native_go_data_checkpoint"] = True
+            if "NATIVE_DATA_RESTORE_VERIFIED" not in native.stdout:
+                raise RuntimeError("native verified data restore missing")
+            report["native_go_data_restore"] = True
             if candidate:
                 candidate_root = mountpoint / "candidate-data"
                 candidate_root.mkdir(mode=0o700)
@@ -222,7 +225,10 @@ def main(args):
                         raise RuntimeError("actual prepared-data writer admission/claim verification missing")
                     report["native_writer_intent_and_claim_verified"] = True
                 if phase == "prepare":
+                    if "NATIVE_JOURNAL_RESTORE_VERIFIED" not in result.stdout:
+                        raise RuntimeError("signed journal restore verification missing")
                     report["native_journal_checkpoint_verified"] = True
+                    report["native_journal_restore_verified"] = True
 
             run_journal("prepare")
             if len(args) in (9,11):

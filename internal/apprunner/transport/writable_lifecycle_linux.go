@@ -205,6 +205,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchCheckpoint(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
 	case CheckpointRead:
 		result, err = provider.store.ReadCheckpointReceipt(ctx, raw, sig)
+	case RestoreExecute:
+		if provider.dataRoot == nil || provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchRestore(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
+	case RestoreRead:
+		result, err = provider.store.ReadRestoreReceipt(ctx, raw, sig)
 	default:
 		return
 	}

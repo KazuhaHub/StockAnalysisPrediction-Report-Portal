@@ -30,13 +30,15 @@ const (
 	ManagedRemovalRead
 	CheckpointCreate
 	CheckpointRead
+	RestoreExecute
+	RestoreRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= CheckpointRead
+	return a >= WritableWriterExecute && a <= RestoreRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute
 }
 
 // This opaque value records authenticated response provenance. Historical
@@ -103,6 +105,12 @@ func (o WritableLifecycleObservation) CheckpointReceipt() (journal.CheckpointRec
 	}
 	return journal.ParseCheckpointReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) RestoreReceipt() (journal.RestoreReceipt, error) {
+	if o.action < RestoreExecute || o.action > RestoreRead {
+		return journal.RestoreReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseRestoreReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer       control.DataWriterCommand
@@ -110,6 +118,7 @@ type writableLifecycleReference struct {
 	registration control.WritableBackendRegistrationCommand
 	removal      control.ManagedRemovalCommand
 	checkpoint   control.CheckpointCommand
+	restore      control.RestoreCommand
 	index        control.Command
 	release      string
 }
@@ -154,13 +163,20 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		}
 		r.removal = v.Command()
 		r.release = r.removal.Payload.ReleaseSHA256
-	default:
+	case action <= CheckpointRead:
 		v, err := control.VerifyCheckpoint(raw, sig, a, now)
 		if err != nil {
 			return r, err
 		}
 		r.checkpoint = v.Command()
 		r.release = r.checkpoint.Payload.ReleaseSHA256
+	default:
+		v, err := control.VerifyRestore(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.restore = v.Command()
+		r.release = r.restore.Payload.ReleaseSHA256
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != r.release {
@@ -243,6 +259,30 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			v.ProjectID != c.Payload.ProjectID || v.NamespaceInode != c.Payload.NamespaceInode ||
 			v.Device != c.Payload.Device || v.DataFormat != c.Payload.DataFormat ||
 			v.WriterFence != c.Payload.WriterFence {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
+			return false
+		}
+		settled = v.SettledMS
+	case action >= RestoreExecute && action <= RestoreRead:
+		v, e := journal.ParseRestoreReceipt(body)
+		c := r.restore
+		if e != nil || v.Stage != "restore_data" || v.State != "restored" ||
+			v.DeploymentID != c.DeploymentID || v.ControllerEpoch != c.ControllerEpoch ||
+			v.InstallationID != c.InstallationID || v.OperationID != c.OperationID ||
+			v.TargetGeneration != c.TargetGeneration || v.EffectID != c.EffectID ||
+			v.PayloadSHA256 != c.PayloadSHA256 || v.RecoverySetID != c.Payload.RecoverySetID ||
+			v.CheckpointID != c.Payload.CheckpointID || v.NamespaceID != c.Payload.NamespaceID ||
+			v.ReleaseSHA256 != c.Payload.ReleaseSHA256 || v.ManifestSHA256 != c.Payload.ManifestSHA256 ||
+			v.ArchiveBytes != c.Payload.ArchiveBytes || v.ProjectID != c.Payload.ProjectID ||
+			v.NamespaceInode != c.Payload.NamespaceInode || v.Device != c.Payload.Device ||
+			v.DataFormat != c.Payload.DataFormat || v.WriterFence != c.Payload.WriterFence ||
+			v.SourceCheckpointOperationID != c.Payload.SourceCheckpointOperationID ||
+			v.SourceCheckpointEffectID != c.Payload.SourceCheckpointEffectID ||
+			v.SourceCheckpointReceiptSHA != c.Payload.SourceCheckpointReceiptSHA {
 			return false
 		}
 		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)

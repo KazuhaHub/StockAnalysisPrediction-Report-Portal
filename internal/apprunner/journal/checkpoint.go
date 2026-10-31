@@ -116,6 +116,10 @@ type checkpointSource struct {
 }
 
 func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64) (checkpointSource, error) {
+	return loadCheckpointSourceExcluding(ctx, tx, c, now, c.EffectID)
+}
+
+func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
 	var startRaw, startOperation, startState, storedPayload string
@@ -198,7 +202,7 @@ func loadCheckpointSource(ctx context.Context, tx *sql.Tx, c control.CheckpointC
 		return result, fmt.Errorf("%w: checkpoint stopped resource", ErrFenceReconciliation)
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil || pending != 0 {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, excludeEffect).Scan(&pending); err != nil || pending != 0 {
 		return result, fmt.Errorf("%w: checkpoint pending command", ErrFenceReconciliation)
 	}
 	if now <= 0 {
@@ -228,6 +232,7 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 		return zero, false, err
 	}
 	command := verified.Command()
+	createdCommand := false
 	var storedOperation, storedInstallation, storedStage, storedKind, storedPayload, storedEpoch, storedState, storedReceipt string
 	var storedSlot, storedGeneration, storedFence int64
 	err = tx.QueryRowContext(ctx, `SELECT operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json
@@ -267,11 +272,24 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 			command.Stage, slot, command.Kind, command.PayloadSHA256, generation, command.ControllerEpoch, fence, now, now); err != nil {
 			return zero, false, err
 		}
+		createdCommand = true
 	} else {
 		return zero, false, err
 	}
 	source, err := loadCheckpointSource(ctx, tx, command, now)
 	if err != nil {
+		return zero, false, err
+	}
+	if createdCommand {
+		format, _ := strconv.ParseInt(command.Payload.DataFormat, 10, 64)
+		writer, _ := strconv.ParseInt(command.Payload.WriterFence, 10, 64)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runner_checkpoints(id,data_namespace_id,installation_id,operation_id,release_sha256,data_format,writer_fence,manifest_sha256,bytes,state,revision,verified_ms,created_ms,updated_ms)
+			VALUES(?,?,?,?,?,?,?,NULL,0,'preparing',1,NULL,?,?)`,
+			command.Payload.CheckpointID, command.Payload.NamespaceID, command.InstallationID,
+			command.OperationID, command.Payload.ReleaseSHA256, format, writer, now, now); err != nil {
+			return zero, false, err
+		}
+	} else if err := validateCheckpointRecord(ctx, tx, command, "", 0, false); err != nil {
 		return zero, false, err
 	}
 	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=? WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
@@ -344,6 +362,19 @@ func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, o
 		return zero, ErrFenceReconciliation
 	}
 	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}'`, string(encoded), now, source.command.EffectID)
+	if err != nil {
+		return zero, err
+	}
+	if n, err := changed.RowsAffected(); err != nil || n != 1 {
+		return zero, ErrFenceReconciliation
+	}
+	changed, err = tx.ExecContext(ctx, `UPDATE runner_checkpoints SET manifest_sha256=?,bytes=?,state='verified',revision=revision+1,verified_ms=?,updated_ms=?
+		WHERE id=? AND data_namespace_id=? AND installation_id=? AND operation_id=? AND release_sha256=?
+		AND data_format=? AND writer_fence=? AND manifest_sha256 IS NULL AND bytes=0
+		AND state='preparing' AND revision=1 AND verified_ms IS NULL`,
+		result.ManifestSHA256, mustDataInt(result.ArchiveBytes), now, now,
+		result.CheckpointID, result.NamespaceID, result.InstallationID, result.OperationID,
+		result.ReleaseSHA256, mustDataInt(result.DataFormat), mustDataInt(result.WriterFence))
 	if err != nil {
 		return zero, err
 	}
@@ -445,8 +476,45 @@ func (s *Store) ReadCheckpointReceipt(ctx context.Context, raw, signature []byte
 	if err != nil || !checkpointReceiptMatchesCommand(result, command) {
 		return zero, ErrFenceReconciliation
 	}
+	if err := validateCheckpointRecord(ctx, tx, command, result.ManifestSHA256, mustDataInt(result.ArchiveBytes), true); err != nil {
+		return zero, err
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
 	return result, nil
+}
+
+func validateCheckpointRecord(ctx context.Context, tx *sql.Tx, command control.CheckpointCommand, manifest string, bytes int64, verified bool) error {
+	var id, namespace, installation, operation, release, state string
+	var format, writer, revision int64
+	var storedManifest sql.NullString
+	var storedBytes, verifiedMS sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT id,data_namespace_id,installation_id,operation_id,release_sha256,
+		data_format,writer_fence,manifest_sha256,bytes,state,revision,verified_ms
+		FROM runner_checkpoints WHERE operation_id=? AND state<>
+		'deleted' ORDER BY created_ms DESC,id LIMIT 1`, command.OperationID).
+		Scan(&id, &namespace, &installation, &operation, &release, &format, &writer,
+			&storedManifest, &storedBytes, &state, &revision, &verifiedMS); err != nil {
+		return ErrFenceReconciliation
+	}
+	if id != command.Payload.CheckpointID || namespace != command.Payload.NamespaceID ||
+		installation != command.InstallationID || operation != command.OperationID ||
+		release != command.Payload.ReleaseSHA256 || format != mustDataInt(command.Payload.DataFormat) ||
+		writer != mustDataInt(command.Payload.WriterFence) {
+		return ErrFenceReconciliation
+	}
+	if !verified {
+		if state != "preparing" || revision != 1 || storedManifest.Valid || !storedBytes.Valid ||
+			storedBytes.Int64 != 0 || verifiedMS.Valid {
+			return ErrFenceReconciliation
+		}
+		return nil
+	}
+	if state != "verified" || revision != 2 || !storedManifest.Valid || storedManifest.String != manifest ||
+		!storedBytes.Valid || storedBytes.Int64 != bytes || bytes <= 0 || !verifiedMS.Valid ||
+		verifiedMS.Int64 <= 0 || verifiedMS.Int64 > time.Now().UTC().UnixMilli() {
+		return ErrFenceReconciliation
+	}
+	return nil
 }

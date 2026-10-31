@@ -167,6 +167,21 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if err := os.Chown(namespace+"/hello.txt", 65532, 65532); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Mkdir(namespace+"/writable", 02770); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(namespace+"/writable", 65532, 65532); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(namespace+"/writable", 02770); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namespace+"/writable/created.txt", []byte("writable child"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(namespace+"/writable/created.txt", 65532, 65532); err != nil {
+		t.Fatal(err)
+	}
 	observed, err := root.Inspect(context.Background(), expected, nativeNamespace(1), 4201)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +193,7 @@ func TestNativeDataPrimitive(t *testing.T) {
 	}
 	checkpoint, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, request)
 	checkpointSnapshot, snapshotErr := checkpoint.Snapshot()
-	if err != nil || snapshotErr != nil || checkpointSnapshot.ArchiveBytes <= 0 || checkpointSnapshot.Entries != 3 || checkpointSnapshot.ManifestSHA256 == "" || checkpointSnapshot.ObservedMS <= 0 {
+	if err != nil || snapshotErr != nil || checkpointSnapshot.ArchiveBytes <= 0 || checkpointSnapshot.Entries != 5 || checkpointSnapshot.ManifestSHA256 == "" || checkpointSnapshot.ObservedMS <= 0 {
 		t.Fatalf("native checkpoint: %+v %v", checkpointSnapshot, errors.Join(err, snapshotErr))
 	}
 	verified, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, checkpointSnapshot.ManifestSHA256)
@@ -192,6 +207,66 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, request); !errors.Is(err, ErrConflict) {
 		t.Fatal("checkpoint identity reused", err)
 	}
+	if err := os.WriteFile(namespace+"/hello.txt", []byte("mutated after checkpoint"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(namespace+"/after", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namespace+"/after/extra.txt", []byte("must disappear"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	restoreRequest := RestoreRequest{
+		CheckpointID: request.CheckpointID, NamespaceID: request.NamespaceID,
+		ReleaseSHA256: request.ReleaseSHA256, ManifestSHA256: checkpointSnapshot.ManifestSHA256,
+		ProjectID: request.ProjectID, DataFormat: request.DataFormat,
+		ArchiveBytes: checkpointSnapshot.ArchiveBytes, MaxArchiveBytes: request.MaxArchiveBytes,
+		ExpectedDevice: request.ExpectedDevice, ExpectedNamespaceInode: request.ExpectedNamespaceInode,
+		WriterFence: request.WriterFence,
+	}
+	changed := restoreRequest
+	changed.ManifestSHA256 = strings.Repeat("b", 64)
+	if _, err := checkpointRoot.Restore(context.Background(), checkpointIdentity, root, expected, changed); !errors.Is(err, ErrRestoreUnsafe) {
+		t.Fatal("changed restore manifest accepted", err)
+	}
+	if content, err := os.ReadFile(namespace + "/hello.txt"); err != nil || string(content) != "mutated after checkpoint" {
+		t.Fatal("refused restore changed source data", string(content), err)
+	}
+	restored, err := checkpointRoot.Restore(context.Background(), checkpointIdentity, root, expected, restoreRequest)
+	restoredSnapshot, restoreSnapshotErr := restored.Snapshot()
+	if err != nil || restoreSnapshotErr != nil || restoredSnapshot.ManifestSHA256 != checkpointSnapshot.ManifestSHA256 ||
+		restoredSnapshot.Entries != checkpointSnapshot.Entries || restoredSnapshot.NamespaceInode != observed.Inode ||
+		restoredSnapshot.NamespaceDevice != observed.Device {
+		t.Fatalf("native restore: %+v %v", restoredSnapshot, errors.Join(err, restoreSnapshotErr))
+	}
+	if content, err := os.ReadFile(namespace + "/hello.txt"); err != nil || string(content) != "checkpoint payload" {
+		t.Fatal("restored file content", string(content), err)
+	}
+	if content, err := os.ReadFile(namespace + "/nested/value.json"); err != nil || string(content) != `{"v":1}` {
+		t.Fatal("restored nested content", string(content), err)
+	}
+	if content, err := os.ReadFile(namespace + "/writable/created.txt"); err != nil || string(content) != "writable child" {
+		t.Fatal("restored writable content", string(content), err)
+	}
+	var writableStat unix.Stat_t
+	if err := unix.Stat(namespace+"/writable", &writableStat); err != nil ||
+		writableStat.Uid != 65532 || writableStat.Gid != 65532 || writableStat.Mode&07777 != 02770 {
+		t.Fatal("restored writable directory metadata", writableStat, err)
+	}
+	if _, err := os.Lstat(namespace + "/after"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("restore retained uncheckpointed entry", err)
+	}
+	var restoredNamespace unix.Stat_t
+	if err := unix.Stat(namespace, &restoredNamespace); err != nil ||
+		uint64(restoredNamespace.Dev) != observed.Device || restoredNamespace.Ino != observed.Inode {
+		t.Fatal("restore changed namespace identity", restoredNamespace, err)
+	}
+	replayed, err := checkpointRoot.Restore(context.Background(), checkpointIdentity, root, expected, restoreRequest)
+	replayedSnapshot, replaySnapshotErr := replayed.Snapshot()
+	if err != nil || replaySnapshotErr != nil || replayedSnapshot.ManifestSHA256 != restoredSnapshot.ManifestSHA256 {
+		t.Fatal("deterministic restore replay", replayedSnapshot, errors.Join(err, replaySnapshotErr))
+	}
+	t.Log("NATIVE_DATA_RESTORE_VERIFIED")
 	if err := os.Symlink("hello.txt", namespace+"/link"); err != nil {
 		t.Fatal(err)
 	}

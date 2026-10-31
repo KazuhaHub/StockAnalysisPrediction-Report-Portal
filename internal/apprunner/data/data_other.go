@@ -32,3 +32,6 @@ func (*Root) Checkpoint(context.Context, RootIdentity, *Root, RootIdentity, Chec
 func (*Root) VerifyCheckpoint(context.Context, RootIdentity, RootIdentity, CheckpointRequest, string) (CheckpointObservation, error) {
 	return CheckpointObservation{}, ErrUnsupported
 }
+func (*Root) Restore(context.Context, RootIdentity, *Root, RootIdentity, RestoreRequest) (RestoreObservation, error) {
+	return RestoreObservation{}, ErrUnsupported
+}

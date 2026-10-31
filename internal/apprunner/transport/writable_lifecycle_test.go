@@ -118,6 +118,65 @@ func checkpointTransportFixture(t *testing.T) (control.Authority, control.Checkp
 	return a, command, raw, signature, descriptor, receipt
 }
 
+func restoreTransportFixture(t *testing.T) (control.Authority, control.RestoreCommand, []byte, []byte, []byte, journal.RestoreReceipt) {
+	t.Helper()
+	a, checkpoint, _, _, descriptor, checkpointReceipt := checkpointTransportFixture(t)
+	checkpointRaw, err := json.Marshal(checkpointReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpointDigest := sha256.Sum256(checkpointRaw)
+	now := time.Now().UnixMilli()
+	command := control.RestoreCommand{
+		Format: control.RestoreFormat, DeploymentID: a.DeploymentID,
+		ControllerEpoch: a.ControllerEpoch, ControlRevision: strconv.FormatInt(a.ControlRevision, 10),
+		InstallationID: checkpoint.InstallationID, OperationID: "11111111-1111-4111-8111-111111119950",
+		TargetGeneration: checkpoint.TargetGeneration, Stage: "restore_data",
+		EffectNumber: "1", EffectID: "11111111-1111-4111-8111-111111119951",
+		Kind: "restore", InstallationFence: checkpoint.InstallationFence,
+		Payload: control.RestorePayload{
+			RecoverySetID: "11111111-1111-4111-8111-111111119952",
+			CheckpointID:  checkpoint.Payload.CheckpointID, NamespaceID: checkpoint.Payload.NamespaceID,
+			ReleaseSHA256:  checkpoint.Payload.ReleaseSHA256,
+			ManifestSHA256: checkpointReceipt.ManifestSHA256,
+			ArchiveBytes:   checkpointReceipt.ArchiveBytes, ProjectID: checkpoint.Payload.ProjectID,
+			NamespaceInode: checkpoint.Payload.NamespaceInode, Device: checkpoint.Payload.Device,
+			DataFormat: checkpoint.Payload.DataFormat, WriterFence: checkpoint.Payload.WriterFence,
+			SourceCheckpointOperationID: checkpoint.OperationID,
+			SourceCheckpointEffectID:    checkpoint.EffectID,
+			SourceCheckpointReceiptSHA:  hex.EncodeToString(checkpointDigest[:]),
+		},
+	}
+	command.PayloadSHA256, err = control.RestoreLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.IssuedMS, command.ExpiresMS = strconv.FormatInt(now, 10), strconv.FormatInt(now+25000, 10)
+	raw, signature, err := control.SignRestore(command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := journal.RestoreReceipt{
+		Format:       "portal.runner.data-restore-receipt/1-dev.1",
+		DeploymentID: command.DeploymentID, ControllerEpoch: command.ControllerEpoch,
+		InstallationID: command.InstallationID, OperationID: command.OperationID,
+		TargetGeneration: command.TargetGeneration, Stage: command.Stage,
+		EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		RecoverySetID: command.Payload.RecoverySetID, CheckpointID: command.Payload.CheckpointID,
+		NamespaceID: command.Payload.NamespaceID, ReleaseSHA256: command.Payload.ReleaseSHA256,
+		ManifestSHA256: command.Payload.ManifestSHA256, ArchiveBytes: command.Payload.ArchiveBytes,
+		ProjectID: command.Payload.ProjectID, NamespaceInode: command.Payload.NamespaceInode,
+		Device: command.Payload.Device, DataFormat: command.Payload.DataFormat,
+		WriterFence:                 command.Payload.WriterFence,
+		SourceCheckpointOperationID: command.Payload.SourceCheckpointOperationID,
+		SourceCheckpointEffectID:    command.Payload.SourceCheckpointEffectID,
+		SourceCheckpointReceiptSHA:  command.Payload.SourceCheckpointReceiptSHA,
+		Entries:                     "3", UsedBytes: "4096", State: "restored", ObservedMS: strconv.FormatInt(now, 10),
+		SettledMS: strconv.FormatInt(now, 10),
+	}
+	return a, command, raw, signature, descriptor, receipt
+}
+
 func TestWritableLifecycleIndependentActionReferences(t *testing.T) {
 	a, c, raw, sig, descriptor, _ := writableHandshakeRequestFixture(t)
 	v, err := control.VerifyWritableBackendRegistration(raw, sig, a, time.Now().UnixMilli())
@@ -254,6 +313,53 @@ func TestWritableLifecycleCheckpointReferenceAndReply(t *testing.T) {
 	}
 }
 
+func TestWritableLifecycleRestoreReferenceAndReply(t *testing.T) {
+	a, command, raw, sig, descriptor, receipt := restoreTransportFixture(t)
+	now := time.Now().UnixMilli()
+	for _, action := range []WritableLifecycleAction{RestoreExecute, RestoreRead} {
+		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		if err != nil || ref.restore.EffectID != command.EffectID || ref.release != command.Payload.ReleaseSHA256 {
+			t.Fatal("restore reference", action, err)
+		}
+		body, _ := json.Marshal(receipt)
+		started, received := time.Now().Add(-time.Second), time.Now()
+		if !validWritableLifecycleReply(action, body, ref, started, received) {
+			t.Fatal("exact restore reply refused", action)
+		}
+	}
+	ref, err := verifyWritableLifecycle(RestoreExecute, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, received := time.Now().Add(-time.Second), time.Now()
+	for name, mutate := range map[string]func(*journal.RestoreReceipt){
+		"recovery set": func(v *journal.RestoreReceipt) { v.RecoverySetID = "11111111-1111-4111-8111-111111119960" },
+		"checkpoint":   func(v *journal.RestoreReceipt) { v.CheckpointID = "11111111-1111-4111-8111-111111119961" },
+		"namespace":    func(v *journal.RestoreReceipt) { v.NamespaceID = "11111111-1111-4111-8111-111111119962" },
+		"manifest":     func(v *journal.RestoreReceipt) { v.ManifestSHA256 = strings.Repeat("f", 64) },
+		"archive":      func(v *journal.RestoreReceipt) { v.ArchiveBytes = "2048" },
+		"source operation": func(v *journal.RestoreReceipt) {
+			v.SourceCheckpointOperationID = "11111111-1111-4111-8111-111111119963"
+		},
+		"source effect":     func(v *journal.RestoreReceipt) { v.SourceCheckpointEffectID = "11111111-1111-4111-8111-111111119964" },
+		"source receipt":    func(v *journal.RestoreReceipt) { v.SourceCheckpointReceiptSHA = strings.Repeat("a", 64) },
+		"namespace inode":   func(v *journal.RestoreReceipt) { v.NamespaceInode = "99" },
+		"device":            func(v *journal.RestoreReceipt) { v.Device = "99" },
+		"writer fence":      func(v *journal.RestoreReceipt) { v.WriterFence = "2" },
+		"target generation": func(v *journal.RestoreReceipt) { v.TargetGeneration = "3" },
+		"restored state":    func(v *journal.RestoreReceipt) { v.State = "verified" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := receipt
+			mutate(&changed)
+			encoded, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(RestoreExecute, encoded, ref, started, received) {
+				t.Fatal("changed restore receipt accepted")
+			}
+		})
+	}
+}
+
 func TestWritableLifecycleOpaqueTypedEvidence(t *testing.T) {
 	var proof WritableLifecycleObservation
 	if _, err := json.Marshal(proof); err == nil {
@@ -305,6 +411,16 @@ func TestWritableLifecycleOpaqueTypedEvidence(t *testing.T) {
 	proof.action = ManagedRemovalRead
 	if _, err := proof.CheckpointReceipt(); err == nil {
 		t.Fatal("managed removal used as checkpoint")
+	}
+	a, _, _, _, _, restore := restoreTransportFixture(t)
+	restoreBody, _ := json.Marshal(restore)
+	proof = WritableLifecycleObservation{action: RestoreRead, body: string(restoreBody), authority: a}
+	if got, err := proof.RestoreReceipt(); err != nil || got != restore {
+		t.Fatal("restore evidence", got, err)
+	}
+	proof.action = CheckpointRead
+	if _, err := proof.RestoreReceipt(); err == nil {
+		t.Fatal("checkpoint used as restore")
 	}
 	copy := proof.Controller()
 	copy.PublicKey[0] ^= 1

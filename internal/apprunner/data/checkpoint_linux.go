@@ -289,7 +289,10 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 	if err := unix.Fstatat(int(parent.Fd()), name, &before, unix.AT_SYMLINK_NOFOLLOW); err != nil {
 		return checkpointIncomplete(err)
 	}
-	if before.Mode&(unix.S_ISUID|unix.S_ISGID|unix.S_ISVTX) != 0 {
+	if !checkpointModeAllowed(before.Mode, before.Gid) {
+		return ErrCheckpointUnsafe
+	}
+	if !checkpointOwnerAllowed(before.Uid, before.Gid) {
 		return ErrCheckpointUnsafe
 	}
 	switch before.Mode & unix.S_IFMT {
@@ -354,8 +357,12 @@ func (w *checkpointWalker) add(parent *os.File, name, relative string, depth int
 }
 
 func checkpointHeader(name string, stat unix.Stat_t, size int64, kind byte) *tar.Header {
+	mode := stat.Mode & 0777
+	if kind == tar.TypeDir && stat.Mode&unix.S_ISGID != 0 && stat.Gid == writeAccessGID {
+		mode |= unix.S_ISGID
+	}
 	return &tar.Header{
-		Format: tar.FormatPAX, Name: name, Mode: int64(stat.Mode & 0777), Uid: int(stat.Uid), Gid: int(stat.Gid),
+		Format: tar.FormatPAX, Name: name, Mode: int64(mode), Uid: int(stat.Uid), Gid: int(stat.Gid),
 		Size: size, ModTime: time.Unix(0, 0).UTC(), Typeflag: kind,
 	}
 }
@@ -369,6 +376,21 @@ func checkpointAfter(file *os.File, before unix.Stat_t) error {
 		return ErrCheckpointUnsafe
 	}
 	return nil
+}
+
+func checkpointOwnerAllowed(uid, gid uint32) bool {
+	return (uid == 0 && (gid == 0 || gid == writeAccessGID)) ||
+		(uid == writeAccessGID && gid == writeAccessGID)
+}
+
+func checkpointModeAllowed(mode uint32, gid uint32) bool {
+	if mode&(unix.S_ISUID|unix.S_ISVTX) != 0 {
+		return false
+	}
+	if mode&unix.S_ISGID != 0 {
+		return mode&unix.S_IFMT == unix.S_IFDIR && gid == writeAccessGID
+	}
+	return true
 }
 
 // VerifyCheckpoint recomputes the archive hash and validates its bound manifest
@@ -459,7 +481,18 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 		}
 		if err != nil || header.Name == "" || header.Name == checkpointManifestEntry || seen[header.Name] || header.Name < last ||
 			header.Name == "." || header.Name == ".." || strings.HasPrefix(header.Name, "/") || strings.Contains(header.Name, "\\") || path.Clean(strings.TrimSuffix(header.Name, "/")) != strings.TrimSuffix(header.Name, "/") ||
-			header.Mode&07000 != 0 || (header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= maxCheckpointEntries {
+			(header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg) || entries >= maxCheckpointEntries {
+			return zero, ErrCheckpointUnsafe
+		}
+		if header.Typeflag == tar.TypeDir {
+			if header.Mode&(unix.S_ISUID|unix.S_ISVTX) != 0 ||
+				(header.Mode&unix.S_ISGID != 0 && header.Gid != int(writeAccessGID)) {
+				return zero, ErrCheckpointUnsafe
+			}
+		} else if header.Mode&07000 != 0 {
+			return zero, ErrCheckpointUnsafe
+		}
+		if header.Uid < 0 || header.Gid < 0 || !checkpointOwnerAllowed(uint32(header.Uid), uint32(header.Gid)) {
 			return zero, ErrCheckpointUnsafe
 		}
 		if header.Typeflag == tar.TypeReg {

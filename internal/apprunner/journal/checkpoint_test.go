@@ -87,6 +87,10 @@ func TestCheckpointPersistsOneExactUnknownIntent(t *testing.T) {
 	if err := f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE effect_id=? AND state='unknown' AND receipt_json='{}'`, f.command.EffectID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("checkpoint intent not durably unknown")
 	}
+	if err := f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_checkpoints WHERE id=? AND operation_id=? AND state='preparing' AND revision=1 AND manifest_sha256 IS NULL AND bytes=0`,
+		f.command.Payload.CheckpointID, f.command.OperationID).Scan(&count); err != nil || count != 1 {
+		t.Fatal("checkpoint repository intent not durable")
+	}
 	if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); !errors.Is(err, ErrFenceReconciliation) {
 		t.Fatal("unknown checkpoint reclaimed", err)
 	}
@@ -155,6 +159,10 @@ func TestCheckpointReceiptReadMatchesAppliedIntent(t *testing.T) {
 	if _, err := f.store.db.Exec(`UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=?`, string(raw), now, f.command.EffectID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.store.db.Exec(`UPDATE runner_checkpoints SET manifest_sha256=?,bytes=1024,state='verified',revision=2,verified_ms=?,updated_ms=? WHERE id=?`,
+		receipt.ManifestSHA256, now, now, receipt.CheckpointID); err != nil {
+		t.Fatal(err)
+	}
 	got, err := f.store.ReadCheckpointReceipt(context.Background(), f.raw, f.sig)
 	if err != nil || got != receipt {
 		t.Fatal(got, err)
@@ -167,6 +175,45 @@ func TestCheckpointReceiptReadMatchesAppliedIntent(t *testing.T) {
 	}
 	if _, err := f.store.ReadCheckpointReceipt(context.Background(), f.raw, f.sig); err == nil {
 		t.Fatal("changed checkpoint receipt read as applied intent")
+	}
+	if _, err := f.store.db.Exec(`UPDATE runner_commands SET receipt_json=? WHERE effect_id=?`, string(raw), f.command.EffectID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckpointRepositoryBindingRejectsChangedRecord(t *testing.T) {
+	for _, mutation := range []string{"manifest", "bytes", "operation", "state"} {
+		t.Run(mutation, func(t *testing.T) {
+			f := newCheckpointFixture(t)
+			if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); err != nil {
+				t.Fatal(err)
+			}
+			switch mutation {
+			case "manifest":
+				_, err := f.store.db.Exec(`UPDATE runner_checkpoints SET manifest_sha256=? WHERE id=?`, strings.Repeat("a", 64), f.command.Payload.CheckpointID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "bytes":
+				_, err := f.store.db.Exec(`UPDATE runner_checkpoints SET bytes=1 WHERE id=?`, f.command.Payload.CheckpointID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "operation":
+				_, err := f.store.db.Exec(`UPDATE runner_checkpoints SET operation_id=? WHERE id=?`, fixtureID(885), f.command.Payload.CheckpointID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "state":
+				_, err := f.store.db.Exec(`UPDATE runner_checkpoints SET state='review_required' WHERE id=?`, f.command.Payload.CheckpointID)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, _, err := f.store.beginCheckpoint(context.Background(), f.raw, f.sig); !errors.Is(err, ErrFenceReconciliation) {
+				t.Fatal("changed checkpoint repository binding accepted", err)
+			}
+		})
 	}
 }
 

@@ -50,6 +50,13 @@ func TestReadonlyEndpointRefusesAllWritableLifecycleActions(t *testing.T) {
 			t.Fatal("readonly minted checkpoint lifecycle", action, err)
 		}
 	}
+	restoreAuthority, _, restoreRaw, restoreSig, restoreDescriptor, _ := restoreTransportFixture(t)
+	for _, action := range []WritableLifecycleAction{RestoreExecute, RestoreRead} {
+		proof, err := writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, restoreRaw, restoreSig, restoreAuthority, restoreDescriptor, nil)
+		if err == nil || !proof.ReceivedAt().IsZero() || backend.calls.Load() != 0 {
+			t.Fatal("readonly minted restore lifecycle", action, err)
+		}
+	}
 }
 func TestWritableLifecycleFramingAndHistoricalRead(t *testing.T) {
 	for _, mode := range []string{"accepted", "nonce", "magic", "oversize", "truncated", "trailing", "effect", "payload", "source", "document", "future", "revision", "unknown", "cancel"} {

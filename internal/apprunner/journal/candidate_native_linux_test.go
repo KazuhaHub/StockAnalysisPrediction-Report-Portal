@@ -137,6 +137,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkpointVerified := false
+	restoreVerified := false
 	for slot := 0; slot < 4; slot++ {
 		if slot == 2 {
 			continue
@@ -306,6 +307,47 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 						t.Fatal("managed update checkpoint read", checkpointAgain, err)
 					}
 					checkpointVerified = true
+					checkpointReceiptRaw, err := json.Marshal(checkpoint)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restoreCommand := control.RestoreCommand{
+						Format: control.RestoreFormat, DeploymentID: enrollment.DeploymentID,
+						ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: strconv.FormatInt(enrollment.ControlRevision, 10),
+						InstallationID: c.InstallationID, OperationID: fixtureID(7115 + slot*10),
+						TargetGeneration: "2", Stage: "restore_data", EffectNumber: "1",
+						EffectID: fixtureID(7116 + slot*10), Kind: "restore", InstallationFence: "2",
+						IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+						Payload: control.RestorePayload{
+							RecoverySetID: fixtureID(7117 + slot*10), CheckpointID: checkpoint.CheckpointID,
+							NamespaceID: checkpoint.NamespaceID, ReleaseSHA256: checkpoint.ReleaseSHA256,
+							ManifestSHA256: checkpoint.ManifestSHA256, ArchiveBytes: checkpoint.ArchiveBytes,
+							ProjectID: checkpoint.ProjectID, NamespaceInode: checkpoint.NamespaceInode,
+							Device: checkpoint.Device, DataFormat: checkpoint.DataFormat,
+							WriterFence:                 checkpoint.WriterFence,
+							SourceCheckpointOperationID: checkpointCommand.OperationID,
+							SourceCheckpointEffectID:    checkpointCommand.EffectID,
+							SourceCheckpointReceiptSHA:  candidateHash(checkpointReceiptRaw),
+						},
+					}
+					restoreCommand.PayloadSHA256, err = control.RestoreLogicalDigest(restoreCommand)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restoreRaw, restoreSig, err := control.SignRestore(restoreCommand, key, authority, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					restored, err := s.DispatchRestore(ctx, restoreRaw, restoreSig, root, pin, checkpointRoot, checkpointPin)
+					if err != nil || restored.Format != restoreReceiptFormat || restored.ManifestSHA256 != checkpoint.ManifestSHA256 ||
+						restored.NamespaceInode != checkpoint.NamespaceInode || restored.NamespaceID != checkpoint.NamespaceID {
+						t.Fatal("managed update restore", restored, err)
+					}
+					restoredAgain, err := s.ReadRestoreReceipt(ctx, restoreRaw, restoreSig)
+					if err != nil || restoredAgain != restored {
+						t.Fatal("managed update restore read", restoredAgain, err)
+					}
+					restoreVerified = true
 					dispatchRemoval("remove_code", "remove-code", fixtureID(7108+slot*10), fixtureID(7109+slot*10))
 					var absentState, absentDesired string
 					var absentRevision int
@@ -356,6 +398,10 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 	if !checkpointVerified {
 		t.Fatal("signed journal checkpoint was not verified")
 	}
+	if !restoreVerified {
+		t.Fatal("signed journal restore was not verified")
+	}
 	fmt.Println("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
+	fmt.Println("NATIVE_JOURNAL_RESTORE_VERIFIED")
 	t.Log("native journal candidate: actual running receipt; atomic SQL failure retained uncertainty; exact owned native IDs cleaned")
 }
