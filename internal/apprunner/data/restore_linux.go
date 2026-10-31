@@ -118,7 +118,7 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 		return incomplete(fmt.Errorf("verify restored namespace: %w", err))
 	}
 	if !sameRestoreEntries(entries, restored) {
-		return incomplete(fmt.Errorf("verify restored namespace: content mismatch"))
+		return incomplete(fmt.Errorf("verify restored namespace: %s", restoreEntryDifference(entries, restored)))
 	}
 	currentStat := unix.Stat_t{}
 	if err := unix.Fstat(int(namespace.Fd()), &currentStat); err != nil ||
@@ -620,13 +620,17 @@ func restoreReadEntries(ctx context.Context, parent *os.File, device uint64, max
 }
 
 func sameRestoreEntries(expected, actual []restoreEntry) bool {
+	return restoreEntryDifference(expected, actual) == ""
+}
+
+func restoreEntryDifference(expected, actual []restoreEntry) string {
 	if len(expected) != len(actual) {
-		return false
+		return fmt.Sprintf("entry count %d != %d", len(expected), len(actual))
 	}
 	for index := range expected {
 		if expected[index] != actual[index] {
-			return false
+			return fmt.Sprintf("entry %d expected %+v actual %+v", index, expected[index], actual[index])
 		}
 	}
-	return true
+	return ""
 }
