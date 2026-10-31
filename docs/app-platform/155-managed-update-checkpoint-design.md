@@ -3,9 +3,10 @@
 Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
 root, bounded quiescent archive, read-back verification, signed runner-journal
 receipt and Portal recovery-set preparation/verification are implemented. This
-document also claims verified native restore and Portal restore admission. It
-does not claim the managed update executor or a completed reviewed rollback
-executor around that primitive.
+document also claims verified native restore, Portal restore admission and the
+generation-2 `update-start` admission/reservation boundary. It does not claim
+the managed update executor, native generation-2 launch or a completed reviewed
+rollback executor around that primitive.
 
 ## Decision
 
@@ -145,6 +146,14 @@ stopped resource to retain the same namespace. The two rows must be explicitly
 related by installation, namespace, source generation, target generation and
 source checkpoint. Existing install admission remains unchanged.
 
+The implemented admission stores a distinct `update-start` command and pending
+target resource. It requires the checkpoint operation to be the same managed
+update operation, a checkpoint repository row in `verified` state, exact source
+start/data receipts, a source process that is stopped, no other live process on
+the namespace, and target generation N+1 with an increased writer fence. A
+replay returns the same resource/effect identities and never advances Portal's
+operation stage.
+
 ## Portal operation tuple
 
 A managed update review binds:
@@ -161,6 +170,14 @@ Consumption creates one `managed=1` update operation with
 `source_generation=N`, `target_generation=N+1`. It does not change the live
 activation, generation or policy until target readiness and registration are
 verified.
+
+The managed-update review projection binds the exact recovery-set ID,
+checkpoint operation/effect/receipt, source/target releases and generations,
+policy revisions, namespace/schema/source writer fence and target runtime. At
+Portal `start`, it creates one candidate activation for generation N+1 plus one
+prepared `update-start` effect, signs the complete command and asks the runner
+to reserve the target resource. It does not mark the process running or advance
+to `probe`.
 
 ## Ordered execution
 
@@ -231,7 +248,7 @@ Disposable Linux/XFS/Docker tests:
 1. Native quiescent checkpoint/read-back primitive and refusals.
 2. Journal checkpoint command, receipt, crash recovery and repository tests.
 3. Portal recovery-set preparation/verification transaction. Implemented.
-4. Distinct update-start admission with source-checkpoint binding.
+4. Distinct update-start admission with source-checkpoint binding. Implemented.
 5. Managed update executor and activation transaction.
 6. Restore/rollback executor and disposable Linux acceptance. The native
    restore and Portal restore-admission primitive are implemented and passed
