@@ -25,8 +25,15 @@ import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluato
 //
 // The switch is three-way here rather than in the settings modal, because the two things an operator
 // needs beside it — the readiness list and the dry-run sample — are the reasons a mode is refused or
-// trusted. "On" is disabled while any readiness item fails, and the failing items are named. The
+// trusted. Switching "On" is refused while any readiness item fails, and the failing items are named
+// (once on, the option stays enabled: the dry-pass item fails by construction in that mode). The
 // state itself comes from lib/forecastEvaluator, shared with the record page's pill.
+//
+// The card changes shape with the mode. Off and dry are the setup phase: the readiness list, and in
+// dry the sample and the gate form, are what the operator works through. Once on, those are history
+// (the dry-pass item can never pass again by design), so the card shows the last pass and the backlog,
+// and brings back only what still needs a hand: a failing item that still matters, and the gate form
+// while a benchmark is waiting for its check.
 
 export default function ForecastEvaluatorStatus({
   settings,
@@ -38,7 +45,9 @@ export default function ForecastEvaluatorStatus({
   const { t } = useTranslation()
   const { message, modal } = App.useApp()
   const [busy, setBusy] = useState(false)
-  const [code, setCode] = useState(settings.gate_codes[0] ?? settings.bench)
+  // The operator's pick, remembered with the suggestion it overrode: a quiet reload keeps this card
+  // mounted, and a newly scheduled or newly awaited benchmark must replace a pick made before it.
+  const [pick, setPick] = useState<{ code: string; against: string } | null>(null)
   const [note, setNote] = useState('')
   // Re-render the age on its own clock: a page left open must go stale without a reload, and the
   // heartbeat is the only evidence that the loop is alive.
@@ -50,7 +59,21 @@ export default function ForecastEvaluatorStatus({
 
   const status = evaluatorStatus(settings, nowMs)
   const hb = settings.heartbeat
+  const on = settings.mode === '1'
   const failing = settings.readiness.filter((r) => !r.ok)
+  // Once on, the dry-pass item fails by construction and the primary-source item has its own alert.
+  // A missing gate the evaluator is already waiting on is named once, by the awaiting-gate alert.
+  const stillFailing = failing.filter(
+    (r) => r.key !== 'dry_pass' && r.key !== 'ledger_chain' && !(r.key === 'dry_gate' && (hb?.awaiting_gate?.length ?? 0) > 0),
+  )
+  // A benchmark scheduled for the next cohort with no check would only ever be planned, never written.
+  const nextUnchecked = settings.bench_next && !settings.dry_gate[settings.bench_next] ? settings.bench_next : ''
+  const awaiting = hb?.awaiting_gate ?? []
+  const gateCodes = [...new Set([...awaiting, ...(nextUnchecked ? [nextUnchecked] : []), ...settings.gate_codes])]
+  const suggested = awaiting[0] ?? (nextUnchecked || (settings.gate_codes[0] ?? settings.bench))
+  const code = pick && pick.against === suggested && gateCodes.includes(pick.code) ? pick.code : suggested
+  const showGate = settings.mode === 'dry' || (on && (awaiting.length > 0 || nextUnchecked !== ''))
+  const fetches = hb ? Object.values(hb.pass.fetches).reduce((a, b) => a + b, 0) : 0
   // A failing item is worded from its reason code, with the benchmarks it names in their display
   // names; the server's English detail is only the fallback for a server that sends no reason.
   const readinessDetail = (r: ForecastReadinessItem) => {
@@ -159,11 +182,14 @@ export default function ForecastEvaluatorStatus({
             {
               value: '1',
               label: t('forecast.eval.mode.on'),
-              disabled: failing.length > 0,
+              // Already on: the dry-pass item fails by construction, and disabling the selected
+              // option would grey out the very mode the evaluator is in.
+              disabled: !on && failing.length > 0,
             },
           ]}
         />
 
+        {settings.mode === '0' && <Alert type="info" showIcon title={t('forecast.eval.offHint')} />}
         {settings.mode === 'dry' && <Alert type="info" showIcon title={t('forecast.eval.dryHint')} />}
         {settings.readiness.some((item) => item.key === 'ledger_chain' && !item.ok) && (
           <Alert type="warning" showIcon title={t('quoteAdmin.ledgerNoPrimary')} />
@@ -177,11 +203,28 @@ export default function ForecastEvaluatorStatus({
             })}
           />
         )}
+        {on && stillFailing.map((r) => (
+          <Alert
+            key={r.key}
+            type="warning"
+            showIcon
+            title={readinessDetail(r) || t(`forecast.eval.readiness.${r.key}`)}
+          />
+        ))}
+        {on && nextUnchecked && (
+          <Alert
+            type="warning"
+            showIcon
+            title={t('forecast.eval.gate.nextUnchecked', { bench: t(`forecast.bench.${nextUnchecked}`), from: settings.bench_next_from ?? '' })}
+          />
+        )}
         {(hb?.awaiting_gate?.length ?? 0) > 0 && (
           <Alert
             type="warning"
             showIcon
-            title={t('forecast.eval.awaiting_gate', { codes: (hb?.awaiting_gate ?? []).join(', ') })}
+            title={t('forecast.eval.awaiting_gate', {
+              codes: (hb?.awaiting_gate ?? []).map((c) => t(`forecast.bench.${c}`)).join(t('forecast.listSeparator')),
+            })}
           />
         )}
         {hb?.pass.last_error && <Alert type="error" showIcon title={hb.pass.last_error} />}
@@ -190,75 +233,89 @@ export default function ForecastEvaluatorStatus({
 
         <ForecastBacklog backlog={settings.backlog} />
 
-        <Descriptions column={{ xs: 1, sm: 2 }} size="small" bordered>
-          <Descriptions.Item label={t('forecast.eval.readiness.title')}>
-            <Space orientation="vertical" size={2}>
-              {settings.readiness.map((r) => (
-                <Typography.Text key={r.key} type={r.ok ? undefined : 'danger'}>
-                  {r.ok ? '✓' : '✗'} {t(`forecast.eval.readiness.${r.key}`)}
-                  {!r.ok && readinessDetail(r) ? ` — ${readinessDetail(r)}` : ''}
-                </Typography.Text>
-              ))}
+        {hb && (
+          <Typography.Text>
+            {t('forecast.eval.summary', {
+              resolved: hb.pass.resolved,
+              due: hb.pass.due_unsettled,
+              fetches,
+              errors: hb.pass.errors + hb.pass.panics,
+            })}
+          </Typography.Text>
+        )}
+
+        {!on && (
+          <Descriptions column={1} size="small" bordered>
+            <Descriptions.Item label={t('forecast.eval.readiness.title')}>
+              <Space orientation="vertical" size={2}>
+                {settings.readiness.map((r) => (
+                  <Typography.Text key={r.key} type={r.ok ? undefined : 'danger'}>
+                    {r.ok ? '✓' : '✗'} {t(`forecast.eval.readiness.${r.key}`)}
+                    {!r.ok && readinessDetail(r) ? ` — ${readinessDetail(r)}` : ''}
+                  </Typography.Text>
+                ))}
+              </Space>
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+
+        {settings.mode === 'dry' && (
+          <div>
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+              {t('forecast.eval.sample.title')}
+            </Typography.Title>
+            {hb && (hb.dry_sample?.length ?? 0) > 0 ? (
+              <div className="rp-table-scroll">
+              <Table
+                size="small"
+                rowKey={(r) => `${r.set_id}-${r.kind}-${r.mark ?? ''}-${r.code}`}
+                pagination={false}
+                dataSource={hb.dry_sample}
+                columns={sampleColumns}
+              />
+              </div>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('forecast.eval.sample.empty')} />
+            )}
+          </div>
+        )}
+
+        {showGate && (
+          <div>
+            <Typography.Title level={5} style={{ marginTop: 0 }}>
+              {t('forecast.eval.gate.title')}
+            </Typography.Title>
+            <Typography.Text type="secondary">{t('forecast.eval.gate.hint')}</Typography.Text>
+            <Space wrap style={{ marginTop: 8 }}>
+              <Select
+                value={code}
+                onChange={(next: string) => setPick({ code: next, against: suggested })}
+                style={{ width: 160 }}
+                aria-label={t('forecast.eval.gate.code')}
+                options={gateCodes.map((c) => ({ value: c, label: t(`forecast.bench.${c}`) }))}
+              />
+              <Input
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={t('forecast.eval.gate.notePlaceholder')}
+                aria-label={t('forecast.eval.gate.note')}
+                style={{ width: 360 }}
+              />
+              <Button onClick={recordGate} disabled={busy || !note.trim()}>
+                {t('forecast.eval.gate.save')}
+              </Button>
             </Space>
-          </Descriptions.Item>
-          <Descriptions.Item label={t('forecast.eval.fetches', { n: hb ? Object.values(hb.pass.fetches).reduce((a, b) => a + b, 0) : 0 })}>
-            {hb ? `${hb.pass.resolved} / ${hb.pass.due_unsettled}` : '—'}
-          </Descriptions.Item>
-        </Descriptions>
-
-        <div>
-          <Typography.Title level={5} style={{ marginTop: 0 }}>
-            {t('forecast.eval.sample.title')}
-          </Typography.Title>
-          {hb && (hb.dry_sample?.length ?? 0) > 0 ? (
-            <div className="rp-table-scroll">
-            <Table
-              size="small"
-              rowKey={(r) => `${r.set_id}-${r.kind}-${r.mark ?? ''}-${r.code}`}
-              pagination={false}
-              dataSource={hb.dry_sample}
-              columns={sampleColumns}
-            />
-            </div>
-          ) : (
-            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('forecast.eval.sample.empty')} />
-          )}
-        </div>
-
-        <div>
-          <Typography.Title level={5} style={{ marginTop: 0 }}>
-            {t('forecast.eval.gate.title')}
-          </Typography.Title>
-          <Typography.Text type="secondary">{t('forecast.eval.gate.hint')}</Typography.Text>
-          <Space wrap style={{ marginTop: 8 }}>
-            <Select
-              value={code}
-              onChange={setCode}
-              style={{ width: 160 }}
-              aria-label={t('forecast.eval.gate.code')}
-              options={settings.gate_codes.map((c) => ({ value: c, label: t(`forecast.bench.${c}`) }))}
-            />
-            <Input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={t('forecast.eval.gate.notePlaceholder')}
-              aria-label={t('forecast.eval.gate.note')}
-              style={{ width: 360 }}
-            />
-            <Button onClick={recordGate} disabled={busy || !note.trim()}>
-              {t('forecast.eval.gate.save')}
-            </Button>
-          </Space>
-          {settings.dry_gate[code] && (
-            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
-              {t('forecast.eval.gate.recorded', {
-                by: settings.dry_gate[code].by,
-                at: dayjs(settings.dry_gate[code].at).format('YYYY-MM-DD HH:mm'),
-              })}
-              {settings.dry_gate[code].note ? ` — ${settings.dry_gate[code].note}` : ''}
-            </Typography.Text>
-          )}
-        </div>
+            {settings.dry_gate[code] && (
+              <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+                {t('forecast.eval.gate.recorded', {
+                  by: settings.dry_gate[code].by,
+                  at: dayjs(settings.dry_gate[code].at).format('YYYY-MM-DD HH:mm'),
+                })}
+                {settings.dry_gate[code].note ? ` — ${settings.dry_gate[code].note}` : ''}
+              </Typography.Text>
+            )}
+          </div>
+        )}
       </Space>
     </Card>
   )

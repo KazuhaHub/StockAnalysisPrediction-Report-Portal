@@ -102,3 +102,43 @@ func TestForecastDeliveryDiagnosticsBoundAndRedact(t *testing.T) {
 		t.Fatal("successful set kept stale failure")
 	}
 }
+
+// A source with no as-of stamp cannot vouch for a bar dated today, so the evaluator settles a
+// session's marks only once the date has rolled over (newestBarFinal). The lagging clock must start
+// there: measured from the close, every trading evening paged at 21:00 over work nothing could do.
+func TestLaggingClockStartsWhenTheBarCanBeVouchedFor(t *testing.T) {
+	s := newV1Server(t)
+	id := seedAcceptedSetAt(t, s, "688469", "2026-10-23")
+	if _, err := s.st.exec(`UPDATE prediction_marks SET session_date='2026-10-30' WHERE set_id=? AND checkpoint='d5'`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.SetSetting(setForecastAuto, forecastModeOn); err != nil {
+		t.Fatal(err)
+	}
+	evening := shanghai(2026, time.October, 30, 22, 11)
+	b, err := s.forecastBacklog(evening)
+	if err != nil || b.Due != 1 || b.OldestMinutes != 401 || b.Overdue != 0 || b.OldestLateMinutes != 0 {
+		t.Fatalf("evening backlog=%+v error=%v", b, err)
+	}
+	if err := s.st.saveForecastHeartbeat(forecastHeartbeat{Mode: forecastModeOn, LastTickAt: evening.UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	s.forecastWatchdogOnce(evening)
+	if at := s.st.forecastAlertState().Last["lagging"]; at != "" {
+		t.Fatalf("lagging paged at %s for a session that cannot settle before midnight", at)
+	}
+
+	// Six hours after the rollover the work is genuinely late, and before the next open.
+	morning := shanghai(2026, time.October, 31, 6, 1)
+	b, err = s.forecastBacklog(morning)
+	if err != nil || b.Overdue != 1 || b.OldestLateMinutes != 361 {
+		t.Fatalf("morning backlog=%+v error=%v", b, err)
+	}
+	if err := s.st.saveForecastHeartbeat(forecastHeartbeat{Mode: forecastModeOn, LastTickAt: morning.UTC().Format(time.RFC3339)}); err != nil {
+		t.Fatal(err)
+	}
+	s.forecastWatchdogOnce(morning)
+	if s.st.forecastAlertState().Last["lagging"] == "" {
+		t.Fatal("work still unsettled six hours after the rollover did not page")
+	}
+}

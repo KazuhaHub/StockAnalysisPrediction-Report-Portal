@@ -32,7 +32,7 @@ export function evaluatorStatus(s: ForecastSettings, nowMs: number): EvaluatorSt
   // last manual pass said, and on the ledger signals below, which do not expire.
   if (!hb) return s.mode === 'dry' ? 'dry' : 'stale'
   if (s.mode !== 'dry' && nowMs - Date.parse(hb.last_tick_at) > STALLED_MS) return 'stale'
-  if ((s.backlog?.oldest_minutes ?? 0) > LAGGING_MINUTES) return 'lagging'
+  if ((s.backlog?.oldest_late_minutes ?? 0) > LAGGING_MINUTES) return 'lagging'
   if (hb.pass.errors > 0 || hb.pass.panics > 0) return 'error'
   if (
     (hb.awaiting_gate?.length ?? 0) > 0 ||

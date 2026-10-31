@@ -132,12 +132,21 @@ describe('ForecastPage', () => {
   })
 
   it('says the evaluator is off, and shows the counts beside it', async () => {
-    apiMock.get.mockImplementation(byUrl({ ...on, enabled: false, due_sets: 0, pending: 0 }))
+    apiMock.get.mockImplementation(byUrl({ ...on, enabled: false, mode: '0', due_sets: 0, pending: 0 }))
     show()
-    await waitFor(() => expect(screen.getByText('forecast.eval.off')).toBeTruthy())
     // Off is the shipped state and reads as a fault unless named as intentional.
-    expect(screen.getByText('forecast.eval.offHint')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('forecast.eval.offHint')).toBeTruthy())
     expect(screen.getByText('forecast.eval.due')).toBeTruthy()
+  })
+
+  it('names the ledger benchmark and its scheduled successor instead of a bare code, without repeating the mode', async () => {
+    apiMock.get.mockImplementation(byUrl({ ...on, bench: 'sh000852', bench_next: 'sh000906', bench_next_from: '2026-11' }))
+    show()
+    await waitFor(() => expect(screen.getByText('forecast.eval.title')).toBeTruthy())
+    expect(screen.getAllByText(/forecast\.bench\.sh000852/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/forecast\.eval\.benchNext/)).toBeTruthy()
+    // The mode switch already says whether the evaluator is on; the ledger card does not repeat it.
+    expect(screen.queryByText('forecast.eval.on')).toBeNull()
   })
 
   it('marks a non-zero refusal count as a number to act on, not as another counter', async () => {
