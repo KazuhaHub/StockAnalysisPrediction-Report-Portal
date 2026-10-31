@@ -107,10 +107,14 @@ Browser-plugin acceptance exercised actual directory discovery, unverified label
 TLS/signature/artifact staging, exact verified summary, explicit empty-audience
 review, background completion and refresh preserving the operation UUID. The
 confirmation showed the downloaded 1.0.1-beta.1 version rather than the already
-staged 1.0.0-beta.1 package. English/Simplified/Traditional UI followed Portal
-preferences; theme switching retained progress. No native desktop control or
-production server was used. This is interaction/DOM evidence, not mobile/pixel,
-assistive technology or production network acceptance.
+staged 1.0.0-beta.1 package. A subsequent pass installed it, confirmed the
+uninstall dialog's clear-on-uninstall disclosure, completed uninstall, verified
+that the same release returned to the installable state, and reinstalled it.
+English/Simplified/Traditional UI followed Portal preferences; theme switching
+retained progress. The fixture now sets its synthetic session through a
+`Set-Cookie` response header instead of relying on browser execution of an inline
+cookie script. No production server was used. This is interaction/DOM evidence,
+not mobile/pixel, assistive technology or production network acceptance.
 
 ## Verification and remaining work
 

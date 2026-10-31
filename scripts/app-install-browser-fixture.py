@@ -96,8 +96,10 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                 if self.relay():
                     return
                 path = urlsplit(self.path).path
+                set_cookie = None
                 if path in ("/", "/manage/apps", "/apps"):
                     cookie = fixture_cookie(state["cookieName"], state["cookie"])
+                    set_cookie = cookie
                     cookie_script = f"<script>document.cookie={json.dumps(cookie)}</script>"
                     data = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"><div id="host"></div>' + cookie_script + '<script src="/host.js"></script>').encode()
                     mime = "text/html; charset=utf-8"
@@ -110,6 +112,8 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                 self.send_response(200)
                 self.send_header("Content-Type", mime)
                 self.send_header("Cache-Control", "no-store")
+                if set_cookie is not None and safe_response_header("Set-Cookie", set_cookie):
+                    self.send_header("Set-Cookie", set_cookie)
                 self.end_headers()
                 self.wfile.write(data)
 
