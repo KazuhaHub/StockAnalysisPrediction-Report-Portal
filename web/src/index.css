@@ -2194,6 +2194,21 @@ body {
   }
 }
 
+/* Touch screens: small controls get a target a finger can hit (WCAG 2.2: 24px; Apple: 44pt) with no
+   change to how they look. A switch's hit area grows past its edges; an unlabelled checkbox gains
+   padding that a negative margin of the same size cancels, so nothing moves; number-input arrows,
+   about 1px wide on a phone, give way to typing the number. */
+@media (pointer: coarse) {
+  .ant-switch { overflow: visible; }
+  .ant-switch::after { content: ''; position: absolute; inset: -12px -8px; }
+  .ant-checkbox-wrapper:not(:has(> .ant-checkbox + span)) { padding: 10px; margin: -10px; }
+  .ant-input-number-actions { display: none; }
+}
+/* A spinning status icon holds still for readers who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .anticon-spin, .anticon-spin::before { animation: none; }
+}
+
 /* Every antd tab row that does not fit scrolls (antd's own swipe and wheel) and fades at the side
    that has more, like the settings workspace; antd's "…" overflow menu hid tabs behind a click. */
 .ant-tabs > .ant-tabs-nav .ant-tabs-nav-operations { display: none !important; }

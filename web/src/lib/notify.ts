@@ -160,6 +160,15 @@ export function notify(opts: NotifyOptions): string {
 }
 
 /** Close a notification by key (an exit animation, then removal). */
+/**
+ * A failed action, said once: the stack's failure kind, keyed by its text so a repeat replaces the
+ * card instead of stacking it. Every error a page reports goes through here, never antd's
+ * message.error, whose three seconds can pass before anyone looks (notify.guard.test.ts).
+ */
+export function notifyError(title: ReactNode): string {
+  return notify({ kind: 'failure', title, key: typeof title === 'string' ? `error:${title}` : undefined })
+}
+
 export function dismissNotification(key: string, reason: NotifyCloseReason = 'manual'): void {
   const item = items.find((i) => i.key === key)
   if (!item || item.leaving) return
