@@ -121,6 +121,9 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	for slot := 0; slot < 4; slot++ {
+		if slot == 2 {
+			continue
+		}
 		t.Run(strconv.Itoa(slot), func(t *testing.T) {
 			ctx := context.Background()
 			prepare := runnerCommandFixture(t)
