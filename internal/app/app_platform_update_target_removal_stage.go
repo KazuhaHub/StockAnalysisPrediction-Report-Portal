@@ -58,7 +58,7 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 	}
 	current, err := s.preparePlatformUpdateTargetRemoval(
 		ctx, lease, intent.command.Stage,
-		int(mustPlatformCheckpointInt(intent.effectNumber)))
+		intent.effectNumber)
 	if err != nil {
 		return zero, err
 	}
@@ -108,7 +108,7 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 			AND state='prepared' AND receipt_json='{}'
 			AND observed_fence=0 AND created_ms=? AND updated_ms=?`,
 			lease.fence, string(encoded), now, lease.id,
-			mustPlatformCheckpointInt(intent.effectNumber),
+			intent.effectNumber,
 			current.command.EffectID, current.command.Stage,
 			current.command.PayloadSHA256, runtime.id,
 			lease.controllerEpoch, lease.fence,
@@ -156,7 +156,7 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 	}
 	after, err := s.preparePlatformUpdateTargetRemoval(
 		ctx, result, intent.command.Stage,
-		int(mustPlatformCheckpointInt(intent.effectNumber)))
+		intent.effectNumber)
 	if err != nil || !samePlatformUpdateTargetRemovalIntent(
 		expected, after) {
 		return zero, errAppPlatformStageEvidence

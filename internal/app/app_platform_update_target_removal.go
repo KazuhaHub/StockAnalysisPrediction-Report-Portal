@@ -27,7 +27,7 @@ type platformUpdateTargetRemovalIntent struct {
 	sourceOperation  string
 	nativeID         string
 	effectStage      string
-	effectNumber     string
+	effectNumber     int
 	created, updated int64
 	applied          bool
 	receipt          journal.ManagedRemovalReceipt
@@ -267,7 +267,7 @@ func (s *Server) preparePlatformUpdateTargetRemoval(ctx context.Context, lease p
 		sourceOperation: checkpoint.OperationID,
 		nativeID:        start.running.NativeID,
 		effectStage:     "quiesce",
-		effectNumber:    strconv.Itoa(effectNumber),
+		effectNumber:    effectNumber,
 		created:         created, updated: updated,
 	}
 	if fresh {
