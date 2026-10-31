@@ -438,7 +438,7 @@ export default function ForecastReadingCard({
           {allowPayload && set.payload && (
             <details>
               <summary style={{ cursor: 'pointer' }}>{t('forecast.panel.payload')}</summary>
-              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{set.payload}</pre>
+              <pre className="rp-code">{set.payload}</pre>
             </details>
           )}
         </div>

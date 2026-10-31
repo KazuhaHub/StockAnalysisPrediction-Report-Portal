@@ -193,15 +193,7 @@ export default function ReviewPage() {
             <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
               {t('review.emptyBody')}
             </Typography.Paragraph>
-            <pre
-              style={{
-                background: token.colorFillQuaternary,
-                padding: 12,
-                borderRadius: token.borderRadius,
-                fontSize: 12,
-                overflowX: 'auto',
-              }}
-            >
+            <pre className="rp-code">
               {`POST /api/v1/reports
 {
   "symbol": "600519", "date": "2026-07-31", "subtype": "投资决策",

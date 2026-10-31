@@ -348,7 +348,7 @@ function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; t
             // antd's copy control stops its own click, so copying never folds the panel.
             extra: r.detail ? <Typography.Text copyable={{ text: r.detail }} /> : null,
             // Bounded and scrollable: a grant change over a large OU carries a long list.
-            children: <pre>{pretty || '—'}</pre>,
+            children: <pre className="rp-code">{pretty || '—'}</pre>,
           },
         ]}
       />

@@ -2444,7 +2444,9 @@ body {
 }
 .rp-audit-record__raw.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding-inline: 0; color: var(--ant-color-primary); }
 .rp-audit-record__raw.ant-collapse .ant-collapse-content-box { padding-inline: 0; }
-.rp-audit-record__raw pre {
+/* Code and payload blocks (codeBlocks.test.ts): one template, wrapped rather than scrolled sideways
+   so a command or a payload reads on a phone, bounded in height. */
+.rp-code {
   max-height: 320px;
   margin: 0;
   padding: 10px 12px;

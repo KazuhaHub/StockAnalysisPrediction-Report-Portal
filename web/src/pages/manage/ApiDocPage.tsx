@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Card, Empty, Input, Pagination, Space, Spin, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import Markdown from '../../components/Markdown'
@@ -14,18 +14,6 @@ const METHOD_COLORS: Record<string, string> = {
   DELETE: 'red',
 }
 
-const CODE_BLOCK: CSSProperties = {
-  background: 'rgba(128,128,128,0.12)',
-  padding: 12,
-  borderRadius: 'var(--ant-border-radius)',
-  overflow: 'auto',
-  fontSize: 12,
-  lineHeight: 1.6,
-  margin: '4px 0 0',
-  // Wrapped rather than scrolled sideways: a command is still readable broken across lines on a phone.
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-all',
-}
 
 function EndpointCard({ e }: { e: ApiEndpoint }) {
   const { t } = useTranslation()
@@ -70,13 +58,13 @@ function EndpointCard({ e }: { e: ApiEndpoint }) {
           <Typography.Text strong style={{ fontSize: 12 }}>
             {t('apidoc.requestExample')}
           </Typography.Text>
-          <pre style={CODE_BLOCK}>{e.requestExample}</pre>
+          <pre className="rp-code">{e.requestExample}</pre>
         </div>
         <div>
           <Typography.Text strong style={{ fontSize: 12 }}>
             {t('apidoc.responseExample')}
           </Typography.Text>
-          <pre style={CODE_BLOCK}>{e.responseExample}</pre>
+          <pre className="rp-code">{e.responseExample}</pre>
         </div>
 
         {e.errors.length > 0 && (
