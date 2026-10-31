@@ -8,7 +8,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Popover,
   Space,
   Tag,
@@ -17,6 +16,7 @@ import {
 } from 'antd'
 import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -322,9 +322,9 @@ export default function TypesPage() {
       width: 60,
       align: 'right' as const,
       render: (_: any, r: TypeRow) => (
-        <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.name)}>
+        <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.name)} okText={t('types.deleteAction')}>
           <Button size="small" danger disabled={dirty || busy} icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]
@@ -342,22 +342,22 @@ export default function TypesPage() {
         <Button type="primary" disabled={dirty || busy} icon={<PlusOutlined />} onClick={openAdd}>
           {t('common.add')}
         </Button>
-        <Popconfirm title={t('types.reclassifyConfirm')} onConfirm={reclassify}>
+        <Confirm title={t('types.reclassifyConfirm')} onConfirm={reclassify} okText={t('types.reclassifyAction')} danger={false}>
           <Button disabled={dirty || busy} icon={<ReloadOutlined />} loading={reclassifying}>
             {t('types.reclassify')}
           </Button>
-        </Popconfirm>
-        <Popconfirm title={t('types.restoreDefaultsConfirm')} onConfirm={restoreDefaults}>
+        </Confirm>
+        <Confirm title={t('types.restoreDefaultsConfirm')} onConfirm={restoreDefaults} okText={t('types.restoreDefaultsAction')} irreversible>
           <Button disabled={dirty || busy} icon={<RollbackOutlined />} loading={restoring}>
             {t('types.restoreDefaults')}
           </Button>
-        </Popconfirm>
+        </Confirm>
         {selected.length > 0 && (
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={removeSelected}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={removeSelected} okText={t('types.deleteSelectedAction')}>
             <Button danger disabled={dirty || busy} icon={<DeleteOutlined />}>
               {t('common.deleteSelected')} ({selected.length})
             </Button>
-          </Popconfirm>
+          </Confirm>
         )}
       </Space>
       <Typography.Text type="secondary">{t('manage.typesSaveScope')}</Typography.Text>

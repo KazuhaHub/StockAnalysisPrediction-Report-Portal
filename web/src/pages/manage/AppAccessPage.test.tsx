@@ -137,7 +137,7 @@ describe('App service status', () => {
     expect(screen.getByRole('heading', { name: 'nav.quotes · Default' })).toBeTruthy()
     expect((save() as HTMLButtonElement).disabled).toBe(false)
     await user.click(screen.getByText('Research'))
-    await user.click((await screen.findAllByRole('button', { name: 'apps.access.discardOk' })).slice(-1)[0])
+    await user.click((await screen.findAllByRole('button', { name: 'apps.access.discardAction' })).slice(-1)[0])
     await heading('nav.quotes · Research')
   })
 

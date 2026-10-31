@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
+import { App, Button, Card, Form, Input, Modal, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -102,9 +103,9 @@ export default function WebhooksPage() {
           <Button size="small" icon={<SendOutlined />} onClick={() => test(h.id)}>
             {t('webhook.test')}
           </Button>
-          <Popconfirm title={t('webhook.deleteConfirm')} onConfirm={() => remove(h.id)}>
+          <Confirm title={t('webhook.deleteConfirm')} onConfirm={() => remove(h.id)} okText={t('webhook.deleteAction')}>
             <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },

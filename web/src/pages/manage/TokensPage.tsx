@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Tag, Typography } from 'antd'
+import { Alert, App, Button, DatePicker, Form, Input, Modal, Select, Space, Tag, Typography } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -122,11 +123,11 @@ export default function TokensPage() {
           {t('common.add')}
         </Button>
         {selected.length > 0 && (
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={removeSelected}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={removeSelected} okText={t('tokens.deleteSelectedAction')} irreversible>
             <Button danger icon={<DeleteOutlined />}>
               {t('common.deleteSelected')} ({selected.length})
             </Button>
-          </Popconfirm>
+          </Confirm>
         )}
       </Space>
 
@@ -161,9 +162,9 @@ export default function TokensPage() {
             width: 60,
             align: 'right',
             render: (_, r) => (
-              <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.id)}>
+              <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.id)} okText={t('tokens.deleteAction')} irreversible>
                 <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-              </Popconfirm>
+              </Confirm>
             ),
           },
         ]}

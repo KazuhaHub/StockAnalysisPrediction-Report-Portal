@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
+import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import Confirm, { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -127,8 +128,7 @@ export default function RunPresetsEditor() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'), okText: t('manage.leave'),
-      cancelText: t('manage.stay'), okButtonProps: { danger: true }, onOk: () => setDraft(null) })
+    confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'), okText: t('manage.leave'), cancelText: t('manage.stay'), onOk: () => setDraft(null) }, t)
   }
 
   const load = (opts?: LoadOpts) => {
@@ -230,9 +230,9 @@ export default function RunPresetsEditor() {
                 </Typography.Text>
                 {p.invert ? <Tag color="orange">{t('preset.invertTag')}</Tag> : <Tag>{t('preset.overrun.' + p.on_overrun)}</Tag>}
                 <Button size="small" icon={<EditOutlined />} onClick={() => edit(p)} aria-label={t('common.edit')} />
-                <Popconfirm title={t('preset.deleteConfirm')} onConfirm={() => remove(p.id)} okText={t('common.ok')} cancelText={t('common.cancel')}>
+                <Confirm title={t('preset.deleteConfirm')} onConfirm={() => remove(p.id)} okText={t('preset.deleteAction')}>
                   <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-                </Popconfirm>
+                </Confirm>
               </div>
             </SortableItem>
           ))}

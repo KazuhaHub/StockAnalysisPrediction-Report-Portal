@@ -113,6 +113,14 @@ beforeEach(() => {
   onTabChange.mockReset()
 })
 
+// The confirmation's action-named button, found inside the open popover (the opener can share its name).
+const confirmBtn = async (name: string) =>
+  within(await waitFor(() => {
+    const p = document.querySelector('.ant-popover:not(.ant-popover-hidden)')
+    if (!p) throw new Error('no confirmation open')
+    return p as HTMLElement
+  })).getByRole('button', { name })
+
 describe('Tasks drawer mine / all (ADR 0047)', () => {
   it('lets an administrator switch to their own runs', async () => {
     mount()
@@ -311,7 +319,7 @@ describe('Tasks drawer Runs tab', () => {
     store.jobs = [job({ id: 77 })]
     mount()
     await user.click(await screen.findByRole('button', { name: 'tasks.cancel' }))
-    await user.click(await screen.findByRole('button', { name: 'OK' }))
+    await user.click(await confirmBtn('queue.cancelRunAction'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/77/cancel'))
   })
 
@@ -344,7 +352,7 @@ describe('Tasks drawer Runs tab', () => {
     store.jobs = [job({ id: 77 })]
     mount()
     await user.click(await screen.findByRole('button', { name: 'tasks.cancel' }))
-    await screen.findByRole('button', { name: 'OK' })
+    await confirmBtn('queue.cancelRunAction')
     expect(rows('tasks.section.active')[0].classList.contains('is-active')).toBe(true)
   })
 
@@ -376,7 +384,7 @@ describe('Tasks drawer Exports tab', () => {
     expect(row.textContent).toContain('tasks.rows:{"done":22,"total":34}')
     await user.click(within(row).getByRole('button', { name: 'tasks.cancel' }))
     expect(apiMock.post).not.toHaveBeenCalled() // one tap is not enough
-    await user.click(await screen.findByRole('button', { name: 'OK' }))
+    await user.click(await confirmBtn('export.history.cancelAction'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/exports/e1/cancel'))
     expect(refreshTasks).toHaveBeenCalled()
   })
@@ -554,7 +562,7 @@ describe('Tasks drawer rows open the run in place', () => {
     mount()
     await screen.findByText('Deep Research')
     fireEvent.click(within(rows('tasks.section.active')[0]).getByRole('button', { name: 'tasks.cancel' }))
-    await screen.findByRole('button', { name: 'OK' }) // its own confirmation opened
+    await confirmBtn('queue.cancelRunAction') // its own confirmation opened
     expect(screen.queryByText(/batch\.jobTitle|batch\.jobDetail/)).toBeNull()
   })
 
@@ -663,7 +671,7 @@ describe('Tasks drawer rows open the export in place', () => {
     expect(screen.getByTestId('where').textContent).toBe('/')
     fireEvent.click(within(modalEl()).getByRole('button', { name: /tasks\.cancel/ }))
     expect(apiMock.post).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('export.history.cancelAction'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/exports/e1/cancel'))
   })
 

@@ -4,6 +4,7 @@ import type { MenuProps } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EditOutlined, HomeOutlined, MessageOutlined, MoreOutlined, PlusOutlined, RobotOutlined, StarFilled, StarOutlined, StopOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../components/Confirm'
 import { api, ApiError, errText } from '../api/client'
 import { useAuth } from '../auth'
 import Markdown from '../components/Markdown'
@@ -554,12 +555,11 @@ export default function ChatPage() {
   }
 
   const confirmDelete = (c: ChatConversation) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('chat.deleteConfirm'),
-      okText: t('common.delete'),
-      okButtonProps: { danger: true },
+      okText: t('chat.deleteAction'),
       onOk: () => delConv(c.id),
-    })
+    }, t)
 
   // Star/unstar optimistically (snappy pin), reverting the local flag if the write fails.
   const toggleStar = async (c: ChatConversation) => {

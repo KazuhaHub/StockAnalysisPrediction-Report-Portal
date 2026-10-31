@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Space, Spin, Switch, Tag, Tooltip, Typography } from 'antd'
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -172,9 +173,9 @@ export default function ChatAdminPage() {
       key: 'actions',
       width: 48,
       render: (_: unknown, r: ChatLiveTurn) => (
-        <Popconfirm title={t('chatAdmin.stopConfirm')} onConfirm={() => stop(r.id)} okButtonProps={{ danger: true }}>
+        <Confirm title={t('chatAdmin.stopConfirm')} onConfirm={() => stop(r.id)} okText={t('chatAdmin.stopAction')}>
           <Button size="small" type="text" danger icon={<StopOutlined />} title={t('chatAdmin.stop')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]

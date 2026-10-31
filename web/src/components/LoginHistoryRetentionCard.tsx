@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, InputNumber, Popconfirm, Space, Spin, Typography } from 'antd'
+import { Alert, App, Button, Card, InputNumber, Space, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
 
@@ -35,9 +36,9 @@ export default function LoginHistoryRetentionCard() {
       <Space wrap>
         <Typography.Text>{t('loginActivity.keep')}</Typography.Text>
         <InputNumber aria-label={t('loginActivity.keep')} min={1} max={10000} precision={0} value={keep} onChange={setKeep} disabled={saving} />
-        <Popconfirm title={t('storage.loginHistoryConfirm', { count: keep })} onConfirm={save}>
+        <Confirm title={t('storage.loginHistoryConfirm', { count: keep })} onConfirm={save} okText={t('storage.loginHistoryAction')} irreversible>
           <Button type="primary" loading={saving} disabled={!valid || keep === saved}>{t('common.save')}</Button>
-        </Popconfirm>
+        </Confirm>
       </Space>
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t('storage.loginHistoryHint')}</Typography.Paragraph>
     </>}

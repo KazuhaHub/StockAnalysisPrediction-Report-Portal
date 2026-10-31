@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Select, Space, Tag, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Select, Space, Tag, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm, { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -75,9 +76,9 @@ function VersionRegistry() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
-      okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
-      onOk: () => setDraft(null) })
+    confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'),
+      okText: t('manage.leave'), cancelText: t('manage.stay'),
+      onOk: () => setDraft(null) }, t)
   }
   const save = async () => {
     if (!draft) return
@@ -135,9 +136,9 @@ function VersionRegistry() {
             { title: t('versions.reportCount'), dataIndex: 'reports', width: 90 },
             { title: '', width: 100, align: 'right', render: (_, version) => <Space size={4}>
               <Button size="small" icon={<EditOutlined />} aria-label={t('common.edit')} onClick={() => open(version)} />
-              {!version.is_default && <Popconfirm title={t('versions.deleteConfirm')} onConfirm={() => remove(version.name)}>
+              {!version.is_default && <Confirm title={t('versions.deleteConfirm')} onConfirm={() => remove(version.name)} okText={t('versions.deleteAction')}>
                 <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-              </Popconfirm>}
+              </Confirm>}
             </Space> },
           ]} />
       </div>

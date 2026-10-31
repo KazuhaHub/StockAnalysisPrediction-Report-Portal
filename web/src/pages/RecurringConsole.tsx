@@ -3,6 +3,7 @@ import { App, Button, Card, Drawer, Input, InputNumber, Modal, Select, Space, Sw
 import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../components/Confirm'
 import { visibleOn } from '../lib/batchUi'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
@@ -210,31 +211,30 @@ export default function RecurringConsole() {
   }
 
   const runNow = (task: RecurringTask) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('recurring.runNowTitle', { name: task.name }),
-      content: t('recurring.runNowBody'),
-      okText: t('recurring.runNow'),
-      cancelText: t('common.cancel'),
+      description: t('recurring.runNowBody'),
+      okText: t('recurring.runNowAction'),
+      danger: false,
       onOk: async () => {
         const r = await api.post<{ job_id: number }>(`/api/admin/batch/recurring/${task.id}/run`, {})
         message.success(t('recurring.firedJob', { id: r.job_id }))
         loadTasks(true).catch(() => {})
       },
-    })
+    }, t)
 
   const remove = (task: RecurringTask) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('recurring.deleteTitle', { name: task.name }),
-      content: t('recurring.deleteBody'),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('recurring.deleteBody'),
+      okText: t('recurring.deleteAction'),
+      irreversible: true,
       onOk: async () => {
         await api.del(`/api/admin/batch/recurring/${task.id}`)
         message.success(t('recurring.deleted'))
         loadTasks(true).catch(() => {})
       },
-    })
+    }, t)
 
   const openHistory = async (task: RecurringTask) => {
     const d = await api.get<RecurringDetail>(`/api/admin/batch/recurring/${task.id}`)

@@ -161,8 +161,8 @@ describe('the history drawer', () => {
     state.form = { ...editorForm, updated_at: 'token-after-restore' }
 
     await userEvent.click(screen.getAllByText('reportHistory.restore')[0])
-    // antd's Popconfirm renders its OK button with the default confirm label.
-    await userEvent.click(await screen.findByText('OK'))
+    // The confirmation's button names the action, not a default "OK".
+    await userEvent.click(await screen.findByText('reportHistory.restoreAction'))
 
     await waitFor(() => expect(state.postedTo).toBe('/api/reports/12/revisions/7/restore'))
     // The editor's token, not the report's current sent_at: a restore computed from a list drawn

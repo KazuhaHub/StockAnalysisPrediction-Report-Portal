@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
@@ -130,7 +131,7 @@ export default function NotificationsPage() {
             { title: t('batch.col.actions'), render: (_, c) => <Space wrap>
               <Button size="small" onClick={() => openChannel(c)}>{t('common.edit')}</Button>
               {c.adapter !== 'inbox' && <Button size="small" disabled={!c.enabled || busy} onClick={() => { setTestTo(''); setTestChannel(c) }}>{t('notify.test')}</Button>}
-              {(!c.id.startsWith('legacy:') || c.legacy_ref.startsWith('webhook:')) && <Popconfirm title={t('notify.deleteChannel')} onConfirm={() => run(() => notifications.deleteChannel(c.id, c.revision))}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Popconfirm>}
+              {(!c.id.startsWith('legacy:') || c.legacy_ref.startsWith('webhook:')) && <Confirm title={t('notify.deleteChannel')} onConfirm={() => run(() => notifications.deleteChannel(c.id, c.revision))} okText={t('notify.deleteChannelAction')} irreversible><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Confirm>}
             </Space> },
           ]} />
         </Space> },
@@ -143,7 +144,7 @@ export default function NotificationsPage() {
             { title: t('notify.events'), render: (_, r) => r.events.split(',').map(kind => <Tag key={kind}>{eventLabel(kind)}</Tag>) },
             { title: t('notify.audience'), render: (_, r) => t(`notify.mode.${r.recipient_mode}`) },
             { title: t('notify.status'), render: (_, r) => t(r.enabled ? 'notify.enabled' : 'notify.disabled') },
-            { title: t('batch.col.actions'), render: (_, r) => <Space><Button size="small" onClick={() => openRule(r)}>{t('common.edit')}</Button><Popconfirm title={t('notify.deleteRule')} onConfirm={() => run(() => notifications.deleteRoute(r.id, r.revision))}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Popconfirm></Space> },
+            { title: t('batch.col.actions'), render: (_, r) => <Space><Button size="small" onClick={() => openRule(r)}>{t('common.edit')}</Button><Confirm title={t('notify.deleteRule')} onConfirm={() => run(() => notifications.deleteRoute(r.id, r.revision))} okText={t('notify.deleteRuleAction')}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Confirm></Space> },
           ]} />
         </Space> },
         { key: 'history', label: t('notify.history'), children: <Space orientation="vertical" style={{ width: '100%' }}>

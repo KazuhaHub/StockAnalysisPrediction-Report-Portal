@@ -43,7 +43,7 @@ describe('TypesPage — restore defaults', () => {
     fireEvent.click(await screen.findByText('types.restoreDefaults'))
     expect(post).not.toHaveBeenCalled() // Popconfirm gate: nothing fires on the first click
 
-    fireEvent.click(await screen.findByText('OK')) // antd Popconfirm default confirm label
+    fireEvent.click(await screen.findByText('types.restoreDefaultsAction')) // the Confirm template names the action
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/admin/types/restore-defaults', {}))
   })
 })

@@ -21,6 +21,8 @@ interface Rules {
   irreversible?: boolean
   /** More about the consequence, shown before the irreversibility line. */
   description?: ReactNode
+  /** The way back, when "Cancel" says less than it could ("Keep editing"). */
+  cancelText?: string
 }
 
 export default function Confirm({
@@ -29,6 +31,7 @@ export default function Confirm({
   danger = true,
   irreversible,
   description,
+  cancelText,
   onConfirm,
   onOpenChange,
   disabled,
@@ -54,7 +57,7 @@ export default function Confirm({
       title={title}
       description={body}
       okText={okText}
-      cancelText={t('common.cancel')}
+      cancelText={cancelText ?? t('common.cancel')}
       okButtonProps={{ danger }}
       cancelButtonProps={{ autoFocus: true }}
       onConfirm={onConfirm}
@@ -70,7 +73,7 @@ export default function Confirm({
 /** The same rules for a dialog confirmation (antd's modal.confirm from App.useApp()). */
 export function confirmAction(
   modal: Pick<HookAPI, 'confirm'>,
-  { title, okText, danger = true, irreversible, description, ...rest }: Rules & Omit<ModalFuncProps, 'title' | 'okText' | 'content'>,
+  { title, okText, danger = true, irreversible, description, cancelText, ...rest }: Rules & Omit<ModalFuncProps, 'title' | 'okText' | 'content'>,
   t: (key: string) => string,
 ) {
   const content = description || irreversible ? (
@@ -85,7 +88,7 @@ export function confirmAction(
     title,
     content,
     okText,
-    cancelText: t('common.cancel'),
+    cancelText: cancelText ?? t('common.cancel'),
     okButtonProps: { danger },
     autoFocusButton: 'cancel',
   })

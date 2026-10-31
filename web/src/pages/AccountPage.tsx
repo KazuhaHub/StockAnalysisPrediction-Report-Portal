@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Space,
   Spin,
   Tag,
@@ -16,6 +15,7 @@ import {
 } from 'antd'
 import { KeyOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../components/Confirm'
 import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
@@ -421,11 +421,11 @@ function PasskeyCard({
                     : t('account.passkeyNeverUsed')}
                 </Typography.Text>
               </span>
-              <Popconfirm title={t('account.passkeyRevokeConfirm')} onConfirm={() => setProofFor(k.id)}>
+              <Confirm title={t('account.passkeyRevokeConfirm')} onConfirm={() => setProofFor(k.id)} okText={t('account.passkeyRevokeAction')}>
                 <Button type="text" danger size="small">
                   {t('account.passkeyRevoke')}
                 </Button>
-              </Popconfirm>
+              </Confirm>
             </div>
           ))}
         </div>

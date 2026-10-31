@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, 
 import { AuditOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -235,14 +236,13 @@ export default function StoragePage() {
   // Reports (core content): preview the live count, then a strict confirm before arming or running.
   const guardReports = async (onConfirm: () => void) => {
     const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: ['reports'] })
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmReportsTitle'),
-      content: t('storage.confirmReportsBody', { count: r.reports, days: cfg?.reports_days ?? reportsDays }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmReportsBody', { count: r.reports, days: cfg?.reports_days ?? reportsDays }),
+      okText: t('storage.cleanReportsAction'),
+      irreversible: true,
       onOk: onConfirm,
-    })
+    }, t)
   }
 
   // The ledger is the second danger-zone target, and for a stronger reason than reports: a report
@@ -250,14 +250,13 @@ export default function StoragePage() {
   // was claimed at a moment that has passed. Confirmed like reports, with its own wording.
   const guardPredictions = async (onConfirm: () => void) => {
     const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: ['predictions'] })
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmPredictionsTitle'),
-      content: t('storage.confirmPredictionsBody', { count: r.predictions, days: cfg?.predictions_days ?? predictionsDays }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmPredictionsBody', { count: r.predictions, days: cfg?.predictions_days ?? predictionsDays }),
+      okText: t('storage.cleanPredictionsAction'),
+      irreversible: true,
       onOk: onConfirm,
-    })
+    }, t)
   }
 
   const onTogglePredictions = (checked: boolean) => {
@@ -292,14 +291,13 @@ export default function StoragePage() {
     // silently fell through to the tokens count, so the audit confirm promised to delete however
     // many TOKENS had expired.
     const n = r[key as 'batch' | 'tokens' | 'reports' | 'audit' | 'revisions' | 'predictions'] ?? 0
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmTitle'),
-      content: t('storage.confirmBody', { n, days, cat: t(`storage.cat.${key}`) }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmBody', { n, days, cat: t(`storage.cat.${key}`) }),
+      okText: t('storage.cleanCategoryAction', { cat: t(`storage.cat.${key}`) }),
+      irreversible: true,
       onOk: () => doRun([key]),
-    })
+    }, t)
   }
 
   // retention/grace currently in effect for each category (last-saved, so labels match what a run does)

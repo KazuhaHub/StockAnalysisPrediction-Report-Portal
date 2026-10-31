@@ -9,7 +9,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Switch,
@@ -29,6 +28,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm, { confirmAction } from '../../components/Confirm'
 import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
@@ -223,16 +223,15 @@ export default function UsersPage() {
               {/* A federated account has no local password, so knowing which rows those are is the
                   difference between offering a password reset and offering to revoke a binding. */}
               {u.federated && (
-                <Popconfirm
+                <Confirm
                   title={t('users.unlinkConfirm', { slug: u.sso_slug || 'SSO' })}
-                  okText={t('users.unlink')}
-                  cancelText={t('common.cancel')}
                   onConfirm={() => unlink(u.username)}
+                  okText={t('users.unlinkAction')}
                 >
                   <Tag color="geekblue" style={{ cursor: 'pointer' }}>
                     {t('users.federatedTag', { slug: u.sso_slug || 'SSO' })}
                   </Tag>
-                </Popconfirm>
+                </Confirm>
               )}
             </div>
             <div className="rp-user-secondary" title={`@${u.username}${u.email ? ` · ${u.email}` : ''}`}>
@@ -327,9 +326,9 @@ export default function UsersPage() {
         <Space size={4}>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(u)} aria-label={t('common.edit')} />
           <Button size="small" icon={<KeyOutlined />} onClick={() => setPwUser(u.username)} aria-label={t('users.newPassword')} />
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(u.username)} disabled={u.username === data?.me}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(u.username)} disabled={u.username === data?.me} okText={t('users.deleteAction')} irreversible>
             <Button size="small" danger icon={<DeleteOutlined />} disabled={u.username === data?.me} aria-label={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },
@@ -391,11 +390,11 @@ export default function UsersPage() {
             <Button size="small" onClick={() => bulk('clear_group')}>
               {t('users.bulkClearGroup')}
             </Button>
-            <Popconfirm title={t('users.bulkDeleteConfirm', { n: selected.length })} onConfirm={() => bulk('delete')}>
+            <Confirm title={t('users.bulkDeleteConfirm', { n: selected.length })} onConfirm={() => bulk('delete')} okText={t('users.deleteSelectedAction')} irreversible>
               <Button size="small" danger>
                 {t('common.delete')}
               </Button>
-            </Popconfirm>
+            </Confirm>
           </Space>
         </Card>
       )}
@@ -578,9 +577,9 @@ function GroupsPanel({
             if (next === selId) return
             if (detailPending.saving) { message.info(t('manage.saveInProgress')); return }
             if (!detailPending.dirty) { setSelId(next); return }
-            modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
-              okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
-              onOk: () => setSelId(next) })
+            confirmAction(modal, { title: t('manage.leaveTitle'), description: t('manage.leaveDescription'),
+              okText: t('manage.leave'), cancelText: t('manage.stay'),
+              onOk: () => setSelId(next) }, t)
           }}
           onManage={() => {}}
           onAdd={() => setAdding(true)}

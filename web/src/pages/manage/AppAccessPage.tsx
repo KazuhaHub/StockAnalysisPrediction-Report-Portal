@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, Card, Radio, Result, Space, Tag, Typography, theme } from 'antd'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { AppAccessOU, UserGroupRow } from '../../api/types'
@@ -90,13 +91,12 @@ function AccessWorkspace({
       onSelect(id)
       return
     }
-    modal.confirm({
+    confirmAction(modal, {
       title: t('apps.access.discardTitle'),
-      content: t('apps.access.discardBody'),
-      okText: t('apps.access.discardOk'),
-      cancelText: t('common.cancel'),
+      description: t('apps.access.discardBody'),
+      okText: t('apps.access.discardAction'),
       onOk: () => onSelect(id),
-    })
+    }, t)
   }
   const overridden = useMemo(() => new Set(app.access.filter((a) => a.own !== null).map((a) => a.ou)), [app.access])
   const annotate = useCallback(

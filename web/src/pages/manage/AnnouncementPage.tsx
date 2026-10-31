@@ -8,7 +8,6 @@ import {
   Empty,
   Form,
   Input,
-  Popconfirm,
   Radio,
   Segmented,
   Select,
@@ -21,6 +20,7 @@ import {
 } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import useFormDraft from './useFormDraft'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
@@ -359,9 +359,9 @@ export default function AnnouncementPage() {
           />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(a)} aria-label={t('common.edit')} />
-        <Popconfirm title={t('announcementAdmin.deleteConfirm')} onConfirm={() => remove(a.id)}>
+        <Confirm title={t('announcementAdmin.deleteConfirm')} onConfirm={() => remove(a.id)} okText={t('announcementAdmin.deleteAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       </div>
     )
   }

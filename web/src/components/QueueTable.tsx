@@ -9,7 +9,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Progress,
   Segmented,
   Select,
@@ -30,6 +29,7 @@ import {
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
 import { exportLink, runsFilterToTree } from '../lib/exportFilter'
@@ -337,14 +337,14 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           )}
           {!isTerminal(j.status)
             ? canCancel(j) && (
-                <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancel(j.id)}>
+                <Confirm title={t('queue.cancelConfirm')} onConfirm={() => cancel(j.id)} okText={t('queue.cancelRunAction')}>
                   <Button size="small" type="text" danger icon={<StopOutlined />} title={t('common.cancel')} />
-                </Popconfirm>
+                </Confirm>
               )
             : admin && (
-                <Popconfirm title={t('queue.deleteConfirm')} onConfirm={() => del(j.id)}>
+                <Confirm title={t('queue.deleteConfirm')} onConfirm={() => del(j.id)} okText={t('queue.deleteRunAction')} irreversible>
                   <Button size="small" type="text" danger icon={<DeleteOutlined />} title={t('common.delete')} />
-                </Popconfirm>
+                </Confirm>
               )}
         </Space>
       ),
@@ -393,11 +393,11 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </span>
       )}
       {selectedJobs.length > 0 && (
-        <Popconfirm title={t('queue.cancelJobsConfirm', { n: selectedJobs.length })} onConfirm={() => cancelJobs(selectedJobs)}>
+        <Confirm title={t('queue.cancelJobsConfirm', { n: selectedJobs.length })} onConfirm={() => cancelJobs(selectedJobs)} okText={t('queue.cancelRunsAction')}>
           <Button size="small" danger icon={<StopOutlined />}>
             {t('queue.cancelSelected', { n: selectedJobs.length })}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
       {admin && (
         // Hands the current filters to the Export page. Only status, submitter and workflow have a
@@ -418,11 +418,11 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </Button>
       )}
       {admin && (
-        <Popconfirm title={t('queue.clearFinishedConfirm')} onConfirm={clearFinished}>
+        <Confirm title={t('queue.clearFinishedConfirm')} onConfirm={clearFinished} okText={t('queue.clearFinishedAction')} irreversible>
           <Button size="small" icon={<DeleteOutlined />}>
             {t('queue.clearFinished')}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         {t('queue.autoRefresh')}

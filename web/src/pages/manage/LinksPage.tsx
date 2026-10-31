@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Switch, Tag, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Checkbox, Empty, Form, Input, Modal, Radio, Select, Space, Switch, Tag, Tooltip, Typography, theme } from 'antd'
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -322,9 +323,9 @@ export default function LinksPage() {
           <Switch size="small" checked={g.visible !== false} onChange={(v) => toggleGroupVisible(g, v)} />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openGroupEdit(g)} aria-label={t('common.edit')} />
-        <Popconfirm title={t('links.deleteGroupConfirm')} onConfirm={() => deleteGroup(g.id)}>
+        <Confirm title={t('links.deleteGroupConfirm')} onConfirm={() => deleteGroup(g.id)} okText={t('links.deleteGroupAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       </div>
     )
   }
@@ -364,9 +365,9 @@ export default function LinksPage() {
           <Switch size="small" checked={l.visible !== false} onChange={(v) => toggleLinkVisible(l, v)} />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(l)} aria-label={t('common.edit')} />
-        <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(l.id)}>
+        <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(l.id)} okText={t('links.deleteAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       </div>
     )
   }

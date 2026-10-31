@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, T
 import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -316,14 +317,13 @@ export default function QuoteSourcesPage() {
     try {
       if (ledger?.ledgerPrimary && !rows.some((r) => r.enabled && r.source === ledger.ledgerPrimary)) {
         const confirmed = await new Promise<boolean>((resolve) => {
-          const confirmation = modal.confirm({
+          const confirmation = confirmAction(modal, {
             title: t('quoteAdmin.ledgerRemoveTitle'),
-            content: t('quoteAdmin.ledgerRemoveBody', { source: sourceLabel(ledger.ledgerPrimary) }),
+            description: t('quoteAdmin.ledgerRemoveBody', { source: sourceLabel(ledger.ledgerPrimary) }),
             okText: t('quoteAdmin.ledgerRemoveConfirm'),
-            cancelText: t('common.cancel'),
             onOk: () => resolve(true),
             onCancel: () => resolve(false),
-          })
+          }, t)
           cancelConfirmation.current = () => { confirmation.destroy(); resolve(false) }
         })
         cancelConfirmation.current = null

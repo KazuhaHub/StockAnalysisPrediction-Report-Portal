@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import LoginHistoryRetentionCard from './LoginHistoryRetentionCard'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: { get: vi.fn(), put: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
+// The confirmation's action-named button, found inside the open popover (the opener can share its name).
+const confirmBtn = async (name: string) =>
+  within(await waitFor(() => {
+    const p = document.querySelector('.ant-popover:not(.ant-popover-hidden)')
+    if (!p) throw new Error('no confirmation open')
+    return p as HTMLElement
+  })).getByRole('button', { name })
+
 describe('Administrator login history retention', () => {
   beforeEach(() => {
     apiMock.get.mockReset().mockResolvedValue({ keep: 100 })
@@ -19,7 +27,7 @@ describe('Administrator login history retention', () => {
     fireEvent.blur(input)
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }))
     expect(apiMock.put).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('storage.loginHistoryAction'))
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/login-activity/retention', { keep: 3 }))
     await waitFor(() => expect((screen.getByRole('button', { name: /common.save/ }) as HTMLButtonElement).disabled).toBe(true))
   })
@@ -30,7 +38,7 @@ describe('Administrator login history retention', () => {
     fireEvent.change(input, { target: { value: '5' } })
     fireEvent.blur(input)
     fireEvent.click(screen.getByRole('button', { name: 'common.save' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('storage.loginHistoryAction'))
     expect(await screen.findByText('Request failed')).toBeTruthy()
     expect(apiMock.get).toHaveBeenCalledTimes(1)
   })

@@ -61,7 +61,7 @@ describe('ExportHistory', () => {
     const cancels = screen.getAllByRole('button', { name: 'export.history.cancel' })
     expect(cancels).toHaveLength(1)
     await user.click(cancels[0])
-    await user.click(await screen.findByRole('button', { name: /^OK$/ }))
+    await user.click(await screen.findByRole('button', { name: 'export.history.cancelAction' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/exports/r1/cancel'))
   })
 

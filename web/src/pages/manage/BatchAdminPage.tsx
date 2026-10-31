@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Alert, App, Button, Checkbox, Form, Input, Modal, Popover, Select, Space, Spin, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, CloudDownloadOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import useFormDraft from './useFormDraft'
 import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
@@ -461,9 +462,9 @@ function GlobalExecutionTargets() {
               <Button size="small" icon={<EditOutlined />} title={t('common.edit')} onClick={() => openEdit(tg)} />
             </>
           )}
-          <Popconfirm title={t('batch.admin.deleteTargetConfirm')} onConfirm={() => deleteTarget(tg.id)}>
+          <Confirm title={t('batch.admin.deleteTargetConfirm')} onConfirm={() => deleteTarget(tg.id)} okText={t('batch.admin.deleteTargetAction')}>
             <Button size="small" danger icon={<DeleteOutlined />} title={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },
@@ -477,9 +478,9 @@ function GlobalExecutionTargets() {
       title: t('batch.col.actions'),
       width: 80,
       render: (_: unknown, p: BatchPlugin) => (
-        <Popconfirm title={t('batch.admin.deletePluginConfirm')} onConfirm={() => deletePlugin(p.slug)}>
+        <Confirm title={t('batch.admin.deletePluginConfirm')} onConfirm={() => deletePlugin(p.slug)} okText={t('batch.admin.deletePluginAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]

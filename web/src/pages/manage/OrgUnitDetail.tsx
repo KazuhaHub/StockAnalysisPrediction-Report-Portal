@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Tag, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tag, Typography } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { loadFailure } from '../../lib/loadFailure'
 import { useLoadFailure } from '../../lib/useOnReconnect'
@@ -562,11 +563,11 @@ export default function OrgUnitDetail({
       {show('targets') && !group.restricted_effective && <Alert type="info" showIcon title={t('ou.unrestrictedTargets')} />}
 
       {show('directory') && !isDefault && (
-        <Popconfirm title={t('users.deleteGroupConfirm')} onConfirm={remove}>
+        <Confirm title={t('users.deleteGroupConfirm')} onConfirm={remove} okText={t('ou.deleteOu')}>
           <Button danger icon={<DeleteOutlined />}>
             {t('ou.deleteOu')}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
 
       <Modal

@@ -4,7 +4,6 @@ import {
   Button,
   Input,
   InputNumber,
-  Popconfirm,
   Popover,
   Segmented,
   Select,
@@ -22,6 +21,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 
 import type { PluginInput } from '../api/types'
 import {
@@ -246,15 +246,16 @@ export default function BatchRowsEditor({
           <Button size="small" icon={<DownloadOutlined />} onClick={() => downloadCSV('batch-rows.csv', currentCSV())}>
             {t('batch.editor.downloadRows')}
           </Button>
-          <Popconfirm
+          <Confirm
             title={t('batch.editor.clearConfirm')}
             onConfirm={() => {
               setRawCSV(toCSV(keys, []))
               onChange([blankBatchRow(inputs)])
             }}
+            okText={t('batch.editor.clearAction')}
           >
             <Button size="small" danger>{t('batch.editor.clear')}</Button>
-          </Popconfirm>
+          </Confirm>
         </Space>
       </div>
 

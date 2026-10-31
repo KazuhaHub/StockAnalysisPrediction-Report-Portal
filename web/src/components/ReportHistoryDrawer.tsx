@@ -5,7 +5,6 @@ import {
   Button,
   Drawer,
   Empty,
-  Popconfirm,
   Segmented,
   Space,
   Spin,
@@ -15,6 +14,7 @@ import {
 } from 'antd'
 import { RollbackOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import type { SectionDiff } from '../api/types'
 import { formatReportDateTime } from '../lib/datetime'
@@ -198,7 +198,7 @@ export default function ReportHistoryDrawer({
                       {v.title} · {t('reportHistory.bytes', { count: v.bytes })}
                     </Typography.Text>
                   </span>
-                  <Popconfirm title={t('reportHistory.restoreConfirm')} onConfirm={() => restore(v.id)}>
+                  <Confirm title={t('reportHistory.restoreConfirm')} onConfirm={() => restore(v.id)} okText={t('reportHistory.restoreAction')} danger={false}>
                     <Button
                       size="small"
                       icon={<RollbackOutlined />}
@@ -207,7 +207,7 @@ export default function ReportHistoryDrawer({
                     >
                       {t('reportHistory.restore')}
                     </Button>
-                  </Popconfirm>
+                  </Confirm>
                 </div>
               ))}
             </div>

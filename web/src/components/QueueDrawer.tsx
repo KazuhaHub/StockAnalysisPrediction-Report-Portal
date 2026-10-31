@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
@@ -285,11 +286,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         actions={
           <>
             {live && (
-              <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)} onOpenChange={(o) => setConfirming(o ? `run-${j.id}` : null)}>
+              <Confirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)} onOpenChange={(o) => setConfirming(o ? `run-${j.id}` : null)} okText={t('queue.cancelRunAction')}>
                 <Tooltip title={t('tasks.cancel')}>
                   <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
-              </Popconfirm>
+              </Confirm>
             )}
           </>
         }
@@ -337,15 +338,16 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         actions={
           <>
             {x.cancel && (
-              <Popconfirm
+              <Confirm
                 title={t('export.history.cancelConfirm')}
                 onConfirm={() => void cancelExport(x)}
                 onOpenChange={(o) => setConfirming(o ? `export-${taskKey(x)}` : null)}
+                okText={t('export.history.cancelAction')}
               >
                 <Tooltip title={t('tasks.cancel')}>
                   <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
-              </Popconfirm>
+              </Confirm>
             )}
             {x.download && iconAction(t('tasks.download'), <DownloadOutlined />, { href: x.download })}
           </>

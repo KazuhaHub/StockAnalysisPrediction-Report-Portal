@@ -123,9 +123,9 @@ describe('App detail: installed app', () => {
     renderAt('/manage/apps/hello')
     await user.click(await screen.findByRole('button', { name: /apps\.section\.uninstall\.title/ }))
     // The confirmation says what else goes with the app; nothing is deleted yet.
-    expect(await screen.findByText('apps.section.uninstall.confirmBody')).toBeTruthy()
+    expect(await screen.findByText(/apps.section.uninstall.confirmBody.*confirm.irreversible/)).toBeTruthy()
     expect(apiMock.del).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'apps.section.uninstall.confirmOk' }))
+    await user.click(screen.getByRole('button', { name: 'apps.section.uninstall.confirmAction' }))
     await waitFor(() => expect(apiMock.del).toHaveBeenCalledWith('/api/admin/apps/hello'))
     expect(await screen.findByText('list')).toBeTruthy()
   })

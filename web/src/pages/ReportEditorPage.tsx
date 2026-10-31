@@ -7,7 +7,6 @@ import {
   DatePicker,
   Form,
   Input,
-  Popconfirm,
   Radio,
   Row,
   Segmented,
@@ -28,6 +27,7 @@ import {
 import dayjs from 'dayjs'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import Confirm, { confirmAction } from '../components/Confirm'
 import { ApiError, api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import type { Principal } from '../api/types'
@@ -229,14 +229,12 @@ export default function ReportEditorPage() {
       go()
       return
     }
-    modal.confirm({
+    confirmAction(modal, {
       title: t('reportEditor.discardTitle'),
-      content: t('reportEditor.discardBody'),
+      description: t('reportEditor.discardBody'),
       okText: t('reportEditor.discardOk'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
       onOk: go,
-    })
+    }, t)
   }
 
   // Importing a .md file fills the body rather than uploading anything: the report is the text, and
@@ -296,13 +294,13 @@ export default function ReportEditorPage() {
         ? (e.data as { id?: number } | undefined)?.id
         : undefined
       if (other) {
-        modal.confirm({
+        confirmAction(modal, {
           title: t('reportEditor.existsTitle'),
-          content: t('reportEditor.existsBody'),
+          description: t('reportEditor.existsBody'),
           okText: t('reportEditor.existsOpen'),
-          cancelText: t('common.cancel'),
+          danger: false,
           onOk: () => navigate(`/report/${other}/edit`),
-        })
+        }, t)
       } else {
         message.error(errText(e, t))
       }
@@ -497,11 +495,11 @@ export default function ReportEditorPage() {
                   {t('common.save')}
                 </Button>
                 {editingId && (
-                  <Popconfirm title={t('reportEditor.deleteConfirm')} onConfirm={remove}>
+                  <Confirm title={t('reportEditor.deleteConfirm')} onConfirm={remove} okText={t('reportEditor.deleteAction')} irreversible>
                     <Button danger icon={<DeleteOutlined />}>
                       {t('common.delete')}
                     </Button>
-                  </Popconfirm>
+                  </Confirm>
                 )}
               </Space>
             </Space>

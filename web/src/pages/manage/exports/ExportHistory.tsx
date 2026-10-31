@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Alert, Button, Card, Popconfirm, Progress, Space, Tag, Tooltip, Typography } from 'antd'
+import { App, Alert, Button, Card, Progress, Space, Tag, Tooltip, Typography } from 'antd'
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../../components/Confirm'
 import { api, errText } from '../../../api/client'
 import { useLoadFailure } from '../../../lib/useOnReconnect'
 import type { ExportJob, ExportStatus } from '../../../api/types'
@@ -129,11 +130,11 @@ export default function ExportHistory({ tz, labels, onReuse, mode = 'admin' }: {
               </Button>
             )}
             {a.cancel && (
-              <Popconfirm title={t('export.history.cancelConfirm')} onConfirm={() => cancel(j)}>
+              <Confirm title={t('export.history.cancelConfirm')} onConfirm={() => cancel(j)} okText={t('export.history.cancelAction')}>
                 <Button type="link" size="small" danger>
                   {t('export.history.cancel')}
                 </Button>
-              </Popconfirm>
+              </Confirm>
             )}
             <Button type="link" size="small" onClick={() => onReuse(j)}>
               {t('export.history.reuse')}
