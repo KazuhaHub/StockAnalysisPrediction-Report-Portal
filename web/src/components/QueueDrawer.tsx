@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
 import { InputsPreview, isTerminal, jobProgressPresentation } from '../lib/batchUi'
-import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
+import { UNCHANGED, forgetTags, getIfChanged, type TagHolder } from '../lib/conditionalGet'
 import { fmtBytes, notifyExportsChanged } from '../lib/exportJobs'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
@@ -26,6 +26,9 @@ export type DrawerTab = 'runs' | 'exports'
 // Finished exports are kept this long (exportFileTTL in internal/app/export_jobs.go).
 const EXPORT_KEPT_DAYS = 7
 const RECENT_MAX = 5
+
+// One scope's last answer: null until its first summary / jobs call has landed.
+type ScopeView = { summary: BatchQueueSummary | null; jobs: BatchJob[] | null; err: string }
 
 export interface TasksDrawerProps {
   open: boolean
@@ -70,62 +73,69 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
   const runsShown = canRun && activeTab === 'runs'
   // Whose runs the drawer covers; the same per-browser pick as the full page (ADR 0047).
   const [scope, setScope] = useQueueScope(admin)
-  const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
-  const [jobs, setJobs] = useState<BatchJob[]>([])
+  // Each scope keeps its own last answer, so the Mine / All switch shows the other at once and
+  // never shows one scope's runs under the other's label. A scope with no answer yet has no
+  // entry: `[]` and a wall of zeros are where the state starts, not an answer, so nothing is said
+  // about the queue until that scope's jobs call has landed at least once.
+  const [views, setViews] = useState<Partial<Record<QueueScope, ScopeView>>>({})
   const [targets, setTargets] = useState<BatchTarget[]>([])
-  // Same rule as the full queue page: `[]` and a wall of zeros are where the state starts, not
-  // an answer. Nothing is said about the queue until the jobs call has landed at least once.
-  const [loaded, setLoaded] = useState(false)
-  const [loadErr, setLoadErr] = useState('')
-  // What this drawer is actually holding. The tag store is module-global, and the header badge
-  // polls the same summary URL — so on the first open a 304 would answer "unchanged" about a
-  // summary the drawer has never seen, leaving all four tiles on a dash for good.
-  // The URLs whose answers the drawer holds (they change with the scope).
-  const heldSummary = useRef<string | null>(null)
-  const heldJobs = useRef<string | null>(null)
+  const view = views[scope]
+  const summary = view?.summary ?? null
+  const jobs = useMemo(() => view?.jobs ?? [], [view])
+  const loaded = !!view?.jobs
+  const loadErr = view?.err ?? ''
+  // The drawer's own revalidation tags. The header badge and the queue page poll the same summary
+  // URL, so with shared tags a 304 could answer "unchanged" about a summary the drawer never had.
+  // Each scope's URLs are fixed and its view keeps the last answer, so whatever tag the drawer
+  // holds for a URL came with the answer it is showing.
+  const [tagHolder] = useState<TagHolder>(() => ({}))
+  // Also when the viewer's admin role changes: the plain URL then means another scope (everyone's
+  // for an administrator, their own otherwise), so a tag kept across that would answer for the wrong one.
+  useEffect(() => () => forgetTags(undefined, tagHolder), [tagHolder, admin])
 
-  const load = async () => {
-    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
-    const jobsUrl = withQueueScope('/api/admin/batch/jobs', scope, admin)
-    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
-    if (heldJobs.current !== jobsUrl) forgetTags(jobsUrl)
-    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
+  const loadScope = async (sc: QueueScope) => {
+    const patch = (p: Partial<ScopeView>) => setViews((v) => ({ ...v, [sc]: { summary: null, jobs: null, err: '', ...v[sc], ...p } }))
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', sc, admin)
+    const jobsUrl = withQueueScope('/api/admin/batch/jobs', sc, admin)
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl, tagHolder)
       .then((r) => {
-        if (r === UNCHANGED) return
-        setSummary(r)
-        heldSummary.current = summaryUrl
+        if (r !== UNCHANGED) patch({ summary: r })
       })
       .catch(() => {})
-    const jobsRequest = getIfChanged<{ jobs: BatchJob[] }>(jobsUrl).then((r) => {
-      if (r === UNCHANGED) return
-      setJobs(r.jobs || [])
-      heldJobs.current = jobsUrl
-    })
     try {
-      await jobsRequest
-      if (heldJobs.current === jobsUrl) {
-        setLoaded(true)
-        setLoadErr('')
-      }
+      const r = await getIfChanged<{ jobs: BatchJob[] }>(jobsUrl, tagHolder)
+      if (r !== UNCHANGED) patch({ jobs: r.jobs || [], err: '' })
     } catch (e) {
-      // Read only while !loaded: a poll that fails once the list is on screen changes nothing,
-      // since those runs are still the last thing the server said about the queue.
+      // Read only while that scope has no rows: a poll that fails once the list is on screen
+      // changes nothing, since those runs are still the last thing the server said.
       const text = loadFailure(e, t)
-      if (text !== null) setLoadErr(text)
+      if (text !== null) patch({ err: text })
     }
     await summaryRequest
   }
+  const load = () => loadScope(scope)
+  // The scope not on screen is asked once per open of the Runs tab, so switching to it has an
+  // answer ready; the poll then keeps whichever scope is showing current.
+  const askedOther = useRef(false)
+  useEffect(() => {
+    if (!open || !runsShown) askedOther.current = false
+  }, [open, runsShown])
 
   useEffect(() => {
     if (!open) return
     void refreshTasks()
     if (!runsShown) return
-    // Reopening asks again, so the drawer must not present the previous open's answer as this
-    // one's — but it keeps the rows it has so a reopen is not a flash of spinner.
-    setLoadErr('')
+    // Reopening, switching scope or returning to Runs asks again, so an earlier failure is not
+    // presented as this ask's answer (a scope that never loaded shows its spinner until the poll
+    // answers or fails again) — but the rows are kept so none of these is a flash of spinner.
+    setViews((v) => Object.fromEntries(Object.entries(v).map(([k, x]) => [k, { ...x, err: '' }])))
     api.get<{ targets: BatchTarget[] }>('/api/admin/batch/targets').then((r) => setTargets(r.targets || [])).catch(() => {})
     const unwatch = watchQueue() // the badge stands down while the drawer shows the same thing
     const stop = startVisiblePoll(load, 3000)
+    if (admin && !askedOther.current) {
+      askedOther.current = true
+      void loadScope(scope === 'all' ? 'mine' : 'all')
+    }
     return () => {
       stop()
       unwatch()

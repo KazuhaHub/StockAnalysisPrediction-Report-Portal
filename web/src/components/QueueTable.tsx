@@ -47,7 +47,7 @@ import {
   priorityNum,
   priorityTag,
 } from '../lib/batchUi'
-import { UNCHANGED, forgetTags, getIfChanged } from '../lib/conditionalGet'
+import { UNCHANGED, forgetTags, getIfChanged, type TagHolder } from '../lib/conditionalGet'
 import { watchQueue } from '../lib/queueWatch'
 import { useQueueScope, withQueueScope, type QueueScope } from '../lib/queueScope'
 import { startVisiblePoll } from '../lib/visiblePoll'
@@ -63,6 +63,9 @@ const todayStr = () => new Date().toISOString().slice(0, 10)
 // (embedded under the run form) so both show the same complete view. Queue mutations
 // are gated to match the server: a non-admin sees only "cancel" and only on their own
 // runs; admins see cancel/terminate/retry/reschedule/reprioritize/delete on any job.
+// One scope's last answer: null until its first jobs / summary call has landed.
+type ScopeView = { jobs: BatchJob[] | null; total: number; summary: BatchQueueSummary | null; err: string }
+
 export default function QueueTable({ showStats = false }: { showStats?: boolean }) {
   const { t } = useTranslation()
   const { message } = App.useApp()
@@ -71,9 +74,6 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const [scope, setScope] = useQueueScope(admin)
   const mobile = !Grid.useBreakpoint().md
   const navigate = useNavigate()
-  const [jobs, setJobs] = useState<BatchJob[]>([])
-  const [total, setTotal] = useState(0)
-  const [summary, setSummary] = useState<BatchQueueSummary | null>(null)
   const [targets, setTargets] = useState<BatchTarget[]>([])
   const [auto, setAuto] = useState(true)
   const [fStatus, setFStatus] = useState<string>('')
@@ -97,19 +97,30 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
   const [reschedId, setReschedId] = useState<number | null>(null)
   const [reschedAt, setReschedAt] = useState<Dayjs | null>(null)
   const [selectedJobs, setSelectedJobs] = useState<Key[]>([])
-  // Has the first jobs answer landed? `jobs` starts at [] because that is where a useState
-  // starts, not because the queue is empty — and "Queue is empty" is a claim about the server.
-  const [loaded, setLoaded] = useState(false)
-  const [loadErr, setLoadErr] = useState('')
+  // Each scope keeps its own last answer, so switching back to one shows it at once and switching
+  // to one not yet asked shows the spinner — never the other scope's runs under this one's label.
+  // A scope with no entry has not answered: `[]` is where state starts, not an empty queue, and
+  // "Queue is empty" is a claim about the server.
+  const [views, setViews] = useState<Partial<Record<QueueScope, ScopeView>>>({})
+  const view = views[scope]
+  const jobs = useMemo(() => view?.jobs ?? [], [view])
+  const total = view?.total ?? 0
+  const summary = view?.summary ?? null
+  const loaded = !!view?.jobs
+  const loadErr = view?.err ?? ''
   const [targetsLoaded, setTargetsLoaded] = useState(false) // the workflow filter's option list
-  // Which answers this component is actually holding. A 304 means "unchanged since the tag YOU
-  // sent", and the tag store is module-global and outlives any one mount — so without these,
-  // arriving on /queue after the header badge has tagged the summary, or clearing the search box
-  // back to a URL tagged before the current rows, is answered "nothing changed" about data this
-  // component does not have. Refs, not state: `load` is captured by a poll started in an effect.
-  const heldJobsUrl = useRef('')
-  // The summary URL whose answer this view holds (it changes with the scope).
-  const heldSummary = useRef<string | null>(null)
+  // This view's own revalidation tags: the header badge and the Tasks drawer poll the same summary
+  // URL, and a 304 means "unchanged since the tag YOU sent", so shared tags would let them answer
+  // "nothing changed" about a summary this view never had.
+  const [tagHolder] = useState<TagHolder>(() => ({}))
+  // Also when the viewer's admin role changes: the plain URL then means another scope (everyone's
+  // for an administrator, their own otherwise), so a tag kept across that would answer for the wrong one.
+  useEffect(() => () => forgetTags(undefined, tagHolder), [tagHolder, admin])
+  // The jobs URL whose answer each scope's view holds. The search box changes that URL within a
+  // scope, so clearing it back to a URL tagged before the current rows would otherwise be answered
+  // "nothing changed" about rows this view no longer has. A ref, not state: `load` is captured by
+  // a poll started in an effect.
+  const heldJobsUrl = useRef<Partial<Record<QueueScope, string>>>({})
 
   const load = async () => {
     // Bounded poll: the server returns every active job + the most recent terminal jobs (not the whole
@@ -119,41 +130,32 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     // whole.
     // Conditional: a queue in which nothing happened answers 304, and keeping the objects we
     // already have is what stops a 3-second poll from re-rendering the table for no reason.
-    const jobsUrl = withQueueScope(`/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`, scope, admin)
-    const summaryUrl = withQueueScope('/api/admin/batch/queue', scope, admin)
-    // Drop the tag for anything we are not holding, so this request has to come back as an answer.
-    if (heldJobsUrl.current !== jobsUrl) forgetTags(jobsUrl)
-    if (heldSummary.current !== summaryUrl) forgetTags(summaryUrl)
-    const jobsRequest = getIfChanged<{ jobs: BatchJob[]; total?: number }>(jobsUrl).then((r) => {
+    const sc = scope
+    const patch = (p: Partial<ScopeView>) => setViews((v) => ({ ...v, [sc]: { jobs: null, total: 0, summary: null, err: '', ...v[sc], ...p } }))
+    const jobsUrl = withQueueScope(`/api/admin/batch/jobs?limit=300${search.trim() ? `&q=${encodeURIComponent(search.trim())}` : ''}`, sc, admin)
+    const summaryUrl = withQueueScope('/api/admin/batch/queue', sc, admin)
+    // Drop the tag for rows we are not holding, so this request has to come back as an answer.
+    if (heldJobsUrl.current[sc] !== jobsUrl) forgetTags(jobsUrl, tagHolder)
+    const jobsRequest = getIfChanged<{ jobs: BatchJob[]; total?: number }>(jobsUrl, tagHolder).then((r) => {
       if (r === UNCHANGED) return
-      setJobs(r.jobs || [])
-      setTotal(r.total ?? (r.jobs || []).length)
-      heldJobsUrl.current = jobsUrl
+      patch({ jobs: r.jobs || [], total: r.total ?? (r.jobs || []).length, err: '' })
+      heldJobsUrl.current[sc] = jobsUrl
     })
-    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl)
+    const summaryRequest = getIfChanged<BatchQueueSummary>(summaryUrl, tagHolder)
       .then((r) => {
-        if (r === UNCHANGED) return
-        setSummary(r)
-        heldSummary.current = summaryUrl
+        if (r !== UNCHANGED) patch({ summary: r })
       })
       .catch(() => {})
     try {
       await jobsRequest
-      // Only once rows for THIS url have actually landed. The guard above means an UNCHANGED can
-      // no longer arrive for a url we are not holding, but the gate is what stands between the
-      // reader and "Queue is empty", so it does not take that on trust.
-      if (heldJobsUrl.current === jobsUrl) {
-        setLoaded(true)
-        setLoadErr('')
-      }
     } catch (e) {
-      // Only the first load has anything to report. Once rows are on screen a failed poll is
+      // Only a scope's first load has anything to report. Once rows are on screen a failed poll is
       // not news — they are still the last thing the server said, and swapping them for an
       // error page would be the worse answer. The render below reads this only while !loaded.
       // A lost connection is not news either: the table keeps its spinner and the next poll (which
       // also runs when the connection returns) asks again.
       const text = loadFailure(e, t)
-      if (text !== null) setLoadErr(text)
+      if (text !== null) patch({ err: text })
     }
     await summaryRequest
   }

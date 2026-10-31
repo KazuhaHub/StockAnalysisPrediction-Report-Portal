@@ -53,4 +53,46 @@ describe('getIfChanged', () => {
     await getIfChanged('/api/q')
     expect(fetchMock.mock.calls[2][1].headers).toBeUndefined()
   })
+
+  // Several pollers ask for one URL (the queue summary: the header badge, the Tasks drawer, the
+  // queue page). A tag moved on by one of them must not let another hear "unchanged" about an
+  // answer it never had.
+  it('keeps each holder to its own tag, so one poller cannot make another stale', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(respond(200, '{"n":1}', 'W/"a1"'))
+      .mockResolvedValueOnce(respond(200, '{"n":2}', 'W/"a2"'))
+      .mockResolvedValueOnce(respond(304, ''))
+    vi.stubGlobal('fetch', fetchMock)
+    const badge = {}
+    const drawer = {}
+
+    await getIfChanged('/api/q', drawer)
+    await getIfChanged('/api/q', badge)
+    await getIfChanged('/api/q', drawer)
+    expect(fetchMock.mock.calls[1][1].headers).toBeUndefined()
+    expect(fetchMock.mock.calls[2][1].headers['If-None-Match']).toBe('W/"a1"')
+  })
+
+  it("forgets one URL for every holder, or every URL for one holder", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(respond(200, '{}', 'W/"t"')))
+    vi.stubGlobal('fetch', fetchMock)
+    const a = {}
+    const b = {}
+    await getIfChanged('/api/q', a)
+    await getIfChanged('/api/q', b)
+    await getIfChanged('/api/r', a)
+
+    forgetTags('/api/q')
+    await getIfChanged('/api/q', a)
+    await getIfChanged('/api/q', b)
+    expect(fetchMock.mock.calls[3][1].headers).toBeUndefined()
+    expect(fetchMock.mock.calls[4][1].headers).toBeUndefined()
+
+    forgetTags(undefined, a)
+    await getIfChanged('/api/r', a)
+    await getIfChanged('/api/q', b)
+    expect(fetchMock.mock.calls[5][1].headers).toBeUndefined()
+    expect(fetchMock.mock.calls[6][1].headers['If-None-Match']).toBe('W/"t"')
+  })
 })

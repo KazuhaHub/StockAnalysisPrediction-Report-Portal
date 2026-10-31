@@ -14,6 +14,10 @@ const store = vi.hoisted(() => ({
   urls: [] as string[],
   admin: true,
   jobs: [] as unknown[],
+  // What an administrator's own scope answers; null means the same as everyone's.
+  jobsMine: null as unknown[] | null,
+  // Leave every scope=mine request unanswered.
+  pendMine: false,
   summary: { running: 0, waiting: 0, scheduled: 0, budget: 3 },
 }))
 // Counts the live pollers: started minus stopped. The first tick runs at once, as the real one does.
@@ -25,6 +29,9 @@ vi.mock('../lib/conditionalGet', () => ({
   forgetTags: () => {},
   getIfChanged: (url: string) => {
     store.urls.push(String(url))
+    const mine = String(url).includes('scope=mine')
+    if (mine && store.pendMine) return new Promise(() => {})
+    if (mine && store.jobsMine && String(url).includes('/jobs')) return Promise.resolve({ jobs: store.jobsMine })
     return String(url).includes('/queue') ? Promise.resolve(store.summary) : Promise.resolve({ jobs: store.jobs })
   },
 }))
@@ -89,6 +96,8 @@ beforeEach(() => {
   poll.live = 0
   store.admin = true
   store.jobs = []
+  store.jobsMine = null
+  store.pendMine = false
   store.summary = { running: 0, waiting: 0, scheduled: 0, budget: 3 }
   localStorage.clear()
   closeJobDetail()
@@ -111,6 +120,37 @@ describe('Tasks drawer mine / all (ADR 0047)', () => {
     fireEvent.click(screen.getByText('queue.scope.mine'))
     await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs') && u.includes('scope=mine'))).toBe(true))
     await waitFor(() => expect(store.urls.some((u) => u.includes('/queue') && u.includes('scope=mine'))).toBe(true))
+  })
+
+  it('loads both scopes when it opens, so switching shows the other at once', async () => {
+    store.jobs = [job({ id: 1, inputs: JSON.stringify({ symbol: '111111' }) })]
+    store.jobsMine = [job({ id: 2, inputs: JSON.stringify({ symbol: '222222' }) })]
+    mount()
+    await screen.findByText(/111111/)
+    await waitFor(() => expect(store.urls.some((u) => u.includes('/jobs') && u.includes('scope=mine'))).toBe(true))
+    await act(async () => {})
+    fireEvent.click(screen.getByText('queue.scope.mine'))
+    // No wait: the answer is already held.
+    expect(screen.getByText(/222222/)).toBeTruthy()
+    expect(screen.queryByText(/111111/)).toBeNull()
+  })
+
+  it("never shows one scope's runs under the other while the other is still loading", async () => {
+    store.jobs = [job({ id: 1, inputs: JSON.stringify({ symbol: '111111' }) })]
+    store.pendMine = true
+    mount()
+    await screen.findByText(/111111/)
+    fireEvent.click(screen.getByText('queue.scope.mine'))
+    expect(screen.queryByText(/111111/)).toBeNull()
+    expect(screen.queryByText('tasks.emptyRuns')).toBeNull()
+  })
+
+  it('asks for the other scope only once per open, not on every poll', async () => {
+    mount()
+    await waitFor(() => expect(store.urls.some((u) => u.includes('scope=mine'))).toBe(true))
+    await act(async () => {})
+    const mineAsks = store.urls.filter((u) => u.includes('/jobs') && u.includes('scope=mine')).length
+    expect(mineAsks).toBe(1)
   })
 
   it('offers no toggle to a non-administrator', async () => {
