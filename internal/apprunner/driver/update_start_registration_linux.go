@@ -39,10 +39,11 @@ func (r *CandidateRuntime) updateStartRegistration(ctx context.Context, request 
 		return zero, ErrContainerUncertain
 	}
 	defer registration.Close()
-	metadata, err := registration.Metadata()
+	metadata, metadataErr := registration.Metadata()
 	descriptor, err := appplatform.ParseDescriptor(request.Descriptor)
 	i, m := request.Identity, metadata.Identity
-	if err != nil || descriptor.Manifest.Backend == nil ||
+	if metadataErr != nil || err != nil ||
+		descriptor.Manifest.Backend == nil ||
 		descriptor.SHA256 != i.ReleaseSHA256 ||
 		m.AppID != descriptor.Manifest.ID ||
 		m.DeploymentID != i.DeploymentID ||
