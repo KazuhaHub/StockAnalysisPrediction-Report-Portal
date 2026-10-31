@@ -74,21 +74,6 @@ func (s *Server) executePlatformUpdateStart(ctx context.Context, expected platfo
 	return s.commitPlatformUpdateStartReceipt(ctx, expected, admission.intent, endpoint, proof)
 }
 
-func (s *Server) readPlatformUpdateStartReceipt(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
-	intent, err := s.preparePlatformUpdateStart(ctx, expected)
-	if err != nil || intent.reservation == nil {
-		return platformOperationLease{}, errAppPlatformStageEvidence
-	}
-	if err := s.checkPlatformManagedOperationRoot(ctx, expected.id, intent.runtime, intent.authority, endpoint); err != nil {
-		return platformOperationLease{}, err
-	}
-	proof, err := platformReadUpdateStartReceipt(ctx, endpoint, intent)
-	if err != nil {
-		return platformOperationLease{}, err
-	}
-	return s.commitPlatformUpdateStartReceipt(ctx, expected, intent, endpoint, proof)
-}
-
 func platformUpdateStartCommandsEqual(a, b control.UpdateStartCommand) bool {
 	a.IssuedMS, a.ExpiresMS = "", ""
 	b.IssuedMS, b.ExpiresMS = "", ""

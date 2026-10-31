@@ -20,6 +20,13 @@ func (s *Server) runPlatformWritableInstallMode(ctx context.Context, expected pl
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
+	if expected.snapshot.Action == appplatform.ActionUpdate && expected.snapshot.Managed &&
+		expected.snapshot.Generation > 1 && expected.snapshot.Stage == appplatform.StageStart &&
+		endpoint.path != "" {
+		lease, err := s.executePlatformUpdateStart(ctx, expected, endpoint)
+		result.lease = lease
+		return result, err
+	}
 	if expected.snapshot.Action != appplatform.ActionInstall || !expected.snapshot.Managed || expected.snapshot.Generation != 1 || endpoint.path == "" {
 		return result, errAppPlatformStageEvidence
 	}
