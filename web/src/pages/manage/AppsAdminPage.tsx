@@ -76,7 +76,8 @@ export default function AppsAdminPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto' }}>
+            {/* The count keeps one line; the search box is what gives way. */}
+            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
               {t('apps.count', { count: shown.length })}
             </Typography.Text>
           </div>

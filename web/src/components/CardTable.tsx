@@ -10,12 +10,14 @@ export type CardColumn<T> = ColumnType<T> & { phoneLabel?: string }
 // horizontal scroll where the cards make it unnecessary (.rp-card-table--cards in index.css).
 export default function CardTable<T>(props: TableProps<T>) {
   const phone = !Grid.useBreakpoint().sm
-  const columns = props.columns?.map((column) => {
+  // The first column names the row (the item); on a card it is the title rather than a labelled field.
+  const columns = props.columns?.map((column, i) => {
     const c = column as CardColumn<T>
     const label = c.phoneLabel ?? (typeof c.title === 'string' ? c.title : '')
+    const card = i === 0 ? { 'data-label': label, 'data-primary': '' } : { 'data-label': label }
     return {
       ...c,
-      onCell: (record: T, index?: number) => ({ ...(c.onCell?.(record, index) ?? {}), 'data-label': label }) as ReturnType<NonNullable<ColumnType<T>['onCell']>>,
+      onCell: (record: T, index?: number) => ({ ...(c.onCell?.(record, index) ?? {}), ...card }) as ReturnType<NonNullable<ColumnType<T>['onCell']>>,
     }
   })
   const className = [props.className, 'rp-card-table', phone && 'rp-card-table--cards'].filter(Boolean).join(' ')

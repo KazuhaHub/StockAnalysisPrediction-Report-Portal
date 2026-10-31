@@ -43,4 +43,14 @@ describe('CardTable', () => {
     expect(cell.getAttribute('title')).toBe('own')
     expect(cell.getAttribute('data-label')).toBe('Name')
   })
+
+  // The first column names the row (Shopify's primary column): on a card it is the title, full width
+  // and unlabelled, not one more labelled field.
+  it('makes the first column the card title', () => {
+    width(true)
+    const { container } = render(<CardTable<Row> rowKey="id" columns={columns} dataSource={rows} />)
+    const cells = [...container.querySelectorAll('.ant-table-tbody tr.ant-table-row td')]
+    expect(cells[0].hasAttribute('data-primary')).toBe(true)
+    expect(cells[1].hasAttribute('data-primary')).toBe(false)
+  })
 })

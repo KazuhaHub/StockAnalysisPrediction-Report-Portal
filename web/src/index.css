@@ -2244,6 +2244,24 @@ body {
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-label='']::before,
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td:not([data-label])::before { content: none; }
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td > * { min-width: 0; }
+/* The first column is the card's title: full width, unlabelled, set apart from the fields below. */
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary] {
+  padding-block: 6px 8px !important;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--ant-color-split) !important;
+  font-weight: 500;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]::before { content: none; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]:last-child { border-bottom: 0 !important; }
+/* Row controls antd adds (expand arrow) sit in the card's corner, not on a line of their own. */
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row { position: relative; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td.ant-table-row-expand-icon-cell {
+  position: absolute !important;
+  inset: 10px 10px auto auto !important;
+  width: auto !important;
+  padding: 0 !important;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:has(> td.ant-table-row-expand-icon-cell) > td[data-primary] { padding-inline-end: 28px !important; }
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row:hover > td { background: transparent !important; }
 .rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) { display: block; }
 .rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) > td { display: block; border: 0; }
