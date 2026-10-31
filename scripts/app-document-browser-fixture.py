@@ -49,7 +49,7 @@ with tempfile.TemporaryDirectory(prefix="portal-document-browser-") as directory
                 self.send_response(response.status)
                 for key in SAFE_RESPONSE_HEADERS:
                     value = response.getheader(key)
-                    if value is not None and safe_response_header(key, value):
+                    if value is not None and isinstance(value, str) and "\r" not in value and "\n" not in value and safe_response_header(key, value):
                         self.send_header(key, value)
                 self.end_headers()
                 self.wfile.write(content)

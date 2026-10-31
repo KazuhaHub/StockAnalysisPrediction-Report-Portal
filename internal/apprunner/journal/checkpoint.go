@@ -290,8 +290,9 @@ func (s *Store) beginCheckpoint(ctx context.Context, raw, signature []byte) (che
 func (s *Store) settleCheckpoint(ctx context.Context, source checkpointSource, observation data.CheckpointObservation) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
 	snapshot, err := observation.Snapshot()
+	projectID, projectErr := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil || snapshot.NamespaceID != source.command.Payload.NamespaceID || snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
-		snapshot.ProjectID != uint32(mustDataInt(source.command.Payload.ProjectID)) || snapshot.DataFormat != mustDataInt(source.command.Payload.DataFormat) ||
+		projectErr != nil || snapshot.ProjectID != projectID || snapshot.DataFormat != mustDataInt(source.command.Payload.DataFormat) ||
 		snapshot.ArchiveBytes <= 0 || snapshot.ArchiveBytes > maxCheckpointArchiveBytes || snapshot.Entries < 0 {
 		return zero, ErrFenceReconciliation
 	}
@@ -381,9 +382,13 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 	if replay {
 		return s.ReadCheckpointReceipt(ctx, raw, signature)
 	}
+	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
+	if err != nil {
+		return zero, ErrFenceReconciliation
+	}
 	request := data.CheckpointRequest{
 		CheckpointID: source.command.Payload.CheckpointID, NamespaceID: source.command.Payload.NamespaceID,
-		ReleaseSHA256: source.command.Payload.ReleaseSHA256, ProjectID: uint32(mustDataInt(source.command.Payload.ProjectID)),
+		ReleaseSHA256: source.command.Payload.ReleaseSHA256, ProjectID: projectID,
 		DataFormat: mustDataInt(source.command.Payload.DataFormat), MaxArchiveBytes: maxCheckpointArchiveBytes,
 		ExpectedDevice: mustDataUint(source.command.Payload.Device), ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
 		WriterFence: mustDataInt(source.command.Payload.WriterFence),
@@ -393,6 +398,14 @@ func (s *Store) DispatchCheckpoint(ctx context.Context, raw, signature []byte, d
 		return zero, err
 	}
 	return s.settleCheckpoint(ctx, source, observation)
+}
+
+func checkpointProjectID(value string) (uint32, error) {
+	project, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || project == 0 || strconv.FormatUint(project, 10) != value {
+		return 0, ErrFenceReconciliation
+	}
+	return uint32(project), nil
 }
 
 func mustDataUint(value string) uint64 {
