@@ -303,12 +303,13 @@ func testPlatformUpdateStartReservationRollback(t *testing.T, pg bool) {
 		mustExec(t, s.st, `CREATE TRIGGER fixture_update_start_reservation_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.update_start_reserved' BEGIN SELECT RAISE(ABORT,'fixture reservation failure'); END`)
 		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_update_start_reservation_failure`)
 	}
+	auditBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_reserved' AND target_id=?`, lease.id)
 	if _, err := s.commitPlatformUpdateStartReservation(context.Background(), lease, intent, endpoint, observation, reservation); err == nil {
 		t.Fatal("failed reservation audit committed")
 	}
 	if scalar[int64](t, s.st, `SELECT observed_fence FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != 0 ||
 		scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "{}" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_reserved' AND target_id=?`, lease.id) != 0 {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_reserved' AND target_id=?`, lease.id) != auditBefore {
 		t.Fatal("failed reservation commit was partial")
 	}
 }
