@@ -185,6 +185,14 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 			admitted.OperationID) != "update:queued" {
 		t.Fatal("managed update did not create a managed operation")
 	}
+	selected, err := s.claimNextPlatformManagedUpdate(
+		ctx, platformFixtureID(981))
+	if err != nil || selected.lease.id != admitted.OperationID ||
+		selected.lease.snapshot.Stage != appplatform.StageQueued {
+		t.Fatal("managed update queue claim", selected, err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operations
+		SET lease_until_ms=1 WHERE id=?`, admitted.OperationID)
 	worker, err := newPlatformWritableInstallScheduler(
 		s, endpoint, platformFixtureID(980), 100*time.Millisecond)
 	if err != nil {
@@ -224,8 +232,14 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 			t.Fatalf("managed update worker stopped: %v %+v",
 				err, worker.currentStatus())
 		case <-workerCtx.Done():
-			t.Fatalf("managed update deadline: %+v",
-				worker.currentStatus())
+			stage := scalar[string](t, s.st, `SELECT stage
+				FROM app_platform_operations WHERE id=?`,
+				admitted.OperationID)
+			owner := scalar[string](t, s.st, `SELECT COALESCE(lease_owner,'')
+				FROM app_platform_operations WHERE id=?`,
+				admitted.OperationID)
+			t.Fatalf("managed update deadline: stage=%s owner=%s %+v",
+				stage, owner, worker.currentStatus())
 		case <-ticker.C:
 		}
 	}
