@@ -33,7 +33,8 @@ func (s *Server) reservePlatformUpdateStart(ctx context.Context, expected platfo
 	}
 	proof, err := platformReserveUpdateStart(ctx, endpoint, intent)
 	if err != nil {
-		return platformUpdateStartAdmission{}, err
+		return platformUpdateStartAdmission{}, fmt.Errorf(
+			"update-start reserve: %w", err)
 	}
 	reservation, ok := validPlatformUpdateStartObservation(proof, intent, endpoint)
 	if !ok {
@@ -71,7 +72,8 @@ func (s *Server) executePlatformUpdateStart(ctx context.Context, expected platfo
 	}
 	proof, err := platformExecuteUpdateStart(ctx, endpoint, admission.intent)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"update-start execute: %w", err)
 	}
 	return s.commitPlatformUpdateStartReceipt(ctx, expected, admission.intent, endpoint, proof)
 }
@@ -89,7 +91,8 @@ func (s *Server) probePlatformUpdateStart(ctx context.Context, expected platform
 	}
 	proof, err := platformProbeUpdateStart(ctx, endpoint, intent)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"update-start probe: %w", err)
 	}
 	return s.commitPlatformUpdateStartReadiness(ctx, expected, intent, endpoint, proof)
 }
