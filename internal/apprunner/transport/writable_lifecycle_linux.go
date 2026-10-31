@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -38,14 +39,16 @@ func RunControllerWritableLifecycle(ctx context.Context, path string, uid, gid u
 func writableLifecycleFrame(parent context.Context, path string, profile endpointProfile, action WritableLifecycleAction, raw, sig []byte, a control.Authority, descriptor, document []byte) (WritableLifecycleObservation, error) {
 	var zero WritableLifecycleObservation
 	if !action.valid() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 || len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes || len(document) > 4096 || action.registrationDelivery() != (len(document) > 0) {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle input", driver.ErrContainerUncertain)
 	}
 	raw, sig, descriptor, document, a.PublicKey = bytes.Clone(raw), bytes.Clone(sig), bytes.Clone(descriptor), bytes.Clone(document), bytes.Clone(a.PublicKey)
 	defer clear(document)
 	started := time.Now()
 	ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, started.UnixMilli())
 	if err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle verification", driver.ErrContainerUncertain)
 	}
 	if action == WritableRegistrationDeliver {
 		v, err := control.VerifyWritableBackendRegistration(raw, sig, a, started.UnixMilli())
@@ -100,34 +103,42 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 	frame = append(frame, size[:]...)
 	frame = append(frame, document...)
 	if _, err := io.Copy(conn, bytes.NewReader(frame)); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle write", driver.ErrContainerUncertain)
 	}
 	if err := conn.CloseWrite(); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle close-write", driver.ErrContainerUncertain)
 	}
 	var header [44]byte
 	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle header", driver.ErrContainerUncertain)
 	}
 	sum := sha256.Sum256(frame)
 	count := binary.BigEndian.Uint32(header[40:])
 	if string(header[:8]) != writableLifecycleReplyMagic || !bytes.Equal(header[8:40], sum[:]) || count == 0 || count > maxWritableLifecycleReply {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle header validation", driver.ErrContainerUncertain)
 	}
 	body := make([]byte, int(count))
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle body", driver.ErrContainerUncertain)
 	}
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle trailing bytes", driver.ErrContainerUncertain)
 	}
 	received := time.Now()
 	if ctx.Err() != nil || !validWritableLifecycleReply(action, body, ref, started, received) {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle reply validation", driver.ErrContainerUncertain)
 	}
 	if _, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, received.UnixMilli()); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
 	command := sha256.Sum256(raw)
 	return WritableLifecycleObservation{action: action, body: string(body), authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: profile.owner, ControllerUID: uint32(os.Geteuid()), ControllerGID: profile.group, RootController: profile.shared}, receivedAt: received, commandSHA: hex.EncodeToString(command[:])}, nil
