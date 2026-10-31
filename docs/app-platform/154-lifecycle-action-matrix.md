@@ -53,7 +53,8 @@ Implemented and tested:
 Still required for H13 completion:
 
 - managed update A-to-B execution (the current generic update executor is
-  frontend-only);
+  frontend-only; the execution and checkpoint gate is specified in
+  [155-managed-update-checkpoint-design.md](155-managed-update-checkpoint-design.md));
 - managed restore and reconciliation around stop/remove-code against a live
   runner;
 - reviewed managed namespace deletion after the retained state (frontend plugin
