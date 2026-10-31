@@ -113,6 +113,64 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, operation).Scan(&raw); err != nil {
 		return nil, err
 	}
+	var probe struct {
+		Format string `json:"format"`
+	}
+	if json.Unmarshal([]byte(raw), &probe) != nil {
+		return nil, errAppPlatformStageEvidence
+	}
+	switch probe.Format {
+	case platformUpdateReviewFormat:
+		var plan platformUpdateProjection
+		if json.Unmarshal([]byte(raw), &plan) != nil ||
+			plan.Format != probe.Format || plan.Target.Runtime == nil {
+			return nil, errAppPlatformStageEvidence
+		}
+		if err := validateManagedInstallTarget(
+			e, plan.Target.Runtime, plan.ControllerEpoch); err != nil {
+			return nil, err
+		}
+		return plan.Target.Runtime, nil
+	case platformManagedUpdateFormat:
+		var plan platformManagedUpdatePlan
+		if json.Unmarshal([]byte(raw), &plan) != nil ||
+			plan.Format != probe.Format || plan.TargetRuntime == nil {
+			return nil, errAppPlatformStageEvidence
+		}
+		if err := validateManagedInstallTarget(
+			e, plan.TargetRuntime, plan.ControllerEpoch); err != nil {
+			return nil, err
+		}
+		return plan.TargetRuntime, nil
+	case platformManagedRestoreFormat:
+		var restore platformManagedRestorePlan
+		if json.Unmarshal([]byte(raw), &restore) != nil ||
+			restore.Format != probe.Format ||
+			!platformValidUUID(restore.CheckpointOperationID) {
+			return nil, errAppPlatformStageEvidence
+		}
+		var updateRaw string
+		if err := e.queryRow(`SELECT p.plan_json
+			FROM app_platform_operations o
+			JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+			WHERE o.id=? AND o.action='update' AND o.managed=1`,
+			restore.CheckpointOperationID).Scan(&updateRaw); err != nil {
+			return nil, errAppPlatformStageEvidence
+		}
+		var update platformManagedUpdatePlan
+		if json.Unmarshal([]byte(updateRaw), &update) != nil ||
+			update.Format != platformManagedUpdateFormat ||
+			update.TargetRuntime == nil ||
+			update.InstallationID != restore.InstallationID ||
+			update.SourceReleaseSHA256 != restore.ReleaseSHA256 {
+			return nil, errAppPlatformStageEvidence
+		}
+		if err := validateManagedInstallTarget(
+			e, update.TargetRuntime, update.ControllerEpoch); err != nil {
+			return nil, err
+		}
+		return update.TargetRuntime, nil
+	}
 	var p platformInstallProjection
 	if json.Unmarshal([]byte(raw), &p) != nil || !platformManagedFormat(p.Format) || p.Runtime == nil {
 		return nil, errAppPlatformStageEvidence

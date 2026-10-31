@@ -201,6 +201,17 @@ func TestPlatformManagedUpdateReviewRejectsMissingOpaqueRuntime(t *testing.T) {
 	}
 }
 
+func TestManagedRestoreRootResolvesUpdateRuntime(t *testing.T) {
+	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, false)
+	target, err := platformManagedTargetForOperation(
+		s.st.poolExec(), lease.id)
+	if err != nil || target == nil ||
+		target.RuntimeID == "" ||
+		target.Profile.Platform != "linux/amd64" {
+		t.Fatal("restore root runtime target", target, err)
+	}
+}
+
 func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
 	fixture := platformManagedUpdateProjectionFixture(t, pg)
@@ -277,6 +288,10 @@ func TestPlatformManagedUpdateQueueClaimsExactAdmissionPostgres(t *testing.T) {
 
 func testPlatformManagedUpdateQueueClaimsExactAdmission(t *testing.T, pg bool) {
 	s, lease := platformManagedUpdateOperationFixture(t, pg)
+	if target, err := platformManagedTargetForOperation(
+		s.st.poolExec(), lease.id); err != nil || target == nil {
+		t.Fatal("managed update root target", target, err)
+	}
 	beforeGeneration := scalar[int64](t, s.st, `SELECT generation
 		FROM app_platform_installations WHERE id=?`, lease.installationID)
 	selected, err := s.claimNextPlatformManagedUpdate(
@@ -521,6 +536,11 @@ func testPlatformManagedUpdateAdvancesCheckpointToStart(t *testing.T, pg bool) {
 		finalized.TargetRuntime == nil ||
 		finalized.CheckpointOperationID != lease.id {
 		t.Fatal("managed update plan was not finalized", err)
+	}
+	if target, err := platformManagedTargetForOperation(
+		s.st.poolExec(), lease.id); err != nil ||
+		target == nil || *target != *finalized.TargetRuntime {
+		t.Fatal("finalized managed update root target", target, err)
 	}
 	trust, err := loadPlatformPublisherTrust(s.st.poolExec())
 	if err != nil {
