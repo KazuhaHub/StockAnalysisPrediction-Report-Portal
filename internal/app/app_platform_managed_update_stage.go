@@ -27,6 +27,7 @@ type platformManagedUpdateQuiesceIntent struct {
 	nativeID         string
 	platform         string
 	descriptor       []byte
+	effectStage      string
 	created, updated int64
 	applied          bool
 	receipt          journal.ManagedRemovalReceipt
@@ -39,7 +40,6 @@ func (s *Server) advancePlatformManagedUpdateStage(ctx context.Context, expected
 		appplatform.StageValidate: appplatform.StageDownload,
 		appplatform.StageDownload: appplatform.StageStage,
 		appplatform.StageStage:    appplatform.StageQuiesce,
-		appplatform.StageMigrate:  appplatform.StageStart,
 	}
 	next, ok := nextByStage[expected.snapshot.Stage]
 	if !ok || expected.snapshot.Action != appplatform.ActionUpdate ||
@@ -120,13 +120,29 @@ func (s *Server) advancePlatformManagedUpdateStage(ctx context.Context, expected
 }
 
 func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expected platformOperationLease) (platformManagedUpdateQuiesceIntent, error) {
+	return s.preparePlatformManagedUpdateSourceRemoval(
+		ctx, expected, appplatform.StageQuiesce)
+}
+
+func (s *Server) preparePlatformManagedUpdateMigrate(ctx context.Context, expected platformOperationLease) (platformManagedUpdateQuiesceIntent, error) {
+	return s.preparePlatformManagedUpdateSourceRemoval(
+		ctx, expected, appplatform.StageMigrate)
+}
+
+func (s *Server) preparePlatformManagedUpdateSourceRemoval(ctx context.Context, expected platformOperationLease, stage appplatform.Stage) (platformManagedUpdateQuiesceIntent, error) {
 	var zero platformManagedUpdateQuiesceIntent
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed ||
-		expected.snapshot.Stage != appplatform.StageQuiesce ||
+		expected.snapshot.Stage != stage ||
+		(stage != appplatform.StageQuiesce &&
+			stage != appplatform.StageMigrate) ||
 		expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
+	}
+	commandStage, commandKind := "stop", "stop"
+	if stage == appplatform.StageMigrate {
+		commandStage, commandKind = "remove_code", "remove-code"
 	}
 	dek, err := s.dek()
 	if err != nil {
@@ -178,8 +194,8 @@ func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expect
 	effectErr := e.queryRow(`SELECT effect_id,kind,payload_sha256,
 		admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms
 		FROM app_platform_operation_effects
-		WHERE operation_id=? AND stage='quiesce' AND effect_number=1`,
-		expected.id).
+		WHERE operation_id=? AND stage=? AND effect_number=1`,
+		expected.id, string(stage)).
 		Scan(&effectID, &kind, &digest, &admittedFence, &observedFence,
 			&state, &receipt, &created, &updated)
 	fresh := errors.Is(effectErr, sql.ErrNoRows)
@@ -192,7 +208,7 @@ func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expect
 			return zero, err
 		}
 		created, updated = facts.now, facts.now
-	} else if kind != "stop" || admittedFence != expected.fence ||
+	} else if kind != commandKind || admittedFence != expected.fence ||
 		(state != "prepared" && state != "applied") ||
 		updated < created || updated > facts.now {
 		return zero, errAppPlatformStageEvidence
@@ -210,8 +226,8 @@ func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expect
 		InstallationID:  expected.installationID, OperationID: expected.id,
 		TargetGeneration: strconv.FormatUint(
 			expected.snapshot.Generation, 10),
-		Stage: "stop", EffectNumber: "1", EffectID: effectID,
-		Kind: "stop", InstallationFence: strconv.FormatInt(expected.fence, 10),
+		Stage: commandStage, EffectNumber: "1", EffectID: effectID,
+		Kind: commandKind, InstallationFence: strconv.FormatInt(expected.fence, 10),
 		IssuedMS:  strconv.FormatInt(issue, 10),
 		ExpiresMS: strconv.FormatInt(issue+25000, 10),
 		Payload: control.ManagedRemovalPayload{
@@ -246,17 +262,18 @@ func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expect
 		command: command, raw: raw, signature: signature,
 		authority: authority, runtime: runtime, source: source,
 		nativeID: source.nativeID, platform: source.platform,
-		descriptor: bytes.Clone(source.descriptor),
-		created:    created, updated: updated,
+		descriptor:  bytes.Clone(source.descriptor),
+		effectStage: string(stage),
+		created:     created, updated: updated,
 	}
 	if fresh {
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(
 			operation_id,stage,effect_number,effect_id,kind,payload_sha256,
 			runtime_id,controller_epoch,admitted_fence,observed_fence,state,
 			receipt_json,created_ms,updated_ms)
-			VALUES(?,'quiesce',1,?,'stop',?,?,?,?,0,'prepared','{}',?,?)`,
-			expected.id, effectID, command.PayloadSHA256, runtime.id,
-			expected.controllerEpoch, expected.fence, facts.now,
+			VALUES(?,?,1,?,?,?,?,?,?,0,'prepared','{}',?,?)`,
+			expected.id, string(stage), effectID, command.Kind,
+			command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence, facts.now,
 			facts.now); err != nil {
 			return zero, err
 		}
@@ -293,6 +310,10 @@ func (s *Server) preparePlatformManagedUpdateQuiesce(ctx context.Context, expect
 
 func platformManagedUpdateQuiesceReceiptMatches(receipt journal.ManagedRemovalReceipt, intent platformManagedUpdateQuiesceIntent) bool {
 	command := intent.command
+	state := "stopped"
+	if command.Stage == "remove_code" {
+		state = "absent"
+	}
 	return receipt.DeploymentID == command.DeploymentID &&
 		receipt.ControllerEpoch == command.ControllerEpoch &&
 		receipt.InstallationID == command.InstallationID &&
@@ -300,7 +321,7 @@ func platformManagedUpdateQuiesceReceiptMatches(receipt journal.ManagedRemovalRe
 		receipt.SourceOperationID == command.Payload.SourceOperationID &&
 		receipt.SourceEffectID == command.Payload.SourceEffectID &&
 		receipt.TargetGeneration == command.TargetGeneration &&
-		receipt.Stage == "stop" && receipt.State == "stopped" &&
+		receipt.Stage == command.Stage && receipt.State == state &&
 		receipt.EffectID == command.EffectID &&
 		receipt.PayloadSHA256 == command.PayloadSHA256 &&
 		receipt.SourceReceiptSHA256 ==
@@ -354,36 +375,49 @@ func validPlatformManagedUpdateQuiesceObservation(observation platformManagedUpd
 }
 
 func (s *Server) executePlatformManagedUpdateQuiesce(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
-	intent, err := s.preparePlatformManagedUpdateQuiesce(ctx, expected)
+	return s.executePlatformManagedUpdateSourceRemoval(
+		ctx, expected, endpoint, appplatform.StageQuiesce,
+		appplatform.StageStop)
+}
+
+func (s *Server) executePlatformManagedUpdateMigrate(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	return s.executePlatformManagedUpdateSourceRemoval(
+		ctx, expected, endpoint, appplatform.StageMigrate,
+		appplatform.StageRemoveCode)
+}
+
+func (s *Server) executePlatformManagedUpdateSourceRemoval(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint, stage, endpointStage appplatform.Stage) (platformOperationLease, error) {
+	intent, err := s.preparePlatformManagedUpdateSourceRemoval(
+		ctx, expected, stage)
 	if err != nil {
 		return platformOperationLease{}, fmt.Errorf(
-			"managed update quiesce prepare: %w", err)
+			"managed update %s prepare: %w", stage, err)
 	}
 	if err := s.checkPlatformManagedOperationRoot(
 		ctx, expected.id, intent.runtime, intent.authority,
 		endpoint); err != nil {
 		return platformOperationLease{}, fmt.Errorf(
-			"managed update quiesce root: %w", err)
+			"managed update %s root: %w", stage, err)
 	}
 	observation, err := platformRunManagedRemoval(
-		ctx, endpoint, appplatform.StageStop, intent.raw,
+		ctx, endpoint, endpointStage, intent.raw,
 		intent.signature, intent.authority, intent.descriptor)
 	if err != nil {
 		return platformOperationLease{}, fmt.Errorf(
-			"managed update quiesce runner: %w", err)
+			"managed update %s runner: %w", stage, err)
 	}
 	receipt, ok := validPlatformManagedUpdateQuiesceObservation(
 		observation, intent, endpoint)
 	if !ok {
 		return platformOperationLease{}, fmt.Errorf(
-			"managed update quiesce observation: %w",
+			"managed update %s observation: %w", stage,
 			errAppPlatformStageEvidence)
 	}
 	result, err := s.commitPlatformManagedUpdateQuiesce(
 		ctx, expected, intent, receipt)
 	if err != nil {
 		return platformOperationLease{}, fmt.Errorf(
-			"managed update quiesce commit: %w", err)
+			"managed update %s commit: %w", stage, err)
 	}
 	return result, nil
 }
@@ -392,7 +426,8 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	var zero platformOperationLease
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed ||
-		expected.snapshot.Stage != appplatform.StageQuiesce ||
+		(expected.snapshot.Stage != appplatform.StageQuiesce &&
+			expected.snapshot.Stage != appplatform.StageMigrate) ||
 		expected.rowRevision == math.MaxInt64 ||
 		!platformManagedUpdateQuiesceReceiptMatches(receipt, intent) {
 		return zero, errAppPlatformStageEvidence
@@ -401,8 +436,8 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	if err != nil || len(encoded) > 16384 {
 		return zero, errAppPlatformStageEvidence
 	}
-	current, err := s.preparePlatformManagedUpdateQuiesce(
-		ctx, expected)
+	current, err := s.preparePlatformManagedUpdateSourceRemoval(
+		ctx, expected, expected.snapshot.Stage)
 	if err != nil || !samePlatformManagedUpdateQuiesceIntent(
 		intent, current) {
 		return zero, errAppPlatformStageEvidence
@@ -437,12 +472,13 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	}
 	changed, err := e.exec(`UPDATE app_platform_operation_effects
 		SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND stage='quiesce' AND effect_number=1
-		AND effect_id=? AND kind='stop' AND payload_sha256=?
+		WHERE operation_id=? AND stage=? AND effect_number=1
+		AND effect_id=? AND kind=? AND payload_sha256=?
 		AND state='prepared' AND observed_fence=0 AND receipt_json='{}'
 		AND admitted_fence=?`,
 		expected.fence, string(encoded), now, expected.id,
-		intent.command.EffectID, intent.command.PayloadSHA256,
+		string(expected.snapshot.Stage), intent.command.EffectID,
+		intent.command.Kind, intent.command.PayloadSHA256,
 		expected.fence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
@@ -451,8 +487,12 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	nextStage := appplatform.StageSnapshot
+	if expected.snapshot.Stage == appplatform.StageMigrate {
+		nextStage = appplatform.StageStart
+	}
 	next, err := model.Advance(
-		expected.snapshot.Revision, appplatform.StageSnapshot)
+		expected.snapshot.Revision, nextStage)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -460,14 +500,15 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	result.snapshot, result.rowRevision =
 		next.Snapshot(), expected.rowRevision+1
 	changed, err = e.exec(`UPDATE app_platform_operations
-		SET stage='snapshot',state_revision=?,row_revision=row_revision+1,
+		SET stage=?,state_revision=?,row_revision=row_revision+1,
 		updated_ms=? WHERE id=? AND installation_id=?
-		AND stage='quiesce' AND state_revision=? AND row_revision=?
+		AND stage=? AND state_revision=? AND row_revision=?
 		AND controller_epoch=? AND fence=? AND lease_owner=?
 		AND lease_until_ms=? AND lease_until_ms>?
 		AND completed_ms IS NULL`,
-		int64(result.snapshot.Revision), now, expected.id,
-		expected.installationID, int64(expected.snapshot.Revision),
+		string(nextStage), int64(result.snapshot.Revision), now, expected.id,
+		expected.installationID, string(expected.snapshot.Stage),
+		int64(expected.snapshot.Revision),
 		expected.rowRevision, expected.controllerEpoch, expected.fence,
 		expected.owner, expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
@@ -479,11 +520,15 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 		Release    string `json:"release_sha256"`
 	}{intent.command.Payload.ResourceID, receipt.NativeID,
 		intent.command.Payload.ReleaseSHA256})
+	auditAction := "app_platform.managed_update_quiesced"
+	if expected.snapshot.Stage == appplatform.StageMigrate {
+		auditAction = "app_platform.managed_update_source_removed"
+	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)
-		VALUES(?,'system',0,'app_platform.managed_update_quiesced',
-		'app_platform_operation',?,?,'')`,
+		VALUES(?,'system',0,?,'app_platform_operation',?,?,'')`,
 		time.UnixMilli(now).UTC().Format(time.RFC3339),
+		auditAction,
 		expected.id, string(detail)); err != nil {
 		return zero, err
 	}
@@ -520,14 +565,16 @@ func (s *Server) runPlatformManagedUpdate(ctx context.Context, expected platform
 	}
 	switch expected.snapshot.Stage {
 	case appplatform.StageQueued, appplatform.StageValidate,
-		appplatform.StageDownload, appplatform.StageStage,
-		appplatform.StageMigrate:
+		appplatform.StageDownload, appplatform.StageStage:
 		return s.advancePlatformManagedUpdateStage(ctx, expected)
 	case appplatform.StageQuiesce:
 		return s.executePlatformManagedUpdateQuiesce(
 			ctx, expected, endpoint)
 	case appplatform.StageSnapshot:
 		return s.dispatchPlatformCheckpoint(ctx, expected, endpoint)
+	case appplatform.StageMigrate:
+		return s.executePlatformManagedUpdateMigrate(
+			ctx, expected, endpoint)
 	case appplatform.StageStart:
 		return s.executePlatformUpdateStart(ctx, expected, endpoint)
 	case appplatform.StageProbe:

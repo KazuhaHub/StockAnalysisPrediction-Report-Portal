@@ -94,7 +94,7 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	}
 	baseEffects := 2
 	if lease.snapshot.Action == appplatform.ActionUpdate {
-		baseEffects = 3
+		baseEffects = 4
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		baseEffects = 4

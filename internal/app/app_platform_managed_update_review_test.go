@@ -472,6 +472,10 @@ func testPlatformManagedUpdateQuiesceCommitsSnapshotStage(t *testing.T, pg bool)
 
 func platformManagedUpdateQuiesceReceipt(intent platformManagedUpdateQuiesceIntent) journal.ManagedRemovalReceipt {
 	now := time.Now().UTC().UnixMilli()
+	state := "stopped"
+	if intent.command.Stage == "remove_code" {
+		state = "absent"
+	}
 	return journal.ManagedRemovalReceipt{
 		Format:            "portal.runner.managed-removal-receipt/1-dev.1",
 		DeploymentID:      intent.command.DeploymentID,
@@ -481,13 +485,13 @@ func platformManagedUpdateQuiesceReceipt(intent platformManagedUpdateQuiesceInte
 		SourceOperationID: intent.command.Payload.SourceOperationID,
 		SourceEffectID:    intent.command.Payload.SourceEffectID,
 		TargetGeneration:  intent.command.TargetGeneration,
-		Stage:             "stop", EffectID: intent.command.EffectID,
+		Stage:             intent.command.Stage, EffectID: intent.command.EffectID,
 		PayloadSHA256:       intent.command.PayloadSHA256,
 		SourceReceiptSHA256: intent.command.Payload.SourceReceiptSHA256,
 		ResourceID:          intent.command.Payload.ResourceID,
 		DataNamespaceID:     intent.command.Payload.DataNamespaceID,
 		ReleaseSHA256:       intent.command.Payload.ReleaseSHA256,
-		NativeID:            intent.source.nativeID, State: "stopped",
+		NativeID:            intent.source.nativeID, State: state,
 		ObservedMS: strconv.FormatInt(now, 10),
 		SettledMS:  strconv.FormatInt(now, 10),
 	}
@@ -558,8 +562,14 @@ func testPlatformManagedUpdateAdvancesCheckpointToStart(t *testing.T, pg bool) {
 		reclaimed.lease.snapshot.Stage != appplatform.StageMigrate {
 		t.Fatal("finalized managed update was not reclaimable", reclaimed, err)
 	}
-	start, err := s.advancePlatformManagedUpdateStage(
+	remove, err := s.preparePlatformManagedUpdateMigrate(
 		context.Background(), reclaimed.lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, err := s.commitPlatformManagedUpdateQuiesce(
+		context.Background(), reclaimed.lease, remove,
+		platformManagedUpdateQuiesceReceipt(remove))
 	if err != nil || start.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("managed migrate transition", start, err)
 	}

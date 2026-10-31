@@ -210,7 +210,8 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
 		t.Fatal("managed update checkpoint", migrate.snapshot, err)
 	}
-	start, err := s.advancePlatformManagedUpdateStage(ctx, migrate)
+	start, err := s.executePlatformManagedUpdateMigrate(
+		ctx, migrate, endpoint)
 	if err != nil || start.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("managed update migrate", start.snapshot, err)
 	}

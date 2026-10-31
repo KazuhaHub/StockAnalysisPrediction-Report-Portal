@@ -115,6 +115,18 @@ func platformManagedUpdateStartFixture(t *testing.T, pg bool) (*Server, platform
 		WHERE o.id=?`,
 		platformFixtureID(1299), strings.Repeat("9", 64),
 		checkpointLease.id)
+	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(
+		operation_id,stage,effect_number,effect_id,kind,payload_sha256,
+		runtime_id,controller_epoch,admitted_fence,observed_fence,state,
+		receipt_json,created_ms,updated_ms)
+		SELECT o.id,'migrate',1,?,'remove-code',?,i.runtime_id,
+		o.controller_epoch,o.fence,o.fence,'applied','{}',
+		o.created_ms,o.updated_ms
+		FROM app_platform_operations o
+		JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.id=?`,
+		platformFixtureID(1298), strings.Repeat("8", 64),
+		checkpointLease.id)
 	checkpointIntent, err := s.preparePlatformCheckpoint(context.Background(), checkpointLease)
 	if err != nil {
 		t.Fatal(err)
