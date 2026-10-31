@@ -306,6 +306,7 @@ Disposable Linux/XFS/Docker tests:
    the disposable Linux/XFS/Docker probe. Reviewed restore queueing, exact
    failed-target stop/remove, quiesce completion and transition to
    `restore_data` are implemented, and the post-restore signed
-   `restore-start` intent is prepared. Native source restart/probe/activation and the
-   disposable update-failure acceptance remain.
+   `restore-start` reservation, launch, readiness, protected registration, boot and
+   activation chain is implemented. Native source restart/probe/activation acceptance
+   and the disposable update-failure acceptance remain.
 7. Only then expose managed update through scheduler and management HTTP.

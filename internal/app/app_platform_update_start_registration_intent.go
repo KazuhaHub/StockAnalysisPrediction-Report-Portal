@@ -61,10 +61,12 @@ func platformUpdateStartRegistrationReceiptMatches(r journal.UpdateStartRegistra
 
 func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease, start platformUpdateStartIntent, runtime platformRuntimeRegistration, seed, dek []byte, now int64, create bool) (platformUpdateStartRegistrationIntent, bool, error) {
 	var zero platformUpdateStartRegistrationIntent
-	if lease.snapshot.Action != appplatform.ActionUpdate || !lease.snapshot.Managed ||
+	if (lease.snapshot.Action != appplatform.ActionUpdate &&
+		lease.snapshot.Action != appplatform.ActionRestore) ||
+		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || start.running == nil ||
-		start.readiness == nil || start.plan.TargetPolicyRevision < 2 {
+		start.readiness == nil || start.plan.TargetPolicyRevision < 1 {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	lock := ""
@@ -90,8 +92,12 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 		lease.id).Scan(&count); err != nil {
 		return zero, false, err
 	}
+	baseEffects := 2
+	if lease.snapshot.Action == appplatform.ActionRestore {
+		baseEffects = 4
+	}
 	if fresh {
-		if !create || count != 2 || !freshPlatformUpdateRegistrationSourceAt(start, now) {
+		if !create || count != baseEffects || !freshPlatformUpdateRegistrationSourceAt(start, now) {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		effect, err = platformNewUUID()
@@ -99,7 +105,7 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 			return zero, false, err
 		}
 		created, updated = now, now
-	} else if count != 3 || !platformValidUUID(effect) ||
+	} else if count != baseEffects+1 || !platformValidUUID(effect) ||
 		kind != "update-start-registration" ||
 		epoch != lease.controllerEpoch || admitted != lease.fence ||
 		created < start.activationObserved ||

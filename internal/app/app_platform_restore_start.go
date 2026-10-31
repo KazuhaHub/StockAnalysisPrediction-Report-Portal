@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"math"
 	"strconv"
@@ -70,10 +71,22 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 }
 
 func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platformOperationLease) (platformUpdateStartIntent, error) {
+	return s.preparePlatformRestoreStartMode(
+		ctx, lease, appplatform.StageStart)
+}
+
+func (s *Server) preparePlatformRestoreProbe(ctx context.Context, lease platformOperationLease) (platformUpdateStartIntent, error) {
+	return s.preparePlatformRestoreStartMode(
+		ctx, lease, appplatform.StageProbe)
+}
+
+func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease platformOperationLease, stage appplatform.Stage) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
 	if lease.snapshot.Action != appplatform.ActionRestore ||
 		!lease.snapshot.Managed ||
-		lease.snapshot.Stage != appplatform.StageStart ||
+		lease.snapshot.Stage != stage ||
+		(stage != appplatform.StageStart && stage != appplatform.StageProbe &&
+			stage != appplatform.StageActivate) ||
 		lease.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -132,14 +145,25 @@ func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platform
 		stopState != "applied" || removeState != "applied" {
 		return zero, errAppPlatformStageEvidence
 	}
-	var activation, namespace, activationState string
+	var activation, namespace, activationState, readinessRaw string
 	var format int64
-	if err := e.queryRow(`SELECT id,data_namespace_id,data_format,state
+	var activationObserved sql.NullInt64
+	if err := e.queryRow(`SELECT id,data_namespace_id,data_format,state,
+		readiness_evidence,observed_ms
 		FROM app_platform_activations WHERE installation_id=? AND generation=?`,
 		lease.installationID, lease.snapshot.Generation).
-		Scan(&activation, &namespace, &format, &activationState); err != nil ||
+		Scan(&activation, &namespace, &format, &activationState,
+			&readinessRaw, &activationObserved); err != nil ||
 		activationState != "candidate" || namespace != checkpoint.NamespaceID ||
 		format != mustPlatformCheckpointInt(checkpoint.DataFormat) {
+		return zero, errAppPlatformStageEvidence
+	}
+	if stage == appplatform.StageProbe &&
+		(readinessRaw != "{}" || activationObserved.Valid) {
+		return zero, errAppPlatformStageEvidence
+	}
+	if stage == appplatform.StageActivate &&
+		(readinessRaw == "{}" || !activationObserved.Valid) {
 		return zero, errAppPlatformStageEvidence
 	}
 	var installationPolicy int64
@@ -151,16 +175,18 @@ func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platform
 		installationPolicy < 1 {
 		return zero, errAppPlatformStageEvidence
 	}
-	changed, err := e.exec(`UPDATE app_platform_activations
-		SET release_sha256=?,policy_revision=?,state='candidate',
-		readiness_evidence='{}',observed_ms=NULL,updated_ms=?
-		WHERE id=? AND installation_id=? AND generation=?
-		AND data_namespace_id=? AND data_format=? AND state='candidate'`,
-		checkpoint.ReleaseSHA256, installationPolicy, facts.now,
-		activation, lease.installationID, lease.snapshot.Generation,
-		checkpoint.NamespaceID, checkpoint.DataFormat)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return zero, err
+	if stage == appplatform.StageStart {
+		changed, err := e.exec(`UPDATE app_platform_activations
+			SET release_sha256=?,policy_revision=?,state='candidate',
+			readiness_evidence='{}',observed_ms=NULL,updated_ms=?
+			WHERE id=? AND installation_id=? AND generation=?
+			AND data_namespace_id=? AND data_format=? AND state='candidate'`,
+			checkpoint.ReleaseSHA256, installationPolicy, facts.now,
+			activation, lease.installationID, lease.snapshot.Generation,
+			checkpoint.NamespaceID, checkpoint.DataFormat)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return zero, err
+		}
 	}
 	var effectID, kind, digest, epoch, state, receipt string
 	var admitted, observedFence, created, updated int64
@@ -176,6 +202,9 @@ func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platform
 		return zero, errAppPlatformStageEvidence
 	}
 	if freshEffect {
+		if stage != appplatform.StageStart {
+			return zero, errAppPlatformStageEvidence
+		}
 		effectID, err = platformNewUUID()
 		if err != nil {
 			return zero, err
@@ -235,7 +264,7 @@ func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platform
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
-	return platformUpdateStartIntent{
+	result := platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
 		authority: authority, command: command, checkpoint: checkpoint,
 		checkpointRaw: []byte(checkpointRaw), source: source, plan: platformManagedUpdatePlan{
@@ -260,5 +289,169 @@ func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platform
 			SourceWriterFence:        mustPlatformCheckpointInt(checkpoint.WriterFence),
 		},
 		targetDescriptor: source.descriptor, raw: raw, signature: signature,
-	}, nil
+	}
+	if !freshEffect {
+		switch state {
+		case "prepared":
+			if observedFence == 0 {
+				if receipt != "{}" {
+					return zero, errAppPlatformStageEvidence
+				}
+			} else {
+				if observedFence != lease.fence {
+					return zero, errAppPlatformStageEvidence
+				}
+				reservation, err := journal.ParseUpdateStartReservation(
+					[]byte(receipt))
+				if err != nil || !platformUpdateStartReservationMatches(
+					reservation, command, activation, effectID) {
+					return zero, errAppPlatformStageEvidence
+				}
+				result.reservation = &reservation
+			}
+		case "applied":
+			if observedFence != lease.fence {
+				return zero, errAppPlatformStageEvidence
+			}
+			running, err := journal.ParseUpdateStartRunningReceipt(
+				[]byte(receipt))
+			if err != nil {
+				return zero, errAppPlatformStageEvidence
+			}
+			reservation := journal.UpdateStartReservation{
+				ResourceID:      running.Claim.ResourceID,
+				InstallationID:  running.InstallationID,
+				NamespaceID:     running.NamespaceID,
+				EffectID:        running.Claim.EffectID,
+				OwnershipSHA256: running.Claim.OwnershipSHA256,
+				SourceGeneration: mustPlatformCheckpointInt(
+					running.SourceGeneration),
+				TargetGeneration: mustPlatformCheckpointInt(
+					running.TargetGeneration),
+				SourceReleaseSHA256: running.SourceReleaseSHA256,
+				TargetReleaseSHA256: running.TargetReleaseSHA256,
+				ControlFence: mustPlatformCheckpointInt(
+					running.ControlFence),
+				SourceWriterFence: mustPlatformCheckpointInt(
+					running.SourceWriterFence),
+				TargetWriterFence: mustPlatformCheckpointInt(
+					running.TargetWriterFence),
+			}
+			if !platformUpdateStartRunningMatches(
+				running, command, activation, effectID, &reservation) {
+				return zero, errAppPlatformStageEvidence
+			}
+			result.reservation = &reservation
+			result.running = &running
+			if readinessRaw != "{}" && activationObserved.Valid {
+				readiness, err := journal.ParseUpdateStartReadiness(
+					[]byte(readinessRaw))
+				observed := mustPlatformCheckpointInt(readiness.ObservedMS)
+				if err != nil || observed != activationObserved.Int64 ||
+					readiness.PayloadSHA256 != command.PayloadSHA256 ||
+					readiness.RunningReceiptSHA256 !=
+						platformDigest([]byte(receipt)) ||
+					readiness.NativeID != running.NativeID ||
+					readiness.DataFormat != command.Payload.DataFormat {
+					return zero, errAppPlatformStageEvidence
+				}
+				result.readiness = &readiness
+				result.activationObserved = observed
+			}
+		default:
+			return zero, errAppPlatformStageEvidence
+		}
+	}
+	return result, nil
+}
+
+func (s *Server) preparePlatformRestoreStartRegistration(ctx context.Context, lease platformOperationLease) (platformUpdateStartRegistrationIntent, error) {
+	var zero platformUpdateStartRegistrationIntent
+	if lease.snapshot.Action != appplatform.ActionRestore ||
+		!lease.snapshot.Managed ||
+		lease.snapshot.Stage != appplatform.StageActivate ||
+		lease.snapshot.Generation < 2 {
+		return zero, errAppPlatformStageEvidence
+	}
+	start, err := s.preparePlatformRestoreStartMode(
+		ctx, lease, appplatform.StageActivate)
+	if err != nil || start.running == nil || start.readiness == nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	dek, err := s.dek()
+	if err != nil {
+		return zero, err
+	}
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		e, lease.controllerEpoch, dek)
+	if err != nil {
+		return zero, err
+	}
+	defer clear(seed)
+	facts, err := loadPlatformBoundOperationLease(e, lease)
+	if err != nil {
+		return zero, err
+	}
+	intent, fresh, err := loadPlatformUpdateStartRegistration(
+		e, lease, start, runtime, seed, dek, facts.now, true)
+	if err != nil {
+		return zero, err
+	}
+	failed := true
+	defer func() {
+		if failed {
+			intent.registration.Close()
+		}
+	}()
+	if fresh {
+		detail, _ := json.Marshal(struct {
+			EffectID    string `json:"effect_id"`
+			ResourceID  string `json:"resource_id"`
+			DocumentSHA string `json:"document_sha256"`
+		}{intent.command.EffectID, intent.start.resourceID,
+			intent.command.DocumentSHA256})
+		if _, err := e.exec(`INSERT INTO audit_log(
+			at,actor,actor_ou,action,target_type,target_id,detail,ip)
+			VALUES(?,'system',0,'app_platform.restore_start_registration_intent',
+			'app_platform_operation',?,?,'')`,
+			time.UnixMilli(facts.now).UTC().Format(time.RFC3339),
+			lease.id, string(detail)); err != nil {
+			return zero, err
+		}
+	}
+	now, err := finalPlatformOperationLeaseCheck(e, facts)
+	if err != nil {
+		return zero, err
+	}
+	after, _, err := loadPlatformUpdateStartRegistration(
+		e, lease, start, runtime, seed, dek, now, false)
+	if err != nil {
+		return zero, err
+	}
+	defer after.registration.Close()
+	if !samePlatformUpdateStartRegistrationIntent(intent, after) {
+		return zero, errAppPlatformStageEvidence
+	}
+	if _, err := control.VerifyUpdateStartRegistration(
+		intent.raw, intent.signature, start.authority,
+		time.Now().UnixMilli()); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	failed = false
+	return intent, nil
 }

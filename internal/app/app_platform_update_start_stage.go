@@ -17,6 +17,7 @@ import (
 type platformUpdateStartAdmission struct {
 	intent      platformUpdateStartIntent
 	reservation journal.UpdateStartReservation
+	lease       platformOperationLease
 }
 
 // reservePlatformUpdateStart persists the signed generation-2 intent and asks

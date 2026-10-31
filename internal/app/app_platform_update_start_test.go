@@ -729,6 +729,205 @@ func platformUpdateStartBootFixture(t *testing.T, s *Server, lease platformOpera
 	return applied, boot
 }
 
+func platformRestoreStartRegistrationObservationFixture(t *testing.T, intent platformUpdateStartRegistrationIntent, endpoint platformRuntimeEndpoint) platformUpdateStartTestObservation {
+	t.Helper()
+	var receipt journal.UpdateStartRegistrationReceipt
+	if err := json.Unmarshal([]byte(`{"claim":{}}`), &receipt); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	receipt.Format = "portal.runner.update-start-registration-delivery/1-dev.1"
+	claim := &receipt.Claim
+	claim.Format = "portal.runner.update-start-registration-claim/1-dev.1"
+	claim.ClaimID = platformFixtureID(1602)
+	claim.EffectID = intent.command.EffectID
+	claim.PayloadSHA256 = intent.command.PayloadSHA256
+	claim.SourceSHA256 = intent.command.RunningReceiptSHA256
+	claim.DocumentSHA256 = intent.command.DocumentSHA256
+	claim.NativeID = intent.start.running.NativeID
+	claim.ControlRevision = intent.start.command.ControlRevision
+	claim.ClaimedMS = strconv.FormatInt(now, 10)
+	claim.ExpiresMS = intent.start.command.ExpiresMS
+	claimRaw, _ := json.Marshal(receipt.Claim)
+	receipt.BindingSHA256 = platformDigest(claimRaw)
+	receipt.Device = "9"
+	receipt.Inode = "10"
+	receipt.ObservedMS = strconv.FormatInt(now, 10)
+	receipt.SettledMS = receipt.ObservedMS
+	observation := platformUpdateStartReservationFixture(
+		intent.start, endpoint)
+	observation.commandSHA = platformDigest(intent.raw)
+	observation.action = transport.UpdateStartRegistrationDeliver
+	observation.registration = receipt
+	if !validPlatformUpdateStartRegistrationObservation(
+		observation, intent, endpoint) {
+		t.Fatal("restore registration observation fixture refused")
+	}
+	return observation
+}
+
+func platformRestoreStartBootFixture(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint) (platformUpdateStartRegistrationIntent, platformUpdateStartBootObservation) {
+	t.Helper()
+	applied, err := s.preparePlatformRestoreStartRegistration(
+		context.Background(), lease)
+	if err != nil || !applied.applied {
+		t.Fatal("prepare applied restore registration", err)
+	}
+	signer, err := applied.registration.Signer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(signer.Key)
+	now := time.Now()
+	challenge, err := signer.NewChallenge(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootID := "restore-boot/42"
+	answer, err := signer.AnswerChallenge(challenge, bootID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptRaw, _ := json.Marshal(applied.receipt)
+	proof := platformUpdateStartHandshakeTestObservation{
+		evidence: journal.UpdateStartBackendHandshakeEvidence{
+			Format:                "portal.runner.update-start-backend-handshake/1-dev.1",
+			PayloadSHA256:         applied.command.PayloadSHA256,
+			DeliveryReceiptSHA256: platformDigest(receiptRaw),
+			NativeID:              applied.start.running.NativeID,
+			ChallengeSHA256:       platformDigest([]byte(challenge)),
+			Answer:                answer, ObservedMS: strconv.FormatInt(now.UnixMilli(), 10),
+		},
+		authority: applied.start.authority,
+		endpoint: transport.CandidateReceiptEndpoint{
+			Path: endpoint.path, RunnerUID: 0,
+			ControllerUID: endpoint.controllerUID,
+			ControllerGID: endpoint.controllerGID, RootController: true,
+		},
+		receivedAt: time.Now(), commandSHA: platformDigest(applied.raw),
+	}
+	boot, err := s.finishPlatformRestoreStartBoot(
+		context.Background(), lease, applied, endpoint, challenge, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if boot.bootID != bootID {
+		t.Fatal("restore boot identity", boot)
+	}
+	return applied, boot
+}
+
+func platformRestoreStartReadyFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformRuntimeEndpoint) {
+	t.Helper()
+	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, pg)
+	endpoint := platformUpdateStartEndpointFixture()
+	stop, err := s.preparePlatformUpdateTargetRemoval(
+		context.Background(), lease, "stop", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopProof := platformUpdateTargetRemovalObservationFixture(
+		stop, endpoint, "stopped")
+	next, err := s.commitPlatformUpdateTargetRemoval(
+		context.Background(), lease, stop, endpoint, stopProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remove, err := s.preparePlatformUpdateTargetRemoval(
+		context.Background(), next, "remove_code", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeProof := platformUpdateTargetRemovalObservationFixture(
+		remove, endpoint, "absent")
+	removed, err := s.commitPlatformUpdateTargetRemoval(
+		context.Background(), next, remove, endpoint, removeProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.advancePlatformRestoreStage(
+		context.Background(), removed, appplatform.StageSnapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreData, err := s.advancePlatformRestoreStage(
+		context.Background(), snapshot, appplatform.StageRestoreData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreIntent, err := s.preparePlatformRestore(
+		context.Background(), restoreData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreProof := platformRestoreObservationFixture(
+		restoreIntent, endpoint)
+	startLease, err := s.commitPlatformRestore(
+		context.Background(), restoreData, restoreIntent,
+		endpoint, restoreProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	startIntent, err := s.preparePlatformRestoreStart(
+		context.Background(), startLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := platformUpdateStartReservationFixture(
+		startIntent, endpoint).reservation
+	reserved, err := s.commitPlatformRestoreStartReservation(
+		context.Background(), startLease, startIntent,
+		endpoint, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runningProof := platformUpdateStartRunningFixture(
+		reserved.intent, reservation, endpoint)
+	probeLease, err := s.commitPlatformRestoreStartRunning(
+		context.Background(), reserved.lease, reserved.intent,
+		endpoint, runningProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeIntent, err := s.preparePlatformRestoreProbe(
+		context.Background(), probeLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readinessProof := platformUpdateStartReservationFixture(
+		probeIntent, endpoint)
+	readinessProof.readiness = journal.UpdateStartReadiness{
+		Format:        "portal.runner.update-start-readiness/1-dev.1",
+		PayloadSHA256: probeIntent.command.PayloadSHA256,
+		RunningReceiptSHA256: platformDigest(
+			mustMarshalPlatformUpdateStartReceipt(*probeIntent.running)),
+		NativeID:   probeIntent.running.NativeID,
+		Protocol:   "portal.backend/1",
+		DataFormat: probeIntent.command.Payload.DataFormat,
+		ObservedMS: probeIntent.running.NativeObservedMS,
+	}
+	activateLease, err := s.commitPlatformRestoreStartReadiness(
+		context.Background(), probeLease, probeIntent,
+		endpoint, readinessProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, activateLease, endpoint
+}
+
+func platformRestoreStartRegistrationCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartRegistrationIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, lease, endpoint := platformRestoreStartReadyFixture(t, pg)
+	intent, err := s.preparePlatformRestoreStartRegistration(
+		context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := platformRestoreStartRegistrationObservationFixture(
+		t, intent, endpoint)
+	return s, lease, intent, endpoint, observation
+}
+
 func platformUpdateTargetRemovalObservationFixture(intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint, state string) platformUpdateTargetRemovalTestObservation {
 	now := time.Now().UnixMilli()
 	issued, _ := strconv.ParseInt(
@@ -827,6 +1026,30 @@ func TestPlatformUpdateTargetRemovalPostgres(t *testing.T) {
 	testPlatformUpdateTargetRemoval(t, true)
 }
 
+func TestPlatformRestoreRetryExhaustionSQLite(t *testing.T) {
+	testPlatformRestoreRetryExhaustion(t, false)
+}
+
+func TestPlatformRestoreRetryExhaustionPostgres(t *testing.T) {
+	testPlatformRestoreRetryExhaustion(t, true)
+}
+
+func testPlatformRestoreRetryExhaustion(t *testing.T, pg bool) {
+	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, pg)
+	if err := s.finishPlatformManagedRestoreForReview(
+		context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code
+		FROM app_platform_operations WHERE id=?`, lease.id) !=
+		"recovery_required:restore_recovery_required" ||
+		scalar[string](t, s.st, `SELECT phase
+			FROM app_platform_installations WHERE id=?`,
+			lease.installationID) != "recovery_required" {
+		t.Fatal("restore retry exhaustion was not retained")
+	}
+}
+
 func testPlatformUpdateTargetRemoval(t *testing.T, pg bool) {
 	s, lease, _ := platformUpdateRecoveryRestoreFixture(t, pg)
 	endpoint := platformUpdateStartEndpointFixture()
@@ -906,17 +1129,268 @@ func testPlatformUpdateTargetRemoval(t *testing.T, pg bool) {
 			startIntent.command.PayloadSHA256 {
 		t.Fatal("restore-start replay", again, err)
 	}
-	if err := s.finishPlatformManagedRestoreForReview(
-		context.Background(), startLease); err != nil {
+	reservation := platformUpdateStartReservationFixture(
+		startIntent, endpoint).reservation
+	reserved, err := s.commitPlatformRestoreStartReservation(
+		context.Background(), startLease, startIntent,
+		endpoint, reservation)
+	if err != nil || reserved.intent.reservation == nil {
+		t.Fatal("restore-start reservation", reserved, err)
+	}
+	runningProof := platformUpdateStartRunningFixture(
+		reserved.intent, reservation, endpoint)
+	probeLease, err := s.commitPlatformRestoreStartRunning(
+		context.Background(), reserved.lease, reserved.intent,
+		endpoint, runningProof)
+	if err != nil || probeLease.snapshot.Stage != appplatform.StageProbe {
+		t.Fatal("restore-start running receipt", probeLease, err)
+	}
+	probeIntent, err := s.preparePlatformRestoreProbe(
+		context.Background(), probeLease)
+	if err != nil || probeIntent.running == nil {
+		t.Fatal("restore-start probe intent", err)
+	}
+	readinessProof := platformUpdateStartReservationFixture(
+		probeIntent, endpoint)
+	readinessProof.readiness = journal.UpdateStartReadiness{
+		Format:        "portal.runner.update-start-readiness/1-dev.1",
+		PayloadSHA256: probeIntent.command.PayloadSHA256,
+		RunningReceiptSHA256: platformDigest(
+			mustMarshalPlatformUpdateStartReceipt(*probeIntent.running)),
+		NativeID:   probeIntent.running.NativeID,
+		Protocol:   "portal.backend/1",
+		DataFormat: probeIntent.command.Payload.DataFormat,
+		ObservedMS: probeIntent.running.NativeObservedMS,
+	}
+	activateLease, err := s.commitPlatformRestoreStartReadiness(
+		context.Background(), probeLease, probeIntent,
+		endpoint, readinessProof)
+	if err != nil || activateLease.snapshot.Stage !=
+		appplatform.StageActivate {
+		t.Fatal("restore-start readiness", activateLease, err)
+	}
+	registration, err := s.preparePlatformRestoreStartRegistration(
+		context.Background(), activateLease)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if scalar[string](t, s.st, `SELECT stage||':'||error_code
-		FROM app_platform_operations WHERE id=?`, lease.id) !=
-		"recovery_required:restore_recovery_required" ||
-		scalar[string](t, s.st, `SELECT phase
-			FROM app_platform_installations WHERE id=?`,
-			lease.installationID) != "recovery_required" {
-		t.Fatal("restore retry exhaustion was not retained")
+	registrationProof :=
+		platformRestoreStartRegistrationObservationFixture(
+			t, registration, endpoint)
+	registered, err := s.commitPlatformRestoreStartRegistration(
+		context.Background(), activateLease, registration,
+		endpoint, registrationProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformRestoreStartBootFixture(
+		t, s, registered, endpoint)
+	defer applied.registration.Close()
+	result, err := s.commitPlatformRestoreStartActivation(
+		context.Background(), registered, applied, boot)
+	if err != nil || result.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("restore activation", result, err)
+	}
+	if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision
+		FROM app_platform_installations WHERE id=?`,
+		lease.installationID) != "ready:2:1" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='retired' AND generation=1`,
+			lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='active' AND generation=2`,
+			lease.installationID) != 1 ||
+		scalar[int64](t, s.st, `SELECT writer_fence
+			FROM app_platform_data_namespaces
+			WHERE owner_installation_id=?`,
+			lease.installationID) != 2 ||
+		scalar[string](t, s.st, `SELECT stage
+			FROM app_platform_operations WHERE id=?`,
+			lease.id) != "complete" {
+		t.Fatal("restore did not activate the restored generation")
+	}
+}
+
+func TestPlatformRestoreStartRegistrationRequiresAppliedStartEffectSQLite(t *testing.T) {
+	testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t, false)
+}
+
+func TestPlatformRestoreStartRegistrationRequiresAppliedStartEffectPostgres(t *testing.T) {
+	testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t, true)
+}
+
+func testPlatformRestoreStartRegistrationRequiresAppliedStartEffect(t *testing.T, pg bool) {
+	s, lease, _ := platformRestoreStartReadyFixture(t, pg)
+	mustExec(t, s.st, `DELETE FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start'`, lease.id)
+	if _, err := s.preparePlatformRestoreStartRegistration(
+		context.Background(), lease); err == nil {
+		t.Fatal("restore registration synthesized a missing start effect")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start'`, lease.id) != 0 {
+		t.Fatal("missing restore-start effect was recreated at activate")
+	}
+}
+
+func TestPlatformRestoreStartRegistrationRefusalsSQLite(t *testing.T) {
+	testPlatformRestoreStartRegistrationRefusals(t, false)
+}
+
+func TestPlatformRestoreStartRegistrationRefusalsPostgres(t *testing.T) {
+	testPlatformRestoreStartRegistrationRefusals(t, true)
+}
+
+func testPlatformRestoreStartRegistrationRefusals(t *testing.T, pg bool) {
+	for name, mutate := range map[string]func(*journal.UpdateStartRegistrationReceipt){
+		"payload": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.PayloadSHA256 = strings.Repeat("1", 64)
+		},
+		"running": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.SourceSHA256 = strings.Repeat("2", 64)
+		},
+		"document": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.DocumentSHA256 = strings.Repeat("3", 64)
+		},
+		"native": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.Claim.NativeID = strings.Repeat("4", 64)
+		},
+		"future": func(r *journal.UpdateStartRegistrationReceipt) {
+			r.ObservedMS = strconv.FormatInt(
+				time.Now().Add(10*time.Second).UnixMilli(), 10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, lease, intent, endpoint, observation :=
+				platformRestoreStartRegistrationCommitFixture(t, pg)
+			mutate(&observation.registration)
+			if _, err := s.commitPlatformRestoreStartRegistration(
+				context.Background(), lease, intent, endpoint,
+				observation); err == nil {
+				t.Fatal("changed restore registration committed")
+			}
+			if scalar[string](t, s.st, `SELECT state
+				FROM app_platform_operation_effects
+				WHERE operation_id=? AND stage='activate'`,
+				lease.id) != "prepared" ||
+				scalar[int64](t, s.st, `SELECT row_revision
+					FROM app_platform_operations WHERE id=?`,
+					lease.id) != lease.rowRevision {
+				t.Fatal("refused restore registration changed durable state")
+			}
+		})
+	}
+}
+
+func TestPlatformRestoreStartActivationRefusesChangedBootSQLite(t *testing.T) {
+	testPlatformRestoreStartActivationRefusesChangedBoot(t, false)
+}
+
+func TestPlatformRestoreStartActivationRefusesChangedBootPostgres(t *testing.T) {
+	testPlatformRestoreStartActivationRefusesChangedBoot(t, true)
+}
+
+func testPlatformRestoreStartActivationRefusesChangedBoot(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, registrationObservation :=
+		platformRestoreStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformRestoreStartRegistration(
+		context.Background(), lease, intent, endpoint,
+		registrationObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformRestoreStartBootFixture(
+		t, s, next, endpoint)
+	defer applied.registration.Close()
+	for name, mutate := range map[string]func(*platformUpdateStartBootObservation){
+		"native": func(b *platformUpdateStartBootObservation) {
+			b.nativeID = strings.Repeat("1", 64)
+		},
+		"document": func(b *platformUpdateStartBootObservation) {
+			b.documentSHA256 = strings.Repeat("2", 64)
+		},
+		"delivery": func(b *platformUpdateStartBootObservation) {
+			b.deliverySHA256 = strings.Repeat("3", 64)
+		},
+		"boot": func(b *platformUpdateStartBootObservation) {
+			b.bootID = ""
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := boot
+			mutate(&changed)
+			if _, err := s.commitPlatformRestoreStartActivation(
+				context.Background(), next, applied, changed); err == nil {
+				t.Fatal("changed restore boot activated")
+			}
+			if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision
+				FROM app_platform_installations WHERE id=?`,
+				lease.installationID) != "recovery_required:1:1" ||
+				scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+					WHERE installation_id=? AND state='candidate'
+					AND generation=2`, lease.installationID) != 1 {
+				t.Fatal("refused restore boot changed the active tuple")
+			}
+		})
+	}
+}
+
+func TestPlatformRestoreStartActivationRollbackSQLite(t *testing.T) {
+	testPlatformRestoreStartActivationRollback(t, false)
+}
+
+func TestPlatformRestoreStartActivationRollbackPostgres(t *testing.T) {
+	testPlatformRestoreStartActivationRollback(t, true)
+}
+
+func testPlatformRestoreStartActivationRollback(t *testing.T, pg bool) {
+	s, lease, intent, endpoint, registrationObservation :=
+		platformRestoreStartRegistrationCommitFixture(t, pg)
+	next, err := s.commitPlatformRestoreStartRegistration(
+		context.Background(), lease, intent, endpoint,
+		registrationObservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	applied, boot := platformRestoreStartBootFixture(
+		t, s, next, endpoint)
+	defer applied.registration.Close()
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_restore_activation_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture restore activation failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_restore_activation_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.restore_activated') EXECUTE FUNCTION fixture_restore_activation_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_restore_activation_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_restore_activation_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_restore_activation_failure
+			BEFORE INSERT ON audit_log
+			WHEN NEW.action='app_platform.restore_activated'
+			BEGIN SELECT RAISE(ABORT,'fixture restore activation failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS
+			fixture_restore_activation_failure`)
+	}
+	if _, err := s.commitPlatformRestoreStartActivation(
+		context.Background(), next, applied, boot); err == nil {
+		t.Fatal("failed restore activation audit committed")
+	}
+	if scalar[string](t, s.st, `SELECT phase||':'||generation||':'||policy_revision
+		FROM app_platform_installations WHERE id=?`,
+		lease.installationID) != "recovery_required:1:1" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='active' AND generation=1`,
+			lease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='candidate' AND generation=2`,
+			lease.installationID) != 1 ||
+		scalar[int64](t, s.st, `SELECT writer_fence
+			FROM app_platform_data_namespaces
+			WHERE owner_installation_id=?`,
+			lease.installationID) != 1 ||
+		scalar[string](t, s.st, `SELECT stage
+			FROM app_platform_operations WHERE id=?`,
+			lease.id) != "activate" {
+		t.Fatal("failed restore activation was partial")
 	}
 }
 

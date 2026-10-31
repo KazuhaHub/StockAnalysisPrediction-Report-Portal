@@ -134,9 +134,27 @@ func (s *Server) runPlatformManagedRestore(ctx context.Context, expected platfor
 			ctx, expected, appplatform.StageRestoreData)
 	case appplatform.StageRestoreData:
 		return s.dispatchPlatformRestore(ctx, expected, endpoint)
+	case appplatform.StageStart:
+		return s.executePlatformRestoreStart(ctx, expected, endpoint)
+	case appplatform.StageProbe:
+		return s.probePlatformRestoreStart(ctx, expected, endpoint)
+	case appplatform.StageActivate:
+		registered, err := s.dispatchPlatformRestoreStartRegistration(
+			ctx, expected, endpoint)
+		if err != nil {
+			return platformOperationLease{}, err
+		}
+		confirmed, err := s.completePlatformRestoreStartRegistration(
+			ctx, registered, endpoint)
+		if err != nil {
+			return platformOperationLease{}, err
+		}
+		if _, err := s.activatePlatformRestoreStart(
+			ctx, confirmed, endpoint); err != nil {
+			return platformOperationLease{}, err
+		}
+		return platformOperationLease{}, nil
 	default:
-		// Start/probe/activate require the separately reviewed source restart
-		// command and cannot be inferred from restored bytes.
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
 }
