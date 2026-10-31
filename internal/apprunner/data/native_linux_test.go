@@ -177,12 +177,14 @@ func TestNativeDataPrimitive(t *testing.T) {
 		ExpectedNamespaceInode: observed.Inode, WriterFence: 1,
 	}
 	checkpoint, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, request)
-	if err != nil || checkpoint.ArchiveBytes <= 0 || checkpoint.Entries != 3 || checkpoint.ManifestSHA256 == "" || checkpoint.ObservedMS <= 0 {
-		t.Fatalf("native checkpoint: %+v %v", checkpoint, err)
+	checkpointSnapshot, snapshotErr := checkpoint.Snapshot()
+	if err != nil || snapshotErr != nil || checkpointSnapshot.ArchiveBytes <= 0 || checkpointSnapshot.Entries != 3 || checkpointSnapshot.ManifestSHA256 == "" || checkpointSnapshot.ObservedMS <= 0 {
+		t.Fatalf("native checkpoint: %+v %v", checkpointSnapshot, errors.Join(err, snapshotErr))
 	}
-	verified, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, checkpoint.ManifestSHA256)
-	if err != nil || verified.ManifestSHA256 != checkpoint.ManifestSHA256 || verified.ArchiveBytes != checkpoint.ArchiveBytes || verified.Entries != checkpoint.Entries {
-		t.Fatalf("checkpoint read-back: %+v %v", verified, err)
+	verified, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, checkpointSnapshot.ManifestSHA256)
+	verifiedSnapshot, verifiedErr := verified.Snapshot()
+	if err != nil || verifiedErr != nil || verifiedSnapshot.ManifestSHA256 != checkpointSnapshot.ManifestSHA256 || verifiedSnapshot.ArchiveBytes != checkpointSnapshot.ArchiveBytes || verifiedSnapshot.Entries != checkpointSnapshot.Entries {
+		t.Fatalf("checkpoint read-back: %+v %v", verifiedSnapshot, errors.Join(err, verifiedErr))
 	}
 	if _, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, strings.Repeat("b", 64)); !errors.Is(err, ErrCheckpointUnsafe) {
 		t.Fatal("changed checkpoint digest accepted", err)

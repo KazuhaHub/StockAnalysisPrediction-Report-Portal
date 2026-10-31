@@ -191,7 +191,7 @@ func (r *Root) Checkpoint(ctx context.Context, expected RootIdentity, source *Ro
 	}
 	ok = true
 	verified.ObservedMS = time.Now().UTC().UnixMilli()
-	return verified, nil
+	return CheckpointObservation{snapshot: verified, valid: true}, nil
 }
 
 func checkpointIncomplete(err error) error {
@@ -387,11 +387,16 @@ func (r *Root) VerifyCheckpoint(ctx context.Context, expected RootIdentity, sour
 	if err != nil || identity != expected {
 		return zero, ErrUnsafe
 	}
-	return r.verifyCheckpointLocked(ctx, expected, sourceExpected, request, manifestSHA256)
+	snapshot, err := r.verifyCheckpointLocked(ctx, expected, sourceExpected, request, manifestSHA256)
+	if err != nil {
+		return zero, err
+	}
+	snapshot.ObservedMS = time.Now().UTC().UnixMilli()
+	return CheckpointObservation{snapshot: snapshot, valid: true}, nil
 }
 
-func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpected RootIdentity, request CheckpointRequest, manifestSHA256 string) (CheckpointObservation, error) {
-	var zero CheckpointObservation
+func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpected RootIdentity, request CheckpointRequest, manifestSHA256 string) (CheckpointSnapshot, error) {
+	var zero CheckpointSnapshot
 	directory, err := r.openCheckpointDirectory()
 	if err != nil {
 		return zero, err
@@ -476,7 +481,7 @@ func (r *Root) verifyCheckpointLocked(ctx context.Context, expected, sourceExpec
 	if stat.Size() > request.MaxArchiveBytes {
 		return zero, ErrCheckpointUnsafe
 	}
-	return CheckpointObservation{
+	return CheckpointSnapshot{
 		NamespaceID: request.NamespaceID, ReleaseSHA256: request.ReleaseSHA256, ProjectID: request.ProjectID,
 		DataFormat: request.DataFormat, ArchiveBytes: stat.Size(), Entries: entries, ManifestSHA256: manifestSHA256,
 	}, nil

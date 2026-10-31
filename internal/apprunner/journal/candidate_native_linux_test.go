@@ -91,6 +91,21 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer root.Close()
+	checkpointPath := os.Getenv("APP_DATA_CHECKPOINT_ROOT")
+	checkpointInput, err := os.Open(checkpointPath)
+	if err != nil || !filepath.IsAbs(checkpointPath) {
+		t.Fatal("open checkpoint root", err)
+	}
+	defer checkpointInput.Close()
+	checkpointRoot, err := data.Open(checkpointInput)
+	if err != nil {
+		t.Fatal("open checkpoint runtime", err)
+	}
+	defer checkpointRoot.Close()
+	checkpointPin, err := checkpointRoot.Identity(context.Background())
+	if err != nil {
+		t.Fatal("checkpoint identity", err)
+	}
 	s, err := Open(journalPath)
 	if err != nil {
 		t.Fatal(err)
@@ -252,6 +267,43 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 					if err := s.db.QueryRow(`SELECT observed_state,revision FROM runner_resources WHERE id=?`, c.Payload.ResourceID).Scan(&stoppedState, &stoppedRevision); err != nil || stoppedState != "stopped" || stoppedRevision != 3 {
 						t.Fatal("managed stop did not settle", stoppedState, stoppedRevision, err)
 					}
+					var sourceDataEffect, sourceDataReceipt string
+					if err := s.db.QueryRow(`SELECT effect_id,receipt_json FROM runner_commands WHERE operation_id=? AND stage='prepare_data' AND effect_number=1 AND kind='prepare-data' AND state='applied'`, c.OperationID).Scan(&sourceDataEffect, &sourceDataReceipt); err != nil {
+						t.Fatal(err)
+					}
+					now := time.Now().UnixMilli()
+					checkpointCommand := control.CheckpointCommand{
+						Format: control.CheckpointFormat, DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch,
+						ControlRevision: strconv.FormatInt(enrollment.ControlRevision, 10), InstallationID: c.InstallationID,
+						OperationID: fixtureID(7112 + slot*10), TargetGeneration: "2", Stage: "snapshot", EffectNumber: "1",
+						EffectID: fixtureID(7113 + slot*10), Kind: "snapshot", InstallationFence: "2",
+						IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+						Payload: control.CheckpointPayload{
+							CheckpointID: fixtureID(7114 + slot*10), NamespaceID: c.Payload.DataNamespaceID, ResourceID: c.Payload.ResourceID,
+							ReleaseSHA256: c.Payload.ReleaseSHA256, SourceOperationID: c.OperationID,
+							SourceStartEffectID: c.EffectID, SourceReceiptSHA256: candidateHash([]byte(stored)),
+							SourceDataEffectID: sourceDataEffect, SourceDataReceiptSHA256: candidateHash([]byte(sourceDataReceipt)),
+							ProjectID: proof.ProjectID, NamespaceInode: proof.NamespaceInode, Device: proof.Device,
+							DataFormat: proof.DataFormat, WriterFence: proof.WriterFence,
+						},
+					}
+					checkpointCommand.PayloadSHA256, err = control.CheckpointLogicalDigest(checkpointCommand)
+					if err != nil {
+						t.Fatal(err)
+					}
+					checkpointRaw, checkpointSig, err := control.SignCheckpoint(checkpointCommand, key, authority, now)
+					if err != nil {
+						t.Fatal(err)
+					}
+					checkpoint, err := s.DispatchCheckpoint(ctx, checkpointRaw, checkpointSig, root, pin, checkpointRoot, checkpointPin)
+					if err != nil || checkpoint.Format != checkpointReceiptFormat || checkpoint.ManifestSHA256 == "" || checkpoint.ArchiveBytes == "0" {
+						t.Fatal("managed update checkpoint", checkpoint, err)
+					}
+					checkpointAgain, err := s.ReadCheckpointReceipt(ctx, checkpointRaw, checkpointSig)
+					if err != nil || checkpointAgain != checkpoint {
+						t.Fatal("managed update checkpoint read", checkpointAgain, err)
+					}
+					t.Log("NATIVE_JOURNAL_CHECKPOINT_VERIFIED")
 					dispatchRemoval("remove_code", "remove-code", fixtureID(7108+slot*10), fixtureID(7109+slot*10))
 					var absentState, absentDesired string
 					var absentRevision int

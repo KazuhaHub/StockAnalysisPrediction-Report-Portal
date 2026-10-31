@@ -71,15 +71,34 @@ func (r CheckpointRequest) valid() bool {
 	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.DataFormat > 0 && r.MaxArchiveBytes > 0 && r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 && r.WriterFence > 0 && sha256Value(r.ReleaseSHA256)
 }
 
-// CheckpointObservation describes a complete archive that was read back and
+// CheckpointSnapshot describes a complete archive that was read back and
 // hashed. It is not a journal receipt, restore proof or activation authority.
-type CheckpointObservation struct {
+type CheckpointSnapshot struct {
 	NamespaceID, ReleaseSHA256 string
 	ProjectID                  uint32
 	DataFormat                 int64
 	ArchiveBytes, Entries      int64
 	ManifestSHA256             string
 	ObservedMS                 int64
+}
+
+// CheckpointObservation is minted only after checkpoint read-back succeeds.
+type CheckpointObservation struct {
+	snapshot CheckpointSnapshot
+	valid    bool
+}
+
+func (CheckpointObservation) MarshalJSON() ([]byte, error) { return nil, ErrCheckpointUnsafe }
+func (o *CheckpointObservation) UnmarshalJSON([]byte) error {
+	*o = CheckpointObservation{}
+	return ErrCheckpointUnsafe
+}
+func (o CheckpointObservation) Snapshot() (CheckpointSnapshot, error) {
+	if !o.valid || o.snapshot.ArchiveBytes <= 0 || o.snapshot.Entries < 0 || o.snapshot.ObservedMS <= 0 ||
+		!namespaceID.MatchString(o.snapshot.NamespaceID) || !sha256Value(o.snapshot.ReleaseSHA256) || !sha256Value(o.snapshot.ManifestSHA256) {
+		return CheckpointSnapshot{}, ErrCheckpointUnsafe
+	}
+	return o.snapshot, nil
 }
 
 func sha256Value(value string) bool {

@@ -1,6 +1,7 @@
 package data
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -59,5 +60,18 @@ func TestCheckpointRequestBounds(t *testing.T) {
 				t.Fatal("malformed checkpoint request accepted")
 			}
 		})
+	}
+}
+
+func TestCheckpointObservationIsOpaque(t *testing.T) {
+	var observation CheckpointObservation
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("zero checkpoint observation accepted")
+	}
+	if _, err := json.Marshal(observation); err == nil {
+		t.Fatal("checkpoint observation serialized")
+	}
+	if err := json.Unmarshal([]byte(`{"manifest_sha256":"`+strings.Repeat("a", 64)+`"}`), &observation); err == nil {
+		t.Fatal("checkpoint observation decoded")
 	}
 }
