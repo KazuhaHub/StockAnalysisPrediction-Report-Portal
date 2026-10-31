@@ -2253,15 +2253,18 @@ body {
 }
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]::before { content: none; }
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]:last-child { border-bottom: 0 !important; }
-/* Row controls antd adds (expand arrow) sit in the card's corner, not on a line of their own. */
+/* Row controls sit in the card's top corner, not on a line of their own: antd's expand arrow and
+   selection box, and an unlabelled trailing column (an open arrow or the row's actions). */
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row { position: relative; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td.ant-table-selection-column,
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-label='']:last-child:not([data-primary]),
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td.ant-table-row-expand-icon-cell {
   position: absolute !important;
   inset: 10px 10px auto auto !important;
   width: auto !important;
   padding: 0 !important;
 }
-.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:has(> td.ant-table-row-expand-icon-cell) > td[data-primary] { padding-inline-end: 28px !important; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:has(> td.ant-table-row-expand-icon-cell, > td.ant-table-selection-column, > td[data-label='']:last-child) > td[data-primary] { padding-inline-end: 36px !important; }
 .rp-card-table--cards .ant-table-tbody > tr.ant-table-row:hover > td { background: transparent !important; }
 .rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) { display: block; }
 .rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) > td { display: block; border: 0; }
