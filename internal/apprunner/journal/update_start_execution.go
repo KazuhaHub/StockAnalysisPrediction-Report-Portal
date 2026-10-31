@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -823,13 +824,23 @@ func (s *Store) DispatchUpdateStart(ctx context.Context, raw, signature, descrip
 	if receipt, err := s.ReadUpdateStartRunningReceipt(ctx, raw, signature); err == nil {
 		return receipt, nil
 	}
+	log.Printf("update-start %s: reading reservation",
+		verified.Command().OperationID)
 	if _, err := s.ReadUpdateStartReservation(ctx, raw, signature); err != nil {
+		log.Printf("update-start %s: reservation rejected: %v",
+			verified.Command().OperationID, err)
 		return zero, ErrUpdateStartExecutionUnavailable
 	}
+	log.Printf("update-start %s: claiming",
+		verified.Command().OperationID)
 	claim, err := s.ClaimUpdateStart(ctx, raw, signature)
 	if err != nil {
+		log.Printf("update-start %s: claim rejected: %v",
+			verified.Command().OperationID, err)
 		return zero, err
 	}
+	log.Printf("update-start %s: executing",
+		verified.Command().OperationID)
 	return s.ExecuteUpdateStart(ctx, claim, native, descriptor)
 }
 
