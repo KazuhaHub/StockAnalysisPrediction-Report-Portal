@@ -442,7 +442,7 @@ function AppShell() {
               open={workbenchOpen}
               onOpenChange={setWorkbenchOpen}
               destroyOnHidden
-              styles={{ container: { padding: 12, borderRadius: 18 } }}
+              styles={{ container: { padding: 12, borderRadius: token.borderRadiusLG } }}
               content={
                 // The card grows with its tiles (see .rp-workbench-menu): a fixed width held three.
                 <div

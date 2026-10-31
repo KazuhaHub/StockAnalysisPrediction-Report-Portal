@@ -300,7 +300,7 @@ export default function LinksPage() {
           gap: 8,
           flexWrap: 'wrap',
           padding: '8px 10px',
-          borderRadius: 8,
+          borderRadius: token.borderRadius,
           background: token.colorFillSecondary,
           border: `1px solid ${token.colorBorderSecondary}`,
           opacity: g.visible === false ? 0.55 : 1, // dim a hidden group so its state reads at a glance
@@ -340,7 +340,7 @@ export default function LinksPage() {
           gap: 10,
           padding: '6px 10px',
           paddingInlineStart: grouped ? 30 : 10, // indent grouped links to show nesting
-          borderRadius: 8,
+          borderRadius: token.borderRadius,
           border: `1px solid ${token.colorBorderSecondary}`,
           background: token.colorBgContainer,
           opacity: l.visible === false ? 0.55 : 1, // dim a hidden entry so its state reads at a glance

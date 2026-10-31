@@ -33,7 +33,7 @@ export default function TimelinePanel({ nodes, selected, onSelect, horizontal }:
               style={{
                 flex: '0 0 auto',
                 cursor: 'pointer',
-                borderRadius: 16,
+                borderRadius: 999,
                 padding: '4px 12px',
                 fontSize: 13,
                 lineHeight: 1.5,

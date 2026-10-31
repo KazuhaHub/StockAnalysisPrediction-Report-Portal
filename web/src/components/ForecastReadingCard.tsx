@@ -322,7 +322,7 @@ export default function ForecastReadingCard({
               <div
                 data-testid="forecast-scenario-band"
                 data-stops={JSON.stringify(bandStops)}
-                style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
+                style={{ height: 8, borderRadius: token.borderRadius, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
               />
               {cursor !== undefined && (
                 <div data-testid="forecast-scenario-cursor" data-position={cursor} style={{ position: 'absolute', insetBlockStart: 0, insetInlineStart: `${cursor}%`, width: 0, height: 8 }}>
@@ -346,7 +346,7 @@ export default function ForecastReadingCard({
                       insetInlineStart: -1,
                       width: 2,
                       height: 18,
-                      borderRadius: 1,
+                      borderRadius: token.borderRadiusXS,
                       background: token.colorText,
                       // A hairline of the card colour keeps the tick distinct where it crosses the band.
                       boxShadow: `0 0 0 1px ${token.colorBgContainer}`,

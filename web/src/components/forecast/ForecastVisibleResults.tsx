@@ -60,11 +60,11 @@ export default function ForecastVisibleResults({ members, mature, complete, hide
             {([['stock', row.stock], ['benchmark', row.bench]] as const).map(([name, value]) => <div key={name}
               style={{ display: 'grid', gridTemplateColumns: '80px 1fr 76px', alignItems: 'center', gap: 8, marginTop: 8 }}>
               <Typography.Text type="secondary">{t(`forecast.readable.${name}`)}</Typography.Text>
-              <div style={{ position: 'relative', height: 18, background: token.colorFillQuaternary, borderRadius: 3 }}>
+              <div style={{ position: 'relative', height: 18, background: token.colorFillQuaternary, borderRadius: token.borderRadiusXS }}>
                 <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, borderLeft: `1px solid ${token.colorTextTertiary}` }} />
                 {value !== undefined && <div style={{ position: 'absolute', top: 3, height: 12,
                   left: value < 0 ? `${50 - Math.abs(value) / maxReturn * 48}%` : '50%',
-                  width: `${Math.abs(value) / maxReturn * 48}%`, background: name === 'stock' ? token.colorPrimary : token.colorTextTertiary, borderRadius: 2 }} />}
+                  width: `${Math.abs(value) / maxReturn * 48}%`, background: name === 'stock' ? token.colorPrimary : token.colorTextTertiary, borderRadius: token.borderRadiusXS }} />}
               </div>
               <span style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pct(value)}</span>
             </div>)}

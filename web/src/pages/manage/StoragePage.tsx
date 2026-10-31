@@ -321,9 +321,9 @@ export default function StoragePage() {
     const color = catColor(c.key)
     const days = catDays(c.key)
     return (
-      <div key={c.key} style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div key={c.key} style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 36, height: 36, borderRadius: 9, display: 'grid', placeItems: 'center', background: color + '22', color, fontSize: 18 }}>{CAT_ICON[c.key]}</span>
+          <span style={{ width: 36, height: 36, borderRadius: token.borderRadiusLG, display: 'grid', placeItems: 'center', background: color + '22', color, fontSize: 18 }}>{CAT_ICON[c.key]}</span>
           <Typography.Text strong>{t(`storage.cat.${c.key}`)}</Typography.Text>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -425,17 +425,17 @@ export default function StoragePage() {
                   <div
                     key={c.key}
                     title={`${t(`storage.cat.${c.key}`)} ${fmtBytes(c.bytes)}`}
-                    style={{ flex: `${Math.max(2, (c.bytes / totalBytes) * 100)} 0 0`, background: catColor(c.key), borderRadius: 3, minWidth: 6 }}
+                    style={{ flex: `${Math.max(2, (c.bytes / totalBytes) * 100)} 0 0`, background: catColor(c.key), borderRadius: token.borderRadiusXS, minWidth: 6 }}
                   />
                 ))
             ) : (
-              <div style={{ flex: 1, background: token.colorFillSecondary, borderRadius: 3 }} />
+              <div style={{ flex: 1, background: token.colorFillSecondary, borderRadius: token.borderRadiusXS }} />
             )}
           </div>
           <Space wrap size={16}>
             {cats.map((c) => (
               <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 3, background: catColor(c.key), display: 'inline-block' }} />
+                <span style={{ width: 10, height: 10, borderRadius: token.borderRadiusXS, background: catColor(c.key), display: 'inline-block' }} />
                 <Typography.Text>{t(`storage.cat.${c.key}`)}</Typography.Text>
                 <Typography.Text type="secondary">{fmtBytes(c.bytes)}</Typography.Text>
               </span>

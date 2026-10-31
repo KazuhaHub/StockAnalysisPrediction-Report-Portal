@@ -51,10 +51,38 @@ export default function SettingsWorkspace({ sections, active, onChange, children
     ink.style.transform = `translateX(${tab.offsetLeft}px)`
     ink.style.width = `${tab.offsetWidth}px`
   }
+  // A row wider than its space scrolls without a scrollbar (index.css); a fade marks each side that
+  // has more tabs. Read from the list itself, so it holds after a resize, a scroll or a new label.
+  const markEdges = () => {
+    const list = listRef.current
+    if (!list) return
+    const more = (on: boolean, side: 'start' | 'end') => {
+      if (on) list.dataset[side] = 'true'
+      else delete list.dataset[side]
+    }
+    more(list.scrollLeft > 1, 'start')
+    more(list.scrollLeft + list.clientWidth < list.scrollWidth - 1, 'end')
+  }
+  // The chosen tab is brought fully into view, with a little of its neighbour showing past it.
+  const reveal = (smooth: boolean) => {
+    const list = listRef.current
+    const tab = placedFor.current === null ? null : document.getElementById(tabId(placedFor.current))
+    if (!list || !tab) return
+    const pad = 24
+    const view = list.clientWidth
+    let left = list.scrollLeft
+    if (tab.offsetLeft < left) left = Math.max(0, tab.offsetLeft - pad)
+    else if (tab.offsetLeft + tab.offsetWidth > left + view) left = tab.offsetLeft + tab.offsetWidth - view + pad
+    else return
+    const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    list.scrollTo?.({ left, behavior: smooth && !still ? 'smooth' : 'auto' })
+  }
   useLayoutEffect(() => {
     const animate = placedFor.current !== null && placedFor.current !== active
     placedFor.current = active
     placeInk(animate)
+    reveal(animate)
+    markEdges()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, shape])
   // Labels change width with the language and once web fonts land, and a bar mounted while hidden
@@ -63,7 +91,12 @@ export default function SettingsWorkspace({ sections, active, onChange, children
   useLayoutEffect(() => {
     const list = listRef.current
     if (!list || typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(() => placeInk(false))
+    // Also the first chance to bring the chosen tab into view when the row mounted hidden.
+    const ro = new ResizeObserver(() => {
+      placeInk(false)
+      reveal(false)
+      markEdges()
+    })
     ro.observe(list)
     for (const tab of list.querySelectorAll('[role="tab"]')) ro.observe(tab)
     return () => ro.disconnect()
@@ -79,11 +112,14 @@ export default function SettingsWorkspace({ sections, active, onChange, children
     else return
     event.preventDefault()
     onChange(sections[next].key)
-    document.getElementById(tabId(sections[next].key))?.focus()
+    // Focus without the browser's own jump into view: reveal() scrolls it there, smoothly and with a
+    // little of the next tab showing.
+    document.getElementById(tabId(sections[next].key))?.focus({ preventScroll: true })
   }
   return (
     <div className="rp-settings-workspace">
-      <div ref={listRef} role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}>
+      <div ref={listRef} role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}
+        onScroll={markEdges}>
         {sections.map((section) => {
           const selected = section.key === active
           return (

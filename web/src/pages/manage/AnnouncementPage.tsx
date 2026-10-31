@@ -304,7 +304,7 @@ export default function AnnouncementPage() {
           gap: 8,
           flexWrap: 'wrap',
           padding: '8px 10px',
-          borderRadius: 8,
+          borderRadius: token.borderRadius,
           background: token.colorFillQuaternary,
           border: `1px solid ${token.colorBorderSecondary}`,
           opacity: a.enabled ? 1 : 0.55, // a switched-off row reads as off at a glance
@@ -316,7 +316,7 @@ export default function AnnouncementPage() {
           style={{
             width: 8,
             height: 8,
-            borderRadius: 4,
+            borderRadius: '50%',
             flexShrink: 0,
             background: (token as unknown as Record<string, string>)[LEVEL_DOT[a.level]],
           }}
@@ -436,7 +436,7 @@ export default function AnnouncementPage() {
             <div
               style={{
                 border: `1px dashed ${token.colorBorder}`,
-                borderRadius: 8,
+                borderRadius: token.borderRadius,
                 padding: 12,
                 background: token.colorFillQuaternary,
               }}
@@ -463,7 +463,7 @@ export default function AnnouncementPage() {
               showIcon
               type="warning"
               title={t('announcementAdmin.crowded', { count: liveCount })}
-              style={{ borderRadius: 8 }}
+              style={{ borderRadius: token.borderRadius }}
             />
           )}
 
@@ -558,7 +558,7 @@ export default function AnnouncementPage() {
                         display: 'inline-block',
                         width: 8,
                         height: 8,
-                        borderRadius: 4,
+                        borderRadius: '50%',
                         background: (token as unknown as Record<string, string>)[LEVEL_DOT[level]],
                       }}
                     />

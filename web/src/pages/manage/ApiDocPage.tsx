@@ -16,7 +16,7 @@ const METHOD_COLORS: Record<string, string> = {
 const CODE_BLOCK: CSSProperties = {
   background: 'rgba(128,128,128,0.12)',
   padding: 12,
-  borderRadius: 8,
+  borderRadius: 'var(--ant-border-radius)',
   overflow: 'auto',
   fontSize: 12,
   lineHeight: 1.6,

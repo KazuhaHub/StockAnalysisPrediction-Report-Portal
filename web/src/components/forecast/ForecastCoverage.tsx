@@ -57,7 +57,7 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
           fontSize: 12,
           lineHeight: '18px',
           padding: '0 6px',
-          borderRadius: 4,
+          borderRadius: token.borderRadiusSM,
           border: `1px solid ${warn ? token.colorWarningBorder : token.colorBorderSecondary}`,
           background: warn ? token.colorWarningBg : token.colorFillQuaternary,
           color: warn ? forecastWarningText(token) : token.colorTextSecondary,
@@ -70,7 +70,7 @@ export default function ForecastCoverage({ group: g, auditLink }: Props) {
 
   return (
     <div style={{ minWidth: 132, maxWidth: 260 }}>
-      <div role="img" aria-label={barLabel} style={{ display: 'flex', gap: 1, borderRadius: 4, overflow: 'hidden', background: token.colorFillQuaternary }}>
+      <div role="img" aria-label={barLabel} style={{ display: 'flex', gap: 1, borderRadius: token.borderRadiusSM, overflow: 'hidden', background: token.colorFillQuaternary }}>
         {families.map(([name, n, background]) => (
           <span key={name} data-seg={name} style={{ display: 'block', height: 8, width: share(n), background }} />
         ))}

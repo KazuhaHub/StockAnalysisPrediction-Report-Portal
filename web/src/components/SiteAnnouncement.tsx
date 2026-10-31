@@ -75,7 +75,7 @@ export function AnnouncementRow({
         alignItems: 'center',
         gap: 10,
         padding: '7px 10px',
-        borderRadius: 8,
+        borderRadius: token.borderRadius,
         background: palette[tokens.bg],
         ...style,
       }}
