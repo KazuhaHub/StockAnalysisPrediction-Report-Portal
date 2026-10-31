@@ -191,8 +191,8 @@ func TestPlatformObjectsCrossAccountAndBindingIsolation(t *testing.T) {
 	}
 }
 
-func TestPlatformObjectsUninstallAndAccountDeletionClearData(t *testing.T) {
-	s, admin, reader, installation := platformObjectsFixture(t)
+func testPlatformObjectsUninstallAndAccountDeletionClearData(t *testing.T, pg bool) {
+	s, admin, reader, installation := platformObjectsFixturePG(t, pg)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"delete with app"}`)); response.Code != http.StatusOK {
 		t.Fatal(response.Code, response.Body.String())
@@ -209,7 +209,7 @@ func TestPlatformObjectsUninstallAndAccountDeletionClearData(t *testing.T) {
 		t.Fatal("uninstall did not clear object data, counters and the plugin table")
 	}
 
-	s, _, reader, installation = platformObjectsFixture(t)
+	s, _, reader, installation = platformObjectsFixturePG(t, pg)
 	binding = platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"delete with account"}`)); response.Code != http.StatusOK {
 		t.Fatal(response.Code, response.Body.String())
@@ -223,8 +223,16 @@ func TestPlatformObjectsUninstallAndAccountDeletionClearData(t *testing.T) {
 	}
 }
 
-func TestPlatformObjectUninstallRollsBackWhenAdmissionFails(t *testing.T) {
-	s, admin, reader, installation := platformObjectsFixture(t)
+func TestPlatformObjectsUninstallAndAccountDeletionClearDataSQLite(t *testing.T) {
+	testPlatformObjectsUninstallAndAccountDeletionClearData(t, false)
+}
+
+func TestPlatformObjectsUninstallAndAccountDeletionClearDataPostgres(t *testing.T) {
+	testPlatformObjectsUninstallAndAccountDeletionClearData(t, true)
+}
+
+func testPlatformObjectUninstallRollsBackWhenAdmissionFails(t *testing.T, pg bool) {
+	s, admin, reader, installation := platformObjectsFixturePG(t, pg)
 	binding := platformObjectBindingMap(t, s, reader, installation)
 	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"must survive rollback"}`)); response.Code != http.StatusOK {
 		t.Fatal(response.Code, response.Body.String())
@@ -234,8 +242,17 @@ func TestPlatformObjectUninstallRollsBackWhenAdmissionFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustExec(t, s.st, `CREATE TRIGGER fixture_object_uninstall_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.operation_admitted' BEGIN SELECT RAISE(ABORT,'fixture object uninstall failure'); END`)
-	defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_object_uninstall_failure`)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION fixture_object_uninstall_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture object uninstall failure'; END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_object_uninstall_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.operation_admitted') EXECUTE FUNCTION fixture_object_uninstall_failure()`)
+		defer func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_object_uninstall_failure ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_object_uninstall_failure()`)
+		}()
+	} else {
+		mustExec(t, s.st, `CREATE TRIGGER fixture_object_uninstall_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.operation_admitted' BEGIN SELECT RAISE(ABORT,'fixture object uninstall failure'); END`)
+		defer mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_object_uninstall_failure`)
+	}
 	if _, err := s.consumePlatformRemovalReview(admin, plan.ID, plan.SHA256, platformFixtureID(891)); err == nil {
 		t.Fatal("failed uninstall admission committed")
 	}
@@ -245,6 +262,14 @@ func TestPlatformObjectUninstallRollsBackWhenAdmissionFails(t *testing.T) {
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "enabled:ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (action='uninstall' OR completed_ms IS NULL)`, installation) != 0 {
 		t.Fatal("failed uninstall changed authority or queued work")
 	}
+}
+
+func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsSQLite(t *testing.T) {
+	testPlatformObjectUninstallRollsBackWhenAdmissionFails(t, false)
+}
+
+func TestPlatformObjectUninstallRollsBackWhenAdmissionFailsPostgres(t *testing.T) {
+	testPlatformObjectUninstallRollsBackWhenAdmissionFails(t, true)
 }
 
 func TestPlatformFrontendUninstallSchedulerClearsPluginDataAndAccess(t *testing.T) {
