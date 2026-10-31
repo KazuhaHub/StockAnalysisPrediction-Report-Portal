@@ -450,14 +450,14 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 		return zero, err
 	}
 	if !source.preflightMatches(snapshot.Launch) || snapshot.NativeID != source.resource.nativeID {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement preflight/native id", ErrFenceReconciliation)
 	}
 	expectedState := "exited"
 	if source.command.Stage == "remove_code" {
 		expectedState = "absent"
 	}
 	if snapshot.State != expectedState {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement state %s", ErrFenceReconciliation, snapshot.State)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -474,18 +474,18 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 	now := time.Now().UTC().UnixMilli()
 	if _, err := control.VerifyManagedRemoval(source.commandRaw(), source.commandSignature(), authority, now); err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement authority", ErrFenceReconciliation)
 	}
 	current, err := loadManagedRemovalSource(ctx, tx, source.command, now)
 	if err != nil {
 		return zero, err
 	}
 	if current.resource.nativeID != source.resource.nativeID || !sameCandidateRemovalProvenance(source, current) {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement provenance", ErrFenceReconciliation)
 	}
 	var state, receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, source.command.EffectID).Scan(&state, &receipt); err != nil || state != "unknown" || receipt != "{}" {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement unknown intent", ErrFenceReconciliation)
 	}
 	nextRevision := int64(3)
 	nextState, nextDesired := "stopped", "stopped"
@@ -499,7 +499,7 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement resource CAS", ErrFenceReconciliation)
 	}
 	result := ManagedRemovalReceipt{
 		Format: managedRemovalReceiptFormat, DeploymentID: source.command.DeploymentID, ControllerEpoch: source.command.ControllerEpoch,
@@ -512,18 +512,18 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 		ObservedMS: strconv.FormatInt(snapshot.ObservedMS, 10), SettledMS: strconv.FormatInt(now, 10),
 	}
 	if !validManagedRemovalReceipt(result) {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement receipt", ErrFenceReconciliation)
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > 16384 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement encoding", ErrFenceReconciliation)
 	}
 	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}'`, string(encoded), now, source.command.EffectID)
 	if err != nil {
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal settlement receipt CAS", ErrFenceReconciliation)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
