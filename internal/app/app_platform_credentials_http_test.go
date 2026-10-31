@@ -24,7 +24,7 @@ func TestPlatformCredentialManagementHTTP(t *testing.T) {
 	if list.Code != 200 || !strings.Contains(list.Body.String(), credential.ID) || strings.Contains(list.Body.String(), value) {
 		t.Fatal("credential list", list.Code, list.Body.String())
 	}
-	preview := sessionTestRequest(mux, "POST", "/api/admin/app-platform/credentials/"+credential.ID+"/preview", cookie, fmt.Sprintf(`{"action":"replace","revision":"1","value_revision":"1"}`))
+	preview := sessionTestRequest(mux, "POST", "/api/admin/app-platform/credentials/"+credential.ID+"/preview", cookie, `{"action":"replace","revision":"1","value_revision":"1"}`)
 	if preview.Code != 200 || !strings.Contains(preview.Body.String(), `"direct":true`) {
 		t.Fatal("direct credential preview", preview.Code, preview.Body.String())
 	}

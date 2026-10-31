@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"math"
 	"sort"
 	"time"
@@ -267,15 +266,4 @@ func (s *Server) consumePlatformCredentialReview(session platformActorSession, p
 		return platformCredentialMetadata{}, err
 	}
 	return result, nil
-}
-
-func (s *Server) directPlatformCredentialChange(session platformActorSession, id string, revision, valueRevision int64, action string, value []byte) (platformCredentialMetadata, error) {
-	change := platformCredentialChange{kind: action, id: id, revision: revision, valueRevision: valueRevision, value: value}
-	if action == "replace" {
-		return s.changePlatformCredential(session, change)
-	}
-	if action == "revoke" {
-		return s.changePlatformCredential(session, change)
-	}
-	return platformCredentialMetadata{}, errors.New("invalid credential action")
 }
