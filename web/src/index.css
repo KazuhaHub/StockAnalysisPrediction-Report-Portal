@@ -459,9 +459,10 @@ body {
   overflow-anchor: none;
 }
 /* The bar scrolls sideways on narrow screens. The baseline is an inset shadow rather than a border
-   so the active tab's underline can sit on it without a negative margin: with one, every tab stood
+   so the selected tab's underline (.rp-settings-tab-ink) can sit on it without a negative margin: with one, every tab stood
    1px taller than the bar, and overflow-x: auto turned that pixel into a vertical scrollbar. */
 .rp-settings-tabs {
+  position: relative;
   display: flex;
   gap: 4px;
   min-width: 0;
@@ -475,6 +476,7 @@ body {
   padding: 8px 12px;
   border: 0;
   border-bottom: 2px solid transparent;
+  transition: color var(--ant-motion-duration-mid, 0.2s);
   background: transparent;
   color: var(--ant-color-text-secondary);
   font: inherit;
@@ -482,7 +484,30 @@ body {
   white-space: nowrap;
 }
 .rp-settings-tab:hover { color: var(--ant-color-text); }
-.rp-settings-tab--active { color: var(--ant-color-primary); border-bottom-color: var(--ant-color-primary); }
+.rp-settings-tab--active { color: var(--ant-color-primary); }
+/* The selected tab's underline: one bar that slides between tabs, timed like antd's ink bar. It
+   sits on the baseline inside the scroller, so it scrolls with the tabs on narrow screens. */
+.rp-settings-tab-ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--ant-color-primary);
+  pointer-events: none;
+}
+.rp-settings-tab-ink--animated {
+  transition: transform var(--ant-motion-duration-slow, 0.3s) var(--ant-motion-ease-in-out, ease-in-out),
+    width var(--ant-motion-duration-slow, 0.3s) var(--ant-motion-ease-in-out, ease-in-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-settings-tab { transition: none; }
+  .rp-settings-tab-ink--animated { transition: none; }
+}
+/* Forced colours repaint backgrounds with the canvas colour, which would erase the bar and leave
+   no visible selection; draw it in the system highlight instead. */
+@media (forced-colors: active) {
+  .rp-settings-tab-ink { background: Highlight; forced-color-adjust: none; }
+}
 .rp-settings-tab:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: -2px; }
 .rp-admin-list-page {
   display: flex;

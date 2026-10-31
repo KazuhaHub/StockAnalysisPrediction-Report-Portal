@@ -1,4 +1,4 @@
-import { createContext, useContext, useId, type KeyboardEvent, type ReactNode } from 'react'
+import { createContext, useContext, useId, useLayoutEffect, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 const ActiveSection = createContext('')
@@ -23,6 +23,52 @@ export default function SettingsWorkspace({ sections, active, onChange, children
   const id = useId()
   const tabId = (key: string) => `${id}-tab-${key}`
   const panelId = `${id}-panel`
+  // One underline that moves under the selected tab, so a switch slides it across (like antd's ink
+  // bar) instead of the old per-tab border jumping. It slides only when the selection changes; first
+  // paint, a resize, late web fonts and a language switch put it in place without motion. Written
+  // straight to the element: it is decoration, and a re-render per measurement would buy nothing.
+  const listRef = useRef<HTMLDivElement>(null)
+  const inkRef = useRef<HTMLSpanElement>(null)
+  const placedFor = useRef<string | null>(null)
+  // Where the bar was last put, so a re-measure that finds the tab unmoved leaves a slide running.
+  const placedAt = useRef<string | null>(null)
+  // Callers build `sections` inline, so the array is new on every render (some pages re-render per
+  // keystroke). What the bar depends on is the tabs' keys and labels.
+  const shape = sections.map((section) => `${section.key}\u0000${section.label}`).join('\u0001')
+  const placeInk = (animate: boolean) => {
+    const ink = inkRef.current
+    if (!ink) return
+    const tab = placedFor.current === null ? null : document.getElementById(tabId(placedFor.current))
+    const at = tab ? `${tab.offsetLeft} ${tab.offsetWidth}` : ''
+    // A resize callback mid-slide (the page scrollbar appearing narrows the list, not the tabs) must
+    // not take the transition away from a moving bar: that snaps it to the end.
+    if (!animate && at === placedAt.current) return
+    placedAt.current = at
+    ink.classList.toggle('rp-settings-tab-ink--animated', animate)
+    // No tab for the selection: underline nothing rather than whichever tab now sits there.
+    ink.style.visibility = tab ? '' : 'hidden'
+    if (!tab) return
+    ink.style.transform = `translateX(${tab.offsetLeft}px)`
+    ink.style.width = `${tab.offsetWidth}px`
+  }
+  useLayoutEffect(() => {
+    const animate = placedFor.current !== null && placedFor.current !== active
+    placedFor.current = active
+    placeInk(animate)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, shape])
+  // Labels change width with the language and once web fonts land, and a bar mounted while hidden
+  // measures nothing until shown; follow them. Kept apart from the selection so its first callback
+  // never cuts a slide short.
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => placeInk(false))
+    ro.observe(list)
+    for (const tab of list.querySelectorAll('[role="tab"]')) ro.observe(tab)
+    return () => ro.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shape])
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
     const index = sections.findIndex((section) => section.key === active)
     let next = index
@@ -37,7 +83,7 @@ export default function SettingsWorkspace({ sections, active, onChange, children
   }
   return (
     <div className="rp-settings-workspace">
-      <div role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}>
+      <div ref={listRef} role="tablist" aria-label={t('manage.sections')} className="rp-settings-tabs" onKeyDown={move}>
         {sections.map((section) => {
           const selected = section.key === active
           return (
@@ -47,6 +93,7 @@ export default function SettingsWorkspace({ sections, active, onChange, children
               onClick={() => onChange(section.key)}>{section.label}</button>
           )
         })}
+        <span ref={inkRef} aria-hidden="true" className="rp-settings-tab-ink" />
       </div>
       <div id={panelId} role="tabpanel" aria-labelledby={tabId(active)} className="rp-settings-content">
         <ActiveSection value={active}>{children}</ActiveSection>
