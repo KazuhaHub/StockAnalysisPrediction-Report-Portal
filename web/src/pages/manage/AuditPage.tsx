@@ -24,6 +24,7 @@ import AuditTimeRange from './AuditTimeRange'
 import { auditExportInput, auditQueryParams, type AuditCondition, type AuditRange } from '../../lib/auditQuery'
 import type { ColumnsType } from 'antd/es/table'
 import { useTableView } from '../../components/TableView'
+import Fold from '../../components/Fold'
 import { ExportOutlined, RightOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
@@ -344,7 +345,9 @@ function AuditRecordView({ r, tz, ouNames, locale, compact }: { r: AuditEntry; t
           {r.detail ? <Typography.Text copyable={{ text: r.detail }} /> : null}
         </Space>
         {/* Bounded and scrollable: a grant change over a large OU carries a long list. */}
-        {raw && <pre>{pretty || '—'}</pre>}
+        <Fold open={raw}>
+          <pre>{pretty || '—'}</pre>
+        </Fold>
       </div>
     </section>
   )
