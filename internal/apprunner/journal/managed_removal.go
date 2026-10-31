@@ -274,23 +274,23 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 	var zero managedRemovalNativeInput
 	project, err := strconv.ParseUint(source.data.ProjectID, 10, 32)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal project id", ErrFenceReconciliation)
 	}
 	device, err := strconv.ParseUint(source.data.Device, 10, 64)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal device", ErrFenceReconciliation)
 	}
 	inode, err := strconv.ParseUint(source.data.NamespaceInode, 10, 64)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal namespace inode", ErrFenceReconciliation)
 	}
 	quotaBytes, err := strconv.ParseInt(source.data.QuotaBytes, 10, 64)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal quota bytes", ErrFenceReconciliation)
 	}
 	quotaInodes, err := strconv.ParseInt(source.data.QuotaInodes, 10, 64)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal quota inodes", ErrFenceReconciliation)
 	}
 	result := managedRemovalNativeInput{request: driver.CandidateLaunchRequest{
 		Identity: driver.CandidateIdentity{
@@ -361,15 +361,15 @@ func (s *Store) beginManagedRemoval(ctx context.Context, raw, signature []byte) 
 		if storedState == "applied" {
 			receipt, err := ParseManagedRemovalReceipt([]byte(storedReceipt))
 			if err != nil || !managedRemovalReceiptMatchesCommand(receipt, command) {
-				return zero, false, ErrFenceReconciliation
+				return zero, false, fmt.Errorf("%w: managed removal replay receipt", ErrFenceReconciliation)
 			}
 			return zero, true, nil
 		}
 		if storedState == "unknown" {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf("%w: managed removal replay uncertain", ErrFenceReconciliation)
 		}
 		if storedState != "prepared" {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf("%w: managed removal replay state", ErrFenceReconciliation)
 		}
 	} else if errors.Is(err, sql.ErrNoRows) {
 		source, err := loadManagedRemovalSource(ctx, tx, command, now)
@@ -391,7 +391,7 @@ func (s *Store) beginManagedRemoval(ctx context.Context, raw, signature []byte) 
 			return zero, false, err
 		}
 		if n, err := changed.RowsAffected(); err != nil || n != 1 {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf("%w: managed removal intent transition", ErrFenceReconciliation)
 		}
 		if err := tx.Commit(); err != nil {
 			return zero, false, err
@@ -409,7 +409,7 @@ func (s *Store) beginManagedRemoval(ctx context.Context, raw, signature []byte) 
 		return zero, false, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, false, ErrFenceReconciliation
+		return zero, false, fmt.Errorf("%w: managed removal prepared transition", ErrFenceReconciliation)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, false, err
@@ -582,7 +582,7 @@ func (s *Store) DispatchManagedRemoval(ctx context.Context, raw, signature []byt
 	}
 	source.raw, source.signature = raw, signature
 	if source.command.Payload.ReleaseSHA256 != parsed.SHA256 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf("%w: managed removal descriptor release", ErrFenceReconciliation)
 	}
 	input, err := managedRemovalNativeRequest(source, descriptor)
 	if err != nil {
