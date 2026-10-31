@@ -13,7 +13,7 @@ import (
 //
 // When a branch adds a step, append its id here as well. A rebase that resolves the migrations() line
 // by sorting the ids fails this test.
-var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006", "0010", "0009", "0007", "0008", "0011", "0012", "0013", "0014"}
+var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006", "0010", "0009", "0007", "0008", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018"}
 
 func TestMigrationListKeepsItsMergeOrder(t *testing.T) {
 	st := newTestStore(t)

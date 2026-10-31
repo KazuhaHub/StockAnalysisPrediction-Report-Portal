@@ -1,0 +1,256 @@
+name: app project quota probe
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_capability_snapshot*'
+      - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
+      - 'internal/app/app_platform_object*'
+      - 'internal/app/app_platform_storage*'
+      - 'internal/app/app_platform_managed_access.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/appReportsV2*'
+      - 'web/src/lib/appObjectsV2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
+      - 'scripts/generate_app_contract*'
+      - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
+      - 'internal/apprunner/broker/**'
+      - 'internal/apprunner/driver/**'
+      - 'internal/apprunner/journal/**'
+      - 'internal/apprunner/transport/**'
+      - 'internal/app/app_platform_network_request*'
+      - 'internal/app/app_platform_network_http*'
+      - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_data*'
+      - 'internal/app/app_platform_writer*'
+      - 'internal/app/app_platform_writable*'
+      - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
+      - 'internal/appplatform/backend_registration*'
+      - 'internal/app/app_platform_backend_identity*'
+      - 'internal/app/app_platform_backend_delivery*'
+      - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
+      - 'internal/appplatform/backend_handshake*'
+      - 'internal/app/app_platform_install_stage*'
+      - 'internal/app/app_platform_install_worker*'
+      - 'internal/app/app_platform_install_queue*'
+      - 'internal/app/app_platform_install_scheduler*'
+      - 'internal/app/app_platform_install_service*'
+      - 'internal/app/app_platform_lease*'
+      - 'internal/app/app_platform_install_review*'
+      - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/app_platform_trust*'
+      - 'internal/app/app_platform_install_audience*'
+      - 'internal/app/app_platform_activation*'
+      - 'internal/app/app_platform_frontend*'
+      - 'internal/app/app_platform_install_profile*'
+      - 'internal/app/app_platform_launch*'
+      - 'internal/app/app_platform_viewer*'
+      - 'internal/app/app_platform_audience*'
+      - 'internal/appplatform/viewer_identity*'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/acceptance/**'
+      - 'scripts/project_quota_probe_test.py'
+      - '.github/workflows/app-project-quota-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_capability_snapshot*'
+      - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
+      - 'internal/app/app_platform_object*'
+      - 'internal/app/app_platform_storage*'
+      - 'internal/app/app_platform_managed_access.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/appReportsV2*'
+      - 'web/src/lib/appObjectsV2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
+      - 'scripts/generate_app_contract*'
+      - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
+      - 'internal/apprunner/broker/**'
+      - 'internal/apprunner/driver/**'
+      - 'internal/apprunner/journal/**'
+      - 'internal/apprunner/transport/**'
+      - 'internal/app/app_platform_network_request*'
+      - 'internal/app/app_platform_network_http*'
+      - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_data*'
+      - 'internal/app/app_platform_writer*'
+      - 'internal/app/app_platform_writable*'
+      - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
+      - 'internal/appplatform/backend_registration*'
+      - 'internal/app/app_platform_backend_identity*'
+      - 'internal/app/app_platform_backend_delivery*'
+      - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
+      - 'internal/appplatform/backend_handshake*'
+      - 'internal/app/app_platform_install_stage*'
+      - 'internal/app/app_platform_install_worker*'
+      - 'internal/app/app_platform_install_queue*'
+      - 'internal/app/app_platform_install_scheduler*'
+      - 'internal/app/app_platform_install_service*'
+      - 'internal/app/app_platform_lease*'
+      - 'internal/app/app_platform_install_review*'
+      - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/app_platform_trust*'
+      - 'internal/app/app_platform_install_audience*'
+      - 'internal/app/app_platform_activation*'
+      - 'internal/app/app_platform_frontend*'
+      - 'internal/app/app_platform_install_profile*'
+      - 'internal/app/app_platform_launch*'
+      - 'internal/app/app_platform_viewer*'
+      - 'internal/app/app_platform_audience*'
+      - 'internal/appplatform/viewer_identity*'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/acceptance/**'
+      - 'scripts/project_quota_probe_test.py'
+      - '.github/workflows/app-project-quota-probe.yml'
+permissions:
+  contents: read
+concurrency:
+  group: app-project-quota-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  enforce-disposable-project-quota:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check out the reviewed SDK browser fixture source
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
+          ref: e21e16d4cba80ea80bcc014be89db2917c578748
+          path: .sdk-browser-apps
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Build the exact shared SDK and Portal browser fixtures
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+          npm ci --prefix .sdk-browser-apps
+          npm ci --prefix .sdk-browser-apps/apps/status/tests
+          cd .sdk-browser-apps/apps/status/tests
+          npx playwright install --with-deps chromium
+          cd "$GITHUB_WORKSPACE"
+          python3 .sdk-browser-apps/scripts/test-app-template.py --v2-fixture-output "$RUNNER_TEMP/v2-template-fixture"
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateCandidate$' -count=1
+          python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
+          APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
+          python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
+          sdk_public=$(python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --build "$RUNNER_TEMP/sdk-browser-fixture" --packages "$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/node_modules" --browsers "$RUNNER_TEMP/sdk-browser-browsers" --runner "$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs")
+          {
+            echo "APP_SDK_BROWSER_PUBLIC_ROOT=$sdk_public"
+            echo "APP_SDK_BROWSER_DIR=$sdk_public"
+            echo "APP_SDK_BROWSER_NODE=$(command -v node)"
+            echo "APP_SDK_BROWSER_RUNNER=$sdk_public/run.cjs"
+            echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
+          } >> "$GITHUB_ENV"
+      - name: Exercise the generated template in the actual Portal shell
+        run: |
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" APP_V2_AUTHORING_BROWSER_RUNNER="$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/template.cjs" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateBrowser$' -count=1 -v -timeout=90s
+      - name: Preserve generated-template browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-template-browser
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/v2-template-fixture/failure.jpg
+            ${{ runner.temp }}/v2-template-fixture/proof.jpg
+            ${{ runner.temp }}/v2-template-fixture/browser-evidence.json
+      - name: Install ephemeral filesystem acceptance tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev iproute2 util-linux
+      - name: Build native data and independent UAPI probes
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-driver-native.test" ./internal/apprunner/driver
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-data-native.test" ./internal/app
+          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/appplatform ./internal/apprunner/transport ./internal/apprunner/driver
+          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
+          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
+          docker pull registry.k8s.io/pause:3.10
+          candidate_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
+          test -n "$candidate_image"
+          candidate_socket=$(readlink -f /var/run/docker.sock)
+          {
+            echo "APP_CANDIDATE_NATIVE_BINARY=$RUNNER_TEMP/app-driver-native.test"
+            echo "APP_CANDIDATE_NATIVE_IMAGE=$candidate_image"
+            echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket"
+          } >> "$GITHUB_ENV"
+      - name: Check refusal behavior without privileges
+        run: |
+          python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
+          GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/ready_app -run '^TestFixedFixtureQuotaProfiles$' -count=1
+      - name: Build owned readiness backend through disposable local registry
+        run: bash scripts/acceptance/ready_app/build-fixture.sh
+      - name: Enforce quotas only on the newly owned loopback image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+      - name: Remove only the owned readiness registry
+        if: always()
+        run: bash scripts/acceptance/ready_app/cleanup-fixture.sh
+      - name: Remove only the owned public SDK browser fixture
+        if: always() && env.APP_SDK_BROWSER_PUBLIC_ROOT != ''
+        run: python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --cleanup "$APP_SDK_BROWSER_PUBLIC_ROOT"
+      - name: Preserve redacted enforcement evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: project-quota-evidence
+          path: |
+            project-quota-evidence.json
+            portal-quota-failure.txt
+          if-no-files-found: warn
+          retention-days: 14

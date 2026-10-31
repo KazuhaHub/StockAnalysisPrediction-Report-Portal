@@ -10,7 +10,14 @@ const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
 const authState = vi.hoisted(() => ({ can: (_p: string): boolean => true }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'failed' }))
 vi.mock('../auth', () => ({ useAuth: () => ({ can: (p: string) => authState.can(p) }) }))
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
+vi.mock('../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
+vi.mock('../lib/appDirectoryV2', () => ({
+  useAppDirectory: () => ({ items: [], loading: false, failed: false, nextCursor: '', load: () => undefined }),
+}))
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({ t: (k: string) => k }),
+  initReactI18next: { type: '3rdParty', init: () => undefined },
+}))
 
 const renderHub = () =>
   render(

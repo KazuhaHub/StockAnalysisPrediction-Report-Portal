@@ -31,6 +31,7 @@ const renderAt = (path: string) =>
           <Route path="/manage/apps" element={<div>list</div>} />
           <Route path="/manage/apps/:key" element={<AppDetailPage />} />
           <Route path="/manage/apps/:key/access" element={<div>access</div>} />
+          <Route path="/manage/apps/:key/credentials" element={<div>credentials</div>} />
         </Routes>
       </MemoryRouter>
     </App>,
@@ -116,6 +117,14 @@ describe('App detail: installed app', () => {
     renderAt('/manage/apps/hello')
     await user.click(await screen.findByRole('button', { name: /apps\.section\.backend\.title/ }))
     expect(await screen.findByText('backend-modal:hello')).toBeTruthy()
+  })
+
+  it('opens credential and binding management for an installed app', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/hello')
+    await user.click(await screen.findByRole('button', { name: /apps\.section\.credentials\.title/ }))
+    expect(await screen.findByText('credentials')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/manage/apps/hello/credentials')
   })
 
   it('uninstalls only after confirmation, then returns to the list', async () => {

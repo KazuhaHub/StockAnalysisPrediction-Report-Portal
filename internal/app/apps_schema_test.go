@@ -79,7 +79,7 @@ func TestMigration0014RefusesADatabaseMissingItsTables(t *testing.T) {
 
 // withoutSections rewrites a dump the way a release before a step wrote it: no section for the named
 // tables, and neither the tables nor the step in the header.
-func withoutSections(t *testing.T, dump []byte, tables []string, step string) []byte {
+func withoutSections(t *testing.T, dump []byte, tables, steps []string) []byte {
 	t.Helper()
 	var out bytes.Buffer
 	skipping := false
@@ -96,7 +96,7 @@ func withoutSections(t *testing.T, dump []byte, tables []string, step string) []
 				}
 				kept := []string{}
 				for _, v := range list {
-					if v != step && !slices.Contains(tables, v) {
+					if !slices.Contains(steps, v) && !slices.Contains(tables, v) {
 						kept = append(kept, v)
 					}
 				}
@@ -119,9 +119,13 @@ func withoutSections(t *testing.T, dump []byte, tables []string, step string) []
 
 func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
 	src := newTestStore(t)
-	dump := withoutSections(t, dumpOf(t, src), []string{"app_order", "app_ou_access"}, "0014")
-	if bytes.Contains(dump, []byte("app_order")) || bytes.Contains(dump, []byte("app_ou_access")) || bytes.Contains(dump, []byte(`"0014"`)) {
-		t.Fatal("the fixture still mentions the step's tables or the step")
+	tables := append(migration0014().tables, migration0015().tables...)
+	tables = append(tables, migration0016().tables...)
+	tables = append(tables, migration0017().tables...)
+	tables = append(tables, migration0018().tables...)
+	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0014", "0015", "0016", "0017", "0018"})
+	if bytes.Contains(dump, []byte("app_order")) || bytes.Contains(dump, []byte("app_ou_access")) || bytes.Contains(dump, []byte(`"0017"`)) || bytes.Contains(dump, []byte(`"0018"`)) {
+		t.Fatal("the fixture still mentions later tables or steps")
 	}
 
 	dst := newTestStore(t)

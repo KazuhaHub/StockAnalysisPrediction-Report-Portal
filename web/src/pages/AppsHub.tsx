@@ -3,11 +3,14 @@ import { Alert, Button, Card, Col, Empty, Row, Space, Spin, Tag, Typography, the
 import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import { api } from '../api/client'
+import { api, errText } from '../api/client'
+import { usePrefs } from '../prefs'
+import { AppDisplayIcon, appDisplayText } from '../lib/appDisplayV2'
 import { useAuth } from '../auth'
 import { BUILTIN_APPS, BUILTIN_PIN_PREFIX, type BuiltinApp } from '../lib/builtinApps'
 import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
+import { useAppDirectory } from '../lib/appDirectoryV2'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 
@@ -21,11 +24,11 @@ const BUILTIN_ICONS: Record<string, ReactNode> = {
   recurring: <ClockCircleOutlined />,
 }
 
-function AppCard({ icon, title, desc, tag, onClick }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void }) {
+function AppCard({ icon, title, desc, tag, onClick, disabled = false }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void; disabled?: boolean }) {
   const { token } = theme.useToken()
   return (
     <Col xs={24} sm={12} lg={8}>
-      <Card hoverable {...clickable(onClick, title)} style={{ height: '100%' }}>
+      <Card hoverable={!disabled} {...(disabled ? { role: 'button', tabIndex: 0, 'aria-disabled': true, 'aria-label': title } : clickable(onClick, title))} style={{ height: '100%', opacity: disabled ? 0.65 : 1 }}>
         <Space align="start" size={16}>
           <span style={{ fontSize: 28, color: token.colorPrimary, lineHeight: 1 }}>{icon}</span>
           <div>
@@ -54,7 +57,9 @@ const registryKeys = () => BUILTIN_APPS.map((a) => BUILTIN_PIN_PREFIX + a.key)
 export default function AppsHub() {
   const { t } = useTranslation()
   const { failure, catchLoad, retryKey } = useLoadFailure()
-  const { can } = useAuth()
+  const { can, user } = useAuth()
+  const { lang } = usePrefs()
+  const directory = useAppDirectory(user)
   const navigate = useNavigate()
   const [resp, setResp] = useState<AppsResp | null>(null)
   // A failed request must not wear the face of "no apps available": the page would be making a claim
@@ -92,7 +97,7 @@ export default function AppsHub() {
       if (app) entries.push({ kind: 'installed', app })
     }
   }
-  const isEmpty = entries.length === 0
+  const isEmpty = entries.length === 0 && directory.items.length === 0
 
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
@@ -108,12 +113,16 @@ export default function AppsHub() {
           action={<Button size="small" onClick={load}>{t('common.retry')}</Button>}
         />
       )}
-      {loading && !resp ? (
+      {directory.failed && (
+        <Alert type="warning" showIcon title={t('apps.v2ListUnavailable')}
+          action={<Button size="small" onClick={() => directory.load()}>{t('common.retry')}</Button>} />
+      )}
+      {(loading || directory.loading) && isEmpty ? (
         <div style={{ display: 'grid', justifyItems: 'center', gap: 12, minHeight: 200, alignContent: 'center' }}>
           <Spin size="large" />
           <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
         </div>
-      ) : isEmpty && !loadErr ? (
+      ) : isEmpty && !loading && !directory.loading && !loadErr && !directory.failed ? (
         <Empty description={t('apps.empty')} />
       ) : (
         <Row gutter={[16, 16]}>
@@ -137,7 +146,18 @@ export default function AppsHub() {
               />
             ),
           )}
+          {directory.items.map((a) => {
+            const copy = appDisplayText(a.applicationId, a.display, lang)
+            return (
+            <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
+              tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+              onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
+            )
+          })}
         </Row>
+      )}
+      {directory.nextCursor && !directory.failed && (
+        <Button onClick={() => directory.load(directory.nextCursor)} loading={directory.loading}>{t('apps.v2LoadMore')}</Button>
       )}
     </Space>
   )

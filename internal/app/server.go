@@ -43,6 +43,12 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	platformBackendRequests platformDocumentBudget
+	platformNetworkRequests platformDocumentBudget
+	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
+
+	platformInstaller     platformFrontendInstallRuntime
+	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
 	mailExecMu            sync.Mutex
 	mailExec              *notification.Executor
@@ -111,7 +117,8 @@ type statusRecorder struct {
 	status int
 }
 
-func (w *statusRecorder) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) WriteHeader(code int)        { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // slowRequest is the latency at which a successful API read becomes worth a log line on its own.
 // A page that takes a second is a complaint waiting to happen, and it is the one class of problem
@@ -220,6 +227,7 @@ func RunServer(cfgPath string) {
 	}
 	s := &Server{cfg: cfg, st: st, appTok: newAppTokens(30 * time.Minute), loginThr: newLoginThrottle(), v1Rate: newRateLimiter(),
 		trustedNets: trustedNets, captchaSvc: captcha.New()}
+	configurePlatformRuntimeEndpoint(s)
 	// The failed-login ceiling and its window are settings (limits.go); handing the throttle the
 	// reader rather than the numbers is what makes a change on the settings page apply to the next
 	// attempt instead of at the next restart.
@@ -275,6 +283,7 @@ func RunServer(cfgPath string) {
 	s.runForecastRepair()
 
 	stopNotifications := s.startNotificationRuntime()
+	stopAppInstalls := s.startPlatformFrontendInstallService()
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
 	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
@@ -308,7 +317,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopNotifications, s.stopTransactionalMail)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter

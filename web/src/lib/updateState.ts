@@ -179,10 +179,12 @@ export function useUpdateState(pollMs = 5 * 60_000): UpdateState {
         return
       }
       answered = mine
-      if (info) {
+      const server = info && typeof info.version === 'string' && typeof info.commit === 'string' && typeof info.buildDate === 'string' && info.version.trim() && info.commit.trim() && info.buildDate.trim()
+        ? { version: info.version, commit: info.commit, buildDate: info.buildDate }
+        : null
+      if (info && server) {
         setFailed(false)
         setPolicy(info.automaticUpdate === true ? 'automatic' : normalizePolicy(info.updatePromptPolicy))
-        const server = { version: info.version, commit: info.commit, buildDate: info.buildDate }
         // Re-evaluated every tick, in both directions: a second deploy moves the target, and a
         // rollback to the page's own build clears it.
         setTarget(buildKey(server) === buildKey(page) ? null : server)

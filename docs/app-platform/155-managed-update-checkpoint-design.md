@@ -1,0 +1,276 @@
+# Managed update checkpoint and execution gate
+
+Status: implementation gate, 2026-10-31. The distinct root-owned XFS checkpoint
+root, bounded quiescent archive, read-back verification, signed runner-journal
+receipt and Portal recovery-set preparation/verification are implemented. This
+document also claims verified native restore, Portal restore admission and the
+generation-2 `update-start` admission/reservation, native launch and running
+receipt boundary. It does not claim a completed managed update executor,
+generation-2 readiness/registration/activation or a reviewed rollback executor.
+Portal now persists the exact
+runner-acknowledged target reservation on the prepared start effect, so a
+restart can distinguish the same reserved resource from an unreserved intent.
+
+## Decision
+
+An ordinary managed update cannot reuse the initial-install candidate command
+unchanged. The install path requires one applied `prepare_data` command for the
+same operation and generation, together with one data resource reservation. An
+update intentionally preserves the installation identity, data namespace and
+writer fence while changing the release and generation. Treating install data
+metadata as update evidence would fabricate history and is refused.
+
+The first managed update implementation must therefore add four closed pieces:
+
+1. a quiescent checkpoint primitive over the existing XFS project namespace;
+2. a signed runner command that creates and verifies that checkpoint;
+3. a separate generation-bound update candidate command that references the
+   checkpoint and the exact stopped source generation; and
+4. a restore or compatible rollback path before target activation becomes
+   visible to users.
+
+No review route, scheduler claim or `managed=1` update operation may be exposed
+before those pieces are available.
+
+## Current constraints
+
+- `internal/apprunner/journal/candidate_reservation.go` derives candidate data
+  evidence only from `prepare_data` commands for the candidate's own operation
+  and target generation.
+- `runner_resources` currently carries one resource row per native identity and
+  binds the data namespace to the container generation.
+- The installer's ordinary candidate mount is read-only. Writable candidates
+  deliberately mount application data read-write and can change bytes after
+  start.
+- `app_platform_recovery_sets` has closed states `preparing`, `verified`,
+  `restoring`, `deleted` and `review_required`; checkpoint and restore
+  producers/verifiers now use the first three.
+- The data adapter can checkpoint and restore the existing project-quota
+  namespace. Reviewed retained-namespace deletion remains outstanding.
+- Portal completion, runner journal completion, Docker state and XFS state do not
+  share one transaction. Every boundary must be recoverable by exact identity.
+
+## Checkpoint primitive
+
+Checkpoint input is reconstructed only from trusted journal and Portal state:
+
+- root filesystem UUID and inode;
+- exact namespace ID and XFS project ID;
+- device and namespace inode;
+- byte and inode limits;
+- writer fence and admission fence;
+- release digest and data format;
+- a fresh server-generated checkpoint ID.
+
+The source process must first be observed stopped. The runner then opens the
+namespace relative to its pinned root descriptor with `O_DIRECTORY|O_NOFOLLOW`;
+it never accepts a caller path. It walks only regular files and directories.
+Symlinks, device nodes, sockets, FIFOs, hard-link ambiguity, traversal names,
+unexpected ownership, foreign project IDs and unbounded file counts are refused.
+
+File content and metadata are copied into a bounded checkpoint directory owned by
+the runner root. The manifest records canonical relative names, file type, mode,
+owner identity, size and SHA-256. The manifest is fsynced, then its digest and
+total bytes are returned as opaque native evidence. The checkpoint remains
+`preparing` until the runner journal atomically records that evidence and Portal
+records the same manifest digest.
+
+A copy is not considered verified merely because the process returned. It must be
+read back and rehashed before either store changes the recovery set to `verified`.
+
+## Portal recovery-set admission
+
+The controller transport exposes checkpoint create/read as two closed lifecycle
+actions. It accepts no host path, file name, archive option or caller-selected
+manifest. The combined managed endpoint opens the separately pinned checkpoint
+root; ordinary candidate-only endpoints do not acquire checkpoint authority.
+
+Portal derives a checkpoint command only from an active managed generation and
+the completed install operation's applied `prepare_data` and start receipts. The
+`snapshot` stage persists one recovery-set row and one operation effect before
+signing, with stable recovery-set, checkpoint and effect identities. A retry may
+renew the command timestamps but cannot replace the namespace, writer fence,
+source receipts, release, operation or generation.
+
+A successful observation must match the exact command, controller key and
+endpoint, with native observation/settlement inside the authenticated response.
+One transaction then writes the manifest digest/archive bytes, marks the effect
+applied, changes `preparing` to `verified`, and advances
+`snapshot -> migrate`. A missing, changed or future receipt remains `preparing`
+and cannot be used by restore or target start. Restore pause, an expired lease,
+or any SQL failure rolls all three records back together.
+
+## Verified restore
+
+Restore keeps the existing namespace path, inode, project ID, inheritance and
+quota allocation. It does not swap in a new namespace or silently reset a
+partial restore. Before mutation, the runner re-verifies the archive size,
+SHA-256, canonical manifest and source/checkpoint root identities.
+
+The runner then clears only the namespace's child entries without following
+symlinks or crossing device boundaries, extracts regular files and directories
+through pinned directory descriptors, applies the recorded ownership/mode, and
+reads the complete restored tree back. Extra or missing entries, changed
+contents, metadata drift, quota overflow and archive changes are refused. Any
+failure after clearing begins is `incomplete`, never reported as reverted.
+
+Writable subdirectories may retain normal inherited setgid only when their group
+is the fixed app group 65532. File setgid, setuid and sticky bits remain
+refused.
+
+Portal restore requires a canonical managed-restore plan that names the exact
+recovery set, checkpoint operation/effect/receipt, checkpoint ID, release,
+manifest, archive bytes, source/target generation and controller epoch. The
+recovery set must still be verified. The signed restore intent changes it to
+`restoring`; an exact native receipt atomically applies the effect, records
+restored bytes, returns the recovery set to `verified`, updates the namespace
+observation and advances `restore_data -> start`. Restore pause, an expired
+lease or any SQL failure rolls all of those records back together.
+
+## Journal protocol
+
+The exact format is a new signed lifecycle command family, not a relaxed
+candidate command:
+
+- `checkpoint`: source installation, source generation, source release, source
+  start receipt digest, namespace, writer fence and checkpoint ID;
+- `update-start`: source checkpoint receipt, target operation and generation,
+  target release, target policy revision and runtime identity;
+- `restore`: verified checkpoint ID and the exact recovery-set/operation
+  identity;
+- `read`: retrieves only an applied receipt for the same signed logical command.
+
+Each command persists intent before native IO. Unknown outcomes are not retried
+under a new identity. The journal verifies that the source process resource is
+stopped and that no prepared or unknown command remains before checkpointing.
+
+`update-start` reserves a new container resource ID while allowing the old
+stopped resource to retain the same namespace. The two rows must be explicitly
+related by installation, namespace, source generation, target generation and
+source checkpoint. Existing install admission remains unchanged.
+
+The implemented admission stores a distinct `update-start` command and pending
+target resource. It requires the checkpoint operation to be the same managed
+update operation, a checkpoint repository row in `verified` state, exact source
+start/data receipts, a source process that is stopped, no other live process on
+the namespace, and target generation N+1 with an increased writer fence. A
+replay returns the same resource/effect identities and never advances Portal's
+operation stage. Portal writes that exact reservation to the prepared start
+effect in one transaction and verifies it again on intent reload. The runner's
+replay marker is descriptive rather than authority; a changed resource, effect,
+namespace, release, generation, fence or writer fence is refused.
+
+The native execution claim is a separate durable step. The runner writes one
+unknown marker for the reserved target before any Docker mutation, binds the
+exact native preflight, starts only that pinned container, and atomically
+settles a running receipt. The receipt binds the full installation/operation,
+namespace, source/target releases, generations, control/source/target writer
+fences, data format, checkpoint and native ID. A timeout or post-effect failure
+remains uncertain and is never retried under the same or a fresh identity.
+Portal verifies the receipt against the persisted reservation and then advances
+only `start -> probe`. Running is not readiness, registration or activation.
+
+## Portal operation tuple
+
+A managed update review binds:
+
+- installation, app and publisher identity;
+- source and target release digests;
+- source and target generations;
+- source active policy revision and target policy revision;
+- runtime ID and control revision;
+- exact data namespace, schema, writer fence and recovery-set ID;
+- target capability selection and current actor/trust revisions.
+
+Consumption creates one `managed=1` update operation with
+`source_generation=N`, `target_generation=N+1`. It does not change the live
+activation, generation or policy until target readiness and registration are
+verified.
+
+The managed-update review projection binds the exact recovery-set ID,
+checkpoint operation/effect/receipt, source/target releases and generations,
+policy revisions, namespace/schema/source writer fence and target runtime. At
+Portal `start`, it creates one candidate activation for generation N+1 plus one
+prepared `update-start` effect, signs the complete command and asks the runner
+to reserve the target resource. It does not mark the process running or advance
+to `probe`.
+
+## Ordered execution
+
+1. `queued -> validate`: recheck actor, publisher, runtime, source activation,
+   grants, source process receipt and exact data namespace.
+2. `download -> stage`: verify the immutable target release and backend image.
+3. `quiesce`: send the existing signed managed stop for the source generation
+   and require an opaque exited observation.
+4. `snapshot`: create the quiescent checkpoint and persist both native and Portal
+   manifest evidence.
+5. `migrate`: initially support only the same data schema and an explicit no-op
+   migration completion. Any schema change remains unavailable until a bounded
+   migration command and postcondition verifier exist.
+6. `start`: start the target candidate with `update-start`, preserving the data
+   namespace and increasing the writer/control generation fences.
+7. `probe`: require authenticated target readiness.
+8. `activate`: switch one active generation/policy tuple, retire the source
+   activation, replace capability rows and complete the operation in one Portal
+   transaction.
+
+No stage may be skipped because an earlier update happened to succeed.
+
+## Failure and rollback
+
+- Before checkpoint verification, the source release remains the only admissible
+  release. A stopped source may be restarted only by a separately observable
+  enable/recovery action.
+- After a verified checkpoint but before target readiness, failure enters
+  `recovery_required`. The old release may restart only when the data schema is
+  still readable; otherwise the checkpoint must be restored first.
+- After any target process may have mounted writable data, a source restart
+  requires either the explicit same-schema proof before target start or a
+  verified restore.
+- After target activation commits, the old generation is retired. Rollback is a
+  new reviewed operation, not an implicit mutation of completed history.
+- Lost native acknowledgements preserve unknown effects and never trigger an
+  automatic repeated start, checkpoint or restore.
+
+## Required tests
+
+Portable and repository tests:
+
+- namespace/path/symlink/device/ownership/project/quota refusals;
+- deterministic manifest order and digest;
+- crash before and after checkpoint creation;
+- journal unknown/apply/CAS and repeated-read behavior;
+- Portal recovery-set uniqueness, exact source binding, changed
+  command/receipt/checkpoint/fence/epoch refusal, restore pause and rollback;
+- native deterministic archive/extract/read-back, post-checkpoint mutation,
+  extra-entry removal, namespace identity preservation and writable metadata;
+- managed-restore plan/recovery-set/checkpoint receipt binding, `restoring`
+  CAS, changed receipt refusal, duplicate/uncertain settlement and SQL rollback;
+- stale runtime/release/policy/checkpoint/generation refusals;
+- no target activation without applied checkpoint and readiness evidence.
+
+Disposable Linux/XFS/Docker tests:
+
+- create real data, stop a real source candidate, checkpoint it, start a distinct
+  target candidate and verify the exact container identities;
+- inject target readiness failure and prove compatible source rollback;
+- mutate the namespace after checkpoint, force restore and verify the restored
+  manifest/content;
+- crash at each external boundary and reconcile without duplicate effects;
+- verify retained bytes, project limits and no foreign namespace access.
+
+## Implementation order
+
+1. Native quiescent checkpoint/read-back primitive and refusals.
+2. Journal checkpoint command, receipt, crash recovery and repository tests.
+3. Portal recovery-set preparation/verification transaction. Implemented.
+4. Distinct update-start admission with source-checkpoint binding and durable
+   Portal reservation recovery. Implemented.
+5. Managed update executor and activation transaction. Native generation-2
+   launch/receipt and Portal `start -> probe` are implemented; readiness,
+   registration, activation and rollback remain.
+6. Restore/rollback executor and disposable Linux acceptance. The native
+   restore and Portal restore-admission primitive are implemented and passed
+   the disposable Linux/XFS/Docker probe; binding them to the managed update
+   executor remains.
+7. Only then expose managed update through scheduler and management HTTP.

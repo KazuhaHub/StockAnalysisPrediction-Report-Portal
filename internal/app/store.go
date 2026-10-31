@@ -124,7 +124,7 @@ func connectStore(driver, source string) (*Store, error) {
 	if driver == "" {
 		driver = "sqlite"
 	}
-	sqlDriver := "sqlite"
+	sqlDriver := portalSQLiteDriver
 	if driver == "postgres" {
 		sqlDriver = "pgx"
 	}
@@ -1048,6 +1048,11 @@ func (s *Store) DeleteUser(name string) error {
 		}
 	}
 
+	platformImpacts, err := appPlatformPrincipalImpacts(migExec{s: s, ex: tx}, name, 0)
+	if err != nil {
+		return err
+	}
+
 	run := func(q string, args ...any) error {
 		_, err := tx.Exec(s.bind(q), args...)
 		return err
@@ -1114,6 +1119,12 @@ func (s *Store) DeleteUser(name string) error {
 		if err := run(st.q, st.arg); err != nil {
 			return err
 		}
+	}
+	if err := cleanupPlatformAccountObjects(migExec{s: s, ex: tx}, name, time.Now().UTC().UnixMilli()); err != nil {
+		return err
+	}
+	if err := invalidateAppPlatformPrincipal(migExec{s: s, ex: tx}, platformImpacts); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err

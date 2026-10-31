@@ -79,7 +79,7 @@ const b64Key = "$b64"
 // backupTables lists every table in the current schema, from the schema declarations and the
 // migration list themselves so a new table is included the day it is declared and nobody has to
 // remember a second list.
-func (s *Store) backupTables() []string {
+func (s *Store) backupTables() ([]string, error) {
 	seen := map[string]bool{}
 	var base []string
 	for _, stmt := range s.baseSchemaStmts() {
@@ -90,7 +90,34 @@ func (s *Store) backupTables() []string {
 		seen[t] = true
 		base = append(base, t)
 	}
-	return backupTableNames(base, s.migrations())
+	names := backupTableNames(base, s.migrations())
+	if s.tableExists(platformPrefix + "plugin_tables") {
+		rows, err := s.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var table string
+			if err := rows.Scan(&table); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if !platformPluginDataTablePattern.MatchString(table) {
+				rows.Close()
+				return nil, fmt.Errorf("invalid plugin data table name %q", table)
+			}
+			if !containsString(names, table) {
+				names = append(names, table)
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(names)
+	}
+	return names, nil
 }
 
 // Backup writes a full dump of the configured database to path ("-" for stdout).
@@ -140,7 +167,10 @@ func Backup(cfgPath, path string) (tables int, rows int64, err error) {
 // dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
 // single point in time rather than a table-by-table sample of a moving database.
 func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
-	names := s.backupTables()
+	names, err := s.backupTables()
+	if err != nil {
+		return 0, 0, err
+	}
 	opts := &sql.TxOptions{ReadOnly: true}
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
@@ -335,14 +365,18 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	// Every pooled read happens HERE, before any transaction is opened: on SQLite the pool is a
 	// single connection, and a pooled query issued while the restore transaction is open would
 	// block on the connection that transaction is holding.
+	backupTables, err := s.backupTables()
+	if err != nil {
+		return nil, err
+	}
 	known := map[string]map[string]bool{}
-	for _, t := range s.backupTables() {
+	for _, t := range backupTables {
 		known[t] = map[string]bool{}
 	}
 	if err := s.collectColumns(known); err != nil {
 		return nil, err
 	}
-	existing, err := s.rowCounts(s.backupTables())
+	existing, err := s.rowCounts(backupTables)
 	if err != nil {
 		return nil, err
 	}
@@ -393,19 +427,47 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 			}
 		}
 	}
+	for _, table := range rep.Header.Tables {
+		if !platformPluginDataTablePattern.MatchString(table) {
+			continue
+		}
+		if _, ok := known[table]; !ok {
+			definition, _ := platformPluginDataTableDefinition(table)
+			known[table] = map[string]bool{}
+			for _, column := range definition.columns() {
+				known[table][column.name] = true
+			}
+		}
+	}
 	optional := optionalColumns(rep.Header.Migrations, steps)
 	renamed := renamesNotCarried(rep.Header.Migrations, steps)
 
 	var tx *sql.Tx
+	var identityFloors map[string]restoreIdentityFloor
 	if force {
 		tx, err = s.db.Begin()
 		if err != nil {
 			return nil, err
 		}
 		defer tx.Rollback() //nolint:errcheck // no-op once committed
+		captured, captureErr := capturePlatformRestorePrior(migExec{s: s, ex: tx})
+		if captureErr != nil {
+			return nil, captureErr
+		}
+		prior.appPlatform = &captured
+		identityFloors, err = s.captureIdentityFloors(tx, identity)
+		if err != nil {
+			return nil, err
+		}
 		// Empty EVERY table in the schema, not only the ones the dump carries: a table the dump
 		// omits must end up empty too, or the result is a mix of two databases that never existed.
-		for _, t := range s.backupTables() {
+		for _, t := range backupTables {
+			if platformPluginDataTablePattern.MatchString(t) {
+				if _, err := tx.Exec(`DROP TABLE IF EXISTS ` + t); err != nil {
+					return nil, fmt.Errorf("drop %s: %w", t, err)
+				}
+				continue
+			}
 			if _, err := tx.Exec("DELETE FROM " + t); err != nil {
 				return nil, fmt.Errorf("clear %s: %w", t, err)
 			}
@@ -417,14 +479,14 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 	if !force {
 		return rep, nil
 	}
-	if err := s.resetIdentities(tx, identity, rep.Rows); err != nil {
+	if err := s.advanceRestoreIdentities(tx, identity, identityFloors); err != nil {
 		return nil, err
 	}
 	// The database's own consistency is settled HERE, inside the transaction that wrote the rows: a
 	// restore that ended with the data and the ledger disagreeing would be a database nobody could
 	// reason about, and leaving a step unrecorded is how the next start re-runs an upgrade over data
 	// that has already been upgraded.
-	if err := s.finishRestore(tx, steps, prior); err != nil {
+	if err := s.finishRestore(tx, steps, rep.Header.Migrations, prior); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -437,6 +499,7 @@ func (s *Store) restoreFrom(r io.Reader, force bool) (*RestoreReport, error) {
 // restorePrior holds the live values a restore must reconcile against the dump rather than replace
 // outright. It is captured before the restore's transaction clears the tables.
 type restorePrior struct {
+	appPlatform    *platformRestorePrior
 	populationFrom string // the live forecast_population_from, "" when unset
 	autoMode       string // the live forecast_auto, "" when unset
 	readerStage    string // the live reading stage as the readers resolve it: off, card or full
@@ -465,8 +528,13 @@ func (s *Store) populationFromRow() string {
 // finishRestore settles the database after its rows have been replaced: the unknown-step check, the
 // product check, and the ledger. All of it runs on the restore's own transaction, so a failure here
 // takes the data back with it rather than leaving a half-loaded database behind.
-func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior) error {
+func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, prior restorePrior) error {
 	e := migExec{s: s, ex: tx}
+	if prior.appPlatform != nil {
+		if err := applyPlatformRestore(e, *prior.appPlatform); err != nil {
+			return err
+		}
+	}
 	if err := resetRestoredExtensionConnections(e); err != nil {
 		return err
 	}
@@ -493,6 +561,29 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, prior restorePrior)
 	// A dump from a release that had steps this build does not: its `meta` carried the record in.
 	if err := refuseUnknownLedgerRowsExec(e, known); err != nil {
 		return err
+	}
+	carried := map[string]bool{}
+	for _, id := range declared {
+		carried[id] = true
+	}
+	for _, m := range steps {
+		if carried[m.id] || !m.restore.upgradeOnRestore {
+			continue
+		}
+		if m.up == nil {
+			return fmt.Errorf("restore migration %s has no data upgrade", m.id)
+		}
+		if err := m.up(e); err != nil {
+			return fmt.Errorf("restore migration %s data upgrade: %w", m.id, err)
+		}
+	}
+	for _, m := range steps {
+		if carried[m.id] || m.restoreSeed == nil {
+			continue
+		}
+		if err := m.restoreSeed(e); err != nil {
+			return fmt.Errorf("restore migration %s defaults: %w", m.id, err)
+		}
 	}
 	// What the schema actually looks like now, not what the dump claimed.
 	if err := s.verifyMigrationProducts(e, steps); err != nil {
@@ -728,6 +819,9 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 				return err
 			}
 			table, cols = line.Table, line.Columns
+			if platformPluginDataTablePattern.MatchString(table) && !containsString(rep.Header.Tables, table) {
+				return fmt.Errorf("the backup contains undeclared plugin data table %s", table)
+			}
 			// A dump from before a step that renamed a baseline column carries the old name. The
 			// rename moves no data, so the value is loaded under the new one; a dump that claims the
 			// step gets no translation, and an old name in it is refused below as unknown.
@@ -783,6 +877,11 @@ func (s *Store) restoreStream(dec *json.Decoder, tx *sql.Tx, known, optional map
 			values = make([]any, len(cols))
 			if tx != nil {
 				var err error
+				if platformPluginDataTablePattern.MatchString(table) {
+					if err := createPlatformPluginDataTable(migExec{s: s, ex: tx}, table); err != nil {
+						return fmt.Errorf("create plugin data table %s: %w", table, err)
+					}
+				}
 				if stmt, err = s.prepareInsert(tx, table, cols, identity); err != nil {
 					return fmt.Errorf("prepare insert into %s: %w", table, err)
 				}
@@ -855,23 +954,6 @@ func (s *Store) identityColumns() (map[string]string, error) {
 		out[t] = c
 	}
 	return out, rows.Err()
-}
-
-// resetIdentities moves each Postgres identity sequence past the ids just restored. Without it the
-// sequence still sits at 1 and the very next insert collides with a restored row.
-func (s *Store) resetIdentities(tx *sql.Tx, identity map[string]string, restored map[string]int64) error {
-	for table, col := range identity {
-		if restored[table] == 0 {
-			continue
-		}
-		q := fmt.Sprintf(
-			`SELECT setval(pg_get_serial_sequence('%s','%s'), COALESCE((SELECT MAX(%s) FROM %s),0)+1, false)`,
-			table, col, col, table)
-		if _, err := tx.Exec(q); err != nil {
-			return fmt.Errorf("reset %s.%s sequence: %w", table, col, err)
-		}
-	}
-	return nil
 }
 
 // collectColumns fills in the real column set of every table, which is what decides whether a dump

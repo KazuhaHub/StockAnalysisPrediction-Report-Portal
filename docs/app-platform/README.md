@@ -1,11 +1,49 @@
 # Application platform v2: delivery plan
 
-Status: proposed implementation design, prepared 2026-10-24 Pacific. The owner
-approved the product direction and writing this plan. Specific database layouts,
-host privileges and deployment are not approved by this document.
-Nothing in this directory is an implemented endpoint, command or accepted ADR.
-The previous Status rollout remains paused. This is a platform project, not a
-Status redesign. Production image/channel configuration is outside this change.
+Status: implementation in progress. The original delivery design was prepared
+2026-10-24 Pacific. The owner approved initial storage D2 and runtime/trust
+candidate A for development and disposable Linux acceptance. These decisions do
+not authorize production deployment, stable public SDK freeze or Status adoption.
+The Status rollout remains paused; server `beta` configuration is unchanged.
+
+Documents 01–08 specify the required outcome and acceptance, not completed
+features. [The execution register](09-execution-log.md) records implemented work
+and exact evidence. Recent continuations connect [claimed writable installation
+and activation](113-writable-install-worker.md) and
+[writable queue/scheduling](114-writable-install-scheduling.md), followed by
+[complete background installation](115-writable-background-completion.md) and
+[writable launch documents](116-writable-launch-documents.md) and the
+[current-page backend session gateway](117-backend-session-gateway.md) and
+[shared SDK own-backend channel](118-sdk-own-backend-channel.md) and
+[SDK browser/native request-chain acceptance](119-sdk-native-browser-acceptance.md) and
+[natural document sizing](120-document-layout.md), and
+[the shared unsaved-change guard](121-unsaved-change-guard.md), and
+[signed routes and host history](122-signed-route-navigation.md), and
+[signed typed query state](123-typed-route-query.md), and
+[shared page metadata/actions](124-shared-page-actions.md), and
+[development v2 authoring/template checks](125-v2-authoring-template.md), and
+[capability snapshot integrity](126-capability-snapshot-integrity.md), and
+[bounded HTTP execution](127-bounded-http-executor.md), and
+[shared network policy encoding](128-network-policy-contract.md), and
+[network dependency gate repair](129-network-dependency-security.md), and
+[signed network request checks](130-signed-network-request-boundary.md), and
+[shared executor ownership/budgets](132-network-executor-ownership.md), and
+[fresh online network confirmation](133-network-online-confirmation.md), and
+[private network controller transport](134-private-network-controller-transport.md), and
+[network runtime support observation](135-network-runtime-observation.md), and
+[credential storage and custody](136-credential-schema-and-custody.md), and
+[canonical binding restrictions](137-secret-binding-policy.md), and
+[uninstall binding revocation](138-uninstall-secret-binding-revocation.md), and
+[current network provider observation](139-current-network-provider-observation.md), and
+[reviewed network installation](140-reviewed-network-installation.md), and
+[current-viewer network request authority](141-current-viewer-network-request.md), and
+[isolated Portal HTTPS acceptance](142-portal-https-native-acceptance.md), and
+[the session-only network gateway](143-network-session-http-gateway.md).
+The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
+is now owner-approved for development/isolated implementation; production and
+later job/event products remain separate decisions.
+An implemented internal primitive does not establish a complete user-facing
+marketplace installation. Full P00–P14 delivery and D5/D6 acceptance remain open.
 
 ## The outcome
 
@@ -33,6 +71,8 @@ reader, authentication or analysis queue down with it.
 | [07 Developer and operator guide](07-handbook.md) | Concrete authoring, deployment, support and release workflows |
 | [08 Source inventory](08-source-inventory.md) | Verified legacy code locations, reuse boundaries and compatibility traps |
 | [09 Execution evidence](09-execution-log.md) | Actual implementation progress, verification and remaining work |
+| [11 Compatibility contract](11-compatibility-contract.md) | Protocol ranges, runtime matching and refusal semantics |
+| [13 Initial physical storage](13-control-storage-spec.md) | Concrete control-plane/runner layout and incremental D2 decision |
 
 Read the architecture and lifecycle before implementing an endpoint. Then take
 the next work package whose dependencies and decision gates are satisfied. Do not
@@ -113,6 +153,13 @@ document. A restricted native widget renderer can be added later if needed.
 
 ## Decision gates
 
+The concrete D1/D3/D4 development candidate is
+[runtime and trust candidate A](18-runtime-and-trust-proposal.md), approved for
+development and isolated acceptance. Initial D2 storage approval is recorded in
+[the storage implementation](14-control-storage-implementation.md). These limited approvals
+do not authorize additional storage layouts, stable public SDK/API freeze or
+production privileges/rollout. D5 visual acceptance and D6 rollout remain open.
+
 | Gate | Required decision or evidence | Blocks |
 | --- | --- | --- |
 | D1 | Approve architecture, runtime threat model and one-time runner deployment | Privileged runner integration and production setup |
@@ -135,7 +182,7 @@ market, no manual backend setup, restart recovery, an update with retained data,
 rejected permissions, a failed migration and recovery, a stopped/uninstalled app,
 and unaffected Portal business routes during app/runner outages.
 
-No checkbox below is completed by this plan. See the
-[execution register](09-execution-log.md) for subsequent work package state.
+The requirements above are not completed by the plan itself. See the
+[execution register](09-execution-log.md) for work package state and evidence.
 Source tests alone do not prove a production installation. Optional
 credentials for a particular business app are separate from platform acceptance.

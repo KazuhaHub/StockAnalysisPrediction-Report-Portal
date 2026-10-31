@@ -1,0 +1,174 @@
+// Disposable Linux acceptance only. No production browser profile or credentials.
+const {createRequire}=require('node:module');
+const {chromium}=createRequire(process.env.SDK_BROWSER_PACKAGE)('playwright');
+const origin='http://127.0.0.1:31935';
+let stage='launch';
+let readFailure='none';
+async function main(){
+ const browser=await chromium.launch({headless:true,timeout:10000});
+ const deadline=setTimeout(()=>{void browser.close()},20000);
+ try{
+  const context=await browser.newContext({acceptDownloads:false});
+  const page=await context.newPage();page.setDefaultTimeout(8000);
+  stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
+  const frame=page.frameLocator('iframe');
+  await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
+  let issued=0;
+  async function dispatch(name){
+   await frame.getByRole('button',{name,exact:true}).click();
+   const result=frame.locator('[data-testid="backend-result"][data-request-id="'+(++issued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
+  async function read(){const text=await dispatch('Read backend');if(text.startsWith('error:')){readFailure=/^error:(not_ready|unsupported|invalid_request|busy|unavailable|uncertain)$/.test(text)?text:'invalid-result';throw new Error('read refused')}const value=JSON.parse(text);if(value.status!==200)throw new Error('app read refused');return value}
+  stage='initial-read';const before=await read();
+  if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
+  const networkAvailable=await frame.getByTestId('network-ready').innerText()==='true';
+  let reportsIssued=0;
+  async function dispatchReports(){
+   await frame.getByRole('button',{name:'Read reports',exact:true}).click();
+   const result=frame.locator('[data-testid="reports-result"][data-request-id="'+(++reportsIssued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
+  if(networkAvailable){
+   stage='network-success';await frame.getByRole('button',{name:'Read network',exact:true}).click();
+   const result=frame.locator('[data-testid="network-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   const text=await result.innerText(),value=JSON.parse(text);
+   if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('network SDK result changed');
+  }
+  const reportsReady=await frame.getByTestId('reports-ready').innerText();
+  if(reportsReady==='true'){
+   stage='reports';const reportText=await dispatchReports(),report=JSON.parse(reportText);
+   if(report.count!==1||report.total!==1||report.title!=='Browser current viewer report'||!report.bodyMarkdown.includes('Current viewer evidence.'))throw new Error('reports SDK result changed');
+  }
+  let objectsIssued=0;
+  const objectsReady=await frame.getByTestId('objects-ready').innerText();
+  async function dispatchObject(name){
+   await frame.getByRole('button',{name,exact:true}).click();
+   const result=frame.locator('[data-testid="objects-result"][data-request-id="'+(++objectsIssued)+'"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   return result.innerText();
+  }
+  if(objectsReady==='true'){
+   stage='objects';const text=await dispatchObject('Write object'),value=JSON.parse(text);
+   if(value.count!==1||value.label!=='Browser note'||value.body!=='Persisted object'||value.revision!==1)throw new Error('object SDK result changed');
+  }
+  stage='page-actions';await page.getByRole('heading',{name:'Fixture zh-CN /',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Header increment',exact:true}).click();
+  await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
+  await page.getByRole('button',{name:'Header wait',exact:true}).click();
+  await page.getByRole('button',{name:'Header wait',exact:true,disabled:true}).waitFor();
+  stage='locale';await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();
+  await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
+  stage='navigation';await frame.getByRole('button',{name:'Retained 0',exact:true}).click();
+  await frame.getByRole('button',{name:'Open editor',exact:true}).click();
+  await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  await frame.getByTestId('page-cancelled').filter({hasText:'1'}).waitFor();
+  await page.getByRole('heading',{name:'Fixture zh-TW /editor',exact:true}).waitFor();
+  await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
+  await page.goForward();await page.waitForURL(origin+'/editor');await frame.getByTestId('app-route').filter({hasText:'/editor'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  await page.waitForTimeout(110);
+  await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
+  await frame.getByTestId('app-route').filter({hasText:'/',hasNotText:'editor'}).waitFor();
+  stage='query-state';await page.waitForTimeout(110);await frame.getByRole('button',{name:'Set filters',exact:true}).click();
+  const search='?active=false&page=2&q=%E4%B8%AD%E6%96%87+%26+test&sort=newest';
+  await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  const query=JSON.parse(await frame.getByTestId('app-query').innerText());
+  if(query.page!==2||query.active!==false||query.q!=='中文 & test'||query.sort!=='newest')throw new Error('typed query lost');
+  await page.goBack();await page.waitForURL(origin+'/');await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
+  await page.goForward();await page.waitForURL(origin+'/'+search);await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  await frame.getByRole('button',{name:'Retained 1',exact:true}).waitFor();
+  stage='query-reload';await page.reload({waitUntil:'domcontentloaded'});issued=0;reportsIssued=0;objectsIssued=0;
+  await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
+  await frame.getByTestId('app-query').filter({hasText:'"page":2'}).waitFor();
+  if(objectsReady==='true'){
+   await frame.getByTestId('objects-ready').filter({hasText:'true'}).waitFor();
+   stage='objects-reload';const text=await dispatchObject('Read object'),value=JSON.parse(text);
+   if(value.body!=='Persisted object')throw new Error('object did not persist across reload');
+  }
+  const restored=JSON.parse(await frame.getByTestId('app-query').innerText());
+  if(restored.page!==2||restored.active!==false||restored.q!=='中文 & test'||restored.sort!=='newest')throw new Error('query reload lost typed values');
+  await frame.getByRole('button',{name:'Retained 0',exact:true}).waitFor();
+  const effects=await frame.getByTestId('query-effects').innerText();
+  await page.getByRole('button',{name:'Traditional Chinese',exact:true}).click();await frame.getByTestId('locale').filter({hasText:'zh-TW'}).waitFor();
+  if(await frame.getByTestId('query-effects').innerText()!==effects)throw new Error('appearance repeated query effects');
+  await page.waitForTimeout(110);await frame.getByRole('button',{name:'Open home',exact:true}).click();await page.waitForURL(origin+'/');
+  await frame.getByTestId('app-query').filter({hasText:'{}'}).waitFor();
+  stage='page-wrap';await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
+  const longLabel='L'.repeat(48);await page.getByRole('button',{name:longLabel,exact:true}).waitFor();
+  await page.setViewportSize({width:320,height:800});
+  const geometry=await page.evaluate(()=>({scroll:document.documentElement.scrollWidth,width:window.innerWidth}));
+  if(geometry.scroll>geometry.width+1)throw new Error('shared page header overflows narrow viewport');
+  await page.getByRole('button',{name:longLabel,exact:true}).focus();
+  await page.getByRole('button',{name:longLabel,exact:true}).press('Enter');
+  await frame.getByTestId('page-count').filter({hasText:'1'}).waitFor();
+  await page.setViewportSize({width:1280,height:720});
+  await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
+  stage='layout-grow';
+  await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
+  const inner=await frame.locator('html').evaluate(element=>({scroll:element.scrollHeight,client:element.clientHeight}));
+  if(inner.scroll>inner.client+2)throw new Error('document gained internal scroll');
+  await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
+  await page.waitForFunction(()=>{const height=document.querySelector('iframe')?.getBoundingClientRect().height;return height>=64&&height<1000});
+  stage='write';const write=JSON.parse(await dispatch('Write backend'));
+  if(write.status!==200||write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
+  stage='uncertain';if(await dispatch('Disconnect write')!=='error:uncertain')throw new Error('missing uncertainty');
+  stage='verify-count';const after=await read();
+  if(after.count!==before.count+2||after.calls!==before.calls+3)throw new Error('uncertain browser write retried or omitted');
+  stage='revoke';await page.getByRole('button',{name:'Revoke fixture access',exact:true}).click();
+  await page.getByTestId('launch-status').filter({hasText:'revoke:204'}).waitFor();
+  if(await dispatch('Read backend')!=='error:unavailable')throw new Error('revoked backend remained available');
+  if(networkAvailable){
+   stage='network-revoked';await frame.getByRole('button',{name:'Read network',exact:true}).click();
+   const result=frame.locator('[data-testid="network-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   if(await result.innerText()!=='error:unavailable')throw new Error('revoked network remained available');
+  }
+  if(reportsReady==='true'){
+   stage='reports-revoked';const revokedReport=await dispatchReports();
+   if(revokedReport!=='error:unavailable')throw new Error('revoked reports returned '+revokedReport);
+  }
+  if(objectsReady==='true'){
+   stage='objects-revoked';const revokedObject=await dispatchObject('Read object');
+   if(revokedObject!=='error:unavailable')throw new Error('revoked objects returned '+revokedObject);
+  }
+  if(await page.locator('iframe').getAttribute('sandbox')!=='allow-scripts')throw new Error('sandbox weakened');
+  stage='draft-edit';await frame.getByRole('button',{name:'Edit draft',exact:true}).click();
+  await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
+  // The boolean hint is deliberately coalesced; wait for its bounded flush.
+  await page.waitForTimeout(150);
+  stage='draft-cancel';await page.getByRole('link',{name:'Leave fixture',exact:true}).click();
+  const dialog=page.getByRole('dialog');await dialog.waitFor();
+  await dialog.getByRole('button',{name:'apps.draftStay',exact:true}).click();
+  await dialog.waitFor({state:'hidden'});
+  await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
+  stage='draft-confirm';await page.getByRole('link',{name:'Leave fixture',exact:true}).click();
+  await dialog.getByRole('button',{name:'apps.draftLeave',exact:true}).click();
+  await page.getByText('Fixture closed',{exact:true}).waitFor();
+  if(await page.locator('iframe').count()!==0)throw new Error('retired app remained mounted');
+  await context.close();
+  console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');
+  console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
+  console.log('SDK_NATIVE_BROWSER_DRAFT_GUARD');
+  console.log('SDK_NATIVE_BROWSER_NAVIGATION');
+  console.log('SDK_NATIVE_BROWSER_TYPED_QUERY');
+  console.log('SDK_NATIVE_BROWSER_PAGE_ACTIONS');
+  console.log('SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY');
+  console.log('SDK_NATIVE_BROWSER_REVOKED');
+  if(networkAvailable){
+   console.log('SDK_NATIVE_BROWSER_NETWORK');
+  }
+  if(reportsReady==='true'){
+   console.log('SDK_NATIVE_BROWSER_REPORTS');
+  }
+  if(objectsReady==='true'){
+   console.log('SDK_NATIVE_BROWSER_OBJECTS');
+  }
+ }finally{clearTimeout(deadline);await browser.close()}
+}
+main().catch(()=>{console.error('SDK native browser acceptance failed at '+stage+' ('+readFailure+')');process.exitCode=1});

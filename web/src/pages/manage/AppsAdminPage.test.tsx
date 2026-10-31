@@ -11,7 +11,7 @@ vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request faile
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (o === undefined ? k : `${k}:${JSON.stringify(o)}`)
   const hook = { t, i18n: { language: 'en-US' } }
-  return { useTranslation: () => hook }
+  return { useTranslation: () => hook, initReactI18next: { type: '3rdParty', init: () => undefined } }
 })
 // Dragging itself is dnd.test.tsx's concern. This stand-in exposes the wrapper's contract, a reordered
 // id sequence, through a button, so the test can assert what the page persists.

@@ -1,0 +1,21 @@
+[Unit]
+Description=Portal application runtime runner
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=portal-app-runner
+UMask=0077
+ExecStart=/opt/portal-app-runner/app-runner serve --config /etc/portal-app-runner/service.json
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

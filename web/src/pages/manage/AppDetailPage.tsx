@@ -161,6 +161,12 @@ function AppDetail({ app }: { app: AdminApp }) {
           />
           {!app.builtin && (
             <>
+              <Section
+                title={t('apps.section.credentials.title')}
+                hint={t('apps.section.credentials.hint')}
+                value={t('apps.section.credentials.value')}
+                onOpen={() => navigate(`${appPath(app.key)}/credentials`)}
+              />
               <Section title={t('apps.section.backend.title')} hint={t('apps.section.backend.hint')} value={t('apps.section.backend.value')} onOpen={() => setBackendOpen(true)} />
               <Section title={t('apps.section.uninstall.title')} hint={t('apps.section.uninstall.hint')} danger onOpen={uninstall} />
             </>
