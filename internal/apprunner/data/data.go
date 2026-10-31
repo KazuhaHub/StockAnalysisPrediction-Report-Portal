@@ -3,16 +3,19 @@
 package data
 
 import (
+	"encoding/hex"
 	"errors"
 	"os"
 	"regexp"
 )
 
 var (
-	ErrUnsupported = errors.New("native data profile is unsupported")
-	ErrUnsafe      = errors.New("data root or project reservation is unsafe")
-	ErrConflict    = errors.New("data namespace or project already exists")
-	ErrIncomplete  = errors.New("data preparation requires reconciliation")
+	ErrUnsupported          = errors.New("native data profile is unsupported")
+	ErrUnsafe               = errors.New("data root or project reservation is unsafe")
+	ErrConflict             = errors.New("data namespace or project already exists")
+	ErrIncomplete           = errors.New("data preparation requires reconciliation")
+	ErrCheckpointUnsafe     = errors.New("data checkpoint contains unsafe or changed content")
+	ErrCheckpointIncomplete = errors.New("data checkpoint requires reconciliation")
 )
 var namespaceID = regexp.MustCompile(`^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$`)
 
@@ -52,6 +55,37 @@ type Observation struct {
 // writer lease or an admission receipt. A caller must separately journal and
 // fence authority and exclude old containers/open descriptors before mutation.
 type WriteAccessObservation struct{ Namespace Observation }
+
+// CheckpointRequest is trusted infrastructure input derived from a stopped
+// generation. It never contains a host path or caller-selected command.
+type CheckpointRequest struct {
+	CheckpointID, NamespaceID, ReleaseSHA256 string
+	ProjectID                                uint32
+	DataFormat                               int64
+	MaxArchiveBytes                          int64
+	ExpectedDevice, ExpectedNamespaceInode   uint64
+	WriterFence                              int64
+}
+
+func (r CheckpointRequest) valid() bool {
+	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) && r.ProjectID > 0 && r.DataFormat > 0 && r.MaxArchiveBytes > 0 && r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 && r.WriterFence > 0 && sha256Value(r.ReleaseSHA256)
+}
+
+// CheckpointObservation describes a complete archive that was read back and
+// hashed. It is not a journal receipt, restore proof or activation authority.
+type CheckpointObservation struct {
+	NamespaceID, ReleaseSHA256 string
+	ProjectID                  uint32
+	DataFormat                 int64
+	ArchiveBytes, Entries      int64
+	ManifestSHA256             string
+	ObservedMS                 int64
+}
+
+func sha256Value(value string) bool {
+	raw, err := hex.DecodeString(value)
+	return err == nil && len(raw) == 32 && hex.EncodeToString(raw) == value
+}
 
 // Open requires an explicitly configured root-owned private existing data root.
 // Implementations own a new pinned descriptor; callers retain their input file.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -135,6 +136,79 @@ func TestNativeDataPrimitive(t *testing.T) {
 			t.Fatal("project conflict created namespace")
 		}
 	}
+	checkpointPath := os.Getenv("APP_DATA_CHECKPOINT_ROOT")
+	if checkpointPath == "" || !filepath.IsAbs(checkpointPath) {
+		t.Fatal("missing independent checkpoint root")
+	}
+	checkpointInput, err := os.Open(checkpointPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer checkpointInput.Close()
+	checkpointRoot, err := Open(checkpointInput)
+	if err != nil {
+		t.Fatal("open checkpoint root", err)
+	}
+	defer checkpointRoot.Close()
+	checkpointIdentity, err := checkpointRoot.Identity(context.Background())
+	if err != nil || checkpointIdentity == expected {
+		t.Fatal("checkpoint root identity", checkpointIdentity, err)
+	}
+	namespace := rootPath + "/" + nativeNamespace(1)
+	if err := os.MkdirAll(namespace+"/nested", 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namespace+"/hello.txt", []byte("checkpoint payload"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(namespace+"/nested/value.json", []byte(`{"v":1}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(namespace+"/hello.txt", 65532, 65532); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := root.Inspect(context.Background(), expected, nativeNamespace(1), 4201)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CheckpointRequest{
+		CheckpointID: nativeNamespace(500), NamespaceID: nativeNamespace(1), ReleaseSHA256: strings.Repeat("a", 64),
+		ProjectID: 4201, DataFormat: 1, MaxArchiveBytes: 1 << 20, ExpectedDevice: observed.Device,
+		ExpectedNamespaceInode: observed.Inode, WriterFence: 1,
+	}
+	checkpoint, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, request)
+	if err != nil || checkpoint.ArchiveBytes <= 0 || checkpoint.Entries != 3 || checkpoint.ManifestSHA256 == "" || checkpoint.ObservedMS <= 0 {
+		t.Fatalf("native checkpoint: %+v %v", checkpoint, err)
+	}
+	verified, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, checkpoint.ManifestSHA256)
+	if err != nil || verified.ManifestSHA256 != checkpoint.ManifestSHA256 || verified.ArchiveBytes != checkpoint.ArchiveBytes || verified.Entries != checkpoint.Entries {
+		t.Fatalf("checkpoint read-back: %+v %v", verified, err)
+	}
+	if _, err := checkpointRoot.VerifyCheckpoint(context.Background(), checkpointIdentity, expected, request, strings.Repeat("b", 64)); !errors.Is(err, ErrCheckpointUnsafe) {
+		t.Fatal("changed checkpoint digest accepted", err)
+	}
+	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, request); !errors.Is(err, ErrConflict) {
+		t.Fatal("checkpoint identity reused", err)
+	}
+	if err := os.Symlink("hello.txt", namespace+"/link"); err != nil {
+		t.Fatal(err)
+	}
+	unsafe := request
+	unsafe.CheckpointID = nativeNamespace(501)
+	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe); !errors.Is(err, ErrCheckpointUnsafe) {
+		t.Fatal("symlink checkpoint accepted", err)
+	}
+	if err := os.Remove(namespace + "/link"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(namespace+"/hello.txt", namespace+"/hard"); err != nil {
+		t.Fatal(err)
+	}
+	unsafe.CheckpointID = nativeNamespace(502)
+	if _, err := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, unsafe); !errors.Is(err, ErrCheckpointUnsafe) {
+		t.Fatal("hard-linked checkpoint accepted", err)
+	}
+	t.Log("NATIVE_DATA_CHECKPOINT_VERIFIED")
 
 	// Replacing the configured path does not retarget an already pinned root.
 	renamed := rootPath + "-pinned"

@@ -1,8 +1,9 @@
 # Managed update checkpoint and execution gate
 
 Status: design gate, 2026-10-31. The distinct root-owned XFS checkpoint root is
-now part of runner configuration and startup preflight. This document does not
-claim that checkpoint bytes, managed update execution or restore are implemented.
+part of runner configuration and startup preflight. A bounded quiescent archive
+primitive now writes and re-reads the deterministic manifest. This document does
+not claim journal admission, managed update execution or restore.
 
 ## Decision
 

@@ -169,8 +169,10 @@ def main(args):
         if len(args) in (5,7,9,11):
             native_root = mountpoint / "native-data"
             native_root.mkdir(mode=0o700)
-            native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_NATIVE_ABI=args[4])
-            native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess)$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
+            checkpoint_root = mountpoint / "checkpoint-data"
+            checkpoint_root.mkdir(mode=0o700)
+            native_env = dict(ENV, APP_DATA_NATIVE_UUID=command("blkid", "-p", "-s", "UUID", "-o", "value", loop), APP_DATA_NATIVE_INODE=str(native_root.stat().st_ino), GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted", APP_DATA_NATIVE_ROOT=str(native_root), APP_DATA_CHECKPOINT_ROOT=str(checkpoint_root), APP_DATA_NATIVE_ABI=args[4])
+            native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess|Checkpoint)$", "-test.v", "-test.timeout=45s"], env=native_env, capture_output=True, text=True, timeout=60)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-32768:])
             report["native_go_data_prepared"] = True
@@ -178,6 +180,9 @@ def main(args):
             if "NATIVE_DATA_WRITE_ACCESS_TRANSITION_VERIFIED" not in native.stdout:
                 raise RuntimeError("native data write-access transition missing")
             report["native_go_data_write_access_transition"] = True
+            if "NATIVE_DATA_CHECKPOINT_VERIFIED" not in native.stdout:
+                raise RuntimeError("native quiescent checkpoint missing")
+            report["native_go_data_checkpoint"] = True
             if candidate:
                 candidate_root = mountpoint / "candidate-data"
                 candidate_root.mkdir(mode=0o700)

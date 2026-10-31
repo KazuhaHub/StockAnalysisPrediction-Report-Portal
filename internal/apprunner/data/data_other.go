@@ -26,3 +26,9 @@ func (*Root) EnableWriteAccess(context.Context, RootIdentity, Observation) (Writ
 func (*Root) InspectWriteAccess(context.Context, RootIdentity, string, uint32) (WriteAccessObservation, error) {
 	return WriteAccessObservation{}, ErrUnsupported
 }
+func (*Root) Checkpoint(context.Context, RootIdentity, *Root, RootIdentity, CheckpointRequest) (CheckpointObservation, error) {
+	return CheckpointObservation{}, ErrUnsupported
+}
+func (*Root) VerifyCheckpoint(context.Context, RootIdentity, RootIdentity, CheckpointRequest, string) (CheckpointObservation, error) {
+	return CheckpointObservation{}, ErrUnsupported
+}
