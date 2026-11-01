@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"os"
@@ -29,6 +30,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
+	"golang.org/x/sys/unix"
 )
 
 func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
@@ -559,6 +561,18 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 
 func removePlatformServiceFixtureRoot(t *testing.T, root string) {
 	t.Helper()
+	_ = filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil || entry == nil || !entry.IsDir() ||
+			entry.Name() != "http" {
+			return nil
+		}
+		if err := unix.Unmount(path, unix.MNT_DETACH); err != nil &&
+			!errors.Is(err, unix.EINVAL) &&
+			!errors.Is(err, unix.ENOENT) {
+			t.Logf("detach retired fixture mount %s: %v", path, err)
+		}
+		return nil
+	})
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		err := os.RemoveAll(root)
