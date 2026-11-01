@@ -27,7 +27,7 @@ func TestDataWriterReferenceInventoryRefusesScopeAndUnknownMounts(t *testing.T) 
 	if err := os.Symlink(target, alias); err != nil {
 		t.Fatal(err)
 	}
-	for _, source := range []string{target, root, filepath.Join(target, "child"), alias, filepath.Join(root, "missing")} {
+	for _, source := range []string{target, root, filepath.Join(target, "child"), alias} {
 		t.Run(filepath.Base(source), func(t *testing.T) {
 			raw, _ := json.Marshal([]map[string]any{{"Id": strings.Repeat("a", 64), "Mounts": []map[string]any{{"Type": "bind", "Source": source}}, "State": "exited"}})
 			client := daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
@@ -40,8 +40,40 @@ func TestDataWriterReferenceInventoryRefusesScopeAndUnknownMounts(t *testing.T) 
 			if err == nil {
 				t.Fatal("referenced/unresolved data admitted")
 			}
-			if source != filepath.Join(root, "missing") && !errors.Is(err, ErrContainerConflict) {
+			if !errors.Is(err, ErrContainerConflict) {
 				t.Fatal(err)
+			}
+		})
+	}
+	for name, source := range map[string]string{
+		"missing": filepath.Join(root, "missing"),
+		"loop":    filepath.Join(root, "loop"),
+	} {
+		if name == "loop" {
+			if err := os.Symlink(source, source); err != nil {
+				t.Fatal(err)
+			}
+		}
+		t.Run(name, func(t *testing.T) {
+			raw, _ := json.Marshal([]map[string]any{{"Id": strings.Repeat("a", 64), "Mounts": []map[string]any{{"Type": "bind", "Source": source}}, "State": "exited"}})
+			client := daemonClient(transportFunc(
+				func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: 200,
+						Body: io.NopCloser(
+							strings.NewReader(string(raw))),
+					}, nil
+				}))
+			err := requireNoContainerMountReferences(
+				context.Background(), client, target)
+			if name == "missing" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrUnavailable) {
+				t.Fatalf("unresolvable mount source admitted: %v", err)
 			}
 		})
 	}
