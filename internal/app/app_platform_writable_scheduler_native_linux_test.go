@@ -171,9 +171,27 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	testNativeWritableLaunchHTTP(
 		t, s, actor, admitted.InstallationID, activeRelease, endpoint)
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
+	mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
+		role, actor.username)
+	failedOperation, _ := testNativeWritableManagedUpdateVersion(
+		t, s, actor, endpoint, admitted.InstallationID,
+		"1.2.0-beta.3", true)
+	testNativeWritableManagedRestore(
+		t, s, actor, endpoint, admitted.InstallationID,
+		updateRelease, updateOperation, failedOperation)
 }
 
 func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) (string, string) {
+	return testNativeWritableManagedUpdateVersion(
+		t, s, actor, endpoint, installation,
+		"1.1.0-beta.2", false)
+}
+
+func testNativeWritableManagedUpdateVersion(
+	t *testing.T, s *Server, actor platformActorSession,
+	endpoint platformRuntimeEndpoint, installation, version string,
+	failAtProbe bool,
+) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	facts, err := s.observePlatformManagedRuntime(ctx, actor, endpoint)
@@ -189,7 +207,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		t.Fatal(err)
 	}
 	manifest.ID = appID
-	manifest.Version = "1.1.0-beta.2"
+	manifest.Version = version
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
@@ -272,6 +290,14 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
 		logManagedUpdateContainers(t, s, admitted.OperationID)
 		t.Fatal("managed update start", probe.snapshot, err)
+	}
+	if failAtProbe {
+		if err := s.finishPlatformManagedUpdateForReview(
+			ctx, probe); err != nil {
+			t.Fatal("managed update recovery", err)
+		}
+		t.Log("MANAGED_UPDATE_FAILED_FOR_RESTORE")
+		return admitted.OperationID, release.sha256
 	}
 	mustExec(t, s.st, `UPDATE app_platform_operations
 		SET lease_until_ms=1 WHERE id=?`, admitted.OperationID)
@@ -357,6 +383,116 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
 	return admitted.OperationID, release.sha256
+}
+
+func testNativeWritableManagedRestore(
+	t *testing.T, s *Server, actor platformActorSession,
+	endpoint platformRuntimeEndpoint, installation, sourceRelease,
+	sourceOperation, failedOperation string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	recoverySetID := scalar[string](t, s.st, `SELECT id
+		FROM app_platform_recovery_sets
+		WHERE operation_id=? AND state='verified'`, failedOperation)
+	review, err := s.createPlatformManagedRestoreReview(
+		ctx, actor, installation, recoverySetID)
+	if err != nil {
+		t.Fatal("managed restore review", err)
+	}
+	commit, err := s.consumePlatformManagedRestoreReview(
+		ctx, actor, review.ID, review.SHA256,
+		platformFixtureID(982))
+	if err != nil || commit.Stage != appplatform.StageQuiesce ||
+		commit.OperationID == "" {
+		t.Fatal("managed restore admission", commit, err)
+	}
+	selected, err := s.claimNextPlatformManagedRestore(
+		ctx, platformFixtureID(983))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("managed restore claim", selected, err)
+	}
+	current := selected.lease
+	for {
+		if current.snapshot.Stage == appplatform.StageActivate {
+			intent, err := s.preparePlatformRestoreStartRegistration(
+				ctx, current)
+			if err != nil || intent.start.running == nil {
+				t.Fatal("managed restore registration witness", err)
+			}
+			witness, err := json.Marshal(
+				platformWritableUpdateStartFixtureMessage{
+					Format:    "portal.fixture.writable-update-start/1-dev.1",
+					Raw:       intent.start.raw,
+					Signature: intent.start.signature,
+					Receipt:   intent.receipt,
+					Running:   *intent.start.running,
+				})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(
+				filepath.Join(os.Getenv("TMPDIR"),
+					"writable-update-start.json"),
+				witness, 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		next, err := s.runPlatformManagedRestore(
+			ctx, current, endpoint)
+		if err != nil {
+			t.Fatal("managed restore execution",
+				current.snapshot.Stage, err)
+		}
+		if next.id == "" {
+			break
+		}
+		current = next
+	}
+	if scalar[string](t, s.st, `SELECT phase||':'||generation
+		FROM app_platform_installations WHERE id=?`,
+		installation) != "ready:3" ||
+		scalar[string](t, s.st, `SELECT release_sha256
+			FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			installation) != sourceRelease ||
+		scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'')
+			FROM app_platform_operations WHERE id=?`,
+			sourceOperation) != "complete:" ||
+		scalar[string](t, s.st, `SELECT stage||':'||error_code
+			FROM app_platform_operations WHERE id=?`,
+			failedOperation) !=
+			"recovery_required:update_recovery_required" ||
+		scalar[string](t, s.st, `SELECT stage
+			FROM app_platform_operations WHERE id=?`,
+			commit.OperationID) != "complete" {
+		logManagedUpdateState(t, s, commit.OperationID, installation)
+		t.Fatal("managed restore did not activate restored source")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='quiesce'
+		AND state='applied'
+		AND json_extract(receipt_json,'$.state') IN ('stopped','absent')`,
+		commit.OperationID) != 2 ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_operation_effects
+			WHERE operation_id=? AND stage='restore_data'
+			AND kind='restore' AND state='applied'`,
+			commit.OperationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_operation_effects
+			WHERE operation_id=? AND stage IN ('start','activate')
+			AND state='applied'`,
+			commit.OperationID) != 2 {
+		t.Fatal("managed restore effects incomplete")
+	}
+	savePlatformWritableFixtureOwner(
+		t, s, commit.OperationID, installation,
+		sourceRelease, os.Getenv("PORTAL_MANAGED_IMAGE"))
+	t.Log("MANAGED_RESTORE_STOP_REMOVE_TARGET")
+	t.Log("MANAGED_RESTORE_DATA_VERIFIED")
+	t.Log("MANAGED_RESTORE_START_ACTIVATED")
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {

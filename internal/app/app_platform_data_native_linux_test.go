@@ -542,6 +542,19 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal("child did not prove activation/launch", output.String())
 	}
 	if useService {
+		for _, marker := range []string{
+			"MANAGED_UPDATE_FAILED_FOR_RESTORE",
+			"MANAGED_RESTORE_STOP_REMOVE_TARGET",
+			"MANAGED_RESTORE_DATA_VERIFIED",
+			"MANAGED_RESTORE_START_ACTIVATED",
+		} {
+			if !bytes.Contains(output.Bytes(), []byte(marker)) {
+				t.Fatalf(
+					"child did not verify managed restore %s: %s",
+					marker, output.String())
+			}
+			t.Log(marker)
+		}
 		if !bytes.Contains(output.Bytes(),
 			[]byte("MANAGED_UNINSTALL_REMOVE_DATA")) {
 			t.Fatalf(

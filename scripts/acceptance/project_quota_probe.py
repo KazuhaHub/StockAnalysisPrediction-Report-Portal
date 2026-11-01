@@ -471,6 +471,10 @@ def main(args):
                         if "MANAGED_UPDATE_A_TO_B" not in result.stdout:
                             raise RuntimeError("Managed update A-to-B acceptance missing")
                         report["native_managed_update_a_to_b"] = True
+                        for marker in ("MANAGED_UPDATE_FAILED_FOR_RESTORE", "MANAGED_RESTORE_STOP_REMOVE_TARGET", "MANAGED_RESTORE_DATA_VERIFIED", "MANAGED_RESTORE_START_ACTIVATED"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Native managed restore acceptance missing: " + marker)
+                        report["native_managed_restore_from_failed_update"] = True
                         if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout:
                             raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True
