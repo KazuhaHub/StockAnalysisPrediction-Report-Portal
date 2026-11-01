@@ -823,6 +823,67 @@ func testNativeManagedDisableEnable(
 	}
 	t.Log("MANAGED_REPAIR_START_PROBE_ACTIVATED")
 	t.Log("MANAGED_REPAIR_BACKEND_REQUEST")
+
+	deleteDisableReview, err := s.createPlatformRemovalReview(
+		actor, installation, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("native delete-data disable review", err)
+	}
+	deleteDisableCommit, err := s.consumePlatformRemovalReview(
+		actor, deleteDisableReview.ID, deleteDisableReview.SHA256,
+		platformFixtureID(998))
+	if err != nil {
+		t.Fatal("native delete-data disable admission", err)
+	}
+	deleteDisableClaim, err := s.claimNextPlatformManagedUninstall(
+		ctx, platformFixtureID(999))
+	if err != nil || deleteDisableClaim.lease.id !=
+		deleteDisableCommit.OperationID {
+		t.Fatal("native delete-data disable claim",
+			deleteDisableClaim, err)
+	}
+	deleteDisabled, err := s.runPlatformManagedUninstall(
+		ctx, deleteDisableClaim.lease, endpoint)
+	if err != nil || deleteDisabled.lease.snapshot.Stage !=
+		appplatform.StageComplete {
+		t.Fatal("native delete-data disable execution",
+			deleteDisabled, err)
+	}
+	namespaceID := scalar[string](t, s.st, `SELECT id
+		FROM app_platform_data_namespaces
+		WHERE origin_installation_id=?`, installation)
+	deleteReview, err := s.createPlatformDeleteDataReview(
+		ctx, actor, installation, namespaceID)
+	if err != nil {
+		t.Fatal("native standalone delete-data review", err)
+	}
+	deleteCommit, err := s.consumePlatformDeleteDataReview(
+		actor, deleteReview.ID, deleteReview.SHA256,
+		platformFixtureID(1000))
+	if err != nil {
+		t.Fatal("native standalone delete-data admission", err)
+	}
+	deleteClaim, err := s.claimNextPlatformDeleteData(
+		ctx, platformFixtureID(1001))
+	if err != nil || deleteClaim.lease.id != deleteCommit.OperationID {
+		t.Fatal("native standalone delete-data claim", deleteClaim, err)
+	}
+	deleteRun, err := s.runPlatformDeleteData(
+		ctx, deleteClaim.lease, endpoint)
+	if err != nil || deleteRun.lease.snapshot.Stage !=
+		appplatform.StageComplete {
+		t.Fatal("native standalone delete-data execution", deleteRun, err)
+	}
+	if scalar[string](t, s.st, `SELECT state||':'||
+		COALESCE(owner_installation_id,'')||':'||observed_bytes
+		FROM app_platform_data_namespaces WHERE id=?`,
+		namespaceID) != "deleted::0" ||
+		scalar[string](t, s.st, `SELECT stage
+			FROM app_platform_operations WHERE id=?`,
+			deleteCommit.OperationID) != "complete" {
+		t.Fatal("native standalone delete-data did not settle")
+	}
+	t.Log("STANDALONE_DELETE_DATA_NAMESPACE_ABSENT")
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {
