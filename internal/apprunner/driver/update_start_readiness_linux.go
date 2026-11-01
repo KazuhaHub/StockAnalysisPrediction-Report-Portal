@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -69,28 +70,37 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 	request.Descriptor = bytes.Clone(request.Descriptor)
 	for live := range r.launches {
 		if live.snapshot.Identity.NamespaceID == request.Identity.NamespaceID {
-			return zero, ErrContainerConflict
+			return zero, fmt.Errorf(
+				"update-start readiness live conflict: %w",
+				ErrContainerConflict)
 		}
 	}
 	report, err := InspectDaemon(ctx, r.socket)
 	if err != nil || !report.MetadataCompatible {
-		return zero, errors.Join(ErrUnsupported, err)
+		return zero, fmt.Errorf(
+			"update-start readiness daemon: %w",
+			errors.Join(ErrUnsupported, err))
 	}
 	accessWritable := request.SandboxProfile == UpdateStartWritableSandboxProfile
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness data profile: %w", err)
 	}
 	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
 	if err != nil || image.Platform != request.Platform {
-		return zero, errors.Join(ErrInvalidResponse, err)
+		return zero, fmt.Errorf(
+			"update-start readiness image: %w",
+			errors.Join(ErrInvalidResponse, err))
 	}
 	plan, err := planUpdateStartContainer(request.Descriptor, image, candidateOwner(request.Identity), r.roots, request.Binding, request.SandboxProfile)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness plan: %w", err)
 	}
 	pins, base, err := r.pinCandidatePreflight(ctx, request.CandidateLaunchRequest, image, plan)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness pins: %w", err)
 	}
 	defer pins.Close()
 	actual := UpdateStartLaunchSnapshot{
@@ -98,37 +108,51 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 		SeccompSHA256: UpdateStartSeccompSHA256(request.SandboxProfile),
 	}
 	if actual != expected {
-		return zero, ErrContainerConflict
+		return zero, fmt.Errorf(
+			"update-start readiness snapshot: %w",
+			ErrContainerConflict)
 	}
 	client, closeClient := r.client()
 	defer closeClient()
 	native, err := managedCandidateReference(ctx, client, plan)
 	if err != nil || native != nativeID {
-		return zero, errors.Join(ErrContainerConflict, err)
+		return zero, fmt.Errorf(
+			"update-start readiness native identity: %w",
+			errors.Join(ErrContainerConflict, err))
 	}
 	state, err := inspectCandidateContainerHTTP(ctx, client, native, plan)
 	if err != nil || state != "running" {
-		return zero, errors.Join(ErrContainerUncertain, err)
+		return zero, fmt.Errorf(
+			"update-start readiness initial state %s: %w",
+			state, errors.Join(ErrContainerUncertain, err))
 	}
 	if err := action(ctx, pins); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness socket: %w", err)
 	}
 	if err := pins.validate(ctx, plan); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness pins recheck: %w", err)
 	}
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness data recheck: %w", err)
 	}
 	again, err := managedCandidateReference(ctx, client, plan)
 	if err != nil || again != native {
-		return zero, errors.Join(ErrContainerConflict, err)
+		return zero, fmt.Errorf(
+			"update-start readiness native recheck: %w",
+			errors.Join(ErrContainerConflict, err))
 	}
 	state, err = inspectCandidateContainerHTTP(ctx, client, native, plan)
 	if err != nil || state != "running" || ctx.Err() != nil {
-		return zero, errors.Join(ErrContainerUncertain, err)
+		return zero, fmt.Errorf(
+			"update-start readiness final state %s: %w",
+			state, errors.Join(ErrContainerUncertain, err))
 	}
 	if err := pins.validate(ctx, plan); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness final pins: %w", err)
 	}
 	return UpdateStartRunningSnapshot{Launch: expected, NativeID: native, ObservedMS: time.Now().UnixMilli()}, nil
 }
