@@ -144,13 +144,20 @@ func loadManagedRemovalUpdateCheckpoint(ctx context.Context, tx *sql.Tx, install
 			continue
 		}
 		checkpoint, err := ParseCheckpointReceipt([]byte(raw))
+		checkpointWriter, checkpointWriterErr := strconv.ParseInt(
+			checkpoint.WriterFence, 10, 64)
+		sourceWriter, sourceWriterErr := strconv.ParseInt(
+			running.SourceWriterFence, 10, 64)
+		checkpointWriterMatches := checkpointWriterErr == nil &&
+			sourceWriterErr == nil && checkpointWriter > 0 &&
+			checkpointWriter <= sourceWriter
 		if err != nil || checkpoint.PayloadSHA256 != payload ||
 			checkpoint.InstallationID == "" ||
 			checkpoint.TargetGeneration != running.TargetGeneration ||
 			checkpoint.NamespaceID != running.NamespaceID ||
 			checkpoint.ReleaseSHA256 != running.SourceReleaseSHA256 ||
 			checkpoint.DataFormat != running.DataFormat ||
-			checkpoint.WriterFence != running.SourceWriterFence ||
+			!checkpointWriterMatches ||
 			checkpoint.ProjectID != running.Claim.Preflight.ProjectID ||
 			checkpoint.Device != running.Claim.Preflight.Device ||
 			checkpoint.NamespaceInode !=
@@ -186,7 +193,9 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 	}
 	sourceDigest := sha256.Sum256([]byte(sourceRaw))
 	if sourceOperation != c.Payload.SourceOperationID ||
-		(sourceKind != "start-candidate" && sourceKind != "update-start") ||
+		(sourceKind != "start-candidate" &&
+			sourceKind != "update-start" &&
+			sourceKind != "enable-start") ||
 		sourceState != "applied" ||
 		!dataSHA(sourcePayload) || hex.EncodeToString(sourceDigest[:]) != c.Payload.SourceReceiptSHA256 || result.sourceFence < 1 {
 		return result, fmt.Errorf("%w: managed removal source command", ErrFenceReconciliation)
@@ -198,7 +207,8 @@ func loadManagedRemovalSource(ctx context.Context, tx *sql.Tx, c control.Managed
 		return result, fmt.Errorf("%w: managed removal source receipt format", ErrFenceReconciliation)
 	}
 	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
-	updateSource := sourceKind == "update-start"
+	updateSource := sourceKind == "update-start" ||
+		sourceKind == "enable-start"
 	switch format.Format {
 	case candidateReceiptFormat:
 		if updateSource {

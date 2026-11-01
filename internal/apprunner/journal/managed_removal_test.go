@@ -175,6 +175,82 @@ func TestManagedRemovalAcceptsUpdateStartSource(t *testing.T) {
 	}
 }
 
+func TestManagedRemovalAcceptsEnableStartSource(t *testing.T) {
+	fixture, _, start, _, _ := updateStartJournalFixture(t)
+	start.Kind = "enable-start"
+	start.Payload.TargetReleaseSHA256 =
+		start.Payload.SourceReleaseSHA256
+	start.Payload.SourceWriterFence = "2"
+	start.Payload.TargetWriterFence = "3"
+	start.Payload.CheckpointWriterFence = "1"
+	var err error
+	start.PayloadSHA256, err = control.UpdateStartLogicalDigest(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	start.IssuedMS = strconv.FormatInt(now, 10)
+	start.ExpiresMS = strconv.FormatInt(now+25000, 10)
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID:    enrollment.DeploymentID,
+		ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision,
+		PublicKey:       enrollment.PublicKey,
+		Fingerprint:     enrollment.Fingerprint,
+	}
+	startRaw, startSignature, err := control.SignUpdateStart(
+		start, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runningRaw := seedUpdateStartRunningFixture(
+		t, fixture, start, startRaw, startSignature)
+	running, err := ParseUpdateStartRunningReceipt(runningRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := control.ManagedRemovalCommand{
+		Format: control.ManagedRemovalFormat, DeploymentID: start.DeploymentID,
+		ControllerEpoch: start.ControllerEpoch,
+		ControlRevision: start.ControlRevision,
+		InstallationID:  start.InstallationID,
+		OperationID:     fixtureID(1712), TargetGeneration: "3", Stage: "stop",
+		EffectNumber: "1", EffectID: fixtureID(1713), Kind: "stop",
+		InstallationFence: "3",
+		IssuedMS:          strconv.FormatInt(now, 10),
+		ExpiresMS:         strconv.FormatInt(now+25000, 10),
+		Payload: control.ManagedRemovalPayload{
+			ResourceID:          running.Claim.ResourceID,
+			DataNamespaceID:     running.NamespaceID,
+			ReleaseSHA256:       running.TargetReleaseSHA256,
+			Platform:            running.Claim.Preflight.Platform,
+			SourceOperationID:   start.OperationID,
+			SourceEffectID:      start.EffectID,
+			SourceReceiptSHA256: candidateHash(runningRaw),
+		},
+	}
+	command.PayloadSHA256, err =
+		control.ManagedRemovalLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, signature, err := control.SignManagedRemoval(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, replay, err := fixture.store.beginManagedRemoval(
+		context.Background(), raw, signature)
+	if err != nil || replay || source.update == nil ||
+		source.nativeID != running.NativeID ||
+		source.generation != 2 || source.writerFence != 3 {
+		t.Fatal("enable-start source removal", source, replay, err)
+	}
+}
+
 func TestManagedRemovalRejectsChangedSourceAndPendingWork(t *testing.T) {
 	for _, name := range []string{"source state", "source hash", "resource", "pending", "target", "authority"} {
 		t.Run(name, func(t *testing.T) {

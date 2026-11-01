@@ -269,7 +269,7 @@ func loadCheckpointWritableSource(ctx context.Context, tx *sql.Tx, c control.Che
 	return result, nil
 }
 
-func loadCheckpointUpdateSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions []string, startOperation, startState, storedPayload, startRaw string, sourceFence int64) (checkpointSource, error) {
+func loadCheckpointUpdateSource(ctx context.Context, tx *sql.Tx, c control.CheckpointCommand, now int64, excludeEffect string, additionalExclusions []string, startOperation, startKind, startState, storedPayload, startRaw string, sourceFence int64) (checkpointSource, error) {
 	var result checkpointSource
 	result.command = c
 	result.sourceFence = sourceFence
@@ -417,10 +417,10 @@ func loadCheckpointSourceExcluding(ctx context.Context, tx *sql.Tx, c control.Ch
 		c.Payload.SourceStartEffectID, c.InstallationID).Scan(&startOperation, &startKind, &startState, &storedPayload, &startRaw, &result.sourceFence); err != nil {
 		return result, ErrCheckpointUnavailable
 	}
-	if startKind == "update-start" {
+	if startKind == "update-start" || startKind == "enable-start" {
 		return loadCheckpointUpdateSource(
 			ctx, tx, c, now, excludeEffect, additionalExclusions,
-			startOperation, startState, storedPayload, startRaw,
+			startOperation, startKind, startState, storedPayload, startRaw,
 			result.sourceFence)
 	}
 	if startKind != "start-candidate" {
