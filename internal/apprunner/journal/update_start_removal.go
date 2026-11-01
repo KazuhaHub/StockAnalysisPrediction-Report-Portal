@@ -283,7 +283,10 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	snapshot, err := observation.Snapshot()
 	if err != nil || snapshot.Launch != before.expected.Launch ||
 		snapshot.NativeID != before.running.NativeID {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal settlement snapshot expected=%s actual=%s",
+			ErrFenceReconciliation, before.running.NativeID,
+			snapshot.NativeID)
 	}
 	command := before.verified.Command()
 	expectedState := "stopped"
@@ -295,7 +298,9 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		nextDesired = "absent"
 	}
 	if snapshot.State != expectedState {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal settlement state %s/%s",
+			ErrFenceReconciliation, snapshot.State, expectedState)
 	}
 	tx, current, err := beginUpdateStartRemoval(
 		ctx, store, raw, signature, before.request.Descriptor)
@@ -305,7 +310,10 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	defer tx.Rollback()
 	if current.row.state != "unknown" ||
 		current.running.NativeID != before.running.NativeID {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal settlement intent state=%s native=%s/%s",
+			ErrFenceReconciliation, current.row.state,
+			current.running.NativeID, before.running.NativeID)
 	}
 	now := time.Now().UTC().UnixMilli()
 	changed, err := tx.ExecContext(ctx,
@@ -319,7 +327,9 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal resource CAS rows=%d err=%v",
+			ErrFenceReconciliation, n, err)
 	}
 	start := current.verified.Start().Command()
 	receipt := ManagedRemovalReceipt{
@@ -341,10 +351,14 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	}
 	encoded, err := json.Marshal(receipt)
 	if err != nil || len(encoded) > 16384 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal receipt encode: %v",
+			ErrFenceReconciliation, err)
 	}
 	if _, err := ParseManagedRemovalReceipt(encoded); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"%w: update-start removal receipt parse: %v",
+			ErrFenceReconciliation, err)
 	}
 	changed, err = tx.ExecContext(ctx,
 		`UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND ack_attempted_ms IS NULL`,
@@ -353,7 +367,9 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"%w: update-start removal command CAS rows=%d err=%v",
+			ErrFenceReconciliation, n, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
