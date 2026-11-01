@@ -159,6 +159,75 @@ func TestRestoreStartReservesFromSeparateCheckpointOperation(t *testing.T) {
 	}
 }
 
+func TestRestoreStartReusesRemovedActivationResource(t *testing.T) {
+	f, _, command, _, _ := updateStartJournalFixture(t)
+	command.Kind = "restore-start"
+	command.OperationID = fixtureID(1534)
+	command.Payload.TargetReleaseSHA256 =
+		command.Payload.SourceReleaseSHA256
+	var err error
+	command.PayloadSHA256, err = control.UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	command.IssuedMS = strconv.FormatInt(now, 10)
+	command.ExpiresMS = strconv.FormatInt(now+25000, 10)
+	enrollment := enrollmentFixture(30)
+	authority := control.Authority{
+		DeploymentID:    enrollment.DeploymentID,
+		ControllerEpoch: enrollment.ControllerEpoch,
+		ControlRevision: enrollment.ControlRevision,
+		PublicKey:       enrollment.PublicKey, Fingerprint: enrollment.Fingerprint,
+	}
+	raw, signature, err := control.SignUpdateStart(
+		command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)),
+		authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustJournalExec(t, f.store.db, `INSERT INTO runner_commands(
+		effect_id,operation_id,installation_id,stage,effect_number,kind,
+		payload_sha256,target_generation,controller_epoch,admitted_fence,
+		state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		VALUES(?,?,?,'remove_code',1,'remove-code',?,?,?,?,'applied',
+		'{}',NULL,?,?)`,
+		fixtureID(1535), command.OperationID, command.InstallationID,
+		strings.Repeat("f", 64), mustDataInt(command.TargetGeneration),
+		command.ControllerEpoch, command.InstallationFence, now-1, now-1)
+	mustJournalExec(t, f.store.db, `INSERT INTO runner_resources(
+		id,installation_id,data_namespace_id,kind,native_id,release_sha256,
+		generation,controller_epoch,control_fence,writer_fence,desired_state,
+		observed_state,ownership_sha256,revision,observed_ms,created_ms,
+		updated_ms)
+		VALUES(?,?,?,'container',?,?,?,?,?,?,'absent','absent',?,4,?,?,?)`,
+		command.Payload.ResourceID, command.InstallationID,
+		command.Payload.NamespaceID, updateStartPendingPrefix+
+			command.Payload.ResourceID, strings.Repeat("d", 64),
+		mustDataInt(command.TargetGeneration), command.ControllerEpoch,
+		command.InstallationFence, command.Payload.TargetWriterFence,
+		strings.Repeat("e", 64), now-1, now-1, now-1)
+	reservation, err := f.store.ReserveUpdateStart(
+		context.Background(), raw, signature)
+	if err != nil || reservation.ResourceID != command.Payload.ResourceID ||
+		reservation.Replayed {
+		t.Fatal("removed activation reuse", reservation, err)
+	}
+	var desired, observed, release, native string
+	var revision int64
+	if err := f.store.db.QueryRow(`SELECT desired_state,observed_state,
+		release_sha256,native_id,revision FROM runner_resources WHERE id=?`,
+		command.Payload.ResourceID).Scan(
+		&desired, &observed, &release, &native, &revision); err != nil ||
+		desired != "present" || observed != "unknown" ||
+		release != command.Payload.TargetReleaseSHA256 ||
+		native != updateStartPendingPrefix+command.Payload.ResourceID ||
+		revision != 1 {
+		t.Fatal("reused resource state", desired, observed, release,
+			native, revision, err)
+	}
+}
+
 func TestUpdateStartRefusesChangedCheckpointAndSources(t *testing.T) {
 	for _, mode := range []string{"checkpoint state", "running source", "source receipt", "resource alias"} {
 		t.Run(mode, func(t *testing.T) {

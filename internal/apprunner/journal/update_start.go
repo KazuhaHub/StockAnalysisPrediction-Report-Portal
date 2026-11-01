@@ -364,8 +364,77 @@ func (s *Store) ReserveUpdateStart(ctx context.Context, raw, signature []byte) (
 	}
 	if existing != nil {
 		result, err := reservedUpdateStart(f, existing)
+		if err == nil {
+			if err := finalUpdateStartCheck(ctx, f); err != nil {
+				return zero, err
+			}
+			if err := tx.Commit(); err != nil {
+				return zero, err
+			}
+			return result, nil
+		}
+		if !reusableUpdateStartResource(f, existing) {
+			return zero, err
+		}
+		var removals int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands
+			WHERE operation_id=? AND installation_id=?
+			AND stage='remove_code' AND kind='remove-code'
+			AND state='applied'`,
+			c.OperationID, c.InstallationID).Scan(&removals); err != nil {
+			return zero, err
+		}
+		if removals != 1 {
+			return zero, fmt.Errorf(
+				"update-start reusable removal count=%d: %w",
+				removals, ErrFenceReconciliation)
+		}
+		fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+		generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+		writer, _ := strconv.ParseInt(p.TargetWriterFence, 10, 64)
+		ownership := updateStartOwnership(c, fence)
+		changed, err := tx.ExecContext(ctx,
+			`UPDATE runner_resources SET native_id=?,release_sha256=?,
+			generation=?,controller_epoch=?,control_fence=?,writer_fence=?,
+			desired_state='present',observed_state='unknown',
+			ownership_sha256=?,revision=1,observed_ms=NULL,
+			created_ms=?,updated_ms=?
+			WHERE id=? AND installation_id=? AND data_namespace_id=?
+			AND kind='container' AND generation=? AND controller_epoch=?
+			AND desired_state='absent' AND observed_state='absent'
+			AND revision=4`,
+			updateStartPendingPrefix+p.ResourceID, p.TargetReleaseSHA256,
+			generation, c.ControllerEpoch, fence, writer, ownership,
+			f.now, f.now, p.ResourceID, c.InstallationID, p.NamespaceID,
+			generation, c.ControllerEpoch)
 		if err != nil {
 			return zero, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return zero, fmt.Errorf(
+				"update-start reuse resource rows=%d err=%v: %w",
+				n, err, ErrFenceReconciliation)
+		}
+		slot, _ := strconv.ParseInt(c.EffectNumber, 10, 64)
+		kind := updateStartIndex(c).Kind
+		if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+			VALUES(?,?,?,?,?,?,?,?,?,?,'prepared','{}',NULL,?,?)`,
+			c.EffectID, c.OperationID, c.InstallationID, c.Stage, slot,
+			kind, c.PayloadSHA256, generation, c.ControllerEpoch, fence,
+			f.now, f.now); err != nil {
+			return zero, err
+		}
+		result = UpdateStartReservation{
+			ResourceID: p.ResourceID, InstallationID: c.InstallationID,
+			NamespaceID: p.NamespaceID, EffectID: c.EffectID,
+			OwnershipSHA256:     ownership,
+			SourceGeneration:    mustDataInt(p.SourceGeneration),
+			TargetGeneration:    generation,
+			SourceReleaseSHA256: p.SourceReleaseSHA256,
+			TargetReleaseSHA256: p.TargetReleaseSHA256,
+			ControlFence:        fence,
+			SourceWriterFence:   mustDataInt(p.SourceWriterFence),
+			TargetWriterFence:   writer,
 		}
 		if err := finalUpdateStartCheck(ctx, f); err != nil {
 			return zero, err
@@ -415,6 +484,18 @@ func (s *Store) ReserveUpdateStart(ctx context.Context, raw, signature []byte) (
 		return zero, err
 	}
 	return result, nil
+}
+
+func reusableUpdateStartResource(f updateStartFacts, r *dataResource) bool {
+	c := f.command
+	return r != nil && r.id == c.Payload.ResourceID &&
+		r.installation == c.InstallationID &&
+		r.namespace.Valid && r.namespace.String == c.Payload.NamespaceID &&
+		r.kind == "container" &&
+		r.generation == mustDataInt(c.TargetGeneration) &&
+		r.epoch == c.ControllerEpoch &&
+		r.desired == "absent" && r.observed == "absent" &&
+		r.revision == 4
 }
 
 func (s *Store) ReadUpdateStartReservation(ctx context.Context, raw, signature []byte) (UpdateStartReservation, error) {
