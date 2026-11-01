@@ -63,7 +63,7 @@ export function PolicyPage({ section, children, renderOU }: { section: FeaturePo
   }
   return <div className={`rp-policy-workspace ${!phone && collapsed ? 'rp-policy-workspace--collapsed' : ''}`}>
     <aside className="rp-policy-scope" aria-label={t('ou.unitScope')}>
-      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={phone || !collapsed} type="text" className={scoped ? undefined : 'rp-policy-scope-global--active'}
+      <div className="rp-policy-scope-header"><Button aria-label={t('ou.globalScope')} title={t('ou.globalScope')} icon={<GlobalOutlined />} block={phone || !collapsed} color={scoped ? 'default' : 'primary'} variant={scoped ? 'outlined' : 'solid'}
         aria-current={!scoped ? 'true' : undefined} onClick={() => selectScope()}>{(phone || !collapsed) && t('ou.globalScope')}</Button>
       {phone
         // The visible unit name stays in the accessible name; aria-expanded carries the state.

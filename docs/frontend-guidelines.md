@@ -70,8 +70,10 @@ When in doubt, look at how they solve it before inventing a pattern.
 ## Loading
 
 - A view's first load goes through `LoadGate` / `LoadingPlaceholder`: the shared loading ring with
-  its status line, centred where the view will appear, **from the first frame**, fading in. No delay
-  before it: a delay is a blank frame, repeated on every Suspense layer a page passes through.
+  its status line, centred where the view will appear, **from the first frame**, with no delay and no
+  fade (a delay is a blank frame, and a fade replays on every Suspense layer a page passes through).
+  Every in-app ring's turn is pinned to one clock (`SpinRing`; the boot splash is plain CSS), so when a page's data wait takes over from
+  its code wait the ring carries on instead of restarting.
 - A table's first load shows skeleton rows in the table's own shape (`CardTable`); a refresh keeps
   the rows under antd's spinner.
 - No hand-placed large spinners (`loadingStates.test.ts`). Never render defaults as if the server

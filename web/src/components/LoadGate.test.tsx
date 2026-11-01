@@ -23,7 +23,7 @@ it('says it is waiting for the connection, still without children, while the con
 })
 
 // The ring is there from the first frame: a delay before it is a blank frame, repeated on every
-// Suspense layer a page passes through. Its fade-in is CSS (.rp-loading).
+// Suspense layer a page passes through.
 it('shows the loading ring and status from the first frame', () => {
   const { container } = render(<LoadGate loading><span>defaults</span></LoadGate>)
   expect(screen.getByRole('status').textContent).toBe('common.loading')

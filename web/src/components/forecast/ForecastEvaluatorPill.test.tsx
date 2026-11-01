@@ -60,6 +60,14 @@ describe('ForecastEvaluatorPill', () => {
     expect(apiMock.get.mock.calls.map(([u]) => String(u))).toEqual(['/api/admin/forecast'])
   })
 
+  // It sits beside the page's Export CSV button and matches it: default size, default shape.
+  it('is a default-size button like the one beside it', async () => {
+    show()
+    const pill = await screen.findByRole('button', { name: /forecast\.eval\.pill:/ })
+    expect(pill.className).not.toContain('ant-btn-sm')
+    expect(pill.className).not.toContain('ant-btn-round')
+  })
+
   it.each([
     ['off', settings({ mode: '0', heartbeat: null }), 'forecast.eval.status.off'],
     ['dry', settings({ mode: 'dry' }), 'forecast.eval.status.dry'],
