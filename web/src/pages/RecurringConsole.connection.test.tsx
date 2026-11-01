@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
+import { MemoryRouter } from 'react-router'
 import RecurringConsole from './RecurringConsole'
 
 const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn(), put: vi.fn(), del: vi.fn() }))
@@ -22,7 +23,7 @@ describe('RecurringConsole while the connection is down', () => {
       recurring += 1
       return recurring === 1 ? Promise.resolve({ tasks: [task] }) : Promise.reject(lost())
     })
-    const { container } = render(<App><RecurringConsole /></App>)
+    const { container } = render(<MemoryRouter><App><RecurringConsole /></App></MemoryRouter>)
     await screen.findByText('Close review')
     await userEvent.setup().click(screen.getByRole('switch'))
     await waitFor(() => expect(recurring).toBe(2))
@@ -37,7 +38,7 @@ describe('RecurringConsole while the connection is down', () => {
       if (url.includes('/batch/targets')) return Promise.resolve({ targets: [] })
       return down ? Promise.reject(lost()) : Promise.resolve({ tasks: [task] })
     })
-    render(<App><RecurringConsole /></App>)
+    render(<MemoryRouter><App><RecurringConsole /></App></MemoryRouter>)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.queryByText('Close review')).toBeNull()

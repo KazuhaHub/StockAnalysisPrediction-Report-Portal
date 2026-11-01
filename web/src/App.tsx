@@ -65,6 +65,7 @@ const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
 const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
+const RecurringEditor = lazyRetry(() => import('./pages/RecurringEditor'))
 const QueuePage = lazyRetry(() => import('./pages/QueuePage'))
 const ChatPage = lazyRetry(() => import('./pages/ChatPage'))
 
@@ -194,19 +195,25 @@ function AppRoutes() {
             </RequirePerm>
           }
         />
+        {/* The list and the task editor pages share one gate and one draft boundary: the editor
+            registers its unsaved edits, and the boundary carries that to route changes (Back, a
+            breadcrumb link, the browser's back button). */}
         <Route
           path="/apps/recurring"
           element={
             <RequirePerm perm="run_batch">
               <RequireAppOpen appKey="builtin:recurring">
-                {/* Its task editor guards unsaved edits; the boundary carries that to route changes. */}
                 <AdminDraftBoundary>
-                  <RecurringConsole />
+                  <Outlet />
                 </AdminDraftBoundary>
               </RequireAppOpen>
             </RequirePerm>
           }
-        />
+        >
+          <Route index element={<RecurringConsole />} />
+          <Route path="new" element={<RecurringEditor />} />
+          <Route path=":id" element={<RecurringEditor />} />
+        </Route>
         <Route
           path="/queue"
           element={

@@ -94,9 +94,9 @@ vi.mock('./SiteAnnouncement', () => ({
 const page = { version: 'v2026.38.1', commit: 'abc1234', buildDate: '2026-08-10T00:00:00Z' }
 const noUpdate = { page, target: null, kind: null, policy: 'dismissible', workerReady: false, failed: false }
 
-function renderAt(path: string) {
+function renderAt(path: string, state?: unknown) {
   return render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[state === undefined ? path : { pathname: path, state }]}>
       <Routes>
         <Route element={<AppLayout />}>
           <Route path="chat" element={<div>chat-body</div>} />
@@ -105,6 +105,9 @@ function renderAt(path: string) {
           <Route path="review" element={<div>review-body</div>} />
           <Route path="apps" element={<div>apps-body</div>} />
           <Route path="apps/batch" element={<div>batch-body</div>} />
+          <Route path="apps/recurring" element={<div>recurring-body</div>} />
+          <Route path="apps/recurring/new" element={<div>recurring-new-body</div>} />
+          <Route path="apps/recurring/:id" element={<div>recurring-edit-body</div>} />
           <Route path="manage/*" element={<div>manage-body</div>} />
           <Route path="report/new" element={<div>write-report-body</div>} />
         </Route>
@@ -668,6 +671,26 @@ describe('AppLayout forecast record navigation', () => {
     expect(await screen.findByText('forecast-body')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'nav.home' }).getAttribute('href')).toBe('/')
     expect(screen.getByText('nav.forecast_record').closest('a')).toBeNull()
+  })
+
+  it('traces the recurring-task editor pages back through the list', async () => {
+    renderAt('/apps/recurring/new')
+    expect(await screen.findByText('recurring-new-body')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'nav.home' }).getAttribute('href')).toBe('/')
+    expect(screen.getByRole('link', { name: 'nav.apps' }).getAttribute('href')).toBe('/apps')
+    expect(screen.getByRole('link', { name: 'nav.recurring' }).getAttribute('href')).toBe('/apps/recurring')
+    expect(screen.getByText('recurring.new').closest('a')).toBeNull()
+  })
+
+  it('names the task being edited in the breadcrumb when the list passed its name, and the generic title for a deep link', async () => {
+    const { unmount } = renderAt('/apps/recurring/7', { crumb: 'Close review' })
+    expect(await screen.findByText('recurring-edit-body')).toBeTruthy()
+    expect(screen.getByText('Close review').closest('a')).toBeNull()
+    expect(screen.getByRole('link', { name: 'nav.recurring' }).getAttribute('href')).toBe('/apps/recurring')
+    unmount()
+    renderAt('/apps/recurring/7')
+    expect(await screen.findByText('recurring-edit-body')).toBeTruthy()
+    expect(screen.getByText('recurring.edit').closest('a')).toBeNull()
   })
 
   it('never asks a forecast or prediction route from the shell, whatever the scope', async () => {
