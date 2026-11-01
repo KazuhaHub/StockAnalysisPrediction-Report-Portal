@@ -35,3 +35,7 @@ func (*Root) VerifyCheckpoint(context.Context, RootIdentity, RootIdentity, Check
 func (*Root) Restore(context.Context, RootIdentity, *Root, RootIdentity, RestoreRequest) (RestoreObservation, error) {
 	return RestoreObservation{}, ErrUnsupported
 }
+
+func (*Root) Delete(context.Context, RootIdentity, DeleteRequest) (DeleteObservation, error) {
+	return DeleteObservation{}, ErrUnsupported
+}

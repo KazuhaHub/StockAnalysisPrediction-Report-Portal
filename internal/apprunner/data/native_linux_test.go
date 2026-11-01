@@ -136,6 +136,79 @@ func TestNativeDataPrimitive(t *testing.T) {
 			t.Fatal("project conflict created namespace")
 		}
 	}
+	deleteNamespace := filepath.Join(rootPath, nativeNamespace(4))
+	if err := os.MkdirAll(
+		filepath.Join(deleteNamespace, "nested"), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(deleteNamespace, "payload.bin"),
+		[]byte("retained payload"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(deleteNamespace, "nested", "value.json"),
+		[]byte(`{"delete":true}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(
+		filepath.Join(rootPath, nativeNamespace(1)),
+		filepath.Join(deleteNamespace, "foreign-link")); err != nil {
+		t.Fatal(err)
+	}
+	deleteObserved, err := root.Inspect(
+		context.Background(), expected, nativeNamespace(4), 4204)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteRequest := DeleteRequest{
+		NamespaceID:   nativeNamespace(4),
+		ReleaseSHA256: strings.Repeat("d", 64),
+		ProjectID:     4204, DataFormat: 1,
+		QuotaBytes:             deleteObserved.ByteLimit,
+		QuotaInodes:            deleteObserved.InodeLimit,
+		ExpectedDevice:         deleteObserved.Device,
+		ExpectedNamespaceInode: deleteObserved.Inode,
+		WriterFence:            1,
+	}
+	wrongDelete := deleteRequest
+	wrongDelete.ProjectID = 4201
+	if _, err := root.Delete(
+		context.Background(), expected, wrongDelete); !errors.Is(err, ErrDeleteUnsafe) {
+		t.Fatal("foreign project deletion accepted", err)
+	}
+	if _, err := os.Lstat(deleteNamespace); err != nil {
+		t.Fatal("refused deletion changed namespace", err)
+	}
+	deleted, err := root.Delete(
+		context.Background(), expected, deleteRequest)
+	deletedSnapshot, deletedErr := deleted.Snapshot()
+	if err != nil || deletedErr != nil ||
+		deletedSnapshot.NamespaceID != deleteRequest.NamespaceID ||
+		deletedSnapshot.ProjectID != deleteRequest.ProjectID ||
+		deletedSnapshot.Entries != 4 || deletedSnapshot.AlreadyAbsent ||
+		deletedSnapshot.ObservedMS <= 0 {
+		t.Fatalf("native delete: %+v %v",
+			deletedSnapshot, errors.Join(err, deletedErr))
+	}
+	if _, err := os.Lstat(deleteNamespace); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("native delete retained namespace")
+	}
+	if limit, err := readLimits(
+		root.file, deleteRequest.ProjectID); err != nil ||
+		limit != (limits{}) {
+		t.Fatal("native delete retained project quota", limit, err)
+	}
+	absent, err := root.Delete(
+		context.Background(), expected, deleteRequest)
+	absentSnapshot, absentErr := absent.Snapshot()
+	if err != nil || absentErr != nil ||
+		!absentSnapshot.AlreadyAbsent ||
+		absentSnapshot.NamespaceID != deleteRequest.NamespaceID {
+		t.Fatalf("native delete reconciliation: %+v %v",
+			absentSnapshot, errors.Join(err, absentErr))
+	}
+	t.Log("NATIVE_DATA_NAMESPACE_DELETED")
 	checkpointPath := os.Getenv("APP_DATA_CHECKPOINT_ROOT")
 	if checkpointPath == "" || !filepath.IsAbs(checkpointPath) {
 		t.Fatal("missing independent checkpoint root")

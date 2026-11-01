@@ -18,6 +18,8 @@ var (
 	ErrCheckpointIncomplete = errors.New("data checkpoint requires reconciliation")
 	ErrRestoreUnsafe        = errors.New("data restore binding is unsafe")
 	ErrRestoreIncomplete    = errors.New("data restore requires reconciliation")
+	ErrDeleteUnsafe         = errors.New("data deletion binding is unsafe")
+	ErrDeleteIncomplete     = errors.New("data deletion requires reconciliation")
 )
 var namespaceID = regexp.MustCompile(`^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$`)
 
@@ -111,6 +113,64 @@ type RestoreRequest struct {
 	DataFormat, ArchiveBytes, MaxArchiveBytes                int64
 	ExpectedDevice, ExpectedNamespaceInode                   uint64
 	WriterFence                                              int64
+}
+
+// DeleteRequest binds one retained namespace and project quota to an exact
+// reviewed deletion. It contains no host path or caller-selected traversal.
+type DeleteRequest struct {
+	NamespaceID, ReleaseSHA256             string
+	ProjectID                              uint32
+	DataFormat, QuotaBytes, QuotaInodes    int64
+	ExpectedDevice, ExpectedNamespaceInode uint64
+	WriterFence                            int64
+}
+
+func (r DeleteRequest) valid() bool {
+	return namespaceID.MatchString(r.NamespaceID) && sha256Value(r.ReleaseSHA256) &&
+		r.ProjectID > 0 && r.DataFormat > 0 && r.QuotaBytes > 0 &&
+		r.QuotaBytes%512 == 0 && r.QuotaInodes > 0 &&
+		r.ExpectedDevice > 0 && r.ExpectedNamespaceInode > 0 &&
+		r.WriterFence > 0
+}
+
+// DeleteSnapshot is minted only after the complete namespace tree and project
+// quota are absent. AlreadyAbsent supports exact receipt reconciliation.
+type DeleteSnapshot struct {
+	NamespaceID, ReleaseSHA256 string
+	ProjectID                  uint32
+	DataFormat                 int64
+	Entries, UsedBytes         int64
+	UsedInodes                 int64
+	NamespaceDevice            uint64
+	NamespaceInode             uint64
+	WriterFence                int64
+	AlreadyAbsent              bool
+	ObservedMS                 int64
+}
+
+type DeleteObservation struct {
+	snapshot DeleteSnapshot
+	valid    bool
+}
+
+func (DeleteObservation) MarshalJSON() ([]byte, error) { return nil, ErrDeleteUnsafe }
+func (o *DeleteObservation) UnmarshalJSON([]byte) error {
+	*o = DeleteObservation{}
+	return ErrDeleteUnsafe
+}
+
+func (o DeleteObservation) Snapshot() (DeleteSnapshot, error) {
+	s := o.snapshot
+	if !o.valid || !namespaceID.MatchString(s.NamespaceID) ||
+		!sha256Value(s.ReleaseSHA256) || s.ProjectID == 0 ||
+		s.DataFormat < 1 || s.WriterFence < 1 ||
+		s.Entries < 0 || s.UsedBytes < 0 || s.UsedInodes < 0 ||
+		(!s.AlreadyAbsent &&
+			(s.NamespaceDevice == 0 || s.NamespaceInode == 0)) ||
+		s.ObservedMS <= 0 {
+		return DeleteSnapshot{}, ErrDeleteUnsafe
+	}
+	return s, nil
 }
 
 func (r RestoreRequest) valid() bool {
