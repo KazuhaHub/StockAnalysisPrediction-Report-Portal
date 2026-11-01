@@ -60,12 +60,39 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 	defer cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed || r.root == nil || !validUpdateStartRequest(request) ||
-		!validUpdateStartSnapshot(expected) || expected.Binding != request.Binding ||
-		expected.Launch.Identity != request.Identity || expected.Launch.Data != request.Data ||
-		expected.Launch.Platform != request.Platform ||
-		expected.SandboxProfile != request.SandboxProfile {
-		return zero, ErrInvalidResponse
+	switch {
+	case r.closed || r.root == nil:
+		return zero, fmt.Errorf(
+			"update-start readiness runtime state: %w",
+			ErrInvalidResponse)
+	case !validUpdateStartRequest(request):
+		return zero, fmt.Errorf(
+			"update-start readiness request: %w",
+			ErrInvalidResponse)
+	case !validUpdateStartSnapshot(expected):
+		return zero, fmt.Errorf(
+			"update-start readiness expected snapshot: %w",
+			ErrInvalidResponse)
+	case expected.Binding != request.Binding:
+		return zero, fmt.Errorf(
+			"update-start readiness binding: %w",
+			ErrInvalidResponse)
+	case expected.Launch.Identity != request.Identity:
+		return zero, fmt.Errorf(
+			"update-start readiness identity: %w",
+			ErrInvalidResponse)
+	case expected.Launch.Data != request.Data:
+		return zero, fmt.Errorf(
+			"update-start readiness data: %w",
+			ErrInvalidResponse)
+	case expected.Launch.Platform != request.Platform:
+		return zero, fmt.Errorf(
+			"update-start readiness platform: %w",
+			ErrInvalidResponse)
+	case expected.SandboxProfile != request.SandboxProfile:
+		return zero, fmt.Errorf(
+			"update-start readiness sandbox: %w",
+			ErrInvalidResponse)
 	}
 	request.Descriptor = bytes.Clone(request.Descriptor)
 	for live := range r.launches {
