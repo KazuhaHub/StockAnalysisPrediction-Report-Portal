@@ -295,6 +295,7 @@ func testNativeWritableManagedUpdateVersion(
 	if err != nil {
 		t.Fatal("managed update admission", err)
 	}
+	assertNativePlatformGrant(t, s, installation, "update admission")
 	if scalar[int](t, s.st, `SELECT managed
 		FROM app_platform_operations WHERE id=?`,
 		admitted.OperationID) != 1 ||
@@ -324,20 +325,24 @@ func testNativeWritableManagedUpdateVersion(
 	if err != nil || snapshot.snapshot.Stage != appplatform.StageSnapshot {
 		t.Fatal("managed update source quiesce", snapshot.snapshot, err)
 	}
+	assertNativePlatformGrant(t, s, installation, "update quiesce")
 	migrate, err := s.dispatchPlatformCheckpoint(ctx, snapshot, endpoint)
 	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
 		t.Fatal("managed update checkpoint", migrate.snapshot, err)
 	}
+	assertNativePlatformGrant(t, s, installation, "update checkpoint")
 	start, err := s.executePlatformManagedUpdateMigrate(
 		ctx, migrate, endpoint)
 	if err != nil || start.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("managed update migrate", start.snapshot, err)
 	}
+	assertNativePlatformGrant(t, s, installation, "update migrate")
 	probe, err := s.executePlatformUpdateStart(ctx, start, endpoint)
 	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
 		logManagedUpdateContainers(t, s, admitted.OperationID)
 		t.Fatal("managed update start", probe.snapshot, err)
 	}
+	assertNativePlatformGrant(t, s, installation, "update start")
 	if failAtProbe {
 		if err := s.finishPlatformManagedUpdateForReview(
 			ctx, probe); err != nil {
