@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App } from 'antd'
+import { App, ConfigProvider } from 'antd'
 import type { ExportPolicyEntry, ExportPolicyResult, UserGroupRow } from '../../../api/types'
 import ReaderExportPolicy from './ReaderExportPolicy'
 import { mockNarrowViewport } from '../../../test/narrow'
@@ -14,6 +14,10 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => hook }
 })
 
+const pending = vi.hoisted(() => vi.fn())
+vi.mock('../AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
+const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
+
 const res = <T,>(own: T | null, effective: T, source_ou: number): ExportPolicyResult<T> => ({ own, effective, source_ou, inherited: own === null, available: true })
 const groups = [
   { id: 1, name: 'Default', is_default: true, members: 0, weight: 0, parent_id: 0 },
@@ -25,6 +29,7 @@ const entries: ExportPolicyEntry[] = [
 ]
 
 beforeEach(() => {
+  pending.mockReset()
   apiMock.get.mockReset()
   apiMock.put.mockReset()
   apiMock.get.mockImplementation(async (url: string) => {
@@ -35,7 +40,7 @@ beforeEach(() => {
   apiMock.put.mockResolvedValue({})
 })
 
-const renderPanel = () => render(<App><ReaderExportPolicy /></App>)
+const renderPanel = () => render(<ConfigProvider theme={{ token: { motion: false } }}><App><ReaderExportPolicy /></App></ConfigProvider>)
 
 describe('ReaderExportPolicy', () => {
   it('opens on the Default OU, which cannot inherit', async () => {
@@ -72,6 +77,67 @@ describe('ReaderExportPolicy', () => {
     expect(await screen.findByText('export.reader.quotaBelowMax:{"quota":50,"max":200}')).toBeTruthy()
     await user.click(screen.getByRole('button', { name: 'common.save' }))
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/exports/policy/1', { daily_quota: 50 }))
+  })
+})
+
+describe('ReaderExportPolicy unsaved changes', () => {
+  it('is not pending after load', async () => {
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    expect(pending.mock.calls.some(([dirty]) => dirty === true)).toBe(false)
+    expect(lastPending()).toEqual([false, false])
+  })
+
+  it('is pending once a field differs, including while the value is invalid, and clean when put back', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    const max = screen.getByRole('spinbutton', { name: 'export.reader.fieldMax' })
+    await user.clear(max)
+    expect(lastPending()).toEqual([true, false])
+    expect((screen.getByRole('button', { name: 'common.save' }) as HTMLButtonElement).disabled).toBe(true)
+    await user.type(max, '200')
+    expect(lastPending()).toEqual([false, false])
+  })
+
+  it('is clean again after a successful save, even when the server answer is unchanged', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    const quota = screen.getByRole('spinbutton', { name: 'export.reader.fieldQuota' })
+    await user.clear(quota)
+    await user.type(quota, '900')
+    expect(lastPending()).toEqual([true, false])
+    await user.click(screen.getByRole('button', { name: 'common.save' }))
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/exports/policy/1', { daily_quota: 900 }))
+    await waitFor(() => expect(lastPending()).toEqual([false, false]))
+    expect((screen.getByRole('button', { name: 'common.save' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('asks before switching to another OU with an unsaved draft', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    const max = screen.getByRole('spinbutton', { name: 'export.reader.fieldMax' })
+    await user.clear(max)
+    await user.type(max, '20')
+    await user.click(await screen.findByText('Research'))
+    await user.click(await screen.findByRole('button', { name: 'manage.stay' }))
+    await waitFor(() => expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0))
+    expect(screen.getByRole('heading', { name: 'Default' })).toBeTruthy()
+    expect((screen.getByRole('spinbutton', { name: 'export.reader.fieldMax' }) as HTMLInputElement).value).toBe('20')
+    await user.click(screen.getByText('Research'))
+    await user.click(await screen.findByRole('button', { name: 'manage.leave' }))
+    expect(await screen.findByRole('heading', { name: 'Research' })).toBeTruthy()
+  })
+
+  it('switches OU without asking when the draft is clean', async () => {
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByRole('heading', { name: 'Default' })
+    await user.click(screen.getByText('Research'))
+    expect(await screen.findByRole('heading', { name: 'Research' })).toBeTruthy()
+    expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0)
   })
 })
 

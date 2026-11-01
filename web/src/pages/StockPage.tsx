@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
-import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Select, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -33,6 +33,9 @@ import ForecastReadingCard from '../components/ForecastReadingCard'
 import ForecastSummaryChip from '../components/ForecastSummaryChip'
 import { useAuth } from '../auth'
 import { useAppAccess } from '../appAccess'
+import { LoadingPlaceholder } from '../components/LoadGate'
+import Expand from '../components/Expand'
+import { useNarrow } from '../lib/useNarrow'
 
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
@@ -130,6 +133,7 @@ export default function StockPage() {
   const [quoteError, setQuoteError] = useState<unknown>(null)
   const [quoteRange, setQuoteRange] = useState<QuoteRange>('3m')
   const [chartOpen, setChartOpen] = useState(readChartOpen)
+  const phone = useNarrow()
   // Bumped by the retry button. The quote is the one thing on this page a reader may want to
   // re-request without navigating, and a nonce is the smallest way to say "run that effect again".
   const [quoteNonce, setQuoteNonce] = useState(0)
@@ -373,9 +377,7 @@ export default function StockPage() {
 
   if (loading && !data) {
     return (
-      <div style={{ padding: 80, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
   if (!data) return null
@@ -501,22 +503,37 @@ export default function StockPage() {
               {/* The range switcher belongs to the chart, so it appears with the chart. Chrome for
                   something that is not on screen is not free: each press re-fetches the quote, so a
                   collapsed panel would spend vendor requests on bars nobody is looking at. */}
-              {chartOpen && (
+              {/* On a phone the ranges fold into a dropdown, as a dashboard's time picker does, so the
+                  title and its controls keep to one line. */}
+              {chartOpen && (phone ? (
+                <Select
+                  size="small"
+                  variant="filled"
+                  aria-label={t('quote.rangeLabel')}
+                  value={quoteRange}
+                  onChange={(v) => setQuoteRange(v)}
+                  popupMatchSelectWidth={false}
+                  options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r }))}
+                />
+              ) : (
                 <Segmented
                   size="small"
                   value={quoteRange}
                   onChange={(v) => setQuoteRange(v as QuoteRange)}
                   options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r, title: NO_ITEM_TOOLTIP }))}
                 />
-              )}
+              ))}
               <Button
                 type="text"
                 size="small"
                 icon={chartOpen ? <UpOutlined /> : <DownOutlined />}
                 aria-expanded={chartOpen}
+                aria-label={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
+                title={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
                 onClick={toggleChart}
               >
-                {chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
+                {/* On a phone only the chevron; its name stays in aria-label and the tooltip. */}
+                {!phone && (chartOpen ? t('quote.collapseChart') : t('quote.expandChart'))}
               </Button>
             </Space>
           }
@@ -527,13 +544,13 @@ export default function StockPage() {
             error={quoteError}
             onRetry={() => setQuoteNonce((n) => n + 1)}
           />
-          {/* Unmounted while collapsed rather than hidden with CSS. A chart inside a display:none
+          {/* Unmounted while collapsed (Expand) rather than hidden with CSS. A chart inside a display:none
               box measures zero width, so it would sit there rendering its own placeholder and
               observing a box it can never read — the cost of being mounted with none of the
               drawing. Expanding costs no round trip either way: the bars arrived with the snapshot
               in the same response (ADR 0028 §2). */}
-          {chartOpen && (
-            <div style={{ marginTop: 12 }}>
+          <Expand open={chartOpen}>
+            <div style={{ paddingTop: 12 }}>
               <PriceChart
                 bars={quote?.bars ?? []}
                 loading={quoteLoading}
@@ -548,7 +565,7 @@ export default function StockPage() {
                 overlayLegend={drawOverlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
               />
             </div>
-          )}
+          </Expand>
           {quotesOpen && (
             <div style={{ marginTop: 8, textAlign: 'right' }}>
               {/* What makes keeping this panel small fair: the full-size chart, the other ranges and

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { App, Button, Drawer, Empty, Popconfirm, Segmented, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Drawer, Empty, Segmented, Tooltip, Typography, theme } from 'antd'
 import { ArrowRightOutlined, CloseCircleOutlined, DownloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import type { BatchJob, BatchQueueSummary, BatchTarget, TaskItem } from '../api/types'
@@ -20,6 +21,7 @@ import TaskRow, { type TaskTone } from './TaskRow'
 import RunningFor from './RunningFor'
 import ExportDetailModal from './ExportDetailModal'
 import { openJobDetail, pageShowsJob } from '../lib/jobDetailStore'
+import { notifyError } from '../lib/notify'
 
 export type DrawerTab = 'runs' | 'exports'
 
@@ -167,7 +169,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       message.success(t('batch.msg.cancelRequested'))
       void load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const cancelExport = async (task: TaskItem) => {
@@ -177,7 +179,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
       void refreshTasks()
       notifyExportsChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -285,11 +287,11 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         actions={
           <>
             {live && (
-              <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)} onOpenChange={(o) => setConfirming(o ? `run-${j.id}` : null)}>
+              <Confirm title={t('queue.cancelConfirm')} onConfirm={() => cancelRun(j.id)} onOpenChange={(o) => setConfirming(o ? `run-${j.id}` : null)} okText={t('queue.cancelRunAction')}>
                 <Tooltip title={t('tasks.cancel')}>
                   <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
-              </Popconfirm>
+              </Confirm>
             )}
           </>
         }
@@ -337,15 +339,16 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
         actions={
           <>
             {x.cancel && (
-              <Popconfirm
+              <Confirm
                 title={t('export.history.cancelConfirm')}
                 onConfirm={() => void cancelExport(x)}
                 onOpenChange={(o) => setConfirming(o ? `export-${taskKey(x)}` : null)}
+                okText={t('export.history.cancelAction')}
               >
                 <Tooltip title={t('tasks.cancel')}>
                   <Button type="text" size="small" className="rp-task-cancel" icon={<CloseCircleOutlined />} aria-label={t('tasks.cancel')} />
                 </Tooltip>
-              </Popconfirm>
+              </Confirm>
             )}
             {x.download && iconAction(t('tasks.download'), <DownloadOutlined />, { href: x.download })}
           </>

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
+import { App, Button, ConfigProvider, Empty, Input, InputNumber, Modal, Select, Space, Switch, Tag, TimePicker, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -12,6 +13,8 @@ import { DragHandle, SortableItem, SortableWrapper } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import { usePendingSettings } from './AdminDraftBoundary'
+import { notifyError } from '../../lib/notify'
+import { confirmLeave } from './useLeaveGuard'
 
 // Admin editor for preset low-peak scheduling windows (docs/adr/0014). An ordered, drag-sortable
 // list (like LinksPage / TypesPage); each preset is edited in a modal whose anchor fields adapt to
@@ -127,8 +130,7 @@ export default function RunPresetsEditor() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'), okText: t('manage.leave'),
-      cancelText: t('manage.stay'), okButtonProps: { danger: true }, onOk: () => setDraft(null) })
+    confirmLeave(modal, t, () => setDraft(null))
   }
 
   const load = (opts?: LoadOpts) => {
@@ -176,17 +178,17 @@ export default function RunPresetsEditor() {
   const save = async () => {
     if (!draft) return
     if (!draft.label.trim()) {
-      message.error(t('preset.needLabel'))
+      notifyError(t('preset.needLabel'))
       return
     }
     // A row with no weekday picked expands to nothing. Saying so beats saving a preset that
     // quietly lost a window the admin thought they had configured.
     if (rows?.some((r) => r.days.length === 0)) {
-      message.error(t('preset.needWeekday'))
+      notifyError(t('preset.needWeekday'))
       return
     }
     if (draft.intervals.length === 0) {
-      message.error(t('preset.needWindow'))
+      notifyError(t('preset.needWindow'))
       return
     }
     setSaving(true)
@@ -197,7 +199,7 @@ export default function RunPresetsEditor() {
       setDraft(null)
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -219,7 +221,7 @@ export default function RunPresetsEditor() {
                   gap: 8,
                   padding: '6px 8px',
                   border: '1px solid rgba(128,128,128,0.2)',
-                  borderRadius: 8,
+                  borderRadius: 'var(--ant-border-radius)',
                 }}
               >
                 <DragHandle label={t('common.reorder')} />
@@ -230,9 +232,9 @@ export default function RunPresetsEditor() {
                 </Typography.Text>
                 {p.invert ? <Tag color="orange">{t('preset.invertTag')}</Tag> : <Tag>{t('preset.overrun.' + p.on_overrun)}</Tag>}
                 <Button size="small" icon={<EditOutlined />} onClick={() => edit(p)} aria-label={t('common.edit')} />
-                <Popconfirm title={t('preset.deleteConfirm')} onConfirm={() => remove(p.id)} okText={t('common.ok')} cancelText={t('common.cancel')}>
+                <Confirm title={t('preset.deleteConfirm')} onConfirm={() => remove(p.id)} okText={t('preset.deleteAction')}>
                   <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-                </Popconfirm>
+                </Confirm>
               </div>
             </SortableItem>
           ))}

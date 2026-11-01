@@ -61,7 +61,7 @@ describe('ExportHistory', () => {
     const cancels = screen.getAllByRole('button', { name: 'export.history.cancel' })
     expect(cancels).toHaveLength(1)
     await user.click(cancels[0])
-    await user.click(await screen.findByRole('button', { name: /^OK$/ }))
+    await user.click(await screen.findByRole('button', { name: 'export.history.cancelAction' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/exports/r1/cancel'))
   })
 
@@ -77,5 +77,49 @@ describe('ExportHistory', () => {
     await screen.findByText('Done one')
     await user.click(screen.getAllByRole('button', { name: 'export.history.reuse' })[0])
     expect(onReuse.mock.calls[0][0].id).toBe('d1')
+  })
+})
+
+// The task list is a flat data table like the audit log and the queue: it fits the card's width rather
+// than scrolling sideways, and its columns are chosen and sized through the shared display control.
+describe('ExportHistory table', () => {
+  beforeEach(() => localStorage.clear())
+
+  it('uses the shared adaptive table with its column menu', async () => {
+    const { container } = renderIt()
+    await screen.findByText('Done one')
+    expect(container.querySelector('.ant-table-wrapper.rp-adaptive-table')).not.toBeNull()
+    expect(screen.getByRole('button', { name: /table\.columnMenu/ })).toBeTruthy()
+  })
+
+  it('fits every column into the width by default, so an empty list has no sideways scroll', async () => {
+    apiMock.get.mockResolvedValue({ jobs: [] })
+    const { container } = renderIt()
+    await screen.findByText('export.history.empty')
+    const widths = [...container.querySelectorAll('col')].map((c) => (c as HTMLElement).style.width).filter(Boolean)
+    expect(widths.length).toBeGreaterThan(0)
+    expect(widths.every((w) => w.endsWith('%'))).toBe(true)
+  })
+
+  it('keeps the requester column, and its saved layout, to the admin view', async () => {
+    const labels = () => [...document.querySelectorAll('th')].map((th) => th.textContent)
+    const admin = renderIt()
+    await screen.findByText('Done one')
+    expect(labels().some((l) => l?.includes('export.history.requester'))).toBe(true)
+    admin.unmount()
+
+    function Reader() {
+      return <ExportHistory tz="UTC" labels={useExportLabels()} onReuse={() => {}} mode="reader" />
+    }
+    render(<App><Reader /></App>)
+    await screen.findByText('Done one')
+    expect(labels().some((l) => l?.includes('export.history.requester'))).toBe(false)
+  })
+
+  it('takes no horizontal scroll width beyond the fitted columns', async () => {
+    const { container } = renderIt()
+    await screen.findByText('Done one')
+    const table = container.querySelector('.ant-table-content table, .ant-table-body table') as HTMLElement | null
+    expect(table?.style.minWidth ?? '').not.toBe('max-content')
   })
 })

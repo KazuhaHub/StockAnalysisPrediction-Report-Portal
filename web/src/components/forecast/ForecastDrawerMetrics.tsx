@@ -1,9 +1,10 @@
-import { Table, Typography } from 'antd'
+import { Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ForecastCell, ForecastMode } from '../../api/types'
 import { cellDisplay, type Translate } from '../../lib/forecast'
 import { formatProbability, formatSigned } from '../../lib/forecastPresentation'
 import ScrollRegion from './ScrollRegion'
+import CardTable from '../CardTable'
 
 // The numbers behind a mature cell, as the drawer states them: every metric with its null, its p and
 // (on the record) its corrected q, then the same metrics per policy version.
@@ -103,7 +104,7 @@ export function MetricsTable({ cell, mode }: { cell: ForecastCell; mode: Forecas
   const custom = mode === 'custom'
   return (
     <ScrollRegion label={t('forecast.drawer.results')}>
-      <Table
+      <CardTable
         size="small"
         rowKey="key"
         pagination={false}
@@ -142,7 +143,7 @@ export function SlicesTable({ cell, mode }: { cell: ForecastCell; mode: Forecast
         {t('forecast.drawer.slices')}
       </Typography.Title>
       <ScrollRegion label={t('forecast.drawer.slices')}>
-        <Table
+        <CardTable
           size="small"
           rowKey="policy_version"
           pagination={false}

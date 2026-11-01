@@ -4,16 +4,18 @@ import type { MenuProps } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, DeleteOutlined, EditOutlined, HomeOutlined, MessageOutlined, MoreOutlined, PlusOutlined, RobotOutlined, StarFilled, StarOutlined, StopOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../components/Confirm'
 import { api, ApiError, errText } from '../api/client'
 import { useAuth } from '../auth'
 import Markdown from '../components/Markdown'
-import LoadGate from '../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../components/LoadGate'
 import { difyModeTag } from '../lib/batchUi'
 import type { ChatConversation, ChatTarget, ChatTurn } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { loadFailure } from '../lib/loadFailure'
 import { useOnReconnect } from '../lib/useOnReconnect'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
 
 type Msg = { role: 'user' | 'assistant'; content: string }
 
@@ -410,7 +412,7 @@ export default function ChatPage() {
       setConvId(c.id)
       return c.id
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       return undefined
     }
   }
@@ -549,17 +551,16 @@ export default function ChatPage() {
       setConvs((cs) => cs.filter((c) => c.id !== id))
       if (convId === id) newConv()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
   const confirmDelete = (c: ChatConversation) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('chat.deleteConfirm'),
-      okText: t('common.delete'),
-      okButtonProps: { danger: true },
+      okText: t('chat.deleteAction'),
       onOk: () => delConv(c.id),
-    })
+    }, t)
 
   // Star/unstar optimistically (snappy pin), reverting the local flag if the write fails.
   const toggleStar = async (c: ChatConversation) => {
@@ -569,7 +570,7 @@ export default function ChatPage() {
       await api.post(`/api/chat/conversations/${c.id}/star`, { starred: next })
     } catch (e) {
       setConvs((cs) => sortConvs(cs.map((x) => (x.id === c.id ? { ...x, starred: c.starred } : x))))
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -587,7 +588,7 @@ export default function ChatPage() {
       await api.post(`/api/chat/conversations/${id}/rename`, { title })
       setConvs((cs) => cs.map((x) => (x.id === id ? { ...x, title } : x)))
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -633,8 +634,8 @@ export default function ChatPage() {
             style={{
               maxWidth: compact ? '90%' : '84%',
               padding: compact ? '8px 13px' : '10px 15px',
-              borderRadius: 18,
-              borderTopRightRadius: 6,
+              borderRadius: token.borderRadiusLG,
+              borderTopRightRadius: token.borderRadiusSM,
               background: token.colorFillSecondary,
               color: token.colorText,
               whiteSpace: 'pre-wrap',
@@ -669,7 +670,8 @@ export default function ChatPage() {
         alignItems: compact ? 'flex-end' : undefined,
         gap: 4,
         padding: compact ? 6 : 8,
-        borderRadius: compact ? 24 : 22,
+        // A pill while it is one line; a panel once it stacks.
+        borderRadius: compact ? 999 : token.borderRadiusLG,
         background: token.colorBgContainer,
         border: `1px solid ${focused ? token.colorPrimary : token.colorBorder}`,
         boxShadow: focused ? `0 0 0 3px ${token.colorPrimaryBg}` : token.boxShadowTertiary,
@@ -817,7 +819,7 @@ export default function ChatPage() {
                   alignItems: 'center',
                   gap: 8,
                   padding: '7px 10px',
-                  borderRadius: 8,
+                  borderRadius: token.borderRadius,
                   cursor: 'pointer',
                   background: active ? token.colorFillSecondary : hovered ? token.colorFillTertiary : 'transparent',
                   transition: 'background .12s',
@@ -893,7 +895,7 @@ export default function ChatPage() {
           display: 'flex',
           flexDirection: 'column',
           border: compact ? 'none' : `1px solid ${token.colorBorderSecondary}`,
-          borderRadius: compact ? 0 : 12,
+          borderRadius: compact ? 0 : token.borderRadiusLG,
           overflow: 'hidden',
           background: token.colorBgContainer,
         }}
@@ -936,9 +938,7 @@ export default function ChatPage() {
 
         <div ref={scrollRef} onScroll={onThreadScroll} style={{ flex: 1, overflowY: 'auto' }}>
           {loadingHist ? (
-            <div style={{ textAlign: 'center', paddingTop: 60 }}>
-              <Spin />
-            </div>
+            <LoadingPlaceholder />
           ) : showHero ? (
             // New conversation: a centered greeting hero with the composer in the middle and
             // the assistant's opening line (Dify's greeting) above it.
@@ -1026,7 +1026,7 @@ export default function ChatPage() {
                     gap: 6,
                     height: 32,
                     padding: sending || recovering ? '0 16px' : '0 14px',
-                    borderRadius: 16,
+                    borderRadius: 999,
                     background: token.colorBgElevated,
                     color: token.colorText,
                     border: `1px solid ${token.colorBorderSecondary}`,

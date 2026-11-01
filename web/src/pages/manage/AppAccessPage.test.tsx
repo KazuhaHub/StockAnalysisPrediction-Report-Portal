@@ -15,6 +15,10 @@ vi.mock('react-i18next', () => {
   return { useTranslation: () => hook }
 })
 
+const pending = vi.hoisted(() => vi.fn())
+vi.mock('./AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
+const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
+
 const renderAt = (path: string) =>
   render(
     <App>
@@ -27,6 +31,7 @@ const renderAt = (path: string) =>
   )
 
 beforeEach(() => {
+  pending.mockReset()
   apiMock.get.mockReset()
   apiMock.put.mockReset()
   apiMock.get.mockImplementation(async (url: string) => {
@@ -137,7 +142,7 @@ describe('App service status', () => {
     expect(screen.getByRole('heading', { name: 'nav.quotes · Default' })).toBeTruthy()
     expect((save() as HTMLButtonElement).disabled).toBe(false)
     await user.click(screen.getByText('Research'))
-    await user.click((await screen.findAllByRole('button', { name: 'apps.access.discardOk' })).slice(-1)[0])
+    await user.click((await screen.findAllByRole('button', { name: 'apps.access.discardAction' })).slice(-1)[0])
     await heading('nav.quotes · Research')
   })
 
@@ -197,6 +202,42 @@ describe('App service status', () => {
     expect(crumbs.textContent).toContain('apps.title')
     expect(crumbs.textContent).toContain('Hello')
     expect(crumbs.textContent).toContain('apps.section.status.title')
+  })
+})
+
+describe('App service status unsaved changes', () => {
+  it('is not pending after load, and only a changed choice makes it pending', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    expect(lastPending()).toEqual([false, false])
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
+    expect(lastPending()).toEqual([true, false])
+  })
+
+  it('is clean again after a successful save, even when the refresh afterwards fails', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    apiMock.get.mockRejectedValue(new Error('down'))
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.off$/ }))
+    expect(lastPending()).toEqual([true, false])
+    await user.click(save())
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalled())
+    await screen.findByText('apps.access.reloadFailed')
+    await waitFor(() => expect(lastPending()).toEqual([false, false]))
+    await waitFor(() => expect((screen.getByText('common.save').closest('button') as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('is clean again after the same choice is saved and the page reloads', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    await user.click(screen.getByRole('radio', { name: /apps\.access\.on$/ }))
+    expect(lastPending()).toEqual([true, false])
+    await user.click(save())
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalled())
+    await waitFor(() => expect(lastPending()).toEqual([false, false]))
   })
 })
 

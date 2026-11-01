@@ -164,15 +164,17 @@ describe('Scope rail across breakpoints', () => {
     await act(async () => { await router.navigate('/manage/security?scope=ou&ou=7') })
     await waitFor(() => expect(screen.queryByRole('tree')).toBeNull())
   })
-  it('marks Global as selected with a class on the same button, never switching variants', async () => {
+  // Selected, Global is filled; otherwise it is an outlined button like the collapse button beside
+  // it, never bare text that stops reading as a control. The same button either way.
+  it('fills Global while selected and outlines it otherwise, on the same button', async () => {
     mount('/manage/security')
     const global = screen.getByRole('button', { name: /ou.globalScope/ })
-    expect(global.className).toContain('rp-policy-scope-global--active')
+    expect(global.className).toContain('ant-btn-variant-solid')
     expect(global.getAttribute('aria-current')).toBe('true')
     fireEvent.click(await screen.findByRole('button', { name: /Default|ou.unitScope/ }))
     fireEvent.click(within(await screen.findByRole('tree')).getByText('Research'))
     await waitFor(() => expect(screen.getByRole('button', { name: /ou.globalScope/ })).toBe(global))
-    expect(global.className).not.toContain('rp-policy-scope-global--active')
-    expect(global.className).toContain('ant-btn-variant-text')
+    expect(global.className).toContain('ant-btn-variant-outlined')
+    expect(global.getAttribute('aria-current')).toBeNull()
   })
 })

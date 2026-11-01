@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { App, Button, Input } from 'antd'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { createMemoryRouter, Link, Route, RouterProvider, Routes } from 'react-router'
+import { createMemoryRouter, Link, Route, RouterProvider, Routes, useNavigate } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import AdminDraftBoundary, { usePendingSettings } from './AdminDraftBoundary'
 
@@ -16,9 +16,24 @@ function Editor() {
     <Button onClick={() => setSaving(true)}>Start save</Button><Link to="/other">Other page</Link></>
 }
 
+// An editor that leaves for another page the moment its save succeeds: the draft is cleared and the
+// navigation starts in the same commit, so the boundary must already know the draft is gone.
+function SavingEditor() {
+  const [value, setValue] = useState('')
+  const [saved, setSaved] = useState(false)
+  const navigate = useNavigate()
+  usePendingSettings(!!value && !saved)
+  useEffect(() => {
+    if (saved) navigate('/other')
+  }, [saved, navigate])
+  return <><Input aria-label="draft" value={value} onChange={(event) => setValue(event.target.value)} />
+    <Button onClick={() => setSaved(true)}>Save and leave</Button></>
+}
+
 function mount(initialEntries = ['/editor']) {
   const router = createMemoryRouter([{ path: '*', element: <App><Routes>
     <Route path="/editor" element={<AdminDraftBoundary><Editor /></AdminDraftBoundary>} />
+    <Route path="/saving" element={<AdminDraftBoundary><SavingEditor /></AdminDraftBoundary>} />
     <Route path="/other" element={<div>Other page content</div>} />
   </Routes></App> }], { initialEntries })
   render(<RouterProvider router={router} />)
@@ -77,5 +92,13 @@ describe('pending administration drafts', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Start save' }))
     fireEvent.click(screen.getByRole('link'))
     await waitFor(() => expect((screen.getByRole('button', { name: 'manage.leave' }) as HTMLButtonElement).disabled).toBe(true))
+  })
+
+  it('lets a page leave in the same commit that clears its draft after a save', async () => {
+    mount(['/saving'])
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Unsaved' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save and leave' }))
+    expect(await screen.findByText('Other page content')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'manage.stay' })).toBeNull()
   })
 })

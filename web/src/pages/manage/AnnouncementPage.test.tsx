@@ -460,7 +460,7 @@ describe('AnnouncementPage', () => {
     const del = container.querySelector('.ant-btn-dangerous') as HTMLElement
     await user.click(del)
     const confirm = await screen.findByRole('tooltip')
-    await user.click(within(confirm).getByRole('button', { name: /OK|确 定|确定/ }))
+    await user.click(within(confirm).getByRole('button', { name: 'announcementAdmin.deleteAction' }))
     await waitFor(() => expect(apiMock.del).toHaveBeenCalledWith('/api/admin/announcements/1'))
   })
 })

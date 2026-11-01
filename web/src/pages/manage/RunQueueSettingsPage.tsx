@@ -14,6 +14,7 @@ import SettingsField from './SettingsField'
 import type { ReactElement } from 'react'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import { PolicyPage } from './OUPolicyWorkspace'
+import { notifyError } from '../../lib/notify'
 
 // Standalone run-queue settings (docs/adr/0007 + 0008): the queue concurrency budget,
 // the default base priority, the Dify end-user template, and the Slurm-style multifactor
@@ -104,7 +105,7 @@ function GlobalRunQueueSettings() {
     })
     message.success(t('common.saved'))
     setSaved(values)
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   const row = (label: string, hint: string, control: ReactElement) => <SettingsField label={label} hint={hint}>{control}</SettingsField>

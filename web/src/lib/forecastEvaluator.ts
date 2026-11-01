@@ -1,4 +1,5 @@
 import type { ForecastSettings } from '../api/types'
+import type { StatusTone } from '../components/StatusTag'
 
 // The evaluator's state, derived from what it last did.
 //
@@ -43,12 +44,12 @@ export function evaluatorStatus(s: ForecastSettings, nowMs: number): EvaluatorSt
   return s.mode === 'dry' ? 'dry' : 'healthy'
 }
 
-/** antd Tag colour presets for each state, for the operations card. */
-export const EVALUATOR_TAG_COLOR: Record<EvaluatorStatus, string> = {
-  off: 'default',
-  dry: 'blue',
-  healthy: 'green',
-  stale: 'orange',
-  lagging: 'orange',
-  error: 'red',
+/** The StatusTag tone of each state, for the operations card. */
+export const EVALUATOR_TAG_TONE: Record<EvaluatorStatus, StatusTone> = {
+  off: 'neutral',
+  dry: 'processing',
+  healthy: 'success',
+  stale: 'warning',
+  lagging: 'warning',
+  error: 'error',
 }

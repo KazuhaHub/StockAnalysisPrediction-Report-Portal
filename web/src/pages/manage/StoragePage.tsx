@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Table, Tag, TimePicker, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Divider, Empty, InputNumber, Select, Space, Switch, Tag, TimePicker, Typography, theme } from 'antd'
 import { AuditOutlined, DatabaseOutlined, ExportOutlined, FileTextOutlined, FundProjectionScreenOutlined, HistoryOutlined, KeyOutlined, MessageOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
@@ -12,6 +13,9 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // Storage management console (docs/adr/0017-storage-cleanup.md): a per-category usage dashboard (icon
 // cards + a proportion bar), a self-explanatory manual cleanup (the button names what and how old),
@@ -209,7 +213,7 @@ export default function StoragePage() {
       message.success(t('common.saved'))
       await loadConfig({ quiet: true })
       await loadUsage().catch(() => {})
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   const doRun = async (targets: string[]) => {
@@ -234,14 +238,13 @@ export default function StoragePage() {
   // Reports (core content): preview the live count, then a strict confirm before arming or running.
   const guardReports = async (onConfirm: () => void) => {
     const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: ['reports'] })
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmReportsTitle'),
-      content: t('storage.confirmReportsBody', { count: r.reports, days: cfg?.reports_days ?? reportsDays }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmReportsBody', { count: r.reports, days: cfg?.reports_days ?? reportsDays }),
+      okText: t('storage.cleanReportsAction'),
+      irreversible: true,
       onOk: onConfirm,
-    })
+    }, t)
   }
 
   // The ledger is the second danger-zone target, and for a stronger reason than reports: a report
@@ -249,14 +252,13 @@ export default function StoragePage() {
   // was claimed at a moment that has passed. Confirmed like reports, with its own wording.
   const guardPredictions = async (onConfirm: () => void) => {
     const r = await api.post<CleanupResult>('/api/admin/cleanup/preview', { targets: ['predictions'] })
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmPredictionsTitle'),
-      content: t('storage.confirmPredictionsBody', { count: r.predictions, days: cfg?.predictions_days ?? predictionsDays }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmPredictionsBody', { count: r.predictions, days: cfg?.predictions_days ?? predictionsDays }),
+      okText: t('storage.cleanPredictionsAction'),
+      irreversible: true,
       onOk: onConfirm,
-    })
+    }, t)
   }
 
   const onTogglePredictions = (checked: boolean) => {
@@ -291,14 +293,13 @@ export default function StoragePage() {
     // silently fell through to the tokens count, so the audit confirm promised to delete however
     // many TOKENS had expired.
     const n = r[key as 'batch' | 'tokens' | 'reports' | 'audit' | 'revisions' | 'predictions'] ?? 0
-    modal.confirm({
+    confirmAction(modal, {
       title: t('storage.confirmTitle'),
-      content: t('storage.confirmBody', { n, days, cat: t(`storage.cat.${key}`) }),
-      okText: t('storage.doClean'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('storage.confirmBody', { n, days, cat: t(`storage.cat.${key}`) }),
+      okText: t('storage.cleanCategoryAction', { cat: t(`storage.cat.${key}`) }),
+      irreversible: true,
       onOk: () => doRun([key]),
-    })
+    }, t)
   }
 
   // retention/grace currently in effect for each category (last-saved, so labels match what a run does)
@@ -321,9 +322,9 @@ export default function StoragePage() {
     const color = catColor(c.key)
     const days = catDays(c.key)
     return (
-      <div key={c.key} style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div key={c.key} style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 36, height: 36, borderRadius: 9, display: 'grid', placeItems: 'center', background: color + '22', color, fontSize: 18 }}>{CAT_ICON[c.key]}</span>
+          <span style={{ width: 36, height: 36, borderRadius: token.borderRadiusLG, display: 'grid', placeItems: 'center', background: color + '22', color, fontSize: 18 }}>{CAT_ICON[c.key]}</span>
           <Typography.Text strong>{t(`storage.cat.${c.key}`)}</Typography.Text>
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -394,7 +395,7 @@ export default function StoragePage() {
     {
       title: t('storage.histStatus'),
       dataIndex: 'ok',
-      render: (ok: boolean, r: CleanupRun) => (ok ? <Tag color="green">{t('storage.statusOk')}</Tag> : <Tag color="red">{r.error || t('storage.statusFailed')}</Tag>),
+      render: (ok: boolean, r: CleanupRun) => (ok ? <StatusTag tone="success">{t('storage.statusOk')}</StatusTag> : <StatusTag tone="error">{r.error || t('storage.statusFailed')}</StatusTag>),
     },
   ]
 
@@ -425,17 +426,17 @@ export default function StoragePage() {
                   <div
                     key={c.key}
                     title={`${t(`storage.cat.${c.key}`)} ${fmtBytes(c.bytes)}`}
-                    style={{ flex: `${Math.max(2, (c.bytes / totalBytes) * 100)} 0 0`, background: catColor(c.key), borderRadius: 3, minWidth: 6 }}
+                    style={{ flex: `${Math.max(2, (c.bytes / totalBytes) * 100)} 0 0`, background: catColor(c.key), borderRadius: token.borderRadiusXS, minWidth: 6 }}
                   />
                 ))
             ) : (
-              <div style={{ flex: 1, background: token.colorFillSecondary, borderRadius: 3 }} />
+              <div style={{ flex: 1, background: token.colorFillSecondary, borderRadius: token.borderRadiusXS }} />
             )}
           </div>
           <Space wrap size={16}>
             {cats.map((c) => (
               <span key={c.key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ width: 10, height: 10, borderRadius: 3, background: catColor(c.key), display: 'inline-block' }} />
+                <span style={{ width: 10, height: 10, borderRadius: token.borderRadiusXS, background: catColor(c.key), display: 'inline-block' }} />
                 <Typography.Text>{t(`storage.cat.${c.key}`)}</Typography.Text>
                 <Typography.Text type="secondary">{fmtBytes(c.bytes)}</Typography.Text>
               </span>
@@ -574,7 +575,7 @@ export default function StoragePage() {
           <div style={{ overflowX: 'auto' }}>
             {/* Paginated, not a full dump: this is a ring buffer of up to cleanupRunsKeep rows, and
                 a page you have to scroll past to reach anything below it is a page nobody reads. */}
-            <Table
+            <CardTable
               rowKey="id"
               size="small"
               pagination={{ pageSize: 10, size: 'small', hideOnSinglePage: true, showSizeChanger: false }}

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import EmailPage from './EmailPage'
+import { findFailure } from '../../test/notifications'
 
 const server = vi.hoisted(() => ({ post: vi.fn(), fail: false }))
 vi.mock('../../api/client', () => ({
@@ -27,7 +28,7 @@ describe('SMTP drafts', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'email.connection' }))
     server.fail = true
     fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
-    await screen.findByText('Offline')
+    await findFailure('Offline')
     expect((screen.getByRole('textbox', { name: 'email.host' }) as HTMLInputElement).value).toBe('new.example.org')
     fireEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
     expect((screen.getByRole('textbox', { name: 'email.host' }) as HTMLInputElement).value).toBe('smtp.example.org')

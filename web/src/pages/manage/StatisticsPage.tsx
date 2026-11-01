@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, DatePicker, Input, Segmented, Select, Space, Spin, Statistic, Table, Typography } from 'antd'
+import { Alert, Button, DatePicker, Input, Segmented, Select, Space, Spin, Statistic, Typography } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
@@ -7,6 +7,7 @@ import DashboardChart from './DashboardChart'
 import DashboardChartCard from './DashboardChartCard'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import CardTable from '../../components/CardTable'
 
 type Dataset = 'reports' | 'runs' | 'accounts'
 interface Result {
@@ -126,7 +127,7 @@ export default function StatisticsPage() {
             series={pie ? {type:'pie',radius:['45%','68%'],label:{show:false}} :
               {type:type === 'line' ? 'line' : 'bar',barMaxWidth:36,label:{show:rows.length<=20,position:type==='bar'?'right':'top'}}}/>}
         </DashboardChartCard>}
-    </Spin> : <Table size="middle" rowKey="label" loading={busy} dataSource={result?.items ?? []} tableLayout="fixed"
+    </Spin> : <CardTable size="middle" rowKey="label" loading={busy} dataSource={result?.items ?? []} tableLayout="fixed"
       columns={[
         { title: t('statistics.value'), dataIndex: 'label', render: (label: string) => label || t('statistics.unassigned') },
         { title: t('statistics.count'), dataIndex: 'count', width: '25%', align: 'right', render: (count: number) => count.toLocaleString() },

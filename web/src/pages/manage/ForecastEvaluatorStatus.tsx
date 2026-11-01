@@ -10,16 +10,18 @@ import {
   Radio,
   Select,
   Space,
-  Table,
-  Tag,
   Typography,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import dayjs from 'dayjs'
 import { api, errText } from '../../api/client'
 import type { ForecastDrySample, ForecastReadinessItem, ForecastSettings } from '../../api/types'
 import ForecastBacklog from './ForecastBacklog'
-import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
+import { evaluatorStatus, EVALUATOR_TAG_TONE } from '../../lib/forecastEvaluator'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // The evaluator's operating card (P9): what it is doing, what it would write, and the switch.
 //
@@ -92,7 +94,7 @@ export default function ForecastEvaluatorStatus({
       if (success) message.success(success)
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       throw e
     } finally {
       setBusy(false)
@@ -105,9 +107,9 @@ export default function ForecastEvaluatorStatus({
       void post({ mode: next }, t('common.saved')).catch(() => undefined)
       return
     }
-    modal.confirm({
+    confirmAction(modal, {
       title: t('forecast.eval.confirmOn'),
-      content: (
+      description: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Typography.Text>{t('forecast.eval.confirmOnBody')}</Typography.Text>
           {settings.readiness.map((r) => (
@@ -117,10 +119,10 @@ export default function ForecastEvaluatorStatus({
           ))}
         </div>
       ),
-      okText: t('forecast.eval.mode.on'),
-      cancelText: t('common.cancel'),
+      okText: t('forecast.eval.confirmOnAction'),
+      danger: false,
       onOk: () => post({ mode: '1' }, t('common.saved')),
-    })
+    }, t)
   }
 
   const evaluateNow = async () => {
@@ -131,7 +133,7 @@ export default function ForecastEvaluatorStatus({
       await api.post('/api/admin/forecast/evaluate', {})
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -160,7 +162,7 @@ export default function ForecastEvaluatorStatus({
       title={
         <Space wrap>
           <span>{t('forecast.eval.status.title')}</span>
-          <Tag color={EVALUATOR_TAG_COLOR[status]}>{t(`forecast.eval.status.${status}`)}</Tag>
+          <StatusTag tone={EVALUATOR_TAG_TONE[status]}>{t(`forecast.eval.status.${status}`)}</StatusTag>
           {hb && <Typography.Text type="secondary">{t('forecast.eval.lastTick', { at: dayjs(hb.last_tick_at).format('YYYY-MM-DD HH:mm') })}</Typography.Text>}
           {!hb && <Typography.Text type="secondary">{t('forecast.eval.never')}</Typography.Text>}
         </Space>
@@ -266,7 +268,7 @@ export default function ForecastEvaluatorStatus({
             </Typography.Title>
             {hb && (hb.dry_sample?.length ?? 0) > 0 ? (
               <div className="rp-table-scroll">
-              <Table
+              <CardTable
                 size="small"
                 rowKey={(r) => `${r.set_id}-${r.kind}-${r.mark ?? ''}-${r.code}`}
                 pagination={false}

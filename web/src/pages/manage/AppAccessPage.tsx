@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, Card, Radio, Result, Space, Tag, Typography, theme } from 'antd'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { AppAccessOU, UserGroupRow } from '../../api/types'
@@ -10,6 +11,8 @@ import { useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppsBreadcrumb } from './appsAdminParts'
 import OrgUnitPicker from './OrgUnitPicker'
 import ScopeFold from './ScopeFold'
+import { notifyError } from '../../lib/notify'
+import { usePendingSettings } from './AdminDraftBoundary'
 
 // The service status of one app by organizational unit (ADR 0048), modelled on the Google Workspace
 // Admin console: pick an OU on the left, set that one app on or off on the right. An OU inherits its
@@ -90,13 +93,12 @@ function AccessWorkspace({
       onSelect(id)
       return
     }
-    modal.confirm({
+    confirmAction(modal, {
       title: t('apps.access.discardTitle'),
-      content: t('apps.access.discardBody'),
-      okText: t('apps.access.discardOk'),
-      cancelText: t('common.cancel'),
+      description: t('apps.access.discardBody'),
+      okText: t('apps.access.discardAction'),
       onOk: () => onSelect(id),
-    })
+    }, t)
   }
   const overridden = useMemo(() => new Set(app.access.filter((a) => a.own !== null).map((a) => a.ou)), [app.access])
   const annotate = useCallback(
@@ -107,7 +109,7 @@ function AccessWorkspace({
   return (
     <>
       <AppsBreadcrumb app={app} name={name} page={t('apps.section.status.title')} />
-      <Card styles={{ body: { padding: 0 } }}>
+      <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
         <div className="rp-app-access">
           <div className="rp-app-access__tree">
             <ScopeFold label={selected?.name ?? t('ou.title')}>
@@ -177,7 +179,11 @@ function AccessEditor({
   const [choice, setChoice] = useState<boolean | null>(null)
   const draft = choice ?? mine.effective
   const [busy, setBusy] = useState(false)
-  const dirty = choice !== null && choice !== mine.own
+  // The override as last loaded or saved. A save moves it at once, so the editor is clean even if
+  // the refresh that follows fails and `mine` is still the old row.
+  const [savedOwn, setSavedOwn] = useState<boolean | null>(mine.own)
+  const dirty = choice !== null && choice !== savedOwn
+  usePendingSettings(dirty, busy)
   useEffect(() => {
     onDirtyChange(dirty)
     return () => onDirtyChange(false)
@@ -194,10 +200,12 @@ function AccessEditor({
     setBusy(true)
     try {
       await api.put(`/api/admin/apps/${encodeURIComponent(app.key)}/access/${group.id}`, { enabled })
+      setSavedOwn(enabled)
+      if (enabled === null) setChoice(null)
       if (!(await reload({ quiet: true }))) message.warning(t('apps.access.reloadFailed'))
       message.success(t('common.saved'))
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

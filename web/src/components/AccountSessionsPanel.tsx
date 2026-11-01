@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Empty, Popconfirm, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, Empty, Space, Tag, Typography } from 'antd'
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import type { LoadOpts } from '../lib/loadFailure'
 import { useLoadFailure } from '../lib/useOnReconnect'
@@ -9,6 +10,8 @@ import type { AccountSessionsResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { clientLabel } from '../lib/clientInfo'
 import { formatRegion } from '../lib/geo'
+import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 export default function AccountSessionsPanel() {
   const { t, i18n } = useTranslation()
@@ -41,7 +44,7 @@ export default function AccountSessionsPanel() {
       }
       message.success(t('sessions.revoked'))
       await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) }
+    } catch (e) { notifyError(errText(e, t)) }
     finally { setBusy(false) }
   }
 
@@ -50,14 +53,14 @@ export default function AccountSessionsPanel() {
     <Card title={t('sessions.title')} extra={<Button aria-label={t('sessions.refresh')} icon={<ReloadOutlined />} disabled={busy} onClick={() => void load()} />}>
       <Typography.Paragraph type="secondary">{t('sessions.hint')}</Typography.Paragraph>
       <Space wrap style={{ marginBottom: 16 }}>
-        <Popconfirm title={t('sessions.othersConfirm')} onConfirm={() => revoke('others', true)}>
+        <Confirm title={t('sessions.othersConfirm')} onConfirm={() => revoke('others', true)} okText={t('sessions.logoutOthers')}>
           <Button disabled={busy} loading={busy}>{t('sessions.logoutOthers')}</Button>
-        </Popconfirm>
-        <Popconfirm title={t('sessions.allConfirm')} onConfirm={() => revoke('all', true)}>
+        </Confirm>
+        <Confirm title={t('sessions.allConfirm')} onConfirm={() => revoke('all', true)} okText={t('sessions.logoutAll')}>
           <Button danger disabled={busy}>{t('sessions.logoutAll')}</Button>
-        </Popconfirm>
+        </Confirm>
       </Space>
-      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <Spin /> : !data.items.length ? <Empty /> : (
+      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <LoadingPlaceholder /> : !data.items.length ? <Empty /> : (
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           {data.items.map((item) => {
             const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)
@@ -79,9 +82,9 @@ export default function AccountSessionsPanel() {
                   <Typography.Text type="secondary">{t('sessions.lastSeen', { time: stamp(item.last_seen) })}</Typography.Text>
                   <Typography.Text type="secondary">{t('sessions.expires', { time: stamp(item.expires_at) })}</Typography.Text>
                 </Space>
-                <Popconfirm title={t(item.current ? 'sessions.currentConfirm' : 'sessions.revokeConfirm')} onConfirm={() => revoke(item.id, false)}>
+                <Confirm title={t(item.current ? 'sessions.currentConfirm' : 'sessions.revokeConfirm')} onConfirm={() => revoke(item.id, false)} okText={t(item.current ? 'sessions.logoutCurrent' : 'sessions.revokeAction')}>
                   <Button danger disabled={busy}>{t(item.current ? 'sessions.logoutCurrent' : 'sessions.revoke')}</Button>
-                </Popconfirm>
+                </Confirm>
               </div>
             )
           })}

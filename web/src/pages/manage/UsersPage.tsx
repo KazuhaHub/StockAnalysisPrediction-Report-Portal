@@ -9,11 +9,9 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Switch,
-  Table,
   Tabs,
   Tag,
   Tooltip,
@@ -30,6 +28,7 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { useSearchParams } from 'react-router'
 import { api, errText } from '../../api/client'
 import OrgUnitPicker, { subtreeOf } from './OrgUnitPicker'
@@ -38,6 +37,10 @@ import UserAvatar from '../../components/UserAvatar'
 import OrgUnitDetail from './OrgUnitDetail'
 import { usePendingSettings } from './AdminDraftBoundary'
 import type { Role, UserGroupRow, UserRow, UsersResp } from '../../api/types'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
+import { confirmLeave } from './useLeaveGuard'
 
 const ROLE_COLOR: Record<string, string> = { admin: 'gold', operator: 'blue', user: 'default' }
 
@@ -138,7 +141,7 @@ export default function UsersPage() {
       message.success(t('users.unlinked'))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -196,7 +199,7 @@ export default function UsersPage() {
       message.success(t('common.saved'))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const resetPw = async () => {
@@ -223,16 +226,15 @@ export default function UsersPage() {
               {/* A federated account has no local password, so knowing which rows those are is the
                   difference between offering a password reset and offering to revoke a binding. */}
               {u.federated && (
-                <Popconfirm
+                <Confirm
                   title={t('users.unlinkConfirm', { slug: u.sso_slug || 'SSO' })}
-                  okText={t('users.unlink')}
-                  cancelText={t('common.cancel')}
                   onConfirm={() => unlink(u.username)}
+                  okText={t('users.unlinkAction')}
                 >
                   <Tag color="geekblue" style={{ cursor: 'pointer' }}>
                     {t('users.federatedTag', { slug: u.sso_slug || 'SSO' })}
                   </Tag>
-                </Popconfirm>
+                </Confirm>
               )}
             </div>
             <div className="rp-user-secondary" title={`@${u.username}${u.email ? ` · ${u.email}` : ''}`}>
@@ -296,7 +298,7 @@ export default function UsersPage() {
             <Typography.Text style={{ fontSize: 12 }} type={expired ? 'danger' : undefined}>
               {v}
             </Typography.Text>
-            {expired && <Tag color="red">{t('users.expired')}</Tag>}
+            {expired && <StatusTag tone="error">{t('users.expired')}</StatusTag>}
           </Space>
         )
       },
@@ -321,15 +323,16 @@ export default function UsersPage() {
     {
       title: '',
       key: 'actions', minWidth: 96,
+      fixed: 'right',
       width: 120,
       align: 'right',
       render: (_, u) => (
         <Space size={4}>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(u)} aria-label={t('common.edit')} />
           <Button size="small" icon={<KeyOutlined />} onClick={() => setPwUser(u.username)} aria-label={t('users.newPassword')} />
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(u.username)} disabled={u.username === data?.me}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(u.username)} disabled={u.username === data?.me} okText={t('users.deleteAction')} irreversible>
             <Button size="small" danger icon={<DeleteOutlined />} disabled={u.username === data?.me} aria-label={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },
@@ -362,7 +365,7 @@ export default function UsersPage() {
             options={roles.map((r) => ({ value: r.code, label: r.name }))}
           />
         </Space>
-        <Space wrap>{tableView.controls}<Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
+        <Space wrap><Button type="primary" icon={<PlusOutlined />} onClick={() => openEdit('new')}>
           {t('users.add')}
         </Button></Space>
       </Space>
@@ -391,20 +394,27 @@ export default function UsersPage() {
             <Button size="small" onClick={() => bulk('clear_group')}>
               {t('users.bulkClearGroup')}
             </Button>
-            <Popconfirm title={t('users.bulkDeleteConfirm', { n: selected.length })} onConfirm={() => bulk('delete')}>
+            <Confirm title={t('users.bulkDeleteConfirm', { n: selected.length })} onConfirm={() => bulk('delete')} okText={t('users.deleteSelectedAction')} irreversible>
               <Button size="small" danger>
                 {t('common.delete')}
               </Button>
-            </Popconfirm>
+            </Confirm>
           </Space>
         </Card>
       )}
 
-      <Table<UserRow>
+      <CardTable<UserRow>
         rowKey="username"
         loading={loading}
         dataSource={filtered}
+        filtered={!!(search.trim() || roleFilter || ouScope)}
+        onClearFilters={() => {
+          setSearch('')
+          setRoleFilter(undefined)
+          setOuScoped(false)
+        }}
         columns={tableView.columns}
+        components={tableView.components}
         size="small"
         className={`${tableView.className} rp-users-table`}
         tableLayout="fixed"
@@ -554,7 +564,7 @@ function GroupsPanel({
       setNewParent(0)
       onChanged()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -578,9 +588,7 @@ function GroupsPanel({
             if (next === selId) return
             if (detailPending.saving) { message.info(t('manage.saveInProgress')); return }
             if (!detailPending.dirty) { setSelId(next); return }
-            modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
-              okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
-              onOk: () => setSelId(next) })
+            confirmLeave(modal, t, () => setSelId(next))
           }}
           onManage={() => {}}
           onAdd={() => setAdding(true)}

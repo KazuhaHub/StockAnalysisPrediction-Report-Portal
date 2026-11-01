@@ -12,6 +12,8 @@ export interface AdminPage {
   icon: ReactNode
   warm?: string
   related: string[]
+  /** The page readers see this feature on, offered after the related admin pages. */
+  readerPage?: { to: string; label: string }
 }
 
 export const ADMIN_GROUPS: { key: string; label: string; pages: AdminPage[] }[] = [
@@ -24,7 +26,7 @@ export const ADMIN_GROUPS: { key: string; label: string; pages: AdminPage[] }[] 
   { key: 'content', label: 'nav.group.content', pages: [
     { key: 'types', label: 'nav.types', icon: <TagsOutlined />, warm: '/api/admin/types', related: ['versions', 'batch'] },
     { key: 'versions', label: 'nav.versions', icon: <BranchesOutlined />, warm: '/api/admin/versions', related: ['users', 'types'] },
-    { key: 'forecast', label: 'nav.forecast', icon: <FundProjectionScreenOutlined />, warm: '/api/admin/forecast', related: ['quotes', 'users', 'audit'] },
+    { key: 'forecast', label: 'nav.forecast', icon: <FundProjectionScreenOutlined />, warm: '/api/admin/forecast', related: ['quotes', 'users', 'audit'], readerPage: { to: '/forecast', label: 'nav.forecast_record' } },
   ] },
   { key: 'access', label: 'nav.group.access', pages: [
     { key: 'users', label: 'nav.users', icon: <TeamOutlined />, warm: '/api/admin/users', related: ['sso', 'security', 'versions'] },

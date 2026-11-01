@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { api, ApiError, errText } from '../../api/client'
 import type { ForecastChannelResult, ForecastSettings } from '../../api/types'
+import { notifyError } from '../../lib/notify'
 
 // The alert channels (P41). Readiness item 5 is "at least one channel is configured and enabled, and a
 // test alert reached every such channel in the last 30 days" (one channel is enough since 2026-10-24),
@@ -49,7 +50,7 @@ export default function ForecastAlerts({
       onChanged()
       return true
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       return false
     } finally {
       setBusy(false)
@@ -87,7 +88,7 @@ export default function ForecastAlerts({
         const data = e.data as { results?: Record<string, ForecastChannelResult> } | undefined
         if (data?.results) setResults(data.results)
       }
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setTesting(false)
     }

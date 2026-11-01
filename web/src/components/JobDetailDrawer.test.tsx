@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import { MemoryRouter } from 'react-router'
 import type { BatchItem, BatchJob, BatchJobDetail } from '../api/types'
@@ -51,6 +51,14 @@ beforeEach(() => {
   apiMock.post.mockReset().mockResolvedValue({})
   store.detail = detail()
 })
+
+// The confirmation's action-named button, found inside the open popover (the opener can share its name).
+const confirmBtn = async (name: string) =>
+  within(await waitFor(() => {
+    const p = document.querySelector('.ant-popover:not(.ant-popover-hidden)')
+    if (!p) throw new Error('no confirmation open')
+    return p as HTMLElement
+  })).getByRole('button', { name })
 
 describe('single-run layout', () => {
   it('shows key-value inputs and times instead of the row table', async () => {
@@ -109,7 +117,7 @@ describe('single-run layout', () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: /tasks\.cancel/ }))
     expect(apiMock.post).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('queue.cancelJob'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/cancel'))
     expect(apiMock.post).not.toHaveBeenCalledWith(expect.stringContaining('/items/cancel'), expect.anything())
   })
@@ -126,7 +134,7 @@ describe('single-run layout', () => {
     store.detail = detail({ status: 'finished', failed: 1 }, [item({ status: 'failed', run_id: 'r1', finished_at: '2026-10-29 09:05:00' })])
     mount()
     fireEvent.click(await screen.findByRole('button', { name: /queue\.reconcile/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('queue.reconcileAction'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/items/70/reconcile'))
   })
 })
@@ -154,7 +162,7 @@ describe('batch layout', () => {
     mount()
     fireEvent.click(await screen.findByRole('button', { name: /queue\.cancelJob/ }))
     expect(apiMock.post).not.toHaveBeenCalled()
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
+    fireEvent.click(await confirmBtn('queue.cancelJob'))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs/7/cancel'))
   })
 
@@ -242,10 +250,10 @@ describe('a job that is being cancelled', () => {
 describe('loading and failure', () => {
   const detailCalls = () => apiMock.get.mock.calls.filter((c) => /jobs\/\d+$/.test(c[0])).length
 
-  it('shows a spinner until the first reply', async () => {
+  it('says it is loading until the first reply', async () => {
     apiMock.get.mockImplementation((url: string) => (url.includes('/targets') ? Promise.resolve({ targets: [] }) : new Promise(() => {})))
     mount()
-    await waitFor(() => expect(document.querySelector('.ant-spin')).not.toBeNull())
+    expect(await screen.findByText('common.loading')).toBeTruthy()
     expect(screen.queryByText('batch.jobNotFound')).toBeNull()
   })
 
@@ -276,7 +284,7 @@ describe('loading and failure', () => {
     expect(detailCalls()).toBeGreaterThan(before)
   })
 
-  it('keeps the spinner, with no red error, when the connection is down', async () => {
+  it('keeps loading, with no red error, when the connection is down', async () => {
     apiMock.get.mockImplementation(async (url: string) => {
       if (url.includes('/targets')) return { targets: [] }
       throw Object.assign(new Error('offline'), { code: 'network_unavailable' })
@@ -285,7 +293,7 @@ describe('loading and failure', () => {
     await waitFor(() => expect(apiMock.get.mock.calls.some((c) => /jobs\/\d+$/.test(c[0]))).toBe(true))
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByRole('button', { name: /common\.retry/ })).toBeNull()
-    expect(document.querySelector('.ant-spin')).not.toBeNull()
+    expect(screen.getByText('common.loading')).toBeTruthy()
   })
 })
 

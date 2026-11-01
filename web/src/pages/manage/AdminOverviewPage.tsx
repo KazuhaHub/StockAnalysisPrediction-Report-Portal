@@ -8,13 +8,14 @@ import { api } from '../../api/client'
 import { loadFailure } from '../../lib/loadFailure'
 import { useOnReconnect } from '../../lib/useOnReconnect'
 import type { BatchQueueSummary, ForecastSettings } from '../../api/types'
-import { evaluatorStatus, EVALUATOR_TAG_COLOR } from '../../lib/forecastEvaluator'
+import { evaluatorStatus, EVALUATOR_TAG_TONE } from '../../lib/forecastEvaluator'
 import { MetricChart, ReportKinds, ReportTrend, ReportBars, ReportDonut, type ReportOverview } from './DashboardCharts'
 import { DASHBOARD_METRICS, DEFAULT_METRICS } from './dashboardMetrics'
 import DashboardLayoutEditor from './DashboardLayoutEditor'
 import DashboardChartCard from './DashboardChartCard'
 import { dashboardBlockKind, dashboardChartType, defaultDashboardChart, isDashboardChart, type DashboardBlock, type DashboardLayout } from './dashboardLayout'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
+import StatusTag from '../../components/StatusTag'
 
 function useSnapshot<T>(url: string, revision: number, enabled = true) {
   const { t } = useTranslation()
@@ -99,7 +100,7 @@ export default function AdminOverviewPage() {
     })}</div>
     return block.id === 'reports' ? snapshotCard('manage.dashboard.reports', reports, metrics, '/', <FileTextOutlined />) :
       block.id === 'queue' ? snapshotCard('queue.title', queue, metrics, '/queue', <ControlOutlined />) :
-        snapshotCard('nav.forecast', forecast, metrics, '/manage/forecast', <FundProjectionScreenOutlined />, status && <Tag color={EVALUATOR_TAG_COLOR[status]}>{t(`forecast.eval.status.${status}`)}</Tag>)
+        snapshotCard('nav.forecast', forecast, metrics, '/manage/forecast', <FundProjectionScreenOutlined />, status && <StatusTag tone={EVALUATOR_TAG_TONE[status]}>{t(`forecast.eval.status.${status}`)}</StatusTag>)
   }
   const content: Record<string, ReactNode> = {
     shortcuts: <section aria-label={t('manage.dashboard.shortcuts')}>

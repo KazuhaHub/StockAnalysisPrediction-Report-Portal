@@ -16,7 +16,7 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { App, Button, Card, Col, Empty, Pagination, Result, Row, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Button, Card, Col, Empty, Pagination, Result, Row, Space, Spin, Tag, Typography, theme } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router'
@@ -27,6 +27,7 @@ import { useHomeQuotes, type CardQuote } from '../lib/useHomeQuotes'
 import { clickable } from '../lib/clickable'
 import { useAppAccess } from '../appAccess'
 import { FavoriteButton } from './FavoriteButton'
+import { notifyError } from '../lib/notify'
 
 const PAGE_SIZE = 20
 
@@ -154,7 +155,6 @@ export default function FavoritesGrid({
   onReorder: (items: FavoriteItem[]) => void | Promise<void>
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [page, setPage] = useState(1)
   const maxPage = Math.max(1, Math.ceil(items.length / PAGE_SIZE))
   useEffect(() => setPage((current) => Math.min(current, maxPage)), [maxPage])
@@ -168,7 +168,7 @@ export default function FavoritesGrid({
   const dragEnd = (event: DragEndEvent) => {
     if (!event.over || event.active.id === event.over.id) return
     const next = moveFavoriteItems(items, String(event.active.id), String(event.over.id))
-    void Promise.resolve(onReorder(next)).catch((cause) => message.error(errText(cause, t)))
+    void Promise.resolve(onReorder(next)).catch((cause) => notifyError(errText(cause, t)))
   }
 
   if (error) {

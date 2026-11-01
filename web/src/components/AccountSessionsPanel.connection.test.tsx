@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from 'antd'
 import AccountSessionsPanel from './AccountSessionsPanel'
+import { findFailure } from '../test/notifications'
 
 const { apiMock } = vi.hoisted(() => ({ apiMock: { get: vi.fn(), post: vi.fn(), del: vi.fn() } }))
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
@@ -13,6 +14,14 @@ const sessions = [
   { id: 'other', created_at: 1791100000, last_seen: 1791100000, expires_at: 1791186400, ip: '198.51.100.2', current: false, client: { browser: 'Firefox' } },
 ]
 const mount = () => render(<App><AccountSessionsPanel /></App>)
+
+// The confirmation's action-named button, found inside the open popover (the opener can share its name).
+const confirmBtn = async (name: string) =>
+  within(await waitFor(() => {
+    const p = document.querySelector('.ant-popover:not(.ant-popover-hidden)')
+    if (!p) throw new Error('no confirmation open')
+    return p as HTMLElement
+  })).getByRole('button', { name })
 
 describe('AccountSessionsPanel while the connection is down', () => {
   beforeEach(() => {
@@ -51,7 +60,7 @@ describe('AccountSessionsPanel while the connection is down', () => {
     mount()
     await screen.findByText('sessions.current')
     fireEvent.click(screen.getByRole('button', { name: 'sessions.revoke' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'OK' }))
-    expect(await screen.findByText('Request failed')).toBeTruthy()
+    fireEvent.click(await confirmBtn('sessions.revokeAction'))
+    expect(await findFailure('Request failed')).toBeTruthy()
   })
 })

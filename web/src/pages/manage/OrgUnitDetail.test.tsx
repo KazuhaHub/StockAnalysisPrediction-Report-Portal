@@ -375,9 +375,14 @@ describe('OrgUnitDetail — deleting an OU that announcements are addressed to',
 
   const clickDelete = async () => {
     fireEvent.click(screen.getByRole('button', { name: /ou\.deleteOu/ }))
-    // antd Popconfirm's own OK, before the impact dialog appears
-    const ok = await screen.findAllByRole('button')
-    fireEvent.click(ok.find((b) => /OK|确 定|确定/.test(b.textContent || '')) as HTMLElement)
+    // The Confirm popover's own action button, before the impact dialog appears. The opener shares
+    // its name, so look inside the popover.
+    const popover = await waitFor(() => {
+      const p = document.querySelector('.ant-popover:not(.ant-popover-hidden)')
+      if (!p) throw new Error('no confirmation open')
+      return p as HTMLElement
+    })
+    fireEvent.click(within(popover).getByRole('button', { name: 'ou.deleteOu' }))
   }
 
   it('asks what to do, and sends the answer, when an announcement would be left with nobody', async () => {

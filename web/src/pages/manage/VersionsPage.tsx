@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Drawer, Form, Input, Select, Space, Tag, Typography } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -9,6 +10,9 @@ import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
 import { usePendingSettings } from './AdminDraftBoundary'
 import { PolicyPage } from './OUPolicyWorkspace'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import { confirmLeave } from './useLeaveGuard'
 
 interface VersionRow {
   name: string
@@ -74,9 +78,7 @@ function VersionRegistry() {
   const close = () => {
     if (saving) return
     if (!dirty) { setDraft(null); return }
-    modal.confirm({ title: t('manage.leaveTitle'), content: t('manage.leaveDescription'),
-      okText: t('manage.leave'), cancelText: t('manage.stay'), okButtonProps: { danger: true },
-      onOk: () => setDraft(null) })
+    confirmLeave(modal, t, () => setDraft(null))
   }
   const save = async () => {
     if (!draft) return
@@ -93,12 +95,12 @@ function VersionRegistry() {
       message.success(t('versions.saved'))
       setDraft(null)
       await load({ quiet: true })
-    } catch (error) { message.error(errText(error, t)) }
+    } catch (error) { notifyError(errText(error, t)) }
     finally { setSaving(false) }
   }
   const remove = async (name: string) => {
     try { await api.del(`/api/admin/versions/${encodeURIComponent(name)}`); await load({ quiet: true }) }
-    catch (error) { message.error(errText(error, t)) }
+    catch (error) { notifyError(errText(error, t)) }
   }
   const patch = (changes: Partial<VersionRow>) => setDraft((value) => value ? { ...value, ...changes } : value)
   const principalOptions = [
@@ -120,7 +122,8 @@ function VersionRegistry() {
             value={query} onChange={(event) => setQuery(event.target.value)} style={{ maxWidth: 360 }} />
           <Button type="primary" icon={<PlusOutlined />} aria-label={t('versions.add')} onClick={() => open()}>{t('versions.add')}</Button>
         </div>
-        <Table<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
+        <CardTable<VersionRow> rowKey="name" dataSource={filtered} loading={loading} scroll={{ x: 700 }}
+          filtered={!!query.trim()} onClearFilters={() => setQuery('')}
           pagination={{ pageSize: 12, hideOnSinglePage: true, showSizeChanger: false }} columns={[
             { title: t('versions.name'), render: (_, version) => <Space orientation="vertical" size={2}>
               <Space wrap size={4}><Typography.Text strong>{version.label || version.name}</Typography.Text>
@@ -134,9 +137,9 @@ function VersionRegistry() {
             { title: t('versions.reportCount'), dataIndex: 'reports', width: 90 },
             { title: '', width: 100, align: 'right', render: (_, version) => <Space size={4}>
               <Button size="small" icon={<EditOutlined />} aria-label={t('common.edit')} onClick={() => open(version)} />
-              {!version.is_default && <Popconfirm title={t('versions.deleteConfirm')} onConfirm={() => remove(version.name)}>
+              {!version.is_default && <Confirm title={t('versions.deleteConfirm')} onConfirm={() => remove(version.name)} okText={t('versions.deleteAction')}>
                 <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-              </Popconfirm>}
+              </Confirm>}
             </Space> },
           ]} />
       </div>

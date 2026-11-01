@@ -1,6 +1,8 @@
-import { Alert, Card, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Card, Collapse, Space, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ForecastDiagnostics as Diagnostics } from '../../api/types'
+import CardTable from '../../components/CardTable'
+import StatusTag from '../../components/StatusTag'
 
 // Missing, unreadable and measured-zero telemetry are different states. These retained samples
 // describe comparison only; agreement does not grant a candidate permission to settle anything.
@@ -26,7 +28,7 @@ export default function ForecastDiagnostics({ value, fallback }: { value?: Diagn
         </Typography.Paragraph>
         <Typography.Text>{t('forecast.diagnostics.updated', { at: shadow.updated_at })}</Typography.Text>
         <Typography.Title level={5} style={{ margin: 0 }}>{t('forecast.diagnostics.calls')}</Typography.Title>
-        <Table
+        <CardTable
           size="small" pagination={false} scroll={{ x: 700 }} dataSource={callRows}
           rowKey={(row) => `${row.date}:${row.source}`}
           columns={[
@@ -35,39 +37,50 @@ export default function ForecastDiagnostics({ value, fallback }: { value?: Diagn
           ]}
         />
         <Typography.Title level={5} style={{ margin: 0 }}>{t('forecast.diagnostics.comparisons')}</Typography.Title>
-        <Table
+        <CardTable
           size="small" pagination={false} scroll={{ x: 700 }} dataSource={shadow.days} rowKey="date"
           columns={['date', 'selected', 'reads', 'http_attempts', 'matches', 'mismatches', 'unavailable'].map(column)}
         />
         <Typography.Title level={5} style={{ margin: 0 }}>{t('forecast.diagnostics.recent')}</Typography.Title>
-        {shadow.recent.map((result, index) => (
-          <details key={`${result.at}:${result.target.market}:${result.target.code}:${index}`} open={index === 0} style={{ width: '100%' }}>
-            <summary style={{ cursor: 'pointer' }}>
+        {/* antd Collapse rather than a native disclosure: it animates and honours reduced motion. */}
+        <Collapse
+          size="small"
+          style={{ width: '100%' }}
+          defaultActiveKey={shadow.recent.length ? ['0'] : []}
+          items={shadow.recent.map((result, index) => ({
+            key: String(index),
+            label: (
               <Space wrap>
                 <Typography.Text>{result.at} · {result.target.market}{result.target.code} · {result.primary} → {result.candidate || '—'}</Typography.Text>
-                <Tag color={result.status === 'mismatch' ? 'warning' : undefined}>{t(`forecast.diagnostics.${result.status === 'unavailable' ? 'comparisonUnavailable' : result.status}`)}</Tag>
+                <StatusTag tone={result.status === 'mismatch' ? 'warning' : result.status === 'match' ? 'success' : 'neutral'}>{t(`forecast.diagnostics.${result.status === 'unavailable' ? 'comparisonUnavailable' : result.status}`)}</StatusTag>
               </Space>
-            </summary>
-            <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <Typography.Text>{t('forecast.diagnostics.anchors', { from: result.anchors[0], to: result.anchors[1] })}</Typography.Text>
-              {result.reason && <Typography.Text code>{result.reason}</Typography.Text>}
-              {result.comparison && <Typography.Text>{t('forecast.diagnostics.compared', { dates: result.comparison.compared_dates, differences: result.difference_count })}</Typography.Text>}
-              {result.truncated && <Alert type="warning" showIcon title={t('forecast.diagnostics.truncated', { total: result.difference_count, shown: result.comparison?.differences.length ?? 0 })} />}
-              {!!result.comparison?.differences.length && (
-                <div style={{ overflowX: 'auto' }}>
-                  <table aria-label={t('forecast.diagnostics.differences')} style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead><tr>{['barDate', 'field', 'anchor', 'primary', 'candidate'].map((field) => <th key={field} style={{ textAlign: 'start', padding: 4 }}>{t(`forecast.diagnostics.${field}`)}</th>)}</tr></thead>
-                    <tbody>{result.comparison.differences.map((difference) => (
-                      <tr key={`${difference.date}:${difference.field}`}>
-                        {[difference.date, difference.field, difference.anchor ? t('forecast.diagnostics.anchor') : '—', difference.primary ?? '—', difference.candidate ?? '—'].map((content, cell) => <td key={cell} style={{ padding: 4 }}>{content}</td>)}
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          </details>
-        ))}
+            ),
+            children: (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <Typography.Text>{t('forecast.diagnostics.anchors', { from: result.anchors[0], to: result.anchors[1] })}</Typography.Text>
+                {result.reason && <Typography.Text code>{result.reason}</Typography.Text>}
+                {result.comparison && <Typography.Text>{t('forecast.diagnostics.compared', { dates: result.comparison.compared_dates, differences: result.difference_count })}</Typography.Text>}
+                {result.truncated && <Alert type="warning" showIcon title={t('forecast.diagnostics.truncated', { total: result.difference_count, shown: result.comparison?.differences.length ?? 0 })} />}
+                {!!result.comparison?.differences.length && (
+                  <CardTable
+                    size="small"
+                    pagination={false}
+                    aria-label={t('forecast.diagnostics.differences')}
+                    rowKey={(d) => `${d.date}:${d.field}`}
+                    dataSource={result.comparison.differences}
+                    columns={[
+                      { key: 'barDate', title: t('forecast.diagnostics.barDate'), render: (_, d) => d.date },
+                      { key: 'field', title: t('forecast.diagnostics.field'), render: (_, d) => d.field },
+                      { key: 'anchor', title: t('forecast.diagnostics.anchor'), render: (_, d) => (d.anchor ? t('forecast.diagnostics.anchor') : '—') },
+                      { key: 'primary', title: t('forecast.diagnostics.primary'), render: (_, d) => d.primary ?? '—' },
+                      { key: 'candidate', title: t('forecast.diagnostics.candidate'), render: (_, d) => d.candidate ?? '—' },
+                    ]}
+                  />
+                )}
+              </div>
+            ),
+          }))}
+        />
       </Space>
     </Card>
   )

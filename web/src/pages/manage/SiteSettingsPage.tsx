@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { App, Button, Form, Input, Radio, Select, Space, Switch, Typography, Upload } from 'antd'
 import { DeleteOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -12,6 +12,7 @@ import LoadGate from '../../components/LoadGate'
 import GeoSection from './GeoSection'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
+import { notifyError } from '../../lib/notify'
 
 // tzOptions lists the panel-timezone choices: a "follow system" default plus the
 // browser's full IANA zone list (Intl.supportedValuesOf, guarded for older engines).
@@ -115,7 +116,7 @@ export default function SiteSettingsPage() {
       setSavedValues({ ...v })
       message.success(t('common.saved'))
     } catch (error) {
-      message.error(errText(error, t))
+      notifyError(errText(error, t))
     } finally {
       setSaving(false)
     }
@@ -132,27 +133,27 @@ export default function SiteSettingsPage() {
 
   const uploadLogo = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      message.error(t('settings.logoTypeInvalid'))
+      notifyError(t('settings.logoTypeInvalid'))
       return false
     }
     if (file.size > 512 * 1024) {
-      message.error(t('settings.logoTooLarge'))
+      notifyError(t('settings.logoTooLarge'))
       return false
     }
-    uploadAsset('logo', file, 'siteLogoUrl').catch((e) => message.error(e instanceof Error ? e.message : t('settings.logoReadFailed')))
+    uploadAsset('logo', file, 'siteLogoUrl').catch((e) => notifyError(e instanceof Error ? e.message : t('settings.logoReadFailed')))
     return false
   }
 
   const uploadPwaIcon = (file: File) => {
     if (!file.type.startsWith('image/')) {
-      message.error(t('settings.logoTypeInvalid'))
+      notifyError(t('settings.logoTypeInvalid'))
       return false
     }
     if (file.size > 512 * 1024) {
-      message.error(t('settings.pwaIconTooLarge'))
+      notifyError(t('settings.pwaIconTooLarge'))
       return false
     }
-    uploadAsset('pwaIcon', file, 'pwaIconUrl').catch((e) => message.error(e instanceof Error ? e.message : t('settings.logoReadFailed')))
+    uploadAsset('pwaIcon', file, 'pwaIconUrl').catch((e) => notifyError(e instanceof Error ? e.message : t('settings.logoReadFailed')))
     return false
   }
 
@@ -161,7 +162,6 @@ export default function SiteSettingsPage() {
       <Form form={form} layout="vertical" disabled={saving}>
         <SettingsWorkspace sections={sections} active={section} onChange={setSection}>
         <SettingsPanel section="branding">
-        <Typography.Title level={4}>{t('manage.section.branding')}</Typography.Title>
         <Form.Item
           name="siteTitle"
           label={t('settings.siteTitle')}
@@ -169,68 +169,53 @@ export default function SiteSettingsPage() {
         >
           <Input maxLength={80} showCount placeholder={t('brand')} />
         </Form.Item>
-        <Form.Item name="siteLogoUrl" label={t('settings.logoUrl')} extra={t('settings.logoHint')}>
-          <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t('settings.logoPlaceholder')} />
-        </Form.Item>
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Upload accept="image/*" showUploadList={false} beforeUpload={uploadLogo}>
-            <Button icon={<UploadOutlined />}>{t('settings.logoUpload')}</Button>
-          </Upload>
-          <Button icon={<DeleteOutlined />} onClick={() => form.setFieldsValue({ siteLogoUrl: '' })}>
-            {t('settings.logoClear')}
-          </Button>
-        </Space>
-        <Form.Item shouldUpdate noStyle>
-          {({ getFieldValue }) => {
-            const logo = String(getFieldValue('siteLogoUrl') || '').trim()
-            const title = String(getFieldValue('siteTitle') || '').trim() || t('brand')
+        <ImageField
+          name="siteLogoUrl"
+          label={t('settings.logoUrl')}
+          hint={t('settings.logoHint')}
+          upload={uploadLogo}
+          uploadLabel={t('settings.logoUpload')}
+          clearLabel={t('settings.logoClear')}
+          onClear={() => form.setFieldsValue({ siteLogoUrl: '' })}
+          preview={(get) => {
+            const logo = String(get('siteLogoUrl') || '').trim()
+            const title = String(get('siteTitle') || '').trim() || t('brand')
             return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+              <>
                 {logo ? (
-                  <img src={logo} alt="" style={{ width: 32, height: 32, objectFit: 'contain' }} />
+                  <img src={logo} alt="" style={{ width: 28, height: 28, objectFit: 'contain' }} />
                 ) : (
-                  <BrandIcon style={{ color: 'var(--ant-color-primary)', fontSize: 32 }} />
+                  <BrandIcon style={{ color: 'var(--ant-color-primary)', fontSize: 28 }} />
                 )}
-                <Typography.Text strong>{title}</Typography.Text>
-              </div>
+                <Typography.Text strong ellipsis>{title}</Typography.Text>
+              </>
             )
           }}
-        </Form.Item>
+        />
         </SettingsPanel>
         <SettingsPanel section="pwa">
-        <Typography.Title level={4}>{t('settings.pwaEnabled')}</Typography.Title>
         <Form.Item name="pwaEnabled" label={t('settings.pwaEnabled')} valuePropName="checked">
           <Switch />
         </Form.Item>
-        <Form.Item name="pwaIconUrl" label={t('settings.pwaIconUrl')} extra={t('settings.pwaIconHint')}>
-          <Input.TextArea autoSize={{ minRows: 2, maxRows: 4 }} placeholder={t('settings.logoPlaceholder')} />
-        </Form.Item>
-        <Space wrap style={{ marginBottom: 16 }}>
-          <Upload accept="image/*" showUploadList={false} beforeUpload={uploadPwaIcon}>
-            <Button icon={<UploadOutlined />}>{t('settings.pwaIconUpload')}</Button>
-          </Upload>
-          <Button icon={<DeleteOutlined />} onClick={() => form.setFieldsValue({ pwaIconUrl: '' })}>
-            {t('settings.pwaIconClear')}
-          </Button>
-        </Space>
-        <Form.Item shouldUpdate noStyle>
-          {({ getFieldValue }) => {
-            const icon = String(getFieldValue('pwaIconUrl') || getFieldValue('siteLogoUrl') || '').trim()
-            return (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-                {icon ? (
-                  <img src={icon} alt="" style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 8 }} />
-                ) : (
-                  <BrandIcon style={{ color: 'var(--ant-color-primary)', fontSize: 40 }} />
-                )}
-                <Typography.Text type="secondary">{t('settings.pwaIconPreview')}</Typography.Text>
-              </div>
+        <ImageField
+          name="pwaIconUrl"
+          label={t('settings.pwaIconUrl')}
+          hint={t('settings.pwaIconHint')}
+          upload={uploadPwaIcon}
+          uploadLabel={t('settings.pwaIconUpload')}
+          clearLabel={t('settings.pwaIconClear')}
+          onClear={() => form.setFieldsValue({ pwaIconUrl: '' })}
+          preview={(get) => {
+            const icon = String(get('pwaIconUrl') || get('siteLogoUrl') || '').trim()
+            return icon ? (
+              <img src={icon} alt={t('settings.pwaIconPreview')} style={{ width: 40, height: 40, objectFit: 'contain', borderRadius: 'var(--ant-border-radius)' }} />
+            ) : (
+              <BrandIcon aria-label={t('settings.pwaIconPreview')} style={{ color: 'var(--ant-color-primary)', fontSize: 40 }} />
             )
           }}
-        </Form.Item>
+        />
         </SettingsPanel>
         <SettingsPanel section="footer">
-        <Typography.Title level={4}>{t('settings.footerSection')}</Typography.Title>
         <Form.Item name="footerShowInfo" label={t('settings.footerShowInfo')} valuePropName="checked">
           <Switch />
         </Form.Item>
@@ -262,7 +247,6 @@ export default function SiteSettingsPage() {
             are the same decision, and two booleans can describe a state nobody chose. */}
         </SettingsPanel>
         <SettingsPanel section="updates">
-        <Typography.Title level={4}>{t('settings.updatePrompt')}</Typography.Title>
         <Form.Item name="updatePromptPolicy" style={{ marginBottom: 8 }}>
           <Radio.Group>
             <Space orientation="vertical" size={10}>
@@ -286,7 +270,6 @@ export default function SiteSettingsPage() {
             the captcha host check all derive from it too, so it belongs with the deployment. */}
         </SettingsPanel>
         <SettingsPanel section="url">
-        <Typography.Title level={4}>{t('settings.urlSection')}</Typography.Title>
         <Form.Item
           name="publicUrl"
           label={t('settings.publicUrl')}
@@ -308,7 +291,6 @@ export default function SiteSettingsPage() {
 
         </SettingsPanel>
         <SettingsPanel section="time">
-        <Typography.Title level={4}>{t('settings.timeSection')}</Typography.Title>
         <Form.Item name="timezone" label={t('settings.timezone')} style={{ marginBottom: 8 }}>
           <Select
             showSearch
@@ -329,5 +311,38 @@ export default function SiteSettingsPage() {
           onDiscard={() => { if (savedValues) { form.setFieldsValue(savedValues); form.setFields(Object.keys(savedValues).map((name) => ({ name, errors: [] }))) } }} />
       </Form>
       </LoadGate>
+  )
+}
+
+// An image setting: what it looks like now, beside the buttons that change it, and the address it is
+// read from below them for anyone who would rather point at an existing file.
+function ImageField({ name, label, hint, upload, uploadLabel, clearLabel, onClear, preview }: {
+  name: string
+  label: string
+  hint: string
+  upload: (file: File) => boolean | void
+  uploadLabel: string
+  clearLabel: string
+  onClear: () => void
+  preview: (get: (name: string) => unknown) => ReactNode
+}) {
+  const { t } = useTranslation()
+  return (
+    <Form.Item label={label} extra={hint} htmlFor={`rp-image-${name}`}>
+      <div className="rp-image-field">
+        <Form.Item shouldUpdate noStyle>
+          {({ getFieldValue }) => <div className="rp-image-field__preview">{preview(getFieldValue)}</div>}
+        </Form.Item>
+        <Space wrap size={8}>
+          <Upload accept="image/*" showUploadList={false} beforeUpload={upload}>
+            <Button icon={<UploadOutlined />}>{uploadLabel}</Button>
+          </Upload>
+          <Button icon={<DeleteOutlined />} onClick={onClear}>{clearLabel}</Button>
+        </Space>
+      </div>
+      <Form.Item name={name} noStyle>
+        <Input id={`rp-image-${name}`} placeholder={t('settings.logoPlaceholder')} style={{ marginTop: 12 }} />
+      </Form.Item>
+    </Form.Item>
   )
 }

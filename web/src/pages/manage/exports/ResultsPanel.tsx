@@ -1,10 +1,11 @@
-import { Alert, Button, Empty, Space, Table, Typography } from 'antd'
+import { Alert, Button, Empty, Space, Typography } from 'antd'
 import { DownloadOutlined, SettingOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import type { ExportSource } from '../../../api/types'
 import { formatCell } from '../../../lib/exportTime'
 import type { ExportLabels } from './labels'
+import CardTable from '../../../components/CardTable'
 
 type Row = Record<string, string | number | null>
 export const PAGE_SIZES = [20, 50, 100, 200]
@@ -71,7 +72,7 @@ export default function ResultsPanel({
         </Space>
       </div>
       {error && <Alert type="error" showIcon title={error} style={{ marginBottom: 12 }} />}
-      <Table<Row>
+      <CardTable<Row>
         size="small"
         rowKey={(r) => String(r.id ?? JSON.stringify(r))}
         loading={loading}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Input, Select, Space, Table, Tag, Typography, theme } from 'antd'
+import { Alert, App, Button, Card, Input, Select, Space, Tag, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { SearchOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -9,6 +9,8 @@ import type { TrackingResp, TrackingRow } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../lib/loadFailure'
+import CardTable from '../components/CardTable'
+import { notifyError } from '../lib/notify'
 
 // The review queue: what the reports ASSUMED, and whether it held.
 //
@@ -68,7 +70,7 @@ export default function ReviewPage() {
       message.success(t('common.saved'))
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -185,22 +187,14 @@ export default function ReviewPage() {
         {!loading && total === 0 && !err ? (
           // Empty is the expected state until the workflow emits any. Say what is missing and
           // exactly what to send, so nobody has to read the API docs to find out.
-          <Space orientation="vertical" size={12} style={{ maxWidth: 720 }}>
+          <Space orientation="vertical" size={12} style={{ width: '100%', maxWidth: 720 }}>
             <Typography.Title level={5} style={{ margin: 0 }}>
               {t('review.emptyTitle')}
             </Typography.Title>
             <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
               {t('review.emptyBody')}
             </Typography.Paragraph>
-            <pre
-              style={{
-                background: token.colorFillQuaternary,
-                padding: 12,
-                borderRadius: token.borderRadius,
-                fontSize: 12,
-                overflowX: 'auto',
-              }}
-            >
+            <pre className="rp-code">
               {`POST /api/v1/reports
 {
   "symbol": "600519", "date": "2026-07-31", "subtype": "投资决策",
@@ -217,7 +211,7 @@ export default function ReviewPage() {
             </Typography.Paragraph>
           </Space>
         ) : (
-          <Table<TrackingRow>
+          <CardTable<TrackingRow>
             rowKey="id"
             size="small"
             loading={loading}

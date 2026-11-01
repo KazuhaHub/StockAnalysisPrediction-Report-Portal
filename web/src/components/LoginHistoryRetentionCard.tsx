@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, InputNumber, Popconfirm, Space, Spin, Typography } from 'antd'
+import { Alert, App, Button, Card, InputNumber, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from './LoadGate'
 
 export default function LoginHistoryRetentionCard() {
   const { t } = useTranslation()
@@ -27,17 +30,17 @@ export default function LoginHistoryRetentionCard() {
       await api.put('/api/admin/login-activity/retention', { keep })
       setSaved(keep)
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) }
+    } catch (e) { notifyError(errText(e, t)) }
     finally { setSaving(false) }
   }
   return <Card title={t('storage.loginHistoryTitle')}>
-    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <Spin /> : <>
+    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <LoadingPlaceholder /> : <>
       <Space wrap>
         <Typography.Text>{t('loginActivity.keep')}</Typography.Text>
         <InputNumber aria-label={t('loginActivity.keep')} min={1} max={10000} precision={0} value={keep} onChange={setKeep} disabled={saving} />
-        <Popconfirm title={t('storage.loginHistoryConfirm', { count: keep })} onConfirm={save}>
+        <Confirm title={t('storage.loginHistoryConfirm', { count: keep })} onConfirm={save} okText={t('storage.loginHistoryAction')} irreversible>
           <Button type="primary" loading={saving} disabled={!valid || keep === saved}>{t('common.save')}</Button>
-        </Popconfirm>
+        </Confirm>
       </Space>
       <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t('storage.loginHistoryHint')}</Typography.Paragraph>
     </>}

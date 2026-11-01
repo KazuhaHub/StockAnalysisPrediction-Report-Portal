@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, Button, Space, Spin, Typography, theme } from 'antd'
+import { Alert, Button, Space, Typography, theme } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../prefs'
 import type { AppTokenResp } from '../api/types'
 import { API_MESSAGE, API_RESULT, INIT_MESSAGE, THEME_MESSAGE, reqIdOf, validateApiRequest, type ThemePayload } from '../lib/appBridge'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // AppView hosts one installed app inside a sandboxed iframe and mediates its API
 // access. The iframe (sandbox="allow-scripts", so a null origin) can reach the
@@ -154,9 +155,7 @@ export default function AppView() {
   }
   if (!meta) {
     return (
-      <div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
 

@@ -7,6 +7,11 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, vars?: Record<string, unknown>) => (vars ? `${key}:${JSON.stringify(vars)}` : key) }),
 }))
 
+const pending = vi.hoisted(() => vi.fn())
+vi.mock('./AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
+const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
+const postSpy = vi.hoisted(() => vi.fn())
+
 const state = vi.hoisted(() => ({
   source: 'maxmind',
   pick: '',
@@ -21,7 +26,7 @@ vi.mock('../../api/client', () => ({
         status: { enabled: true, pick: state.pick, dir: '/data/geoip', loaded: true, files: state.files, info: {} },
         update: { auto: true, auto_hours: 12, source: state.source, edition: '', url: '', has_key: true, updating: false },
       }),
-    post: () => Promise.resolve({}),
+    post: (...args: unknown[]) => { postSpy(...args); return Promise.resolve({}) },
   },
 }))
 
@@ -103,5 +108,49 @@ describe('GeoSection', () => {
     it('falls back to whatever the database claims', () => {
       expect(describeDatabase({ file: 'x.mmdb', ok: true, info: { granularity: 'asn' } }, t)).toBe('x.mmdb · asn')
     })
+  })
+})
+
+describe('GeoSection unsaved changes', () => {
+  beforeEach(() => {
+    pending.mockReset()
+    postSpy.mockReset()
+    state.source = 'maxmind'
+    state.pick = ''
+  })
+  const loaded = async () => {
+    show()
+    await waitFor(() => expect(screen.getByText('audit.geoSourceLabel')).toBeTruthy())
+  }
+
+  it('is not pending after the settings load', async () => {
+    await loaded()
+    expect(pending.mock.calls.some(([dirty]) => dirty === true)).toBe(false)
+    expect(lastPending()).toEqual([false, false])
+  })
+
+  it('is pending after a switch is flipped, and clean when flipped back', async () => {
+    await loaded()
+    const [show_] = screen.getAllByRole('switch')
+    fireEvent.click(show_)
+    expect(lastPending()).toEqual([true, false])
+    fireEvent.click(show_)
+    expect(lastPending()).toEqual([false, false])
+  })
+
+  it('is pending once a new credential is typed', async () => {
+    await loaded()
+    fireEvent.change(screen.getByPlaceholderText('audit.geoKeySaved'), { target: { value: 'new-key' } })
+    expect(lastPending()).toEqual([true, false])
+  })
+
+  it('is clean again after a successful save', async () => {
+    await loaded()
+    fireEvent.click(screen.getAllByRole('switch')[0])
+    fireEvent.change(screen.getByPlaceholderText('audit.geoKeySaved'), { target: { value: 'new-key' } })
+    expect(lastPending()).toEqual([true, false])
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }))
+    await waitFor(() => expect(postSpy).toHaveBeenCalledWith('/api/admin/geoip', expect.objectContaining({ enabled: false, token: 'new-key' })))
+    await waitFor(() => expect(lastPending()).toEqual([false, false]))
   })
 })

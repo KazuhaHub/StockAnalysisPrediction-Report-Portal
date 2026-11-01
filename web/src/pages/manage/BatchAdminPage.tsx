@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Checkbox, Form, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Switch, Table, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
+import { Alert, App, Button, Checkbox, Form, Input, Modal, Popover, Select, Space, Switch, Tabs, Tag, Tooltip, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, CloudDownloadOutlined, DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import useFormDraft from './useFormDraft'
 import { PolicyPage } from './OUPolicyWorkspace'
 import { api, errText } from '../../api/client'
@@ -14,7 +15,9 @@ import type { Surface } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import type { BatchPlugin, BatchTarget, DifyInput, DifyRefreshResult, DifyTargetEdit, PluginInput } from '../../api/types'
 import DifyRefreshModal from './DifyRefreshModal'
-import LoadGate from '../../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../../components/LoadGate'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 const INPUT_PREVIEW_LIMIT = 3
 
@@ -209,7 +212,7 @@ function GlobalExecutionTargets() {
       setEditingId(tg.id)
       setTargetOpen(true)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -247,7 +250,7 @@ function GlobalExecutionTargets() {
       else message.success(t('batch.dify.probed', { name: r.name }))
     } catch (e) {
       setProbed(null)
-      message.error(t('batch.dify.probeFailed', { error: errText(e, t) }))
+      notifyError(t('batch.dify.probeFailed', { error: errText(e, t) }))
     } finally {
       setProbing(false)
     }
@@ -261,7 +264,7 @@ function GlobalExecutionTargets() {
       setRefreshResults(r.results || [])
       setRefreshOpen(true)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setRefreshing(false)
     }
@@ -284,7 +287,7 @@ function GlobalExecutionTargets() {
       setRefreshOpen(false)
       loadTargets()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -308,7 +311,7 @@ function GlobalExecutionTargets() {
       return
     }
     if (inputs.length === 0) {
-      message.error(t('batch.dify.needInputs'))
+      notifyError(t('batch.dify.needInputs'))
       return
     }
     setSaving(true)
@@ -334,7 +337,7 @@ function GlobalExecutionTargets() {
       setTargetOpen(false)
       loadTargets()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -348,7 +351,7 @@ function GlobalExecutionTargets() {
         message.success(t('batch.admin.msgImported'))
         loadPlugins({ quiet: true })
       } catch (e) {
-        message.error(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
+        notifyError(`${t('batch.admin.msgImportFailed')}：${errText(e, t) || ''}`)
       }
     }
     reader.readAsText(file)
@@ -396,7 +399,7 @@ function GlobalExecutionTargets() {
     setTargets(orderedIds.map((id) => byId.get(id)!).filter(Boolean))
     api
       .post('/api/admin/batch/targets/reorder', { ids: orderedIds.map(Number) })
-      .catch((e) => message.error(errText(e, t)))
+      .catch((e) => notifyError(errText(e, t)))
       .finally(() => loadTargets().catch(() => {}))
   }
 
@@ -460,9 +463,9 @@ function GlobalExecutionTargets() {
               <Button size="small" icon={<EditOutlined />} title={t('common.edit')} onClick={() => openEdit(tg)} />
             </>
           )}
-          <Popconfirm title={t('batch.admin.deleteTargetConfirm')} onConfirm={() => deleteTarget(tg.id)}>
+          <Confirm title={t('batch.admin.deleteTargetConfirm')} onConfirm={() => deleteTarget(tg.id)} okText={t('batch.admin.deleteTargetAction')}>
             <Button size="small" danger icon={<DeleteOutlined />} title={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },
@@ -476,9 +479,9 @@ function GlobalExecutionTargets() {
       title: t('batch.col.actions'),
       width: 80,
       render: (_: unknown, p: BatchPlugin) => (
-        <Popconfirm title={t('batch.admin.deletePluginConfirm')} onConfirm={() => deletePlugin(p.slug)}>
+        <Confirm title={t('batch.admin.deletePluginConfirm')} onConfirm={() => deletePlugin(p.slug)} okText={t('batch.admin.deletePluginAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]
@@ -550,7 +553,7 @@ function GlobalExecutionTargets() {
                 >
                 {targets.length === 0 && <Typography.Text type="secondary">{t('batch.dify.targetsHint')}</Typography.Text>}
                 <SortableWrapper ids={targets.map((tg) => String(tg.id))} onReorder={reorderTargets}>
-                  <Table
+                  <CardTable
                     className="rp-batch-targets-table"
                     rowKey="id"
                     size="small"
@@ -577,13 +580,13 @@ function GlobalExecutionTargets() {
                   </Upload>
                 </div>
                 {!pluginsLoaded ? (
-                  <Spin />
+                  <LoadingPlaceholder />
                 ) : pluginsErr ? (
                   <Typography.Text type="danger">{pluginsErr}</Typography.Text>
                 ) : customPlugins.length === 0 ? (
                   <Typography.Text type="secondary">{t('batch.admin.advancedPluginsHint')}</Typography.Text>
                 ) : (
-                  <Table rowKey="slug" size="small" dataSource={customPlugins} columns={pluginCols} pagination={false} scroll={{ x: 'max-content' }} />
+                  <CardTable rowKey="slug" size="small" dataSource={customPlugins} columns={pluginCols} pagination={false} scroll={{ x: 'max-content' }} />
                 )}
               </Space>
             ),

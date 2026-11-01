@@ -3,6 +3,7 @@ import { Alert, App, Button, Card, Result, Space, Tag, Typography, theme } from 
 import { RightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import AppBackendModal from '../../components/AppBackendModal'
 import { SCOPE_LABEL } from '../../components/ScopePermissionModal'
@@ -10,6 +11,7 @@ import LoadGate from '../../components/LoadGate'
 import { clickable } from '../../lib/clickable'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, AppsBreadcrumb, ServiceStatus } from './appsAdminParts'
+import { notifyError } from '../../lib/notify'
 
 // One section of the detail page: a title, a line saying what it controls, its current value and a
 // chevron. With `onOpen` the whole card is the control; without it the card only reports a value.
@@ -81,22 +83,21 @@ function AppDetail({ app }: { app: AdminApp }) {
   )
 
   const uninstall = () =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('apps.section.uninstall.confirmTitle', { name }),
-      content: t('apps.section.uninstall.confirmBody'),
-      okText: t('apps.section.uninstall.confirmOk'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
+      description: t('apps.section.uninstall.confirmBody'),
+      okText: t('apps.section.uninstall.confirmAction'),
+      irreversible: true,
       onOk: async () => {
         try {
           await api.del(`/api/admin/apps/${encodeURIComponent(app.key)}`)
           message.success(t('apps.section.uninstall.done'))
           navigate('/manage/apps')
         } catch (e) {
-          message.error(errText(e, t))
+          notifyError(errText(e, t))
         }
       },
-    })
+    }, t)
 
   const facts: [string, ReactNode][] = [[t('apps.detail.type'), app.builtin ? t('apps.type.builtin') : t('apps.type.installed')]]
   if (app.version) facts.push([t('apps.version'), app.version])

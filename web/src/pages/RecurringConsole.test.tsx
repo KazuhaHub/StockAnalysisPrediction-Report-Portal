@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import RecurringConsole from './RecurringConsole'
 
 const apiMock = vi.hoisted(() => ({
@@ -11,7 +12,7 @@ const apiMock = vi.hoisted(() => ({
   del: vi.fn(),
 }))
 
-vi.mock('../api/client', () => ({ api: apiMock }))
+vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: true }) }))
 
@@ -40,10 +41,22 @@ const tasks = {
   ],
 }
 
+function Where() {
+  const loc = useLocation()
+  return <div data-testid="where" data-crumb={(loc.state as { crumb?: string } | null)?.crumb ?? ''}>{loc.pathname}</div>
+}
+
 function renderPage() {
   return render(
     <App>
-      <RecurringConsole />
+      <MemoryRouter initialEntries={['/apps/recurring']}>
+        <Where />
+        <Routes>
+          <Route path="/apps/recurring" element={<RecurringConsole />} />
+          <Route path="/apps/recurring/new" element={<div>new-page</div>} />
+          <Route path="/apps/recurring/:id" element={<div>edit-page</div>} />
+        </Routes>
+      </MemoryRouter>
     </App>,
   )
 }
@@ -58,7 +71,7 @@ describe('RecurringConsole', () => {
       if (url.includes('/batch/targets')) return Promise.resolve({ ...targets })
       if (url === '/api/admin/batch/recurring') return Promise.resolve({ ...tasks })
       if (url === '/api/admin/batch/recurring/7')
-        return Promise.resolve({ ...tasks.tasks[0], rows: [{ code: '600000' }, { code: '000001' }], history: [] })
+        return Promise.resolve({ ...tasks.tasks[0], rows: [{ code: '600000' }, { code: '000001' }], history: [{ id: 1, task_id: 7, job_id: 42, fired_at: '2026-07-12 09:30:00', job_status: 'done' }] })
       return Promise.resolve({})
     })
     apiMock.post.mockResolvedValue({ ok: true, job_id: 42 })
@@ -82,44 +95,40 @@ describe('RecurringConsole', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/recurring/7/enable', { enabled: false }))
   })
 
-  it('the new-task button opens the create modal', async () => {
+  it('the new-task button opens the new-task page rather than a dialog', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
     await user.click(screen.getByRole('button', { name: /recurring\.new/ }))
-    // the modal renders the name + target fields.
-    expect((await screen.findAllByText('recurring.fieldName')).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('recurring.fieldTarget').length).toBeGreaterThan(0)
-    expect(screen.getByText('recurring.executionSettings')).toBeTruthy()
-    expect(document.querySelector('.rp-recurring-execution-grid')).not.toBeNull()
+    expect(await screen.findByText('new-page')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/apps/recurring/new')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('editing prefills the CSV editor WITH a header row so the template round-trips', async () => {
+  it('the edit action opens that task on its own page, carrying its name for the breadcrumb', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
-    await user.click(screen.getByLabelText('common.edit')) // the aria-labelled edit action
-    await screen.findByText('recurring.edit') // modal title (editing mode)
-    const ta = screen.getByPlaceholderText('batch.csvPlaceholder') as HTMLTextAreaElement
-    // header line + both data rows — NOT data-only (which csvToRows would eat as a header, blanking it).
-    expect(ta.value).toBe('code\n600000\n000001')
+    await user.click(screen.getByLabelText('common.edit'))
+    expect(await screen.findByText('edit-page')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/apps/recurring/7')
+    expect(screen.getByTestId('where').dataset.crumb).toBe('Close review')
+    // Opening the page fetches nothing here: the page loads the task itself.
+    expect(apiMock.get).not.toHaveBeenCalledWith('/api/admin/batch/recurring/7')
   })
 
-  it('imports a CSV file into a new task template', async () => {
+  it('keeps the history drawer', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
-    await user.click(screen.getByRole('button', { name: /recurring\.new/ }))
+    await user.click(screen.getByLabelText('recurring.history'))
+    expect(await screen.findByText('#42')).toBeTruthy()
+  })
 
-    fireEvent.mouseDown(screen.getAllByRole('combobox')[0])
-    await user.click(await screen.findByText('Daily Review'))
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
-    expect(input).not.toBeNull()
-    await user.upload(input!, new File(['code\n600519\n000001'], 'rows.csv', { type: 'text/csv' }))
-
-    await waitFor(() => {
-      const editor = screen.getByPlaceholderText('batch.csvPlaceholder') as HTMLTextAreaElement
-      expect(editor.value).toBe('code\n600519\n000001')
-    })
+  it('does not enable New until it knows there is a workflow to run', async () => {
+    apiMock.get.mockImplementation((url: string) => (url.includes('/batch/targets') ? Promise.resolve({ targets: [] }) : Promise.resolve({ ...tasks })))
+    renderPage()
+    expect(await screen.findByText('recurring.noTargets')).toBeTruthy()
+    expect((screen.getByRole('button', { name: /recurring\.new/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

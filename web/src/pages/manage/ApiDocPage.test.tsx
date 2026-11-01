@@ -19,7 +19,9 @@ describe('API reference navigation', () => {
     expect(screen.getByText('Ingest reports')).toBeTruthy()
     expect(screen.getByText('Authentication guide')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('manage.apiSearch'), { target: { value: 'unknown' } })
-    expect(screen.getByText('manage.noResults')).toBeTruthy()
+    expect(screen.getByText('table.noMatches')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'table.clearFilters' }))
+    expect(screen.getByText('Find reports')).toBeTruthy()
   })
   it('offers a retry when the API reference request fails', async () => {
     fetchDoc.mockRejectedValueOnce(new Error('Offline'))

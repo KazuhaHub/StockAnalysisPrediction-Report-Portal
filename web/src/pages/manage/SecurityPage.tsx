@@ -9,6 +9,7 @@ import CompactNumberInput from '../../components/CompactNumberInput'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import { PolicyPage } from './OUPolicyWorkspace'
+import { notifyError } from '../../lib/notify'
 
 // Login protection and self-service registration.
 //
@@ -147,7 +148,7 @@ function GlobalSecuritySettings() {
         const text = failure(e, opts)
         if (text === null) return
         setLoadErr(text)
-        message.error(text)
+        notifyError(text)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -180,7 +181,7 @@ function GlobalSecuritySettings() {
       message.success(t('common.saved'))
       await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, type Key, type ReactNode } from 'react'
-import { Alert, App, Button, Descriptions, Drawer, Grid, Modal, Popconfirm, Space, Table, Typography } from 'antd'
+import { Alert, App, Button, Descriptions, Drawer, Grid, Modal, Space, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ArrowLeftOutlined, ArrowRightOutlined, CloseCircleOutlined, InfoCircleOutlined, SyncOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
 import type { BatchItem, BatchJobDetail, BatchTarget } from '../api/types'
@@ -22,6 +23,8 @@ import { formatElapsed } from '../lib/taskUi'
 import { loadFailure } from '../lib/loadFailure'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import LoadGate from './LoadGate'
+import CardTable from './CardTable'
+import { notifyError } from '../lib/notify'
 
 // itemActive reports whether a run (row) can still be cancelled: it hasn't reached a
 // terminal state (succeeded / partial / failed / cancelled).
@@ -117,7 +120,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       setSelected([])
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -128,7 +131,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       message.success(t('batch.msg.cancelRequested'))
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   // A row that has a Dify handle can be reconciled: fetch its true outcome from Dify without
@@ -141,7 +144,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       message.success(r.note ? t('queue.reconcileStillRunning') : t('queue.reconcileDone', { status: t(`batch.status.${r.status}`) }))
       await load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const idCell = (v: string) =>
@@ -157,15 +160,15 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
   // cancelled; cancelling just its row would leave a "finished" job and raise a "run finished" notification.
   const cancelButton = (it: BatchItem, labelled: boolean) =>
     labelled ? (
-      <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
+      <Confirm title={t('queue.cancelConfirm')} onConfirm={cancelJob} okText={t('queue.cancelJob')}>
         <Button danger icon={<CloseCircleOutlined />}>
           {t('tasks.cancel')}
         </Button>
-      </Popconfirm>
+      </Confirm>
     ) : (
-      <Popconfirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])}>
+      <Confirm title={t('queue.cancelRowConfirm')} onConfirm={() => cancelRows([it.id])} okText={t('queue.cancelRow')}>
         <Button size="small" type="text" danger icon={<CloseCircleOutlined />} title={t('queue.cancelRow')} />
-      </Popconfirm>
+      </Confirm>
     )
 
   const cols: ColumnsType<BatchItem> = [
@@ -199,9 +202,9 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
         <Space size={0}>
           <Button size="small" type="text" icon={<InfoCircleOutlined />} title={t('queue.itemDetails')} onClick={() => setDetailItem(it)} />
           {canReconcile(it) ? (
-            <Popconfirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(it)}>
+            <Confirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(it)} okText={t('queue.reconcileAction')} danger={false}>
               <Button size="small" type="text" icon={<SyncOutlined />} title={t('queue.reconcile')} />
-            </Popconfirm>
+            </Confirm>
           ) : null}
           {canCancel && itemActive(it.status) ? cancelButton(it, false) : null}
         </Space>
@@ -295,11 +298,11 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
 
   const jobAction =
     detail && !single && canCancel && !isTerminal(detail.job.status) && detail.job.status !== 'cancelling' ? (
-      <Popconfirm title={t('queue.cancelConfirm')} onConfirm={cancelJob}>
+      <Confirm title={t('queue.cancelConfirm')} onConfirm={cancelJob} okText={t('queue.cancelJob')}>
         <Button danger icon={<CloseCircleOutlined />}>
           {t('queue.cancelJob')}
         </Button>
-      </Popconfirm>
+      </Confirm>
     ) : null
   const rowActions = single && (
     <Space wrap>
@@ -307,9 +310,9 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
         {t('queue.itemDetails')}
       </Button>
       {canReconcile(single) && (
-        <Popconfirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(single)}>
+        <Confirm title={t('queue.reconcileConfirm')} onConfirm={() => reconcile(single)} okText={t('queue.reconcileAction')} danger={false}>
           <Button icon={<SyncOutlined />}>{t('queue.reconcile')}</Button>
-        </Popconfirm>
+        </Confirm>
       )}
       {canCancel && itemActive(single.status) && detail?.job.status !== 'cancelling' && cancelButton(single, true)}
     </Space>
@@ -341,11 +344,11 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
       footer={detail ? footer : undefined}
       extra={
         !single && selected.length > 0 ? (
-          <Popconfirm title={t('queue.cancelRowsConfirm', { n: selected.length })} onConfirm={() => cancelRows(selected)}>
+          <Confirm title={t('queue.cancelRowsConfirm', { n: selected.length })} onConfirm={() => cancelRows(selected)} okText={t('queue.cancelRowsAction')}>
             <Button danger size="small" icon={<CloseCircleOutlined />}>
               {t('queue.cancelSelected', { n: selected.length })}
             </Button>
-          </Popconfirm>
+          </Confirm>
         ) : null
       }
     >
@@ -366,7 +369,7 @@ export default function JobDetailDrawer({ jobId, onClose, onOpenInQueue, zIndex 
           {detail.job.status === 'running' && !detail.running_in_process && (
             <Alert type="info" showIcon style={{ marginBottom: 12 }} title={t('queue.notInProcess')} description={t('queue.notInProcessHint')} />
           )}
-          <Table
+          <CardTable
             rowKey="id"
             size="small"
             rowSelection={rowSelection}

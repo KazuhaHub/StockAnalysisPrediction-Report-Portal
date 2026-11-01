@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, DatePicker, Form, Input, Modal, Select, Space, Tag, Typography } from 'antd'
 import { CopyOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import type { TokenRow } from '../../api/types'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 const SCOPE_COLORS: Record<string, string> = { all: 'gold', ingest: 'blue', query: 'green' }
 
@@ -85,7 +88,7 @@ export default function TokensPage() {
       ),
     })
     load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setCreating(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setCreating(false) }
   }
 
   // navigator.clipboard needs a secure context; where it is unavailable the field above is still
@@ -121,18 +124,20 @@ export default function TokensPage() {
           {t('common.add')}
         </Button>
         {selected.length > 0 && (
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={removeSelected}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={removeSelected} okText={t('tokens.deleteSelectedAction')} irreversible>
             <Button danger icon={<DeleteOutlined />}>
               {t('common.deleteSelected')} ({selected.length})
             </Button>
-          </Popconfirm>
+          </Confirm>
         )}
       </Space>
 
-      <Table<TokenRow>
+      <CardTable<TokenRow>
         rowKey="id"
         size="small"
         loading={loading}
+        filtered={!!search.trim()}
+        onClearFilters={() => setSearch('')}
         dataSource={tokens.filter((token) => `${token.name} ${token.scope} ${t(`scope.${token.scope}`, token.scope)} ${token.prefix}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
         pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }}
         scroll={{ x: 'max-content' }}
@@ -153,16 +158,16 @@ export default function TokensPage() {
             dataIndex: 'scope',
             render: (s: string) => <Tag color={SCOPE_COLORS[s] || 'default'}>{s.startsWith('notify:') ? `${t('scope.notify')}: ${s.slice(7)}` : t(`scope.${s}`, s)}</Tag>,
           },
-          { title: t('settings.tokenExpires'), dataIndex: 'expires', render: (e: string) => e || '∞' },
+          { title: t('settings.tokenExpires'), dataIndex: 'expires', render: (e: string) => e || t('settings.tokenNeverExpires') },
           { title: t('settings.tokenLastUsed'), dataIndex: 'lastUsed', render: (e: string) => e || '—' },
           {
             title: '',
             width: 60,
             align: 'right',
             render: (_, r) => (
-              <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.id)}>
+              <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.id)} okText={t('tokens.deleteAction')} irreversible>
                 <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-              </Popconfirm>
+              </Confirm>
             ),
           },
         ]}
@@ -196,7 +201,7 @@ export default function TokensPage() {
           </Form.Item>
           {selectedScope === 'notify' && <Form.Item name="publisher" label={t('notify.publisher')} extra={t('notify.publisherHelp')} rules={[{ required: true, pattern: /^[a-z][a-z0-9-]{0,47}$/ }]}><Input /></Form.Item>}
           <Form.Item name="expires" label={t('settings.tokenExpires')}>
-            <DatePicker style={{ width: '100%' }} />
+            <DatePicker style={{ width: '100%' }} placeholder={t('settings.tokenNeverExpires')} />
           </Form.Item>
         </Form>
       </Modal>

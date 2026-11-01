@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import TypesPage from './TypesPage'
+import { findFailure } from '../../test/notifications'
 
 const post = vi.fn()
 const get = vi.fn()
@@ -43,7 +44,7 @@ describe('TypesPage — restore defaults', () => {
     fireEvent.click(await screen.findByText('types.restoreDefaults'))
     expect(post).not.toHaveBeenCalled() // Popconfirm gate: nothing fires on the first click
 
-    fireEvent.click(await screen.findByText('OK')) // antd Popconfirm default confirm label
+    fireEvent.click(await screen.findByText('types.restoreDefaultsAction')) // the Confirm template names the action
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/admin/types/restore-defaults', {}))
   })
 })
@@ -60,7 +61,7 @@ describe('TypesPage — kind colors', () => {
     const label = await screen.findByDisplayValue('Summary')
     fireEvent.change(label, { target: { value: 'Draft label' } })
     fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
-    await screen.findByText('Offline')
+    await findFailure('Offline')
     expect((label as HTMLInputElement).value).toBe('Draft label')
     fireEvent.click(screen.getByRole('button', { name: 'manage.discard' }))
     expect((label as HTMLInputElement).value).toBe('Summary')

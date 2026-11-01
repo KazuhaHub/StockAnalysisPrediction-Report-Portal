@@ -1,19 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Popconfirm, Space, Spin, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, Drawer, Empty, Grid, Input, InputNumber, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { EyeOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import { formatReportTime } from '../../lib/datetime'
 import { startVisiblePoll } from '../../lib/visiblePoll'
 import Markdown from '../../components/Markdown'
-import LoadGate from '../../components/LoadGate'
+import LoadGate, { LoadingPlaceholder } from '../../components/LoadGate'
 import type { ChatTurn } from '../../api/types'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsField from './SettingsField'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // Assistant admin (docs/adr/0012-interactive-chat.md). Two independent controls:
 //  1. A concurrency ceiling on in-flight chat turns — chat is interactive, so it does NOT
@@ -114,7 +118,7 @@ export default function ChatAdminPage() {
       await api.post('/api/admin/chat/config', values)
       setSaved(values)
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   // Open one user's conversation read-only: pull its messages from Dify (keyed by the owner, so the
@@ -127,7 +131,7 @@ export default function ChatAdminPage() {
     api
       .get<{ turns: ChatTurn[] }>(`/api/admin/chat/conversations/${c.id}/messages`)
       .then((r) => setViewTurns(r.turns || []))
-      .catch((e) => message.error(errText(e, t)))
+      .catch((e) => notifyError(errText(e, t)))
       .finally(() => setViewLoading(false))
   }
   const filteredConvs = useMemo(() => {
@@ -143,7 +147,7 @@ export default function ChatAdminPage() {
       message.success(t('chatAdmin.stopped'))
       load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -171,9 +175,9 @@ export default function ChatAdminPage() {
       key: 'actions',
       width: 48,
       render: (_: unknown, r: ChatLiveTurn) => (
-        <Popconfirm title={t('chatAdmin.stopConfirm')} onConfirm={() => stop(r.id)} okButtonProps={{ danger: true }}>
+        <Confirm title={t('chatAdmin.stopConfirm')} onConfirm={() => stop(r.id)} okText={t('chatAdmin.stopAction')}>
           <Button size="small" type="text" danger icon={<StopOutlined />} title={t('chatAdmin.stop')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]
@@ -211,7 +215,7 @@ export default function ChatAdminPage() {
             {t('chatAdmin.liveCard')}
             {/* No count until the first poll: "0 running" is a claim, and this tag is the only
                 place on the page that makes it in one glance. */}
-            {liveLoaded && <Tag color={turns.length ? 'processing' : 'default'}>{t('chatAdmin.liveCount', { n: turns.length })}</Tag>}
+            {liveLoaded && <StatusTag tone={turns.length ? 'processing' : 'neutral'}>{t('chatAdmin.liveCount', { n: turns.length })}</StatusTag>}
           </Space>
         }
         extra={
@@ -225,7 +229,7 @@ export default function ChatAdminPage() {
         }
       >
         {cfgErr && <Alert type="error" showIcon title={cfgErr} style={{ marginBottom: 12 }} />}
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           columns={columns}
@@ -256,13 +260,15 @@ export default function ChatAdminPage() {
         <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
           {t('chatAdmin.convsHint')}
         </Typography.Text>
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           dataSource={filteredConvs}
           pagination={{ pageSize: 15, size: 'small' }}
           scroll={{ x: 560 }}
           loading={!convsLoaded && !convsErr}
+          filtered={!!convSearch.trim() && !convsErr}
+          onClearFilters={() => setConvSearch('')}
           locale={{
             emptyText: convsErr ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('common.loadFailedContent')} />
@@ -318,9 +324,7 @@ export default function ChatAdminPage() {
         }
       >
         {viewLoading ? (
-          <div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}>
-            <Spin />
-          </div>
+          <LoadingPlaceholder minHeight="40vh" />
         ) : viewConv && !viewConv.started ? (
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('chatAdmin.notStarted')} />
         ) : viewTurns.length === 0 ? (
@@ -334,7 +338,7 @@ export default function ChatAdminPage() {
                     style={{
                       marginBottom: 8,
                       padding: '8px 12px',
-                      borderRadius: 8,
+                      borderRadius: 'var(--ant-border-radius)',
                       whiteSpace: 'pre-wrap',
                       background: 'var(--ant-color-fill-secondary)',
                     }}

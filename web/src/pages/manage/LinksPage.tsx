@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Checkbox, Empty, Form, Input, Modal, Popconfirm, Radio, Select, Space, Switch, Tag, Tooltip, Typography, theme } from 'antd'
+import { App, Button, Checkbox, Empty, Form, Input, Modal, Radio, Select, Space, Switch, Tag, Tooltip, Typography, theme } from 'antd'
 import { DeleteOutlined, EditOutlined, FolderAddOutlined, FolderOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core'
 import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers'
 import { SortableContext, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -17,6 +18,7 @@ import LoadGate from '../../components/LoadGate'
 import { APP_SHORTCUTS, builtinAppOptions, linkDisplayLabel, shortcutOfUrl, shortcutUrl, type ShortcutKey } from '../../lib/shortcuts'
 import { BUILTIN_PIN_PREFIX } from '../../lib/builtinApps'
 import useFormDraft from './useFormDraft'
+import { notifyError } from '../../lib/notify'
 
 const iconSelectOptions = LINK_ICON_OPTIONS.map(({ value }) => {
   const Icon = linkIconComponent(value)
@@ -127,7 +129,7 @@ export default function LinksPage() {
         items: orderedIds.map((k) => ({ kind: k.startsWith('g:') ? 'group' : 'link', id: Number(k.slice(2)) })),
       })
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         load({ quiet: true })
       })
 
@@ -195,7 +197,7 @@ export default function LinksPage() {
     setGroupOpen(false)
     message.success(t('common.saved'))
     await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setGroupSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setGroupSaving(false) }
   }
   const deleteGroup = async (id: number) => {
     await api.del(`/api/admin/link-groups/${id}`)
@@ -244,7 +246,7 @@ export default function LinksPage() {
     setOpen(false)
     message.success(t('common.saved'))
     await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
   const onValuesChange = (changed: Record<string, unknown>) => {
     // Changing the shortcut type invalidates any pinned target (its options come from the old type) —
@@ -300,7 +302,7 @@ export default function LinksPage() {
           gap: 8,
           flexWrap: 'wrap',
           padding: '8px 10px',
-          borderRadius: 8,
+          borderRadius: token.borderRadius,
           background: token.colorFillSecondary,
           border: `1px solid ${token.colorBorderSecondary}`,
           opacity: g.visible === false ? 0.55 : 1, // dim a hidden group so its state reads at a glance
@@ -322,9 +324,9 @@ export default function LinksPage() {
           <Switch size="small" checked={g.visible !== false} onChange={(v) => toggleGroupVisible(g, v)} />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openGroupEdit(g)} aria-label={t('common.edit')} />
-        <Popconfirm title={t('links.deleteGroupConfirm')} onConfirm={() => deleteGroup(g.id)}>
+        <Confirm title={t('links.deleteGroupConfirm')} onConfirm={() => deleteGroup(g.id)} okText={t('links.deleteGroupAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       </div>
     )
   }
@@ -337,10 +339,12 @@ export default function LinksPage() {
         style={{
           display: 'flex',
           alignItems: 'center',
+          // Wraps on a narrow screen rather than pushing the actions past the edge.
+          flexWrap: 'wrap',
           gap: 10,
           padding: '6px 10px',
           paddingInlineStart: grouped ? 30 : 10, // indent grouped links to show nesting
-          borderRadius: 8,
+          borderRadius: token.borderRadius,
           border: `1px solid ${token.colorBorderSecondary}`,
           background: token.colorBgContainer,
           opacity: l.visible === false ? 0.55 : 1, // dim a hidden entry so its state reads at a glance
@@ -348,11 +352,11 @@ export default function LinksPage() {
       >
         <DragHandle label={t('common.reorder')} />
         <Icon />
-        <Typography.Text style={{ minWidth: 120, flexShrink: 0 }} ellipsis>
+        <Typography.Text style={{ minWidth: 0, flex: '0 1 auto' }} ellipsis>
           {linkDisplayLabel(l, t)}
         </Typography.Text>
         {!l.label.trim() && <Tag style={{ flexShrink: 0 }}>{t('links.labelAuto')}</Tag>}
-        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
+        <span style={{ flex: '1 1 120px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{urlDisplay(l.url)}</span>
         {l.newTab === false ? null : (
           <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
             {t('links.newTab')}
@@ -362,9 +366,9 @@ export default function LinksPage() {
           <Switch size="small" checked={l.visible !== false} onChange={(v) => toggleLinkVisible(l, v)} />
         </Tooltip>
         <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(l)} aria-label={t('common.edit')} />
-        <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(l.id)}>
+        <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(l.id)} okText={t('links.deleteAction')}>
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       </div>
     )
   }

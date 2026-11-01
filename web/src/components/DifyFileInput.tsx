@@ -1,10 +1,11 @@
 import { useRef, useState } from 'react'
-import { App, Button, Upload } from 'antd'
+import { Button, Upload } from 'antd'
 import type { UploadFile } from 'antd'
 import { UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
 import { MAX_FILE_BYTES, MAX_FILE_MB, fileLimit, type UploadedFile } from '../lib/difyInputs'
+import { notifyError } from '../lib/notify'
 
 // The run form's control for a Dify `file` / `file-list` input. A file cannot ride in the row the
 // way text does: it is uploaded the moment it is picked, and what the form then holds is the id
@@ -23,7 +24,6 @@ export default function DifyFileInput({
   onChange?: (v: UploadedFile[]) => void
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [uploading, setUploading] = useState(0)
   const limit = fileLimit(type)
 
@@ -53,7 +53,7 @@ export default function DifyFileInput({
       seqRef.current += 1
       commit([...listRef.current, { uid: `${r.file_id}-${seqRef.current}`, name: r.name || file.name, id: r.file_id }])
     } catch (e) {
-      message.error(errText(e, t, 'run.uploadFailed'))
+      notifyError(errText(e, t, 'run.uploadFailed'))
     } finally {
       heldRef.current -= 1
       setUploading((n) => n - 1)
@@ -62,11 +62,11 @@ export default function DifyFileInput({
 
   const beforeUpload = (file: File) => {
     if (file.size > MAX_FILE_BYTES) {
-      message.error(t('run.fileTooLarge', { name: file.name, mb: MAX_FILE_MB }))
+      notifyError(t('run.fileTooLarge', { name: file.name, mb: MAX_FILE_MB }))
       return Upload.LIST_IGNORE
     }
     if (listRef.current.length + heldRef.current >= limit) {
-      message.error(t('run.fileTooMany', { n: limit }))
+      notifyError(t('run.fileTooMany', { n: limit }))
       return Upload.LIST_IGNORE
     }
     heldRef.current += 1

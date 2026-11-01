@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
+import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, theme } from 'antd'
 import { AppstoreOutlined, AuditOutlined, DownOutlined, DownloadOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { ConnectionContent, ConnectionNotice } from './ConnectionBoundary'
@@ -35,6 +35,7 @@ import { isActiveTask } from '../lib/useMyTasks'
 import { useTaskCenter } from '../lib/useTaskCenter'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
+import { LoadingPlaceholder } from './LoadGate'
 
 const { Header, Content, Footer } = Layout
 
@@ -89,6 +90,13 @@ function AppShell() {
     const apps = { label: t('nav.apps'), to: '/apps' }
     if (p === '/apps') return [home, { label: t('nav.apps') }]
     if (p === '/apps/recurring') return [home, apps, { label: t('nav.recurring') }]
+    // The editor pages sit under the list. The list passes the task's name as router state; a deep
+    // link has only the id, so it gets the generic title.
+    if (p === '/apps/recurring/new' || /^\/apps\/recurring\/[^/]+$/.test(p)) {
+      const named = typeof (loc.state as { crumb?: unknown } | null)?.crumb === 'string' ? (loc.state as { crumb: string }).crumb : ''
+      const label = p === '/apps/recurring/new' ? t('recurring.new') : named || t('recurring.edit')
+      return [home, apps, { label: t('nav.recurring'), to: '/apps/recurring' }, { label }]
+    }
     if (p === '/apps/batch') return [home, apps, { label: t('nav.batch') }]
     if (p.startsWith('/apps/x/') || p.startsWith('/apps/v2/')) return [home, apps]
     if (p === '/queue') return [home, { label: t('nav.queue') }]
@@ -97,7 +105,7 @@ function AppShell() {
     if (p === '/forecast') return [home, { label: t('nav.forecast_record') }]
     if (p.startsWith('/stock/') || p.startsWith('/run/')) return [home, { label: decodeURIComponent(p.split('/')[2] || '') }]
     return []
-  }, [loc.pathname, t])
+  }, [loc.pathname, loc.state, t])
   const showCrumbs = crumbs.length > 0 && !onManage && !chatFocus
   // Reset the routed Suspense boundary when the top-level page changes, so navigating to a not-yet-
   // loaded chunk shows the spinner at once instead of freezing on the previous page (React 19 + RR7
@@ -446,7 +454,7 @@ function AppShell() {
               open={workbenchOpen}
               onOpenChange={setWorkbenchOpen}
               destroyOnHidden
-              styles={{ container: { padding: 12, borderRadius: 18 } }}
+              styles={{ container: { padding: 12, borderRadius: token.borderRadiusLG } }}
               content={
                 // The card grows with its tiles (see .rp-workbench-menu): a fixed width held three.
                 <div
@@ -733,7 +741,7 @@ function AppShell() {
         {/* Keyed by suspenseKey (above) so a cross-page navigation to a not-yet-loaded chunk shows the
             spinner immediately instead of freezing on the old page. A cached/prefetched route resolves
             synchronously, so this never flashes a spinner for an already-loaded page. */}
-        <Suspense key={suspenseKey} fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
+        <Suspense key={suspenseKey} fallback={<LoadingPlaceholder minHeight="40vh" />}>
           <ConnectionContent><Outlet /></ConnectionContent>
         </Suspense>
       </Content>

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, Form, Input, Modal, Select, Space, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { ApiOutlined, DeleteOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import type { Webhook, WebhooksResp } from '../../api/types'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 export default function WebhooksPage() {
   const { t } = useTranslation()
@@ -58,13 +62,13 @@ export default function WebhooksPage() {
       setOpen(false)
       message.success(t('webhook.msgAdded'))
       await load({ quiet: true })
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   const test = async (id: number) => {
     const r = await api.post<{ ok: boolean; status: number; error: string }>(`/api/admin/webhooks/${id}/test`)
     if (r.ok) message.success(t('webhook.msgTested', { status: r.status }))
-    else message.error(t('webhook.msgTestFailed', { error: r.error || r.status }))
+    else notifyError(t('webhook.msgTestFailed', { error: r.error || r.status }))
     load({ quiet: true })
   }
 
@@ -78,9 +82,9 @@ export default function WebhooksPage() {
     const ok = h.last_status >= 200 && h.last_status < 400
     const label = h.last_status ? String(h.last_status) : h.last_error || '—'
     return (
-      <Tag color={ok ? 'success' : 'error'} title={h.last_error}>
+      <StatusTag tone={ok ? 'success' : 'error'} title={h.last_error}>
         {label}
-      </Tag>
+      </StatusTag>
     )
   }
 
@@ -101,9 +105,9 @@ export default function WebhooksPage() {
           <Button size="small" icon={<SendOutlined />} onClick={() => test(h.id)}>
             {t('webhook.test')}
           </Button>
-          <Popconfirm title={t('webhook.deleteConfirm')} onConfirm={() => remove(h.id)}>
+          <Confirm title={t('webhook.deleteConfirm')} onConfirm={() => remove(h.id)} okText={t('webhook.deleteAction')}>
             <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-          </Popconfirm>
+          </Confirm>
         </Space>
       ),
     },
@@ -137,7 +141,7 @@ export default function WebhooksPage() {
         <Typography.Text type="secondary">{t('webhook.hint')}</Typography.Text>
         <Input.Search aria-label={t('manage.listSearch')} placeholder={t('manage.listSearch')} allowClear value={search} onChange={(e) => setSearch(e.target.value)} />
         <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={180} title={t('common.loadFailedContent')}>
-          <Table rowKey="id" size="small" dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
+          <CardTable rowKey="id" size="small" filtered={!!search.trim()} onClearFilters={() => setSearch('')} dataSource={hooks.filter((hook) => `${hook.url} ${hook.events.map(eventLabel).join(' ')} ${hook.events.join(' ')}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))} columns={cols} pagination={{ pageSize: 15, hideOnSinglePage: true, showSizeChanger: false }} scroll={{ x: 'max-content' }} />
         </LoadGate>
       </Space>
 

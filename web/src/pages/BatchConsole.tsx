@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Checkbox, InputNumber, Select, Space, Typography } from 'antd'
+import { Alert, App, Button, Card, Checkbox, InputNumber, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { PlayCircleOutlined } from '@ant-design/icons'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
 import type { BatchTarget, BatchTickets, RunPreset, RunPresetsResp } from '../api/types'
 import { BASE_MAX, visibleOn } from '../lib/batchUi'
-import { activeBatchRows, blankBatchRow, type BatchDraftRow } from '../lib/batchRows'
+import { submittedBatchRows, blankBatchRow, carryRowsToTarget, type BatchDraftRow } from '../lib/batchRows'
 import {
   noRunDefaults,
   readRunDefaults,
@@ -21,6 +21,9 @@ import QueueTable from '../components/QueueTable'
 import LoadGate from '../components/LoadGate'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import BatchRowsEditor from '../components/BatchRowsEditor'
+import BatchTargetPicker from '../components/BatchTargetPicker'
+import BatchExecutionFields from '../components/BatchExecutionFields'
+import { notifyError } from '../lib/notify'
 
 export default function BatchConsole() {
   const { t } = useTranslation()
@@ -96,17 +99,13 @@ export default function BatchConsole() {
 
   const enabledPresets = useMemo(() => presets.filter((p) => p.enabled), [presets])
   const target = useMemo(() => targets.find((tg) => tg.id === targetId), [targets, targetId])
-  const rows = useMemo(() => activeBatchRows(draftRows), [draftRows])
+  const rows = useMemo(() => submittedBatchRows(draftRows), [draftRows])
 
   // Keep values whose keys exist on the next workflow, which makes correcting an accidental
   // target choice cheap without ever assigning a value to a different column by position.
   const pickTarget = (v: number | undefined) => {
     const nextInputs = targets.find((tg) => tg.id === v)?.inputs || []
-    setDraftRows((current) => {
-      const filled = activeBatchRows(current)
-      if (filled.length === 0) return [blankBatchRow(nextInputs)]
-      return filled.map((row) => Object.fromEntries(nextInputs.map((input) => [input.key, row[input.key] ?? ''])))
-    })
+    setDraftRows((current) => carryRowsToTarget(current, nextInputs))
     setEditorValid(false)
     setTargetId(v)
   }
@@ -115,7 +114,7 @@ export default function BatchConsole() {
     if (!targetId || rows.length === 0) return
     const err = scheduleError(schedule)
     if (err) {
-      message.error(t(err))
+      notifyError(t(err))
       return
     }
     setSubmitting(true)
@@ -144,7 +143,7 @@ export default function BatchConsole() {
       setNotify(false)
       loadTickets() // an urgent run may have spent a ticket; the embedded queue self-refreshes
     } catch (e) {
-      message.error(errText(e, t) || t('batch.msg.startFailed'))
+      notifyError(errText(e, t) || t('batch.msg.startFailed'))
     } finally {
       setSubmitting(false)
     }
@@ -169,20 +168,7 @@ export default function BatchConsole() {
                 <Typography.Title level={5} className="rp-batch-compose-title">
                   {t('batch.editor.dataTitle')}
                 </Typography.Title>
-                <div className="rp-batch-target-picker">
-                  <Typography.Text>{t('batch.target')}</Typography.Text>
-                  <Select
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder={t('batch.selectTarget')}
-                    value={targetId}
-                    onChange={pickTarget}
-                    options={targets.map((tg) => ({
-                      value: tg.id,
-                      label: tg.plugin_name ? `${tg.name}（${tg.plugin_name}）` : tg.name,
-                    }))}
-                  />
-                </div>
+                <BatchTargetPicker targets={targets} value={targetId} onChange={pickTarget} />
                 {target ? (
                   <BatchRowsEditor
                     key={`${target.id}:${editorReset}`}
@@ -190,6 +176,7 @@ export default function BatchConsole() {
                     rows={draftRows}
                     onChange={setDraftRows}
                     onValidityChange={setEditorValid}
+                    widthsKey={`rows-${target.id}`}
                   />
                 ) : (
                   <div className="rp-batch-editor-empty">
@@ -202,15 +189,12 @@ export default function BatchConsole() {
                 <Typography.Title level={5} className="rp-batch-compose-title">
                   {t('run.settings')}
                 </Typography.Title>
-                <div className="rp-batch-setting-fields">
-                  <label>
-                    <Typography.Text>{t('batch.maxRetries')}</Typography.Text>
-                    <InputNumber min={0} max={5} value={maxRetries} onChange={(v) => setMaxRetries(v ?? 0)} />
-                  </label>
-                  <label>
-                    <Typography.Text>{t('batch.rowConcurrency')}</Typography.Text>
-                    <InputNumber min={1} max={20} value={rowConcurrency} onChange={(v) => setRowConcurrency(v ?? 1)} />
-                  </label>
+                <BatchExecutionFields
+                  maxRetries={maxRetries}
+                  onMaxRetries={setMaxRetries}
+                  rowConcurrency={rowConcurrency}
+                  onRowConcurrency={setRowConcurrency}
+                >
                   {admin && (
                     <label>
                       <Typography.Text>{t('batch.priorityLabel')}</Typography.Text>
@@ -223,7 +207,7 @@ export default function BatchConsole() {
                       />
                     </label>
                   )}
-                </div>
+                </BatchExecutionFields>
 
                 <RunScheduleControls
                   value={schedule}

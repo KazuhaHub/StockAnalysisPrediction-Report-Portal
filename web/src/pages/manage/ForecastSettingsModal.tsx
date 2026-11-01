@@ -3,6 +3,8 @@ import { App, Button, Modal, Select, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { ForecastSettings } from '../../api/types'
+import { notifyError } from '../../lib/notify'
+import useLeaveGuard from './useLeaveGuard'
 
 // The evaluator's settings, as a modal opened from the verification page's header.
 //
@@ -38,6 +40,11 @@ export default function ForecastSettingsModal({
     }
   }, [open, value.bench, value.bench_next, value.fallback])
 
+  // Dirty means the draft differs from what the page last loaded, so a save that the page then
+  // reloads (or a close) leaves it clean without any baseline to keep in step.
+  const dirty = open && (bench !== (value.bench_next || value.bench) || fallback !== (value.fallback || 'off'))
+  const close = useLeaveGuard(dirty, open && busy, onClose)
+
   const benchOptions = value.bench_codes.map((code) => ({
     value: code,
     label: t(`forecast.bench.${code}`),
@@ -61,7 +68,7 @@ export default function ForecastSettingsModal({
     } catch (e) {
       // The server owns the benchmark vocabulary (an index with a daily series), so its refusal is
       // shown with its own code — err.forecast_bad_bench — rather than a generic failure.
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -75,7 +82,7 @@ export default function ForecastSettingsModal({
       onSaved()
       onClose()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -85,7 +92,7 @@ export default function ForecastSettingsModal({
     <Modal
       title={t('forecast.settings.title')}
       open={open}
-      onCancel={onClose}
+      onCancel={close}
       onOk={save}
       confirmLoading={busy}
       okText={t('common.save')}

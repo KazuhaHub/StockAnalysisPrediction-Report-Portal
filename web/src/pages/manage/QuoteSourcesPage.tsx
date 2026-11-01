@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, ConfigProvider, InputNumber, Space, Switch, Tag, Typography } from 'antd'
 import { ClearOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -13,6 +14,9 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import VendorSchedulePanel, { type VendorRatePolicy, type VendorScheduleStatus } from './VendorSchedulePanel'
 import QuoteTrafficPanel, { type QuoteDisplayTraffic } from './QuoteTrafficPanel'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // 管理 → 行情源: the console for the compiled-in quote vendors.
 //
@@ -315,14 +319,13 @@ export default function QuoteSourcesPage() {
     try {
       if (ledger?.ledgerPrimary && !rows.some((r) => r.enabled && r.source === ledger.ledgerPrimary)) {
         const confirmed = await new Promise<boolean>((resolve) => {
-          const confirmation = modal.confirm({
+          const confirmation = confirmAction(modal, {
             title: t('quoteAdmin.ledgerRemoveTitle'),
-            content: t('quoteAdmin.ledgerRemoveBody', { source: sourceLabel(ledger.ledgerPrimary) }),
+            description: t('quoteAdmin.ledgerRemoveBody', { source: sourceLabel(ledger.ledgerPrimary) }),
             okText: t('quoteAdmin.ledgerRemoveConfirm'),
-            cancelText: t('common.cancel'),
             onOk: () => resolve(true),
             onCancel: () => resolve(false),
-          })
+          }, t)
           cancelConfirmation.current = () => { confirmation.destroy(); resolve(false) }
         })
         cancelConfirmation.current = null
@@ -338,7 +341,7 @@ export default function QuoteSourcesPage() {
       if (st && Array.isArray(st.sources)) apply(st)
       else await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       savePending.current = false
       if (active.current) setSaving(false)
@@ -357,7 +360,7 @@ export default function QuoteSourcesPage() {
       setCacheBytes(wireNumber(st.cacheBytes))
       setDisplayTraffic(st.displayTraffic)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -371,7 +374,7 @@ export default function QuoteSourcesPage() {
       setCacheEntries(wireNumber(st.cacheEntries))
       setCacheBytes(wireNumber(st.cacheBytes))
     } catch (e) {
-      if (active.current) message.error(errText(e, t))
+      if (active.current) notifyError(errText(e, t))
     } finally {
       if (active.current) setRefreshingTraffic(false)
     }
@@ -525,12 +528,12 @@ export default function QuoteSourcesPage() {
       width: 130,
       render: (_: unknown, r: QuoteAdminSource) =>
         r.consecutiveFailures > 0 ? (
-          <Tag color="red">{r.consecutiveFailures}</Tag>
+          <StatusTag tone="error">{r.consecutiveFailures}</StatusTag>
         ) : stampOrNever(r.lastSuccess) ? (
           // Both halves are required for OK. A source nobody has called yet has no failures either,
           // and a green OK beside "last success: never" is this page inventing a health check that
           // never ran — which is the state a source switched off months ago is actually in.
-          <Tag color="green">{t('quoteAdmin.ok')}</Tag>
+          <StatusTag tone="success">{t('quoteAdmin.ok')}</StatusTag>
         ) : null,
     },
     {
@@ -623,7 +626,7 @@ export default function QuoteSourcesPage() {
                 )
               }
             >
-              <Table<QuoteAdminSource>
+              <CardTable<QuoteAdminSource>
                 rowKey="source"
                 size="small"
                 dataSource={rows}

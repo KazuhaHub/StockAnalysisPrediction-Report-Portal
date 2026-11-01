@@ -48,14 +48,19 @@ type AuditEntry struct {
 // AuditFilter narrows the log. The zero value is everything.
 type AuditFilter struct {
 	Actor      string
+	Category   string // an auditCategories key, or "other"
 	Action     string
 	TargetType string
 	TargetID   string
 	IP         string
 	Q          string // substring of the detail
-	Since      string // "YYYY-MM-DD"; inclusive
-	Limit      int
-	Offset     int
+	Since      string // "YYYY-MM-DD"; inclusive. The older form of From, kept for links that carry it.
+	// From and To bound the time range, both inclusive; the zero value leaves that end open.
+	From, To time.Time
+	// The negated filters: rows whose field differs, a row without the field included.
+	NotAction, NotActor, NotIP, NotTargetID string
+	Limit                                   int
+	Offset                                  int
 }
 
 // LoginActivity is the small, self-service view of a successful authentication event. The full
@@ -339,6 +344,20 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 	if f.Action != "" {
 		add("action=?", f.Action)
 	}
+	if f.Category != "" {
+		// "other" is everything no category declares; a key this build does not know matches nothing
+		// rather than quietly showing the whole log.
+		list, known := auditCategoryActions(f.Category)
+		switch {
+		case f.Category == auditCategoryOther:
+			// COALESCE so a row with no action at all lands here rather than in no category.
+			add("COALESCE(action,'') NOT IN ("+placeholders(len(auditVocabulary))+")", anyStrings(auditVocabulary)...)
+		case known:
+			add("action IN ("+placeholders(len(list))+")", anyStrings(list)...)
+		default:
+			add("1=0")
+		}
+	}
 	if f.TargetType != "" {
 		add("target_type=?", f.TargetType)
 	}
@@ -354,6 +373,21 @@ func (s *Store) ListAudit(f AuditFilter) ([]AuditEntry, int) {
 	}
 	if f.Since != "" {
 		add("at >= ?", f.Since)
+	}
+	if !f.From.IsZero() {
+		cond, v := auditAt(">=", f.From)
+		add(cond, v...)
+	}
+	if !f.To.IsZero() {
+		cond, v := auditAt("<=", f.To)
+		add(cond, v...)
+	}
+	for _, neg := range []struct{ col, v string }{
+		{"action", f.NotAction}, {"actor", f.NotActor}, {"ip", f.NotIP}, {"target_id", f.NotTargetID},
+	} {
+		if neg.v != "" {
+			add("COALESCE("+neg.col+",'') <> ?", neg.v)
+		}
 	}
 	cond := strings.Join(where, " AND ")
 
@@ -417,39 +451,108 @@ func (s *Store) DeleteAuditBefore(cutoff time.Time) (int64, error) {
 // Rewriting the legacy stamps would be a runtime data conversion, which ADR 0034 rules out.
 
 func auditBefore(cutoff time.Time) (string, []any) {
-	return "at <> '' AND ((at " + likeT + " AND at < ?) OR (at NOT " + likeT + " AND at < ?))",
-		[]any{cutoff.UTC().Format(time.RFC3339), cutoff.Format("2006-01-02 15:04:05")}
+	return auditAt("<", cutoff)
+}
+
+// auditAt compares each row's stamp with an instant in the row's own format: UTC RFC 3339 for
+// current rows, the host's local wall clock for legacy ones (see auditBefore).
+func auditAt(op string, t time.Time) (string, []any) {
+	return "at <> '' AND ((at " + likeT + " AND at " + op + " ?) OR (at NOT " + likeT + " AND at " + op + " ?))",
+		[]any{t.UTC().Format(time.RFC3339), t.In(time.Local).Format("2006-01-02 15:04:05")}
 }
 
 // likeT distinguishes the two formats: an RFC3339 stamp has a T between the date and the time, a
 // legacy one has a space.
 const likeT = "LIKE '%T%'"
 
+// auditCategory is one heading of the console's action filter: an area of the portal and the events
+// it records, in the order an operator reads them (sign-in, then failed sign-in, then lockout), not
+// sorted by key. Picking a category alone filters to all of its events.
+type auditCategory struct {
+	Key     string   `json:"key"`
+	Actions []string `json:"actions"`
+}
+
+// auditCategoryOther holds actions present in the data that no category declares: rows written by an
+// older build, or by one that has since retired an action. It is offered only when there are some.
+const auditCategoryOther = "other"
+
+// auditCategories is every action this build can write, grouped. Each action sits in exactly one
+// category; a new action goes into the category of the area that writes it.
+var auditCategories = []auditCategory{
+	{"auth", []string{
+		AuditLogin, AuditLoginFailed, AuditLockout, AuditLogout, AuditStepUp,
+		AuditSessionRevoke, AuditSessionsRevoke,
+		AuditPasswordChange, AuditPasswordReset, AuditMFAChange,
+		AuditIdentityLink, AuditIdentityUnlink, AuditLoginHistoryRetention,
+	}},
+	{"accounts", []string{
+		AuditUserCreate, AuditUserChange, AuditUserDelete,
+		AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
+		AuditGrantChange, AuditPolicyChange,
+	}},
+	{"reports", []string{
+		AuditReportRead, AuditReportIngest, AuditReportCreate, AuditReportEdit, AuditReportRestore, AuditReportDelete,
+	}},
+	{"runs", []string{AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete, AuditTargetChange}},
+	{"forecast", []string{
+		AuditForecastAuto, AuditForecastEvalRun, AuditForecastDryGate, AuditForecastBench,
+		AuditForecastPopulation, AuditForecastRepair, AuditForecastReader, AuditForecastFallback,
+		AuditForecastAlert, AuditForecastAlertTest, AuditPredictionsRejected, AuditPredictionsStoreFailed,
+	}},
+	{"apps", []string{
+		AuditAppInstall, AuditAppDelete, AuditAppOrder, AuditAppAccess, AuditAppBackendChange, AuditAppBackendDelete,
+		AuditTokenCreate, AuditTokenDelete, AuditWebhookCreate, AuditWebhookDelete,
+	}},
+	{"notifications", []string{
+		AuditNotificationChange, AuditNotificationPublish, AuditNotificationDispatch,
+		AuditNotificationReview, AuditNotificationReplay, AuditNotificationTest,
+	}},
+	{"exports", []string{AuditExportCreate, AuditExportDownload}},
+	{"data", []string{AuditQuoteOrder}},
+}
+
 // auditVocabulary is every action this build can write. The filter offers these WHETHER OR NOT
 // they have happened, because a dropdown built only from the data cannot distinguish "not
 // recorded" from "has not happened yet" — a freshly upgraded portal would offer one option and
 // look like a log that records one thing.
-var auditVocabulary = []string{
-	AuditReportRead, AuditReportIngest, AuditReportCreate, AuditReportEdit, AuditReportRestore,
-	AuditReportDelete,
-	AuditLogin, AuditLoginFailed, AuditLockout, AuditLogout,
-	AuditSessionRevoke, AuditSessionsRevoke, AuditLoginHistoryRetention,
-	AuditPasswordChange, AuditPasswordReset, AuditMFAChange,
-	AuditIdentityLink, AuditIdentityUnlink, AuditStepUp,
-	AuditUserCreate, AuditUserChange, AuditUserDelete,
-	AuditGroupCreate, AuditGroupChange, AuditGroupDelete,
-	AuditGrantChange, AuditPolicyChange, AuditQuoteOrder,
-	AuditRunSubmit, AuditRunCancel, AuditRunChange, AuditRunDelete,
-	AuditTokenCreate, AuditTokenDelete,
-	AuditAppInstall, AuditAppDelete, AuditAppOrder, AuditAppAccess, AuditAppBackendChange, AuditAppBackendDelete,
-	AuditWebhookCreate, AuditWebhookDelete,
-	AuditTargetChange,
-	AuditNotificationChange, AuditNotificationTest, AuditNotificationReplay, AuditNotificationReview, AuditNotificationDispatch,
-	AuditNotificationPublish,
-	AuditPredictionsRejected, AuditPredictionsStoreFailed, AuditForecastAuto, AuditForecastPopulation,
-	AuditForecastBench, AuditForecastRepair, AuditForecastEvalRun, AuditForecastDryGate,
-	AuditForecastAlert, AuditForecastAlertTest, AuditForecastReader, AuditForecastFallback,
-	AuditExportCreate, AuditExportDownload,
+var auditVocabulary = func() []string {
+	var out []string
+	for _, c := range auditCategories {
+		out = append(out, c.Actions...)
+	}
+	return out
+}()
+
+// auditCategoryActions is the actions a category key stands for; ok is false for a key this build
+// does not know. "other" is resolved against the data, not here.
+func auditCategoryActions(key string) (actions []string, ok bool) {
+	for _, c := range auditCategories {
+		if c.Key == key {
+			return c.Actions, true
+		}
+	}
+	return nil, false
+}
+
+// AuditCategories is the filter's grouping: every declared category, then "other" for actions in
+// the data that none declares, when there are any.
+func (s *Store) AuditCategories() []auditCategory {
+	out := append([]auditCategory(nil), auditCategories...)
+	known := map[string]bool{}
+	for _, a := range auditVocabulary {
+		known[a] = true
+	}
+	var other []string
+	for _, a := range s.auditActionsPresent() {
+		if !known[a] {
+			other = append(other, a)
+		}
+	}
+	if len(other) > 0 {
+		out = append(out, auditCategory{auditCategoryOther, other})
+	}
+	return out
 }
 
 // AuditActions lists what the filter offers: this build's whole vocabulary, plus anything present
@@ -699,16 +802,36 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+	// The range is two RFC 3339 instants. A malformed one is refused rather than ignored, because
+	// ignoring it would answer with the whole log as though it were the range asked for.
+	var bounds [2]time.Time
+	for i, key := range []string{"from", "to"} {
+		if v := strings.TrimSpace(q.Get(key)); v != "" {
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				jsonError(w, http.StatusBadRequest, key+" must be an RFC 3339 instant")
+				return
+			}
+			bounds[i] = t
+		}
+	}
 	rows, total := s.st.ListAudit(AuditFilter{
-		Actor:      strings.TrimSpace(q.Get("actor")),
-		Action:     strings.TrimSpace(q.Get("action")),
-		TargetType: strings.TrimSpace(q.Get("target_type")),
-		TargetID:   strings.TrimSpace(q.Get("target_id")),
-		IP:         strings.TrimSpace(q.Get("ip")),
-		Q:          strings.TrimSpace(q.Get("q")),
-		Since:      strings.TrimSpace(q.Get("since")),
-		Limit:      limit,
-		Offset:     offset,
+		From:        bounds[0],
+		To:          bounds[1],
+		NotAction:   strings.TrimSpace(q.Get("not_action")),
+		NotActor:    strings.TrimSpace(q.Get("not_actor")),
+		NotIP:       strings.TrimSpace(q.Get("not_ip")),
+		NotTargetID: strings.TrimSpace(q.Get("not_target_id")),
+		Actor:       strings.TrimSpace(q.Get("actor")),
+		Category:    strings.TrimSpace(q.Get("category")),
+		Action:      strings.TrimSpace(q.Get("action")),
+		TargetType:  strings.TrimSpace(q.Get("target_type")),
+		TargetID:    strings.TrimSpace(q.Get("target_id")),
+		IP:          strings.TrimSpace(q.Get("ip")),
+		Q:           strings.TrimSpace(q.Get("q")),
+		Since:       strings.TrimSpace(q.Get("since")),
+		Limit:       limit,
+		Offset:      offset,
 	})
 	// OU ids are meaningless on screen; resolve them once here rather than per row in the client.
 	ouNames := map[string]string{}
@@ -724,8 +847,10 @@ func (s *Server) apiAdminAudit(w http.ResponseWriter, r *http.Request, user stri
 	}
 	writeJSON(w, map[string]any{
 		"items": rows, "total": total,
-		"actions":  s.st.AuditActions(), // built from the data, so an older build's rows still filter
-		"ou_names": ouNames,
+		"actions": s.st.AuditActions(), // built from the data, so an older build's rows still filter
+		// The same actions grouped for the filter, with "other" for what no category declares.
+		"categories": s.st.AuditCategories(),
+		"ou_names":   ouNames,
 		// The stamps are UTC; the panel timezone is what they are READ in. Sent with the page rather
 		// than fetched separately, because a time column cannot render without it.
 		"timezone": s.st.GetSetting("timezone", ""),

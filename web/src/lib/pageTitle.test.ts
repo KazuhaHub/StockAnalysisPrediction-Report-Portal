@@ -33,6 +33,11 @@ describe('what the browser tab says', () => {
     expect(routeTitle('/manage', t)).toBe('nav.manage')
   })
 
+  it('names the recurring-task editor pages by what they do', () => {
+    expect(routeTitle('/apps/recurring/new', t)).toBe('recurring.new')
+    expect(routeTitle('/apps/recurring/7', t)).toBe('recurring.edit')
+  })
+
   it('ignores a trailing slash, which the router treats as the same route', () => {
     expect(routeTitle('/queue/', t)).toBe('nav.queue')
     expect(routeTitle('/', t)).toBe('')

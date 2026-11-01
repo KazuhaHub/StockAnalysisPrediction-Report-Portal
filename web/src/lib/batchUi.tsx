@@ -5,24 +5,25 @@ import { useTranslation } from 'react-i18next'
 
 import { ALL_SURFACES } from '../api/types'
 import type { BatchJob, BatchTarget, Surface } from '../api/types'
+import StatusTag, { type StatusTone } from '../components/StatusTag'
 
 // Shared presentation for run/queue views. Priority is a Slurm-style number now, not a
 // tier: a run stores "urgent" or a base number 0..100 (docs/adr/0008-multifactor-priority.md).
 
 export const BASE_MAX = 100
-export const JOB_STATUS_COLOR: Record<string, string> = {
-  queued: 'default',
+export const JOB_STATUS_TONE: Record<string, StatusTone> = {
+  queued: 'waiting',
   running: 'processing',
   cancelling: 'warning',
-  cancelled: 'default',
+  cancelled: 'neutral',
   finished: 'success',
-  // 'untracked': the run reached Dify but its outcome couldn't be confirmed — neutral gold (not a
-  // red failure), and never re-run to avoid a duplicate charged run. See docs/adr/0015-reconcile-not-retry-untracked.md.
+  // 'untracked': the run reached Dify but its outcome couldn't be confirmed — a warning (not a
+  // failure), and never re-run to avoid a duplicate charged run. See docs/adr/0015-reconcile-not-retry-untracked.md.
   untracked: 'warning',
 }
 
 export function statusTag(t: TFunction, s: string) {
-  const tag = <Tag color={JOB_STATUS_COLOR[s] || 'default'}>{t(`batch.status.${s}`)}</Tag>
+  const tag = <StatusTag tone={JOB_STATUS_TONE[s] ?? 'neutral'}>{t(`batch.status.${s}`)}</StatusTag>
   // 'untracked' is unusual enough to warrant an inline explanation on hover.
   if (s === 'untracked') {
     return <Tooltip title={t('batch.status.untrackedHint')}>{tag}</Tooltip>
@@ -74,8 +75,8 @@ export function executionTags(t: TFunction, j: BatchJob) {
 }
 
 export function queueStatusTag(t: TFunction, j: BatchJob) {
-  if (j.window_blocked) return <Tag color="purple">{t('queue.avoidingWindow')}</Tag>
-  if (j.status === 'queued' && j.scheduled) return <Tag color="purple" title={j.run_at}>{t('queue.scheduled')}</Tag>
+  if (j.window_blocked) return <StatusTag tone="waiting">{t('queue.avoidingWindow')}</StatusTag>
+  if (j.status === 'queued' && j.scheduled) return <StatusTag tone="waiting" title={j.run_at}>{t('queue.scheduled')}</StatusTag>
   return statusTag(t, j.status)
 }
 

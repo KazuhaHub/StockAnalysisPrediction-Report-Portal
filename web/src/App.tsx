@@ -7,6 +7,7 @@ import { AnnouncementsProvider } from './announcements'
 import { FavoritesProvider } from './favorites'
 import { AppAccessProvider, RequireAppOpen } from './appAccess'
 import { lazyRetry } from './lib/lazyRetry'
+import { RADIUS } from './theme/radius'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionBoundary, { ConnectionContent, ConnectionNotice } from './components/ConnectionBoundary'
@@ -15,6 +16,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import RegisterPage from './pages/RegisterPage'
 import ForgotPage from './pages/ForgotPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
+import SpinRing from './components/SpinRing'
 
 // Route pages are lazy-loaded (Suspense boundary lives in AppLayout), so the first
 // paint only ships the shell + landing page; admin / batch / webhook code and the
@@ -66,6 +68,7 @@ const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
 const AppCredentialsPage = lazyRetry(() => import('./pages/manage/AppCredentialsPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
+const RecurringEditor = lazyRetry(() => import('./pages/RecurringEditor'))
 const QueuePage = lazyRetry(() => import('./pages/QueuePage'))
 const ChatPage = lazyRetry(() => import('./pages/ChatPage'))
 
@@ -196,16 +199,25 @@ function AppRoutes() {
             </RequirePerm>
           }
         />
+        {/* The list and the task editor pages share one gate and one draft boundary: the editor
+            registers its unsaved edits, and the boundary carries that to route changes (Back, a
+            breadcrumb link, the browser's back button). */}
         <Route
           path="/apps/recurring"
           element={
             <RequirePerm perm="run_batch">
               <RequireAppOpen appKey="builtin:recurring">
-                <RecurringConsole />
+                <AdminDraftBoundary>
+                  <Outlet />
+                </AdminDraftBoundary>
               </RequireAppOpen>
             </RequirePerm>
           }
-        />
+        >
+          <Route index element={<RecurringConsole />} />
+          <Route path="new" element={<RecurringEditor />} />
+          <Route path=":id" element={<RecurringEditor />} />
+        </Route>
         <Route
           path="/queue"
           element={
@@ -277,15 +289,29 @@ function Themed() {
     <ConfigProvider
       locale={antd}
       // One loading spinner everywhere: the same ring as the boot splash (index.html),
-      // instead of antd's default 4-dot spinner. Sizing tracks Spin's size via CSS.
-      spin={{ indicator: <span className="rp-spin-ring" /> }}
+      // instead of antd's default 4-dot spinner. Sizing tracks Spin's size (antd's ant-spin-dot
+      // class, which SpinRing keeps); SpinRing also keeps every ring in phase, so one replacing
+      // another does not restart its turn.
+      spin={{ indicator: <SpinRing /> }}
       theme={{
         algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: { colorPrimary: '#1677ff', borderRadius: 8 },
+        // One radius scale for the whole portal; index.css and inline styles use these tokens rather
+        // than numbers of their own: XS 4 (hairlines, bars), SM 6 (tags, small chips), base 8
+        // (controls), LG 12 (cards, dialogs, drawers, panels). Pills and circles stay 999px / 50%.
+        token: { colorPrimary: '#1677ff', borderRadius: RADIUS.base, borderRadiusXS: RADIUS.xs, borderRadiusSM: RADIUS.sm, borderRadiusLG: RADIUS.lg },
         // antd 6 gives a left/right-titled Divider a leading rail (orientationMargin token,
         // default 5%) so the text floats inward. Our section headers want the title flush to
         // the edge, so zero the token globally — the native way, no per-Divider prop or CSS.
-        components: { Divider: { orientationMargin: 0 } },
+        // LG (12) is for surfaces. Controls keep the base radius at every size, so a large button
+        // or input does not round more than the default one beside it.
+        components: {
+          Divider: { orientationMargin: 0 },
+          Button: { borderRadiusLG: RADIUS.base },
+          Input: { borderRadiusLG: RADIUS.base },
+          InputNumber: { borderRadiusLG: RADIUS.base },
+          Select: { borderRadiusLG: RADIUS.base },
+          DatePicker: { borderRadiusLG: RADIUS.base },
+        },
         // A cssVar key PER THEME, not the single useId `cssVar: true` gives. antd caches the
         // generated CSS variables under this key; with one shared key, switching the algorithm at
         // runtime does not regenerate them, so neutral tokens (default button/select/tag fills)

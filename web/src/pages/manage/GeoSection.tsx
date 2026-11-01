@@ -4,6 +4,8 @@ import { Alert, App, Button, Divider, Input, InputNumber, Select, Space, Switch,
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { GeoStatus, GeoUpdateState } from '../../api/types'
+import { notifyError } from '../../lib/notify'
+import { usePendingSettings } from './AdminDraftBoundary'
 
 /**
  * A source is described by what it needs, not by what it is called: the form asks for an edition
@@ -77,6 +79,12 @@ export default function GeoSection() {
     url: '',
   })
   const [key, setKey] = useState<string | null>(null) // null = untouched, so it is not sent
+  // The form values as last loaded from or saved to the server; null until the first load. A typed
+  // credential is an edit in itself, since it is never part of the loaded values.
+  const [baseline, setBaseline] = useState<string | null>(null)
+  const [loadTick, setLoadTick] = useState(0)
+  const dirty = baseline !== null && (JSON.stringify(d) !== baseline || !!key)
+  usePendingSettings(dirty, busy)
 
   const poll = useCallback(() => {
     api
@@ -99,10 +107,15 @@ export default function GeoSection() {
           edition: r.update.edition ?? p.edition,
           url: r.update.url ?? '',
         }))
+        setLoadTick((n) => n + 1)
       })
       .catch(() => {})
   }, [])
   useEffect(poll, [poll])
+  // Taken from the render that holds the freshly loaded values, so it matches them exactly.
+  useEffect(() => {
+    if (loadTick > 0) setBaseline(JSON.stringify(d))
+  }, [loadTick]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Only while a download runs, and it stops on its own: a page left open must not poll for ever.
   useEffect(() => {
@@ -126,10 +139,11 @@ export default function GeoSection() {
     try {
       await api.post('/api/admin/geoip', body())
       setKey(null)
+      setBaseline(JSON.stringify(d))
       message.success(t('common.saved'))
       poll()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -142,10 +156,11 @@ export default function GeoSection() {
     try {
       await api.post('/api/admin/geoip', body())
       setKey(null)
+      setBaseline(JSON.stringify(d))
       await api.post('/api/admin/geoip/update', {})
       poll()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }

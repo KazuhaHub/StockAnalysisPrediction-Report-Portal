@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Descriptions, Modal, Popconfirm, Space, Spin, Typography } from 'antd'
+import { Alert, Button, Descriptions, Modal, Space, Spin, Typography } from 'antd'
 import { CloseCircleOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api } from '../api/client'
 import type { ExportJob, TaskItem } from '../api/types'
 import { countConditions } from '../lib/exportFilter'
@@ -78,17 +79,18 @@ export default function ExportDetailModal({ task, onClose, onCancel }: ExportDet
               </Button>
             )}
             {active && (
-              <Popconfirm
+              <Confirm
                 title={t('export.history.cancelConfirm')}
                 onConfirm={async () => {
                   await onCancel(task)
                   onClose()
                 }}
+                okText={t('export.history.cancelAction')}
               >
                 <Button danger icon={<CloseCircleOutlined />}>
                   {t('tasks.cancel')}
                 </Button>
-              </Popconfirm>
+              </Confirm>
             )}
           </Space>
         ) : null
