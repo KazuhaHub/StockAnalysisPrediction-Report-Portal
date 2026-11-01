@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axe from 'axe-core'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MemoryRouter } from 'react-router'
 import AppPlatformInstallPanel from './AppPlatformInstallPanel'
 
@@ -18,6 +21,7 @@ const digest = 'b'.repeat(64)
 const root = '/api/admin/app-platform'
 const storageKey = 'portal.app-install.pending:admin'
 const translate = mock.t
+const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'index.css'), 'utf8')
 const review = () => ({ plan_id: plan, plan_sha256: digest, expires_ms: String(Date.now() + 900000), review: { action: 'install', app_id: 'notes', publisher_id: 'publisher', release_sha256: release, declined_capabilities: ['storage.files'], audience: [] } })
 const updateReview = () => ({
   plan_id: plan,
@@ -137,6 +141,16 @@ describe('application installation confirmation', () => {
     expect(screen.getAllByText('notifications.publish').length).toBeGreaterThan(0)
     expect(screen.getByText('appPlatform.resources')).toBeTruthy()
     expect(screen.getByText('appPlatform.resourceSummary')).toBeTruthy()
+  })
+
+  it('keeps long lifecycle metadata in bounded local scrollers', async () => {
+    mount()
+    await preview()
+    expect(document.querySelector('.rp-platform-release-table')).not.toBeNull()
+    expect(document.querySelector('.rp-platform-review')).not.toBeNull()
+    expect(css).toMatch(/\.rp-platform-release-table \.ant-table-content\s*\{[^}]*overflow-x:\s*auto/)
+    expect(css).toMatch(/\.rp-platform-release-table :is\(th, td\)\s*\{[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toMatch(/\.rp-platform-review \.ant-descriptions-item-content\s*\{[^}]*min-width:\s*0/)
   })
 
   it('persists a confirmed request and retries the exact key after lost response and reload', async () => {

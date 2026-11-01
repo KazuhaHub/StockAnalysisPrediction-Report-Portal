@@ -3139,6 +3139,17 @@ body {
 }
 .rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
 
+/* Application lifecycle management keeps wide package metadata inside the page. The table wraps
+   long names/digests instead of forcing the whole admin body sideways, and the confirmation dialog
+   owns its vertical scroll when permissions or recovery details exceed the viewport. */
+.rp-platform-release-table { min-width: 0; }
+.rp-platform-release-table .ant-table-content { overflow-x: auto; }
+.rp-platform-release-table :is(th, td) { vertical-align: top; overflow-wrap: anywhere; white-space: normal; }
+.rp-platform-release-table :is(.ant-space, .ant-tag, .ant-typography) { max-width: 100%; overflow-wrap: anywhere; }
+.rp-platform-review { min-width: 0; }
+.rp-platform-review .ant-descriptions-view { min-width: 0; }
+.rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */
 .rp-settings-content .rp-settings-panel .ant-card .ant-card { box-shadow: none; border-color: var(--ant-color-border-secondary); }
