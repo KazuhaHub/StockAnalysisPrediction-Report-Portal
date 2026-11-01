@@ -7,6 +7,20 @@ export interface PlatformRelease {
   version: string
   trust_revision: string
   display?: AppDisplay
+  compatibility?: {
+    platform_api: string
+    runner_protocol: string
+  }
+  platforms?: string[]
+  required_capabilities?: string[]
+  optional_capabilities?: string[]
+  resources?: {
+    memory_mib: number
+    cpu_millis: number
+    pids: number
+  }
+  data_schema?: number
+  backend?: boolean
   installable: boolean
   reason?: string
   installation_id?: string

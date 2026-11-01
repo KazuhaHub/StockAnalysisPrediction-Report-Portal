@@ -2,6 +2,8 @@ import {render,screen,waitFor,act,fireEvent} from '@testing-library/react'
 import {createMemoryRouter,RouterProvider} from 'react-router'
 import {useState,createContext,useContext} from 'react'
 import {beforeEach,afterEach,expect,test,vi} from 'vitest'
+import {ConfigProvider,theme} from 'antd'
+import axe from 'axe-core'
 import AppViewV2 from './AppViewV2'
 const prefs=vi.hoisted(()=>({lang:'zh-CN',dark:true}))
 const frames=vi.hoisted(()=>[] as any[])
@@ -13,7 +15,7 @@ const installation='00000000-0000-4000-8000-000000000001'
 const binding={installationId:installation,generation:'9007199254740993',policyRevision:'1',releaseSha256:'a'.repeat(64)}
 const response={source:`/app-documents/${installation}/${binding.generation}/1/${'a'.repeat(64)}/${'b'.repeat(64)}/index.html`,binding,capabilities:[],applicationId:'notes-sample',routes:[{id:'home',path:'/',layout:'document'}],layout:'document',timeZone:'Asia/Shanghai'}
 const routers:ReturnType<typeof createMemoryRouter>[]=[];
-function Page({path=`/apps/v2/${installation}`}:{path?:string}){const [router]=useState(()=>{const value=createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>}],{initialEntries:[path]});routers.push(value);return value});return <PrefsPulse.Provider value={prefs.lang+String(prefs.dark)}><RouterProvider router={router}/></PrefsPulse.Provider>}
+function Page({path=`/apps/v2/${installation}`,algorithm=theme.defaultAlgorithm}:{path?:string;algorithm?:typeof theme.defaultAlgorithm}){const [router]=useState(()=>{const value=createMemoryRouter([{path:'/apps/v2/:installation/*',element:<AppViewV2/>},{path:'/apps',element:<div>Apps home</div>}],{initialEntries:[path]});routers.push(value);return value});return <ConfigProvider theme={{algorithm}}><PrefsPulse.Provider value={prefs.lang+String(prefs.dark)}><RouterProvider router={router}/></PrefsPulse.Provider></ConfigProvider>}
 function page(){return <Page/>}
 beforeEach(()=>{routers.splice(0);frames.length=0;prefs.lang='zh-CN';prefs.dark=true;vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(response),{status:200})))})
 afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals()})
@@ -101,3 +103,32 @@ test('invalid query has a host-owned home recovery without refetching or forward
  fireEvent.click(screen.getByRole('button',{name:'apps.v2Home'}));await screen.findByTestId('v2-frame');
  expect(frames[frames.length-1].presentation.navigation).toMatchObject({path:'/',search:''});expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+test.each([
+ ['light',theme.defaultAlgorithm],
+ ['dark',theme.darkAlgorithm],
+])('has no axe violations for an open app in %s mode',async(_mode,algorithm)=>{
+ render(<Page algorithm={algorithm}/>)
+ await screen.findByTestId('v2-frame')
+ const result=await axe.run(document.body,{rules:{'color-contrast':{enabled:false},region:{enabled:false}}})
+ expect(result.violations).toEqual([])
+})
+
+test('an unavailable app exposes a keyboard-operable retry and never mounts executable content',async()=>{
+ let attempts=0
+ vi.stubGlobal('fetch',vi.fn(async()=>{
+  attempts++
+  return attempts===1
+   ? new Response('private failure',{status:503})
+   : new Response(JSON.stringify(response),{status:200})
+ }))
+ render(page())
+ const retry=await screen.findByRole('button',{name:'apps.v2Retry'})
+ retry.focus()
+ fireEvent.keyDown(retry,{key:'Enter',code:'Enter'})
+ fireEvent.keyUp(retry,{key:'Enter',code:'Enter'})
+ fireEvent.click(retry)
+ await screen.findByTestId('v2-frame')
+ expect(frames).toHaveLength(1)
+ expect(screen.queryByText(/private failure/)).toBeNull()
+})

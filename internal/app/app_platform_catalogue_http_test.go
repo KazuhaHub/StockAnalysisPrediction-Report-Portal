@@ -14,6 +14,18 @@ func testPlatformStagedCatalogueHTTP(t *testing.T, pg bool) {
 	if got.Code != 200 || !strings.Contains(got.Body.String(), release) || !strings.Contains(got.Body.String(), `"installable":true`) {
 		t.Fatal("verified release missing", got.Code, got.Body.String())
 	}
+	var catalogue struct {
+		Items []platformStagedSummary `json:"items"`
+	}
+	if json.Unmarshal(got.Body.Bytes(), &catalogue) != nil ||
+		len(catalogue.Items) != 1 ||
+		catalogue.Items[0].Compatibility.PlatformAPI == "" ||
+		catalogue.Items[0].Compatibility.RunnerProtocol == "" ||
+		catalogue.Items[0].RequiredCapabilities == nil ||
+		catalogue.Items[0].OptionalCapabilities == nil ||
+		catalogue.Items[0].DataSchema < 1 {
+		t.Fatal("verified release review metadata missing", got.Body.String())
+	}
 	for _, digest := range []string{release, strings.Repeat("f", 64)} {
 		got := sessionTestRequest(mux, "GET", "/api/admin/app-platform/releases?release_sha256="+digest, cookie, "")
 		var page struct {

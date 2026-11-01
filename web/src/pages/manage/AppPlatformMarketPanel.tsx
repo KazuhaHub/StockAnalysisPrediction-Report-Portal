@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Empty, Input, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Descriptions, Empty, Input, Space, Table, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../auth'
 import { api, errText } from '../../api/client'
@@ -16,6 +16,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   const [busy, setBusy] = useState<'discover' | 'stage' | null>(null)
   const [error, setError] = useState('')
   const [ready, setReady] = useState(false)
+  const [verifiedRelease, setVerifiedRelease] = useState<PlatformRelease | null>(null)
   const owner = useRef(user)
   owner.current = user
   const mounted = useRef(false)
@@ -32,7 +33,8 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     const epoch = {}
     generation.current = epoch
     active.current = false
-    setAddress(''); setSource(''); setEntries(null); setBusy(null); setError(''); setReady(false)
+    setAddress(''); setSource(''); setEntries(null); setBusy(null); setError('')
+    setReady(false); setVerifiedRelease(null)
     reportBusy.current(false)
     return () => { mounted.current = false; generation.current = {}; reportBusy.current(false) }
   }, [user])
@@ -40,14 +42,16 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   const changeAddress = (next: string) => {
     generation.current = {}
     active.current = false
-    setAddress(next); setSource(''); setEntries(null); setError(''); setReady(false); setBusy(null)
+    setAddress(next); setSource(''); setEntries(null); setError('')
+    setReady(false); setVerifiedRelease(null); setBusy(null)
     reportBusy.current(false)
   }
 
   const discover = async () => {
     if (active.current || disabled || !address.trim()) return
     const account = user, epoch = generation.current, requested = address.trim()
-    active.current = true; setBusy('discover'); setError(''); setReady(false); setEntries(null)
+    active.current = true; setBusy('discover'); setError(''); setReady(false)
+    setVerifiedRelease(null); setEntries(null)
     // Discovery does not change package state and remains independently editable.
     try {
       const response = await api.post<unknown>(`${root}/market/catalogue`, { catalogue_url: requested })
@@ -62,7 +66,8 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
   const stage = async (entry: PlatformMarketHint) => {
     if (active.current || disabled || !source) return
     const account = user, epoch = generation.current, requested = source
-    active.current = true; setBusy('stage'); setError(''); setReady(false); reportBusy.current(true)
+    active.current = true; setBusy('stage'); setError(''); setReady(false)
+    setVerifiedRelease(null); reportBusy.current(true)
     try {
       const result = await api.post<{ release_sha256: string }>(`${root}/market/stage`, { catalogue_url: requested, release_sha256: entry.descriptor_sha256 })
       if (!live(account, epoch)) return
@@ -76,6 +81,7 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
       if (!verified || verified.release_sha256 !== entry.descriptor_sha256 || verified.app_id !== entry.app_id || verified.publisher_id !== entry.publisher_id || verified.version !== entry.version) throw new Error(t('appMarket.verificationChanged'))
       if (hostDisabled.current) return
       onReady(verified)
+      setVerifiedRelease(verified)
       setReady(true)
     } catch (e) { if (live(account, epoch)) setError(errText(e, t)) }
     finally { if (live(account, epoch)) { active.current = false; setBusy(null); reportBusy.current(false) } }
@@ -90,6 +96,15 @@ export default function AppPlatformMarketPanel({ disabled, onReady, onBusyChange
     </Space.Compact>
     {error && <Alert type="error" showIcon title={error} />}
     {ready && <Alert type="success" showIcon title={t('appMarket.ready')} />}
+    {verifiedRelease && <Descriptions title={t('appPlatform.application')} column={1} items={[
+      { key: 'publisher', label: t('appPlatform.publisher'), children: verifiedRelease.publisher_id },
+      { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code style={{ wordBreak: 'break-all' }}>{verifiedRelease.release_sha256}</Typography.Text> },
+      { key: 'compatibility', label: t('appPlatform.compatibility'), children: verifiedRelease.compatibility ? `${verifiedRelease.compatibility.platform_api} · ${verifiedRelease.compatibility.runner_protocol}` : '—' },
+      { key: 'required', label: t('appPlatform.requiredPermissions'), children: verifiedRelease.required_capabilities?.length ? verifiedRelease.required_capabilities.join(' · ') : t('appPlatform.none') },
+      { key: 'optional', label: t('appPlatform.optionalPermissions'), children: verifiedRelease.optional_capabilities?.length ? verifiedRelease.optional_capabilities.join(' · ') : t('appPlatform.none') },
+      { key: 'resources', label: t('appPlatform.resources'), children: verifiedRelease.backend && verifiedRelease.resources ? t('appPlatform.resourceSummary', { platforms: verifiedRelease.platforms?.join(', ') ?? t('appPlatform.none'), memory: verifiedRelease.resources.memory_mib, cpu: verifiedRelease.resources.cpu_millis, pids: verifiedRelease.resources.pids }) : t('appPlatform.frontendOnly') },
+      { key: 'schema', label: t('appPlatform.storage'), children: t('appPlatform.dataSchema', { schema: verifiedRelease.data_schema ?? 0 }) },
+    ]} />}
     {entries !== null && <>
       <Alert type="warning" showIcon title={t('appMarket.unverified')} description={t('appMarket.trustHint')} />
       <Table<PlatformMarketHint> rowKey="descriptor_sha256" dataSource={entries} pagination={{ pageSize: 10, showSizeChanger: false }} locale={{ emptyText: <Empty description={t('appMarket.empty')} /> }} columns={[

@@ -15,18 +15,25 @@ import (
 const platformManagementPageSize = 32
 
 type platformStagedSummary struct {
-	Release              string                  `json:"release_sha256"`
-	App                  string                  `json:"app_id"`
-	Publisher            string                  `json:"publisher_id"`
-	Version              string                  `json:"version"`
-	TrustRevision        string                  `json:"trust_revision"`
-	Display              *appplatform.AppDisplay `json:"display,omitempty"`
-	Installable          bool                    `json:"installable"`
-	Reason               string                  `json:"reason,omitempty"`
-	InstallationID       string                  `json:"installation_id,omitempty"`
-	CurrentReleaseSHA256 string                  `json:"current_release_sha256,omitempty"`
-	Updateable           bool                    `json:"updateable,omitempty"`
-	Installed            bool                    `json:"installed,omitempty"`
+	Release              string                    `json:"release_sha256"`
+	App                  string                    `json:"app_id"`
+	Publisher            string                    `json:"publisher_id"`
+	Version              string                    `json:"version"`
+	TrustRevision        string                    `json:"trust_revision"`
+	Display              *appplatform.AppDisplay   `json:"display,omitempty"`
+	Compatibility        appplatform.Compatibility `json:"compatibility"`
+	Platforms            []string                  `json:"platforms,omitempty"`
+	RequiredCapabilities []string                  `json:"required_capabilities"`
+	OptionalCapabilities []string                  `json:"optional_capabilities"`
+	Resources            *appplatform.Resources    `json:"resources,omitempty"`
+	DataSchema           int                       `json:"data_schema"`
+	Backend              bool                      `json:"backend"`
+	Installable          bool                      `json:"installable"`
+	Reason               string                    `json:"reason,omitempty"`
+	InstallationID       string                    `json:"installation_id,omitempty"`
+	CurrentReleaseSHA256 string                    `json:"current_release_sha256,omitempty"`
+	Updateable           bool                      `json:"updateable,omitempty"`
+	Installed            bool                      `json:"installed,omitempty"`
 }
 
 func platformManagementQuery(r *http.Request, keys ...string) (url.Values, error) {
@@ -110,7 +117,25 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 			if err != nil {
 				continue
 			}
-			item := platformStagedSummary{Release: record.release, App: record.app, Publisher: record.publisher, Version: record.version, TrustRevision: verified.PublisherRevision, Display: display, Installable: true}
+			manifest := verified.Descriptor.Manifest
+			item := platformStagedSummary{
+				Release: record.release, App: record.app,
+				Publisher: record.publisher, Version: record.version,
+				TrustRevision: verified.PublisherRevision, Display: display,
+				Compatibility: manifest.Compatibility,
+				RequiredCapabilities: append(
+					[]string{}, manifest.Capabilities.Required...),
+				OptionalCapabilities: append(
+					[]string{}, manifest.Capabilities.Optional...),
+				DataSchema: manifest.Data.Schema, Installable: true,
+			}
+			if manifest.Backend != nil {
+				item.Backend = true
+				item.Platforms = append(
+					[]string(nil), manifest.Backend.Platforms...)
+				resources := manifest.Backend.Resources
+				item.Resources = &resources
+			}
 			if platformInstallRequirements(verified.Descriptor.Manifest) != nil || verified.Descriptor.Manifest.Backend != nil || verified.Descriptor.Manifest.Data.WritesOnStartup {
 				item.Installable = false
 				item.Reason = "requirements_unavailable"

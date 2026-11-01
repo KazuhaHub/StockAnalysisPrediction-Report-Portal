@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import AppPlatformMarketPanel from './AppPlatformMarketPanel'
 
 const mock = vi.hoisted(() => ({ post: vi.fn(), get: vi.fn(), user: 'admin', t: (key: string) => key }))
@@ -11,7 +13,21 @@ const digest = 'a'.repeat(64)
 const catalogue = 'https://market.example/index.json'
 const entry = { app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', descriptor_sha256: digest, descriptor_url: 'https://market.example/app.json', signature_url: 'https://market.example/app.sig' }
 const discovery = { catalogue_sha256: 'b'.repeat(64), releases: [entry], publisher_verified: false }
-const verified = { app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', release_sha256: digest, trust_revision: '1', installable: true }
+const verified = {
+  app_id: 'notes',
+  publisher_id: 'publisher',
+  version: '1.0.0',
+  release_sha256: digest,
+  trust_revision: '1',
+  installable: true,
+  compatibility: { platform_api: 'portal.app-platform/1', runner_protocol: 'portal.runner/1' },
+  platforms: ['linux/amd64', 'linux/arm64'],
+  required_capabilities: ['reports.read'],
+  optional_capabilities: ['notifications.publish'],
+  resources: { memory_mib: 256, cpu_millis: 500, pids: 128 },
+  data_schema: 1,
+  backend: true,
+}
 const root = '/api/admin/app-platform'
 
 beforeEach(() => {
@@ -41,6 +57,10 @@ describe('remote application catalogue', () => {
     expect(mock.get).toHaveBeenCalledWith(`${root}/releases?release_sha256=${digest}`)
     await screen.findByText('appMarket.ready')
     expect(ready).toHaveBeenCalledWith(verified)
+    expect(screen.getByText('portal.app-platform/1 · portal.runner/1')).toBeTruthy()
+    expect(screen.getByText('reports.read')).toBeTruthy()
+    expect(screen.getByText('notifications.publish')).toBeTruthy()
+    expect(screen.getByText('appPlatform.resourceSummary')).toBeTruthy()
     expect(mock.post.mock.calls.some(([url]) => url.endsWith('/operations') || url.endsWith('/plans'))).toBe(false)
   })
 
@@ -146,5 +166,32 @@ describe('remote application catalogue', () => {
     await act(async () => resolve({ release_sha256: digest }))
     expect(mock.get).not.toHaveBeenCalled()
     expect(ready).not.toHaveBeenCalled()
+  })
+
+  it('discovers from the catalogue input with the keyboard', async () => {
+    const user = userEvent.setup()
+    render(<AppPlatformMarketPanel disabled={false} onReady={() => {}} onBusyChange={() => {}} />)
+    const input = screen.getByRole('textbox', { name: 'appMarket.catalogueURL' })
+    await user.type(input, `${catalogue}{Enter}`)
+    expect(await screen.findByText('notes')).toBeTruthy()
+  })
+
+  it.each([
+    ['light', theme.defaultAlgorithm],
+    ['dark', theme.darkAlgorithm],
+  ])('has no axe violations in %s mode', async (_mode, algorithm) => {
+    render(
+      <ConfigProvider theme={{ algorithm }}>
+        <AppPlatformMarketPanel disabled={false} onReady={() => {}} onBusyChange={() => {}} />
+      </ConfigProvider>,
+    )
+    await discover()
+    const result = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(result.violations).toEqual([])
   })
 })

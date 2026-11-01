@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
+import { ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import AppsHub from './AppsHub'
 
 // The hub shows what the server says is open, in the administrator's order (ADR 0048), with built-in
@@ -19,11 +21,13 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => undefined },
 }))
 
-const renderHub = () =>
+const renderHub = (algorithm = theme.defaultAlgorithm) =>
   render(
-    <MemoryRouter>
-      <AppsHub />
-    </MemoryRouter>,
+    <ConfigProvider theme={{ algorithm }}>
+      <MemoryRouter>
+        <AppsHub />
+      </MemoryRouter>
+    </ConfigProvider>,
   )
 
 // The card titles, top to bottom.
@@ -80,5 +84,25 @@ describe('AppsHub', () => {
     apiMock.get.mockResolvedValue({ apps: [], builtin_apps: [], order: [] })
     renderHub()
     expect(await screen.findByText('apps.empty')).toBeTruthy()
+  })
+
+  it.each([
+    ['light', theme.defaultAlgorithm],
+    ['dark', theme.darkAlgorithm],
+  ])('has no axe violations in %s mode', async (_mode, algorithm) => {
+    apiMock.get.mockResolvedValue({
+      apps: [{ id: 'hello', name: 'Hello' }],
+      builtin_apps: ['quotes'],
+      order: ['hello', 'builtin:quotes'],
+    })
+    renderHub(algorithm)
+    await screen.findByText('Hello')
+    const result = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(result.violations).toEqual([])
   })
 })

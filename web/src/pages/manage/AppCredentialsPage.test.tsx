@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App } from 'antd'
+import { App, ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppCredentialsPage from './AppCredentialsPage'
 import { installed, layout } from './appsAdminFixtures'
@@ -45,15 +46,17 @@ const binding = {
   revision: 1,
 }
 
-function renderPage() {
+function renderPage(algorithm = theme.defaultAlgorithm) {
   return render(
-    <App>
-      <MemoryRouter initialEntries={['/manage/apps/hello/credentials']}>
-        <Routes>
-          <Route path="/manage/apps/:key/credentials" element={<AppCredentialsPage />} />
-        </Routes>
-      </MemoryRouter>
-    </App>,
+    <ConfigProvider theme={{ algorithm }}>
+      <App>
+        <MemoryRouter initialEntries={['/manage/apps/hello/credentials']}>
+          <Routes>
+            <Route path="/manage/apps/:key/credentials" element={<AppCredentialsPage />} />
+          </Routes>
+        </MemoryRouter>
+      </App>
+    </ConfigProvider>,
   )
 }
 
@@ -122,5 +125,32 @@ describe('application credential settings', () => {
         { plan_id: planID, plan_sha256: 'a'.repeat(64) },
       ),
     )
+  })
+
+  it('opens the shared revoke confirmation from the keyboard and restores focus on Escape', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    const revoke = screen.getByRole('button', { name: 'appCredentials.revoke' })
+    revoke.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByText('appCredentials.revokeBindingConfirm')).toBeTruthy()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(document.activeElement).toBe(revoke))
+  })
+
+  it.each([
+    ['light', theme.defaultAlgorithm],
+    ['dark', theme.darkAlgorithm],
+  ])('has no axe violations in %s mode', async (_mode, algorithm) => {
+    renderPage(algorithm)
+    await screen.findAllByText('Upstream API')
+    const result = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(result.violations).toEqual([])
   })
 })

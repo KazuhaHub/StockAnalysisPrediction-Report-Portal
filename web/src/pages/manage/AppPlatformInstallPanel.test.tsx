@@ -88,6 +88,40 @@ describe('application installation confirmation', () => {
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(0)
   })
 
+  it('shows verified compatibility, required and optional permissions, and resources before install', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? {
+      items: [{
+        release_sha256: release,
+        app_id: 'notes',
+        publisher_id: 'publisher',
+        version: '1.0.0',
+        trust_revision: '1',
+        installable: true,
+        compatibility: {
+          platform_api: 'portal.app-platform/1',
+          runner_protocol: 'portal.runner/1',
+        },
+        platforms: ['linux/amd64', 'linux/arm64'],
+        required_capabilities: ['reports.read'],
+        optional_capabilities: ['notifications.publish'],
+        resources: { memory_mib: 256, cpu_millis: 500, pids: 128 },
+        data_schema: 1,
+        backend: true,
+      }],
+      next_cursor: '',
+    } : { items: [], next_cursor: '' }))
+    mount()
+    await preview()
+    expect(screen.getByText('appPlatform.compatibility')).toBeTruthy()
+    expect(screen.getByText('portal.app-platform/1 · portal.runner/1')).toBeTruthy()
+    expect(screen.getByText('appPlatform.requiredPermissions')).toBeTruthy()
+    expect(screen.getAllByText('reports.read').length).toBeGreaterThan(0)
+    expect(screen.getByText('appPlatform.optionalPermissions')).toBeTruthy()
+    expect(screen.getAllByText('notifications.publish').length).toBeGreaterThan(0)
+    expect(screen.getByText('appPlatform.resources')).toBeTruthy()
+    expect(screen.getByText('appPlatform.resourceSummary')).toBeTruthy()
+  })
+
   it('persists a confirmed request and retries the exact key after lost response and reload', async () => {
     let attempts = 0
     mock.post.mockImplementation((url: string) => url.endsWith('/plans') ? Promise.resolve(review()) : ++attempts === 1 ? Promise.reject(new Error('offline')) : Promise.resolve({ operation_id: operation }))
