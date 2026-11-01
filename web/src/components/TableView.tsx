@@ -4,11 +4,11 @@ import type { ColumnType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import TableColumnHeader, { type ColumnWidths, type ResizeColumn } from './TableColumnHeader'
 import { ColumnMenuButton, makeColumnMenuComponents, type ColumnMenuState } from './TableColumnMenu'
+import { clampColumnWidth, storedColumnWidths } from '../lib/columnWidths'
 
 type Preference = { hidden: string[]; fit: boolean; widths: ColumnWidths; order: string[] }
 const DEFAULT: Preference = { hidden: [], fit: true, widths: {}, order: [] }
 const columnKey = <T,>(column: ColumnType<T>) => String(column.key ?? column.dataIndex ?? '')
-const clampWidth = (width: number) => Math.round(Math.max(64, Math.min(1200, width)))
 
 /** Flat data tables share local display preferences; neither filters nor row data are stored. */
 export function useTableView<T>(name: string, source: ColumnType<T>[], required: string[] = [], labels: Record<string, string> = {}) {
@@ -18,8 +18,7 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const [preference, setPreference] = useState<Preference>(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(storageKey) || 'null')
-      const widths = Object.fromEntries(Object.entries(stored?.widths ?? {}).filter((entry): entry is [string, number] =>
-        typeof entry[1] === 'number' && Number.isFinite(entry[1]) && entry[1] >= 64 && entry[1] <= 10000))
+      const widths = storedColumnWidths(stored)
       return { hidden: Array.isArray(stored?.hidden) ? stored.hidden.filter((key: unknown) => typeof key === 'string') : [],
         fit: typeof stored?.fit === 'boolean' ? stored.fit : true, widths,
         order: Array.isArray(stored?.order) ? stored.order.filter((key: unknown) => typeof key === 'string') : [] }
@@ -64,7 +63,7 @@ export function useTableView<T>(name: string, source: ColumnType<T>[], required:
   const resizeColumn: ResizeColumn = (key, width, commit = true, snapshot = measured) => {
     if (!byKey.has(key) || !Number.isFinite(width)) return
     const widths = { ...defaults, ...preference.widths, ...snapshot }
-    const next = clampWidth(width), previous = widths[key]
+    const next = clampColumnWidth(width, 64), previous = widths[key]
     const index = shown.findIndex((column) => columnKey(column) === key)
     const neighbor = index < 0 ? undefined : shown[index + 1] ?? shown[index - 1]
     // Exchange width with the adjacent column where possible, avoiding a jump in the overall

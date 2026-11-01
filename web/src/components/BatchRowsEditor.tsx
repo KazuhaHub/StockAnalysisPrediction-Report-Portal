@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ClipboardEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react'
 import {
   Alert,
   Button,
@@ -16,8 +16,8 @@ import {
 import {
   DeleteOutlined,
   DownloadOutlined,
-  PlusOutlined,
   QuestionCircleOutlined,
+  UndoOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -26,7 +26,9 @@ import Confirm from './Confirm'
 import type { PluginInput } from '../api/types'
 import {
   activeBatchRows,
+  batchRowHasValues,
   blankBatchRow,
+  ensureTrailingBlank,
   missingCSVHeaders,
   missingRequiredCells,
   pasteBatchGrid,
@@ -34,28 +36,59 @@ import {
 } from '../lib/batchRows'
 import { csvToRows, downloadCSV, toCSV } from '../lib/csv'
 import { inputDisplayMeta } from '../lib/difyInputs'
+import { fillScrollWidth, useColumnWidths } from '../lib/columnWidths'
 import CardTable, { type CardColumn } from './CardTable'
+import TableColumnHeader from './TableColumnHeader'
 
 type EditorMode = 'grid' | 'csv'
 type TableRow = { values: BatchDraftRow; rowIndex: number }
+
+// Input columns share the available width but never get narrower than this; when their minimums do
+// not fit, the grid scrolls inside itself (docs/frontend-guidelines.md, "Editable grids").
+const MIN_COLUMN_WIDTH = 160
+const ROW_NUMBER_WIDTH = 54
+const DELETE_WIDTH = 62
+const PAGE_SIZE = 20
+const lastPage = (count: number, size: number) => Math.max(1, Math.ceil(count / size))
 
 export default function BatchRowsEditor({
   inputs,
   rows,
   onChange,
   onValidityChange,
+  widthsKey,
 }: {
   inputs: PluginInput[]
   rows: BatchDraftRow[]
   onChange: (rows: BatchDraftRow[]) => void
   onValidityChange?: (valid: boolean) => void
+  /** Names where dragged column widths are kept (one per workflow); without it they last until unmount. */
+  widthsKey?: string
 }) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<EditorMode>('grid')
   const [rawCSV, setRawCSV] = useState(() => toCSV(inputs.map((input) => input.key), []))
 
   const keys = useMemo(() => inputs.map((input) => input.key), [inputs])
-  const displayedRows = rows.length > 0 ? rows : [blankBatchRow(inputs)]
+  // The grid always ends on one blank row, spreadsheet-style: typing into it makes the next one
+  // appear. The blank rows are a view concern: they are never counted, never submitted (activeBatchRows
+  // drops them) and never reach the CSV.
+  const displayedRows = useMemo(() => ensureTrailingBlank(rows, inputs), [rows, inputs])
+  const { widths, resize, cancel, reset: resetWidths, measure } = useColumnWidths(widthsKey, MIN_COLUMN_WIDTH)
+  const [page, setPage] = useState({ current: 1, size: PAGE_SIZE })
+  const previousCount = useRef(displayedRows.length)
+  useEffect(() => {
+    const before = previousCount.current
+    previousCount.current = displayedRows.length
+    // A paste on the last page follows the rows it added onto the next one. Typing grows the grid by
+    // exactly one row (the new blank one), and the cell being typed in must stay on screen; a paste
+    // into the middle of a long grid does not yank anyone to the end either.
+    setPage((p) => {
+      const last = lastPage(displayedRows.length, p.size)
+      if (displayedRows.length > before + 1 && p.current >= lastPage(before, p.size)) return { ...p, current: last }
+      return p.current > last ? { ...p, current: last } : p
+    })
+  }, [displayedRows.length])
   const readyRows = useMemo(() => activeBatchRows(rows), [rows])
   const missingCells = useMemo(() => missingRequiredCells(rows, inputs), [rows, inputs])
   const missingCellSet = useMemo(
@@ -78,7 +111,7 @@ export default function BatchRowsEditor({
       setRawCSV(toCSV(keys, readyRows.map((row) => keys.map((key) => row[key] ?? ''))))
     } else {
       const parsed = csvToRows(rawCSV, keys)
-      onChange(parsed.length > 0 ? parsed : [blankBatchRow(inputs)])
+      onChange(ensureTrailingBlank(parsed, inputs))
     }
     setMode(next)
   }
@@ -86,19 +119,19 @@ export default function BatchRowsEditor({
   const updateCell = (rowIndex: number, key: string, value: string) => {
     const next = displayedRows.map((row) => ({ ...row }))
     next[rowIndex][key] = value
-    onChange(next)
+    onChange(ensureTrailingBlank(next, inputs))
   }
 
   const handlePaste = (event: ClipboardEvent<HTMLElement>, rowIndex: number, columnIndex: number) => {
     const text = event.clipboardData.getData('text')
     if (!text.includes('\n') && !text.includes('\t')) return
     event.preventDefault()
-    onChange(pasteBatchGrid(displayedRows, inputs, rowIndex, columnIndex, text))
+    onChange(ensureTrailingBlank(pasteBatchGrid(displayedRows, inputs, rowIndex, columnIndex, text), inputs))
   }
 
   const removeRow = (rowIndex: number) => {
     const next = displayedRows.filter((_row, index) => index !== rowIndex)
-    onChange(next.length > 0 ? next : [blankBatchRow(inputs)])
+    onChange(ensureTrailingBlank(next, inputs))
   }
 
   const importCSV = (file: File) => {
@@ -149,16 +182,25 @@ export default function BatchRowsEditor({
         />
       )
     }
-    if (input.type === 'paragraph') {
-      return (
-        <Input.TextArea
-          {...common}
-          autoSize={{ minRows: 1, maxRows: 3 }}
-          onChange={(event) => updateCell(rowIndex, input.key, event.target.value)}
-        />
-      )
-    }
-    return <Input {...common} onChange={(event) => updateCell(rowIndex, input.key, event.target.value)} />
+    // Long text wraps inside the cell: the editor grows up to three lines and then scrolls, instead of
+    // widening the column. Every text input uses this editor, but only a paragraph input may hold a
+    // line break, so Enter in the others is swallowed rather than leaving a newline inside a value.
+    const singleLine = input.type !== 'paragraph'
+    return (
+      <Input.TextArea
+        {...common}
+        autoSize={{ minRows: 1, maxRows: 3 }}
+        onChange={(event) => updateCell(rowIndex, input.key, event.target.value)}
+        onKeyDown={
+          singleLine
+            ? (event: KeyboardEvent<HTMLTextAreaElement>) => {
+                // An input method confirms its candidate with Enter; that keystroke is not ours.
+                if (event.key === 'Enter' && !event.nativeEvent.isComposing) event.preventDefault()
+              }
+            : undefined
+        }
+      />
+    )
   }
 
   const columns: CardColumn<TableRow>[] = [
@@ -166,7 +208,7 @@ export default function BatchRowsEditor({
       title: '#',
       dataIndex: 'rowIndex',
       key: 'rowIndex',
-      width: 54,
+      width: ROW_NUMBER_WIDTH,
       fixed: 'left',
       align: 'center',
       render: (rowIndex: number) => <Typography.Text type="secondary">{rowIndex + 1}</Typography.Text>,
@@ -175,6 +217,7 @@ export default function BatchRowsEditor({
       const { title, detail } = inputDisplayMeta(input)
       return {
         title: (
+          <TableColumnHeader id={input.key} name={title} onMeasure={measure} onResize={resize} onCancel={cancel}>
           <div className="rp-batch-grid-heading">
             <div className="rp-batch-grid-heading__title">
               <Tooltip title={title}>
@@ -196,29 +239,38 @@ export default function BatchRowsEditor({
             </div>
             {title !== input.key && <Typography.Text code>{input.key}</Typography.Text>}
           </div>
+          </TableColumnHeader>
         ),
         phoneLabel: title,
         key: input.key,
-        width: 220,
+        // No width until the user drags one: the column then shares what is left with its siblings.
+        width: widths[input.key],
         render: (_value: string, record: TableRow) => fieldControl(input, record.rowIndex, columnIndex),
       }
     }),
+    // Once every input column has a width the user gave it, the spare space goes to an empty column
+    // here rather than being spread back over theirs, so a dragged width is the width shown.
+    ...(inputs.length > 0 && inputs.every((input) => widths[input.key] != null)
+      ? [{ key: 'rp-grid-filler', onHeaderCell: () => ({ className: 'rp-grid-filler' }), onCell: () => ({ className: 'rp-grid-filler' }) } as CardColumn<TableRow>]
+      : []),
     {
       key: 'actions',
-      width: 62,
+      width: DELETE_WIDTH,
       fixed: 'right',
       align: 'center',
-      render: (_value, record) => (
-        <Tooltip title={t('batch.editor.deleteRow')}>
-          <Button
-            type="text"
-            danger
-            icon={<DeleteOutlined />}
-            aria-label={t('batch.editor.deleteRowN', { row: record.rowIndex + 1 })}
-            onClick={() => removeRow(record.rowIndex)}
-          />
-        </Tooltip>
-      ),
+      // The trailing blank row is the place to type the next row, not a row to delete.
+      render: (_value, record) =>
+        record.rowIndex === displayedRows.length - 1 && !batchRowHasValues(record.values) ? null : (
+          <Tooltip title={t('batch.editor.deleteRow')}>
+            <Button
+              type="text"
+              danger
+              icon={<DeleteOutlined />}
+              aria-label={t('batch.editor.deleteRowN', { row: record.rowIndex + 1 })}
+              onClick={() => removeRow(record.rowIndex)}
+            />
+          </Tooltip>
+        ),
     },
   ]
 
@@ -240,6 +292,11 @@ export default function BatchRowsEditor({
           <Tag color={readyRows.length > 0 ? 'blue' : undefined}>{t('batch.parsedRows', { n: readyRows.length })}</Tag>
         </Space>
         <Space wrap size={4}>
+          {mode === 'grid' && Object.keys(widths).length > 0 && (
+            <Button size="small" type="text" icon={<UndoOutlined />} onClick={resetWidths}>
+              {t('batch.editor.resetWidths')}
+            </Button>
+          )}
           <Upload accept=".csv,.txt" showUploadList={false} beforeUpload={importCSV}>
             <Button size="small" icon={<UploadOutlined />}>{t('batch.uploadCsv')}</Button>
           </Upload>
@@ -267,20 +324,26 @@ export default function BatchRowsEditor({
           <div className="rp-batch-grid">
             <CardTable<TableRow>
               size="small"
+              className="rp-adaptive-table"
               rowKey={(record) => String(record.rowIndex)}
               columns={columns}
               dataSource={tableRows}
-              pagination={tableRows.length > 20 ? { defaultPageSize: 20, showSizeChanger: true } : false}
-              scroll={{ x: Math.max(720, inputs.length * 220 + 116), y: 420 }}
+              pagination={
+                tableRows.length > page.size
+                  ? {
+                      current: page.current,
+                      pageSize: page.size,
+                      showSizeChanger: true,
+                      onChange: (current, size) => setPage({ current, size }),
+                    }
+                  : false
+              }
+              scroll={{
+                x: fillScrollWidth(keys, widths, MIN_COLUMN_WIDTH, ROW_NUMBER_WIDTH + DELETE_WIDTH),
+                y: 420,
+              }}
             />
           </div>
-          <Button
-            className="rp-batch-editor-add"
-            icon={<PlusOutlined />}
-            onClick={() => onChange([...displayedRows, blankBatchRow(inputs)])}
-          >
-            {t('batch.editor.addRow')}
-          </Button>
         </>
       ) : (
         <Input.TextArea

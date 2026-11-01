@@ -67,6 +67,31 @@ When in doubt, look at how they solve it before inventing a pattern.
 - A filtered empty result says it is the filters and offers to clear them (`filtered` /
   `onClearFilters`, `NoMatches`); an empty list is a plain empty state.
 
+### Editable grids
+
+A table whose cells are inputs (the batch rows grid, shared by the batch console and the recurring-task
+editor, `BatchRowsEditor`) follows the same table rules plus these:
+
+- **Input columns fill, with a floor.** The input columns share the available width, each at least
+  160 px, so a single input column never leaves an empty stretch on the right. When the minimums do
+  not fit, the grid scrolls sideways inside itself: the row number and the delete column stay pinned,
+  and the page never scrolls sideways. The table's `scroll.x` is the sum of the minimums, or of the
+  widths the user gave (`fillScrollWidth`).
+- **Long text wraps in the cell.** A text input is an `Input.TextArea` with `autoSize` (1 to 3 lines,
+  then it scrolls inside) instead of a wider column. Enter does not insert a newline in a single-line
+  input (an input method's Enter is left alone); only a paragraph input keeps it. Number and select
+  inputs stay as they are.
+- **Widths are draggable, and kept.** The grid reuses the table header's resize handle
+  (`TableColumnHeader`). Widths are stored per workflow in `localStorage` as `rp.table.<name>`
+  (`useColumnWidths`, the width half of `useTableView`: the same key prefix and `{ widths }` shape,
+  without column hiding or reordering, which a grid of inputs must not offer). Storage access is
+  wrapped in try/catch; a "reset column widths" action appears once any width was dragged.
+- **The grid ends with one blank row**, spreadsheet-style. Typing or pasting into it makes the next
+  blank row appear; blank rows are never counted, submitted or exported, and deleting rows still
+  leaves one. There is no "add row" button. A paste of several rows expands the grid.
+- **On a phone** the grid is the usual stacked cards (`CardTable`); the trailing blank row is the last
+  card.
+
 ## Loading
 
 - A view's first load goes through `LoadGate` / `LoadingPlaceholder`: the shared loading ring with
@@ -90,7 +115,11 @@ When in doubt, look at how they solve it before inventing a pattern.
   is focused, and an irreversible action says so (`confirmations.test.ts`).
 - Unsaved changes are guarded: settings pages register their draft (`AdminDraftBoundary`,
   `usePendingSettings`), dialogs use `useFormDraft` / `useLeaveGuard`, and the save bar
-  (`SettingsSaveBar`) floats at the bottom of the page while there is something to save.
+  (`SettingsSaveBar`) floats at the bottom of the page while there is something to save. An editor
+  that is a page of its own (the recurring-task editor) registers its draft with
+  `usePendingSettings` and leaves through the router (Back, a breadcrumb, the browser's back
+  button), so `AdminDraftBoundary` is the only thing that asks; after a save it clears the draft in
+  the same commit that navigates.
 
 ## Motion
 

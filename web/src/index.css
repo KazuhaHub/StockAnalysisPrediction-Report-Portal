@@ -762,15 +762,22 @@ body {
 .rp-batch-compose-title.ant-typography {
   margin: 0 0 16px;
 }
-.rp-batch-target-picker {
+/* The editable grid's spare-space column (BatchRowsEditor): nothing in it, and no card field for it. */
+.rp-card-table--cards .rp-grid-filler { display: none; }
+.rp-batch-field-row {
   display: grid;
   grid-template-columns: auto minmax(220px, 440px);
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
 }
-.rp-batch-target-picker .ant-select {
+.rp-batch-field-row .ant-select,
+.rp-batch-field-row .ant-input {
   width: 100%;
+}
+.rp-batch-field-warning.ant-typography {
+  display: block;
+  margin: -8px 0 16px;
 }
 .rp-batch-editor-empty {
   display: grid;
@@ -805,6 +812,12 @@ body {
 .rp-batch-grid .ant-input-number,
 .rp-batch-grid .ant-select {
   width: 100%;
+}
+/* The resizable header wraps the heading in a flex row; its text has to be allowed to shrink so a
+   long field name is cut by the column, not by pushing the resize handle out of it. */
+.rp-batch-grid .rp-table-column-title > span:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
 }
 .rp-batch-grid-heading {
   min-width: 0;
@@ -849,9 +862,6 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rp-batch-editor-add.ant-btn {
-  margin-top: 10px;
-}
 .rp-batch-csv-editor.ant-input {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -870,6 +880,9 @@ body {
 }
 .rp-batch-setting-fields .ant-input-number {
   width: 104px;
+}
+.rp-batch-setting-fields .ant-select {
+  width: 156px;
 }
 .rp-dify-input-descriptions {
   display: grid;
@@ -898,6 +911,23 @@ body {
   white-space: nowrap;
 }
 
+/* The recurrence of a recurring task, at the top of its run-settings rail: the label, the controls
+   (which wrap rather than push the rail wider) and the timezone hint under them. */
+.rp-recurring-cadence {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.rp-recurring-cadence__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.rp-recurring-cadence__hint.ant-typography {
+  font-size: 12px;
+}
+
 @media (max-width: 1000px) {
   .rp-batch-compose-layout {
     grid-template-columns: minmax(0, 1fr);
@@ -912,7 +942,7 @@ body {
 }
 
 @media (max-width: 600px) {
-  .rp-batch-target-picker {
+  .rp-batch-field-row {
     grid-template-columns: minmax(0, 1fr);
     gap: 6px;
   }
@@ -1963,71 +1993,6 @@ body {
    home via the top-left "back" button flew the popup in from the corner. */
 .rp-announce-popup .ant-modal {
   transform-origin: 50% 0 !important;
-}
-
-/* Recurring-task execution settings: keep priority, row concurrency, and retry
-   controls aligned as a deliberate group instead of an inline row that wraps labels
-   away from their inputs. */
-.rp-recurring-execution {
-  padding: 12px 14px 14px;
-  border: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.2));
-  border-radius: var(--ant-border-radius-lg);
-  background: var(--ant-color-fill-quaternary, rgba(128, 128, 128, 0.04));
-}
-.rp-recurring-execution-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-.rp-recurring-execution-heading > .ant-typography:last-child {
-  font-size: 12px;
-  text-align: right;
-}
-.rp-recurring-execution-grid {
-  display: grid;
-  grid-template-columns: minmax(240px, 2fr) repeat(2, minmax(110px, 1fr));
-  gap: 12px;
-  align-items: end;
-}
-.rp-recurring-execution-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-}
-.rp-recurring-execution-field > .ant-typography {
-  font-size: 12px;
-}
-.rp-recurring-execution-field > .ant-input-number {
-  width: 100%;
-}
-.rp-recurring-priority-controls {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-}
-.rp-recurring-priority-controls > .ant-select {
-  min-width: 0;
-  flex: 1;
-}
-.rp-recurring-priority-controls > .ant-input-number {
-  width: 88px;
-  flex: 0 0 88px;
-}
-@media (max-width: 575px) {
-  .rp-recurring-execution-heading {
-    display: block;
-  }
-  .rp-recurring-execution-heading > .ant-typography:last-child {
-    display: block;
-    margin-top: 2px;
-    text-align: left;
-  }
-  .rp-recurring-execution-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* ── Stock reading layout (StockPage) ──────────────────────────────────────────

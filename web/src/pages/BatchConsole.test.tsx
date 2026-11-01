@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
 import BatchConsole from './BatchConsole'
@@ -117,5 +117,44 @@ describe('BatchConsole', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1))
     expect(screen.queryByDisplayValue('code,query\n000001,alpha')).toBeNull()
     expect(document.body.querySelector('.rp-batch-grid')).toBeTruthy()
+  })
+
+  it('renders its run settings through the shared execution fields, in the same order the recurring page uses', async () => {
+    const user = userEvent.setup()
+    render(
+      <App>
+        <BatchConsole />
+      </App>,
+    )
+    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    await user.click(await screen.findByText('Research'))
+    const fields = document.querySelector('.rp-batch-compose-settings .rp-batch-setting-fields')!
+    expect(Array.from(fields.querySelectorAll(':scope > label')).map((node) => node.firstElementChild?.textContent)).toEqual([
+      'batch.maxRetries',
+      'batch.rowConcurrency',
+      'batch.priorityLabel',
+    ])
+    expect(within(fields as HTMLElement).getAllByRole('spinbutton')[1].getAttribute('aria-valuemax')).toBe('20')
+  })
+
+  it('ends the grid on a blank row that is never submitted', async () => {
+    const user = userEvent.setup()
+    apiMock.post.mockResolvedValue({ job_id: 9, concurrency: 1 })
+    render(
+      <App>
+        <BatchConsole />
+      </App>,
+    )
+    fireEvent.mouseDown(await screen.findByRole('combobox'))
+    await user.click(await screen.findByText('Research'))
+    expect(screen.queryByText('batch.editor.addRow')).toBeNull()
+    expect(screen.getAllByRole('textbox', { name: 'batch.editor.cellLabel' })).toHaveLength(2) // one blank row
+    await user.type(screen.getAllByRole('textbox', { name: 'batch.editor.cellLabel' })[0], '000001')
+    await user.type(screen.getAllByRole('textbox', { name: 'batch.editor.cellLabel' })[1], 'alpha')
+    expect(screen.getAllByRole('textbox', { name: 'batch.editor.cellLabel' })).toHaveLength(4) // data row + blank row
+    const run = screen.getByRole('button', { name: /batch\.run/ }) as HTMLButtonElement
+    await waitFor(() => expect(run.disabled).toBe(false))
+    await user.click(run)
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/jobs', expect.objectContaining({ rows: [{ code: '000001', query: 'alpha' }] })))
   })
 })

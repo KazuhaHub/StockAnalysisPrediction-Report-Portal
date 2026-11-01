@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App, ConfigProvider } from 'antd'
+import { App } from 'antd'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import RecurringConsole from './RecurringConsole'
 
 const apiMock = vi.hoisted(() => ({
@@ -13,9 +14,6 @@ const apiMock = vi.hoisted(() => ({
 
 vi.mock('../api/client', () => ({ api: apiMock, errText: () => 'Request failed' }))
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
-const pending = vi.hoisted(() => vi.fn())
-vi.mock('./manage/AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
-const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
 vi.mock('../auth', () => ({ useAuth: () => ({ admin: true }) }))
 
 const targets = { targets: [{ id: 1, plugin_slug: 'dify', name: 'Daily Review', created_at: '', inputs: [{ key: 'code' }] }] }
@@ -43,17 +41,28 @@ const tasks = {
   ],
 }
 
+function Where() {
+  const loc = useLocation()
+  return <div data-testid="where" data-crumb={(loc.state as { crumb?: string } | null)?.crumb ?? ''}>{loc.pathname}</div>
+}
+
 function renderPage() {
   return render(
     <App>
-      <RecurringConsole />
+      <MemoryRouter initialEntries={['/apps/recurring']}>
+        <Where />
+        <Routes>
+          <Route path="/apps/recurring" element={<RecurringConsole />} />
+          <Route path="/apps/recurring/new" element={<div>new-page</div>} />
+          <Route path="/apps/recurring/:id" element={<div>edit-page</div>} />
+        </Routes>
+      </MemoryRouter>
     </App>,
   )
 }
 
 describe('RecurringConsole', () => {
   beforeEach(() => {
-    pending.mockReset()
     apiMock.get.mockReset()
     apiMock.post.mockReset()
     apiMock.put.mockReset()
@@ -62,7 +71,7 @@ describe('RecurringConsole', () => {
       if (url.includes('/batch/targets')) return Promise.resolve({ ...targets })
       if (url === '/api/admin/batch/recurring') return Promise.resolve({ ...tasks })
       if (url === '/api/admin/batch/recurring/7')
-        return Promise.resolve({ ...tasks.tasks[0], rows: [{ code: '600000' }, { code: '000001' }], history: [] })
+        return Promise.resolve({ ...tasks.tasks[0], rows: [{ code: '600000' }, { code: '000001' }], history: [{ id: 1, task_id: 7, job_id: 42, fired_at: '2026-07-12 09:30:00', job_status: 'done' }] })
       return Promise.resolve({})
     })
     apiMock.post.mockResolvedValue({ ok: true, job_id: 42 })
@@ -86,124 +95,40 @@ describe('RecurringConsole', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/batch/recurring/7/enable', { enabled: false }))
   })
 
-  it('the new-task button opens the create modal', async () => {
+  it('the new-task button opens the new-task page rather than a dialog', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
     await user.click(screen.getByRole('button', { name: /recurring\.new/ }))
-    // the modal renders the name + target fields.
-    expect((await screen.findAllByText('recurring.fieldName')).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('recurring.fieldTarget').length).toBeGreaterThan(0)
-    expect(screen.getByText('recurring.executionSettings')).toBeTruthy()
-    expect(document.querySelector('.rp-recurring-execution-grid')).not.toBeNull()
+    expect(await screen.findByText('new-page')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/apps/recurring/new')
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('editing prefills the CSV editor WITH a header row so the template round-trips', async () => {
+  it('the edit action opens that task on its own page, carrying its name for the breadcrumb', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
-    await user.click(screen.getByLabelText('common.edit')) // the aria-labelled edit action
-    await screen.findByText('recurring.edit') // modal title (editing mode)
-    const ta = screen.getByPlaceholderText('batch.csvPlaceholder') as HTMLTextAreaElement
-    // header line + both data rows — NOT data-only (which csvToRows would eat as a header, blanking it).
-    expect(ta.value).toBe('code\n600000\n000001')
+    await user.click(screen.getByLabelText('common.edit'))
+    expect(await screen.findByText('edit-page')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/apps/recurring/7')
+    expect(screen.getByTestId('where').dataset.crumb).toBe('Close review')
+    // Opening the page fetches nothing here: the page loads the task itself.
+    expect(apiMock.get).not.toHaveBeenCalledWith('/api/admin/batch/recurring/7')
   })
 
-  it('imports a CSV file into a new task template', async () => {
+  it('keeps the history drawer', async () => {
     const user = userEvent.setup()
     renderPage()
     await screen.findByText('Close review')
-    await user.click(screen.getByRole('button', { name: /recurring\.new/ }))
-
-    fireEvent.mouseDown(screen.getAllByRole('combobox')[0])
-    await user.click(await screen.findByText('Daily Review'))
-    const input = document.querySelector<HTMLInputElement>('input[type="file"]')
-    expect(input).not.toBeNull()
-    await user.upload(input!, new File(['code\n600519\n000001'], 'rows.csv', { type: 'text/csv' }))
-
-    await waitFor(() => {
-      const editor = screen.getByPlaceholderText('batch.csvPlaceholder') as HTMLTextAreaElement
-      expect(editor.value).toBe('code\n600519\n000001')
-    })
-  })
-})
-
-describe('RecurringConsole unsaved changes', () => {
-  beforeEach(() => {
-    pending.mockReset()
-    apiMock.get.mockReset()
-    apiMock.post.mockReset()
-    apiMock.put.mockReset().mockResolvedValue({ ok: true })
-    apiMock.del.mockReset()
-    apiMock.get.mockImplementation((url: string) => {
-      if (url.includes('/batch/targets')) return Promise.resolve({ ...targets })
-      if (url === '/api/admin/batch/recurring') return Promise.resolve({ ...tasks })
-      if (url === '/api/admin/batch/recurring/7')
-        return Promise.resolve({ ...tasks.tasks[0], rows: [{ code: '600000' }, { code: '000001' }], history: [] })
-      return Promise.resolve({})
-    })
-  })
-  const mount = () => render(<ConfigProvider theme={{ token: { motion: false } }}><App><RecurringConsole /></App></ConfigProvider>)
-  const openEdit = async () => {
-    mount()
-    await screen.findByText('Close review')
-    fireEvent.click(screen.getByLabelText('common.edit'))
-    return (await screen.findByPlaceholderText('recurring.namePlaceholder')) as HTMLInputElement
-  }
-
-  it('is not pending when the console loads or a new task is opened', async () => {
-    mount()
-    await screen.findByText('Close review')
-    expect(lastPending()).toEqual([false, false])
-    fireEvent.click(screen.getByRole('button', { name: /recurring\.new/ }))
-    await screen.findByPlaceholderText('recurring.namePlaceholder')
-    expect(lastPending()).toEqual([false, false])
+    await user.click(screen.getByLabelText('recurring.history'))
+    expect(await screen.findByText('#42')).toBeTruthy()
   })
 
-  it('is not pending when an existing task is opened for editing', async () => {
-    await openEdit()
-    expect(pending.mock.calls.some(([dirty]) => dirty === true)).toBe(false)
-    expect(lastPending()).toEqual([false, false])
-  })
-
-  it('closes a clean editor without asking', async () => {
-    const name = await openEdit()
-    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
-    await waitFor(() => expect(name.isConnected).toBe(false))
-    expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0)
-  })
-
-  it('asks before closing an edited editor through Cancel or the X, and keeps the edits on stay', async () => {
-    const name = await openEdit()
-    fireEvent.change(name, { target: { value: 'Renamed review' } })
-    expect(lastPending()).toEqual([true, false])
-    for (const close of [() => screen.getByRole('button', { name: 'common.cancel' }), () => screen.getByRole('button', { name: 'Close' })]) {
-      fireEvent.click(close())
-      fireEvent.click(await screen.findByRole('button', { name: 'manage.stay' }))
-      await waitFor(() => expect(screen.queryAllByText('manage.leaveTitle')).toHaveLength(0))
-      expect((screen.getByPlaceholderText('recurring.namePlaceholder') as HTMLInputElement).value).toBe('Renamed review')
-    }
-    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'manage.leave' }))
-    await waitFor(() => expect(name.isConnected).toBe(false))
-    expect(lastPending()).toEqual([false, false])
-  })
-
-  it('stays pending when a save fails, and is clean after a successful save', async () => {
-    const name = await openEdit()
-    fireEvent.change(name, { target: { value: 'Renamed review' } })
-    apiMock.put.mockRejectedValueOnce(new Error('boom'))
-    fireEvent.click(screen.getByRole('button', { name: 'common.save' }))
-    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(lastPending()).toEqual([true, false]))
-    expect(name.isConnected).toBe(true)
-    // By text: the error notification that just opened can hide the dialog from role queries.
-    // The button ignores clicks until its loading state from the failed save has cleared.
-    const saveButton = screen.getByText('common.save').closest('button')!
-    await waitFor(() => expect(saveButton.className).not.toContain('ant-btn-loading'))
-    fireEvent.click(saveButton)
-    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(name.isConnected).toBe(false))
-    expect(lastPending()).toEqual([false, false])
+  it('does not enable New until it knows there is a workflow to run', async () => {
+    apiMock.get.mockImplementation((url: string) => (url.includes('/batch/targets') ? Promise.resolve({ targets: [] }) : Promise.resolve({ ...tasks })))
+    renderPage()
+    expect(await screen.findByText('recurring.noTargets')).toBeTruthy()
+    expect((screen.getByRole('button', { name: /recurring\.new/ }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

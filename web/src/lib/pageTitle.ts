@@ -69,6 +69,8 @@ export function routeTitle(pathname: string, t: (k: string) => string): string {
     return key ? t(key) : ''
   }
   if (/^\/report\/[^/]+\/edit$/.test(p)) return t('reportEditor.titleEdit')
+  if (p === '/apps/recurring/new') return t('recurring.new')
+  if (/^\/apps\/recurring\/[^/]+$/.test(p)) return t('recurring.edit')
   // An installed app's own name is not available here (the breadcrumb has the same problem), so the
   // section is the best that can be said — still better than a tab indistinguishable from home.
   if (p.startsWith('/apps/x/')) return t('nav.apps')
