@@ -285,7 +285,7 @@ func TestPlatformManagedEnableCheckpointToStartUsesEnableCommand(t *testing.T) {
 	}
 }
 
-func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) {
+func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) (*Server, platformActorSession, platformOperationLease) {
 	s, snapshot := platformManagedEnableSnapshotFixture(t, pg)
 	checkpoint, err := s.preparePlatformCheckpoint(
 		context.Background(), snapshot)
@@ -417,6 +417,7 @@ func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) {
 		access.intent.generation != 2 {
 		t.Fatal("managed enable history did not retain the active tuple")
 	}
+	return s, actor, startLease
 }
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testing.T) {
@@ -425,6 +426,60 @@ func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testi
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuplePostgres(t *testing.T) {
 	testPlatformManagedEnableSyntheticStart(t, true)
+}
+
+func testPlatformManagedDisablePreparesCurrentEnabledGeneration(t *testing.T, pg bool) {
+	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, pg)
+	review, err := s.createPlatformRemovalReview(
+		actor, enabled.installationID, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("disable review", err)
+	}
+	commit, err := s.consumePlatformRemovalReview(
+		actor, review.ID, review.SHA256, platformFixtureID(1315))
+	if err != nil {
+		t.Fatal("disable admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(1316))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("disable claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage == appplatform.StageQueued ||
+		current.snapshot.Stage == appplatform.StageValidate {
+		current, err = s.st.advancePlatformRemovalControl(current)
+		if err != nil {
+			t.Fatal("disable control stage", current.snapshot.Stage, err)
+		}
+	}
+	current, err = s.advancePlatformManagedRemovalStage(
+		context.Background(), current, appplatform.StageStop)
+	if err != nil {
+		t.Fatal("disable stop stage", err)
+	}
+	intent, err := s.preparePlatformManagedRemovalIntent(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("disable current-generation intent", err)
+	}
+	if intent.sourceOperationID != enabled.id ||
+		intent.command.Payload.SourceOperationID != enabled.id ||
+		intent.command.Payload.SourceEffectID == "" ||
+		intent.command.Payload.SourceReceiptSHA256 == "" ||
+		intent.command.Payload.ReleaseSHA256 == "" ||
+		intent.command.Payload.DataNamespaceID == "" ||
+		intent.nativeID == "" {
+		t.Fatal("disable did not bind the enabled generation")
+	}
+}
+
+func TestPlatformManagedDisablePreparesCurrentEnabledGenerationSQLite(t *testing.T) {
+	testPlatformManagedDisablePreparesCurrentEnabledGeneration(t, false)
+}
+
+func TestPlatformManagedDisablePreparesCurrentEnabledGenerationPostgres(t *testing.T) {
+	testPlatformManagedDisablePreparesCurrentEnabledGeneration(t, true)
 }
 
 func TestPlatformManagedEnableCheckpointToStartPostgres(t *testing.T) {

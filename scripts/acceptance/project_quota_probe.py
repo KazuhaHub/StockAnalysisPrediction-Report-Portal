@@ -475,6 +475,12 @@ def main(args):
                             if marker not in result.stdout:
                                 raise RuntimeError("Native managed restore acceptance missing: " + marker)
                         report["native_managed_restore_from_failed_update"] = True
+                        for marker in ("MANAGED_DISABLE_STOP_VERIFIED", "MANAGED_ENABLE_START_PROBE_ACTIVATED", "MANAGED_ENABLE_BACKEND_REQUEST"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("Native managed disable/enable acceptance missing: " + marker)
+                        report["native_managed_disable_stop_verified"] = True
+                        report["native_managed_enable_start_probe_activated"] = True
+                        report["native_managed_enable_backend_request"] = True
                         if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout:
                             raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True

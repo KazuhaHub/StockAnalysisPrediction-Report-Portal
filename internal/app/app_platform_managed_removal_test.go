@@ -725,3 +725,115 @@ func TestPlatformManagedRemovalPreparedCrashIsClaimableOnlyForRecovery(t *testin
 		t.Fatal("reclaimed crash did not require recovery")
 	}
 }
+
+func testPlatformManagedRemovalPreparesFromRestoredGeneration(t *testing.T, pg bool) {
+	s, restored, _ := platformRestoreStartActivatedFixture(t, pg)
+	actor := platformManagedFixtureSession(t, s)
+	review, err := s.createPlatformRemovalReview(
+		actor, restored.installationID, appplatform.ActionUninstall)
+	if err != nil {
+		t.Fatal("restored-generation uninstall review", err)
+	}
+	commit, err := s.consumePlatformRemovalReview(
+		actor, review.ID, review.SHA256, platformFixtureID(1141))
+	if err != nil {
+		t.Fatal("restored-generation uninstall admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(1142))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("restored-generation uninstall claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage == appplatform.StageQueued ||
+		current.snapshot.Stage == appplatform.StageValidate {
+		current, err = s.st.advancePlatformRemovalControl(current)
+		if err != nil {
+			t.Fatal("restored-generation control stage",
+				current.snapshot.Stage, err)
+		}
+	}
+	current, err = s.advancePlatformManagedRemovalStage(
+		context.Background(), current, appplatform.StageStop)
+	if err != nil {
+		t.Fatal("restored-generation stop stage", err)
+	}
+	intent, err := s.preparePlatformManagedRemovalIntent(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("restored-generation removal intent", err)
+	}
+	if intent.sourceOperationID != restored.id ||
+		intent.command.Payload.SourceOperationID != restored.id ||
+		intent.command.Payload.SourceEffectID == "" ||
+		intent.command.Payload.SourceReceiptSHA256 == "" ||
+		intent.command.Payload.ReleaseSHA256 == "" ||
+		intent.command.Payload.DataNamespaceID == "" ||
+		intent.nativeID == "" {
+		t.Fatal("uninstall did not bind the restored generation")
+	}
+}
+
+func TestPlatformManagedRemovalPreparesFromRestoredGenerationSQLite(t *testing.T) {
+	testPlatformManagedRemovalPreparesFromRestoredGeneration(t, false)
+}
+
+func TestPlatformManagedRemovalPreparesFromRestoredGenerationPostgres(t *testing.T) {
+	testPlatformManagedRemovalPreparesFromRestoredGeneration(t, true)
+}
+
+func testPlatformManagedRemovalPreparesFromUpdatedGeneration(t *testing.T, pg bool) {
+	s, updated, _ := platformUpdateStartActivatedFixture(t, pg)
+	actor := platformManagedFixtureSession(t, s)
+	review, err := s.createPlatformRemovalReview(
+		actor, updated.installationID, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("updated-generation disable review", err)
+	}
+	commit, err := s.consumePlatformRemovalReview(
+		actor, review.ID, review.SHA256, platformFixtureID(1143))
+	if err != nil {
+		t.Fatal("updated-generation disable admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(1144))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("updated-generation disable claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage == appplatform.StageQueued ||
+		current.snapshot.Stage == appplatform.StageValidate {
+		current, err = s.st.advancePlatformRemovalControl(current)
+		if err != nil {
+			t.Fatal("updated-generation control stage",
+				current.snapshot.Stage, err)
+		}
+	}
+	current, err = s.advancePlatformManagedRemovalStage(
+		context.Background(), current, appplatform.StageStop)
+	if err != nil {
+		t.Fatal("updated-generation stop stage", err)
+	}
+	intent, err := s.preparePlatformManagedRemovalIntent(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("updated-generation removal intent", err)
+	}
+	if intent.sourceOperationID != updated.id ||
+		intent.command.Payload.SourceOperationID != updated.id ||
+		intent.command.Payload.SourceEffectID == "" ||
+		intent.command.Payload.SourceReceiptSHA256 == "" ||
+		intent.command.Payload.ReleaseSHA256 == "" ||
+		intent.command.Payload.DataNamespaceID == "" ||
+		intent.nativeID == "" {
+		t.Fatal("disable did not bind the updated generation")
+	}
+}
+
+func TestPlatformManagedRemovalPreparesFromUpdatedGenerationSQLite(t *testing.T) {
+	testPlatformManagedRemovalPreparesFromUpdatedGeneration(t, false)
+}
+
+func TestPlatformManagedRemovalPreparesFromUpdatedGenerationPostgres(t *testing.T) {
+	testPlatformManagedRemovalPreparesFromUpdatedGeneration(t, true)
+}

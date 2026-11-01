@@ -1106,6 +1106,50 @@ func platformRestoreStartRegistrationCommitFixture(t *testing.T, pg bool) (*Serv
 	return s, lease, intent, endpoint, observation
 }
 
+func platformRestoreStartActivatedFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformRuntimeEndpoint) {
+	t.Helper()
+	s, lease, intent, endpoint, observation :=
+		platformRestoreStartRegistrationCommitFixture(t, pg)
+	registered, err := s.commitPlatformRestoreStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil {
+		t.Fatal("restore registration", err)
+	}
+	applied, boot := platformRestoreStartBootFixture(
+		t, s, registered, endpoint)
+	defer applied.registration.Close()
+	result, err := s.commitPlatformRestoreStartActivation(
+		context.Background(), registered, applied, boot)
+	if err != nil {
+		t.Fatal("restore activation", err)
+	}
+	completed := registered
+	completed.snapshot = result.snapshot
+	return s, completed, endpoint
+}
+
+func platformUpdateStartActivatedFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformRuntimeEndpoint) {
+	t.Helper()
+	s, lease, intent, endpoint, observation :=
+		platformUpdateStartRegistrationCommitFixture(t, pg)
+	registered, err := s.commitPlatformUpdateStartRegistration(
+		context.Background(), lease, intent, endpoint, observation)
+	if err != nil {
+		t.Fatal("update registration", err)
+	}
+	applied, boot := platformUpdateStartBootFixture(
+		t, s, registered, endpoint)
+	defer applied.registration.Close()
+	result, err := s.commitPlatformUpdateStartActivation(
+		context.Background(), registered, applied, boot)
+	if err != nil {
+		t.Fatal("update activation", err)
+	}
+	completed := registered
+	completed.snapshot = result.snapshot
+	return s, completed, endpoint
+}
+
 func platformUpdateTargetRemovalObservationFixture(intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint, state string) platformUpdateTargetRemovalTestObservation {
 	now := time.Now().UnixMilli()
 	issued, _ := strconv.ParseInt(

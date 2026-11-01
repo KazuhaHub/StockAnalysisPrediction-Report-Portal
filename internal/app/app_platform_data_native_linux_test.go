@@ -547,6 +547,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			"MANAGED_RESTORE_STOP_REMOVE_TARGET",
 			"MANAGED_RESTORE_DATA_VERIFIED",
 			"MANAGED_RESTORE_START_ACTIVATED",
+			"MANAGED_DISABLE_STOP_VERIFIED",
+			"MANAGED_ENABLE_START_PROBE_ACTIVATED",
+			"MANAGED_ENABLE_BACKEND_REQUEST",
 		} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatalf(

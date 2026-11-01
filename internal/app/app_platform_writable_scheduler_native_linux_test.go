@@ -205,6 +205,8 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	testNativeWritableManagedRestore(
 		t, s, actor, endpoint, admitted.InstallationID,
 		updateRelease, updateOperation, failedOperation)
+	testNativeManagedDisableEnable(
+		t, s, actor, endpoint, admitted.InstallationID)
 }
 
 func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) (string, string) {
@@ -558,6 +560,120 @@ func testNativeWritableManagedRestore(
 	t.Log("MANAGED_RESTORE_STOP_REMOVE_TARGET")
 	t.Log("MANAGED_RESTORE_DATA_VERIFIED")
 	t.Log("MANAGED_RESTORE_START_ACTIVATED")
+}
+
+func testNativeManagedDisableEnable(
+	t *testing.T, s *Server, actor platformActorSession,
+	endpoint platformRuntimeEndpoint, installation string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	generationBefore := scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`, installation)
+	releaseBefore := scalar[string](t, s.st, `SELECT release_sha256
+		FROM app_platform_activations
+		WHERE installation_id=? AND state='active'`, installation)
+	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_access_grants WHERE installation_id=?`,
+		installation)
+	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_capability_grants WHERE installation_id=?`,
+		installation)
+	disableReview, err := s.createPlatformRemovalReview(
+		actor, installation, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("native managed disable review", err)
+	}
+	disableCommit, err := s.consumePlatformRemovalReview(
+		actor, disableReview.ID, disableReview.SHA256,
+		platformFixtureID(984))
+	if err != nil {
+		t.Fatal("native managed disable admission", err)
+	}
+	disableClaim, err := s.claimNextPlatformManagedUninstall(
+		ctx, platformFixtureID(985))
+	if err != nil || disableClaim.lease.id != disableCommit.OperationID {
+		t.Fatal("native managed disable claim", disableClaim, err)
+	}
+	disabled, err := s.runPlatformManagedUninstall(
+		ctx, disableClaim.lease, endpoint)
+	if err != nil || disabled.lease.snapshot.Stage !=
+		appplatform.StageComplete {
+		t.Fatal("native managed disable execution", disabled, err)
+	}
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
+		FROM app_platform_installations WHERE id=?`,
+		installation) != "disabled:disabled" ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			installation) != 0 ||
+		scalar[string](t, s.st, `SELECT state
+			FROM app_platform_data_namespaces
+			WHERE owner_installation_id=?`, installation) != "active" ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_access_grants WHERE installation_id=?`,
+			installation) != grantsBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_capability_grants WHERE installation_id=?`,
+			installation) != capabilitiesBefore {
+		t.Fatal("native managed disable lost data or access")
+	}
+	t.Log("MANAGED_DISABLE_STOP_VERIFIED")
+
+	facts, err := s.observePlatformManagedRuntime(ctx, actor, endpoint)
+	if err != nil {
+		t.Fatal("native managed enable runtime", err)
+	}
+	target, err := managedInstallTarget(facts, endpoint)
+	if err != nil {
+		t.Fatal("native managed enable target", err)
+	}
+	enableReview, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
+		ctx, actor, installation, target, facts.runtime)
+	if err != nil {
+		t.Fatal("native managed enable review", err)
+	}
+	enableCommit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
+		ctx, actor, enableReview.ID, enableReview.SHA256,
+		platformFixtureID(986), target, facts.runtime)
+	if err != nil {
+		t.Fatal("native managed enable admission", err)
+	}
+	enableClaim, err := s.claimNextPlatformManagedEnable(
+		ctx, platformFixtureID(987))
+	if err != nil || enableClaim.lease.id != enableCommit.OperationID {
+		t.Fatal("native managed enable claim", enableClaim, err)
+	}
+	if _, err := s.runPlatformManagedEnable(
+		ctx, enableClaim.lease, endpoint); err != nil {
+		t.Fatal("native managed enable execution", err)
+	}
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
+		FROM app_platform_installations WHERE id=?`,
+		installation) != "enabled:ready" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			installation) != generationBefore+2 ||
+		scalar[string](t, s.st, `SELECT release_sha256
+			FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			installation) != releaseBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_access_grants WHERE installation_id=?`,
+			installation) != grantsBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_capability_grants WHERE installation_id=?`,
+			installation) != capabilitiesBefore {
+		t.Fatal("native managed enable changed the retained tuple")
+	}
+	t.Log("MANAGED_ENABLE_START_PROBE_ACTIVATED")
+	response, err := s.requestPlatformWritableBackend(
+		ctx, actor, installation, "GET", "/v1/echo", nil, endpoint)
+	if err != nil || response.Status != 200 {
+		t.Fatal("native managed enable backend request", response, err)
+	}
+	t.Log("MANAGED_ENABLE_BACKEND_REQUEST")
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {

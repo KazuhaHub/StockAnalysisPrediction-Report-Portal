@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -23,6 +24,14 @@ type platformManagedRemovalIntent struct {
 	runtime           platformRuntimeRegistration
 	sourceOperationID string
 	nativeID          string
+}
+
+type platformManagedRemovalSource struct {
+	operationID, releaseSHA256, descriptor string
+	startEffectID, startReceiptSHA256      string
+	generation, fence                      int64
+	resourceID, namespaceID, nativeID      string
+	platform                               string
 }
 
 func (s *Server) advancePlatformManagedRemovalStage(ctx context.Context, expected platformOperationLease, next appplatform.Stage) (platformOperationLease, error) {
@@ -48,7 +57,8 @@ func (s *Server) advancePlatformManagedRemovalStage(ctx context.Context, expecte
 		return zero, err
 	}
 	if err := validatePlatformAdmittedRemoval(e, expected, facts); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"managed removal admitted state: %w", err)
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
@@ -133,88 +143,121 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 		expectedDesired, expectedPhase = "disabled", "disabled"
 	}
 	if desired != expectedDesired || phase != expectedPhase || generation != int64(expected.snapshot.Generation) || revision < 1 || controlFence != expected.fence {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"managed removal installation tuple: %w",
+			errAppPlatformStageEvidence)
 	}
 	var effectCount int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage=?`, expected.id, string(expected.snapshot.Stage)).Scan(&effectCount); err != nil || effectCount != 0 {
+		return zero, fmt.Errorf(
+			"managed removal prepared effect: %w",
+			errAppPlatformStageEvidence)
+	}
+	sourceGeneration := int64(expected.snapshot.Generation) - 1
+	if sourceGeneration < 1 {
 		return zero, errAppPlatformStageEvidence
 	}
-	var sourceOperation, sourcePlanRaw, sourcePlanSHA, sourceRelease, descriptorRaw string
-	var sourceGeneration, sourceFence, sourceCompleted int64
-	if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
-        FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
-        WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
-          AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL
-        ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, expected.installationID).Scan(&sourceOperation, &sourcePlanRaw, &sourcePlanSHA, &sourceRelease, &descriptorRaw, &sourceGeneration, &sourceFence, &sourceCompleted); err != nil {
-		return zero, errAppPlatformStageEvidence
-	}
-	descriptor := []byte(descriptorRaw)
-	parsed, err := appplatform.ParseDescriptor(descriptor)
-	var plan platformInstallProjection
-	if err != nil || json.Unmarshal([]byte(sourcePlanRaw), &plan) != nil || platformDigest([]byte(sourcePlanRaw)) != sourcePlanSHA ||
-		!platformManagedFormat(plan.Format) || plan.Runtime == nil || plan.ReleaseSHA256 != sourceRelease || parsed.SHA256 != sourceRelease ||
-		plan.Runtime.RuntimeID != runtime.id || validateManagedInstallTarget(e, plan.Runtime, expected.controllerEpoch) != nil ||
-		sourceGeneration < 1 || sourceFence < 1 || sourceGeneration+1 != int64(expected.snapshot.Generation) || sourceCompleted > facts.now {
-		return zero, errAppPlatformStageEvidence
-	}
-	start, err := loadPlatformManagedHistoryEffect(e, platformManagedSource{operationID: sourceOperation, installationID: expected.installationID, epoch: expected.controllerEpoch, generation: uint64(sourceGeneration), fence: sourceFence}, runtime.id, "start", "start-candidate", facts.now)
-	if err != nil {
-		return zero, err
-	}
+	var sourceOperation, sourceRelease, descriptorRaw string
+	var sourceEffectID, sourceReceiptSHA256 string
+	var sourceFence int64
 	var resourceID, namespaceID, nativeID, platform string
-	switch plan.Format {
-	case platformManagedInstallFormat:
-		running, err := journal.ParseCandidateRunningReceipt([]byte(start.receipt))
-		if err != nil || running.Claim.Preflight == nil || running.Claim.Preflight.Platform != plan.Runtime.Profile.Platform ||
-			running.InstallationID != expected.installationID || running.OperationID != sourceOperation || running.ReleaseSHA256 != sourceRelease ||
-			running.Generation != strconv.FormatInt(sourceGeneration, 10) {
-			return zero, errAppPlatformStageEvidence
-		}
-		sourceCommand := control.CandidateCommand{
-			Format: control.CandidateFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
-			ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: expected.installationID,
-			OperationID: sourceOperation, TargetGeneration: running.Generation, Stage: "start", EffectNumber: "1",
-			EffectID: start.id, Kind: "start-candidate", InstallationFence: running.Claim.AdmittedFence,
-			Payload: control.CandidatePayload{ResourceID: running.Claim.ResourceID, DataNamespaceID: running.DataNamespaceID,
-				ReleaseSHA256: running.ReleaseSHA256, Platform: running.Claim.Preflight.Platform, DataFormat: running.DataFormat,
-				WriterFence: running.WriterFence, SandboxProfile: control.CandidateSandboxProfile},
-		}
-		sourceCommand.PayloadSHA256, err = control.CandidateLogicalDigest(sourceCommand)
-		if err != nil || sourceCommand.PayloadSHA256 != start.digest || !running.MatchesCommand(sourceCommand) {
-			return zero, errAppPlatformStageEvidence
-		}
-		resourceID, namespaceID, nativeID, platform = running.Claim.ResourceID, running.DataNamespaceID, running.NativeID, running.Claim.Preflight.Platform
-	case platformWritableInstallFormat:
-		source := platformManagedSource{operationID: sourceOperation, installationID: expected.installationID, epoch: expected.controllerEpoch, generation: uint64(sourceGeneration), fence: sourceFence}
-		dataEffect, err := loadPlatformManagedHistoryEffect(e, source, runtime.id, "prepare_data", "prepare-data", facts.now)
+	if sourceGeneration > 1 {
+		source, err := loadPlatformManagedRemovalSource(
+			e, expected, sourceGeneration, runtime, facts.now)
 		if err != nil {
 			return zero, err
 		}
-		data, err := journal.ParseDataPreparationReceipt([]byte(dataEffect.receipt))
-		dataCommand, commandErr := platformDataCommandForSource(e, source, runtime, data.Claim.ResourceID, dataEffect.id)
-		original := dataCommand
-		original.ControlRevision = data.ControlRevision
-		if err != nil || commandErr != nil || dataCommand.PayloadSHA256 != dataEffect.digest || !data.MatchesCommand(original) ||
-			data.InstallationID != expected.installationID || data.DeploymentID != runtime.deploymentID ||
-			data.ControllerEpoch != expected.controllerEpoch || data.ReleaseSHA256 != sourceRelease ||
-			data.Generation != strconv.FormatInt(sourceGeneration, 10) || data.WriterFence != "1" ||
-			data.DataFormat != strconv.Itoa(parsed.Manifest.Data.Schema) {
+		sourceOperation = source.operationID
+		sourceRelease = source.releaseSHA256
+		descriptorRaw = source.descriptor
+		sourceEffectID = source.startEffectID
+		sourceReceiptSHA256 = source.startReceiptSHA256
+		sourceFence = source.fence
+		resourceID = source.resourceID
+		namespaceID = source.namespaceID
+		nativeID = source.nativeID
+		platform = source.platform
+	} else {
+		var sourcePlanRaw, sourcePlanSHA string
+		var sourceCompleted int64
+		if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor,o.target_generation,o.fence,o.completed_ms
+			FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
+			WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
+			  AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL
+			ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`, expected.installationID).
+			Scan(&sourceOperation, &sourcePlanRaw, &sourcePlanSHA, &sourceRelease, &descriptorRaw, &sourceGeneration, &sourceFence, &sourceCompleted); err != nil {
 			return zero, errAppPlatformStageEvidence
 		}
-		running, err := journal.ParseWritableCandidateRunningReceipt([]byte(start.receipt))
-		revision, _ := strconv.ParseInt(running.Claim.ControlRevision, 10, 64)
-		if err != nil || running.Claim.Preflight == nil || running.Claim.Preflight.Native.Platform != plan.Runtime.Profile.Platform ||
-			running.Claim.SandboxProfile != control.WritableCandidateSandboxProfile || running.Claim.EffectID != start.id ||
-			running.Claim.PayloadSHA256 != start.digest || running.Claim.AdmittedFence != strconv.FormatInt(sourceFence, 10) ||
-			running.Claim.DataReceiptSHA256 != platformDigest([]byte(dataEffect.receipt)) ||
-			running.Claim.Preflight.Native.ProjectID != data.ProjectID || running.Claim.Preflight.Native.NamespaceInode != data.NamespaceInode ||
-			revision < 1 || revision > runtime.controlRevision {
+		descriptor := []byte(descriptorRaw)
+		parsed, err := appplatform.ParseDescriptor(descriptor)
+		var plan platformInstallProjection
+		if err != nil || json.Unmarshal([]byte(sourcePlanRaw), &plan) != nil || platformDigest([]byte(sourcePlanRaw)) != sourcePlanSHA ||
+			!platformManagedFormat(plan.Format) || plan.Runtime == nil || plan.ReleaseSHA256 != sourceRelease || parsed.SHA256 != sourceRelease ||
+			plan.Runtime.RuntimeID != runtime.id || validateManagedInstallTarget(e, plan.Runtime, expected.controllerEpoch) != nil ||
+			sourceGeneration < 1 || sourceFence < 1 || sourceGeneration+1 != int64(expected.snapshot.Generation) || sourceCompleted > facts.now {
 			return zero, errAppPlatformStageEvidence
 		}
-		resourceID, namespaceID, nativeID, platform = running.Claim.ResourceID, data.Claim.ResourceID, running.NativeID, running.Claim.Preflight.Native.Platform
-	default:
-		return zero, errAppPlatformStageEvidence
+		start, err := loadPlatformManagedHistoryEffect(e, platformManagedSource{operationID: sourceOperation, installationID: expected.installationID, epoch: expected.controllerEpoch, generation: uint64(sourceGeneration), fence: sourceFence}, runtime.id, "start", "start-candidate", facts.now)
+		if err != nil {
+			return zero, err
+		}
+		sourceEffectID = start.id
+		sourceReceiptSHA256 = platformDigest([]byte(start.receipt))
+		switch plan.Format {
+		case platformManagedInstallFormat:
+			running, err := journal.ParseCandidateRunningReceipt([]byte(start.receipt))
+			if err != nil || running.Claim.Preflight == nil || running.Claim.Preflight.Platform != plan.Runtime.Profile.Platform ||
+				running.InstallationID != expected.installationID || running.OperationID != sourceOperation || running.ReleaseSHA256 != sourceRelease ||
+				running.Generation != strconv.FormatInt(sourceGeneration, 10) {
+				return zero, errAppPlatformStageEvidence
+			}
+			sourceCommand := control.CandidateCommand{
+				Format: control.CandidateFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
+				ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: expected.installationID,
+				OperationID: sourceOperation, TargetGeneration: running.Generation, Stage: "start", EffectNumber: "1",
+				EffectID: start.id, Kind: "start-candidate", InstallationFence: running.Claim.AdmittedFence,
+				Payload: control.CandidatePayload{ResourceID: running.Claim.ResourceID, DataNamespaceID: running.DataNamespaceID,
+					ReleaseSHA256: running.ReleaseSHA256, Platform: running.Claim.Preflight.Platform, DataFormat: running.DataFormat,
+					WriterFence: running.WriterFence, SandboxProfile: control.CandidateSandboxProfile},
+			}
+			sourceCommand.PayloadSHA256, err = control.CandidateLogicalDigest(sourceCommand)
+			if err != nil || sourceCommand.PayloadSHA256 != start.digest || !running.MatchesCommand(sourceCommand) {
+				return zero, errAppPlatformStageEvidence
+			}
+			resourceID, namespaceID, nativeID, platform = running.Claim.ResourceID, running.DataNamespaceID, running.NativeID, running.Claim.Preflight.Platform
+		case platformWritableInstallFormat:
+			source := platformManagedSource{operationID: sourceOperation, installationID: expected.installationID, epoch: expected.controllerEpoch, generation: uint64(sourceGeneration), fence: sourceFence}
+			dataEffect, err := loadPlatformManagedHistoryEffect(e, source, runtime.id, "prepare_data", "prepare-data", facts.now)
+			if err != nil {
+				return zero, err
+			}
+			data, err := journal.ParseDataPreparationReceipt([]byte(dataEffect.receipt))
+			dataCommand, commandErr := platformDataCommandForSource(e, source, runtime, data.Claim.ResourceID, dataEffect.id)
+			original := dataCommand
+			original.ControlRevision = data.ControlRevision
+			if err != nil || commandErr != nil || dataCommand.PayloadSHA256 != dataEffect.digest || !data.MatchesCommand(original) ||
+				data.InstallationID != expected.installationID || data.DeploymentID != runtime.deploymentID ||
+				data.ControllerEpoch != expected.controllerEpoch || data.ReleaseSHA256 != sourceRelease ||
+				data.Generation != strconv.FormatInt(sourceGeneration, 10) || data.WriterFence != "1" ||
+				data.DataFormat != strconv.Itoa(parsed.Manifest.Data.Schema) {
+				return zero, errAppPlatformStageEvidence
+			}
+			running, err := journal.ParseWritableCandidateRunningReceipt([]byte(start.receipt))
+			revision, _ := strconv.ParseInt(running.Claim.ControlRevision, 10, 64)
+			if err != nil || running.Claim.Preflight == nil || running.Claim.Preflight.Native.Platform != plan.Runtime.Profile.Platform ||
+				running.Claim.SandboxProfile != control.WritableCandidateSandboxProfile || running.Claim.EffectID != start.id ||
+				running.Claim.PayloadSHA256 != start.digest || running.Claim.AdmittedFence != strconv.FormatInt(sourceFence, 10) ||
+				running.Claim.DataReceiptSHA256 != platformDigest([]byte(dataEffect.receipt)) ||
+				running.Claim.Preflight.Native.ProjectID != data.ProjectID || running.Claim.Preflight.Native.NamespaceInode != data.NamespaceInode ||
+				revision < 1 || revision > runtime.controlRevision {
+				return zero, errAppPlatformStageEvidence
+			}
+			resourceID, namespaceID, nativeID, platform = running.Claim.ResourceID, data.Claim.ResourceID, running.NativeID, running.Claim.Preflight.Native.Platform
+		default:
+			return zero, errAppPlatformStageEvidence
+		}
 	}
+	descriptor := []byte(descriptorRaw)
 	effectID, err := platformNewUUID()
 	if err != nil {
 		return zero, err
@@ -227,7 +270,8 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 		Kind: "stop", InstallationFence: strconv.FormatInt(expected.fence, 10),
 		Payload: control.ManagedRemovalPayload{ResourceID: resourceID, DataNamespaceID: namespaceID,
 			ReleaseSHA256: sourceRelease, Platform: platform,
-			SourceOperationID: sourceOperation, SourceEffectID: start.id, SourceReceiptSHA256: platformDigest([]byte(start.receipt))},
+			SourceOperationID: sourceOperation, SourceEffectID: sourceEffectID,
+			SourceReceiptSHA256: sourceReceiptSHA256},
 	}
 	if expected.snapshot.Stage == appplatform.StageRemoveCode {
 		command.Kind = "remove-code"
@@ -250,12 +294,186 @@ func (s *Server) preparePlatformManagedRemovalIntent(ctx context.Context, expect
 		return zero, err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"managed removal final lease check: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
 	return platformManagedRemovalIntent{command: command, raw: raw, signature: signature, authority: authority, descriptor: descriptor, runtime: runtime, sourceOperationID: sourceOperation, nativeID: nativeID}, nil
+}
+
+func loadPlatformManagedRemovalSource(
+	e migExec,
+	expected platformOperationLease,
+	sourceGeneration int64,
+	runtime platformRuntimeRegistration,
+	now int64,
+) (platformManagedRemovalSource, error) {
+	var result platformManagedRemovalSource
+	var sourceRelease, sourceNamespace, sourceState string
+	var sourceActivationGeneration, sourceFormat int64
+	if err := e.queryRow(`SELECT release_sha256,generation,data_namespace_id,data_format,state
+		FROM app_platform_activations
+		WHERE installation_id=? AND generation=? AND state='retired'`,
+		expected.installationID, sourceGeneration).Scan(&sourceRelease,
+		&sourceActivationGeneration, &sourceNamespace, &sourceFormat,
+		&sourceState); err != nil ||
+		sourceState != "retired" ||
+		sourceActivationGeneration != sourceGeneration ||
+		sourceRelease == "" || sourceNamespace == "" || sourceFormat < 1 {
+		return result, fmt.Errorf(
+			"managed removal source activation: %w",
+			errAppPlatformStageEvidence)
+	}
+	var action, planRaw, planSHA, targetRelease string
+	var descriptor []byte
+	var completed int64
+	if err := e.queryRow(`SELECT o.id,o.action,o.fence,o.completed_ms,
+		p.plan_json,p.plan_sha256,p.target_release_sha256,r.descriptor
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
+		WHERE o.installation_id=? AND o.target_generation=?
+		AND o.action IN ('update','enable','restore') AND o.managed=1
+		AND o.stage='complete' AND o.completed_ms IS NOT NULL
+		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
+		AND o.error_code IS NULL AND o.controller_epoch=?
+		AND p.action=o.action AND p.controller_epoch=o.controller_epoch
+		AND p.target_release_sha256=?
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`,
+		expected.installationID, sourceGeneration, expected.controllerEpoch,
+		sourceRelease).Scan(&result.operationID, &action, &result.fence,
+		&completed, &planRaw, &planSHA, &targetRelease,
+		&descriptor); err != nil ||
+		!platformValidUUID(result.operationID) || result.fence < 1 ||
+		completed < 0 || completed > now ||
+		targetRelease != sourceRelease ||
+		platformDigest([]byte(planRaw)) != planSHA {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal source operation: %w",
+			errAppPlatformStageEvidence)
+	}
+	var canonical []byte
+	switch action {
+	case "update":
+		var plan platformManagedUpdatePlan
+		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+			plan.Format != platformManagedUpdateFormat ||
+			plan.InstallationID != expected.installationID ||
+			plan.TargetGeneration != sourceGeneration ||
+			plan.TargetReleaseSHA256 != sourceRelease ||
+			plan.DataNamespaceID != sourceNamespace ||
+			plan.DataFormat != sourceFormat ||
+			plan.TargetRuntime == nil ||
+			plan.TargetRuntime.RuntimeID != runtime.id {
+			return platformManagedRemovalSource{}, fmt.Errorf(
+				"managed removal update plan: %w",
+				errAppPlatformStageEvidence)
+		}
+		canonical, _ = json.Marshal(plan)
+	case "enable":
+		var plan platformManagedUpdatePlan
+		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+			plan.Format != platformManagedEnableFormat ||
+			plan.InstallationID != expected.installationID ||
+			plan.TargetGeneration != sourceGeneration ||
+			plan.TargetReleaseSHA256 != sourceRelease ||
+			plan.DataNamespaceID != sourceNamespace ||
+			plan.DataFormat != sourceFormat ||
+			plan.TargetRuntime == nil ||
+			plan.TargetRuntime.RuntimeID != runtime.id {
+			return platformManagedRemovalSource{}, fmt.Errorf(
+				"managed removal enable plan: %w",
+				errAppPlatformStageEvidence)
+		}
+		canonical, _ = json.Marshal(plan)
+	case "restore":
+		var plan platformManagedRestorePlan
+		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+			plan.Format != platformManagedRestoreFormat ||
+			plan.InstallationID != expected.installationID ||
+			plan.TargetGeneration != sourceGeneration ||
+			plan.ReleaseSHA256 != sourceRelease {
+			return platformManagedRemovalSource{}, fmt.Errorf(
+				"managed removal restore plan: %w",
+				errAppPlatformStageEvidence)
+		}
+		canonical, _ = json.Marshal(plan)
+	default:
+		return platformManagedRemovalSource{}, errAppPlatformStageEvidence
+	}
+	if string(canonical) != planRaw {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal plan canonicalization: %w",
+			errAppPlatformStageEvidence)
+	}
+	target, err := platformManagedTargetForOperation(e, result.operationID)
+	if err != nil || target == nil || target.RuntimeID != runtime.id ||
+		target.ControllerEpoch != expected.controllerEpoch {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal runtime target: %w",
+			errAppPlatformStageEvidence)
+	}
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.SHA256 != sourceRelease ||
+		int64(parsed.Manifest.Data.Schema) != sourceFormat {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal descriptor: %w",
+			errAppPlatformStageEvidence)
+	}
+	expectedKind := map[string]string{
+		"update": "update-start", "enable": "enable-start",
+		"restore": "restore-start",
+	}[action]
+	var effectID, effectKind, effectDigest, receiptRaw string
+	var effectCreated, effectUpdated int64
+	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,receipt_json,
+		created_ms,updated_ms FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start' AND effect_number=1
+		AND state='applied' AND runtime_id=? AND controller_epoch=?
+		AND admitted_fence=? AND observed_fence=?`,
+		result.operationID, runtime.id, expected.controllerEpoch,
+		result.fence, result.fence).Scan(&effectID, &effectKind,
+		&effectDigest, &receiptRaw, &effectCreated,
+		&effectUpdated); err != nil ||
+		!platformValidUUID(effectID) ||
+		effectKind != expectedKind ||
+		!platformValidSHA(effectDigest) ||
+		effectCreated < 0 || effectUpdated < effectCreated ||
+		effectUpdated > completed {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal start effect: %w",
+			errAppPlatformStageEvidence)
+	}
+	running, err := journal.ParseUpdateStartRunningReceipt(
+		[]byte(receiptRaw))
+	if err != nil || running.Claim.Preflight == nil ||
+		running.InstallationID != expected.installationID ||
+		running.OperationID != result.operationID ||
+		running.NamespaceID != sourceNamespace ||
+		running.TargetReleaseSHA256 != sourceRelease ||
+		running.TargetGeneration != strconv.FormatInt(sourceGeneration, 10) ||
+		running.DataFormat != strconv.FormatInt(sourceFormat, 10) ||
+		running.NativeID == "" ||
+		!platformValidUUID(running.Claim.ResourceID) ||
+		running.Claim.EffectID != effectID ||
+		running.Claim.PayloadSHA256 != effectDigest ||
+		running.Claim.AdmittedFence != strconv.FormatInt(result.fence, 10) {
+		return platformManagedRemovalSource{}, fmt.Errorf(
+			"managed removal running receipt: %w",
+			errAppPlatformStageEvidence)
+	}
+	result.resourceID = running.Claim.ResourceID
+	result.releaseSHA256 = sourceRelease
+	result.descriptor = string(descriptor)
+	result.startEffectID = effectID
+	result.startReceiptSHA256 = platformDigest([]byte(receiptRaw))
+	result.generation = sourceGeneration
+	result.namespaceID = sourceNamespace
+	result.nativeID = running.NativeID
+	result.platform = running.Claim.Preflight.Platform
+	return result, nil
 }
 
 func validPlatformManagedRemovalObservation(observation interface {
