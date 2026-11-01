@@ -610,4 +610,47 @@ func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t 
 		t.Fatalf("restored enable review plan: %+v source=%+v err=%v",
 			plan, source, err)
 	}
+	enableCommit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
+		context.Background(), actor, enableReview.ID, enableReview.SHA256,
+		platformFixtureID(1319), source.runtimeTarget, runtime)
+	if err != nil {
+		t.Fatal("restored enable admission", err)
+	}
+	enableSelected, err := s.claimNextPlatformManagedEnable(
+		context.Background(), platformFixtureID(1320))
+	if err != nil || enableSelected.lease.id != enableCommit.OperationID {
+		t.Fatal("restored enable claim", enableSelected, err)
+	}
+	enableLease, err := s.advancePlatformManagedEnableStage(
+		context.Background(), enableSelected.lease)
+	if err != nil {
+		t.Fatal("restored enable validate", err)
+	}
+	enableLease, err = s.advancePlatformManagedEnableStage(
+		context.Background(), enableLease)
+	if err != nil || enableLease.snapshot.Stage !=
+		appplatform.StageSnapshot {
+		t.Fatal("restored enable snapshot stage", enableLease, err)
+	}
+	checkpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), enableLease)
+	if err != nil {
+		t.Fatal("restored enable checkpoint", err)
+	}
+	if checkpoint.command.Payload.WriterFence != source.writerFence ||
+		checkpoint.command.Payload.WriterFence ==
+			strconv.FormatInt(currentWriterFence, 10) {
+		t.Fatalf("restored enable checkpoint writer fence=%s historical=%s current=%d",
+			checkpoint.command.Payload.WriterFence, source.writerFence,
+			currentWriterFence)
+	}
+	checkpointEndpoint := platformCheckpointEndpointFixture()
+	checkpointObservation := platformCheckpointObservationFixture(
+		checkpoint, checkpointEndpoint)
+	startLease, err := s.commitPlatformCheckpoint(
+		context.Background(), enableLease, checkpoint, checkpointEndpoint,
+		checkpointObservation)
+	if err != nil || startLease.snapshot.Stage != appplatform.StageStart {
+		t.Fatal("restored enable checkpoint commit", startLease, err)
+	}
 }

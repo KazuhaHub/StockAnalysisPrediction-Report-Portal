@@ -295,6 +295,10 @@ func platformFinalizeManagedEnablePlan(
 	var plan platformManagedUpdatePlan
 	unmarshalErr := json.Unmarshal([]byte(raw), &plan)
 	canonical, marshalErr := json.Marshal(plan)
+	sourceWriterFence := checkpoint.source.writerFence
+	if checkpoint.source.currentWriterFence != "" {
+		sourceWriterFence = checkpoint.source.currentWriterFence
+	}
 	if unmarshalErr != nil || marshalErr != nil ||
 		string(canonical) != raw ||
 		plan.Format != platformManagedEnableFormat ||
@@ -307,7 +311,7 @@ func platformFinalizeManagedEnablePlan(
 		plan.TargetGeneration != plan.SourceGeneration+1 ||
 		plan.DataNamespaceID != checkpoint.source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(checkpoint.source.dataFormat) ||
-		plan.SourceWriterFence != mustPlatformCheckpointInt(checkpoint.source.writerFence) ||
+		plan.SourceWriterFence != mustPlatformCheckpointInt(sourceWriterFence) ||
 		plan.SourceActivationGeneration != plan.SourceGeneration ||
 		!platformValidSHA(plan.GrantsSHA256) ||
 		!platformValidSHA(plan.AudienceSHA256) {
