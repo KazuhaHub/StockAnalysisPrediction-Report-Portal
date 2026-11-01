@@ -136,7 +136,8 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle reply validation", driver.ErrContainerUncertain)
 	}
-	if _, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, received.UnixMilli()); err != nil {
+	if _, err := verifyWritableLifecycleSettlement(
+		action, raw, sig, descriptor, a, received.UnixMilli()); err != nil {
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}

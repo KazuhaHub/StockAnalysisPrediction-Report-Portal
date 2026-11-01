@@ -574,6 +574,19 @@ func TestWritableLifecycleRestoreReferenceAndReply(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	expired, err := strconv.ParseInt(command.ExpiresMS, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired++
+	if _, err := verifyWritableLifecycle(
+		RestoreExecute, raw, sig, descriptor, a, expired); err == nil {
+		t.Fatal("expired restore dispatch accepted")
+	}
+	if _, err := verifyWritableLifecycleSettlement(
+		RestoreExecute, raw, sig, descriptor, a, expired); err != nil {
+		t.Fatal("admitted restore settlement refused", err)
+	}
 	started, received := time.Now().Add(-time.Second), time.Now()
 	for name, mutate := range map[string]func(*journal.RestoreReceipt){
 		"recovery set": func(v *journal.RestoreReceipt) { v.RecoverySetID = "11111111-1111-4111-8111-111111119960" },

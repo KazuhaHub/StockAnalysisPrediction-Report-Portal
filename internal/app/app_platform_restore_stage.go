@@ -101,7 +101,9 @@ func (s *Server) commitPlatformRestore(ctx context.Context, expected platformOpe
 		!bytes.Equal(current.authority.PublicKey, intent.authority.PublicKey) {
 		return zero, errAppPlatformStageEvidence
 	}
-	if _, err := control.VerifyRestore(intent.raw, intent.signature, current.authority, time.Now().UnixMilli()); err != nil {
+	if _, err := control.VerifyRestoreSettlement(
+		intent.raw, intent.signature, current.authority,
+		time.Now().UnixMilli()); err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
 	encoded, err := json.Marshal(receipt)

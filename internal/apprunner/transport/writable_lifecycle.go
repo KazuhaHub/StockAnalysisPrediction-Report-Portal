@@ -179,6 +179,16 @@ type writableLifecycleReference struct {
 }
 
 func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descriptor []byte, a control.Authority, now int64) (writableLifecycleReference, error) {
+	return verifyWritableLifecycleMode(
+		action, raw, sig, descriptor, a, now, false)
+}
+
+func verifyWritableLifecycleSettlement(action WritableLifecycleAction, raw, sig, descriptor []byte, a control.Authority, now int64) (writableLifecycleReference, error) {
+	return verifyWritableLifecycleMode(
+		action, raw, sig, descriptor, a, now, true)
+}
+
+func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descriptor []byte, a control.Authority, now int64, settling bool) (writableLifecycleReference, error) {
 	var r writableLifecycleReference
 	if !action.valid() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(sig) != 64 || len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes {
 		return r, driver.ErrContainerUncertain
@@ -226,7 +236,13 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		r.checkpoint = v.Command()
 		r.release = r.checkpoint.Payload.ReleaseSHA256
 	case action <= RestoreRead:
-		v, err := control.VerifyRestore(raw, sig, a, now)
+		var v control.VerifiedRestoreCommand
+		var err error
+		if settling {
+			v, err = control.VerifyRestoreSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyRestore(raw, sig, a, now)
+		}
 		if err != nil {
 			return r, err
 		}
