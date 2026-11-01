@@ -420,13 +420,26 @@ def main(args):
                         report["native_portal_network_session_http_uncertain"] = True
                         report["native_portal_writer_settlement_reconciled"] = True
                         report["native_portal_writer_retained_identity"] = True
-                        for marker in ("PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY", "PORTAL_WRITABLE_START_NATIVE_WITNESS", "PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED"):
+                        for marker in ("PORTAL_WRITABLE_START_RECONCILED", "PORTAL_WRITABLE_START_RETAINED_IDENTITY"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Portal writable start acceptance did not execute: " + marker)
                         report["native_portal_writable_start_reconciled"] = True
                         report["native_portal_writable_start_retained_identity"] = True
-                        report["native_portal_writable_start_native_witness"] = True
-                        report["native_portal_writable_start_full_quota_verified"] = True
+                        start_witness = "PORTAL_WRITABLE_START_NATIVE_WITNESS" in result.stdout
+                        start_quota = "PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED" in result.stdout
+                        managed_clear_uninstall = (
+                            "MANAGED_UNINSTALL_STOP_REMOVE_CODE" in result.stdout
+                            and "MANAGED_UNINSTALL_REMOVE_DATA" in result.stdout
+                        )
+                        if start_witness != start_quota:
+                            raise RuntimeError("Portal writable start witness/quota evidence is incomplete")
+                        if not start_witness and not managed_clear_uninstall:
+                            raise RuntimeError("Portal writable start witness missing without managed clear-on-uninstall evidence")
+                        report["native_portal_writable_start_native_witness"] = start_witness
+                        report["native_portal_writable_start_full_quota_verified"] = start_quota
+                        report["native_portal_writable_start_superseded_by_managed_uninstall"] = (
+                            managed_clear_uninstall and not start_witness
+                        )
                         for marker in ("PORTAL_WRITABLE_READINESS_ADVANCED", "PORTAL_WRITABLE_READINESS_REFRESHED", "PORTAL_WRITABLE_READINESS_STALE_SOURCE_REFUSED", "PORTAL_WRITABLE_READINESS_WAIT_CONFIRMED"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Portal writable readiness acceptance did not execute: " + marker)
