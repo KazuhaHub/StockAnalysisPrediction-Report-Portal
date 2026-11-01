@@ -813,6 +813,73 @@ body {
 .rp-batch-grid .ant-select {
   width: 100%;
 }
+/* Keyboard model of the grid (BatchRowsEditor): the active cell wears a 2px primary outline. In select
+   mode its editor holds focus with the whole text selected, so the caret and the selection highlight
+   are hidden (the outline is the selection); edit mode shows both and a lighter fill. The scroll
+   margins keep a cell moved into view clear of the pinned row-number and delete columns. */
+.rp-batch-grid:focus {
+  outline: none;
+}
+.rp-batch-grid:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+.rp-grid-cell {
+  position: relative;
+  border-radius: var(--ant-border-radius-sm);
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+  transition: outline-color 0.12s ease;
+  scroll-margin-inline: 56px 64px;
+}
+.rp-grid-cell--active {
+  outline-color: var(--ant-color-primary);
+}
+.rp-grid-cell--selecting textarea,
+.rp-grid-cell--selecting input {
+  caret-color: transparent;
+}
+.rp-grid-cell--selecting textarea::selection,
+.rp-grid-cell--selecting input::selection {
+  background: transparent;
+}
+.rp-grid-cell--editing .ant-input,
+.rp-grid-cell--editing .ant-input-number,
+.rp-grid-cell--editing .ant-select-content {
+  background: var(--ant-color-bg-elevated);
+}
+/* The expanded editor never shrinks below the height the row was given. */
+.rp-grid-cell--editing textarea.ant-input {
+  min-height: var(--rp-row-h, 0) !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-grid-cell {
+    transition: none;
+  }
+}
+/* Row height handle: the bottom edge of the row-number cell. */
+.rp-batch-grid td.rp-grid-rownum {
+  position: relative;
+}
+.rp-table-resize-handle--row {
+  inset-inline: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  height: 8px;
+  cursor: row-resize;
+}
+.rp-table-resize-handle--row::after {
+  inset-block: 3px auto;
+  inset-inline: 8px;
+  width: auto;
+  height: 1px;
+}
+.rp-table-resize-handle--row:hover::after,
+.rp-table-resize-handle--row:focus-visible::after {
+  width: auto;
+  height: 2px;
+}
 /* The resizable header wraps the heading in a flex row; its text has to be allowed to shrink so a
    long field name is cut by the column, not by pushing the resize handle out of it. */
 .rp-batch-grid .rp-table-column-title > span:first-child {
