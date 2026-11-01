@@ -107,8 +107,41 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	t.Log("PORTAL_WRITABLE_BACKGROUND_COMPLETE")
-	testNativeWritableManagedUpdate(
+	updateOperation, updateRelease := testNativeWritableManagedUpdate(
 		t, s, actor, endpoint, admitted.InstallationID)
+	savePlatformWritableFixtureOwner(
+		t, s, updateOperation, admitted.InstallationID,
+		updateRelease, os.Getenv("PORTAL_MANAGED_IMAGE"))
+	active, err := s.preparePlatformWritableBackendAccess(
+		ctx, actor, admitted.InstallationID)
+	if err != nil || active.intent.update == nil ||
+		active.intent.update.start.running == nil {
+		if err == nil {
+			active.Close()
+		}
+		t.Fatal("updated writable cleanup witness", err)
+	}
+	updateWitness, err := json.Marshal(platformWritableUpdateStartFixtureMessage{
+		Format:    "portal.fixture.writable-update-start/1-dev.1",
+		Raw:       active.intent.update.raw,
+		Signature: active.intent.update.signature,
+		Receipt:   active.intent.update.receipt,
+		Running:   *active.intent.update.start.running,
+	})
+	active.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(os.Getenv("TMPDIR"), "writable-update-start.json"),
+		updateWitness, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(
+		filepath.Join(os.Getenv("TMPDIR"), "writable-auto-start.json")); err != nil &&
+		!os.IsNotExist(err) {
+		t.Fatal(err)
+	}
 	// Current normal-user authorization, not possession of the installer role.
 	role := scalar[string](t, s.st, `SELECT role FROM users WHERE username=?`, actor.username)
 	defer mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`, role, actor.username)
@@ -136,7 +169,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 }
 
-func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) {
+func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) (string, string) {
 	t.Helper()
 	ctx := context.Background()
 	facts, err := s.observePlatformManagedRuntime(ctx, actor, endpoint)
@@ -310,6 +343,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
+	return admitted.OperationID, release.sha256
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {

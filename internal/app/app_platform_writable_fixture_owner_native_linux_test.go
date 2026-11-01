@@ -10,12 +10,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
+
+type platformWritableUpdateStartFixtureMessage struct {
+	Format         string
+	Raw, Signature []byte
+	Receipt        journal.UpdateStartRegistrationReceipt
+	Running        journal.UpdateStartRunningReceipt
+}
 
 func savePlatformWritableFixtureOwner(t *testing.T, s *Server, operation, installation, release, image string) {
 	t.Helper()
@@ -78,6 +87,12 @@ func checkPlatformWritableAutoFixture(t *testing.T, dir string, a control.Author
 		return id
 	}
 	path := filepath.Join(dir, "writable-auto-start.json")
+	updatePath := filepath.Join(dir, "writable-update-start.json")
+	if _, err := os.Stat(updatePath); err == nil {
+		checkPlatformWritableUpdateStartFixture(
+			t, updatePath, p, a, socket, native, cleanup)
+		return
+	}
 	completed, err := os.ReadFile(path)
 	if err == nil {
 		var m platformWritableStartFixtureMessage
@@ -145,4 +160,145 @@ func checkPlatformWritableAutoFixture(t *testing.T, dir string, a control.Author
 		t.Error("automatic fixture IPC cleanup", err)
 	}
 	t.Log("PORTAL_WRITABLE_BACKGROUND_FALLBACK_CLEANUP")
+}
+
+func checkPlatformWritableUpdateStartFixture(t *testing.T, path string, owner platformWritableFixtureOwner, a control.Authority, socket string, native *driver.CandidateRuntime, cleanup bool) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil || len(raw) > 32768 {
+		t.Fatal("updated writable fixture bytes", err)
+	}
+	var message platformWritableUpdateStartFixtureMessage
+	var registration control.UpdateStartRegistrationCommand
+	var start control.UpdateStartCommand
+	if json.Unmarshal(raw, &message) != nil ||
+		message.Format != "portal.fixture.writable-update-start/1-dev.1" ||
+		json.Unmarshal(message.Raw, &registration) != nil ||
+		json.Unmarshal(registration.StartRaw, &start) != nil {
+		t.Fatal("updated writable fixture reference")
+	}
+	issued, err := strconv.ParseInt(start.IssuedMS, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := control.VerifyUpdateStartRegistration(
+		message.Raw, message.Signature, a, issued)
+	if err != nil {
+		t.Fatal("updated writable fixture signature", err)
+	}
+	command := verified.Command()
+	if start.OperationID != owner.OperationID ||
+		start.InstallationID != owner.InstallationID ||
+		start.Payload.TargetReleaseSHA256 != owner.ReleaseSHA ||
+		start.TargetGeneration != "2" ||
+		command.EffectID != message.Receipt.Claim.EffectID ||
+		command.PayloadSHA256 != message.Receipt.Claim.PayloadSHA256 ||
+		command.RunningReceiptSHA256 !=
+			message.Receipt.Claim.SourceSHA256 ||
+		command.DocumentSHA256 != message.Receipt.Claim.DocumentSHA256 ||
+		message.Running.OperationID != owner.OperationID ||
+		message.Running.TargetReleaseSHA256 != owner.ReleaseSHA ||
+		message.Running.TargetGeneration != "2" {
+		t.Fatal("updated writable fixture owner changed")
+	}
+	run := func(args ...string) []byte {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(
+			context.Background(), 15*time.Second)
+		defer cancel()
+		out, err := exec.CommandContext(
+			ctx, "docker",
+			append([]string{"--host", "unix://" + socket}, args...)...).
+			CombinedOutput()
+		if err != nil || len(out) > 65536 {
+			t.Fatal("updated writable fixture inspection", err)
+		}
+		return out
+	}
+	ids := bytes.Fields(run(
+		"container", "ls", "-a", "--no-trunc",
+		"--filter", "label=org.portal.app.operation="+owner.OperationID,
+		"--format", "{{.ID}}"))
+	if len(ids) == 0 {
+		if cleanup {
+			return
+		}
+		t.Fatal("updated writable process missing")
+	}
+	if len(ids) != 1 || !platformValidSHA(string(ids[0])) ||
+		string(ids[0]) != message.Running.NativeID {
+		t.Fatal("updated writable process identity changed")
+	}
+	var rows []struct {
+		ID, Name, Image string
+		Config          struct {
+			Image  string
+			Labels map[string]string
+		}
+	}
+	id := string(ids[0])
+	if json.Unmarshal(run("container", "inspect", id), &rows) != nil ||
+		len(rows) != 1 || rows[0].ID != id ||
+		rows[0].Image != rows[0].Config.Image {
+		t.Fatal("updated writable process inspect")
+	}
+	labels := rows[0].Config.Labels
+	for name, value := range map[string]string{
+		"format":          "update-start/1-dev.1",
+		"sandbox-profile": control.WritableCandidateSandboxProfile,
+		"deployment":      start.DeploymentID,
+		"epoch":           start.ControllerEpoch,
+		"operation":       start.OperationID,
+		"installation":    start.InstallationID,
+		"release":         start.Payload.TargetReleaseSHA256,
+		"generation":      start.TargetGeneration,
+		"control-fence":   start.InstallationFence,
+		"writer-fence":    start.Payload.TargetWriterFence,
+		"start-effect":    start.EffectID,
+		"start-payload":   start.PayloadSHA256,
+	} {
+		if labels["org.portal.app."+name] != value {
+			t.Fatal("updated writable process label", name)
+		}
+	}
+	for _, name := range []string{
+		"resource", "namespace", "start-claim",
+	} {
+		if !platformValidUUID(labels["org.portal.app."+name]) {
+			t.Fatal("updated writable process identity", name)
+		}
+	}
+	for _, name := range []string{
+		"start-ownership", "checkpoint-receipt",
+	} {
+		if !platformValidSHA(labels["org.portal.app."+name]) {
+			t.Fatal("updated writable process digest", name)
+		}
+	}
+	if rows[0].Name != "/portal-app-"+
+		labels["org.portal.app.resource"] {
+		t.Fatal("updated writable process name")
+	}
+	if !cleanup {
+		return
+	}
+	run("container", "stop", "--time", "10", id)
+	run("container", "rm", id)
+	identity := driver.CandidateIdentity{
+		DeploymentID:    start.DeploymentID,
+		ControllerEpoch: start.ControllerEpoch,
+		InstallationID:  start.InstallationID,
+		OperationID:     start.OperationID,
+		ResourceID:      labels["org.portal.app.resource"],
+		NamespaceID:     start.Payload.NamespaceID,
+		ReleaseSHA256:   start.Payload.TargetReleaseSHA256,
+		Generation:      start.TargetGeneration,
+		ControlFence:    start.InstallationFence,
+		WriterFence:     start.Payload.TargetWriterFence,
+	}
+	if err := native.ReleaseCandidateHTTPStorage(
+		context.Background(), identity); err != nil {
+		t.Error("updated writable IPC cleanup", err)
+	}
+	t.Log("PORTAL_WRITABLE_UPDATED_FIXTURE_CLEANUP")
 }
