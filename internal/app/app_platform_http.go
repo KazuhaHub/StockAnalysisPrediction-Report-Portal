@@ -133,27 +133,26 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		}
 		applicationID = m.ID
 		backendAvailable = m.Backend != nil && s.platformBackendEndpoint.Load() != nil
-		var networkGranted int
-		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&networkGranted); err != nil {
+		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
+			WHERE installation_id=? AND granted=1 AND policy_revision=?
+			AND capability IN ('network.http','notifications.publish','reports.read','secrets.use','storage.files')
+			ORDER BY capability`, current.installationID, current.policyRevision)
+		if err != nil {
 			return err
 		}
-		if networkGranted == 1 {
-			capabilities = append(capabilities, "network.http")
+		for rows.Next() {
+			var capability string
+			if err := rows.Scan(&capability); err != nil {
+				rows.Close()
+				return err
+			}
+			capabilities = append(capabilities, capability)
 		}
-		var reportsGranted int
-		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='reports.read' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&reportsGranted); err != nil {
+		if err := rows.Err(); err != nil {
+			rows.Close()
 			return err
 		}
-		if reportsGranted == 1 {
-			capabilities = append(capabilities, "reports.read")
-		}
-		var storageGranted int
-		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='storage.files' AND granted=1 AND policy_revision=?`, current.installationID, current.policyRevision).Scan(&storageGranted); err != nil {
-			return err
-		}
-		if storageGranted == 1 {
-			capabilities = append(capabilities, "storage.files")
-		}
+		rows.Close()
 		display = m.Presentation.Display
 		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
 		for _, route := range routes {
@@ -163,7 +162,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 			}
 		}
 		var zone sql.NullString
-		err := e.queryRow(`SELECT v FROM meta WHERE k='timezone'`).Scan(&zone)
+		err = e.queryRow(`SELECT v FROM meta WHERE k='timezone'`).Scan(&zone)
 		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
