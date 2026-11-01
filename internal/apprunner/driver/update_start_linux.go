@@ -5,6 +5,7 @@ package driver
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -137,6 +138,10 @@ func (r *CandidateRuntime) RemoveUpdateStart(ctx context.Context, launch UpdateS
 		return CandidateRemovalObservation{}, err
 	}
 	identity := snapshot.Launch.Identity
+	if err := launch.Close(); err != nil {
+		return CandidateRemovalObservation{}, errors.Join(
+			ErrContainerUncertain, err)
+	}
 	releaseCtx, cancel := context.WithTimeout(
 		context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
