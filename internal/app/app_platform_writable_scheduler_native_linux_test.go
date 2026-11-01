@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -174,6 +175,27 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
 		role, actor.username)
 	logManagedUpdateState(t, s, updateOperation, admitted.InstallationID)
+	rows, err := s.st.query(`SELECT action,stage,completed_ms
+		FROM app_platform_operations WHERE installation_id=?
+		ORDER BY created_ms,id`, admitted.InstallationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var action, stage string
+		var completed sql.NullInt64
+		if err := rows.Scan(&action, &stage, &completed); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		t.Logf("managed update preflight operation: %s/%s completed=%v",
+			action, stage, completed)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatal(err)
+	}
+	rows.Close()
 	failedOperation, _ := testNativeWritableManagedUpdateVersion(
 		t, s, actor, endpoint, admitted.InstallationID,
 		"1.2.0-beta.3", true)
