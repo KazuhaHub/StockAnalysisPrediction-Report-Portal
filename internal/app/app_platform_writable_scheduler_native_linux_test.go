@@ -265,9 +265,13 @@ func testNativeWritableManagedUpdateVersion(
 		projection.Target.ReleaseSHA256 != release.sha256 {
 		t.Fatal("managed update review projection", err)
 	}
+	admissionKey := platformFixtureID(979)
+	if failAtProbe {
+		admissionKey = platformFixtureID(984)
+	}
 	admitted, err := s.consumePlatformManagedUpdateReview(
 		ctx, actor, review.ID, review.SHA256,
-		platformFixtureID(979), endpoint)
+		admissionKey, endpoint)
 	if err != nil {
 		t.Fatal("managed update admission", err)
 	}
