@@ -289,18 +289,21 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 			snapshot.NativeID)
 	}
 	command := before.verified.Command()
-	expectedState := "stopped"
+	expectedObservationState := "exited"
+	state := "stopped"
 	nextRevision := int64(3)
 	nextDesired := "stopped"
 	if command.Stage == "remove_code" {
-		expectedState = "absent"
+		expectedObservationState = "absent"
+		state = "absent"
 		nextRevision = 4
 		nextDesired = "absent"
 	}
-	if snapshot.State != expectedState {
+	if snapshot.State != expectedObservationState {
 		return zero, fmt.Errorf(
 			"%w: update-start removal settlement state %s/%s",
-			ErrFenceReconciliation, snapshot.State, expectedState)
+			ErrFenceReconciliation, snapshot.State,
+			expectedObservationState)
 	}
 	tx, current, err := beginUpdateStartRemoval(
 		ctx, store, raw, signature, before.request.Descriptor)
@@ -320,7 +323,7 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		`UPDATE runner_resources SET desired_state=?,observed_state=?,revision=?,observed_ms=?,updated_ms=?
 		WHERE id=? AND kind='container' AND native_id=? AND revision=2
 		AND desired_state='present' AND observed_state='running'`,
-		nextDesired, expectedState, nextRevision,
+		nextDesired, state, nextRevision,
 		snapshot.ObservedMS, now, current.start.command.Payload.ResourceID,
 		current.running.NativeID)
 	if err != nil {
@@ -345,7 +348,7 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		ResourceID:          start.Payload.ResourceID,
 		DataNamespaceID:     start.Payload.NamespaceID,
 		ReleaseSHA256:       start.Payload.TargetReleaseSHA256,
-		NativeID:            snapshot.NativeID, State: expectedState,
+		NativeID:            snapshot.NativeID, State: state,
 		ObservedMS: strconv.FormatInt(snapshot.ObservedMS, 10),
 		SettledMS:  strconv.FormatInt(now, 10),
 	}
