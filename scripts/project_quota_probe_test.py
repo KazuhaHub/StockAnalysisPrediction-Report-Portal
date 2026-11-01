@@ -163,7 +163,7 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                     "11111111-1111-4111-8111-111111111111")
             command.assert_called_once_with("umount", "/tmp/owned/mount")
             self.assertEqual(owner.call_count, 1)
-        with patch.object(probe, "require_loop_owner", side_effect=[None, RuntimeError("substituted loop")]), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command") as command:
+        with patch.object(probe, "require_loop_owner", side_effect=[None, RuntimeError("substituted loop")]), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "require_loop_unmounted"), patch.object(probe, "command") as command:
             with self.assertRaisesRegex(RuntimeError, "substituted loop"):
                 probe.replace_owned_uuid(
                     Path("/tmp/owned/mount"), "/dev/loop7",
@@ -181,6 +181,8 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             if args[:2] == ("xfs_admin", "-U"):
                 replacement.append(args[2])
                 return ""
+            if args[:2] == ("findmnt", "--json"):
+                return '{"filesystems":[]}'
             return ""
 
         with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command", side_effect=run):

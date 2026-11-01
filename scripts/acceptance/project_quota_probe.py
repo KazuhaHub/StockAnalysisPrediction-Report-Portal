@@ -77,6 +77,14 @@ def owned_mount_present(mountpoint, loop):
     return True
 
 
+def require_loop_unmounted(loop):
+    data = json.loads(command(
+        "findmnt", "--json", "--source", loop,
+        "--output", "TARGET,FSTYPE"))
+    if data.get("filesystems"):
+        raise RuntimeError("owned loop remains mounted outside the fixture path")
+
+
 def discover_owned_loop(image):
     data = json.loads(command("losetup", "--json", "--list", "--associated", str(image), "--output", "NAME,BACK-FILE"))
     devices = data.get("loopdevices", [])
@@ -98,6 +106,7 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     command("umount", str(mountpoint))
     if owned_mount_present(mountpoint, loop):
         raise RuntimeError("owned filesystem remained mounted before UUID replacement")
+    require_loop_unmounted(loop)
     require_loop_owner(loop, image)
     replacement_uuid = str(uuid.uuid4())
     if replacement_uuid == previous_uuid.lower():
