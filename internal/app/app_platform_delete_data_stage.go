@@ -93,7 +93,8 @@ func platformReadDeleteDataPlan(
 		!platformValidSHA(p.Data.OwnershipSHA256) ||
 		!platformValidUUID(p.Data.SourceOperationID) ||
 		!platformValidUUID(p.Data.SourceEffectID) ||
-		p.Data.SourceGeneration < 1 || p.Data.SourceFence < 1 {
+		p.Data.SourceGeneration < 1 || p.Data.SourceFence < 1 ||
+		p.Data.RunnerWriterFence < 1 {
 		return p, "", errAppPlatformStageEvidence
 	}
 	return p, planID, nil
@@ -243,6 +244,12 @@ func platformValidateAdmittedDeleteData(
 	if err := platformValidateDeleteDataSource(
 		e, p, p.RuntimeID, facts.now); err != nil {
 		return p, err
+	}
+	runnerWriter, err := platformDeleteDataRunnerWriterFence(
+		e, expected.installationID, p.Data.ID, p.ReleaseSHA256,
+		p.Generation)
+	if err != nil || runnerWriter != p.Data.RunnerWriterFence {
+		return p, errAppPlatformStageEvidence
 	}
 	return p, nil
 }
@@ -400,7 +407,7 @@ func (s *Server) preparePlatformStandaloneDeleteDataIntent(
 	}
 	command, err := platformDeleteDataCommand(
 		expected, runtime, p.Data.ID, p.ReleaseSHA256, p.Data.Format,
-		p.Data.WriterFence+1, int64(project),
+		p.Data.RunnerWriterFence+1, int64(project),
 		p.Data.QuotaBytes, quotaInodes, device, inode, effectID)
 	if err != nil {
 		return zero, err

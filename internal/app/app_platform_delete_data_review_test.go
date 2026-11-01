@@ -70,6 +70,7 @@ func testPlatformDeleteDataReview(t *testing.T, pg bool) {
 		p.InstallationID != installation || p.Data.ID != namespace ||
 		p.Generation < 1 || p.TargetGeneration != p.Generation+1 ||
 		p.Data.Format < 1 || p.Data.WriterFence != beforeFence ||
+		p.Data.RunnerWriterFence != p.Data.WriterFence-1 ||
 		p.Data.ProjectID == "" || p.Data.Device == "" ||
 		p.Data.NamespaceInode == "" || p.Data.QuotaInodes == "" ||
 		p.Data.SourcePayloadSHA256 == "" ||

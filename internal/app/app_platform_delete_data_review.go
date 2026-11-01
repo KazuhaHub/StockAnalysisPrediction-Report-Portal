@@ -54,6 +54,7 @@ type platformDeleteDataReviewTarget struct {
 	Format               int64  `json:"format"`
 	Revision             int64  `json:"revision"`
 	WriterFence          int64  `json:"writer_fence"`
+	RunnerWriterFence    int64  `json:"runner_writer_fence"`
 	QuotaBytes           int64  `json:"quota_bytes"`
 	ObservedBytes        int64  `json:"observed_bytes"`
 	SourceOperationID    string `json:"source_operation_id"`
@@ -238,6 +239,69 @@ func platformDeleteDataSourceFacts(
 		lastReason, errAppPlatformPlanChanged)
 }
 
+func platformDeleteDataRunnerWriterFence(
+	e migExec,
+	installation, namespace, release string,
+	generation int64,
+) (int64, error) {
+	rows, err := e.query(`SELECT o.id,f.effect_id,f.receipt_json
+		FROM app_platform_operations o
+		JOIN app_platform_operation_effects f ON f.operation_id=o.id
+		WHERE o.installation_id=? AND o.target_generation=?
+		AND o.action IN ('install','update','enable','repair','restore')
+		AND o.managed=1 AND o.stage='complete'
+		AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+		AND o.lease_until_ms IS NULL AND o.error_code IS NULL
+		AND f.stage='start' AND f.effect_number=1 AND f.state='applied'
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 32`,
+		installation, generation)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var operation, effect, raw string
+		if err := rows.Scan(&operation, &effect, &raw); err != nil {
+			return 0, err
+		}
+		if !platformValidUUID(operation) ||
+			!platformValidUUID(effect) {
+			continue
+		}
+		candidate, candidateErr := journal.ParseCandidateRunningReceipt(
+			[]byte(raw))
+		if candidateErr == nil &&
+			candidate.Claim.EffectID == effect &&
+			candidate.DataNamespaceID == namespace &&
+			candidate.ReleaseSHA256 == release &&
+			candidate.Generation == strconv.FormatInt(generation, 10) {
+			writer, err := strconv.ParseInt(
+				candidate.WriterFence, 10, 64)
+			if err == nil && writer > 0 {
+				return writer, nil
+			}
+		}
+		update, updateErr := journal.ParseUpdateStartRunningReceipt(
+			[]byte(raw))
+		if updateErr == nil &&
+			update.Claim.EffectID == effect &&
+			update.NamespaceID == namespace &&
+			update.TargetReleaseSHA256 == release &&
+			update.TargetGeneration ==
+				strconv.FormatInt(generation, 10) {
+			writer, err := strconv.ParseInt(
+				update.TargetWriterFence, 10, 64)
+			if err == nil && writer > 0 {
+				return writer, nil
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return 0, errAppPlatformPlanChanged
+}
+
 func platformLoadDeleteDataReviewProjection(
 	e migExec,
 	installationID, namespaceID string,
@@ -389,6 +453,12 @@ func platformLoadDeleteDataReviewProjection(
 	source.Revision = p.Data.Revision
 	source.WriterFence = p.Data.WriterFence
 	source.ObservedBytes = p.Data.ObservedBytes
+	runnerWriter, err := platformDeleteDataRunnerWriterFence(
+		e, installationID, namespaceID, p.ReleaseSHA256, p.Generation)
+	if err != nil {
+		return p, err
+	}
+	source.RunnerWriterFence = runnerWriter
 	p.Data = source
 	p.RecoverySetsSHA256, err = platformDeleteDataRecoverySetsDigest(
 		e, namespaceID)
