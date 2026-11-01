@@ -235,16 +235,29 @@ func (s *Store) preflightUpdateStartRegistration(ctx context.Context, raw, signa
 	if native == nil || len(descriptor) == 0 {
 		return zero, ErrFenceReconciliation
 	}
+	request, expected, err := updateStartExpectedSnapshot(
+		before.source.start, before.source.running.Claim, descriptor)
+	comparable := before.source.request
+	comparable.Descriptor = bytes.Clone(descriptor)
+	if err != nil ||
+		!sameUpdateStartRegistrationRequest(request, comparable) {
+		return zero, fmt.Errorf(
+			"update-start registration native request: %w",
+			ErrFenceReconciliation)
+	}
 	observation, err := native.CheckUpdateStartReadiness(
-		ctx, before.source.request, before.source.expected,
+		ctx, request, expected,
 		before.source.running.NativeID, before.source.start.command.Payload.DataFormat)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration native readiness: %w", err)
 	}
 	actual, err := observation.Snapshot()
-	if err != nil || actual.Launch != before.source.expected ||
+	if err != nil || actual.Launch != expected ||
 		actual.NativeID != before.source.running.NativeID {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"update-start registration native snapshot: %w",
+			ErrFenceReconciliation)
 	}
 	post, after, err := beginUpdateStartRegistration(ctx, s, raw, signature, state)
 	if err != nil {
