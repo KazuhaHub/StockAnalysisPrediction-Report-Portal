@@ -434,13 +434,20 @@ func testNativeWritableManagedRestore(
 		commit.OperationID == "" {
 		t.Fatal("managed restore admission", commit, err)
 	}
-	selected, err := s.claimNextPlatformManagedRestore(
-		ctx, platformFixtureID(983))
+	worker := platformFixtureID(983)
+	selected, err := s.claimNextPlatformManagedRestore(ctx, worker)
 	if err != nil || selected.lease.id != commit.OperationID {
 		t.Fatal("managed restore claim", selected, err)
 	}
 	current := selected.lease
 	for {
+		renewed, err := s.st.updatePlatformOperationLeaseContext(
+			ctx, current.id, worker, &current)
+		if err != nil {
+			t.Fatal("managed restore lease renewal",
+				current.snapshot.Stage, err)
+		}
+		current = renewed
 		if current.snapshot.Stage == appplatform.StageActivate {
 			intent, err := s.preparePlatformRestoreStartRegistration(
 				ctx, current)

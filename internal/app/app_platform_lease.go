@@ -14,7 +14,9 @@ var (
 	errAppPlatformControlPaused = errors.New("application control requires initialization or recovery review")
 )
 
-const appPlatformLeaseMS int64 = 30_000
+// A managed native stage can consume the full 30-second lifecycle timeout.
+// Leave a full additional window for preparation, commit and clock skew.
+const appPlatformLeaseMS int64 = 60_000
 
 // This is an internal fencing token, not an external API or execution grant.
 // Claiming work permits inspection/reconciliation; it does not prove any stage
