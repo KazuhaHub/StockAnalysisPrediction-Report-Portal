@@ -17,8 +17,40 @@ func (r *CandidateRuntime) ProvisionUpdateStartSockets(ctx context.Context, requ
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if request.ReplaceSource {
+		if err := r.removeStoppedUpdateStartSource(ctx, request); err != nil {
+			return err
+		}
+	}
 	binding := request.Binding
 	return r.provisionCandidateSocketsProfile(ctx, request.CandidateLaunchRequest, nil, &binding, request.SandboxProfile)
+}
+
+func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, request UpdateStartLaunchRequest) error {
+	r.mu.Lock()
+	var source *candidateLaunchState
+	for state := range r.launches {
+		state.mu.Lock()
+		matches := !state.closed &&
+			state.snapshot.Identity.InstallationID == request.Identity.InstallationID &&
+			state.snapshot.Identity.ResourceID == request.SourceResourceID &&
+			state.snapshot.Identity.NamespaceID == request.Identity.NamespaceID
+		state.mu.Unlock()
+		if matches {
+			source = state
+			break
+		}
+	}
+	r.mu.Unlock()
+	if source == nil {
+		return ErrContainerConflict
+	}
+	launch := UpdateStartLaunch{launch: CandidateLaunch{state: source}}
+	if _, err := r.RemoveUpdateStart(
+		ctx, launch, request.SourceNativeID); err != nil {
+		return err
+	}
+	return nil
 }
 
 // PrepareUpdateStart pins current native facts without changing data ownership

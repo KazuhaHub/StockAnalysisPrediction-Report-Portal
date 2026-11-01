@@ -461,6 +461,30 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		},
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
+	if c.Kind == "enable-start" {
+		sourceResourceID, sourceNativeID := "", ""
+		switch {
+		case f.source.source.update != nil:
+			sourceResourceID = f.source.source.update.Claim.ResourceID
+			sourceNativeID = f.source.source.update.NativeID
+		case f.source.source.writable != nil:
+			sourceResourceID = f.source.source.writable.Claim.ResourceID
+			sourceNativeID = f.source.source.writable.NativeID
+		default:
+			sourceResourceID = f.source.source.source.Claim.ResourceID
+			sourceNativeID = f.source.source.source.NativeID
+		}
+		if !enrollmentUUID.MatchString(sourceResourceID) ||
+			!dataSHA(sourceNativeID) ||
+			sourceResourceID == c.Payload.ResourceID {
+			return zero, fmt.Errorf(
+				"%w: update-start disabled source",
+				ErrFenceReconciliation)
+		}
+		request.ReplaceSource = true
+		request.SourceResourceID = sourceResourceID
+		request.SourceNativeID = sourceNativeID
+	}
 	if !validUpdateStartClaimMarker(marker) || !updateStartClaimMatches(f, marker) {
 		return zero, fmt.Errorf("%w: update-start claim",
 			ErrFenceReconciliation)

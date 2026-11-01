@@ -19,8 +19,11 @@ type UpdateStartBinding struct {
 
 type UpdateStartLaunchRequest struct {
 	CandidateLaunchRequest
-	Binding        UpdateStartBinding
-	SandboxProfile string
+	Binding          UpdateStartBinding
+	SandboxProfile   string
+	ReplaceSource    bool
+	SourceResourceID string
+	SourceNativeID   string
 }
 
 type UpdateStartLaunchSnapshot struct {
@@ -128,7 +131,15 @@ func updateStartSnapshotFailure(s UpdateStartLaunchSnapshot) string {
 }
 
 func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {
-	return candidateRequestValid(r.CandidateLaunchRequest) && validUpdateStartBinding(r.Binding) &&
+	validSource := !r.ReplaceSource && r.SourceResourceID == "" &&
+		r.SourceNativeID == "" ||
+		r.ReplaceSource && containerUUID.MatchString(r.SourceResourceID) &&
+			r.SourceResourceID != "00000000-0000-0000-0000-000000000000" &&
+			containerSHA.MatchString(r.SourceNativeID) &&
+			r.SourceResourceID != r.Identity.ResourceID
+	return validSource &&
+		candidateRequestValid(r.CandidateLaunchRequest) &&
+		validUpdateStartBinding(r.Binding) &&
 		positiveContainerCounter(r.Identity.Generation) && r.Identity.Generation != "1" &&
 		positiveContainerCounter(r.Identity.WriterFence) && r.Identity.WriterFence != "1" &&
 		(r.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
