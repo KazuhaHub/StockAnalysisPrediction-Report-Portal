@@ -129,6 +129,18 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=2 WHERE id=?`, lease.installationID)
 	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=2 WHERE installation_id=?`, lease.installationID)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=2 WHERE installation_id=?`, lease.installationID)
+	// A policy generation change invalidates the old review-bound credential
+	// use. Reapproval here is the same explicit operator path a real installation
+	// follows; the browser later proves the replacement binding is usable.
+	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
+	credentialPlan, err = s.createPlatformSecretBindingReview(actor, lease.installationID, "upstream-api", credential.ID, "http_bearer")
+	if err != nil {
+		t.Fatal("credential binding reapproval review", err)
+	}
+	if _, err := s.consumePlatformSecretBindingReview(actor, credentialPlan.ID, credentialPlan.SHA256); err != nil {
+		t.Fatal("credential binding reapproval", err)
+	}
+	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, actor.username)
 	parent, err := s.st.CreateUserGroup("Writable audience parent", "", 0)
 	if err != nil {
 		t.Fatal(err)
