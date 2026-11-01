@@ -1,10 +1,10 @@
 # Application platform implementation progress
 
-Reviewed: 2026-10-31, America/Los_Angeles.
+Reviewed: 2026-11-01, America/Los_Angeles.
 
 During this pass, Portal main was `d0158f19`
 and Apps main was `54239874c3e8c7af7071cfc6d8de669449440925`. The current
-integration candidates are Portal draft PR 364 (`f181fbe`) and Apps draft PR 36
+integration candidates are Portal draft PR 364 (`602f91fe`) and Apps draft PR 36
 (`78531bf`); the earlier reviewable network chain remains open. The verified
 candidate and SDK WIP commits in the table are the starting points. An integration
 tree now also contains H01-H03, the current-main regression fixes and the
@@ -42,6 +42,8 @@ completion audit rolls the entire transaction back. A prepared effect with no
 confirmed receipt becomes `recovery_required` and is not automatically reissued.
 Tests also prove that this standalone operation does not clear the dedicated
 plugin table; clear-on-uninstall remains a separate reviewed action.
+Candidate `602f91fe` passed Portal test `41341861685`, quota/browser
+`41341861749`, runner daemon `41341861650` and CodeQL.
 
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
