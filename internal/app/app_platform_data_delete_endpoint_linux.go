@@ -18,14 +18,3 @@ func platformDeleteApplicationData(
 		transport.ManagedDataDelete, intent.raw, intent.signature,
 		intent.authority, intent.descriptor, nil)
 }
-
-func platformReadDeleteApplicationData(
-	ctx context.Context,
-	endpoint platformRuntimeEndpoint,
-	intent platformDeleteDataIntent,
-) (transport.WritableLifecycleObservation, error) {
-	return transport.RunControllerWritableLifecycle(
-		ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
-		transport.ManagedDataRead, intent.raw, intent.signature,
-		intent.authority, intent.descriptor, nil)
-}

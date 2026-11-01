@@ -14,10 +14,3 @@ func platformDeleteApplicationData(
 	return transport.WritableLifecycleObservation{},
 		errAppPlatformRuntimeConflict
 }
-
-func platformReadDeleteApplicationData(
-	context.Context, platformRuntimeEndpoint, platformDeleteDataIntent,
-) (transport.WritableLifecycleObservation, error) {
-	return transport.WritableLifecycleObservation{},
-		errAppPlatformRuntimeConflict
-}

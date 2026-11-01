@@ -616,11 +616,6 @@ func platformUpdateStartReadinessCommitFixture(t *testing.T, pg bool) (*Server, 
 	return platformUpdateStartReadinessCommitFixtureMode(t, pg, false)
 }
 
-func platformWritableUpdateStartReadinessCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
-	t.Helper()
-	return platformUpdateStartReadinessCommitFixtureMode(t, pg, true)
-}
-
 func platformUpdateStartReadinessCommitFixtureMode(t *testing.T, pg, writable bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
 	t.Helper()
 	s, lease, runningIntent, endpoint, runningObservation :=
