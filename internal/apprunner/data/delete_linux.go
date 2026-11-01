@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -57,7 +58,12 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	if err != nil {
 		return zero, ErrDeleteUnsafe
 	}
-	defer folder.Close()
+	folderClosed := false
+	defer func() {
+		if !folderClosed {
+			_ = folder.Close()
+		}
+	}()
 	var stat unix.Stat_t
 	if err := unix.Fstat(int(folder.Fd()), &stat); err != nil {
 		return zero, ErrDeleteUnsafe
@@ -109,17 +115,28 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 			ErrDeleteUnsafe)
 	}
 	if len(remaining) != 0 {
-		return zero, errors.Join(ErrDeleteIncomplete, ErrDeleteUnsafe)
+		return zero, errors.Join(
+			ErrDeleteIncomplete,
+			fmt.Errorf("namespace directory is not empty: %w", ErrDeleteUnsafe))
 	}
 	if err := unix.Unlinkat(
 		int(r.file.Fd()), request.NamespaceID, unix.AT_REMOVEDIR); err != nil {
-		return zero, errors.Join(ErrDeleteIncomplete, err)
+		return zero, errors.Join(
+			ErrDeleteIncomplete,
+			fmt.Errorf("remove namespace directory: %w", err))
+	}
+	closeErr := folder.Close()
+	folderClosed = true
+	if closeErr != nil {
+		return zero, errors.Join(ErrDeleteIncomplete, closeErr)
 	}
 	if err := r.file.Sync(); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
 	if err := settleDeleteDataQuota(r.file, request); err != nil {
-		return zero, errors.Join(ErrDeleteIncomplete, err)
+		return zero, errors.Join(
+			ErrDeleteIncomplete,
+			fmt.Errorf("settle namespace quota: %w", err))
 	}
 	if err := r.requireIdentity(ctx, expected); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
@@ -132,17 +149,19 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
 	limit, err := readLimits(file, request.ProjectID)
 	if err != nil {
-		return err
+		return fmt.Errorf("read namespace quota: %w", err)
 	}
 	if limit == (limits{}) {
 		return nil
 	}
 	if limit.usedBytes != 0 || limit.usedInodes != 0 {
-		return ErrDeleteIncomplete
+		return fmt.Errorf(
+			"namespace quota is still in use: %w", ErrDeleteIncomplete)
 	}
 	if limit.bytes != request.QuotaBytes ||
 		limit.inodes != request.QuotaInodes {
-		return ErrDeleteUnsafe
+		return fmt.Errorf(
+			"namespace quota binding changed: %w", ErrDeleteUnsafe)
 	}
 	buffer := make([]byte, 112)
 	buffer[0] = 1
@@ -150,14 +169,15 @@ func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
 	binary.NativeEndian.PutUint16(buffer[2:4], 10)
 	binary.NativeEndian.PutUint32(buffer[4:8], request.ProjectID)
 	if err := quota(file, quotaSet, request.ProjectID, buffer); err != nil {
-		return err
+		return fmt.Errorf("clear namespace quota: %w", err)
 	}
 	cleared, err := readLimits(file, request.ProjectID)
 	if err != nil {
-		return err
+		return fmt.Errorf("verify cleared namespace quota: %w", err)
 	}
 	if cleared != (limits{}) {
-		return ErrDeleteIncomplete
+		return fmt.Errorf(
+			"namespace quota remains after clear: %w", ErrDeleteIncomplete)
 	}
 	return nil
 }
