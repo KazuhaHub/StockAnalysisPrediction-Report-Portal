@@ -586,6 +586,28 @@ func TestUpdateStartRegistrationAdmissionBindsAppliedTarget(t *testing.T) {
 	}
 }
 
+func TestUpdateStartRegistrationCurrentUsesOuterCommand(t *testing.T) {
+	f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	_, raw, signature := updateStartRegistrationCommandFixture(
+		t, command, startRaw, startSignature, runningRaw)
+	if _, err := f.store.AdmitUpdateStartRegistrationCommand(
+		context.Background(), raw, signature); err != nil {
+		t.Fatal(err)
+	}
+	tx, facts, err := beginUpdateStartRegistration(
+		context.Background(), f.store, raw, signature, "prepared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := checkUpdateStartRegistrationCurrent(
+		context.Background(), facts); err != nil {
+		t.Fatal("current registration command", err)
+	}
+}
+
 func TestUpdateStartRegistrationRefusesChangedTargetEvidence(t *testing.T) {
 	t.Run("running receipt hash", func(t *testing.T) {
 		f, _, command, startRaw, startSignature := updateStartJournalFixture(t)

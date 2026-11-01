@@ -39,7 +39,7 @@ type updateStartRegistrationSource struct {
 	expected driver.UpdateStartLaunchSnapshot
 }
 
-func loadUpdateStartRegistrationSource(ctx context.Context, tx *sql.Tx, v control.VerifiedUpdateStartRegistrationCommand, now int64) (updateStartRegistrationSource, error) {
+func loadUpdateStartRegistrationSource(ctx context.Context, tx *sql.Tx, v control.VerifiedUpdateStartRegistrationCommand, authority control.Authority, now int64) (updateStartRegistrationSource, error) {
 	var zero updateStartRegistrationSource
 	startCommand := v.Start().Command()
 	index := updateStartIndex(startCommand)
@@ -58,8 +58,11 @@ func loadUpdateStartRegistrationSource(ctx context.Context, tx *sql.Tx, v contro
 	if err != nil || fence < source.resource.controlFence {
 		return zero, fmt.Errorf("update-start registration checkpoint source: %w", ErrFenceReconciliation)
 	}
+	registrationCommand := v.Command()
 	facts := updateStartFacts{
-		command: startCommand, stored: stored, source: source, now: now,
+		command: startCommand, stored: stored, source: source,
+		authority: authority, now: now,
+		raw: registrationCommand.StartRaw, signature: registrationCommand.StartSignature,
 	}
 	var raw string
 	var ack sql.NullInt64
@@ -107,12 +110,33 @@ func (s *Store) AdmitUpdateStartRegistrationCommand(ctx context.Context, raw, si
 
 func checkUpdateStartRegistrationCurrent(ctx context.Context, f updateStartRegistrationFacts) error {
 	if err := finalUpdateStartCheck(ctx, f.source.start); err != nil {
-		return err
+		return fmt.Errorf(
+			"update-start registration embedded start final: %w", err)
+	}
+	start := f.verified.Start().Command()
+	now := time.Now().UnixMilli()
+	issued, issuedErr := strconv.ParseInt(start.IssuedMS, 10, 64)
+	expires, expiresErr := strconv.ParseInt(start.ExpiresMS, 10, 64)
+	if issuedErr != nil || expiresErr != nil ||
+		now < issued || now >= expires {
+		return fmt.Errorf(
+			"update-start registration start window: %w",
+			control.ErrInvalidCommand)
+	}
+	if _, err := control.VerifyUpdateStart(
+		f.source.start.raw, f.source.start.signature,
+		f.source.start.authority, now); err != nil {
+		return fmt.Errorf(
+			"update-start registration embedded start: %w", err)
 	}
 	_, err := control.VerifyUpdateStartRegistration(
-		f.source.start.raw, f.source.start.signature, f.source.start.authority,
-		time.Now().UnixMilli())
-	return err
+		f.raw, f.signature, f.source.start.authority,
+		now)
+	if err != nil {
+		return fmt.Errorf(
+			"update-start registration outer: %w", err)
+	}
+	return nil
 }
 
 func sameUpdateStartRegistrationSource(a, b updateStartRegistrationFacts) bool {
@@ -179,7 +203,8 @@ func beginUpdateStartRegistration(ctx context.Context, s *Store, raw, signature 
 	if err != nil || !present || row.stored.state != state {
 		return nil, zero, ErrFenceReconciliation
 	}
-	source, err := loadUpdateStartRegistrationSource(ctx, tx, verified, now)
+	source, err := loadUpdateStartRegistrationSource(
+		ctx, tx, verified, authority, now)
 	if err != nil {
 		return nil, zero, err
 	}

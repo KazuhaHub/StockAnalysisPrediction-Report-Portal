@@ -39,7 +39,8 @@ func validateCandidateAdmissionResource(ctx context.Context, tx *sql.Tx, verifie
 		return false, nil
 	}
 	if verified.updateStartRegistration != nil {
-		if _, err := loadUpdateStartRegistrationSource(ctx, tx, *verified.updateStartRegistration, now); err != nil {
+		if _, err := loadUpdateStartRegistrationSource(
+			ctx, tx, *verified.updateStartRegistration, authority, now); err != nil {
 			return false, err
 		}
 		return false, nil
