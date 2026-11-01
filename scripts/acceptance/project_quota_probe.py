@@ -42,11 +42,11 @@ def command_text(*args):
 def command_quiet(*args):
     result = subprocess.run(
         args, env=ENV, check=False, stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE, text=True, timeout=60)
-    if len(result.stderr) > 65536:
-        raise RuntimeError("unexpected quiet probe command output size")
+        stderr=subprocess.DEVNULL, text=True, timeout=60)
     if result.returncode:
-        raise ProbeCommandError(result.returncode, f"{Path(args[0]).name} failed ({result.returncode}): {result.stderr[:2048]}")
+        raise ProbeCommandError(
+            result.returncode,
+            f"{Path(args[0]).name} failed ({result.returncode})")
     return ""
 
 
