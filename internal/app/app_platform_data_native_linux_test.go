@@ -287,6 +287,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			stopServer()
 			fixtureAuthority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
 			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
+			checkPlatformWritableStartFixture(
+				t, filepath.Join(childData,
+					"writable-auto-start.retired.json"),
+				fixtureAuthority,
+				os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"),
+				native, true)
 			if !t.Failed() {
 				// The first writable app remains alive while the second is removed.
 				checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)

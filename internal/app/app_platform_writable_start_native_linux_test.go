@@ -144,9 +144,14 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 		return out
 	}
 	ids := bytes.Fields(run("container", "ls", "-a", "--no-trunc", "--filter", "label=org.portal.app.resource="+w.ResourceID, "--format", "{{.ID}}"))
+	identity := driver.CandidateIdentity{DeploymentID: index.DeploymentID, ControllerEpoch: index.ControllerEpoch, InstallationID: index.InstallationID, OperationID: index.OperationID, ResourceID: w.ResourceID, NamespaceID: index.Payload.DataNamespaceID, ReleaseSHA256: index.Payload.ReleaseSHA256, Generation: index.TargetGeneration, ControlFence: index.InstallationFence, WriterFence: index.Payload.WriterFence}
 	if len(ids) == 0 {
 		if !cleanup {
 			t.Fatal("actual writable process missing")
+		}
+		if err := native.ReleaseCandidateHTTPStorage(
+			context.Background(), identity); err != nil {
+			t.Error("retired writable IPC cleanup", err)
 		}
 		return
 	}
@@ -184,7 +189,6 @@ func checkPlatformWritableStartFixture(t *testing.T, path string, a control.Auth
 	if cleanup {
 		run("container", "stop", "--time", "10", id)
 		run("container", "rm", id)
-		identity := driver.CandidateIdentity{DeploymentID: index.DeploymentID, ControllerEpoch: index.ControllerEpoch, InstallationID: index.InstallationID, OperationID: index.OperationID, ResourceID: w.ResourceID, NamespaceID: index.Payload.DataNamespaceID, ReleaseSHA256: index.Payload.ReleaseSHA256, Generation: index.TargetGeneration, ControlFence: index.InstallationFence, WriterFence: index.Payload.WriterFence}
 		if err := native.ReleaseCandidateHTTPStorage(context.Background(), identity); err != nil {
 			t.Error("owned writable IPC cleanup", err)
 		}

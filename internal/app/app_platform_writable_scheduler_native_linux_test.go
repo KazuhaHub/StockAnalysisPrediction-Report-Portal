@@ -137,8 +137,12 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		updateWitness, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(
-		filepath.Join(os.Getenv("TMPDIR"), "writable-auto-start.json")); err != nil &&
+	oldWitness := filepath.Join(
+		os.Getenv("TMPDIR"), "writable-auto-start.json")
+	if err := os.Rename(
+		oldWitness,
+		filepath.Join(os.Getenv("TMPDIR"),
+			"writable-auto-start.retired.json")); err != nil &&
 		!os.IsNotExist(err) {
 		t.Fatal(err)
 	}
