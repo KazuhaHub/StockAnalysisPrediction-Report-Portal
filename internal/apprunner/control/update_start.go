@@ -45,6 +45,7 @@ type UpdateStartPayload struct {
 	DataFormat                    string `json:"data_format"`
 	SourceWriterFence             string `json:"source_writer_fence"`
 	TargetWriterFence             string `json:"target_writer_fence"`
+	CheckpointWriterFence         string `json:"checkpoint_writer_fence,omitempty"`
 	Platform                      string `json:"platform"`
 	SandboxProfile                string `json:"sandbox_profile"`
 }
@@ -113,6 +114,14 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	sourceWriter, _ := strconv.ParseInt(p.SourceWriterFence, 10, 64)
 	targetWriter, _ := strconv.ParseInt(p.TargetWriterFence, 10, 64)
+	checkpointWriter := sourceWriter
+	if p.CheckpointWriterFence != "" {
+		parsed, ok := counter(p.CheckpointWriterFence, true)
+		if !ok || parsed > sourceWriter {
+			return false
+		}
+		checkpointWriter = parsed
+	}
 	project, _ := strconv.ParseInt(p.ProjectID, 10, 64)
 	archive, _ := strconv.ParseInt(p.CheckpointArchiveBytes, 10, 64)
 	quota, _ := strconv.ParseInt(p.QuotaBytes, 10, 64)
@@ -129,6 +138,7 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 		p.SourceCheckpointReceiptSHA256 != p.SourceStartReceiptSHA256 &&
 		p.SourceStartReceiptSHA256 != p.SourceDataReceiptSHA256 &&
 		source >= 1 && target == source+1 && sourceWriter >= 1 &&
+		checkpointWriter >= 1 &&
 		targetWriter > sourceWriter && project > 0 && project <= math.MaxUint32 &&
 		archive > 0 && archive <= maxUpdateStartArchiveBytes && quota > 0 &&
 		quota%512 == 0 && checkpointUint(p.NamespaceInode) &&

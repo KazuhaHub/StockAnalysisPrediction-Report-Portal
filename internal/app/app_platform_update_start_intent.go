@@ -219,6 +219,11 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 	if expected.snapshot.Action == appplatform.ActionEnable {
 		kind = "enable-start"
 	}
+	checkpointWriterFence := ""
+	if plan.Action == appplatform.ActionEnable {
+		checkpointWriterFence = strconv.FormatInt(
+			plan.CheckpointWriterFence, 10)
+	}
 	command := control.UpdateStartCommand{
 		Format: control.UpdateStartFormat, DeploymentID: runtime.deploymentID,
 		ControllerEpoch: expected.controllerEpoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10),
@@ -247,9 +252,11 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 			Device: source.device, QuotaBytes: source.quotaBytes,
 			QuotaInodes: source.quotaInodes, RootFilesystemUUID: source.rootFilesystemUUID,
 			RootInode: source.rootInode, DataFormat: source.dataFormat,
-			SourceWriterFence: strconv.FormatInt(plan.SourceWriterFence, 10),
-			TargetWriterFence: strconv.FormatInt(plan.SourceWriterFence+1, 10),
-			Platform:          source.platform, SandboxProfile: source.sandboxProfile,
+			SourceWriterFence:     strconv.FormatInt(plan.SourceWriterFence, 10),
+			TargetWriterFence:     strconv.FormatInt(plan.SourceWriterFence+1, 10),
+			CheckpointWriterFence: checkpointWriterFence,
+			Platform:              source.platform,
+			SandboxProfile:        source.sandboxProfile,
 		},
 	}
 	digest, err := control.UpdateStartLogicalDigest(command)

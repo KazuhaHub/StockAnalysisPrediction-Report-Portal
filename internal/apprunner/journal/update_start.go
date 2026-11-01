@@ -147,6 +147,10 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	if c.Kind == "restore-start" && operation == c.OperationID {
 		return zero, ErrFenceReconciliation
 	}
+	expectedCheckpointWriterFence := p.SourceWriterFence
+	if p.CheckpointWriterFence != "" {
+		expectedCheckpointWriterFence = p.CheckpointWriterFence
+	}
 	checkpoint, err := ParseCheckpointReceipt([]byte(raw))
 	if err != nil || checkpoint.EffectID != p.SourceCheckpointEffectID ||
 		checkpoint.PayloadSHA256 != payload ||
@@ -162,7 +166,7 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 		checkpoint.NamespaceInode != p.NamespaceInode ||
 		checkpoint.Device != p.Device ||
 		checkpoint.DataFormat != p.DataFormat ||
-		checkpoint.WriterFence != p.SourceWriterFence ||
+		checkpoint.WriterFence != expectedCheckpointWriterFence ||
 		checkpoint.SourceOperationID != p.SourceOperationID ||
 		checkpoint.SourceStartEffectID != p.SourceStartEffectID ||
 		checkpoint.SourceReceiptSHA256 != p.SourceStartReceiptSHA256 ||
