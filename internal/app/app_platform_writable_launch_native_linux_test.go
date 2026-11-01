@@ -60,8 +60,12 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 	if err != nil || result.Status != 200 || json.Unmarshal(result.Body, &before) != nil {
 		t.Fatal("current page binding did not reach native backend", err)
 	}
+	staleBindingGeneration := "1"
+	if binding.Generation == "1" {
+		staleBindingGeneration = "2"
+	}
 	for _, stale := range []platformBackendRequestBinding{
-		{Generation: "2", PolicyRevision: binding.PolicyRevision, ReleaseSHA256: binding.ReleaseSHA256},
+		{Generation: staleBindingGeneration, PolicyRevision: binding.PolicyRevision, ReleaseSHA256: binding.ReleaseSHA256},
 		{Generation: binding.Generation, PolicyRevision: "9223372036854775807", ReleaseSHA256: binding.ReleaseSHA256},
 		{Generation: binding.Generation, PolicyRevision: binding.PolicyRevision, ReleaseSHA256: strings.Repeat("0", 64)},
 	} {
