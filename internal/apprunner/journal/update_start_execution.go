@@ -462,28 +462,30 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 		SandboxProfile: c.Payload.SandboxProfile,
 	}
 	if c.Kind == "enable-start" {
-		sourceResourceID, sourceNativeID := "", ""
-		switch {
-		case f.source.source.update != nil:
-			sourceResourceID = f.source.source.update.Claim.ResourceID
-			sourceNativeID = f.source.source.update.NativeID
-		case f.source.source.writable != nil:
-			sourceResourceID = f.source.source.writable.Claim.ResourceID
-			sourceNativeID = f.source.source.writable.NativeID
-		default:
-			sourceResourceID = f.source.source.source.Claim.ResourceID
-			sourceNativeID = f.source.source.source.NativeID
-		}
-		if !enrollmentUUID.MatchString(sourceResourceID) ||
-			!dataSHA(sourceNativeID) ||
-			sourceResourceID == c.Payload.ResourceID {
+		source := f.source.source.update
+		if source == nil || source.Claim.Preflight == nil {
 			return zero, fmt.Errorf(
 				"%w: update-start disabled source",
 				ErrFenceReconciliation)
 		}
 		request.ReplaceSource = true
-		request.SourceResourceID = sourceResourceID
-		request.SourceNativeID = sourceNativeID
+		request.Source = &driver.UpdateStartSource{
+			OperationID:   source.OperationID,
+			ResourceID:    source.Claim.ResourceID,
+			NativeID:      source.NativeID,
+			ReleaseSHA256: source.TargetReleaseSHA256,
+			Generation:    source.TargetGeneration,
+			ControlFence:  source.ControlFence,
+			WriterFence:   source.TargetWriterFence,
+			Binding: driver.UpdateStartBinding{
+				EffectID: source.Claim.EffectID, ClaimID: source.Claim.ClaimID,
+				PayloadSHA256:           source.Claim.PayloadSHA256,
+				OwnershipSHA256:         source.Claim.OwnershipSHA256,
+				CheckpointReceiptSHA256: source.Claim.CheckpointReceiptSHA256,
+				PolicyRevision:          source.Claim.PolicyRevision,
+			},
+			SandboxProfile: source.Claim.SandboxProfile,
+		}
 	}
 	if !validUpdateStartClaimMarker(marker) || !updateStartClaimMatches(f, marker) {
 		return zero, fmt.Errorf("%w: update-start claim",

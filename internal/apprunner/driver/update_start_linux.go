@@ -27,13 +27,16 @@ func (r *CandidateRuntime) ProvisionUpdateStartSockets(ctx context.Context, requ
 }
 
 func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, request UpdateStartLaunchRequest) error {
+	if request.Source == nil {
+		return ErrInvalidResponse
+	}
 	r.mu.Lock()
 	var source *candidateLaunchState
 	for state := range r.launches {
 		state.mu.Lock()
 		matches := !state.closed &&
 			state.snapshot.Identity.InstallationID == request.Identity.InstallationID &&
-			state.snapshot.Identity.ResourceID == request.SourceResourceID &&
+			state.snapshot.Identity.ResourceID == request.Source.ResourceID &&
 			state.snapshot.Identity.NamespaceID == request.Identity.NamespaceID
 		state.mu.Unlock()
 		if matches {
@@ -42,13 +45,42 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 		}
 	}
 	r.mu.Unlock()
-	if source == nil {
-		return ErrContainerConflict
-	}
-	launch := UpdateStartLaunch{launch: CandidateLaunch{state: source}}
-	if _, err := r.RemoveUpdateStart(
-		ctx, launch, request.SourceNativeID); err != nil {
+	image, err := InspectBackendImage(
+		ctx, r.socket, request.Descriptor, request.Source.ReleaseSHA256)
+	if err != nil {
 		return err
+	}
+	owner := containerOwner{
+		DeploymentID:    request.Identity.DeploymentID,
+		ControllerEpoch: request.Identity.ControllerEpoch,
+		InstallationID:  request.Identity.InstallationID,
+		OperationID:     request.Source.OperationID,
+		ResourceID:      request.Source.ResourceID,
+		NamespaceID:     request.Identity.NamespaceID,
+		ReleaseSHA256:   request.Source.ReleaseSHA256,
+		Generation:      request.Source.Generation,
+		ControlFence:    request.Source.ControlFence,
+		WriterFence:     request.Source.WriterFence,
+	}
+	plan, err := planUpdateStartContainer(
+		request.Descriptor, image, owner, r.roots, request.Source.Binding,
+		request.Source.SandboxProfile)
+	if err != nil {
+		return err
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	if err := removeCandidateContainerHTTP(
+		ctx, client, request.Source.NativeID, plan); err != nil {
+		return err
+	}
+	if source != nil {
+		launch := UpdateStartLaunch{
+			launch: CandidateLaunch{state: source},
+		}
+		if err := launch.Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

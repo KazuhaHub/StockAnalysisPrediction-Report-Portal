@@ -17,13 +17,19 @@ type UpdateStartBinding struct {
 	PolicyRevision                                                             string
 }
 
+type UpdateStartSource struct {
+	OperationID, ResourceID, NativeID                    string
+	ReleaseSHA256, Generation, ControlFence, WriterFence string
+	Binding                                              UpdateStartBinding
+	SandboxProfile                                       string
+}
+
 type UpdateStartLaunchRequest struct {
 	CandidateLaunchRequest
-	Binding          UpdateStartBinding
-	SandboxProfile   string
-	ReplaceSource    bool
-	SourceResourceID string
-	SourceNativeID   string
+	Binding        UpdateStartBinding
+	SandboxProfile string
+	ReplaceSource  bool
+	Source         *UpdateStartSource
 }
 
 type UpdateStartLaunchSnapshot struct {
@@ -131,12 +137,9 @@ func updateStartSnapshotFailure(s UpdateStartLaunchSnapshot) string {
 }
 
 func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {
-	validSource := !r.ReplaceSource && r.SourceResourceID == "" &&
-		r.SourceNativeID == "" ||
-		r.ReplaceSource && containerUUID.MatchString(r.SourceResourceID) &&
-			r.SourceResourceID != "00000000-0000-0000-0000-000000000000" &&
-			containerSHA.MatchString(r.SourceNativeID) &&
-			r.SourceResourceID != r.Identity.ResourceID
+	validSource := !r.ReplaceSource && r.Source == nil ||
+		r.ReplaceSource && r.Source != nil &&
+			validUpdateStartSource(*r.Source, r)
 	return validSource &&
 		candidateRequestValid(r.CandidateLaunchRequest) &&
 		validUpdateStartBinding(r.Binding) &&
@@ -145,6 +148,26 @@ func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {
 		(r.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
 			r.SandboxProfile == UpdateStartWritableSandboxProfile) &&
 		r.Binding.EffectID != r.Identity.ResourceID && r.Binding.EffectID != r.Identity.NamespaceID
+}
+
+func validUpdateStartSource(s UpdateStartSource, r UpdateStartLaunchRequest) bool {
+	validID := func(id string) bool {
+		return containerUUID.MatchString(id) &&
+			id != "00000000-0000-0000-0000-000000000000"
+	}
+	return validID(s.OperationID) && validID(s.ResourceID) &&
+		s.ResourceID != r.Identity.ResourceID &&
+		containerSHA.MatchString(s.NativeID) &&
+		containerSHA.MatchString(s.ReleaseSHA256) &&
+		s.ReleaseSHA256 == r.Identity.ReleaseSHA256 &&
+		positiveContainerCounter(s.Generation) &&
+		s.Generation != "1" &&
+		positiveContainerCounter(s.ControlFence) &&
+		positiveContainerCounter(s.WriterFence) &&
+		s.WriterFence != "1" &&
+		validUpdateStartBinding(s.Binding) &&
+		(s.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
+			s.SandboxProfile == UpdateStartWritableSandboxProfile)
 }
 
 func updateStartSeccompSHA(profile string) string {
