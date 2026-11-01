@@ -875,12 +875,14 @@ describe('BatchRowsEditor undo and redo', () => {
     expect(cellEl(0, 0).value).toBe('')
   })
 
-  it('keeps a bounded history', () => {
+  // The bound itself is UndoHistory's (lib/undoHistory.test.ts); this only checks the grid stops at
+  // the oldest entry instead of wrapping or throwing when undo runs past it.
+  it('stops at the oldest entry', () => {
     render(<Harness initial={twoRows()} />)
     act(() => cellEl(0, 0).focus())
-    for (let i = 1; i <= 55; i++) fireEvent.paste(cellEl(0, 0), { clipboardData: { getData: () => `v${i}` } })
-    for (let i = 0; i < 70; i++) fireEvent.keyDown(cellEl(0, 0), { key: 'z', ctrlKey: true })
-    expect(cellEl(0, 0).value).toBe('v5')
+    for (let i = 1; i <= 3; i++) fireEvent.paste(cellEl(0, 0), { clipboardData: { getData: () => `v${i}` } })
+    for (let i = 0; i < 5; i++) fireEvent.keyDown(cellEl(0, 0), { key: 'z', ctrlKey: true })
+    expect(cellEl(0, 0).value).toBe('a')
   })
 })
 

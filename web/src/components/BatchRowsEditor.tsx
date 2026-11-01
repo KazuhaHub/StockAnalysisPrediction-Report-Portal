@@ -44,6 +44,7 @@ import { fillScrollWidth, useColumnWidths } from '../lib/columnWidths'
 import CardTable, { type CardColumn } from './CardTable'
 import { useFinePointer } from '../lib/useFinePointer'
 import { useNarrow } from '../lib/useNarrow'
+import { UndoHistory } from '../lib/undoHistory'
 import RowResizeHandle, { measureRowHeight } from './RowResizeHandle'
 import TableColumnHeader from './TableColumnHeader'
 
@@ -131,7 +132,7 @@ export default function BatchRowsEditor({
   const pendingFocus = useRef(false)
   const pendingCaret = useRef<number | 'end' | null>(null)
   const composing = useRef(false)
-  const history = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] })
+  const history = useRef(new UndoHistory<Snapshot>(HISTORY_LIMIT))
   const editSnapshot = useRef<Snapshot | null>(null)
   // Row heights live in component state by row index and are not persisted: rows are transient data.
   // Deleting a row shifts the heights below it up; a paste only overwrites or appends rows, so it
@@ -171,7 +172,7 @@ export default function BatchRowsEditor({
     setRowHeights({})
     setActive(null)
     setEdit(null)
-    history.current = { past: [], future: [] }
+    history.current.clear()
   }, [keySignature])
   const readyRows = useMemo(() => activeBatchRows(rows), [rows])
   const missingCells = useMemo(() => missingRequiredCells(rows, inputs), [rows, inputs])
@@ -197,7 +198,7 @@ export default function BatchRowsEditor({
       const parsed = csvToRows(rawCSV, keys)
       onChange(ensureTrailingBlank(parsed, inputs))
       setRowHeights({})
-      history.current = { past: [], future: [] }
+      history.current.clear()
     }
     setMode(next)
   }
@@ -219,12 +220,7 @@ export default function BatchRowsEditor({
     ) ?? null
 
   const snapshot = (): Snapshot => ({ rows: displayedRows, active: activeCell, heights: rowHeights })
-  const pushHistory = (snap: Snapshot = snapshot()) => {
-    const { past } = history.current
-    past.push(snap)
-    if (past.length > HISTORY_LIMIT) past.shift()
-    history.current.future = []
-  }
+  const pushHistory = (snap: Snapshot = snapshot()) => history.current.push(snap)
 
   // Makes (row, col) the active cell, follows it onto its page and queues a focus for the render that
   // mounts it, so focus never falls back to the page body when a paste, an undo or a move changes page.
@@ -244,16 +240,12 @@ export default function BatchRowsEditor({
     else setEdit(null)
   }
   const undo = () => {
-    const snap = history.current.past.pop()
-    if (!snap) return
-    history.current.future.push(snapshot())
-    restore(snap)
+    const snap = history.current.undo(snapshot())
+    if (snap) restore(snap)
   }
   const redo = () => {
-    const snap = history.current.future.pop()
-    if (!snap) return
-    history.current.past.push(snapshot())
-    restore(snap)
+    const snap = history.current.redo(snapshot())
+    if (snap) restore(snap)
   }
 
   // Ends an edit. The text is already in the rows, so committing is leaving edit mode; what is left to
@@ -634,7 +626,7 @@ export default function BatchRowsEditor({
       setRawCSV(text)
       onChange(csvToRows(text, keys))
       setRowHeights({})
-      history.current = { past: [], future: [] }
+      history.current.clear()
       setMode('csv')
     }
     reader.readAsText(file)
@@ -942,7 +934,7 @@ export default function BatchRowsEditor({
               setRawCSV(toCSV(keys, []))
               setRowHeights({})
               setActive(null)
-              history.current = { past: [], future: [] }
+              history.current.clear()
               onChange([blankBatchRow(inputs)])
             }}
             okText={t('batch.editor.clearAction')}
