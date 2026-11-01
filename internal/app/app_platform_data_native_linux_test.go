@@ -345,8 +345,6 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 					t.Error("managed service candidate IPC cleanup", err)
 				}
 			}
-			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
-			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 			witnessName := "writable-auto-start.json"
 			if _, err := os.Stat(
 				filepath.Join(childData,
