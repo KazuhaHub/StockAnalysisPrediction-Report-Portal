@@ -74,7 +74,7 @@ func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperatio
 		Scan(&startEffect, &startKind, &startPayload, &startState,
 			&startFence, &startRaw); err != nil ||
 		startKind != action+"-start" || startState != "applied" ||
-		startFence != sourceFence {
+		startFence < 1 || startFence > sourceFence {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	running, err := journal.ParseUpdateStartRunningReceipt(
