@@ -112,6 +112,38 @@ def require_loop_unmounted(loop):
         raise RuntimeError("owned loop remains mounted outside the fixture path")
 
 
+def loop_holder_summary(loop):
+    holders = []
+    try:
+        targets = {loop, str(Path(loop).resolve())}
+        processes = Path("/proc").iterdir()
+    except OSError:
+        return ""
+    for process in processes:
+        if not process.name.isdigit():
+            continue
+        try:
+            descriptors = (process / "fd").iterdir()
+        except OSError:
+            continue
+        for descriptor in descriptors:
+            try:
+                target = os.readlink(descriptor)
+            except OSError:
+                continue
+            if target not in targets:
+                continue
+            try:
+                command = (process / "comm").read_text(
+                    encoding="ascii").strip()
+            except OSError:
+                command = ""
+            holders.append(
+                f"{process.name}:{descriptor.name}:{command}")
+            break
+    return ",".join(holders[:16])
+
+
 def discover_owned_loop(image):
     data = json.loads(command("losetup", "--json", "--list", "--associated", str(image), "--output", "NAME,BACK-FILE"))
     devices = data.get("loopdevices", [])
@@ -153,6 +185,10 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
         except ProbeCommandError as error:
             if error.code != 1 or "Device or resource busy" not in str(error):
                 raise
+            holders = loop_holder_summary(loop)
+            if holders:
+                raise RuntimeError(
+                    "owned loop holders refused repair: " + holders)
             require_loop_owner(loop, image)
             command_quiet("xfs_repair", "-L", "-f", str(image))
             os.sync()
