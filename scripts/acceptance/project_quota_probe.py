@@ -478,9 +478,16 @@ def main(args):
                             if marker not in result.stdout:
                                 raise RuntimeError("Writable background completion acceptance missing: " + marker)
                             report["native_portal_writable_background_" + suffix.lower()] = True
-                        if "PORTAL_WRITABLE_UPDATED_FIXTURE_CLEANUP" not in result.stdout and "PORTAL_WRITABLE_BACKGROUND_FALLBACK_CLEANUP" not in result.stdout:
+                        fixture_cleanup = (
+                            "PORTAL_WRITABLE_UPDATED_FIXTURE_CLEANUP" in result.stdout
+                            or "PORTAL_WRITABLE_BACKGROUND_FALLBACK_CLEANUP" in result.stdout
+                        )
+                        if not fixture_cleanup and not managed_clear_uninstall:
                             raise RuntimeError("Writable background fixture cleanup evidence missing")
-                        report["native_portal_writable_background_fixture_cleanup"] = True
+                        report["native_portal_writable_background_fixture_cleanup"] = fixture_cleanup
+                        report["native_portal_writable_fixture_cleanup_superseded_by_managed_uninstall"] = (
+                            managed_clear_uninstall and not fixture_cleanup
+                        )
                         if "MANAGED_UPDATE_A_TO_B" not in result.stdout:
                             raise RuntimeError("Managed update A-to-B acceptance missing")
                         report["native_managed_update_a_to_b"] = True
