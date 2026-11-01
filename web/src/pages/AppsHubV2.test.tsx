@@ -18,7 +18,7 @@ test('authorized v2 app opens the new protected launch page',async()=>{
 })
 test('disabled installation is visible with no open action',async()=>{
  vi.stubGlobal('fetch',vi.fn(async input=>new Response(JSON.stringify(String(input)==='/api/apps'?{apps:[]}:{items:[{...item,state:'disabled',openable:false}],nextCursor:''}),{status:200})))
- render(host());const card=await screen.findByRole('button',{name:'notes-sample'});expect(card.getAttribute('aria-disabled')).toBe('true');fireEvent.click(card);expect(screen.getByTestId('location').textContent).toBe('/apps')
+ render(host());const title=await screen.findByText('notes-sample');expect(screen.queryByRole('button',{name:'notes-sample'})).toBeNull();fireEvent.click(title);expect(screen.getByTestId('location').textContent).toBe('/apps')
 })
 test('legacy failure does not hide authorized v2 apps',async()=>{
  vi.stubGlobal('fetch',vi.fn(async input=>String(input)==='/api/apps'?new Response('legacy unavailable',{status:500}):new Response(JSON.stringify({items:[item],nextCursor:''}),{status:200})))
