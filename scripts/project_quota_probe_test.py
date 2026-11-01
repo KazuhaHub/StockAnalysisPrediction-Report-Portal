@@ -157,13 +157,40 @@ class ProjectQuotaProbeTests(unittest.TestCase):
     def test_uuid_replacement_requires_confirmed_unmount_and_rechecks_loop(self):
         with patch.object(probe, "require_loop_owner") as owner, patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=True), patch.object(probe, "command") as command:
             with self.assertRaisesRegex(RuntimeError, "remained mounted"):
-                probe.replace_owned_uuid(Path("/tmp/owned/mount"), "/dev/loop7", Path("/tmp/owned/image"))
+                probe.replace_owned_uuid(
+                    Path("/tmp/owned/mount"), "/dev/loop7",
+                    Path("/tmp/owned/image"),
+                    "11111111-1111-4111-8111-111111111111")
             command.assert_called_once_with("umount", "/tmp/owned/mount")
             self.assertEqual(owner.call_count, 1)
         with patch.object(probe, "require_loop_owner", side_effect=[None, RuntimeError("substituted loop")]), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command") as command:
             with self.assertRaisesRegex(RuntimeError, "substituted loop"):
-                probe.replace_owned_uuid(Path("/tmp/owned/mount"), "/dev/loop7", Path("/tmp/owned/image"))
+                probe.replace_owned_uuid(
+                    Path("/tmp/owned/mount"), "/dev/loop7",
+                    Path("/tmp/owned/image"),
+                    "11111111-1111-4111-8111-111111111111")
             command.assert_called_once_with("umount", "/tmp/owned/mount")
+
+    def test_uuid_replacement_reads_back_through_xfs_instead_of_blkid_cache(self):
+        old_uuid = "11111111-1111-4111-8111-111111111111"
+        new_uuid = "22222222-2222-4222-8222-222222222222"
+        commands = []
+
+        def run(*args):
+            commands.append(args)
+            if args == ("xfs_admin", "-u", "/dev/loop7"):
+                return f"UUID = {new_uuid}"
+            return ""
+
+        with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command", side_effect=run):
+            self.assertEqual(
+                probe.replace_owned_uuid(
+                    Path("/tmp/owned/mount"), "/dev/loop7",
+                    Path("/tmp/owned/image"), old_uuid),
+                new_uuid)
+        self.assertIn(
+            ("xfs_admin", "-U", "generate", "/dev/loop7"), commands)
+        self.assertFalse(any(command[0] == "blkid" for command in commands))
 
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):
         with tempfile.TemporaryDirectory() as folder:

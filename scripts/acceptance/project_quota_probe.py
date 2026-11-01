@@ -88,18 +88,28 @@ def discover_owned_loop(image):
     return loop
 
 
-def replace_owned_uuid(mountpoint, loop, image):
+def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     # Only the newly created image can be mutated, and only while unmounted.
     require_loop_owner(loop, image)
     require_mount_owner(mountpoint, loop)
+    if previous_uuid is None:
+        previous_uuid = command("blkid", "-p", "-s", "UUID", "-o", "value", loop)
     command("umount", str(mountpoint))
     if owned_mount_present(mountpoint, loop):
         raise RuntimeError("owned filesystem remained mounted before UUID replacement")
     require_loop_owner(loop, image)
     command("xfs_admin", "-U", "generate", loop)
     require_loop_owner(loop, image)
+    raw_uuid = command("xfs_admin", "-u", loop)
+    match = re.search(r"UUID\s*=\s*([0-9a-fA-F-]{36})", raw_uuid)
+    changed_uuid = match.group(1).lower() if match else ""
+    if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", changed_uuid):
+        raise RuntimeError("owned UUID replacement returned an invalid UUID")
+    if changed_uuid == previous_uuid.lower():
+        raise RuntimeError("owned UUID replacement did not take effect")
     command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
     require_mount_owner(mountpoint, loop)
+    return changed_uuid
 
 
 def candidate_configuration():
@@ -599,10 +609,9 @@ def main(args):
         run_workload("released-unlinked", folders["unlinked"])
         report["same_project_limit_controls"] = True
         if native_root is not None:
-            replace_owned_uuid(mountpoint, loop, image)
-            changed_uuid = command("blkid", "-p", "-s", "UUID", "-o", "value", loop)
-            if changed_uuid == native_env["APP_DATA_NATIVE_UUID"]:
-                raise RuntimeError("owned UUID replacement did not take effect")
+            replace_owned_uuid(
+                mountpoint, loop, image,
+                native_env["APP_DATA_NATIVE_UUID"])
             native_env["APP_DATA_NATIVE_PHASE"] = "replaced"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
