@@ -359,7 +359,8 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 			Scan(&effectID, &kind, &digest, &state, &observed,
 				&receipt); err != nil ||
 			kind != action+"-start" || state != "applied" ||
-			observed != result.fence || !platformValidSHA(digest) {
+			observed < 1 || observed > result.fence ||
+			!platformValidSHA(digest) {
 			return platformManagedUpdateSource{}, fmt.Errorf(
 				"%w: managed update source start effect kind=%s action=%s state=%s observed=%d fence=%d",
 				errAppPlatformStageEvidence, kind, action, state,
