@@ -173,6 +173,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 	mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
 		role, actor.username)
+	logManagedUpdateState(t, s, updateOperation, admitted.InstallationID)
 	failedOperation, _ := testNativeWritableManagedUpdateVersion(
 		t, s, actor, endpoint, admitted.InstallationID,
 		"1.2.0-beta.3", true)
