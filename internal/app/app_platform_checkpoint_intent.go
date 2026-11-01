@@ -22,6 +22,7 @@ type platformCheckpointSource struct {
 	operationID, startEffectID, dataEffectID      string
 	sourceReceiptSHA256, sourceDataReceiptSHA256  string
 	resourceID, namespaceID, releaseSHA256        string
+	sourceGeneration                              int64
 	nativeID                                      string
 	projectID, namespaceInode, device, dataFormat string
 	quotaBytes, quotaInodes                       string
@@ -67,6 +68,18 @@ func platformCheckpointMatchesCommand(receipt journal.CheckpointReceipt, command
 }
 
 func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointSourceMode(e, expected, runtime, now, false, 1)
+}
+
+func loadPlatformCheckpointSourceForEnable(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointSourceMode(e, expected, runtime, now, true, 1)
+}
+
+func loadPlatformCheckpointSourceForEnableReview(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointSourceMode(e, expected, runtime, now, true, 0)
+}
+
+func loadPlatformCheckpointSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64, allowDisabled bool, expectedPending int) (platformCheckpointSource, error) {
 	var action string
 	if err := e.queryRow(`SELECT action FROM app_platform_operations
 		WHERE installation_id=? AND action IN ('install','update','restore')
@@ -78,16 +91,21 @@ func loadPlatformCheckpointSource(e migExec, expected platformOperationLease, ru
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	if action == "install" {
-		return loadPlatformCheckpointInstallSource(
-			e, expected, runtime, now)
+		return loadPlatformCheckpointInstallSourceMode(
+			e, expected, runtime, now, allowDisabled, expectedPending)
 	}
-	return loadPlatformCheckpointUpdateSource(
-		e, expected, runtime, action, now)
+	return loadPlatformCheckpointUpdateSourceModeState(
+		e, expected, runtime, action, now, expectedPending, allowDisabled)
 }
 
 // The install source is a completed managed install whose applied start/data
 // effects provide the exact stopped resource and original data evidence.
 func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointInstallSourceMode(
+		e, expected, runtime, now, false, 1)
+}
+
+func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64, allowDisabled bool, expectedPending int) (platformCheckpointSource, error) {
 	var zero platformCheckpointSource
 	var sourceOperation, sourcePlanRaw, sourcePlanSHA, sourceRelease, descriptorRaw string
 	var sourceGeneration, sourceFence, sourceCompleted int64
@@ -108,7 +126,8 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 		!platformManagedFormat(plan.Format) || plan.Runtime == nil || plan.ReleaseSHA256 != sourceRelease ||
 		parsed.SHA256 != sourceRelease || plan.Runtime.RuntimeID != runtime.id ||
 		validateManagedInstallTarget(e, plan.Runtime, expected.controllerEpoch) != nil ||
-		sourceGeneration < 1 || sourceFence < 1 || sourceGeneration+1 != int64(expected.snapshot.Generation) ||
+		sourceGeneration < 1 || sourceFence < 1 ||
+		sourceGeneration+1 != int64(expected.snapshot.Generation) ||
 		sourceCompleted < 0 || sourceCompleted > now {
 		return zero, fmt.Errorf("%w: checkpoint source plan", errAppPlatformStageEvidence)
 	}
@@ -129,17 +148,31 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 		Scan(&appID, &publisher, &desired, &phase, &installationGeneration, &policyRevision, &installedEpoch, &runtimeID); err != nil {
 		return zero, fmt.Errorf("%w: checkpoint current installation", errAppPlatformStageEvidence)
 	}
-	if appID != plan.AppID || publisher != plan.PublisherID || desired != "enabled" ||
-		!(phase == "ready" || (phase == "recovery_required" &&
-			expected.snapshot.Action == appplatform.ActionRestore)) ||
-		installedEpoch != expected.controllerEpoch || !runtimeID.Valid || runtimeID.String != runtime.id ||
-		installationGeneration != sourceGeneration || policyRevision < 1 {
+	validInstallationState := desired == "enabled" &&
+		(phase == "ready" || (phase == "recovery_required" &&
+			expected.snapshot.Action == appplatform.ActionRestore)) &&
+		installationGeneration == sourceGeneration
+	if allowDisabled {
+		validInstallationState =
+			((desired == "disabled" && phase == "disabled") ||
+				(desired == "enabled" && phase == "pending")) &&
+				installationGeneration == sourceGeneration+1
+	}
+	if appID != plan.AppID || publisher != plan.PublisherID ||
+		!validInstallationState ||
+		installedEpoch != expected.controllerEpoch || !runtimeID.Valid ||
+		runtimeID.String != runtime.id || policyRevision < 1 {
 		return zero, fmt.Errorf("%w: checkpoint activation", errAppPlatformStageEvidence)
 	}
 	var activeRelease string
 	var activeGeneration, activePolicy, activeFormat int64
+	activationState := "active"
+	if allowDisabled {
+		activationState = "retired"
+	}
 	if err := e.queryRow(`SELECT id,release_sha256,generation,policy_revision,data_namespace_id,data_format
-		FROM app_platform_activations WHERE installation_id=? AND state='active'`, expected.installationID).
+		FROM app_platform_activations WHERE installation_id=? AND state=?`,
+		expected.installationID, activationState).
 		Scan(&activation, &activeRelease, &activeGeneration, &activePolicy, &activeNamespace, &activeFormat); err != nil {
 		return zero, fmt.Errorf("%w: checkpoint active activation: %v", errAppPlatformStageEvidence, err)
 	}
@@ -150,7 +183,8 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 	source := platformCheckpointSource{
 		operationID: sourceOperation, resourceID: activation, namespaceID: activeNamespace.String,
 		releaseSHA256: sourceRelease, dataFormat: strconv.FormatInt(activeFormat, 10),
-		writerFence: "1", descriptor: descriptor, platform: plan.Runtime.Profile.Platform,
+		sourceGeneration: sourceGeneration,
+		writerFence:      "1", descriptor: descriptor, platform: plan.Runtime.Profile.Platform,
 		sandboxProfile: control.CandidateSandboxProfile, appID: plan.AppID,
 		publisherID: plan.PublisherID, runtimeTarget: plan.Runtime,
 	}
@@ -167,7 +201,8 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 	}
 	if origin != expected.installationID || owner != expected.installationID || namespaceState != "active" ||
 		namespaceFormat != activeFormat || quota != 256<<20 || observedBytes < 0 || observedBytes > quota ||
-		writerFence != 1 || retained.Valid || deleted.Valid {
+		(!allowDisabled && writerFence != 1) ||
+		(allowDisabled && writerFence < 1) || retained.Valid || deleted.Valid {
 		return zero, fmt.Errorf("%w: checkpoint namespace origin=%s owner=%s state=%s format=%d active=%d quota=%d bytes=%d writer=%d retained=%v deleted=%v",
 			errAppPlatformStageEvidence, origin, owner, namespaceState, namespaceFormat, activeFormat,
 			quota, observedBytes, writerFence, retained.Valid, deleted.Valid)
@@ -251,10 +286,16 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 	default:
 		return zero, fmt.Errorf("%w: checkpoint running identity", errAppPlatformStageEvidence)
 	}
+	writerMatches := runningWriter == source.writerFence
+	if allowDisabled {
+		runningWriterValue, parseErr := strconv.ParseInt(runningWriter, 10, 64)
+		writerMatches = parseErr == nil && runningWriterValue >= 1 &&
+			runningWriterValue < writerFence
+	}
 	if runningOperation != source.operationID || runningRelease != sourceRelease ||
 		runningGeneration != strconv.FormatInt(sourceGeneration, 10) ||
 		runningNamespace != source.namespaceID || runningFormat != source.dataFormat ||
-		runningWriter != source.writerFence || nativeID == "" {
+		!writerMatches || nativeID == "" {
 		return zero, fmt.Errorf("%w: checkpoint operation count", errAppPlatformStageEvidence)
 	}
 	source.startEffectID, source.dataEffectID = startEffect.id, dataEffect.id
@@ -263,8 +304,11 @@ func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLe
 	source.projectID, source.namespaceInode, source.device = data.ProjectID, data.NamespaceInode, data.Device
 	source.quotaBytes, source.quotaInodes = data.QuotaBytes, data.QuotaInodes
 	source.rootFilesystemUUID, source.rootInode = data.Claim.RootFilesystemUUID, data.Claim.RootInode
+	if allowDisabled {
+		source.writerFence = strconv.FormatInt(writerFence, 10)
+	}
 	var pending int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND completed_ms IS NULL`, expected.installationID).Scan(&pending); err != nil || pending != 1 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND completed_ms IS NULL`, expected.installationID).Scan(&pending); err != nil || pending != expectedPending {
 		return zero, errAppPlatformStageEvidence
 	}
 	return source, nil
@@ -414,7 +458,9 @@ func mustPlatformCheckpointInt(value string) int64 {
 // never dispatches native work and never advances the operation stage.
 func (s *Server) preparePlatformCheckpoint(ctx context.Context, expected platformOperationLease) (platformCheckpointIntent, error) {
 	var zero platformCheckpointIntent
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageSnapshot || expected.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -446,7 +492,14 @@ func (s *Server) preparePlatformCheckpoint(ctx context.Context, expected platfor
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}

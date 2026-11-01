@@ -79,7 +79,7 @@ type updateStartFacts struct {
 
 func updateStartIndex(c control.UpdateStartCommand) control.Command {
 	kind := c.Kind
-	if kind == "restore-start" {
+	if kind == "restore-start" || kind == "enable-start" {
 		kind = "update-start"
 	}
 	return control.Command{
@@ -140,7 +140,8 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 		candidateHash([]byte(raw)) != p.SourceCheckpointReceiptSHA256 {
 		return zero, ErrFenceReconciliation
 	}
-	if c.Kind == "update-start" && operation != c.OperationID {
+	if (c.Kind == "update-start" || c.Kind == "enable-start") &&
+		operation != c.OperationID {
 		return zero, ErrFenceReconciliation
 	}
 	if c.Kind == "restore-start" && operation == c.OperationID {

@@ -48,7 +48,8 @@ func (s *Server) activatePlatformUpdateStart(ctx context.Context, lease platform
 func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, boot platformUpdateStartBootObservation) (platformActivationResult, error) {
 	var zero platformActivationResult
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
-	if lease.snapshot.Action != appplatform.ActionUpdate ||
+	if (lease.snapshot.Action != appplatform.ActionUpdate &&
+		lease.snapshot.Action != appplatform.ActionEnable) ||
 		!lease.snapshot.Managed || lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || lease.rowRevision == math.MaxInt64 ||
 		!validPlatformUpdateStartBootForActivation(boot, lease, intent) {
@@ -82,7 +83,14 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	if facts.installationRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
 	}
-	source, err := loadPlatformCheckpointSource(e, lease, runtime, facts.now)
+	var source platformCheckpointSource
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, lease, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, lease, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -126,44 +134,67 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	if source.runtimeTarget == nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	capabilities, err := platformInstallCapabilitySelection(
-		manifest.Manifest, source.runtimeTarget)
-	if err != nil {
-		return zero, err
+	var capabilities []platformSelectedCapability
+	if lease.snapshot.Action == appplatform.ActionUpdate {
+		capabilities, err = platformInstallCapabilitySelection(
+			manifest.Manifest, source.runtimeTarget)
+		if err != nil {
+			return zero, err
+		}
 	}
 	var sourceActivation, sourceRelease, sourceState string
 	var sourceGeneration, sourcePolicy, sourceFormat int64
-	if err := e.queryRow(`SELECT id,release_sha256,generation,policy_revision,
-		data_format,state FROM app_platform_activations
-		WHERE installation_id=? AND state='active'`,
-		lease.installationID).
-		Scan(&sourceActivation, &sourceRelease, &sourceGeneration,
-			&sourcePolicy, &sourceFormat, &sourceState); err != nil {
-		return zero, errAppPlatformStageEvidence
-	}
-	if sourceState != "active" ||
-		sourceActivation != source.resourceID ||
-		sourceRelease != plan.SourceReleaseSHA256 ||
-		sourceGeneration != plan.SourceGeneration ||
-		sourcePolicy != plan.SourcePolicyRevision ||
-		sourceFormat != plan.DataFormat {
-		return zero, errAppPlatformStageEvidence
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		if err := e.queryRow(`SELECT id,release_sha256,generation,
+			policy_revision,data_format,state FROM app_platform_activations
+			WHERE installation_id=? AND id=? AND generation=?`,
+			lease.installationID, plan.SourceActivationID,
+			plan.SourceActivationGeneration).
+			Scan(&sourceActivation, &sourceRelease, &sourceGeneration,
+				&sourcePolicy, &sourceFormat, &sourceState); err != nil ||
+			sourceState != "retired" ||
+			sourceActivation != plan.SourceActivationID ||
+			sourceRelease != plan.SourceReleaseSHA256 ||
+			sourceGeneration != plan.SourceGeneration ||
+			sourcePolicy != plan.SourcePolicyRevision ||
+			sourceFormat != plan.DataFormat {
+			return zero, errAppPlatformStageEvidence
+		}
+	} else {
+		if err := e.queryRow(`SELECT id,release_sha256,generation,
+			policy_revision,data_format,state FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			lease.installationID).
+			Scan(&sourceActivation, &sourceRelease, &sourceGeneration,
+				&sourcePolicy, &sourceFormat, &sourceState); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		if sourceState != "active" ||
+			sourceActivation != source.resourceID ||
+			sourceRelease != plan.SourceReleaseSHA256 ||
+			sourceGeneration != plan.SourceGeneration ||
+			sourcePolicy != plan.SourcePolicyRevision ||
+			sourceFormat != plan.DataFormat {
+			return zero, errAppPlatformStageEvidence
+		}
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
 		return zero, err
 	}
-	changed, err := e.exec(`UPDATE app_platform_activations
-		SET state='retired',updated_ms=?
-		WHERE id=? AND installation_id=? AND release_sha256=?
-		AND generation=? AND policy_revision=? AND data_namespace_id=?
-		AND data_format=? AND state='active'`,
-		now, sourceActivation, lease.installationID, sourceRelease,
-		sourceGeneration, sourcePolicy, plan.DataNamespaceID, sourceFormat)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return zero, err
+	if lease.snapshot.Action == appplatform.ActionUpdate {
+		if _, err := e.exec(`UPDATE app_platform_activations
+			SET state='retired',updated_ms=?
+			WHERE id=? AND installation_id=? AND release_sha256=?
+			AND generation=? AND policy_revision=? AND data_namespace_id=?
+			AND data_format=? AND state='active'`,
+			now, sourceActivation, lease.installationID, sourceRelease,
+			sourceGeneration, sourcePolicy, plan.DataNamespaceID,
+			sourceFormat); err != nil {
+			return zero, err
+		}
 	}
-	changed, err = e.exec(`UPDATE app_platform_activations
+	changed, err := e.exec(`UPDATE app_platform_activations
 		SET state='active',updated_ms=?
 		WHERE id=? AND installation_id=? AND release_sha256=?
 		AND generation=? AND policy_revision=? AND data_namespace_id=?
@@ -192,45 +223,65 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	currentPhase := "ready"
+	currentGeneration := plan.SourceGeneration
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		currentPhase = "pending"
+		currentGeneration = plan.TargetGeneration
+	}
 	changed, err = e.exec(`UPDATE app_platform_installations
 		SET generation=?,policy_revision=?,revision=revision+1,
 		phase='ready',updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase='ready'
+		WHERE id=? AND desired_state='enabled' AND phase=?
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=? AND runtime_id=?`,
 		lease.snapshot.Generation, plan.TargetPolicyRevision, now,
-		lease.installationID, plan.SourceGeneration, plan.SourcePolicyRevision,
-		facts.installationRevision, lease.fence, lease.controllerEpoch,
-		runtime.id)
+		lease.installationID, currentPhase, currentGeneration,
+		plan.SourcePolicyRevision, facts.installationRevision,
+		lease.fence, lease.controllerEpoch, runtime.id)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
-	if _, err := e.exec(
-		`DELETE FROM app_platform_capability_grants WHERE installation_id=?`,
-		lease.installationID); err != nil {
-		return zero, err
-	}
-	planID := ""
-	if err := e.queryRow(
-		`SELECT review_plan_id FROM app_platform_operations WHERE id=?`,
-		lease.id).Scan(&planID); err != nil {
-		return zero, err
-	}
-	for _, capability := range capabilities {
-		if _, err := e.exec(`INSERT INTO app_platform_capability_grants(
-			installation_id,capability,granted,policy_json,policy_revision,
-			review_plan_id,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,?)`,
-			lease.installationID, capability.capability,
-			boolInt(capability.granted), capability.policy,
-			plan.TargetPolicyRevision, planID, now, now); err != nil {
+	if lease.snapshot.Action == appplatform.ActionUpdate {
+		if _, err := e.exec(
+			`DELETE FROM app_platform_capability_grants WHERE installation_id=?`,
+			lease.installationID); err != nil {
 			return zero, err
 		}
-	}
-	if err := verifyPlatformSelectedCapabilityRows(
-		e, lease.installationID, capabilities, true,
-		plan.TargetPolicyRevision, planID, errAppPlatformStageEvidence); err != nil {
-		return zero, err
+		planID := ""
+		if err := e.queryRow(
+			`SELECT review_plan_id FROM app_platform_operations WHERE id=?`,
+			lease.id).Scan(&planID); err != nil {
+			return zero, err
+		}
+		for _, capability := range capabilities {
+			if _, err := e.exec(`INSERT INTO app_platform_capability_grants(
+				installation_id,capability,granted,policy_json,policy_revision,
+				review_plan_id,created_ms,updated_ms)
+				VALUES(?,?,?,?,?,?,?,?)`,
+				lease.installationID, capability.capability,
+				boolInt(capability.granted), capability.policy,
+				plan.TargetPolicyRevision, planID, now, now); err != nil {
+				return zero, err
+			}
+		}
+		if err := verifyPlatformSelectedCapabilityRows(
+			e, lease.installationID, capabilities, true,
+			plan.TargetPolicyRevision, planID,
+			errAppPlatformStageEvidence); err != nil {
+			return zero, err
+		}
+	} else {
+		grants, err := platformRemovalGrantsDigest(
+			e, lease.installationID)
+		if err != nil || grants != plan.GrantsSHA256 {
+			return zero, errAppPlatformStageEvidence
+		}
+		audience, err := platformInstallationAudienceSHA(
+			e, lease.installationID)
+		if err != nil || audience != plan.AudienceSHA256 {
+			return zero, errAppPlatformStageEvidence
+		}
 	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
 	if err != nil {
@@ -266,11 +317,15 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}{sourceActivation, current.start.resourceID,
 		int64(lease.snapshot.Generation), plan.TargetPolicyRevision,
 		bootDigest, current.command.DocumentSHA256})
+	audit := "app_platform.managed_update_activated"
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		audit = "app_platform.managed_enable_activated"
+	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)
-		VALUES(?,'system',0,'app_platform.managed_update_activated',
+		VALUES(?,'system',0,?,
 		'app_platform_installation',?,?,'')`,
-		time.UnixMilli(now).UTC().Format(time.RFC3339),
+		time.UnixMilli(now).UTC().Format(time.RFC3339), audit,
 		lease.installationID, string(detail)); err != nil {
 		return zero, err
 	}

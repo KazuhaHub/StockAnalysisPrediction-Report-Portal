@@ -174,6 +174,9 @@ func operationStages(action Action, managed bool) []Stage {
 			stages = append(stages, StageStop)
 		}
 	case ActionEnable:
+		if managed {
+			stages = append(stages, StageSnapshot)
+		}
 		startAndProbe()
 		stages = append(stages, StageActivate)
 	case ActionRepair:

@@ -158,6 +158,45 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 	return nil
 }
 
+func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expected []platformSelectedCapability, policy int64, fail error) error {
+	if policy < 1 {
+		return fail
+	}
+	rows, err := e.query(`SELECT capability,granted,policy_json,
+		policy_revision,review_plan_id
+		FROM app_platform_capability_grants
+		WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	index := 0
+	for rows.Next() {
+		var name, restriction, review string
+		var granted int
+		var revision int64
+		if err := rows.Scan(&name, &granted, &restriction, &revision,
+			&review); err != nil {
+			return err
+		}
+		if index >= len(expected) ||
+			expected[index].capability != name ||
+			granted != boolInt(expected[index].granted) ||
+			restriction != expected[index].policy ||
+			revision != policy || !platformValidUUID(review) {
+			return fail
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if index != len(expected) {
+		return fail
+	}
+	return nil
+}
+
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 	seen := make(map[string]bool, len(m.Capabilities.Required))
 	for _, capability := range m.Capabilities.Required {

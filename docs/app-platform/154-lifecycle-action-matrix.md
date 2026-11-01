@@ -30,6 +30,11 @@ Implemented and tested:
   `validate -> activate -> complete`; execution revalidates the stored release,
   current grants, audience, compatibility and data configuration, restores an
   activation for the same release tuple and never recreates a plugin table;
+- managed enable review through the existing signed
+  `snapshot -> enable-start -> probe -> registration -> boot -> activate`
+  chain. The checkpoint binds the retained namespace and current writer fence;
+  the target keeps the same release, policy and grant rows, while the new
+  generation gets fresh process, readiness, registration and boot evidence;
 - uninstall revocation of credential bindings and transactional clear/drop of
   dedicated plugin object tables;
 - reviewed frontend uninstall scheduling through
@@ -65,8 +70,9 @@ Still required for H13 completion:
 
 - reviewed `delete_data` review/consume entry point for legacy retained
   namespaces and orphan cleanup; normal uninstall no longer leaves one;
-- reviewed managed enable and repair execution with current trust, runtime
-  configuration, process start and health checks and no capability expansion;
+- managed-enable backend history reconstruction plus native runner acceptance;
+- reviewed repair execution with current trust, runtime configuration, process
+  start and health checks and no capability expansion;
 - full concurrent operator acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
 

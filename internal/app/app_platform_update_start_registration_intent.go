@@ -63,7 +63,8 @@ func platformUpdateStartRegistrationReceiptMatches(r journal.UpdateStartRegistra
 func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease, start platformUpdateStartIntent, runtime platformRuntimeRegistration, seed, dek []byte, now int64, create bool) (platformUpdateStartRegistrationIntent, bool, error) {
 	var zero platformUpdateStartRegistrationIntent
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
-		lease.snapshot.Action != appplatform.ActionRestore) ||
+		lease.snapshot.Action != appplatform.ActionRestore &&
+		lease.snapshot.Action != appplatform.ActionEnable) ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || start.running == nil ||

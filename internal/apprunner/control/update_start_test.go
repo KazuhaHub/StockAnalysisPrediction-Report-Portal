@@ -172,3 +172,32 @@ func TestRestoreStartBindsSeparateOperationAndCheckpoint(t *testing.T) {
 		t.Fatal("restore-start reused its outer operation as checkpoint")
 	}
 }
+
+func TestEnableStartReusesCheckpointOperationAtSameRelease(t *testing.T) {
+	command, key, authority, now := updateStartFixture(t)
+	command.Kind = "enable-start"
+	command.Payload.TargetReleaseSHA256 =
+		command.Payload.SourceReleaseSHA256
+	var err error
+	command.PayloadSHA256, err =
+		UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, signature, err := SignUpdateStart(
+		command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyUpdateStart(
+		raw, signature, authority, now); err != nil {
+		t.Fatal(err)
+	}
+	command.Payload.TargetReleaseSHA256 =
+		strings.Repeat("b", 64)
+	command.PayloadSHA256, err =
+		UpdateStartLogicalDigest(command)
+	if err == nil {
+		t.Fatal("enable-start changed release")
+	}
+}

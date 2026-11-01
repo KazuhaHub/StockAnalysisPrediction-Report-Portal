@@ -170,6 +170,19 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 			return nil, err
 		}
 		return update.TargetRuntime, nil
+	case platformManagedEnableFormat:
+		var enable platformManagedUpdatePlan
+		if json.Unmarshal([]byte(raw), &enable) != nil ||
+			enable.Format != probe.Format ||
+			enable.Action != appplatform.ActionEnable ||
+			enable.TargetRuntime == nil {
+			return nil, errAppPlatformStageEvidence
+		}
+		if err := validateManagedInstallTarget(
+			e, enable.TargetRuntime, enable.ControllerEpoch); err != nil {
+			return nil, err
+		}
+		return enable.TargetRuntime, nil
 	}
 	var p platformInstallProjection
 	if json.Unmarshal([]byte(raw), &p) != nil || !platformManagedFormat(p.Format) || p.Runtime == nil {

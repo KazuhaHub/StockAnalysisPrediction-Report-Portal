@@ -51,7 +51,9 @@ func platformCheckpointCommandsEqual(a, b control.CheckpointCommand) bool {
 // preparing and is not admissible for restore or target start.
 func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platformOperationLease, intent platformCheckpointIntent, endpoint platformRuntimeEndpoint, observation platformCheckpointObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageSnapshot || expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
@@ -90,7 +92,14 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -141,7 +150,12 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
-	if err := platformFinalizeManagedUpdatePlan(
+	if expected.snapshot.Action == appplatform.ActionUpdate {
+		if err := platformFinalizeManagedUpdatePlan(
+			e, expected, current, receipt, archiveBytes, now); err != nil {
+			return zero, err
+		}
+	} else if err := platformFinalizeManagedEnablePlan(
 		e, expected, current, receipt, archiveBytes, now); err != nil {
 		return zero, err
 	}
@@ -149,16 +163,21 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	next, err := model.Advance(expected.snapshot.Revision, appplatform.StageMigrate)
+	nextStage := appplatform.StageMigrate
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		nextStage = appplatform.StageStart
+	}
+	next, err := model.Advance(expected.snapshot.Revision, nextStage)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
 	result := expected
 	result.snapshot, result.rowRevision = next.Snapshot(), expected.rowRevision+1
-	changed, err = e.exec(`UPDATE app_platform_operations SET stage='migrate',state_revision=?,row_revision=row_revision+1,updated_ms=?
+	changed, err = e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=?
 		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage='snapshot' AND state_revision=?
 		AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`,
-		int64(result.snapshot.Revision), now, expected.id, expected.installationID, expected.controllerEpoch,
+		string(nextStage), int64(result.snapshot.Revision), now, expected.id,
+		expected.installationID, expected.controllerEpoch,
 		int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner,
 		expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
@@ -252,5 +271,64 @@ func platformFinalizeManagedUpdatePlan(e migExec, expected platformOperationLeas
 		AND consumed_ms IS NOT NULL AND plan_json LIKE ?`,
 		string(planRaw), planSHA, now, planID, digest,
 		`{"format":"`+platformUpdateReviewFormat+`",%`)
+	return platformLeaseCAS(changed, err)
+}
+
+func platformFinalizeManagedEnablePlan(
+	e migExec,
+	expected platformOperationLease,
+	checkpoint platformCheckpointIntent,
+	receipt journal.CheckpointReceipt,
+	archiveBytes, now int64,
+) error {
+	var planID, raw, digest string
+	var consumed int64
+	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,p.consumed_ms
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND p.action='enable'`,
+		expected.id).Scan(&planID, &raw, &digest, &consumed); err != nil ||
+		platformDigest([]byte(raw)) != digest || consumed > now ||
+		len(raw) > 65536 {
+		return errAppPlatformStageEvidence
+	}
+	var plan platformManagedUpdatePlan
+	unmarshalErr := json.Unmarshal([]byte(raw), &plan)
+	canonical, marshalErr := json.Marshal(plan)
+	if unmarshalErr != nil || marshalErr != nil ||
+		string(canonical) != raw ||
+		plan.Format != platformManagedEnableFormat ||
+		plan.Action != appplatform.ActionEnable ||
+		plan.InstallationID != expected.installationID ||
+		plan.SourceReleaseSHA256 != checkpoint.source.releaseSHA256 ||
+		plan.TargetReleaseSHA256 != checkpoint.source.releaseSHA256 ||
+		plan.SourceGeneration != checkpoint.source.sourceGeneration ||
+		plan.TargetGeneration != int64(expected.snapshot.Generation) ||
+		plan.TargetGeneration != plan.SourceGeneration+1 ||
+		plan.DataNamespaceID != checkpoint.source.namespaceID ||
+		plan.DataFormat != mustPlatformCheckpointInt(checkpoint.source.dataFormat) ||
+		plan.SourceWriterFence != mustPlatformCheckpointInt(checkpoint.source.writerFence) ||
+		plan.SourceActivationGeneration != plan.SourceGeneration ||
+		!platformValidSHA(plan.GrantsSHA256) ||
+		!platformValidSHA(plan.AudienceSHA256) {
+		return errAppPlatformStageEvidence
+	}
+	plan.RecoverySetID = checkpoint.recoverySetID
+	plan.CheckpointOperationID = expected.id
+	plan.CheckpointEffectID = checkpoint.effectID
+	plan.CheckpointID = checkpoint.command.Payload.CheckpointID
+	plan.CheckpointManifestSHA256 = receipt.ManifestSHA256
+	plan.CheckpointArchiveBytes = archiveBytes
+	finalRaw, err := json.Marshal(plan)
+	if err != nil || len(finalRaw) > 65536 {
+		return errAppPlatformStageEvidence
+	}
+	finalSHA := platformDigest(finalRaw)
+	changed, err := e.exec(`UPDATE app_platform_review_plans
+		SET plan_json=?,plan_sha256=?,updated_ms=?
+		WHERE id=? AND plan_sha256=? AND action='enable'
+		AND consumed_ms IS NOT NULL AND plan_json LIKE ?`,
+		string(finalRaw), finalSHA, now, planID, digest,
+		`{"format":"`+platformManagedEnableFormat+`",%`)
 	return platformLeaseCAS(changed, err)
 }

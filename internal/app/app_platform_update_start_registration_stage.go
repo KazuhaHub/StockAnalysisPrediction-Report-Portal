@@ -16,7 +16,9 @@ import (
 
 func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lease platformOperationLease) (platformUpdateStartRegistrationIntent, error) {
 	var zero platformUpdateStartRegistrationIntent
-	if lease.snapshot.Action != appplatform.ActionUpdate || !lease.snapshot.Managed ||
+	if (lease.snapshot.Action != appplatform.ActionUpdate &&
+		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 {
 		return zero, fmt.Errorf("update-start registration precondition: %w", errAppPlatformStageEvidence)
@@ -50,7 +52,14 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, lease, runtime, facts.now)
+	var source platformCheckpointSource
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, lease, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, lease, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -228,7 +237,9 @@ func (s *Server) observePlatformUpdateStartRegistration(ctx context.Context, lea
 func (s *Server) commitPlatformUpdateStartRegistration(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, endpoint platformRuntimeEndpoint, proof platformUpdateStartRegistrationObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
-	if lease.snapshot.Action != appplatform.ActionUpdate || !lease.snapshot.Managed ||
+	if (lease.snapshot.Action != appplatform.ActionUpdate &&
+		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || lease.rowRevision == math.MaxInt64 ||
 		!validPlatformUpdateStartRegistrationObservation(proof, intent, endpoint) {
@@ -261,7 +272,14 @@ func (s *Server) commitPlatformUpdateStartRegistration(ctx context.Context, leas
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, lease, runtime, facts.now)
+	var source platformCheckpointSource
+	if lease.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, lease, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, lease, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}

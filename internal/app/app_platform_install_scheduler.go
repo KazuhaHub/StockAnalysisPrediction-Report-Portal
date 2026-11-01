@@ -89,6 +89,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				selected, err = w.server.claimNextPlatformManagedUpdate(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -107,6 +110,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			}
 		} else {
 			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
+			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
 			}
@@ -153,6 +159,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	} else if w.active.snapshot.Action == appplatform.ActionUpdate &&
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedUpdate(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedEnable(
 			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionDisable &&
 		w.active.snapshot.Managed {
@@ -205,6 +215,9 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	finish := w.server.finishPlatformInstallForReview
 	if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedEnableForReview
 	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
 		!w.active.snapshot.Managed {
 		finish = w.server.finishPlatformFrontendEnableForReview

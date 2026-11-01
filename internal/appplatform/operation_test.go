@@ -81,7 +81,7 @@ func TestDisableRevokesBeforeStoppingAndEnableChecksReadiness(t *testing.T) {
 		}
 	}
 	op, _ = NewOperation(ActionEnable, true, 4)
-	for _, stage := range []Stage{StageValidate, StageStart, StageProbe, StageActivate, StageComplete} {
+	for _, stage := range []Stage{StageValidate, StageSnapshot, StageStart, StageProbe, StageActivate, StageComplete} {
 		op, err = op.Advance(op.Snapshot().Revision, stage)
 		if err != nil {
 			t.Fatal(err)

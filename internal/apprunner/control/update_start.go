@@ -75,7 +75,8 @@ func (v VerifiedUpdateStartCommand) Command() UpdateStartCommand { return v.comm
 func validUpdateStartLogical(c UpdateStartCommand) bool {
 	p := c.Payload
 	if c.Format != UpdateStartFormat || c.Stage != "start" ||
-		(c.Kind != "update-start" && c.Kind != "restore-start") ||
+		(c.Kind != "update-start" && c.Kind != "restore-start" &&
+			c.Kind != "enable-start") ||
 		!shaPattern.MatchString(p.SourceStartReceiptSHA256) ||
 		!shaPattern.MatchString(p.SourceDataReceiptSHA256) ||
 		!shaPattern.MatchString(p.SourceCheckpointReceiptSHA256) ||
@@ -120,6 +121,9 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 	if c.Kind == "restore-start" {
 		operationRelation = p.SourceCheckpointOperationID != c.OperationID &&
 			p.TargetReleaseSHA256 == p.SourceReleaseSHA256
+	} else if c.Kind == "enable-start" &&
+		p.TargetReleaseSHA256 != p.SourceReleaseSHA256 {
+		operationRelation = false
 	}
 	return operationRelation &&
 		p.SourceCheckpointReceiptSHA256 != p.SourceStartReceiptSHA256 &&

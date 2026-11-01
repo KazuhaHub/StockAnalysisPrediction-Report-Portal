@@ -21,27 +21,34 @@ import (
 const platformManagedUpdateFormat = "portal.managed-update-review/1-dev.1"
 
 type platformManagedUpdatePlan struct {
-	Format                   string                        `json:"format"`
-	InstallationID           string                        `json:"installation_id"`
-	AppID                    string                        `json:"app_id"`
-	PublisherID              string                        `json:"publisher_id"`
-	SourceReleaseSHA256      string                        `json:"source_release_sha256"`
-	TargetReleaseSHA256      string                        `json:"target_release_sha256"`
-	SourceGeneration         int64                         `json:"source_generation"`
-	TargetGeneration         int64                         `json:"target_generation"`
-	SourcePolicyRevision     int64                         `json:"source_policy_revision"`
-	TargetPolicyRevision     int64                         `json:"target_policy_revision"`
-	ControllerEpoch          string                        `json:"controller_epoch"`
-	RecoverySetID            string                        `json:"recovery_set_id"`
-	CheckpointOperationID    string                        `json:"checkpoint_operation_id"`
-	CheckpointEffectID       string                        `json:"checkpoint_effect_id"`
-	CheckpointID             string                        `json:"checkpoint_id"`
-	CheckpointManifestSHA256 string                        `json:"checkpoint_manifest_sha256"`
-	CheckpointArchiveBytes   int64                         `json:"checkpoint_archive_bytes"`
-	DataNamespaceID          string                        `json:"data_namespace_id"`
-	DataFormat               int64                         `json:"data_format"`
-	SourceWriterFence        int64                         `json:"source_writer_fence"`
-	TargetRuntime            *platformManagedInstallTarget `json:"target_runtime,omitempty"`
+	Format                     string                        `json:"format"`
+	Action                     appplatform.Action            `json:"action,omitempty"`
+	InstallationID             string                        `json:"installation_id"`
+	AppID                      string                        `json:"app_id"`
+	PublisherID                string                        `json:"publisher_id"`
+	SourceReleaseSHA256        string                        `json:"source_release_sha256"`
+	TargetReleaseSHA256        string                        `json:"target_release_sha256"`
+	SourceGeneration           int64                         `json:"source_generation"`
+	TargetGeneration           int64                         `json:"target_generation"`
+	SourcePolicyRevision       int64                         `json:"source_policy_revision"`
+	TargetPolicyRevision       int64                         `json:"target_policy_revision"`
+	ControllerEpoch            string                        `json:"controller_epoch"`
+	TrustRevision              int64                         `json:"trust_revision,omitempty"`
+	RecoverySetID              string                        `json:"recovery_set_id"`
+	CheckpointOperationID      string                        `json:"checkpoint_operation_id"`
+	CheckpointEffectID         string                        `json:"checkpoint_effect_id"`
+	CheckpointID               string                        `json:"checkpoint_id"`
+	CheckpointManifestSHA256   string                        `json:"checkpoint_manifest_sha256"`
+	CheckpointArchiveBytes     int64                         `json:"checkpoint_archive_bytes"`
+	DataNamespaceID            string                        `json:"data_namespace_id"`
+	DataFormat                 int64                         `json:"data_format"`
+	SourceWriterFence          int64                         `json:"source_writer_fence"`
+	SourceControlFence         int64                         `json:"source_control_fence,omitempty"`
+	SourceActivationID         string                        `json:"source_activation_id,omitempty"`
+	SourceActivationGeneration int64                         `json:"source_activation_generation,omitempty"`
+	GrantsSHA256               string                        `json:"grants_sha256,omitempty"`
+	AudienceSHA256             string                        `json:"audience_sha256,omitempty"`
+	TargetRuntime              *platformManagedInstallTarget `json:"target_runtime,omitempty"`
 }
 
 type platformUpdateStartIntent struct {
@@ -63,27 +70,39 @@ type platformUpdateStartIntent struct {
 
 func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, source platformCheckpointSource) (platformManagedUpdatePlan, []byte, error) {
 	var zero platformManagedUpdatePlan
-	var planRaw, planSHA, operationScope, planScope string
+	var planRaw, planSHA, operationScope, planScope, actionText string
 	var sourceGeneration, targetGeneration int64
 	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.actor_scope,p.actor_scope,
-		o.source_generation,o.target_generation
+		o.source_generation,o.target_generation,o.action
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
+		WHERE o.id=? AND o.installation_id=? AND o.action IN ('update','enable') AND o.managed=1
 		AND o.stage IN ('migrate','start','probe','activate','complete','recovery_required')
 		AND (o.stage<>'complete' OR (o.completed_ms IS NOT NULL
 			AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 			AND o.error_code IS NULL))`,
 		expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
-			&sourceGeneration, &targetGeneration); err != nil {
+			&sourceGeneration, &targetGeneration, &actionText); err != nil {
 		return zero, nil, errAppPlatformStageEvidence
 	}
 	var plan platformManagedUpdatePlan
 	unmarshalErr := json.Unmarshal([]byte(planRaw), &plan)
 	canonical, marshalErr := json.Marshal(plan)
+	action := appplatform.Action(actionText)
+	format := plan.Format
+	validFormat := action == appplatform.ActionUpdate &&
+		format == platformManagedUpdateFormat ||
+		action == appplatform.ActionEnable &&
+			format == platformManagedEnableFormat
+	validReleasePolicy := action == appplatform.ActionUpdate &&
+		plan.SourceReleaseSHA256 != plan.TargetReleaseSHA256 &&
+		plan.TargetPolicyRevision > plan.SourcePolicyRevision ||
+		action == appplatform.ActionEnable &&
+			plan.SourceReleaseSHA256 == plan.TargetReleaseSHA256 &&
+			plan.TargetPolicyRevision == plan.SourcePolicyRevision
 	if unmarshalErr != nil || marshalErr != nil || string(canonical) != planRaw ||
 		platformDigest([]byte(planRaw)) != planSHA || operationScope != planScope ||
-		plan.Format != platformManagedUpdateFormat ||
+		!validFormat ||
 		plan.InstallationID != expected.installationID ||
 		plan.ControllerEpoch != expected.controllerEpoch ||
 		plan.SourceGeneration != sourceGeneration || plan.TargetGeneration != targetGeneration ||
@@ -91,9 +110,8 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		targetGeneration != int64(expected.snapshot.Generation) ||
 		plan.SourceReleaseSHA256 != source.releaseSHA256 ||
 		plan.AppID != source.appID || plan.PublisherID != source.publisherID ||
-		plan.SourceReleaseSHA256 == plan.TargetReleaseSHA256 ||
 		plan.SourceGeneration < 1 || plan.TargetGeneration != plan.SourceGeneration+1 ||
-		plan.SourcePolicyRevision < 1 || plan.TargetPolicyRevision <= plan.SourcePolicyRevision ||
+		plan.SourcePolicyRevision < 1 || !validReleasePolicy ||
 		plan.DataNamespaceID != source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(source.dataFormat) ||
 		plan.SourceWriterFence != mustPlatformCheckpointInt(source.writerFence) ||
@@ -103,6 +121,14 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		!platformValidUUID(plan.RecoverySetID) || !platformValidUUID(plan.CheckpointOperationID) ||
 		!platformValidUUID(plan.CheckpointEffectID) || !platformValidUUID(plan.CheckpointID) ||
 		!platformValidSHA(plan.CheckpointManifestSHA256) || plan.CheckpointArchiveBytes <= 0 {
+		return zero, nil, errAppPlatformStageEvidence
+	}
+	if action == appplatform.ActionEnable &&
+		(!platformValidUUID(plan.SourceActivationID) ||
+			plan.SourceActivationGeneration != plan.SourceGeneration ||
+			plan.SourceControlFence < 1 ||
+			!platformValidSHA(plan.GrantsSHA256) ||
+			!platformValidSHA(plan.AudienceSHA256)) {
 		return zero, nil, errAppPlatformStageEvidence
 	}
 	var appID, publisher string
@@ -175,13 +201,17 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 }
 
 func platformUpdateStartCommand(expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, resourceID, effectID string) (control.UpdateStartCommand, error) {
+	kind := "update-start"
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		kind = "enable-start"
+	}
 	command := control.UpdateStartCommand{
 		Format: control.UpdateStartFormat, DeploymentID: runtime.deploymentID,
 		ControllerEpoch: expected.controllerEpoch, ControlRevision: strconv.FormatInt(runtime.controlRevision, 10),
 		InstallationID: expected.installationID, OperationID: expected.id,
 		TargetGeneration: strconv.FormatUint(expected.snapshot.Generation, 10),
 		Stage:            "start", EffectNumber: "1", EffectID: effectID,
-		Kind: "update-start", InstallationFence: strconv.FormatInt(expected.fence, 10),
+		Kind: kind, InstallationFence: strconv.FormatInt(expected.fence, 10),
 		Payload: control.UpdateStartPayload{
 			ResourceID: resourceID, NamespaceID: source.namespaceID,
 			SourceOperationID:             source.operationID,
@@ -218,6 +248,10 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 
 func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, now int64, create bool) (platformUpdateStartIntent, bool, error) {
 	var zero platformUpdateStartIntent
+	startKind := "update-start"
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		startKind = "enable-start"
+	}
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
@@ -272,8 +306,8 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 			return zero, false, err
 		}
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-			VALUES(?,'start',1,?,'update-start',?,?,?, ?,0,'prepared','{}',?,?)`,
-			expected.id, effectID, command.PayloadSHA256, runtime.id,
+			VALUES(?,'start',1,?,?,?,?,?, ?,0,'prepared','{}',?,?)`,
+			expected.id, effectID, startKind, command.PayloadSHA256, runtime.id,
 			expected.controllerEpoch, expected.fence, now, now); err != nil {
 			return zero, false, err
 		}
@@ -308,7 +342,7 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		return invalidActivation("readiness")
 	case observed.Valid:
 		return invalidActivation("observation")
-	case kind != "update-start":
+	case kind != startKind:
 		return invalidActivation("effect kind")
 	case effectEpoch != expected.controllerEpoch:
 		return invalidActivation("effect epoch")
@@ -396,6 +430,10 @@ func loadPlatformCompletedUpdateStartActivation(e migExec, expected platformOper
 
 func loadPlatformUpdateStartActivationState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, activationState string) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
+	startKind := "update-start"
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		startKind = "enable-start"
+	}
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
@@ -434,7 +472,7 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 			"update-start activation start effect: %w",
 			errAppPlatformStageEvidence)
 	}
-	if kind != "update-start" ||
+	if kind != startKind ||
 		effectEpoch != expected.controllerEpoch ||
 		admitted < 1 || admitted > expected.fence ||
 		observedFence != admitted || effectState != "applied" {
@@ -520,7 +558,9 @@ func (s *Server) preparePlatformUpdateRegistrationSource(ctx context.Context, ex
 
 func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected platformOperationLease, stage appplatform.Stage) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != stage || expected.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -552,7 +592,14 @@ func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected pl
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, fmt.Errorf("update-start source: %w", err)
 	}

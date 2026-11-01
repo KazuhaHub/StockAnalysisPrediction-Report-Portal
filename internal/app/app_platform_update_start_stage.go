@@ -105,7 +105,13 @@ func platformUpdateStartCommandsEqual(a, b control.UpdateStartCommand) bool {
 
 func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartRunningObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	startKind := "update-start"
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		startKind = "enable-start"
+	}
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageStart || expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 || intent.reservation == nil {
 		return zero, fmt.Errorf("update-start running precondition: %w", errAppPlatformStageEvidence)
@@ -156,7 +162,14 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -186,10 +199,10 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 	}
 	effectFence := mustPlatformCheckpointInt(current.command.InstallationFence)
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start'
+		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind=?
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=?
 		AND state='prepared' AND observed_fence=? AND receipt_json=?`,
-		effectFence, string(encoded), now, expected.id, current.effectID,
+		effectFence, string(encoded), now, expected.id, current.effectID, startKind,
 		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, effectFence,
 		effectFence, string(reservationRaw))
 	if err := platformLeaseCAS(changed, err); err != nil {
@@ -235,7 +248,9 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 
 func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartReadinessObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageProbe || expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 || intent.reservation == nil || intent.running == nil {
 		return zero, fmt.Errorf("update-start readiness precondition: %w", errAppPlatformStageEvidence)
@@ -279,7 +294,14 @@ func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expecte
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -362,7 +384,13 @@ func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expecte
 // Native start authority remains separate and cannot be inferred from this row.
 func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartObservation, reservation journal.UpdateStartReservation) (platformUpdateStartAdmission, error) {
 	var zero platformUpdateStartAdmission
-	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
+	startKind := "update-start"
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		startKind = "enable-start"
+	}
+	if (expected.snapshot.Action != appplatform.ActionUpdate &&
+		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageStart || expected.snapshot.Generation < 2 ||
 		ctx == nil || ctx.Err() != nil {
 		return zero, errAppPlatformStageEvidence
@@ -405,7 +433,14 @@ func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expec
 	if err != nil {
 		return zero, err
 	}
-	source, err := loadPlatformCheckpointSource(e, expected, runtime, facts.now)
+	var source platformCheckpointSource
+	if expected.snapshot.Action == appplatform.ActionEnable {
+		source, err = loadPlatformCheckpointSourceForEnable(
+			e, expected, runtime, facts.now)
+	} else {
+		source, err = loadPlatformCheckpointSource(
+			e, expected, runtime, facts.now)
+	}
 	if err != nil {
 		return zero, err
 	}
@@ -443,10 +478,10 @@ func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expec
 	}
 	effectFence := mustPlatformCheckpointInt(current.command.InstallationFence)
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET observed_fence=?,receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start'
+		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind=?
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
 		AND observed_fence=0 AND receipt_json='{}'`,
-		effectFence, string(encoded), now, expected.id, current.effectID,
+		effectFence, string(encoded), now, expected.id, current.effectID, startKind,
 		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, effectFence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err

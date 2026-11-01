@@ -104,7 +104,8 @@ func (s *Server) probePlatformUpdateStartBoot(ctx context.Context, lease platfor
 func (s *Server) finishPlatformUpdateStartBoot(ctx context.Context, lease platformOperationLease, intent platformUpdateStartRegistrationIntent, endpoint platformRuntimeEndpoint, challenge string, proof platformUpdateStartHandshakeObservation) (platformUpdateStartBootObservation, error) {
 	var zero platformUpdateStartBootObservation
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
-	if lease.snapshot.Action != appplatform.ActionUpdate ||
+	if (lease.snapshot.Action != appplatform.ActionUpdate &&
+		lease.snapshot.Action != appplatform.ActionEnable) ||
 		!lease.snapshot.Managed || lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 ||
 		!validPlatformUpdateStartHandshakeObservation(

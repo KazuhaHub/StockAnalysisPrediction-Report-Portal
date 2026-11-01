@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 // Capability rows must exactly match the signed declaration and consumed review,
@@ -16,7 +17,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	}
 	var planID, raw, digest, action string
 	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND ((o.action='install') OR (o.action='update' AND o.target_generation=i.generation)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
+		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable') AND o.target_generation=i.generation)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
 		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, epoch, release).Scan(&planID, &raw, &digest, &action); err != nil {
 		return fail
 	}
@@ -77,6 +78,77 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		default:
 			return fail
 		}
+	case "enable":
+		var formatProbe struct {
+			Format string `json:"format"`
+		}
+		if json.Unmarshal([]byte(raw), &formatProbe) != nil {
+			return fail
+		}
+		if formatProbe.Format == platformFrontendEnableFormat {
+			var enable platformFrontendEnablePlan
+			if json.Unmarshal([]byte(raw), &enable) != nil {
+				return fail
+			}
+			canonical, err := json.Marshal(enable)
+			if err != nil || string(canonical) != raw ||
+				enable.Action != appplatform.ActionEnable ||
+				enable.AppID != m.ID ||
+				enable.PublisherID != m.Publisher ||
+				enable.SourceReleaseSHA256 != release ||
+				enable.ControllerEpoch != epoch ||
+				enable.DeclaredDataSchema != int64(m.Data.Schema) ||
+				m.Backend != nil || m.Data.WritesOnStartup {
+				return fail
+			}
+			compatibility, err := appplatform.EvaluateCompatibility(
+				m,
+				appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI})
+			if err != nil || !compatibility.Compatible {
+				return fail
+			}
+			expected, err := platformInstallCapabilitySelection(m, nil)
+			if err != nil {
+				return fail
+			}
+			return verifyPlatformRetainedCapabilityRows(
+				e, installation, expected, policy, fail)
+		}
+		if formatProbe.Format != platformManagedEnableFormat {
+			return fail
+		}
+		var enable platformManagedUpdatePlan
+		if json.Unmarshal([]byte(raw), &enable) != nil {
+			return fail
+		}
+		if enable.TargetRuntime == nil {
+			return fail
+		}
+		format := platformManagedInstallFormat
+		if enable.TargetRuntime.Profile.WritableSandboxProfile ==
+			control.WritableCandidateSandboxProfile {
+			format = platformWritableInstallFormat
+		}
+		canonical, err := json.Marshal(enable)
+		if err != nil || string(canonical) != raw ||
+			enable.Format != platformManagedEnableFormat ||
+			enable.Action != appplatform.ActionEnable ||
+			enable.TargetRuntime == nil ||
+			enable.AppID != m.ID || enable.PublisherID != m.Publisher ||
+			enable.TargetReleaseSHA256 != release ||
+			enable.ControllerEpoch != epoch ||
+			installRequirementsForTarget(
+				m, format,
+				enable.TargetRuntime) != nil {
+			return fail
+		}
+		expected, err := platformInstallCapabilitySelection(
+			m, enable.TargetRuntime)
+		if err != nil {
+			return fail
+		}
+		return verifyPlatformRetainedCapabilityRows(
+			e, installation, expected, policy, fail)
 	default:
 		return fail
 	}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -42,6 +43,11 @@ func loadPlatformCheckpointUpdateSource(e migExec, expected platformOperationLea
 }
 
 func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointUpdateSourceModeState(
+		e, expected, runtime, action, now, expectedPending, false)
+}
+
+func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int, allowDisabled bool) (platformCheckpointSource, error) {
 	if action != "update" && action != "restore" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
@@ -174,21 +180,34 @@ func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperatio
 		FROM app_platform_installations
 		WHERE id=?`, expected.installationID).
 		Scan(&desired, &phase, &installationGeneration,
-			&installationPolicy, &epoch, &runtimeID); err != nil ||
-		desired != "enabled" ||
-		(phase != "ready" &&
-			(phase != "recovery_required" ||
-				expected.snapshot.Action != appplatform.ActionRestore)) ||
-		installationGeneration != generation ||
-		epoch != expected.controllerEpoch || runtimeID != runtime.id {
+			&installationPolicy, &epoch, &runtimeID); err != nil {
+		return platformCheckpointSource{}, errAppPlatformStageEvidence
+	}
+	validInstallationState := desired == "enabled" &&
+		(phase == "ready" ||
+			(phase == "recovery_required" &&
+				expected.snapshot.Action == appplatform.ActionRestore)) &&
+		installationGeneration == generation
+	if allowDisabled {
+		validInstallationState =
+			((desired == "disabled" && phase == "disabled") ||
+				(desired == "enabled" && phase == "pending")) &&
+				installationGeneration == generation+1
+	}
+	if !validInstallationState || epoch != expected.controllerEpoch ||
+		runtimeID != runtime.id {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	var activeActivation, activeRelease string
 	var activeGeneration, activePolicy, activeFormat int64
+	activationState := "active"
+	if allowDisabled {
+		activationState = "retired"
+	}
 	if err := e.queryRow(`SELECT id,release_sha256,generation,
 		policy_revision,data_format FROM app_platform_activations
-		WHERE installation_id=? AND state='active'`,
-		expected.installationID).
+		WHERE installation_id=? AND state=?`,
+		expected.installationID, activationState).
 		Scan(&activeActivation, &activeRelease, &activeGeneration,
 			&activePolicy, &activeFormat); err != nil ||
 		activeActivation == "" || activeRelease != release ||
@@ -220,8 +239,12 @@ func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperatio
 		namespace != running.NamespaceID ||
 		namespaceState != "active" ||
 		namespaceFormat != mustPlatformCheckpointInt(running.DataFormat) ||
-		writerFence != mustPlatformCheckpointInt(
-			running.TargetWriterFence) {
+		(!allowDisabled &&
+			writerFence != mustPlatformCheckpointInt(
+				running.TargetWriterFence)) ||
+		(allowDisabled &&
+			writerFence < mustPlatformCheckpointInt(
+				running.TargetWriterFence)) {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	trust, err := loadPlatformPublisherTrust(e)
@@ -257,6 +280,10 @@ func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperatio
 		appID:              "",
 		descriptor:         currentDescriptor,
 		runtimeTarget:      target,
+		sourceGeneration:   generation,
+	}
+	if allowDisabled {
+		source.writerFence = strconv.FormatInt(writerFence, 10)
 	}
 	parsed, err := appplatform.ParseDescriptor(currentDescriptor)
 	if err != nil || parsed.SHA256 != release ||
