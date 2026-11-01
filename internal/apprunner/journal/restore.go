@@ -371,7 +371,9 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 		snapshot.NamespaceDevice != mustDataUint(source.command.Payload.Device) ||
 		snapshot.NamespaceInode != mustDataUint(source.command.Payload.NamespaceInode) ||
 		snapshot.Entries < 0 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore observation binding: %w",
+			ErrFenceReconciliation)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -392,17 +394,27 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 	}
 	now := time.Now().UTC().UnixMilli()
 	if _, err := control.VerifyRestore(source.raw, source.signature, authority, now); err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement command: %w",
+			ErrFenceReconciliation)
 	}
 	current, err := loadRestoreSource(ctx, tx, source.command, now)
-	if err != nil || !sameRestoreSource(source, current) {
-		return zero, ErrFenceReconciliation
+	if err != nil {
+		return zero, fmt.Errorf(
+			"restore settlement source: %w", err)
+	}
+	if !sameRestoreSource(source, current) {
+		return zero, fmt.Errorf(
+			"restore settlement source changed: %w",
+			ErrFenceReconciliation)
 	}
 	var state, receipt string
 	if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`,
 		source.command.EffectID).Scan(&state, &receipt); err != nil ||
 		state != "unknown" || receipt != "{}" {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement command state=%s receipt=%t err=%v: %w",
+			state, receipt != "{}", err, ErrFenceReconciliation)
 	}
 	result := RestoreReceipt{
 		Format: restoreReceiptFormat, DeploymentID: source.command.DeploymentID,
@@ -429,11 +441,15 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 		SettledMS:  strconv.FormatInt(now, 10),
 	}
 	if !validRestoreReceipt(result) {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement receipt: %w",
+			ErrFenceReconciliation)
 	}
 	encoded, err := json.Marshal(result)
 	if err != nil || len(encoded) > 32768 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement receipt encode: %w",
+			ErrFenceReconciliation)
 	}
 	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=?
 		WHERE effect_id=? AND state='unknown' AND receipt_json='{}'`, string(encoded), now, result.EffectID)
@@ -441,7 +457,9 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement command rows=%d err=%v: %w",
+			n, err, ErrFenceReconciliation)
 	}
 	changed, err = tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='verified',revision=revision+1,updated_ms=?
 		WHERE id=? AND state='restoring' AND revision=3 AND manifest_sha256=? AND bytes=?`,
@@ -450,7 +468,9 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 		return zero, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore settlement checkpoint rows=%d err=%v: %w",
+			n, err, ErrFenceReconciliation)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
