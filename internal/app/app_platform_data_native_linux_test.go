@@ -339,7 +339,16 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 			checkPlatformWritableAutoFixture(t, childData, fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, false)
-			if err := os.Rename(filepath.Join(childData, "writable-auto-start.json"), filepath.Join(childData, "writable-auto-start.verified.json")); err != nil {
+			witnessName := "writable-auto-start.json"
+			if _, err := os.Stat(
+				filepath.Join(childData,
+					"writable-update-start.json")); err == nil {
+				witnessName = "writable-update-start.json"
+			}
+			if err := os.Rename(
+				filepath.Join(childData, witnessName),
+				filepath.Join(childData,
+					witnessName+".verified.json")); err != nil {
 				t.Error("preserve verified background witness", err)
 				return
 			}

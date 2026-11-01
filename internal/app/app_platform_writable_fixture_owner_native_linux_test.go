@@ -93,6 +93,12 @@ func checkPlatformWritableAutoFixture(t *testing.T, dir string, a control.Author
 			t, updatePath, p, a, socket, native, cleanup)
 		return
 	}
+	updatePath += ".verified"
+	if _, err := os.Stat(updatePath); err == nil {
+		checkPlatformWritableUpdateStartFixture(
+			t, updatePath, p, a, socket, native, cleanup)
+		return
+	}
 	completed, err := os.ReadFile(path)
 	if err == nil {
 		var m platformWritableStartFixtureMessage
