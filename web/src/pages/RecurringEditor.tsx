@@ -218,16 +218,17 @@ export default function RecurringEditor() {
   return (
     <Space orientation="vertical" size={16} style={{ width: '100%' }}>
       <Card
+        // Back leads the title, top left, as on the stock, run, report-editor and app pages.
         title={
-          <Space>
-            <ClockCircleOutlined />
-            {taskId == null ? t('recurring.new') : t('recurring.edit')}
+          <Space size={12}>
+            <Button icon={<ArrowLeftOutlined />} onClick={back}>
+              {t('common.back')}
+            </Button>
+            <Space>
+              <ClockCircleOutlined />
+              {taskId == null ? t('recurring.new') : t('recurring.edit')}
+            </Space>
           </Space>
-        }
-        extra={
-          <Button icon={<ArrowLeftOutlined />} onClick={back}>
-            {t('common.back')}
-          </Button>
         }
       >
         <LoadGate loading={loading} error={loadErr} onRetry={load} minHeight={200} title={t('common.loadFailedContent')}>

@@ -47,6 +47,8 @@ When in doubt, look at how they solve it before inventing a pattern.
   `aria-label` and `title`), so a card header stays on one line.
 - **Forms keep a readable width** (`.rp-settings-panel > .ant-form-item`, 720 px); tables and cards
   use the full width.
+- **Back leads the title.** A page reached from a list (a stock, a run, an editor, an app) puts its
+  Back button at the top left, before the page or card title, never in the top-right corner.
 - **Columns align.** Side-by-side panels start on the same line. A sticky rail's offset is measured
   from its scroll container: in the console the page body scrolls and has no top padding, so the
   rail sticks at `top: 0`; a page that scrolls the window sticks below the app header
@@ -89,6 +91,49 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
 - **The grid ends with one blank row**, spreadsheet-style. Typing or pasting into it makes the next
   blank row appear; blank rows are never counted, submitted or exported, and deleting rows still
   leaves one. There is no "add row" button. A paste of several rows expands the grid.
+- **Paste is the spreadsheet clipboard format**, never CSV (`parseClipboardGrid`): tab-separated cells,
+  rows ending at CRLF, LF or CR. A cell is quoted only when it opens with `"` and the matching closing
+  quote (`""` is one quote) is followed by a tab, a line break or the end of the text; anything else
+  (`"Big" deal`, an unterminated quote) is literal text, so a stray quote never swallows what follows.
+  This is Excel's and Sheets' own quoting, odd cases included: hand-typed text such as
+  `"Hello<tab>A<newline>B<tab>5"` followed by a newline is one quoted cell there too.
+  One trailing row terminator makes no row; blank rows in the middle are kept so the rows after them
+  stay aligned; trailing blank rows are dropped. A comma never splits a cell. In select mode every
+  paste is a block from the active cell (text with a tab or line break; a lone value is a 1x1 block),
+  each cell checked against its column: a number column takes a number (full-width digits, a leading plus, spaces and `1,234.50`-style thousands separators are normalised; `5%` is not one), a select column only one
+  of its options, a single-line column turns line breaks into spaces; anything refused leaves the
+  cell as it was, and one notice per paste says how many cells were skipped. In edit mode a paste is the browser's own insert at the caret, except that one trailing
+  line terminator (Excel's `abc\r\n`) is dropped and a single-line cell gets its line breaks as spaces. Copy and cut write the Excel format (a value with a
+  tab, line break or quote is quoted), through `navigator.clipboard` when it exists; a cut empties the cell only after the clipboard accepted
+  the text, and a refusal says so and leaves the cell.
+- **Keyboard follows Google Sheets, with a fine pointer on a wide viewport.** A touch screen of any
+  width, or a window under 768 px, keeps plain tap-to-edit inputs (in the table layout from 576 px,
+  cards below). One cell is active (2px primary outline, `aria-selected`); the grid is `role="grid"`
+  on the body table, with `aria-rowindex` / `aria-colindex` and a roving tabindex, so Tab enters it
+  once. *Select mode*: click selects (no caret); arrows move; Tab / Shift+Tab move along the row and
+  wrap to the next / previous row, and leave the grid past the last / first cell; Delete or Backspace
+  clears; Ctrl/Cmd+C, X and V act on the cell; Ctrl/Cmd+Z undoes and Ctrl/Cmd+Shift+Z or Ctrl+Y
+  redoes (up to 50 steps of clears, cuts, pastes, row deletes and committed edits, restoring the
+  active cell; edit mode leaves undo to the browser); Ctrl/Cmd+Alt+minus deletes the active row (AltGr characters are not shortcuts) (never
+  the trailing blank one); Alt+Shift+Up / Down resize it; typing replaces the content and starts an
+  edit (an input method composition too: the active editor keeps focus with its text selected, caret
+  hidden, so native typing replaces it); Enter, F2 or double-click edit with the caret at the end.
+  Escape in select mode moves focus to the grid itself, from where Tab / Shift+Tab leave to the next /
+  previous control outside it (focus stays on the grid when there is none) and Enter or ArrowDown return to the active cell. *Edit mode*: Enter
+  commits and moves down, Tab commits and moves, Escape restores the value from before the edit.
+  Arrows move the caret after an explicit edit (Enter, F2, double-click) but commit and move after a
+  typed one. Alt+Enter or Ctrl+Enter adds a line break in a paragraph input; a single-line input never
+  gets one. A number cell starts editing only on a digit, minus or dot; a select opens its list, and a
+  typed character filters it instead of replacing the text. Moving the active cell scrolls it into
+  view and follows it across pages; a paste that changes page focuses its last row. Delete buttons
+  and row-height handles are not tab stops (the shortcuts above replace them); the shortcuts are
+  spelled out in the hint line and the grid's `aria-description`.
+- **Row height is draggable.** The bottom edge of a row's number cell is a handle (pointer drag; a
+  keyboard user has Alt+Shift+Up / Down on a cell) from one line to about ten. It reports the row's
+  measured height until one is set. A resized row shows its text up to that height without the
+  three-line clamp. Heights are not saved: they are kept by row index, shift with a row deletion,
+  vanish with a trailing blank row that collapses, and are dropped when the rows are replaced
+  wholesale. An editor being edited grows up to ten lines without changing the stored height.
 - **On a phone** the grid is the usual stacked cards (`CardTable`); the trailing blank row is the last
   card.
 
