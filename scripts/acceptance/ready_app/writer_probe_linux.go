@@ -12,11 +12,20 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const writerProbeCompletePath = "/data/.portal-writer-probe-complete"
+const writerProbeCompleteValue = "portal.fixture.write-probe/1-dev.1\n"
+
 // Detect only the fixed writable fixture mount profile. This lets the real
 // closed builder run the probe without adding any test-selected environment.
 func fixtureHasWritableData() bool {
 	var st unix.Stat_t
-	return unix.Stat("/data", &st) == nil && st.Uid == 0 && st.Gid == 65532 && st.Mode&07777 == 02770
+	if unix.Stat("/data", &st) != nil ||
+		st.Uid != 0 || st.Gid != 65532 ||
+		st.Mode&07777 != 02770 {
+		return false
+	}
+	raw, err := os.ReadFile(writerProbeCompletePath)
+	return err != nil || string(raw) != writerProbeCompleteValue
 }
 
 // Only the disposable writer fixture enables this before readiness. It never
@@ -123,7 +132,19 @@ func verifyFixtureWritableData() error {
 	}{"portal.fixture.write-probe/1-dev.1", allocated, inodes, byteDenied, inodeDenied, true, true}); err != nil {
 		return err
 	}
-	return proof.Sync()
+	if err := proof.Sync(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(writerProbeCompletePath,
+		[]byte(writerProbeCompleteValue), 0600); err != nil {
+		return err
+	}
+	data, err := os.Open("/data")
+	if err != nil {
+		return err
+	}
+	defer data.Close()
+	return data.Sync()
 }
 
 func fixtureQuotaInodeLimit(allocated int64, denied bool) (int, error) {
