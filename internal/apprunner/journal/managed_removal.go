@@ -661,7 +661,13 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 		if source.update != nil && source.update.Claim.Preflight != nil {
 			expectedPreflight = *source.update.Claim.Preflight
 			actualPreflight = updateStartPreflight(
-				driver.UpdateStartLaunchSnapshot{Launch: snapshot.Launch})
+				driver.UpdateStartLaunchSnapshot{
+					Launch: snapshot.Launch,
+					SandboxProfile: source.update.Claim.
+						SandboxProfile,
+					SeccompSHA256: driver.UpdateStartSeccompSHA256(
+						source.update.Claim.SandboxProfile),
+				})
 		}
 		return zero, fmt.Errorf(
 			"%w: managed removal settlement preflight/native id expected=%s actual=%s preflight=%v operation=%s generation=%d expected_preflight=%+v actual_preflight=%+v",
@@ -767,7 +773,13 @@ func (source managedRemovalSource) preflightMatches(snapshot driver.CandidateLau
 	if source.update != nil {
 		return source.update.Claim.Preflight != nil &&
 			*source.update.Claim.Preflight == updateStartPreflight(
-				driver.UpdateStartLaunchSnapshot{Launch: snapshot})
+				driver.UpdateStartLaunchSnapshot{
+					Launch: snapshot,
+					SandboxProfile: source.update.Claim.
+						SandboxProfile,
+					SeccompSHA256: driver.UpdateStartSeccompSHA256(
+						source.update.Claim.SandboxProfile),
+				})
 	}
 	if source.writable != nil {
 		return source.writable.Claim.Preflight != nil && source.writable.Claim.Preflight.Native == candidatePreflight(snapshot)
