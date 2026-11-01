@@ -190,7 +190,7 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 	expectedActive := clonePlatformWritableRegistrationIntent(current)
 	expectedActive.start.writer.activationUpdated = committedAt
 	format, _ := strconv.ParseInt(w.data.DataFormat, 10, 64)
-	active, err := s.loadPlatformWritableBackendHistory(e, platformBackendHistoryBinding{installation: lease.installationID, activation: w.resourceID, release: w.data.ReleaseSHA256, namespace: w.namespaceID, epoch: lease.controllerEpoch, format: format, fence: lease.fence, observed: w.activationObserved.Int64, readiness: w.activationReadiness}, runtime, seed, dek, now)
+	active, err := s.loadPlatformWritableBackendHistory(e, platformBackendHistoryBinding{installation: lease.installationID, activation: w.resourceID, release: w.data.ReleaseSHA256, namespace: w.namespaceID, epoch: lease.controllerEpoch, format: format, fence: lease.fence, observed: w.activationObserved.Int64, readiness: w.activationReadiness, generation: 1}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, err
 	}
