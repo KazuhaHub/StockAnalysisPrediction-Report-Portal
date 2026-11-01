@@ -173,23 +173,34 @@ class ProjectQuotaProbeTests(unittest.TestCase):
 
     def test_uuid_replacement_reads_back_through_xfs_instead_of_blkid_cache(self):
         old_uuid = "11111111-1111-4111-8111-111111111111"
-        new_uuid = "22222222-2222-4222-8222-222222222222"
+        replacement = []
         commands = []
 
         def run(*args):
             commands.append(args)
+            if args[:2] == ("xfs_admin", "-U"):
+                replacement.append(args[2])
+                return ""
             if args == ("xfs_admin", "-u", "/dev/loop7"):
-                return f"UUID = {new_uuid}"
+                return f"UUID = {replacement[0]}"
             return ""
 
         with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command", side_effect=run):
-            self.assertEqual(
-                probe.replace_owned_uuid(
-                    Path("/tmp/owned/mount"), "/dev/loop7",
-                    Path("/tmp/owned/image"), old_uuid),
-                new_uuid)
+            changed = probe.replace_owned_uuid(
+                Path("/tmp/owned/mount"), "/dev/loop7",
+                Path("/tmp/owned/image"), old_uuid)
+        self.assertEqual(changed, replacement[0])
         self.assertIn(
-            ("xfs_admin", "-U", "generate", "/dev/loop7"), commands)
+            "xfs_admin", [entry[0] for entry in commands])
+        replacements = [
+            entry for entry in commands
+            if entry[:2] == ("xfs_admin", "-U") and len(entry) == 4
+        ]
+        self.assertEqual(len(replacements), 1)
+        self.assertRegex(
+            replacements[0][2],
+            r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
+        self.assertNotEqual(replacements[0][2], old_uuid)
         self.assertFalse(any(command[0] == "blkid" for command in commands))
 
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):

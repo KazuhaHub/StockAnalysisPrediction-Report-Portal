@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 ENV = {"PATH": PATH, "LC_ALL": "C"}
@@ -98,7 +99,10 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     if owned_mount_present(mountpoint, loop):
         raise RuntimeError("owned filesystem remained mounted before UUID replacement")
     require_loop_owner(loop, image)
-    command("xfs_admin", "-U", "generate", loop)
+    replacement_uuid = str(uuid.uuid4())
+    if replacement_uuid == previous_uuid.lower():
+        raise RuntimeError("owned UUID replacement reused the old UUID")
+    command("xfs_admin", "-U", replacement_uuid, loop)
     require_loop_owner(loop, image)
     os.sync()
     command("blockdev", "--flushbufs", loop)
@@ -107,7 +111,7 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     changed_uuid = match.group(1).lower() if match else ""
     if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", changed_uuid):
         raise RuntimeError("owned UUID replacement returned an invalid UUID")
-    if changed_uuid == previous_uuid.lower():
+    if changed_uuid != replacement_uuid:
         raise RuntimeError("owned UUID replacement did not take effect")
     command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
     require_mount_owner(mountpoint, loop)
