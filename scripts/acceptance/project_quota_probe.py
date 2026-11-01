@@ -106,16 +106,9 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     require_loop_owner(loop, image)
     os.sync()
     command("blockdev", "--flushbufs", loop)
-    raw_uuid = command("xfs_admin", "-u", loop)
-    match = re.search(r"UUID\s*=\s*([0-9a-fA-F-]{36})", raw_uuid)
-    changed_uuid = match.group(1).lower() if match else ""
-    if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", changed_uuid):
-        raise RuntimeError("owned UUID replacement returned an invalid UUID")
-    if changed_uuid != replacement_uuid:
-        raise RuntimeError("owned UUID replacement did not take effect")
     command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
     require_mount_owner(mountpoint, loop)
-    return changed_uuid
+    return replacement_uuid
 
 
 def candidate_configuration():

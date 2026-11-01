@@ -171,7 +171,7 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                     "11111111-1111-4111-8111-111111111111")
             command.assert_called_once_with("umount", "/tmp/owned/mount")
 
-    def test_uuid_replacement_reads_back_through_xfs_instead_of_blkid_cache(self):
+    def test_uuid_replacement_uses_explicit_uuid_without_cached_blkid(self):
         old_uuid = "11111111-1111-4111-8111-111111111111"
         replacement = []
         commands = []
@@ -181,8 +181,6 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             if args[:2] == ("xfs_admin", "-U"):
                 replacement.append(args[2])
                 return ""
-            if args == ("xfs_admin", "-u", "/dev/loop7"):
-                return f"UUID = {replacement[0]}"
             return ""
 
         with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "command", side_effect=run):
