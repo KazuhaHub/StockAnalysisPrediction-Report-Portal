@@ -59,6 +59,10 @@ func (o platformDeleteDataTestObservation) CommandSHA256() string {
 }
 
 func platformManagedRemovalStopFixture(t *testing.T, pg bool) (*Server, platformActorSession, platformOperationLease) {
+	return platformManagedRemovalStopFixtureAction(t, pg, appplatform.ActionUninstall)
+}
+
+func platformManagedRemovalStopFixtureAction(t *testing.T, pg bool, action appplatform.Action) (*Server, platformActorSession, platformOperationLease) {
 	t.Helper()
 	s, actor, install := platformManagedAccessFixture(t, pg)
 	appID := scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, install.installationID)
@@ -74,7 +78,7 @@ func platformManagedRemovalStopFixture(t *testing.T, pg bool) (*Server, platform
 		"content_sha256": platformDigest(content), "size_bytes": len(content), "revision": 1,
 		"idempotency_key": "managed-uninstall-clear", "created_ms": 1, "updated_ms": 1,
 	})
-	plan, err := s.createPlatformRemovalReview(actor, install.installationID, appplatform.ActionUninstall)
+	plan, err := s.createPlatformRemovalReview(actor, install.installationID, action)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,8 +86,8 @@ func platformManagedRemovalStopFixture(t *testing.T, pg bool) (*Server, platform
 		t.Fatal(err)
 	}
 	selected, err := s.claimNextPlatformManagedUninstall(context.Background(), platformFixtureID(971))
-	if err != nil || selected.lease.id == "" || selected.lease.snapshot.Action != appplatform.ActionUninstall || !selected.lease.snapshot.Managed {
-		t.Fatal("managed uninstall claim", selected, err)
+	if err != nil || selected.lease.id == "" || selected.lease.snapshot.Action != action || !selected.lease.snapshot.Managed {
+		t.Fatal("managed removal claim", selected, err)
 	}
 	current := selected.lease
 	for range 2 {

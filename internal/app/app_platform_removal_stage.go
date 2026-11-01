@@ -117,6 +117,50 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 }
 
 func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLease) error {
+	if lease.snapshot.Action == appplatform.ActionDisable {
+		rows, err := e.query(`SELECT stage,effect_number,kind,state FROM app_platform_operation_effects WHERE operation_id=? ORDER BY stage`, lease.id)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		type effect struct{ kind, state string }
+		effects := map[string]effect{}
+		for rows.Next() {
+			var stage, kind, state string
+			var number int
+			if err := rows.Scan(&stage, &number, &kind, &state); err != nil {
+				return err
+			}
+			if stage != "stop" || number != 1 || kind != "stop" || (state != "prepared" && state != "applied" && state != "unknown") {
+				return errAppPlatformStageEvidence
+			}
+			if _, duplicate := effects[stage]; duplicate {
+				return errAppPlatformStageEvidence
+			}
+			effects[stage] = effect{kind: kind, state: state}
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		switch lease.snapshot.Stage {
+		case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageRevoke:
+			if len(effects) != 0 {
+				return errAppPlatformStageEvidence
+			}
+		case appplatform.StageStop:
+			if len(effects) > 1 {
+				return errAppPlatformStageEvidence
+			}
+		case appplatform.StageComplete:
+			stop, ok := effects["stop"]
+			if len(effects) != 1 || !ok || stop.kind != "stop" || stop.state != "applied" {
+				return errAppPlatformStageEvidence
+			}
+		default:
+			return errAppPlatformStageEvidence
+		}
+		return nil
+	}
 	if lease.snapshot.Action != appplatform.ActionUninstall {
 		var effects int
 		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil {

@@ -151,10 +151,16 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedUpdate(
 			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionDisable &&
+		w.active.snapshot.Managed {
+		result, err = w.server.runPlatformManagedUninstall(
+			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
 		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
 	} else if w.writable {
 		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
+	} else if w.active.snapshot.Action == appplatform.ActionDisable {
+		result.lease, err = w.server.runPlatformFrontendDisable(ctx, w.active)
 	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
 		result.lease, err = w.server.runPlatformStaticUpdate(ctx, w.active)
 	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
@@ -197,9 +203,12 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
 		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedRestoreForReview
-	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
+	} else if (w.active.snapshot.Action == appplatform.ActionDisable ||
+		w.active.snapshot.Action == appplatform.ActionUninstall) &&
+		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedUninstallForReview
-	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
+	} else if w.active.snapshot.Action == appplatform.ActionDisable ||
+		w.active.snapshot.Action == appplatform.ActionUninstall {
 		finish = w.server.finishPlatformFrontendUninstallForReview
 	}
 	if err := finish(ctx, w.active); err != nil {

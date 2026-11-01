@@ -38,10 +38,13 @@ func (s *Server) claimNextPlatformFrontendUninstall(ctx context.Context, worker 
 		return zero, err
 	}
 	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.action='uninstall' AND o.managed=0 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','revoke','remove_code')
-		AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.desired_state='removed' AND i.phase='pending' AND i.runtime_id IS NULL
+		WHERE o.action IN ('disable','uninstall') AND o.managed=0 AND o.completed_ms IS NULL
+		AND ((o.action='disable' AND o.stage IN ('queued','validate','revoke')) OR (o.action='uninstall' AND o.stage IN ('queued','validate','revoke','remove_code')))
+		AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?)
+		AND ((o.action='disable' AND i.desired_state='disabled' AND i.phase='disabled') OR (o.action='uninstall' AND i.desired_state='removed' AND i.phase='pending'))
+		AND i.runtime_id IS NULL
 		AND i.generation=o.target_generation AND i.controller_epoch=? AND o.controller_epoch=? AND p.action=o.action AND p.controller_epoch=o.controller_epoch
-		AND NOT EXISTS(SELECT 1 FROM app_platform_data_namespaces d WHERE d.origin_installation_id=i.id OR d.owner_installation_id=i.id)
+		AND (o.action='disable' OR NOT EXISTS(SELECT 1 FROM app_platform_data_namespaces d WHERE d.origin_installation_id=i.id OR d.owner_installation_id=i.id))
 		AND NOT EXISTS(SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id)
 		ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch)
 	if err != nil {
@@ -69,7 +72,10 @@ func (s *Server) claimNextPlatformFrontendUninstall(ctx context.Context, worker 
 			}
 			return zero, err
 		}
-		if facts.lease.leaseUntilMS > facts.now || facts.lease.snapshot.Action != appplatform.ActionUninstall || facts.lease.snapshot.Managed {
+		if facts.lease.leaseUntilMS > facts.now ||
+			(facts.lease.snapshot.Action != appplatform.ActionDisable &&
+				facts.lease.snapshot.Action != appplatform.ActionUninstall) ||
+			facts.lease.snapshot.Managed {
 			continue
 		}
 		if err := validatePlatformAdmittedRemoval(e, facts.lease, facts); err != nil {
@@ -84,7 +90,11 @@ func (s *Server) claimNextPlatformFrontendUninstall(ctx context.Context, worker 
 		detail, _ := json.Marshal(struct {
 			Worker string `json:"worker_id"`
 		}{worker})
-		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.uninstall_claimed','app_platform_operation',?,?,'')`, time.UnixMilli(facts.now).UTC().Format(time.RFC3339), id, string(detail)); err != nil {
+		audit := "app_platform.uninstall_claimed"
+		if facts.lease.snapshot.Action == appplatform.ActionDisable {
+			audit = "app_platform.disable_claimed"
+		}
+		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_operation',?,?,'')`, time.UnixMilli(facts.now).UTC().Format(time.RFC3339), audit, id, string(detail)); err != nil {
 			return zero, err
 		}
 		if _, err := finalPlatformOperationLeaseCheck(e, check); err != nil {
@@ -100,12 +110,18 @@ func (s *Server) claimNextPlatformFrontendUninstall(ctx context.Context, worker 
 
 func (s *Store) advancePlatformFrontendUninstall(ctx context.Context, expected platformOperationLease) (platformOperationLease, error) {
 	var zero platformOperationLease
-	if expected.snapshot.Action != appplatform.ActionUninstall || expected.snapshot.Managed {
+	if (expected.snapshot.Action != appplatform.ActionDisable &&
+		expected.snapshot.Action != appplatform.ActionUninstall) ||
+		expected.snapshot.Managed {
 		return zero, errAppPlatformStageEvidence
 	}
 	nextByStage := map[appplatform.Stage]appplatform.Stage{
 		appplatform.StageQueued: appplatform.StageValidate, appplatform.StageValidate: appplatform.StageRevoke,
-		appplatform.StageRevoke: appplatform.StageRemoveCode, appplatform.StageRemoveCode: appplatform.StageComplete,
+		appplatform.StageRevoke: appplatform.StageComplete,
+	}
+	if expected.snapshot.Action == appplatform.ActionUninstall {
+		nextByStage[appplatform.StageRevoke] = appplatform.StageRemoveCode
+		nextByStage[appplatform.StageRemoveCode] = appplatform.StageComplete
 	}
 	next, ok := nextByStage[expected.snapshot.Stage]
 	if !ok {
@@ -140,15 +156,21 @@ func (s *Store) advancePlatformFrontendUninstall(ctx context.Context, expected p
 		return zero, errAppPlatformStageEvidence
 	}
 	if next == appplatform.StageComplete {
-		changed, err := e.exec(`UPDATE app_platform_installations SET phase='removed',revision=revision+1,updated_ms=? WHERE id=? AND desired_state='removed' AND phase='pending' AND generation=? AND revision=? AND controller_epoch=?`, now, expected.installationID, expected.snapshot.Generation, facts.installationRevision, expected.controllerEpoch)
+		desired, currentPhase, phase := "removed", "pending", "removed"
+		if expected.snapshot.Action == appplatform.ActionDisable {
+			desired, currentPhase, phase = "disabled", "disabled", "disabled"
+		}
+		changed, err := e.exec(`UPDATE app_platform_installations SET phase=?,revision=revision+1,updated_ms=? WHERE id=? AND desired_state=? AND phase=? AND generation=? AND revision=? AND controller_epoch=?`, phase, now, expected.installationID, desired, currentPhase, expected.snapshot.Generation, facts.installationRevision, expected.controllerEpoch)
 		if err := platformLeaseCAS(changed, err); err != nil {
 			return zero, err
 		}
-		if _, err := e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, expected.installationID); err != nil {
-			return zero, err
-		}
-		if _, err := e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, expected.installationID); err != nil {
-			return zero, err
+		if expected.snapshot.Action == appplatform.ActionUninstall {
+			if _, err := e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, expected.installationID); err != nil {
+				return zero, err
+			}
+			if _, err := e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, expected.installationID); err != nil {
+				return zero, err
+			}
 		}
 	}
 	result := expected
@@ -192,8 +214,22 @@ func (s *Server) runPlatformFrontendUninstall(ctx context.Context, expected plat
 	return platformOperationLease{}, nil
 }
 
+func (s *Server) runPlatformFrontendDisable(ctx context.Context, expected platformOperationLease) (platformOperationLease, error) {
+	result := expected
+	for result.snapshot.Stage != appplatform.StageComplete {
+		next, err := s.st.advancePlatformFrontendUninstall(ctx, result)
+		if err != nil {
+			return result, err
+		}
+		result = next
+	}
+	return platformOperationLease{}, nil
+}
+
 func (s *Server) finishPlatformFrontendUninstallForReview(ctx context.Context, expected platformOperationLease) error {
-	if expected.snapshot.Action != appplatform.ActionUninstall || expected.snapshot.Managed {
+	if (expected.snapshot.Action != appplatform.ActionDisable &&
+		expected.snapshot.Action != appplatform.ActionUninstall) ||
+		expected.snapshot.Managed {
 		return errAppPlatformStageEvidence
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
@@ -224,11 +260,16 @@ func (s *Server) finishPlatformFrontendUninstallForReview(ctx context.Context, e
 	if err != nil {
 		return errAppPlatformStageEvidence
 	}
-	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code='uninstall_retry_exhausted',completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, string(failed.Snapshot().Stage), int64(failed.Snapshot().Revision), now, now, expected.id, expected.installationID, expected.controllerEpoch, string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
+	code := "uninstall_retry_exhausted"
+	audit := "app_platform.uninstall_failed"
+	if expected.snapshot.Action == appplatform.ActionDisable {
+		code, audit = "disable_retry_exhausted", "app_platform.disable_failed"
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code=?,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, string(failed.Snapshot().Stage), int64(failed.Snapshot().Revision), code, now, now, expected.id, expected.installationID, expected.controllerEpoch, string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
-	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.uninstall_failed','app_platform_operation',?,'{}','')`, time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id); err != nil {
+	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_operation',?,'{}','')`, time.UnixMilli(now).UTC().Format(time.RFC3339), audit, expected.id); err != nil {
 		return err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {

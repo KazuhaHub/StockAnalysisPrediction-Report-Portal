@@ -22,6 +22,10 @@ Implemented and tested:
   backend paths;
 - generation/fence/lease/epoch checks across install stages;
 - disable and uninstall admission with immediate authority denial;
+- frontend disable through `revoke -> complete` and managed disable through
+  `revoke -> stop -> complete`; managed completion requires an exact stopped
+  receipt, and offline/uncertain stop work remains failed or `recovery_required`
+  without deleting code, data or grant rows;
 - uninstall revocation of credential bindings and transactional clear/drop of
   dedicated plugin object tables;
 - reviewed frontend uninstall scheduling through
@@ -57,6 +61,8 @@ Still required for H13 completion:
 
 - reviewed `delete_data` review/consume entry point for legacy retained
   namespaces and orphan cleanup; normal uninstall no longer leaves one;
+- reviewed enable/repair execution with current trust, configuration and health
+  checks and no capability expansion;
 - full concurrent operator acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
 
