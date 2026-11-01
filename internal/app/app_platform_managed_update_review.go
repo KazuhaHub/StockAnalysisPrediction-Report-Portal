@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -290,12 +291,19 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		installation).
 		Scan(&result.operationID, &planRaw, &planSHA, &release,
 			&result.generation, &result.fence, &completed, &action); err != nil {
-		return result, errAppPlatformStageEvidence
+		return result, fmt.Errorf(
+			"%w: managed update source query: %v",
+			errAppPlatformStageEvidence, err)
 	}
 	if target == nil || platformDigest([]byte(planRaw)) != planSHA ||
 		release != activeRelease || result.generation != generation ||
 		result.fence < 1 || completed < 0 {
-		return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+		return platformManagedUpdateSource{}, fmt.Errorf(
+			"%w: managed update source identity target=%v digest=%v release=%v/%v generation=%d/%d fence=%d completed=%d",
+			errAppPlatformStageEvidence, target != nil,
+			platformDigest([]byte(planRaw)) == planSHA,
+			release, activeRelease, result.generation, generation,
+			result.fence, completed)
 	}
 	switch action {
 	case "install":
@@ -307,7 +315,9 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 			!platformManagedFormat(plan.Format) || plan.Runtime == nil ||
 			plan.ReleaseSHA256 != release ||
 			!samePlatformManagedUpdateRuntime(plan.Runtime, target) {
-			return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+			return platformManagedUpdateSource{}, fmt.Errorf(
+				"%w: managed update install source plan",
+				errAppPlatformStageEvidence)
 		}
 		result.format = plan.Format
 		result.runtime = plan.Runtime
@@ -322,7 +332,9 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 				plan.Format != platformManagedUpdateFormat ||
 				plan.TargetReleaseSHA256 != release ||
 				plan.TargetGeneration != generation {
-				return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+				return platformManagedUpdateSource{}, fmt.Errorf(
+					"%w: managed update update source plan",
+					errAppPlatformStageEvidence)
 			}
 		case "restore":
 			var plan platformManagedRestorePlan
@@ -333,7 +345,9 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 				plan.Format != platformManagedRestoreFormat ||
 				plan.ReleaseSHA256 != release ||
 				plan.TargetGeneration != generation {
-				return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+				return platformManagedUpdateSource{}, fmt.Errorf(
+					"%w: managed update restore source plan",
+					errAppPlatformStageEvidence)
 			}
 		}
 		var effectID, kind, digest, state, receipt string
@@ -346,7 +360,10 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 				&receipt); err != nil ||
 			kind != action+"-start" || state != "applied" ||
 			observed != result.fence || !platformValidSHA(digest) {
-			return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+			return platformManagedUpdateSource{}, fmt.Errorf(
+				"%w: managed update source start effect kind=%s action=%s state=%s observed=%d fence=%d",
+				errAppPlatformStageEvidence, kind, action, state,
+				observed, result.fence)
 		}
 		running, err := journal.ParseUpdateStartRunningReceipt([]byte(receipt))
 		if err != nil || running.OperationID != result.operationID ||
@@ -357,7 +374,9 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 			running.Claim.EffectID != effectID ||
 			running.Claim.PayloadSHA256 != digest ||
 			running.Claim.Preflight == nil {
-			return platformManagedUpdateSource{}, errAppPlatformStageEvidence
+			return platformManagedUpdateSource{}, fmt.Errorf(
+				"%w: managed update source running receipt",
+				errAppPlatformStageEvidence)
 		}
 		result.format = platformManagedInstallFormat
 		if running.Claim.SandboxProfile ==
