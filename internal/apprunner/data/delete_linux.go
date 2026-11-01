@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	maxDeleteEntries = 100000
-	maxDeleteDepth   = 64
+	maxDeleteEntries       = 100000
+	maxDeleteDepth         = 64
+	deleteQuotaSettleDelay = 5 * time.Second
+	deleteQuotaPoll        = 10 * time.Millisecond
 )
 
 // Delete removes exactly one retained namespace after its writer/container
@@ -37,7 +39,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	}
 	folder, err := r.openNamespace(request.NamespaceID)
 	if errors.Is(err, unix.ENOENT) {
-		if err := settleDeleteDataQuota(r.file, request); err != nil {
+		if err := settleDeleteDataQuota(ctx, r.file, request); err != nil {
 			return zero, errors.Join(ErrDeleteIncomplete, err)
 		}
 		if err := r.requireIdentity(ctx, expected); err != nil {
@@ -133,7 +135,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	if err := r.file.Sync(); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
-	if err := settleDeleteDataQuota(r.file, request); err != nil {
+	if err := settleDeleteDataQuota(ctx, r.file, request); err != nil {
 		return zero, errors.Join(
 			ErrDeleteIncomplete,
 			fmt.Errorf("settle namespace quota: %w", err))
@@ -146,7 +148,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	return DeleteObservation{snapshot: result, valid: true}, nil
 }
 
-func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
+func settleDeleteDataQuota(ctx context.Context, file *os.File, request DeleteRequest) error {
 	limit, err := readLimits(file, request.ProjectID)
 	if err != nil {
 		return fmt.Errorf("read namespace quota: %w", err)
@@ -154,10 +156,41 @@ func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
 	if limit == (limits{}) {
 		return nil
 	}
-	if limit.usedBytes != 0 || limit.usedInodes != 0 {
+	if (limit.bytes != 0 || limit.inodes != 0) &&
+		(limit.bytes != request.QuotaBytes ||
+			limit.inodes != request.QuotaInodes) {
 		return fmt.Errorf(
-			"namespace quota is still in use (bytes=%d inodes=%d): %w",
-			limit.usedBytes, limit.usedInodes, ErrDeleteIncomplete)
+			"namespace quota binding changed: %w", ErrDeleteUnsafe)
+	}
+	if limit.usedBytes != 0 || limit.usedInodes != 0 {
+		timer := time.NewTimer(deleteQuotaSettleDelay)
+		ticker := time.NewTicker(deleteQuotaPoll)
+		defer timer.Stop()
+		defer ticker.Stop()
+		for {
+			// XFS may defer inode inactivation after unlink. statfs pushes
+			// queued inodegc work without requiring a global cache drop.
+			var stat unix.Statfs_t
+			if err := unix.Fstatfs(int(file.Fd()), &stat); err != nil {
+				return fmt.Errorf("push namespace quota release: %w", err)
+			}
+			limit, err = readLimits(file, request.ProjectID)
+			if err != nil {
+				return fmt.Errorf("read releasing namespace quota: %w", err)
+			}
+			if limit.usedBytes == 0 && limit.usedInodes == 0 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-timer.C:
+				return fmt.Errorf(
+					"namespace quota is still in use (bytes=%d inodes=%d): %w",
+					limit.usedBytes, limit.usedInodes, ErrDeleteIncomplete)
+			case <-ticker.C:
+			}
+		}
 	}
 	if limit.bytes != request.QuotaBytes ||
 		limit.inodes != request.QuotaInodes {
