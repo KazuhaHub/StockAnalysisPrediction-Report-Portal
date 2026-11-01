@@ -657,13 +657,19 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 		return zero, err
 	}
 	if !source.preflightMatches(snapshot.Launch) || snapshot.NativeID != source.resource.nativeID {
+		var expectedPreflight, actualPreflight any
+		if source.update != nil && source.update.Claim.Preflight != nil {
+			expectedPreflight = *source.update.Claim.Preflight
+			actualPreflight = updateStartPreflight(
+				driver.UpdateStartLaunchSnapshot{Launch: snapshot.Launch})
+		}
 		return zero, fmt.Errorf(
-			"%w: managed removal settlement preflight/native id expected=%s actual=%s preflight=%v operation=%s generation=%d",
+			"%w: managed removal settlement preflight/native id expected=%s actual=%s preflight=%v operation=%s generation=%d expected_preflight=%+v actual_preflight=%+v",
 			ErrFenceReconciliation, source.resource.nativeID,
 			snapshot.NativeID,
 			source.preflightMatches(snapshot.Launch),
 			source.command.Payload.SourceOperationID,
-			source.generation)
+			source.generation, expectedPreflight, actualPreflight)
 	}
 	expectedState := "exited"
 	if source.command.Stage == "remove_code" {
