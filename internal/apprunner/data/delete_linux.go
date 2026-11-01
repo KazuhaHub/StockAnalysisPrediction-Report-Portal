@@ -36,9 +36,8 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	}
 	folder, err := r.openNamespace(request.NamespaceID)
 	if errors.Is(err, unix.ENOENT) {
-		limit, limitErr := readLimits(r.file, request.ProjectID)
-		if limitErr != nil || limit != (limits{}) {
-			return zero, errors.Join(ErrDeleteUnsafe, limitErr)
+		if err := settleDeleteDataQuota(r.file, request); err != nil {
+			return zero, errors.Join(ErrDeleteIncomplete, err)
 		}
 		if err := r.requireIdentity(ctx, expected); err != nil {
 			return zero, err
@@ -104,9 +103,13 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	if err := folder.Sync(); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
-	remaining, err := readLimits(r.file, request.ProjectID)
-	if err != nil || remaining.usedBytes != 0 || remaining.usedInodes != 0 {
-		return zero, errors.Join(ErrDeleteIncomplete, err)
+	remaining, err := folder.ReadDir(-1)
+	if err != nil {
+		return zero, errors.Join(ErrDeleteIncomplete, err,
+			ErrDeleteUnsafe)
+	}
+	if len(remaining) != 0 {
+		return zero, errors.Join(ErrDeleteIncomplete, ErrDeleteUnsafe)
 	}
 	if err := unix.Unlinkat(
 		int(r.file.Fd()), request.NamespaceID, unix.AT_REMOVEDIR); err != nil {
@@ -115,8 +118,7 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	if err := r.file.Sync(); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
-	remaining, err = readLimits(r.file, request.ProjectID)
-	if err != nil || remaining != (limits{}) {
+	if err := settleDeleteDataQuota(r.file, request); err != nil {
 		return zero, errors.Join(ErrDeleteIncomplete, err)
 	}
 	if err := r.requireIdentity(ctx, expected); err != nil {
@@ -125,6 +127,39 @@ func (r *Root) Delete(ctx context.Context, expected RootIdentity, request Delete
 	result.Entries = int64(count)
 	result.ObservedMS = time.Now().UTC().UnixMilli()
 	return DeleteObservation{snapshot: result, valid: true}, nil
+}
+
+func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
+	limit, err := readLimits(file, request.ProjectID)
+	if err != nil {
+		return err
+	}
+	if limit == (limits{}) {
+		return nil
+	}
+	if limit.usedBytes != 0 || limit.usedInodes != 0 {
+		return ErrDeleteIncomplete
+	}
+	if limit.bytes != request.QuotaBytes ||
+		limit.inodes != request.QuotaInodes {
+		return ErrDeleteUnsafe
+	}
+	buffer := make([]byte, 112)
+	buffer[0] = 1
+	buffer[1] = 2
+	binary.NativeEndian.PutUint16(buffer[2:4], 10)
+	binary.NativeEndian.PutUint32(buffer[4:8], request.ProjectID)
+	if err := quota(file, quotaSet, request.ProjectID, buffer); err != nil {
+		return err
+	}
+	cleared, err := readLimits(file, request.ProjectID)
+	if err != nil {
+		return err
+	}
+	if cleared != (limits{}) {
+		return ErrDeleteIncomplete
+	}
+	return nil
 }
 
 func deleteNamespaceChildren(ctx context.Context, folder *os.File, device uint64, depth int, count *int) error {

@@ -4,6 +4,7 @@ package data
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,6 +200,19 @@ func TestNativeDataPrimitive(t *testing.T) {
 		limit != (limits{}) {
 		t.Fatal("native delete retained project quota", limit, err)
 	}
+	quotaBuffer := make([]byte, 112)
+	quotaBuffer[0] = 1
+	quotaBuffer[1] = 2
+	binary.NativeEndian.PutUint16(quotaBuffer[2:4], 10)
+	binary.NativeEndian.PutUint32(quotaBuffer[4:8], deleteRequest.ProjectID)
+	binary.NativeEndian.PutUint64(
+		quotaBuffer[8:16], uint64(deleteRequest.QuotaBytes/512))
+	binary.NativeEndian.PutUint64(
+		quotaBuffer[24:32], uint64(deleteRequest.QuotaInodes))
+	if err := quota(
+		root.file, quotaSet, deleteRequest.ProjectID, quotaBuffer); err != nil {
+		t.Fatal("restore interrupted quota state", err)
+	}
 	absent, err := root.Delete(
 		context.Background(), expected, deleteRequest)
 	absentSnapshot, absentErr := absent.Snapshot()
@@ -207,6 +221,11 @@ func TestNativeDataPrimitive(t *testing.T) {
 		absentSnapshot.NamespaceID != deleteRequest.NamespaceID {
 		t.Fatalf("native delete reconciliation: %+v %v",
 			absentSnapshot, errors.Join(err, absentErr))
+	}
+	if limit, err := readLimits(
+		root.file, deleteRequest.ProjectID); err != nil ||
+		limit != (limits{}) {
+		t.Fatal("native delete reconciliation retained quota", limit, err)
 	}
 	t.Log("NATIVE_DATA_NAMESPACE_DELETED")
 	checkpointPath := os.Getenv("APP_DATA_CHECKPOINT_ROOT")
