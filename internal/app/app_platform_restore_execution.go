@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -18,7 +19,10 @@ func (s *Server) advancePlatformRestoreStage(ctx context.Context, expected platf
 			next == appplatform.StageSnapshot) ||
 			(expected.snapshot.Stage == appplatform.StageSnapshot &&
 				next == appplatform.StageRestoreData)) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"restore stage transition %s -> %s: %w",
+			expected.snapshot.Stage, next,
+			errAppPlatformStageEvidence)
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -34,31 +38,45 @@ func (s *Server) advancePlatformRestoreStage(ctx context.Context, expected platf
 	}
 	facts, err := loadPlatformBoundOperationLease(e, expected)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"restore stage %s lease: %w", expected.snapshot.Stage, err)
 	}
 	if _, _, _, _, err := loadPlatformRestoreCheckpoint(e, expected); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"restore stage %s checkpoint: %w",
+			expected.snapshot.Stage, err)
 	}
 	var effects int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'
 		AND effect_number IN (1,2) AND state='applied'`,
 		expected.id).Scan(&effects); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"restore stage %s target effects: %w",
+			expected.snapshot.Stage, err)
 	}
 	if expected.snapshot.Stage == appplatform.StageQuiesce && effects != 2 {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"restore quiesce target effects applied=%d: %w",
+			effects, errAppPlatformStageEvidence)
 	}
 	if expected.snapshot.Stage == appplatform.StageSnapshot && effects != 2 {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"restore snapshot target effects applied=%d: %w",
+			effects, errAppPlatformStageEvidence)
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"restore stage %s operation: %w",
+			expected.snapshot.Stage, errAppPlatformStageEvidence)
 	}
 	advanced, err := model.Advance(expected.snapshot.Revision, next)
 	if err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"restore stage %s -> %s transition: %w",
+			expected.snapshot.Stage, next,
+			errAppPlatformStageEvidence)
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
