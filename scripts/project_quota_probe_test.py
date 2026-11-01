@@ -6,7 +6,7 @@ import stat
 import struct
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import mock_open, patch
 
 SOURCE = Path(__file__).parent / "acceptance/quota_workload.py"
 SPEC = importlib.util.spec_from_file_location("quota_workload", SOURCE)
@@ -187,12 +187,13 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                 return "/dev/loop8"
             return ""
 
-        with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "require_loop_unmounted"), patch.object(probe, "discover_owned_loop", return_value=None), patch.object(probe, "command", side_effect=run) as command:
-            changed, replacement_loop = probe.replace_owned_uuid(
+        with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "require_loop_unmounted"), patch("builtins.open", mock_open()) as cache, patch.object(probe, "command", side_effect=run) as command:
+            changed = probe.replace_owned_uuid(
                 Path("/tmp/owned/mount"), "/dev/loop7",
                 Path("/tmp/owned/image"), old_uuid)
         self.assertEqual(changed, replacement[0])
-        self.assertEqual(replacement_loop, "/dev/loop8")
+        cache.assert_called_once_with(
+            "/proc/sys/vm/drop_caches", "w", encoding="ascii")
         self.assertIn(
             "xfs_admin", [entry[0] for entry in commands])
         replacements = [
@@ -205,9 +206,6 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             r"^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
         self.assertNotEqual(replacements[0][2], old_uuid)
         self.assertFalse(any(command[0] == "blkid" for command in commands))
-        self.assertIn(("losetup", "--detach", "/dev/loop7"), commands)
-        self.assertIn(
-            ("losetup", "--find", "--show", "/tmp/owned/image"), commands)
 
     def test_normal_filesystem_does_not_fake_inode_enforcement(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -8,7 +8,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 import uuid
 
 PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
@@ -122,20 +121,11 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     require_loop_owner(loop, image)
     os.sync()
     command("blockdev", "--flushbufs", loop)
-    command("losetup", "--detach", loop)
-    deadline = time.monotonic() + 5
-    while discover_owned_loop(image) is not None:
-        if time.monotonic() >= deadline:
-            raise RuntimeError("owned loop remained attached after UUID replacement")
-        time.sleep(0.05)
-    replacement_loop = command(
-        "losetup", "--find", "--show", str(image))
-    if not re.fullmatch(r"/dev/loop[0-9]+", replacement_loop):
-        raise RuntimeError("UUID replacement did not return an exact loop")
-    require_loop_owner(replacement_loop, image)
-    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", replacement_loop, str(mountpoint))
-    require_mount_owner(mountpoint, replacement_loop)
-    return replacement_uuid, replacement_loop
+    with open("/proc/sys/vm/drop_caches", "w", encoding="ascii") as cache:
+        cache.write("3\n")
+    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
+    require_mount_owner(mountpoint, loop)
+    return replacement_uuid
 
 
 def candidate_configuration():
@@ -635,7 +625,7 @@ def main(args):
         run_workload("released-unlinked", folders["unlinked"])
         report["same_project_limit_controls"] = True
         if native_root is not None:
-            _, loop = replace_owned_uuid(
+            replace_owned_uuid(
                 mountpoint, loop, image,
                 native_env["APP_DATA_NATIVE_UUID"])
             native_env["APP_DATA_NATIVE_PHASE"] = "replaced"
