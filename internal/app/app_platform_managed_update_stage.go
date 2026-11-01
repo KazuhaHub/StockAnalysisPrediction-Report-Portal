@@ -583,16 +583,16 @@ func (s *Server) runPlatformManagedUpdate(ctx context.Context, expected platform
 		registered, err := s.dispatchPlatformUpdateStartRegistration(
 			ctx, expected, endpoint)
 		if err != nil {
-			return zero, err
+			return expected, err
 		}
 		confirmed, err := s.completePlatformUpdateStartRegistration(
 			ctx, registered, endpoint)
 		if err != nil {
-			return zero, err
+			return registered, err
 		}
 		if _, err := s.activatePlatformUpdateStart(
 			ctx, confirmed, endpoint); err != nil {
-			return zero, err
+			return confirmed, err
 		}
 		return zero, nil
 	default:
