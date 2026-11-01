@@ -503,7 +503,7 @@ def main(args):
                         print("Portal data stage output:\n" + diagnostic.read_text(), file=sys.stderr, flush=True)
                         raise RuntimeError("Portal data stage failed: " + (result.stdout+result.stderr)[-32768:])
                     if browser_enabled:
-                        for marker in ("SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"):
+                        for marker in ("SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED", "SDK_NATIVE_BROWSER_CREDENTIAL"):
                             if marker not in result.stdout:
                                 raise RuntimeError("SDK native browser assertion missing: " + marker)
                             report[marker.lower()] = True
@@ -517,7 +517,7 @@ def main(args):
                         if "MANAGED_PROFILE_OBSERVED" not in result.stdout:
                             raise RuntimeError("Portal managed profile acceptance did not execute")
                         report["native_portal_authenticated_managed_profile"] = True
-                        for marker in ("PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT", "PORTAL_WRITABLE_NETWORK_GRANT_LAUNCHED", "PORTAL_NETWORK_CURRENT_VIEWER_SIGNED", "PORTAL_NETWORK_CURRENT_GRANT_RECHECKED", "PORTAL_NETWORK_HTTPS_CURRENT_VIEWER", "PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED", "PORTAL_NETWORK_HTTPS_POST_IO_REVOKED", "PORTAL_NETWORK_SESSION_HTTP", "PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"):
+                        for marker in ("PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT", "PORTAL_WRITABLE_NETWORK_GRANT_LAUNCHED", "PORTAL_NETWORK_CURRENT_VIEWER_SIGNED", "PORTAL_NETWORK_CURRENT_GRANT_RECHECKED", "PORTAL_NETWORK_HTTPS_CURRENT_VIEWER", "PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED", "PORTAL_NETWORK_HTTPS_POST_IO_REVOKED", "PORTAL_NETWORK_CREDENTIAL_INJECTED", "PORTAL_NETWORK_SESSION_HTTP", "PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Portal writable writer acceptance did not execute: " + marker)
                         report["native_portal_writable_review_confirmed"] = True
@@ -528,6 +528,7 @@ def main(args):
                         report["native_portal_network_https_current_viewer"] = True
                         report["native_portal_network_https_pre_io_revoked"] = True
                         report["native_portal_network_https_post_io_revoked"] = True
+                        report["native_portal_network_credential_injected"] = True
                         report["native_portal_network_session_http"] = True
                         report["native_portal_network_session_http_uncertain"] = True
                         report["native_portal_writer_settlement_reconciled"] = True

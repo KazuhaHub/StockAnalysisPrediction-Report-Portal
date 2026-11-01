@@ -38,6 +38,14 @@ async function main(){
    const text=await result.innerText(),value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('network SDK result changed');
   }
+  const credentialAvailable=await frame.getByTestId('credential-ready').innerText()==='true';
+  if(credentialAvailable){
+   stage='credential-network';await frame.getByRole('button',{name:'Read credentialed network',exact:true}).click();
+   const result=frame.locator('[data-testid="credential-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   const text=await result.innerText(),value=JSON.parse(text);
+   if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('credential SDK result changed');
+  }
   const reportsReady=await frame.getByTestId('reports-ready').innerText();
   if(reportsReady==='true'){
    stage='reports';const reportText=await dispatchReports(),report=JSON.parse(reportText);
@@ -162,6 +170,9 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_REVOKED');
   if(networkAvailable){
    console.log('SDK_NATIVE_BROWSER_NETWORK');
+  }
+  if(credentialAvailable){
+   console.log('SDK_NATIVE_BROWSER_CREDENTIAL');
   }
   if(reportsReady==='true'){
    console.log('SDK_NATIVE_BROWSER_REPORTS');

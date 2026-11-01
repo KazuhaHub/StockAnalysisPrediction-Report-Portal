@@ -179,6 +179,7 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	markers := []string{"SDK_NATIVE_BROWSER_PAGE_ACTIONS", "SDK_NATIVE_BROWSER_TYPED_QUERY", "SDK_NATIVE_BROWSER_NAVIGATION", "SDK_NATIVE_BROWSER_DRAFT_GUARD", "SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT", "SDK_NATIVE_BROWSER_CURRENT_VIEWER", "SDK_NATIVE_BROWSER_UNCERTAIN_NO_RETRY", "SDK_NATIVE_BROWSER_REVOKED"}
 	if expectNetwork {
 		markers = append(markers, "SDK_NATIVE_BROWSER_NETWORK")
+		markers = append(markers, "SDK_NATIVE_BROWSER_CREDENTIAL")
 	}
 	if expectReports {
 		markers = append(markers, "SDK_NATIVE_BROWSER_REPORTS")

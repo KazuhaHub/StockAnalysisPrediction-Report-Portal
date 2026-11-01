@@ -43,6 +43,11 @@ function Fixture(){
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/success',accept:'application/json',contentType:''});
   setNetworkResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
  }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
+ const credentialSequence=useRef(0),[credentialResult,setCredentialResult]=useState({id:0,text:'none'}),[credentialBusy,setCredentialBusy]=useState(false);
+ async function runCredentialNetwork(){const id=++credentialSequence.current;setCredentialResult({id,text:'pending'});setCredentialBusy(true);try{
+  const r=await network.request({method:'GET',url:'https://api.example.com/v1/credential',accept:'application/json',contentType:'',credential:'upstream-api'});
+  setCredentialResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
+ }catch(error){setCredentialResult({id,text:'error:'+error.code})}finally{setCredentialBusy(false)}}
  const reportsSequence=useRef(0),[reportsResult,setReportsResult]=useState({id:0,text:'none'}),[reportsBusy,setReportsBusy]=useState(false);
  async function runReports(){const id=++reportsSequence.current;setReportsResult({id,text:'pending'});setReportsBusy(true);try{
   const page=await reports.query({q:'Browser current viewer report',limit:20});
@@ -62,6 +67,7 @@ function Fixture(){
  }catch(error){setObjectsResult({id,text:'error:'+error.code})}finally{setObjectsBusy(false)}}
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
+ <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>
  <Typography.Text data-testid="reports-ready">{String(reports.ready)}</Typography.Text>
  <Typography.Text data-testid="objects-ready">{String(objects.ready)}</Typography.Text>
  <Button onClick={()=>setLongLabels(v=>!v)}>Toggle long labels</Button>
@@ -83,6 +89,8 @@ function Fixture(){
  <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text>
  <Button disabled={!network.ready||networkBusy} onClick={()=>runNetwork()}>Read network</Button>
  <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text>
+ <Button disabled={!network.ready||!network.credentialAvailable||credentialBusy} onClick={()=>runCredentialNetwork()}>Read credentialed network</Button>
+ <Typography.Text data-testid="credential-result" data-request-id={credentialResult.id}>{credentialResult.text}</Typography.Text>
  <Button disabled={!reports.ready||reportsBusy} onClick={()=>runReports()}>Read reports</Button>
  <Typography.Text data-testid="reports-result" data-request-id={reportsResult.id}>{reportsResult.text}</Typography.Text>
  <Button disabled={!objects.ready||objectsBusy} onClick={()=>writeObject()}>Write object</Button>

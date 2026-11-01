@@ -121,13 +121,16 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 			return
 		}
 		body, err := io.ReadAll(io.LimitReader(r.Body, 2))
-		if err != nil || len(body) != 0 || r.Method != "GET" || r.TLS == nil || r.Host != "api.example.com" || r.Header.Get("Authorization") != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Accept") != "application/json" {
+		authorization := r.Header.Get("Authorization")
+		credentialPath := r.URL.Path == "/v1/credential"
+		if err != nil || len(body) != 0 || r.Method != "GET" || r.TLS == nil || r.Host != "api.example.com" || (!credentialPath && authorization != "") || (credentialPath && authorization != "Bearer disposable-upstream-value") || r.Header.Get("Cookie") != "" || r.Header.Get("Accept") != "application/json" {
 			t.Error("invalid actual Portal HTTPS request")
 			w.WriteHeader(400)
 			return
 		}
 		switch r.URL.Path {
 		case "/v1/success":
+		case "/v1/credential":
 		case "/v1/revoke":
 			if err := writePlatformNetworkFixtureFile(filepath.Join(childData, "network-arrived"), []byte("1"), 0444); err != nil {
 				t.Error(err)
@@ -276,6 +279,11 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 		t.Fatal("post-IO withdrawal released response or retried", withdrawalErr, err)
 	}
 	t.Log("PORTAL_NETWORK_HTTPS_POST_IO_REVOKED")
+	credentialResponse, err := s.requestPlatformNetwork(ctx, actor, installation, binding, "GET", "https://api.example.com/v1/credential", "application/json", "", "upstream-api", nil, endpoint)
+	if err != nil || credentialResponse.Status != 200 || string(credentialResponse.Body) != `{"ok":true}` || platformNetworkFixtureCount(t) != 3 {
+		t.Fatal("actual Portal credential injection", credentialResponse.Status, string(credentialResponse.Body), err)
+	}
+	t.Log("PORTAL_NETWORK_CREDENTIAL_INJECTED")
 	testNativePlatformNetworkHTTP(t, s, actor, installation, binding, endpoint)
 }
 
