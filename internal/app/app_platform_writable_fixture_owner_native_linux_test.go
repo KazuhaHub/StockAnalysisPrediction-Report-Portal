@@ -93,10 +93,11 @@ func checkPlatformWritableAutoFixture(t *testing.T, dir string, a control.Author
 			t, updatePath, p, a, socket, native, cleanup)
 		return
 	}
-	updatePath += ".verified"
-	if _, err := os.Stat(updatePath); err == nil {
+	updateVerifiedPath := filepath.Join(
+		dir, "writable-update-start.json.verified.json")
+	if _, err := os.Stat(updateVerifiedPath); err == nil {
 		checkPlatformWritableUpdateStartFixture(
-			t, updatePath, p, a, socket, native, cleanup)
+			t, updateVerifiedPath, p, a, socket, native, cleanup)
 		return
 	}
 	completed, err := os.ReadFile(path)
