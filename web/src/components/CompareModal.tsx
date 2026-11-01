@@ -91,7 +91,7 @@ export default function CompareModal({
     <Modal open={open} onCancel={onClose} footer={null} width={860} title={t('compare.title')} destroyOnHidden>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         {candidates == null && !err ? (
-          <LoadingPlaceholder rows={3} />
+          <LoadingPlaceholder />
         ) : (candidates?.length ?? 0) === 0 && !err ? (
           <Empty description={t('compare.noneToCompare')} />
         ) : (

@@ -34,7 +34,7 @@ export default function LoginActivityPanel() {
   }, [retryKey])
 
   if (failed) return <Alert type="error" showIcon title={t('loginActivity.loadFailed')} />
-  if (!data) return <LoadingPlaceholder minHeight={180} rows={4} />
+  if (!data) return <LoadingPlaceholder minHeight={180} />
 
   return (
     <div style={{ width: '100%' }}>

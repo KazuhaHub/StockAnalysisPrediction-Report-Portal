@@ -110,7 +110,7 @@ export default function AppsHub() {
         />
       )}
       {loading && !resp ? (
-        <LoadingPlaceholder minHeight={200} rows={4} />
+        <LoadingPlaceholder minHeight={200} />
       ) : isEmpty && !loadErr ? (
         <Empty description={t('apps.empty')} />
       ) : (

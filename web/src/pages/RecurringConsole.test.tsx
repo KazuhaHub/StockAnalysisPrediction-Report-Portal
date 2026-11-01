@@ -198,7 +198,10 @@ describe('RecurringConsole unsaved changes', () => {
     await waitFor(() => expect(lastPending()).toEqual([true, false]))
     expect(name.isConnected).toBe(true)
     // By text: the error notification that just opened can hide the dialog from role queries.
-    fireEvent.click(screen.getByText('common.save').closest('button')!)
+    // The button ignores clicks until its loading state from the failed save has cleared.
+    const saveButton = screen.getByText('common.save').closest('button')!
+    await waitFor(() => expect(saveButton.className).not.toContain('ant-btn-loading'))
+    fireEvent.click(saveButton)
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(name.isConnected).toBe(false))
     expect(lastPending()).toEqual([false, false])

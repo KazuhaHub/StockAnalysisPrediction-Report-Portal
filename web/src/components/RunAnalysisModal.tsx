@@ -451,7 +451,7 @@ export default function RunAnalysisModal({
         // A placeholder is the honest answer while the workflow list is on the wire. What used to be
         // here — an empty Select under "no workflows are configured" — described a server that
         // had not spoken yet.
-        <LoadingPlaceholder minHeight={180} rows={4} label={t('run.loading')} />
+        <LoadingPlaceholder minHeight={180} label={t('run.loading')} />
       ) : !targetsOk && loadErr ? (
         <Alert type="error" showIcon title={t('common.loadFailedContent')} description={loadErr} />
       ) : (

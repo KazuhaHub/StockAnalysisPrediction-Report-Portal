@@ -60,7 +60,7 @@ export default function AccountSessionsPanel() {
           <Button danger disabled={busy}>{t('sessions.logoutAll')}</Button>
         </Confirm>
       </Space>
-      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <LoadingPlaceholder rows={3} /> : !data.items.length ? <Empty /> : (
+      {failed ? <Alert type="error" showIcon title={t('sessions.loadFailed')} /> : !data ? <LoadingPlaceholder /> : !data.items.length ? <Empty /> : (
         <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
           {data.items.map((item) => {
             const place = formatRegion(item.geo, i18n?.resolvedLanguage || i18n?.language || navigator.language)

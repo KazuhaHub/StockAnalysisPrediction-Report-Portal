@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, Result, Skeleton, Typography } from 'antd'
+import { Button, Result, Spin, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import WaitingForConnection from './WaitingForConnection'
@@ -24,9 +24,11 @@ import useDelayedFlag from '../lib/useDelayedFlag'
 // the shell's connection strip says the connection is down, and the spinner here only adds a
 // muted line that it is waiting.
 //
-// The placeholder is a skeleton, not a spinner, and it appears only after a short delay: an answer
-// that arrives at once flashes nothing, and a slow one shows the shape of a page rather than a
-// wheel [Primer loading; Geist skeleton]. The loading status is announced from the first frame.
+// The placeholder is the shared loading ring, centred in the space the view will fill, with its
+// words. It appears after a short delay, so an answer that arrives at once flashes nothing, and a
+// slow one is acknowledged almost at once where the reader is looking. (A generic skeleton was tried
+// and dropped: one set of grey bars for every page previews none of them, and reads as a flicker.)
+// The loading status is announced from the first frame.
 export default function LoadGate({
   loading,
   error,
@@ -66,26 +68,26 @@ export default function LoadGate({
 }
 
 /**
- * The placeholder LoadGate shows, for a view that loads in its own way: a skeleton after a short
- * delay, the loading status announced from the first frame, and the waiting-for-connection line.
+ * The placeholder LoadGate shows, for a view that loads in its own way: the loading ring after a
+ * short delay, the loading status announced from the first frame, and the waiting-for-connection line.
  */
 export function LoadingPlaceholder({
   minHeight,
-  rows = 6,
   label,
 }: {
   minHeight?: number | string
-  rows?: number
   label?: string
 }) {
   const { t } = useTranslation()
-  const shown = useDelayedFlag(true)
+  const shown = useDelayedFlag(true, 150)
+  // One status line: read out from the first frame, and shown under the ring once the delay has
+  // passed. Until then the placeholder takes no room, so a fast answer moves nothing.
   return (
-    <div aria-busy className="rp-loading" style={{ minHeight }}>
-      {/* Drawn only when this stands for the whole page (index.css). */}
-      <div className="rp-route-progress" aria-hidden="true" />
-      <Typography.Text role="status" className="rp-sr-only">{label ?? t('common.loading')}</Typography.Text>
-      {shown && <Skeleton active title paragraph={{ rows }} />}
+    <div aria-busy className={`rp-loading${shown ? ' rp-loading--shown' : ''}`} style={{ minHeight }}>
+      {shown && <Spin />}
+      <Typography.Text role="status" type="secondary" className={shown ? undefined : 'rp-sr-only'}>
+        {label ?? t('common.loading')}
+      </Typography.Text>
       <WaitingForConnection />
     </div>
   )

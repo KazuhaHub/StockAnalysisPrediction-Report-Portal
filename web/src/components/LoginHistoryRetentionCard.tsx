@@ -34,7 +34,7 @@ export default function LoginHistoryRetentionCard() {
     finally { setSaving(false) }
   }
   return <Card title={t('storage.loginHistoryTitle')}>
-    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <LoadingPlaceholder rows={2} /> : <>
+    {failed ? <Alert type="error" title={t('loginActivity.loadFailed')} action={<Button onClick={() => void load()}>{t('common.retry')}</Button>} /> : saved === null ? <LoadingPlaceholder /> : <>
       <Space wrap>
         <Typography.Text>{t('loginActivity.keep')}</Typography.Text>
         <InputNumber aria-label={t('loginActivity.keep')} min={1} max={10000} precision={0} value={keep} onChange={setKeep} disabled={saving} />

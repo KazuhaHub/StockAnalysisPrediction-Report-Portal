@@ -580,7 +580,7 @@ function GlobalExecutionTargets() {
                   </Upload>
                 </div>
                 {!pluginsLoaded ? (
-                  <LoadingPlaceholder rows={3} />
+                  <LoadingPlaceholder />
                 ) : pluginsErr ? (
                   <Typography.Text type="danger">{pluginsErr}</Typography.Text>
                 ) : customPlugins.length === 0 ? (

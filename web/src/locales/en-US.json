@@ -1580,6 +1580,7 @@
   "quote.chart": "Chart",
   "quote.chartLabel": "Daily candlestick chart",
   "quote.close": "Close",
+  "quote.rangeLabel": "Chart range",
   "quote.collapseChart": "Hide chart",
   "quote.currency.CNY": "CNY",
   "quote.currency.HKD": "HKD",

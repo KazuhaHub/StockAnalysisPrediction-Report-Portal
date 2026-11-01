@@ -1580,6 +1580,7 @@
   "quote.chart": "图表",
   "quote.chartLabel": "日 K 线图",
   "quote.close": "收盘",
+  "quote.rangeLabel": "行情区间",
   "quote.collapseChart": "收起图表",
   "quote.currency.CNY": "元",
   "quote.currency.HKD": "港元",

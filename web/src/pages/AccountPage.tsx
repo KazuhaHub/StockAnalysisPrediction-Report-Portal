@@ -564,7 +564,7 @@ function ProofModal({
         // read, but drawn straight away it also hides the SSO buttons — so an account whose only
         // way through is a provider is shown a password box and nothing else, until the answer
         // lands. A moment's spinner says the same thing without deciding it.
-        <LoadingPlaceholder rows={3} />
+        <LoadingPlaceholder />
       ) : (
       <>
       <Typography.Paragraph type="secondary">
