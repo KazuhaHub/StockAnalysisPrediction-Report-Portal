@@ -4,7 +4,8 @@ Status: awaiting owner approval. No migration is applied.
 
 ## Decision
 
-Add two Portal tables in append-only migration `0018`:
+Add two Portal tables in append-only migration `0019` (`0018` is already the
+application plugin-table migration):
 
 - `app_platform_tasks`: current durable task identity, immutable execution tuple,
   state, retry budget, lease/fence and bounded result; and
