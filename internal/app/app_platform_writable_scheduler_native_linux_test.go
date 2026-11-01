@@ -191,6 +191,15 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	manifest.ID = appID
 	manifest.Version = "1.1.0-beta.2"
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	archive = platformSDKBrowserArchive(t, archive)
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		manifest.Presentation.Routes = []appplatform.Route{
+			{ID: "editor", Path: "/editor", Layout: "viewport",
+				Query: platformRouteQueryFixture()},
+			{ID: "home", Path: "/", Layout: "document",
+				Query: platformRouteQueryFixture()},
+		}
+	}
 	manifest.Frontend.SHA256 = platformDigest(archive)
 	manifest.Data.Schema = 1
 	manifest.Data.ReadableSchemas = []int{1}
