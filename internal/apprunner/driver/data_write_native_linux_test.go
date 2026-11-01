@@ -319,7 +319,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	dataPath := filepath.Join(rootPath, owner.NamespaceID)
 	checkWriterProbeProject(t, dataPath, allocation.ProjectID, true)
 	entries, err := os.ReadDir(dataPath)
-	if err != nil || len(entries) != 3 {
+	if err != nil || len(entries) != 4 {
 		t.Fatal("unexpected writer probe root contents", err)
 	}
 	for _, entry := range entries {
