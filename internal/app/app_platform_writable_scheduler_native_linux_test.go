@@ -289,6 +289,7 @@ func testNativeWritableManagedUpdateVersion(
 	if failAtProbe {
 		admissionKey = platformFixtureID(984)
 	}
+	assertNativePlatformGrant(t, s, installation, "before update admission")
 	admitted, err := s.consumePlatformManagedUpdateReview(
 		ctx, actor, review.ID, review.SHA256,
 		admissionKey, endpoint)
