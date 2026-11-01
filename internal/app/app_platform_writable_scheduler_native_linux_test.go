@@ -127,7 +127,12 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 			t.Fatal("background app did not serve one current authorized write", method, err)
 		}
 	}
-	testNativeWritableLaunchHTTP(t, s, actor, admitted.InstallationID, release.sha256, endpoint)
+	activeRelease := scalar[string](t, s.st, `SELECT release_sha256
+		FROM app_platform_activations
+		WHERE installation_id=? AND state='active'`,
+		admitted.InstallationID)
+	testNativeWritableLaunchHTTP(
+		t, s, actor, admitted.InstallationID, activeRelease, endpoint)
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 }
 
