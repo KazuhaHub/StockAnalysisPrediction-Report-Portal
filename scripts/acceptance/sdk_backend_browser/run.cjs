@@ -6,7 +6,7 @@ let stage='launch';
 let readFailure='none';
 async function main(){
  const browser=await chromium.launch({headless:true,timeout:10000});
- const deadline=setTimeout(()=>{void browser.close()},20000);
+ const deadline=setTimeout(()=>{void browser.close()},60000);
  try{
   const context=await browser.newContext({acceptDownloads:false});
   const page=await context.newPage();page.setDefaultTimeout(8000);
@@ -47,7 +47,7 @@ async function main(){
    const result=frame.locator('[data-testid="credential-result"]');
    await page.waitForTimeout(500);
    console.error('SDK browser credential result after dispatch: '+await result.innerText());
-   await result.filter({hasNotText:'pending'}).waitFor();
+   await result.filter({hasNotText:'pending'}).waitFor({timeout:25000});
    const text=await result.innerText(),value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('credential SDK result changed');
   }

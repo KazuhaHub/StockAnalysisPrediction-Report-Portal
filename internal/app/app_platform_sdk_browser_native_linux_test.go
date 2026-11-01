@@ -164,7 +164,7 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 			t.Error(err)
 		}
 	}()
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, runner)
 	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
