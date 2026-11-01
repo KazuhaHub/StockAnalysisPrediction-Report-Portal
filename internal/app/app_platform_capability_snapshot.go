@@ -17,7 +17,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	}
 	var planID, raw, digest, action string
 	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable') AND o.target_generation=i.generation)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
+		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair') AND o.target_generation=i.generation)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
 		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, epoch, release).Scan(&planID, &raw, &digest, &action); err != nil {
 		return fail
 	}
@@ -78,7 +78,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		default:
 			return fail
 		}
-	case "enable":
+	case "enable", "repair":
 		var formatProbe struct {
 			Format string `json:"format"`
 		}
@@ -114,7 +114,9 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 			return verifyPlatformRetainedCapabilityRows(
 				e, installation, expected, policy, fail)
 		}
-		if formatProbe.Format != platformManagedEnableFormat {
+		expectedFormat := platformSameReleaseLifecycleFormat(
+			appplatform.Action(action))
+		if formatProbe.Format != expectedFormat {
 			return fail
 		}
 		var enable platformManagedUpdatePlan
@@ -131,8 +133,8 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		}
 		canonical, err := json.Marshal(enable)
 		if err != nil || string(canonical) != raw ||
-			enable.Format != platformManagedEnableFormat ||
-			enable.Action != appplatform.ActionEnable ||
+			enable.Format != expectedFormat ||
+			enable.Action != appplatform.Action(action) ||
 			enable.TargetRuntime == nil ||
 			enable.AppID != m.ID || enable.PublisherID != m.Publisher ||
 			enable.TargetReleaseSHA256 != release ||
