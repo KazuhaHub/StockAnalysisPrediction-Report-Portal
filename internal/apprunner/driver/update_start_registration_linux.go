@@ -5,6 +5,8 @@ package driver
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -29,14 +31,18 @@ func (r *CandidateRuntime) updateStartRegistration(ctx context.Context, request 
 		!containerSHA.MatchString(bindingSHA) || len(document) == 0 ||
 		len(document) > 4096 || len(request.Descriptor) == 0 ||
 		len(request.Descriptor) > appplatform.MaxDescriptorBytes {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start registration arguments: %w",
+			ErrContainerUncertain)
 	}
 	document = bytes.Clone(document)
 	request.Descriptor = bytes.Clone(request.Descriptor)
 	defer clear(document)
 	registration, err := appplatform.ParseBackendRegistration(document)
 	if err != nil {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start registration document: %w",
+			ErrContainerUncertain)
 	}
 	defer registration.Close()
 	metadata, metadataErr := registration.Metadata()
@@ -52,7 +58,9 @@ func (r *CandidateRuntime) updateStartRegistration(ctx context.Context, request 
 		m.Generation != i.Generation || m.Generation == "1" ||
 		m.PolicyRevision != request.Binding.PolicyRevision ||
 		m.ReleaseSHA256 != i.ReleaseSHA256 {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start registration identity: %w",
+			ErrContainerUncertain)
 	}
 	var file unix.Stat_t
 	actual, err := r.withVerifiedUpdateStartCandidate(ctx, request, expected, nativeID, func(ctx context.Context, pins *candidateMountPins) error {
@@ -82,17 +90,22 @@ func (r *CandidateRuntime) updateStartRegistration(ctx context.Context, request 
 		defer unix.Close(dir)
 		if !observeOnly {
 			if err := createBackendRegistrationFile(ctx, dir, document, bindingSHA, 65532, 65532); err != nil {
-				return ErrContainerUncertain
+				return fmt.Errorf(
+					"update-start registration file create: %w",
+					errors.Join(ErrContainerUncertain, err))
 			}
 		}
 		file, err = observeBackendRegistrationFile(ctx, dir, document, bindingSHA, 65532, 65532)
 		if err != nil {
-			return ErrContainerUncertain
+			return fmt.Errorf(
+				"update-start registration file observe: %w",
+				errors.Join(ErrContainerUncertain, err))
 		}
 		return nil
 	})
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration native check: %w", err)
 	}
 	result := UpdateStartRegistrationObservation{
 		valid: true,
