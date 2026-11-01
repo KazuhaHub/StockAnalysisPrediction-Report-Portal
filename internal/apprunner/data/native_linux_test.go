@@ -120,7 +120,7 @@ func TestNativeDataPrimitive(t *testing.T) {
 		}
 		return
 	}
-	for i := 1; i <= 4; i++ {
+	for i := 1; i <= 5; i++ {
 		request := Request{nativeNamespace(i), uint32(4200 + i), 8 << 20, 128}
 		observed, err := root.Prepare(context.Background(), expected, request)
 		if err != nil || observed.ProjectID != request.ProjectID || observed.NamespaceID != request.NamespaceID || observed.ByteLimit != request.Bytes || observed.InodeLimit != request.Inodes || observed.Inode == 0 || !observed.Inherited {
@@ -137,7 +137,7 @@ func TestNativeDataPrimitive(t *testing.T) {
 			t.Fatal("project conflict created namespace")
 		}
 	}
-	deleteNamespace := filepath.Join(rootPath, nativeNamespace(4))
+	deleteNamespace := filepath.Join(rootPath, nativeNamespace(5))
 	if err := os.MkdirAll(
 		filepath.Join(deleteNamespace, "nested"), 0750); err != nil {
 		t.Fatal(err)
@@ -158,14 +158,14 @@ func TestNativeDataPrimitive(t *testing.T) {
 		t.Fatal(err)
 	}
 	deleteObserved, err := root.Inspect(
-		context.Background(), expected, nativeNamespace(4), 4204)
+		context.Background(), expected, nativeNamespace(5), 4205)
 	if err != nil {
 		t.Fatal(err)
 	}
 	deleteRequest := DeleteRequest{
-		NamespaceID:   nativeNamespace(4),
+		NamespaceID:   nativeNamespace(5),
 		ReleaseSHA256: strings.Repeat("d", 64),
-		ProjectID:     4204, DataFormat: 1,
+		ProjectID:     4205, DataFormat: 1,
 		QuotaBytes:             deleteObserved.ByteLimit,
 		QuotaInodes:            deleteObserved.InodeLimit,
 		ExpectedDevice:         deleteObserved.Device,

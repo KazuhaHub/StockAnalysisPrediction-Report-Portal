@@ -175,8 +175,11 @@ def main(args):
             native = subprocess.run([args[2], "-test.run=^TestNativeData(Primitive|WriteAccess|Checkpoint)$", "-test.v", "-test.timeout=45s"], env=native_env, capture_output=True, text=True, timeout=60)
             if native.returncode or "--- PASS: TestNativeDataPrimitive" not in native.stdout:
                 raise RuntimeError("native data preparation failed: " + (native.stdout+native.stderr)[-32768:])
+            if "NATIVE_DATA_NAMESPACE_DELETED" not in native.stdout:
+                raise RuntimeError("native data namespace deletion missing")
             report["native_go_data_prepared"] = True
             report["native_go_root_identity_checked"] = True
+            report["native_go_namespace_deleted"] = True
             if "NATIVE_DATA_WRITE_ACCESS_TRANSITION_VERIFIED" not in native.stdout:
                 raise RuntimeError("native data write-access transition missing")
             report["native_go_data_write_access_transition"] = True
