@@ -365,9 +365,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			}
 			checkPlatformWritableStartFixture(t, filepath.Join(childData, "writable-start.json"), fixtureAuthority, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), native, true)
 			t.Log("PORTAL_WRITABLE_BACKGROUND_OWNED_CLEANUP")
-			if err := os.RemoveAll(serviceFixture.root); err != nil {
-				t.Error("remove service fixture root", err)
-			}
+			removePlatformServiceFixtureRoot(
+				t, serviceFixture.root)
 		}()
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
@@ -555,6 +554,22 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	observed, err := root.Inspect(ctx, pin, verified.Command().Payload.DataNamespaceID, uint32(project))
 	if err != nil || strconv.FormatUint(observed.Inode, 10) != receipt.NamespaceInode || observed.ByteLimit != 256<<20 || observed.InodeLimit != 65536 {
 		t.Fatal("Portal stage lost native resource", err)
+	}
+}
+
+func removePlatformServiceFixtureRoot(t *testing.T, root string) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		err := os.RemoveAll(root)
+		if err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Error("remove service fixture root", err)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 
