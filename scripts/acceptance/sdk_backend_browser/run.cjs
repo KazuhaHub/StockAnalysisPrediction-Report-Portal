@@ -10,6 +10,8 @@ async function main(){
  try{
   const context=await browser.newContext({acceptDownloads:false});
   const page=await context.newPage();page.setDefaultTimeout(8000);
+  page.on('console',message=>{if(message.type()==='error')console.error('SDK browser console: '+message.text())});
+  page.on('response',response=>{if(new URL(response.url()).pathname.endsWith('/network'))console.error('SDK browser network response: '+response.status())});
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
@@ -180,6 +182,6 @@ async function main(){
   if(objectsReady==='true'){
    console.log('SDK_NATIVE_BROWSER_OBJECTS');
   }
- }finally{clearTimeout(deadline);await browser.close()}
+}finally{clearTimeout(deadline);await browser.close()}
 }
-main().catch(()=>{console.error('SDK native browser acceptance failed at '+stage+' ('+readFailure+')');process.exitCode=1});
+main().catch(error=>{console.error('SDK native browser acceptance failed at '+stage+' ('+readFailure+'): '+(error?.stack||error));process.exitCode=1});
