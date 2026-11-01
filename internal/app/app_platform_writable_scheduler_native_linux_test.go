@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -217,6 +219,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 	}
 	probe, err := s.executePlatformUpdateStart(ctx, start, endpoint)
 	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
+		logManagedUpdateContainers(t, s, admitted.OperationID)
 		t.Fatal("managed update start", probe.snapshot, err)
 	}
 	mustExec(t, s.st, `UPDATE app_platform_operations
@@ -251,6 +254,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 			break
 		}
 		if stage == "recovery_required" || stage == "failed" {
+			logManagedUpdateContainers(t, s, admitted.OperationID)
 			t.Fatalf("managed update stopped at %s:%s: %+v",
 				stage, code, worker.currentStatus())
 		}
@@ -299,4 +303,30 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
+}
+
+func logManagedUpdateContainers(t *testing.T, s *Server, operationID string) {
+	t.Helper()
+	effectID := scalar[string](t, s.st, `SELECT effect_id
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='start'`, operationID)
+	if effectID == "" {
+		return
+	}
+	label := "org.portal.app.start-effect=" + effectID
+	out, err := exec.Command(
+		"docker", "ps", "-a", "--filter", "label="+label,
+		"--format", "{{.ID}}\t{{.Status}}").CombinedOutput()
+	t.Logf("managed update containers: %s (%v)",
+		strings.TrimSpace(string(out)), err)
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		id, _, _ := strings.Cut(line, "\t")
+		if id == "" {
+			continue
+		}
+		logs, logErr := exec.Command(
+			"docker", "logs", "--tail", "40", id).CombinedOutput()
+		t.Logf("managed update container %s logs (%v):\n%s",
+			id, logErr, strings.TrimSpace(string(logs)))
+	}
 }
