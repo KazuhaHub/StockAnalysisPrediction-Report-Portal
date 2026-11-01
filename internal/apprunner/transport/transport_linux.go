@@ -294,14 +294,21 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return
 		}
+		lifecycleHeader := make([]byte, 45)
+		copy(lifecycleHeader, header[:8])
+		if _, err := io.ReadFull(conn, lifecycleHeader[8:]); err != nil {
+			return
+		}
+		action := WritableLifecycleAction(lifecycleHeader[44])
 		cancel()
-		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(candidateExecutionTimeout))
+		executionCtx, executionCancel := context.WithDeadline(
+			parent, started.Add(writableLifecycleServerTimeout(action)))
 		defer executionCancel()
 		executionDeadline, _ := executionCtx.Deadline()
 		conn.SetDeadline(executionDeadline)
 		executionStop := context.AfterFunc(executionCtx, func() { conn.Close() })
 		defer executionStop()
-		s.handleWritableLifecycle(executionCtx, conn)
+		s.handleWritableLifecycle(executionCtx, conn, lifecycleHeader)
 		return
 	case writableBackendHandshakeQueryMagic:
 		s.handleWritableBackendHandshake(ctx, conn)

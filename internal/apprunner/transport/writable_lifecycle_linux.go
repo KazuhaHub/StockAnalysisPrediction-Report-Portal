@@ -27,6 +27,13 @@ const writableLifecycleReplyMagic = "PWLR0001"
 const maxWritableLifecycleReply = 16384
 const restoreExecutionTimeout = 2 * time.Minute
 
+func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
+	if action == RestoreExecute {
+		return restoreExecutionTimeout
+	}
+	return candidateExecutionTimeout
+}
+
 // RunControllerWritableLifecycle sends one bounded action to an explicitly
 // provisioned root candidate/managed endpoint. Only delivery accepts private
 // document bytes. A timeout/lost reply may follow effects; retain the same
@@ -147,16 +154,14 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 	command := sha256.Sum256(raw)
 	return WritableLifecycleObservation{action: action, body: string(body), authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: profile.owner, ControllerUID: uint32(os.Geteuid()), ControllerGID: profile.group, RootController: profile.shared}, receivedAt: received, commandSHA: hex.EncodeToString(command[:])}, nil
 }
-func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn) {
+func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn, header []byte) {
 	provider := s.candidateExecution
 	if provider == nil || provider.store == nil || provider.native == nil {
 		log.Printf("writable lifecycle action 0 provider unavailable")
 		return
 	}
-	header := make([]byte, 45)
-	copy(header, writableLifecycleQueryMagic)
-	if _, err := io.ReadFull(conn, header[8:]); err != nil {
-		log.Printf("writable lifecycle header read: %v", err)
+	if len(header) != 45 || string(header[:8]) != writableLifecycleQueryMagic {
+		log.Printf("writable lifecycle header invalid")
 		return
 	}
 	count := binary.BigEndian.Uint32(header[40:44])

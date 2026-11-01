@@ -19,6 +19,22 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
+func TestWritableLifecycleServerTimeoutMatchesRestoreWork(t *testing.T) {
+	if got := writableLifecycleServerTimeout(RestoreExecute); got != 2*time.Minute {
+		t.Fatalf("restore execution window = %s", got)
+	}
+	for _, action := range []WritableLifecycleAction{
+		ManagedRemovalStop,
+		CheckpointCreate,
+		RestoreRead,
+		UpdateStartExecute,
+	} {
+		if got := writableLifecycleServerTimeout(action); got != candidateExecutionTimeout {
+			t.Fatalf("action %d window = %s", action, got)
+		}
+	}
+}
+
 func TestReadonlyEndpointRefusesAllWritableLifecycleActions(t *testing.T) {
 	backend := &recorder{}
 	path, _ := fixture(t, uint32(os.Geteuid()), backend)
