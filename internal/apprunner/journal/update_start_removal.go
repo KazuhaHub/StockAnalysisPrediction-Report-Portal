@@ -64,11 +64,15 @@ func loadUpdateStartRemovalSource(
 	stored, err := loadAdmittedCommand(ctx, tx, startCommand.EffectID)
 	if err != nil || stored.state != "applied" ||
 		!sameLogicalCommand(stored, index) {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"%w: update-start removal source command: %v",
+			ErrFenceReconciliation, err)
 	}
 	floor, err := commandResourceFloor(ctx, tx, index)
 	if err != nil || fence < floor || fence < stored.fence {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"%w: update-start removal source floor fence=%d/%d/%d: %v",
+			ErrFenceReconciliation, fence, floor, stored.fence, err)
 	}
 	source, err := loadUpdateStartSourceExcludingRegistration(
 		ctx, tx, startCommand, now, command.EffectID)
@@ -86,18 +90,24 @@ func loadUpdateStartRemovalSource(
 		startCommand.EffectID).
 		Scan(&raw, &ack, &created, &updated); err != nil ||
 		ack.Valid || created < 0 || updated < created || updated > now {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"%w: update-start removal source receipt metadata",
+			ErrFenceReconciliation)
 	}
 	start.receipt, start.created, start.updated = raw, created, updated
 	running, err := ParseUpdateStartRunningReceipt([]byte(raw))
 	if err != nil || candidateHash([]byte(raw)) != command.RunningReceiptSHA256 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"%w: update-start removal running receipt",
+			ErrFenceReconciliation)
 	}
 	resource, err := existingCandidateResourcePrefix(
 		ctx, tx, index, updateStartPendingPrefix, startCommand.Payload.ResourceID)
 	if err != nil || !updateStartRemovalResourceMatches(
 		start, running, resource, command.Stage, state) {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"%w: update-start removal resource state=%s stage=%s: %v",
+			ErrFenceReconciliation, state, command.Stage, err)
 	}
 	request, expected, err := updateStartExpectedSnapshot(
 		start, running.Claim, descriptor)
@@ -308,7 +318,9 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	tx, current, err := beginUpdateStartRemoval(
 		ctx, store, raw, signature, before.request.Descriptor)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"%w: update-start removal settlement reload: %v",
+			ErrFenceReconciliation, err)
 	}
 	defer tx.Rollback()
 	if current.row.state != "unknown" ||
