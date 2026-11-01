@@ -25,6 +25,7 @@ import (
 const writableLifecycleQueryMagic = "PWLQ0001"
 const writableLifecycleReplyMagic = "PWLR0001"
 const maxWritableLifecycleReply = 16384
+const restoreExecutionTimeout = 2 * time.Minute
 
 // RunControllerWritableLifecycle sends one bounded action to an explicitly
 // provisioned root candidate/managed endpoint. Only delivery accepts private
@@ -73,7 +74,9 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		private.Close()
 	}
 	timeout := sessionTimeout
-	if action.mutating() {
+	if action == RestoreExecute {
+		timeout = restoreExecutionTimeout
+	} else if action.mutating() {
 		timeout = candidateExecutionTimeout
 	}
 	ctx, cancel := context.WithTimeout(parent, timeout)
