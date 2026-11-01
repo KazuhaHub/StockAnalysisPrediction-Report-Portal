@@ -1583,10 +1583,6 @@ func TestPlatformUpdateStartActivationPostgres(t *testing.T) {
 	testPlatformUpdateStartActivationMode(t, true, true)
 }
 
-func testPlatformUpdateStartActivation(t *testing.T, pg bool) {
-	testPlatformUpdateStartActivationMode(t, pg, false)
-}
-
 func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
 	var s *Server
 	var lease platformOperationLease

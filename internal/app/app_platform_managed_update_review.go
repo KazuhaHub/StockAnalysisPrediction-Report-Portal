@@ -40,11 +40,6 @@ func loadPlatformCheckpointUpdateSource(e migExec, expected platformOperationLea
 		e, expected, runtime, action, now, 1)
 }
 
-func loadPlatformCompletedCheckpointUpdateSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64) (platformCheckpointSource, error) {
-	return loadPlatformCheckpointUpdateSourceMode(
-		e, expected, runtime, action, now, 0)
-}
-
 func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int) (platformCheckpointSource, error) {
 	if action != "update" && action != "restore" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
