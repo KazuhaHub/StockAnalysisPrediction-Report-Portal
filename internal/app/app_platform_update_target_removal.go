@@ -346,12 +346,16 @@ type platformUpdateTargetRemovalObservation interface {
 	CommandSHA256() string
 }
 
-func validPlatformUpdateTargetRemovalObservation(observation platformUpdateTargetRemovalObservation, intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint) bool {
+func validatePlatformUpdateTargetRemovalObservation(observation platformUpdateTargetRemovalObservation, intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint) error {
 	receipt, err := observation.ManagedRemovalReceipt()
-	if err != nil || !updateStartRemovalReceiptMatchesIntent(receipt, intent) ||
-		observation.CommandSHA256() != platformDigest(intent.raw) ||
-		observation.ReceivedAt().IsZero() {
-		return false
+	if err != nil || !updateStartRemovalReceiptMatchesIntent(receipt, intent) {
+		return fmt.Errorf("receipt binding: %w", errAppPlatformStageEvidence)
+	}
+	if observation.CommandSHA256() != platformDigest(intent.raw) {
+		return fmt.Errorf("command digest: %w", errAppPlatformStageEvidence)
+	}
+	if observation.ReceivedAt().IsZero() {
+		return fmt.Errorf("receive time: %w", errAppPlatformStageEvidence)
 	}
 	controller := observation.Controller()
 	want := intent.authority
@@ -361,17 +365,29 @@ func validPlatformUpdateTargetRemovalObservation(observation platformUpdateTarge
 	issued, issuedErr := strconv.ParseInt(
 		intent.start.command.IssuedMS, 10, 64)
 	age := time.Since(observation.ReceivedAt())
-	return controller.DeploymentID == want.DeploymentID &&
-		controller.ControllerEpoch == want.ControllerEpoch &&
-		controller.ControlRevision == want.ControlRevision &&
-		controller.Fingerprint == want.Fingerprint &&
-		bytes.Equal(controller.PublicKey, want.PublicKey) &&
-		peer.RootController && peer.RunnerUID == 0 &&
-		peer.Path == endpoint.path &&
-		peer.ControllerUID == endpoint.controllerUID &&
-		peer.ControllerGID == endpoint.controllerGID &&
-		age >= 0 && age <= 3*time.Second &&
-		observedErr == nil && settledErr == nil && issuedErr == nil &&
-		observed >= issued && observed <= settled &&
-		settled <= observation.ReceivedAt().UnixMilli()
+	if controller.DeploymentID != want.DeploymentID ||
+		controller.ControllerEpoch != want.ControllerEpoch ||
+		controller.ControlRevision != want.ControlRevision ||
+		controller.Fingerprint != want.Fingerprint ||
+		!bytes.Equal(controller.PublicKey, want.PublicKey) {
+		return fmt.Errorf("controller identity: %w", errAppPlatformStageEvidence)
+	}
+	if !peer.RootController || peer.RunnerUID != 0 ||
+		peer.Path != endpoint.path ||
+		peer.ControllerUID != endpoint.controllerUID ||
+		peer.ControllerGID != endpoint.controllerGID {
+		return fmt.Errorf("endpoint identity: %w", errAppPlatformStageEvidence)
+	}
+	if age < 0 || age > 3*time.Second {
+		return fmt.Errorf("response age=%s: %w", age, errAppPlatformStageEvidence)
+	}
+	if observedErr != nil || settledErr != nil || issuedErr != nil ||
+		observed < issued || observed > settled ||
+		settled > observation.ReceivedAt().UnixMilli() {
+		return fmt.Errorf(
+			"observation times issued=%d observed=%d settled=%d received=%d: %w",
+			issued, observed, settled, observation.ReceivedAt().UnixMilli(),
+			errAppPlatformStageEvidence)
+	}
+	return nil
 }

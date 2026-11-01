@@ -47,12 +47,16 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 	if lease.snapshot.Action != appplatform.ActionRestore ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageQuiesce ||
-		lease.rowRevision == math.MaxInt64 ||
-		!validPlatformUpdateTargetRemovalObservation(
-			proof, intent, endpoint) {
+		lease.rowRevision == math.MaxInt64 {
+		return zero, fmt.Errorf(
+			"update target removal %s lease: %w",
+			intent.command.Stage, errAppPlatformStageEvidence)
+	}
+	if err := validatePlatformUpdateTargetRemovalObservation(
+		proof, intent, endpoint); err != nil {
 		return zero, fmt.Errorf(
 			"update target removal %s proof binding: %w",
-			intent.command.Stage, errAppPlatformStageEvidence)
+			intent.command.Stage, err)
 	}
 	receipt, err := proof.ManagedRemovalReceipt()
 	if err != nil {
