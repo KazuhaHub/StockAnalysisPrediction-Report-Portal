@@ -313,7 +313,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		sourceGeneration:   generation,
 	}
 	if allowDisabled {
-		source.writerFence = strconv.FormatInt(writerFence, 10)
+		source.currentWriterFence = strconv.FormatInt(writerFence, 10)
 	}
 	parsed, err := appplatform.ParseDescriptor(currentDescriptor)
 	if err != nil || parsed.SHA256 != release ||

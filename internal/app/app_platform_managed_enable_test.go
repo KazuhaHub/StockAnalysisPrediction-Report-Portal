@@ -597,10 +597,16 @@ func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t 
 		t.Fatal("restored enable review", err)
 	}
 	var plan platformManagedUpdatePlan
+	currentWriterFence := scalar[int64](t, s.st, `SELECT writer_fence
+		FROM app_platform_data_namespaces
+		WHERE owner_installation_id=?`, restored.installationID)
 	if err := json.Unmarshal([]byte(enableReview.JSON), &plan); err != nil ||
 		plan.Action != appplatform.ActionEnable ||
 		plan.SourceGeneration != source.sourceGeneration ||
-		plan.TargetGeneration != generation {
+		plan.TargetGeneration != generation ||
+		plan.SourceWriterFence != currentWriterFence ||
+		mustPlatformCheckpointInt(source.writerFence) ==
+			currentWriterFence {
 		t.Fatalf("restored enable review plan: %+v source=%+v err=%v",
 			plan, source, err)
 	}

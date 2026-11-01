@@ -91,6 +91,11 @@ func platformBuildManagedEnablePlan(
 		SourceActivationGeneration: activationGeneration,
 		TargetRuntime:              target,
 	}
+	sourceWriterFence := source.writerFence
+	if source.currentWriterFence != "" {
+		sourceWriterFence = source.currentWriterFence
+	}
+	plan.SourceWriterFence = mustPlatformCheckpointInt(sourceWriterFence)
 	plan.GrantsSHA256, err = platformRemovalGrantsDigest(e, installation)
 	if err != nil {
 		return zero, revision, err
@@ -505,11 +510,15 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 	if err != nil {
 		return zeroPlan, zeroSource, zeroRuntime, err
 	}
+	actualWriterFence := source.currentWriterFence
+	if actualWriterFence == "" {
+		actualWriterFence = source.writerFence
+	}
 	if source.sourceGeneration != plan.SourceGeneration ||
 		source.releaseSHA256 != plan.SourceReleaseSHA256 ||
 		source.namespaceID != plan.DataNamespaceID ||
 		mustPlatformCheckpointInt(source.dataFormat) != plan.DataFormat ||
-		mustPlatformCheckpointInt(source.writerFence) !=
+		mustPlatformCheckpointInt(actualWriterFence) !=
 			plan.SourceWriterFence ||
 		source.appID != plan.AppID || source.publisherID != plan.PublisherID ||
 		!samePlatformManagedUpdateRuntime(

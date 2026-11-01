@@ -28,6 +28,7 @@ type platformCheckpointSource struct {
 	quotaBytes, quotaInodes                       string
 	rootFilesystemUUID, rootInode                 string
 	writerFence, platform, sandboxProfile         string
+	currentWriterFence                            string
 	appID, publisherID                            string
 	descriptor                                    []byte
 	runtimeTarget                                 *platformManagedInstallTarget
