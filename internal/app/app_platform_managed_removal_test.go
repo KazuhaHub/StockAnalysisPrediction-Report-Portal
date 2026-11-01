@@ -34,6 +34,30 @@ func (o platformManagedRemovalTestObservation) Endpoint() transport.CandidateRec
 func (o platformManagedRemovalTestObservation) ReceivedAt() time.Time { return o.receivedAt }
 func (o platformManagedRemovalTestObservation) CommandSHA256() string { return o.commandSHA }
 
+type platformDeleteDataTestObservation struct {
+	receipt    journal.DeleteDataReceipt
+	authority  control.Authority
+	endpoint   transport.CandidateReceiptEndpoint
+	receivedAt time.Time
+	commandSHA string
+}
+
+func (o platformDeleteDataTestObservation) DeleteDataReceipt() (journal.DeleteDataReceipt, error) {
+	return o.receipt, nil
+}
+func (o platformDeleteDataTestObservation) Controller() control.Authority {
+	return o.authority
+}
+func (o platformDeleteDataTestObservation) Endpoint() transport.CandidateReceiptEndpoint {
+	return o.endpoint
+}
+func (o platformDeleteDataTestObservation) ReceivedAt() time.Time {
+	return o.receivedAt
+}
+func (o platformDeleteDataTestObservation) CommandSHA256() string {
+	return o.commandSHA
+}
+
 func platformManagedRemovalStopFixture(t *testing.T, pg bool) (*Server, platformActorSession, platformOperationLease) {
 	t.Helper()
 	s, actor, install := platformManagedAccessFixture(t, pg)
@@ -118,6 +142,59 @@ func platformManagedRemovalObservationFixture(intent platformManagedRemovalInten
 
 func platformManagedRemovalFixtureEndpoint() platformRuntimeEndpoint {
 	return platformRuntimeEndpoint{path: "/run/portal-test/managed-removal.sock", controllerUID: 1000, controllerGID: 1001}
+}
+
+func platformDeleteDataReceiptFixture(
+	intent platformDeleteDataIntent,
+) journal.DeleteDataReceipt {
+	now := time.Now().UTC().UnixMilli()
+	return journal.DeleteDataReceipt{
+		Format:                 "portal.runner.delete-data-receipt/1-dev.1",
+		DeploymentID:           intent.command.DeploymentID,
+		ControllerEpoch:        intent.command.ControllerEpoch,
+		InstallationID:         intent.command.InstallationID,
+		OperationID:            intent.command.OperationID,
+		TargetGeneration:       intent.command.TargetGeneration,
+		Stage:                  intent.command.Stage,
+		EffectID:               intent.command.EffectID,
+		PayloadSHA256:          intent.command.PayloadSHA256,
+		NamespaceID:            intent.command.Payload.NamespaceID,
+		ReleaseSHA256:          intent.command.Payload.ReleaseSHA256,
+		DataReceiptSHA256:      intent.dataReceiptSHA256,
+		OwnershipSHA256:        platformDigest([]byte("ownership")),
+		ProjectID:              intent.command.Payload.ProjectID,
+		DataFormat:             intent.command.Payload.DataFormat,
+		QuotaBytes:             intent.command.Payload.QuotaBytes,
+		QuotaInodes:            intent.command.Payload.QuotaInodes,
+		ExpectedDevice:         intent.command.Payload.ExpectedDevice,
+		ExpectedNamespaceInode: intent.command.Payload.ExpectedNamespaceInode,
+		WriterFence:            intent.command.Payload.WriterFence,
+		Entries:                "4",
+		UsedBytes:              "0",
+		UsedInodes:             "0",
+		NamespaceDevice:        intent.command.Payload.ExpectedDevice,
+		NamespaceInode:         intent.command.Payload.ExpectedNamespaceInode,
+		ObservedMS:             strconv.FormatInt(now, 10),
+		SettledMS:              strconv.FormatInt(now, 10),
+	}
+}
+
+func platformDeleteDataObservationFixture(
+	intent platformDeleteDataIntent,
+	endpoint platformRuntimeEndpoint,
+) platformDeleteDataTestObservation {
+	return platformDeleteDataTestObservation{
+		receipt:   platformDeleteDataReceiptFixture(intent),
+		authority: intent.authority,
+		endpoint: transport.CandidateReceiptEndpoint{
+			Path: endpoint.path, RunnerUID: 0,
+			ControllerUID:  endpoint.controllerUID,
+			ControllerGID:  endpoint.controllerGID,
+			RootController: true,
+		},
+		receivedAt: time.Now().UTC(),
+		commandSHA: platformDigest(intent.raw),
+	}
 }
 
 func platformWritableManagedRemovalStopFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
@@ -240,14 +317,54 @@ func testPlatformManagedRemovalSettlesStopAndRemoveCode(t *testing.T, pg bool) {
 	if !ok {
 		t.Fatal("exact managed remove-code observation refused")
 	}
-	completed, err := s.settlePlatformManagedRemoval(context.Background(), removeLease, removeIntent, removeReceipt)
+	deleteLease, err := s.settlePlatformManagedRemoval(
+		context.Background(), removeLease, removeIntent, removeReceipt)
+	if err != nil || deleteLease.snapshot.Stage != appplatform.StageRemoveData ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != "active" {
+		t.Fatal("managed remove-code settlement", deleteLease.snapshot, err)
+	}
+	deleteIntent, err := s.preparePlatformDeleteDataIntent(
+		context.Background(), deleteLease)
+	if err != nil {
+		t.Fatal("managed data delete intent", err)
+	}
+	if deleteIntent.command.Stage != "remove_data" ||
+		deleteIntent.command.Kind != "remove-data" ||
+		deleteIntent.command.OperationID != lease.id ||
+		deleteIntent.command.Payload.NamespaceID !=
+			stopIntent.command.Payload.DataNamespaceID ||
+		deleteIntent.command.Payload.WriterFence != "2" ||
+		deleteIntent.command.Payload.ProjectID == "" ||
+		deleteIntent.command.Payload.ExpectedDevice == "" ||
+		deleteIntent.command.Payload.ExpectedNamespaceInode == "" ||
+		!platformValidSHA(deleteIntent.dataReceiptSHA256) ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='remove_data' AND kind='delete-data' AND state='prepared'`, lease.id) != 1 {
+		t.Fatalf("invalid managed data delete intent: %+v",
+			deleteIntent.command)
+	}
+	deleteObservation := platformDeleteDataObservationFixture(
+		deleteIntent, endpoint)
+	deleteReceipt, ok := validPlatformDeleteDataObservation(
+		deleteObservation, deleteIntent, endpoint)
+	if !ok {
+		t.Fatal("exact managed data delete observation refused")
+	}
+	changedDelete := deleteObservation
+	changedDelete.receipt.DataReceiptSHA256 =
+		platformDigest([]byte("changed data receipt"))
+	if _, ok := validPlatformDeleteDataObservation(
+		changedDelete, deleteIntent, endpoint); ok {
+		t.Fatal("managed data delete accepted changed preparation receipt")
+	}
+	completed, err := s.settlePlatformDeleteData(
+		context.Background(), deleteLease, deleteIntent, deleteReceipt)
 	if err != nil || completed.snapshot.Stage != appplatform.StageComplete {
-		t.Fatal("managed remove-code settlement", completed.snapshot, err)
+		t.Fatal("managed data delete settlement", completed.snapshot, err)
 	}
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "removed:removed" ||
-		scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != "retained" ||
+		scalar[string](t, s.st, `SELECT state||':'||COALESCE(owner_installation_id,'') FROM app_platform_data_namespaces WHERE origin_installation_id=?`, lease.installationID) != "deleted:" ||
 		scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, lease.id) != "complete:" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, lease.id) != 2 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, lease.id) != 3 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, lease.installationID) != 0 ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, lease.installationID) != 0 ||
@@ -300,10 +417,28 @@ func testPlatformWritableManagedRemoval(t *testing.T, pg bool) {
 	if !ok {
 		t.Fatal("writable managed remove-code observation")
 	}
-	completed, err := s.settlePlatformManagedRemoval(context.Background(), removeLease, removeIntent, removeReceipt)
+	deleteLease, err := s.settlePlatformManagedRemoval(
+		context.Background(), removeLease, removeIntent, removeReceipt)
+	if err != nil || deleteLease.snapshot.Stage != appplatform.StageRemoveData {
+		t.Fatal("writable managed remove-code settlement",
+			deleteLease.snapshot, err)
+	}
+	deleteIntent, err := s.preparePlatformDeleteDataIntent(
+		context.Background(), deleteLease)
+	if err != nil {
+		t.Fatal("writable managed data delete intent", err)
+	}
+	deleteReceipt, ok := validPlatformDeleteDataObservation(
+		platformDeleteDataObservationFixture(deleteIntent, endpoint),
+		deleteIntent, endpoint)
+	if !ok {
+		t.Fatal("writable managed data delete observation")
+	}
+	completed, err := s.settlePlatformDeleteData(
+		context.Background(), deleteLease, deleteIntent, deleteReceipt)
 	if err != nil || completed.snapshot.Stage != appplatform.StageComplete ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "removed:removed" ||
-		scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != "retained" ||
+		scalar[string](t, s.st, `SELECT state||':'||COALESCE(owner_installation_id,'') FROM app_platform_data_namespaces WHERE origin_installation_id=?`, lease.installationID) != "deleted:" ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables`) != 0 {
 		t.Fatal("writable managed uninstall completion", completed.snapshot, err)
 	}
@@ -467,24 +602,42 @@ func testPlatformManagedRemovalCompletionRollback(t *testing.T, pg bool) {
 	if !ok {
 		t.Fatal("remove receipt")
 	}
+	deleteLease, err := s.settlePlatformManagedRemoval(
+		context.Background(), removeLease, removeIntent, removeReceipt)
+	if err != nil || deleteLease.snapshot.Stage != appplatform.StageRemoveData {
+		t.Fatal("remove-code settlement", deleteLease.snapshot, err)
+	}
+	deleteIntent, err := s.preparePlatformDeleteDataIntent(
+		context.Background(), deleteLease)
+	if err != nil {
+		t.Fatal("delete-data intent", err)
+	}
+	deleteReceipt, ok := validPlatformDeleteDataObservation(
+		platformDeleteDataObservationFixture(deleteIntent, endpoint),
+		deleteIntent, endpoint)
+	if !ok {
+		t.Fatal("delete-data receipt")
+	}
 	if pg {
 		mustExec(t, s.st, `CREATE FUNCTION fixture_managed_removal_completion_failure() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture managed removal completion failure'; END $$`)
-		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_removal_completion_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.operation_stage' AND NEW.target_id='`+lease.id+`') EXECUTE FUNCTION fixture_managed_removal_completion_failure()`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_removal_completion_failure BEFORE INSERT ON audit_log FOR EACH ROW WHEN (NEW.action='app_platform.data_deleted' AND NEW.target_id='`+lease.id+`') EXECUTE FUNCTION fixture_managed_removal_completion_failure()`)
 		t.Cleanup(func() {
 			mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_managed_removal_completion_failure ON audit_log`)
 			mustExec(t, s.st, `DROP FUNCTION IF EXISTS fixture_managed_removal_completion_failure()`)
 		})
 	} else {
-		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_removal_completion_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.operation_stage' AND NEW.target_id='`+lease.id+`' BEGIN SELECT RAISE(ABORT,'fixture managed removal completion failure'); END`)
+		mustExec(t, s.st, `CREATE TRIGGER fixture_managed_removal_completion_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.data_deleted' AND NEW.target_id='`+lease.id+`' BEGIN SELECT RAISE(ABORT,'fixture managed removal completion failure'); END`)
 		t.Cleanup(func() { mustExec(t, s.st, `DROP TRIGGER IF EXISTS fixture_managed_removal_completion_failure`) })
 	}
-	if _, err := s.settlePlatformManagedRemoval(context.Background(), removeLease, removeIntent, removeReceipt); err == nil {
+	if _, err := s.settlePlatformDeleteData(
+		context.Background(), deleteLease, deleteIntent,
+		deleteReceipt); err == nil {
 		t.Fatal("managed removal completed without settlement audit")
 	}
-	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "remove_code" ||
-		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='remove_code'`, lease.id) != "prepared" ||
+	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "remove_data" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='remove_data'`, lease.id) != "prepared" ||
 		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "removed:pending" ||
-		scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, lease.installationID) != "active" ||
+		scalar[string](t, s.st, `SELECT state||':'||owner_installation_id FROM app_platform_data_namespaces WHERE origin_installation_id=?`, lease.installationID) != "active:"+lease.installationID ||
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) == 0 {
 		t.Fatal("failed managed completion partially released authority or namespace")
 	}
@@ -494,7 +647,8 @@ func testPlatformManagedRemovalCompletionRollback(t *testing.T, pg bool) {
 	} else {
 		mustExec(t, s.st, `DROP TRIGGER fixture_managed_removal_completion_failure`)
 	}
-	completed, err := s.settlePlatformManagedRemoval(context.Background(), removeLease, removeIntent, removeReceipt)
+	completed, err := s.settlePlatformDeleteData(
+		context.Background(), deleteLease, deleteIntent, deleteReceipt)
 	if err != nil || completed.snapshot.Stage != appplatform.StageComplete {
 		t.Fatal("managed completion retry", completed.snapshot, err)
 	}

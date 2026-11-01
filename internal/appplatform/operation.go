@@ -183,9 +183,10 @@ func operationStages(action Action, managed bool) []Stage {
 	case ActionUninstall:
 		stages = append(stages, StageRevoke)
 		if managed {
-			stages = append(stages, StageStop)
+			stages = append(stages, StageStop, StageRemoveCode, StageRemoveData)
+		} else {
+			stages = append(stages, StageRemoveCode)
 		}
-		stages = append(stages, StageRemoveCode)
 	case ActionDeleteData:
 		stages = append(stages, StageRevoke, StageRemoveData)
 	case ActionRestore:

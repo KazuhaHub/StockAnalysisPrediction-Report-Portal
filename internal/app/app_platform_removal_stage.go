@@ -146,6 +146,8 @@ func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLea
 			expectedKind = "stop"
 		case "remove_code":
 			expectedKind = "remove-code"
+		case "remove_data":
+			expectedKind = "delete-data"
 		default:
 			return errAppPlatformStageEvidence
 		}
@@ -181,8 +183,20 @@ func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLea
 		if remove, ok := effects["remove_code"]; ok && remove.kind != "remove-code" {
 			return errAppPlatformStageEvidence
 		}
+	case appplatform.StageRemoveData:
+		if stop, ok := effects["stop"]; !ok || stop.kind != "stop" || stop.state != "applied" ||
+			effects["remove_code"].kind != "remove-code" || effects["remove_code"].state != "applied" ||
+			len(effects) > 3 {
+			return errAppPlatformStageEvidence
+		}
+		if remove, ok := effects["remove_data"]; ok && remove.kind != "delete-data" {
+			return errAppPlatformStageEvidence
+		}
 	case appplatform.StageComplete:
-		if len(effects) != 2 || effects["stop"].state != "applied" || effects["remove_code"].state != "applied" {
+		if len(effects) != 3 || effects["stop"].state != "applied" ||
+			effects["remove_code"].state != "applied" ||
+			effects["remove_data"].kind != "delete-data" ||
+			effects["remove_data"].state != "applied" {
 			return errAppPlatformStageEvidence
 		}
 	default:

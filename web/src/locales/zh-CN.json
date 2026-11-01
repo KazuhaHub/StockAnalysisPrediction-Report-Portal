@@ -3537,7 +3537,7 @@
   "appPlatform.noData": "不分配持久化数据空间",
   "appPlatform.dataSchemaRetained": "保留现有数据架构 {{schema}}；不兼容的升级会被拒绝。",
   "appPlatform.uninstallPluginData": "插件数据会被清空，专属表会被删除。",
-  "appPlatform.uninstallManagedData": "插件对象数据会被清空。托管后端的数据空间仍保留，需要单独审核删除。",
+  "appPlatform.uninstallManagedData": "插件对象数据和托管后端数据空间会在运行器确认删除后清空。",
   "appPlatform.stage.queued": "等待安装",
   "appPlatform.stage.validate": "校验安装方案",
   "appPlatform.stage.download": "校验软件包",

@@ -89,14 +89,16 @@ func TestDisableRevokesBeforeStoppingAndEnableChecksReadiness(t *testing.T) {
 	}
 }
 
-func TestUninstallRevokesBeforeStoppingAndKeepsData(t *testing.T) {
+func TestUninstallRevokesAndRemovesDataBeforeCompletion(t *testing.T) {
 	op, err := NewOperation(ActionUninstall, true, 9)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, stage := range []Stage{StageValidate, StageRevoke, StageStop, StageRemoveCode, StageComplete} {
+	for _, stage := range []Stage{StageValidate, StageRevoke, StageStop, StageRemoveCode, StageRemoveData, StageComplete} {
 		if _, err := op.Advance(op.Snapshot().Revision, StageRemoveData); !errors.Is(err, ErrInvalidTransition) {
-			t.Fatal("uninstall admitted data deletion")
+			if stage != StageRemoveData {
+				t.Fatal("uninstall admitted data deletion early")
+			}
 		}
 		op, err = op.Advance(op.Snapshot().Revision, stage)
 		if err != nil {

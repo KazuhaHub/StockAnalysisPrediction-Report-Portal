@@ -337,7 +337,7 @@ func (s *Server) settlePlatformManagedRemoval(ctx context.Context, expected plat
 	}
 	next := appplatform.StageRemoveCode
 	if expected.snapshot.Stage == appplatform.StageRemoveCode {
-		next = appplatform.StageComplete
+		next = appplatform.StageRemoveData
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
@@ -350,30 +350,9 @@ func (s *Server) settlePlatformManagedRemoval(ctx context.Context, expected plat
 	result := expected
 	result.snapshot = advanced.Snapshot()
 	result.rowRevision++
-	if next == appplatform.StageComplete {
-		changed, err = e.exec(`UPDATE app_platform_installations SET phase='removed',revision=revision+1,updated_ms=? WHERE id=? AND desired_state='removed' AND phase='pending' AND generation=? AND revision=? AND control_fence=? AND controller_epoch=?`, now, expected.installationID, expected.snapshot.Generation, facts.installationRevision, expected.fence, expected.controllerEpoch)
-		if err := platformLeaseCAS(changed, err); err != nil {
-			return zero, err
-		}
-		if _, err := e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, expected.installationID); err != nil {
-			return zero, err
-		}
-		if _, err := e.exec(`DELETE FROM app_platform_access_grants WHERE installation_id=?`, expected.installationID); err != nil {
-			return zero, err
-		}
-		changed, err = e.exec(`UPDATE app_platform_data_namespaces SET state='retained',retained_ms=?,revision=revision+1,updated_ms=? WHERE owner_installation_id=? AND state='active'`, now, now, expected.installationID)
-		if err := platformLeaseCAS(changed, err); err != nil {
-			return zero, err
-		}
-		changed, err = e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,completed_ms=?,lease_owner=NULL,lease_until_ms=NULL,updated_ms=? WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, int64(result.snapshot.Revision), now, now, expected.id, expected.installationID, expected.controllerEpoch, string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
-		if err := platformLeaseCAS(changed, err); err != nil {
-			return zero, err
-		}
-	} else {
-		changed, err = e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=? WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, string(next), int64(result.snapshot.Revision), now, expected.id, expected.installationID, expected.controllerEpoch, string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
-		if err := platformLeaseCAS(changed, err); err != nil {
-			return zero, err
-		}
+	changed, err = e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=? WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`, string(next), int64(result.snapshot.Revision), now, expected.id, expected.installationID, expected.controllerEpoch, string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner, expected.leaseUntilMS, now)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return zero, err
 	}
 	detail, _ := json.Marshal(struct {
 		Stage    appplatform.Stage `json:"stage"`
@@ -420,7 +399,7 @@ func (s *Server) claimNextPlatformManagedUninstall(ctx context.Context, worker s
 		return zero, err
 	}
 	rows, err := e.query(`SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
-        WHERE o.action='uninstall' AND o.managed=1 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','revoke','stop','remove_code')
+        WHERE o.action='uninstall' AND o.managed=1 AND o.completed_ms IS NULL AND o.stage IN ('queued','validate','revoke','stop','remove_code','remove_data')
           AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.desired_state='removed' AND i.phase='pending' AND i.runtime_id IS NOT NULL
           AND i.generation=o.target_generation AND i.controller_epoch=? AND o.controller_epoch=?
           AND NOT EXISTS(SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage<>o.stage AND f.state<>'applied')
@@ -519,6 +498,33 @@ func (s *Server) runPlatformManagedUninstall(ctx context.Context, expected platf
 				return platformInstallRun{lease: result}, errAppPlatformStageEvidence
 			}
 			next, err := s.settlePlatformManagedRemoval(ctx, result, intent, receipt)
+			if err != nil {
+				return platformInstallRun{lease: result}, err
+			}
+			result = next
+		case appplatform.StageRemoveData:
+			intent, err := s.preparePlatformDeleteDataIntent(ctx, result)
+			if err != nil {
+				return platformInstallRun{lease: result}, err
+			}
+			if err := s.checkPlatformManagedOperationRoot(
+				ctx, intent.sourceOperationID, intent.runtime,
+				intent.authority, endpoint); err != nil {
+				return platformInstallRun{lease: result}, err
+			}
+			observation, err := platformDeleteApplicationData(
+				ctx, endpoint, intent)
+			if err != nil {
+				return platformInstallRun{lease: result}, err
+			}
+			receipt, ok := validPlatformDeleteDataObservation(
+				observation, intent, endpoint)
+			if !ok {
+				return platformInstallRun{lease: result},
+					errAppPlatformStageEvidence
+			}
+			next, err := s.settlePlatformDeleteData(
+				ctx, result, intent, receipt)
 			if err != nil {
 				return platformInstallRun{lease: result}, err
 			}

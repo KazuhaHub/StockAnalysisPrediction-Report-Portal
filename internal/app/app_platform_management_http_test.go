@@ -193,7 +193,7 @@ func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
 	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
 	body := fmt.Sprintf(`{"action":"uninstall","installation_id":%q}`, installation)
 	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
-	if got.Code != 200 || !strings.Contains(got.Body.String(), `"managed":true`) || !strings.Contains(got.Body.String(), `"managed_data_retained":true`) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE action='uninstall'`) != 1 {
+	if got.Code != 200 || !strings.Contains(got.Body.String(), `"managed":true`) || !strings.Contains(got.Body.String(), `"managed_data_cleared":true`) || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE action='uninstall'`) != 1 {
 		t.Fatal("managed uninstall review", got.Code, got.Body.String())
 	}
 	var review struct {

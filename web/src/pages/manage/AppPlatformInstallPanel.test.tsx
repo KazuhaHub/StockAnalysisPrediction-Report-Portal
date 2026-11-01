@@ -57,6 +57,7 @@ const uninstallReview = () => ({
     data_effect: 'delete',
     plugin_data_cleared: true,
     managed_data_retained: false,
+    managed_data_cleared: false,
   },
 })
 function mount(path = '/manage/apps') { return render(<MemoryRouter initialEntries={[path]}><AppPlatformInstallPanel /></MemoryRouter>) }

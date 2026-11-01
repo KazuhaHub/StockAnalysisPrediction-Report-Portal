@@ -3537,7 +3537,7 @@
   "appPlatform.noData": "不分配持久化資料空間",
   "appPlatform.dataSchemaRetained": "保留現有資料架構 {{schema}}；不相容的升級會被拒絕。",
   "appPlatform.uninstallPluginData": "外掛資料會被清空，專屬表會被刪除。",
-  "appPlatform.uninstallManagedData": "外掛物件資料會被清空。託管後端的資料空間仍保留，需要單獨稽核刪除。",
+  "appPlatform.uninstallManagedData": "外掛物件資料與託管後端資料空間會在執行器確認刪除後清空。",
   "appPlatform.stage.queued": "等待安裝",
   "appPlatform.stage.validate": "校驗安裝方案",
   "appPlatform.stage.download": "校驗軟體包",

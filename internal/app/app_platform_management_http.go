@@ -312,7 +312,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
 			"action": "uninstall", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
 			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
-			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": projection.Managed && projection.Data != nil,
+			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": false, "managed_data_cleared": projection.Managed && projection.Data != nil,
 		}})
 	default:
 		platformManagementError(w, errPlatformManagementInput)

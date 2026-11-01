@@ -275,6 +275,15 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 	case UpdateStartRemovalRead:
 		result, err = provider.store.ReadUpdateStartRemovalReceipt(
 			ctx, raw, sig)
+	case ManagedDataDelete:
+		if provider.dataRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchDeleteData(
+			ctx, raw, sig, provider.dataRoot, provider.dataPin)
+	case ManagedDataRead:
+		result, err = provider.store.ReadDeleteDataReceipt(
+			ctx, raw, sig)
 	default:
 		return
 	}

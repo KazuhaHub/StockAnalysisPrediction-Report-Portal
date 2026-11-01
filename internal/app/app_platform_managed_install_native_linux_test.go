@@ -213,7 +213,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		pluginTable := platformPluginDataTableName(scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, activated.installationID))
 		if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, activated.installationID) != "removed:removed" ||
-			scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE owner_installation_id=?`, activated.installationID) != "retained" ||
+			scalar[string](t, s.st, `SELECT state||':'||COALESCE(owner_installation_id,'') FROM app_platform_data_namespaces WHERE origin_installation_id=?`, activated.installationID) != "deleted:" ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND stage='complete' AND completed_ms IS NOT NULL`, removalCommit.OperationID) != 1 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, activated.installationID) != 0 ||
@@ -222,5 +222,6 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			t.Fatal("managed uninstall left authority or plugin data")
 		}
 		t.Log("MANAGED_UNINSTALL_STOP_REMOVE_CODE")
+		t.Log("MANAGED_UNINSTALL_REMOVE_DATA")
 	}
 }

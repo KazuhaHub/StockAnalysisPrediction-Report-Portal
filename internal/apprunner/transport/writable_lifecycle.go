@@ -42,13 +42,15 @@ const (
 	UpdateStartRemovalStop
 	UpdateStartRemovalRemoveCode
 	UpdateStartRemovalRead
+	ManagedDataDelete
+	ManagedDataRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= UpdateStartRemovalRead
+	return a >= WritableWriterExecute && a <= ManagedDataRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -154,6 +156,12 @@ func (o WritableLifecycleObservation) UpdateStartRemovalReceipt() (journal.Manag
 	}
 	return journal.ParseManagedRemovalReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) DeleteDataReceipt() (journal.DeleteDataReceipt, error) {
+	if o.action != ManagedDataDelete && o.action != ManagedDataRead {
+		return journal.DeleteDataReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseDeleteDataReceipt([]byte(o.body))
+}
 
 type writableLifecycleReference struct {
 	writer                  control.DataWriterCommand
@@ -165,6 +173,7 @@ type writableLifecycleReference struct {
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
+	deleteData              control.DeleteDataCommand
 	index                   control.Command
 	release                 string
 }
@@ -239,6 +248,13 @@ func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descripto
 		r.updateStartRemoval = v.Command()
 		r.updateStart = v.Start().Command()
 		r.release = r.updateStart.Payload.TargetReleaseSHA256
+	case action == ManagedDataDelete || action == ManagedDataRead:
+		v, err := control.VerifyDeleteData(raw, sig, a, now)
+		if err != nil {
+			return r, err
+		}
+		r.deleteData = v.Command()
+		r.release = r.deleteData.Payload.ReleaseSHA256
 	default:
 		v, err := control.VerifyUpdateStart(raw, sig, a, now)
 		if err != nil {
@@ -447,6 +463,37 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			v.ResourceID != r.updateStart.Payload.ResourceID ||
 			v.DataNamespaceID != r.updateStart.Payload.NamespaceID ||
 			v.ReleaseSHA256 != r.updateStart.Payload.TargetReleaseSHA256 {
+			return false
+		}
+		settled = v.SettledMS
+	case action == ManagedDataDelete || action == ManagedDataRead:
+		v, e := journal.ParseDeleteDataReceipt(body)
+		c := r.deleteData
+		if e != nil || v.DeploymentID != c.DeploymentID ||
+			v.ControllerEpoch != c.ControllerEpoch ||
+			v.InstallationID != c.InstallationID ||
+			v.OperationID != c.OperationID ||
+			v.TargetGeneration != c.TargetGeneration ||
+			v.EffectID != c.EffectID ||
+			v.PayloadSHA256 != c.PayloadSHA256 ||
+			v.NamespaceID != c.Payload.NamespaceID ||
+			v.ReleaseSHA256 != c.Payload.ReleaseSHA256 ||
+			v.ProjectID != c.Payload.ProjectID ||
+			v.DataFormat != c.Payload.DataFormat ||
+			v.QuotaBytes != c.Payload.QuotaBytes ||
+			v.QuotaInodes != c.Payload.QuotaInodes ||
+			v.ExpectedDevice != c.Payload.ExpectedDevice ||
+			v.ExpectedNamespaceInode !=
+				c.Payload.ExpectedNamespaceInode ||
+			v.WriterFence != c.Payload.WriterFence {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(
+			v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(
+			c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil ||
+			observed < issued {
 			return false
 		}
 		settled = v.SettledMS
