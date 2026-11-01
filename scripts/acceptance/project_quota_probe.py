@@ -39,6 +39,15 @@ def command_text(*args):
     return output.strip()
 
 
+def command_large(*args):
+    result = subprocess.run(args, env=ENV, check=False, capture_output=True, text=True, timeout=60)
+    if len(result.stdout) + len(result.stderr) > 1 << 20:
+        raise RuntimeError("unexpected large probe command output size")
+    if result.returncode:
+        raise ProbeCommandError(result.returncode, f"{Path(args[0]).name} failed ({result.returncode}): {result.stderr[:2048]}")
+    return result.stdout.strip()
+
+
 def require_disposable(args):
     native_args = (
         len(args) in (5, 7, 9, 11)
@@ -143,7 +152,7 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
             if error.code != 1 or "Device or resource busy" not in str(error):
                 raise
             require_loop_owner(loop, image)
-            command("xfs_repair", "-L", "-f", str(image))
+            command_large("xfs_repair", "-L", "-f", str(image))
             os.sync()
             command("blockdev", "--flushbufs", loop)
             with open("/proc/sys/vm/drop_caches", "w", encoding="ascii") as cache:
