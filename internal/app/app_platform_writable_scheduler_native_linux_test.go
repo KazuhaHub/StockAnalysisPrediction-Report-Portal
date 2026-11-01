@@ -715,7 +715,7 @@ func testNativeManagedDisableEnable(
 					accountGeneration, groupID, groupCreated))
 			}
 		}
-		actorGroup := scalar[int64](t, s.st, `SELECT group_id
+		actorGroup := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0)
 			FROM users WHERE username=?`, actor.username)
 		t.Fatalf("native managed enable launch access %+v: %v grants=%v actor=%s/%s/%d/group=%d query=%v",
 			binding, err, grants, actor.username, actor.created,
