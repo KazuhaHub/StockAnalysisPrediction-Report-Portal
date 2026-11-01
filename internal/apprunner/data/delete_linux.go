@@ -156,7 +156,8 @@ func settleDeleteDataQuota(file *os.File, request DeleteRequest) error {
 	}
 	if limit.usedBytes != 0 || limit.usedInodes != 0 {
 		return fmt.Errorf(
-			"namespace quota is still in use: %w", ErrDeleteIncomplete)
+			"namespace quota is still in use (bytes=%d inodes=%d): %w",
+			limit.usedBytes, limit.usedInodes, ErrDeleteIncomplete)
 	}
 	if limit.bytes != request.QuotaBytes ||
 		limit.inodes != request.QuotaInodes {
