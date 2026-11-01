@@ -111,12 +111,14 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "writable-auto-start.json"), witness, 0600); err != nil {
 		t.Fatal(err)
 	}
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "install")
 	t.Log("PORTAL_WRITABLE_BACKGROUND_COMPLETE")
 	updateOperation, updateRelease := testNativeWritableManagedUpdate(
 		t, s, actor, endpoint, admitted.InstallationID)
 	savePlatformWritableFixtureOwner(
 		t, s, updateOperation, admitted.InstallationID,
 		updateRelease, os.Getenv("PORTAL_MANAGED_IMAGE"))
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "update")
 	active, err := s.preparePlatformWritableBackendAccess(
 		ctx, actor, admitted.InstallationID)
 	if err != nil || active.intent.update == nil ||
@@ -206,8 +208,20 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	testNativeWritableManagedRestore(
 		t, s, actor, endpoint, admitted.InstallationID,
 		updateRelease, updateOperation, failedOperation)
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "restore")
 	testNativeManagedDisableEnable(
 		t, s, actor, endpoint, admitted.InstallationID)
+}
+
+func assertNativePlatformGrant(
+	t *testing.T, s *Server, installation, stage string,
+) {
+	t.Helper()
+	if count := scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_access_grants WHERE installation_id=?`,
+		installation); count == 0 {
+		t.Fatalf("native managed %s lost the installation audience", stage)
+	}
 }
 
 func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint, installation string) (string, string) {
@@ -626,6 +640,7 @@ func testNativeManagedDisableEnable(
 		appplatform.StageComplete {
 		t.Fatal("native managed disable execution", disabled, err)
 	}
+	assertNativePlatformGrant(t, s, installation, "disable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
 		installation) != "disabled:disabled" ||
@@ -674,6 +689,7 @@ func testNativeManagedDisableEnable(
 		ctx, enableClaim.lease, endpoint); err != nil {
 		t.Fatal("native managed enable execution", err)
 	}
+	assertNativePlatformGrant(t, s, installation, "enable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
 		installation) != "enabled:ready" ||
