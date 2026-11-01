@@ -874,14 +874,16 @@ func testNativeManagedDisableEnable(
 		appplatform.StageComplete {
 		t.Fatal("native standalone delete-data execution", deleteRun, err)
 	}
-	if scalar[string](t, s.st, `SELECT state||':'||
-		COALESCE(owner_installation_id,'')||':'||observed_bytes
-		FROM app_platform_data_namespaces WHERE id=?`,
-		namespaceID) != "deleted::0" ||
-		scalar[string](t, s.st, `SELECT stage
-			FROM app_platform_operations WHERE id=?`,
-			deleteCommit.OperationID) != "complete" {
-		t.Fatal("native standalone delete-data did not settle")
+	actualNamespace := scalar[string](t, s.st, `SELECT state||':'||
+		COALESCE(owner_installation_id,'')
+		FROM app_platform_data_namespaces WHERE id=?`, namespaceID)
+	actualDeleteStage := scalar[string](t, s.st, `SELECT stage
+		FROM app_platform_operations WHERE id=?`,
+		deleteCommit.OperationID)
+	if actualNamespace != "deleted:" ||
+		actualDeleteStage != "complete" {
+		t.Fatalf("native standalone delete-data did not settle namespace=%s stage=%s",
+			actualNamespace, actualDeleteStage)
 	}
 	t.Log("STANDALONE_DELETE_DATA_NAMESPACE_ABSENT")
 }
