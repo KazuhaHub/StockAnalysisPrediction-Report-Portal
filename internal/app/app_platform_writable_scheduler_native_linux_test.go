@@ -799,20 +799,24 @@ func testNativeManagedDisableEnable(
 	}
 	assertNativePlatformUserGrant(
 		t, s, installation, reader.username, "repair")
-	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
-		FROM app_platform_installations WHERE id=?`,
-		installation) != "enabled:ready" ||
-		scalar[int64](t, s.st, `SELECT generation
-			FROM app_platform_installations WHERE id=?`,
-			installation) != generationBeforeRepair+1 ||
-		scalar[string](t, s.st, `SELECT release_sha256
-			FROM app_platform_activations
-			WHERE installation_id=? AND state='active'`,
-			installation) != releaseBefore ||
-		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_capability_grants WHERE installation_id=?`,
-			installation) != capabilitiesBefore {
-		t.Fatal("native repair changed the retained tuple")
+	actualState := scalar[string](t, s.st, `SELECT desired_state||':'||phase
+		FROM app_platform_installations WHERE id=?`, installation)
+	actualGeneration := scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`, installation)
+	actualRelease := scalar[string](t, s.st, `SELECT release_sha256
+		FROM app_platform_activations
+		WHERE installation_id=? AND state='active'`, installation)
+	actualCapabilities := scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_capability_grants WHERE installation_id=?`,
+		installation)
+	if actualState != "enabled:ready" ||
+		actualGeneration != generationBeforeRepair+1 ||
+		actualRelease != releaseBefore ||
+		actualCapabilities != capabilitiesBefore {
+		t.Fatalf("native repair changed the retained tuple state=%s generation=%d/%d release=%s/%s capabilities=%d/%d",
+			actualState, actualGeneration, generationBeforeRepair+1,
+			actualRelease, releaseBefore, actualCapabilities,
+			capabilitiesBefore)
 	}
 	response, err = s.requestPlatformWritableBackend(
 		ctx, reader, installation, "GET", "/v1/echo", nil, endpoint)
