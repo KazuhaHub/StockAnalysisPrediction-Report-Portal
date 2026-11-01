@@ -238,7 +238,9 @@ func (r *CandidateRuntime) startCandidateProfileAccess(ctx context.Context, laun
 		(writable != nil && *state.plan.writable != *writable) ||
 		(state.plan.updateStart == nil) != (updateStart == nil) ||
 		(updateStart != nil && *state.plan.updateStart != *updateStart) {
-		return zero, ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"candidate start precondition: %w",
+			ErrContainerUncertain)
 	}
 	if err := ctx.Err(); err != nil {
 		return zero, err
@@ -267,11 +269,15 @@ func (r *CandidateRuntime) startCandidateProfileAccess(ctx context.Context, laun
 	defer closeClient()
 	native, err := createPinnedCandidateHTTP(ctx, client, state.plan, state.pins)
 	if err != nil {
-		return zero, errors.Join(ErrContainerUncertain, err)
+		return zero, fmt.Errorf(
+			"candidate create: %w",
+			errors.Join(ErrContainerUncertain, err))
 	}
 	observed, err := startPinnedCandidateHTTP(ctx, client, native, state.plan, state.pins)
 	if err != nil || observed != "running" {
-		return zero, errors.Join(ErrContainerUncertain, err)
+		return zero, fmt.Errorf(
+			"candidate start: %w",
+			errors.Join(ErrContainerUncertain, err))
 	}
 	if err := r.checkCandidateDataProfile(ctx, state.snapshot.Identity, state.snapshot.Data, accessWritable); err != nil {
 		return zero, errors.Join(ErrContainerUncertain, err)

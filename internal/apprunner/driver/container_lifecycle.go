@@ -33,7 +33,9 @@ func startCandidateContainerHTTP(ctx context.Context, client *http.Client, nativ
 		return "", errors.Join(ErrContainerUncertain, err)
 	}
 	if observed != "running" {
-		return "", ErrContainerUncertain
+		return "", fmt.Errorf(
+			"container start observed %s: %w",
+			observed, ErrContainerUncertain)
 	}
 	return observed, nil
 }
