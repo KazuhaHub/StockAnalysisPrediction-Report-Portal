@@ -64,12 +64,11 @@ body {
   justify-items: center;
   gap: 12px;
   padding-block: 24px;
-  animation: rp-loading-in 0.2s ease-out;
 }
-@keyframes rp-loading-in { from { opacity: 0; } }
-.rp-fade-in { animation: rp-loading-in 0.2s ease-out; }
+@keyframes rp-fade-in { from { opacity: 0; } }
+.rp-fade-in { animation: rp-fade-in 0.2s ease-out; }
 @media (prefers-reduced-motion: reduce) {
-  .rp-loading, .rp-fade-in { animation: none; }
+  .rp-fade-in { animation: none; }
 }
 .rp-audit-card > .ant-card-head > .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; padding-block: 12px; }
 .rp-audit-card > .ant-card-head .ant-card-head-title { flex: none; overflow: visible; white-space: normal; text-overflow: clip; }
@@ -651,14 +650,6 @@ body {
 .rp-scope-fold { min-width: 0; width: 100%; }
 .rp-scope-fold > .rp-policy-scope-toggle { max-width: 100%; }
 .rp-scope-fold__body { margin-top: 8px; }
-.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active,
-.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover,
-.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active {
-  color: var(--ant-color-text-light-solid) !important;
-  background: var(--ant-color-primary) !important;
-}
-.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):hover { background: var(--ant-color-primary-hover) !important; }
-.rp-policy-scope-header > .ant-btn.rp-policy-scope-global--active:not(:disabled):active { background: var(--ant-color-primary-active) !important; }
 /* Wide screens: the fold wrappers vanish so the tree is laid out exactly as if they were not there. */
 .rp-scope-fold--inline, .rp-scope-fold--inline > .rp-scope-fold__body { display: contents; }
 .rp-policy-scope-toggle { min-width: 0; }
@@ -1453,9 +1444,6 @@ body {
   height: 20px;
   background: var(--ant-color-border);
 }
-.rp-app-header .ant-btn.ant-btn-primary {
-  box-shadow: none;
-}
 /* The Runs tab's four figures: equal columns, number over label, a hairline between columns. */
 .rp-task-stats {
   display: grid;
@@ -2214,8 +2202,9 @@ body {
 
 /* Loading ring: one spinner shared by the boot splash (index.html) and every in-app
    antd <Spin> (via ConfigProvider spin.indicator), replacing antd's default 4-dot
-   spinner. One uniform size regardless of antd's Spin size prop, so the spinner never
-   changes size between pages; matches the boot-splash ring exactly. */
+   spinner. In a Spin, antd's ant-spin-dot class sizes it to the Spin's size (1em of the
+   dot holder: small, default, large); the 28px here is the ring's own size elsewhere and
+   the boot splash's. */
 .rp-spin-ring {
   display: inline-block;
   width: 28px;

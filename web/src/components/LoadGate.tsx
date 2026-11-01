@@ -24,10 +24,11 @@ import WaitingForConnection from './WaitingForConnection'
 // muted line that it is waiting.
 //
 // The placeholder is the shared loading ring, centred in the space the view will fill, with its
-// words. It is there from the first frame and fades in, so a fast answer leaves at most a faint
-// trace while a slow one is acknowledged at once where the reader is looking. (Holding it back
-// behind a delay left a blank frame instead, once per Suspense layer a page passes through; and a
-// generic skeleton, one set of grey bars for every page, previewed none of them.)
+// words. It is there from the first frame, with no delay and no fade: a delay left a blank frame,
+// once per Suspense layer a page passes through, and a fade replayed itself on each of those layers.
+// A page that waits twice (code, then data) swaps one placeholder for another; the ring's turn is
+// pinned to a shared clock (SpinRing), so the swap does not show. (A generic skeleton, one set of
+// grey bars for every page, previewed none of them.)
 // The loading status is announced from the first frame.
 export default function LoadGate({
   loading,
@@ -68,8 +69,8 @@ export default function LoadGate({
 }
 
 /**
- * The placeholder LoadGate shows, for a view that loads in its own way: the loading ring after a
- * short delay, the loading status announced from the first frame, and the waiting-for-connection line.
+ * The placeholder LoadGate shows, for a view that loads in its own way: the loading ring and its
+ * status line from the first frame, and the waiting-for-connection line.
  */
 export function LoadingPlaceholder({
   minHeight,

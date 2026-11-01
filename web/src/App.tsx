@@ -16,6 +16,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage'
 import RegisterPage from './pages/RegisterPage'
 import ForgotPage from './pages/ForgotPage'
 import VerifyEmailPage from './pages/VerifyEmailPage'
+import SpinRing from './components/SpinRing'
 
 // Route pages are lazy-loaded (Suspense boundary lives in AppLayout), so the first
 // paint only ships the shell + landing page; admin / batch / webhook code and the
@@ -277,8 +278,10 @@ function Themed() {
     <ConfigProvider
       locale={antd}
       // One loading spinner everywhere: the same ring as the boot splash (index.html),
-      // instead of antd's default 4-dot spinner. Sizing tracks Spin's size via CSS.
-      spin={{ indicator: <span className="rp-spin-ring" /> }}
+      // instead of antd's default 4-dot spinner. Sizing tracks Spin's size (antd's ant-spin-dot
+      // class, which SpinRing keeps); SpinRing also keeps every ring in phase, so one replacing
+      // another does not restart its turn.
+      spin={{ indicator: <SpinRing /> }}
       theme={{
         algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         // One radius scale for the whole portal; index.css and inline styles use these tokens rather
