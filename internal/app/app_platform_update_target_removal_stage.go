@@ -33,8 +33,13 @@ func (s *Server) dispatchPlatformUpdateTargetRemoval(ctx context.Context, lease 
 		return platformOperationLease{}, fmt.Errorf(
 			"run update target removal %s: %w", stage, err)
 	}
-	return s.commitPlatformUpdateTargetRemoval(
+	result, err := s.commitPlatformUpdateTargetRemoval(
 		ctx, lease, intent, endpoint, proof)
+	if err != nil {
+		return platformOperationLease{}, fmt.Errorf(
+			"commit update target removal %s: %w", stage, err)
+	}
+	return result, nil
 }
 
 func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease platformOperationLease, intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint, proof platformUpdateTargetRemovalObservation) (platformOperationLease, error) {
@@ -45,15 +50,21 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 		lease.rowRevision == math.MaxInt64 ||
 		!validPlatformUpdateTargetRemovalObservation(
 			proof, intent, endpoint) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update target removal %s proof binding: %w",
+			intent.command.Stage, errAppPlatformStageEvidence)
 	}
 	receipt, err := proof.ManagedRemovalReceipt()
 	if err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update target removal %s receipt parse: %w",
+			intent.command.Stage, errAppPlatformStageEvidence)
 	}
 	encoded, err := json.Marshal(receipt)
 	if err != nil || len(encoded) > 16384 {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update target removal %s receipt encode: %w",
+			intent.command.Stage, errAppPlatformStageEvidence)
 	}
 	dek, err := s.dek()
 	if err != nil {
@@ -63,7 +74,9 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 		ctx, lease, intent.command.Stage,
 		intent.effectNumber)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update target removal %s current intent: %w",
+			intent.command.Stage, err)
 	}
 	if !samePlatformUpdateTargetRemovalIntent(intent, current) {
 		return zero, fmt.Errorf(
@@ -96,7 +109,9 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 	expected := current
 	if current.applied {
 		if current.receipt != receipt {
-			return zero, errAppPlatformStageEvidence
+			return zero, fmt.Errorf(
+				"update target removal %s applied receipt: %w",
+				intent.command.Stage, errAppPlatformStageEvidence)
 		}
 	} else {
 		now, err := finalPlatformOperationLeaseCheck(e, facts)
@@ -162,7 +177,9 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 		intent.effectNumber)
 	if err != nil || !samePlatformUpdateTargetRemovalIntent(
 		expected, after) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update target removal %s settlement reload: %w",
+			intent.command.Stage, errAppPlatformStageEvidence)
 	}
 	return result, nil
 }
