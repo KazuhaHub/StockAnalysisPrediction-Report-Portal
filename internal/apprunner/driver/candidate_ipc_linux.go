@@ -322,6 +322,9 @@ func candidateIPCReferenced(ctx context.Context, path, source string) (bool, err
 	}
 	canonical, err := resolveCandidateIPCSource(ctx, source, filepath.EvalSymlinks)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
 		return false, ErrUnavailable
 	}
 	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil

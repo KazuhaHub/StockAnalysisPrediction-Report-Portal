@@ -275,8 +275,15 @@ func TestCandidateIPCReferencesResolveAliases(t *testing.T) {
 			t.Fatal("mount reference alias missed", err)
 		}
 	}
-	if used, err := candidateIPCReferenced(context.Background(), ipc, filepath.Join(root, "missing")); err == nil || used {
-		t.Fatal("unresolved inventory silently treated as no reference")
+	if used, err := candidateIPCReferenced(context.Background(), ipc, filepath.Join(root, "missing")); err != nil || used {
+		t.Fatal("nonexistent mount source treated as a reference", err)
+	}
+	loop := filepath.Join(root, "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	if used, err := candidateIPCReferenced(context.Background(), ipc, loop); err == nil || used {
+		t.Fatal("unresolvable mount source treated as no reference")
 	}
 	if used, err := candidateIPCReferenced(context.Background(), ipc, ""); err != nil || used {
 		t.Fatal("empty tmpfs source treated as host bind")
