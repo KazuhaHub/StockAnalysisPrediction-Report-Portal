@@ -608,6 +608,23 @@ func TestUpdateStartRegistrationCurrentUsesOuterCommand(t *testing.T) {
 	}
 }
 
+func TestUpdateStartRunningReceiptComparisonUsesContent(t *testing.T) {
+	f, _, command, startRaw, startSignature := updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	first, err := ParseUpdateStartRunningReceipt(runningRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ParseUpdateStartRunningReceipt(runningRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !sameUpdateStartRunningReceipt(first, second) {
+		t.Fatal("identical update-start running receipts differed")
+	}
+}
+
 func TestUpdateStartRegistrationRefusesChangedTargetEvidence(t *testing.T) {
 	t.Run("running receipt hash", func(t *testing.T) {
 		f, _, command, startRaw, startSignature := updateStartJournalFixture(t)

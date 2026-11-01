@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -140,7 +141,7 @@ func checkUpdateStartRegistrationCurrent(ctx context.Context, f updateStartRegis
 }
 
 func sameUpdateStartRegistrationSource(a, b updateStartRegistrationFacts) bool {
-	return a.source.running == b.source.running &&
+	return sameUpdateStartRunningReceipt(a.source.running, b.source.running) &&
 		sameUpdateStartRegistrationRequest(a.source.request, b.source.request) &&
 		a.source.expected == b.source.expected &&
 		a.source.start.receipt == b.source.start.receipt &&
@@ -163,6 +164,12 @@ func sameUpdateStartRegistrationRequest(a, b driver.UpdateStartLaunchRequest) bo
 		a.Data == b.Data && a.Binding == b.Binding &&
 		a.SandboxProfile == b.SandboxProfile &&
 		bytes.Equal(a.Descriptor, b.Descriptor)
+}
+
+func sameUpdateStartRunningReceipt(a, b UpdateStartRunningReceipt) bool {
+	ar, _ := json.Marshal(a)
+	br, _ := json.Marshal(b)
+	return bytes.Equal(ar, br)
 }
 
 func beginUpdateStartRegistration(ctx context.Context, s *Store, raw, signature []byte, state string) (*sql.Tx, updateStartRegistrationFacts, error) {
@@ -266,7 +273,8 @@ func (s *Store) preflightUpdateStartRegistration(ctx context.Context, raw, signa
 			"update-start registration preflight recheck: %w", err)
 	}
 	defer post.Rollback()
-	if before.source.running != after.source.running {
+	if !sameUpdateStartRunningReceipt(
+		before.source.running, after.source.running) {
 		return zero, fmt.Errorf(
 			"update-start registration source running: %w",
 			ErrFenceReconciliation)
