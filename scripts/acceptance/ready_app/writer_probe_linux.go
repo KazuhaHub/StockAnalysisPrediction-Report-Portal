@@ -40,6 +40,18 @@ func verifyFixtureWritableData() error {
 	if err := unix.Fstat(int(dir.Fd()), &st); err != nil || st.Uid != 0 || st.Gid != 65532 || st.Mode&07777 != 02770 {
 		return fmt.Errorf("write probe lost root-owned data profile: %v", err)
 	}
+	marker, err := os.OpenFile(writerProbeCompletePath,
+		os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer marker.Close()
+	if err := marker.Sync(); err != nil {
+		return err
+	}
+	if err := dir.Sync(); err != nil {
+		return err
+	}
 	if err := unix.Fchmod(int(dir.Fd()), 0777); !errors.Is(err, unix.EPERM) {
 		return fmt.Errorf("app chmod of namespace root not refused: %v", err)
 	}
@@ -135,16 +147,13 @@ func verifyFixtureWritableData() error {
 	if err := proof.Sync(); err != nil {
 		return err
 	}
-	if err := os.WriteFile(writerProbeCompletePath,
-		[]byte(writerProbeCompleteValue), 0600); err != nil {
+	if _, err := marker.WriteString(writerProbeCompleteValue); err != nil {
 		return err
 	}
-	data, err := os.Open("/data")
-	if err != nil {
+	if err := marker.Sync(); err != nil {
 		return err
 	}
-	defer data.Close()
-	return data.Sync()
+	return dir.Sync()
 }
 
 func fixtureQuotaInodeLimit(allocated int64, denied bool) (int, error) {
