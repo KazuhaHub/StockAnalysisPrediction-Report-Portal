@@ -49,7 +49,14 @@ func updateStartRemovalIndex(v control.VerifiedUpdateStartRemovalCommand) contro
 	}
 }
 
-func loadUpdateStartRemovalSource(ctx context.Context, tx *sql.Tx, verified control.VerifiedUpdateStartRemovalCommand, state string, now int64) (updateStartRemovalFacts, error) {
+func loadUpdateStartRemovalSource(
+	ctx context.Context,
+	tx *sql.Tx,
+	verified control.VerifiedUpdateStartRemovalCommand,
+	state string,
+	descriptor []byte,
+	now int64,
+) (updateStartRemovalFacts, error) {
 	var result updateStartRemovalFacts
 	command, startCommand := verified.Command(), verified.Start().Command()
 	index := updateStartIndex(startCommand)
@@ -92,7 +99,8 @@ func loadUpdateStartRemovalSource(ctx context.Context, tx *sql.Tx, verified cont
 		start, running, resource, command.Stage, state) {
 		return result, ErrFenceReconciliation
 	}
-	request, expected, err := updateStartExpectedSnapshot(start, running.Claim, nil)
+	request, expected, err := updateStartExpectedSnapshot(
+		start, running.Claim, descriptor)
 	if err != nil {
 		return result, ErrFenceReconciliation
 	}
@@ -103,7 +111,11 @@ func loadUpdateStartRemovalSource(ctx context.Context, tx *sql.Tx, verified cont
 	return result, nil
 }
 
-func beginUpdateStartRemoval(ctx context.Context, store *Store, raw, signature []byte) (*sql.Tx, updateStartRemovalFacts, error) {
+func beginUpdateStartRemoval(
+	ctx context.Context,
+	store *Store,
+	raw, signature, descriptor []byte,
+) (*sql.Tx, updateStartRemovalFacts, error) {
 	var zero updateStartRemovalFacts
 	if store.closing.Load() || len(raw) == 0 ||
 		len(raw) > control.MaxCommandBytes || len(signature) != 64 {
@@ -158,7 +170,7 @@ func beginUpdateStartRemoval(ctx context.Context, store *Store, raw, signature [
 		state = "prepared"
 	}
 	facts, err := loadUpdateStartRemovalSource(
-		ctx, tx, verified, state, now)
+		ctx, tx, verified, state, descriptor, now)
 	if err != nil {
 		return nil, zero, err
 	}
@@ -171,13 +183,17 @@ func beginUpdateStartRemoval(ctx context.Context, store *Store, raw, signature [
 	return tx, facts, nil
 }
 
-func (store *Store) DispatchUpdateStartRemoval(ctx context.Context, raw, signature []byte, native *driver.CandidateRuntime) (ManagedRemovalReceipt, error) {
+func (store *Store) DispatchUpdateStartRemoval(
+	ctx context.Context,
+	raw, signature, descriptor []byte,
+	native *driver.CandidateRuntime,
+) (ManagedRemovalReceipt, error) {
 	var zero ManagedRemovalReceipt
 	if native == nil || store.closing.Load() {
 		return zero, ErrManagedRemovalUnavailable
 	}
 	tx, facts, err := beginUpdateStartRemoval(
-		ctx, store, raw, signature)
+		ctx, store, raw, signature, descriptor)
 	if err != nil {
 		return zero, err
 	}
@@ -186,7 +202,8 @@ func (store *Store) DispatchUpdateStartRemoval(ctx context.Context, raw, signatu
 		switch facts.row.state {
 		case "applied":
 			tx.Rollback()
-			return store.ReadUpdateStartRemovalReceipt(ctx, raw, signature)
+			return store.ReadUpdateStartRemovalReceipt(
+				ctx, raw, signature, descriptor)
 		case "unknown":
 			tx.Rollback()
 			return zero, ErrManagedRemovalUnavailable
@@ -281,7 +298,7 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		return zero, ErrFenceReconciliation
 	}
 	tx, current, err := beginUpdateStartRemoval(
-		ctx, store, raw, signature)
+		ctx, store, raw, signature, before.request.Descriptor)
 	if err != nil {
 		return zero, err
 	}
@@ -344,9 +361,12 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	return receipt, nil
 }
 
-func (store *Store) ReadUpdateStartRemovalReceipt(ctx context.Context, raw, signature []byte) (ManagedRemovalReceipt, error) {
+func (store *Store) ReadUpdateStartRemovalReceipt(
+	ctx context.Context,
+	raw, signature, descriptor []byte,
+) (ManagedRemovalReceipt, error) {
 	tx, facts, err := beginUpdateStartRemoval(
-		ctx, store, raw, signature)
+		ctx, store, raw, signature, descriptor)
 	if err != nil {
 		return ManagedRemovalReceipt{}, err
 	}

@@ -750,7 +750,7 @@ func TestUpdateStartRemovalBindsRunningCandidate(t *testing.T) {
 	_, raw, signature := updateStartRemovalCommandFixture(
 		t, command, startRaw, startSignature, runningRaw, "stop")
 	tx, facts, err := beginUpdateStartRemoval(
-		context.Background(), f.store, raw, signature)
+		context.Background(), f.store, raw, signature, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestUpdateStartRemovalRefusesChangedCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, _, err := beginUpdateStartRemoval(
-		context.Background(), f.store, raw, signature); err == nil {
+		context.Background(), f.store, raw, signature, nil); err == nil {
 		t.Fatal("changed candidate state admitted for stop")
 	}
 }
