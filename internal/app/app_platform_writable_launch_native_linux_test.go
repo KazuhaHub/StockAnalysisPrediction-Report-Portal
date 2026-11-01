@@ -98,7 +98,13 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		return string(raw)
 	}
 	httpBody := requestBody("POST", "/v1/echo", `{"role":"admin","subject":"forged"}`)
-	staleHTTP := strings.Replace(httpBody, `"generation":"1"`, `"generation":"2"`, 1)
+	staleGeneration := "1"
+	if binding.Generation == "1" {
+		staleGeneration = "2"
+	}
+	staleHTTP := strings.Replace(
+		httpBody, `"generation":"`+binding.Generation+`"`,
+		`"generation":"`+staleGeneration+`"`, 1)
 	if denied := platformBackendHTTPCall(mux, backendPath, cookie, staleHTTP, nil); denied.Code != 404 {
 		t.Fatal("stale page passed HTTP admission", denied.Code)
 	}
