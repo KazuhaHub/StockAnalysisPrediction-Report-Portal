@@ -111,15 +111,37 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 			return zero, false, err
 		}
 		created, updated = now, now
-	} else if count != baseEffects+1 || !platformValidUUID(effect) ||
-		kind != "update-start-registration" ||
-		epoch != lease.controllerEpoch || admitted != lease.fence ||
-		created < start.activationObserved ||
-		updated < created || updated > now ||
-		(state != "prepared" && state != "applied") {
-		return zero, false, fmt.Errorf(
-			"update-start registration effect tuple: %w",
-			errAppPlatformStageEvidence)
+	} else {
+		switch {
+		case count != baseEffects+1 || !platformValidUUID(effect):
+			return zero, false, fmt.Errorf(
+				"update-start registration effect count: %w",
+				errAppPlatformStageEvidence)
+		case kind != "update-start-registration":
+			return zero, false, fmt.Errorf(
+				"update-start registration effect kind: %w",
+				errAppPlatformStageEvidence)
+		case epoch != lease.controllerEpoch:
+			return zero, false, fmt.Errorf(
+				"update-start registration effect epoch: %w",
+				errAppPlatformStageEvidence)
+		case admitted != lease.fence:
+			return zero, false, fmt.Errorf(
+				"update-start registration effect fence: %w",
+				errAppPlatformStageEvidence)
+		case created < start.activationObserved:
+			return zero, false, fmt.Errorf(
+				"update-start registration effect start time: %w",
+				errAppPlatformStageEvidence)
+		case updated < created || updated > now:
+			return zero, false, fmt.Errorf(
+				"update-start registration effect clock: %w",
+				errAppPlatformStageEvidence)
+		case state != "prepared" && state != "applied":
+			return zero, false, fmt.Errorf(
+				"update-start registration effect state: %w",
+				errAppPlatformStageEvidence)
+		}
 	}
 	registration, err := platformBackendRegistrationForRelease(
 		e, platformManagedSource{
