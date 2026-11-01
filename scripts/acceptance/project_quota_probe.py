@@ -124,6 +124,13 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
         raise RuntimeError("owned filesystem remained mounted before UUID replacement")
     require_loop_unmounted(loop)
     require_loop_owner(loop, image)
+    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
+    require_mount_owner(mountpoint, loop)
+    command("umount", str(mountpoint))
+    if owned_mount_present(mountpoint, loop):
+        raise RuntimeError("owned filesystem remained mounted after log replay")
+    require_loop_unmounted(loop)
+    require_loop_owner(loop, image)
     replacement_uuid = str(uuid.uuid4())
     if replacement_uuid == previous_uuid.lower():
         raise RuntimeError("owned UUID replacement reused the old UUID")
