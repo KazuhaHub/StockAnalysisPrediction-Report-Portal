@@ -582,16 +582,40 @@ func testNativeManagedDisableEnable(
 	disableReview, err := s.createPlatformRemovalReview(
 		actor, installation, appplatform.ActionDisable)
 	if err != nil {
+		if errors.Is(err, errAppPlatformOperationConflict) {
+			rows, queryErr := s.st.query(`SELECT id,action,stage,
+				COALESCE(error_code,''),completed_ms,lease_owner
+				FROM app_platform_operations
+				WHERE installation_id=? ORDER BY created_ms,id`,
+				installation)
+			if queryErr != nil {
+				t.Log("native managed disable operation diagnostics", queryErr)
+			} else {
+				defer rows.Close()
+				for rows.Next() {
+					var id, action, stage, code string
+					var completed int64
+					var owner sql.NullString
+					if queryErr := rows.Scan(&id, &action, &stage, &code,
+						&completed, &owner); queryErr != nil {
+						t.Log("native managed disable operation scan", queryErr)
+						break
+					}
+					t.Logf("native managed disable operation id=%s action=%s stage=%s code=%s completed=%d owner=%v",
+						id, action, stage, code, completed, owner)
+				}
+			}
+		}
 		t.Fatal("native managed disable review", err)
 	}
 	disableCommit, err := s.consumePlatformRemovalReview(
 		actor, disableReview.ID, disableReview.SHA256,
-		platformFixtureID(984))
+		platformFixtureID(990))
 	if err != nil {
 		t.Fatal("native managed disable admission", err)
 	}
 	disableClaim, err := s.claimNextPlatformManagedUninstall(
-		ctx, platformFixtureID(985))
+		ctx, platformFixtureID(991))
 	if err != nil || disableClaim.lease.id != disableCommit.OperationID {
 		t.Fatal("native managed disable claim", disableClaim, err)
 	}
@@ -636,12 +660,12 @@ func testNativeManagedDisableEnable(
 	}
 	enableCommit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
 		ctx, actor, enableReview.ID, enableReview.SHA256,
-		platformFixtureID(986), target, facts.runtime)
+		platformFixtureID(992), target, facts.runtime)
 	if err != nil {
 		t.Fatal("native managed enable admission", err)
 	}
 	enableClaim, err := s.claimNextPlatformManagedEnable(
-		ctx, platformFixtureID(987))
+		ctx, platformFixtureID(993))
 	if err != nil || enableClaim.lease.id != enableCommit.OperationID {
 		t.Fatal("native managed enable claim", enableClaim, err)
 	}
