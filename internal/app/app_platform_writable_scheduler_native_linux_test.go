@@ -3,9 +3,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // Fresh operation: no stage calls, fault injection, manually claimed lease or
@@ -440,6 +443,14 @@ func testNativeWritableManagedRestore(
 		t.Fatal("managed restore claim", selected, err)
 	}
 	current := selected.lease
+	witnessPath := filepath.Join(
+		os.Getenv("TMPDIR"), "writable-update-start.json")
+	if err := os.Remove(witnessPath); err != nil &&
+		!errors.Is(err, os.ErrNotExist) {
+		t.Fatal("clear managed restore witness", err)
+	}
+	var registrationRaw, registrationSignature []byte
+	var runningReceipt journal.UpdateStartRunningReceipt
 	for {
 		renewed, err := s.st.updatePlatformOperationLeaseContext(
 			ctx, current.id, worker, &current)
@@ -454,29 +465,49 @@ func testNativeWritableManagedRestore(
 			if err != nil || intent.start.running == nil {
 				t.Fatal("managed restore registration witness", err)
 			}
+			registrationRaw = bytes.Clone(intent.raw)
+			registrationSignature =
+				bytes.Clone(intent.signature)
+			runningReceipt = *intent.start.running
+		}
+		stage := current.snapshot.Stage
+		next, err := s.runPlatformManagedRestore(
+			ctx, current, endpoint)
+		if err != nil {
+			t.Fatal("managed restore execution",
+				stage, err)
+		}
+		if stage == appplatform.StageActivate {
+			var receiptRaw string
+			if err := s.st.queryRow(`SELECT receipt_json
+				FROM app_platform_operation_effects
+				WHERE operation_id=? AND stage='activate'
+				AND state='applied'`,
+				commit.OperationID).Scan(&receiptRaw); err != nil {
+				t.Fatal("managed restore registration receipt",
+					err)
+			}
+			receipt, err := journal.ParseUpdateStartRegistrationReceipt(
+				[]byte(receiptRaw))
+			if err != nil {
+				t.Fatal("managed restore registration receipt",
+					err)
+			}
 			witness, err := json.Marshal(
 				platformWritableUpdateStartFixtureMessage{
 					Format:    "portal.fixture.writable-update-start/1-dev.1",
-					Raw:       intent.raw,
-					Signature: intent.signature,
-					Receipt:   intent.receipt,
-					Running:   *intent.start.running,
+					Raw:       registrationRaw,
+					Signature: registrationSignature,
+					Receipt:   receipt,
+					Running:   runningReceipt,
 				})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(
-				filepath.Join(os.Getenv("TMPDIR"),
-					"writable-update-start.json"),
-				witness, 0600); err != nil {
+				witnessPath, witness, 0600); err != nil {
 				t.Fatal(err)
 			}
-		}
-		next, err := s.runPlatformManagedRestore(
-			ctx, current, endpoint)
-		if err != nil {
-			t.Fatal("managed restore execution",
-				current.snapshot.Stage, err)
 		}
 		if next.id == "" {
 			break
