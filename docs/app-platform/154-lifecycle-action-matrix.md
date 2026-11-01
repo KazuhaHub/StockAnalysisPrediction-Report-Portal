@@ -95,15 +95,17 @@ Still required for H13 completion:
 
 - full concurrent operator acceptance across enable/update/repair, not only
   delete-data admission;
-- native repair execution against the disposable Linux/XFS/Docker runner;
 - static frontend repair and end-to-end lifecycle evidence for every row,
   including lost confirmations.
 
 The standalone delete-data path has SQLite and PostgreSQL 18.6 repository
 coverage for stale plans, concurrent confirmations, two-admin conflicts,
 transaction rollback and uncertain runner results. A native standalone
-delete-data acceptance run has not yet replaced the existing managed-uninstall
-native evidence.
+delete-data acceptance run is now part of the disposable Linux/XFS/Docker
+lifecycle and completed against the real runner. The managed repair path is
+also covered in that same native run: it starts after a real stop, checkpoints
+the retained namespace, starts/probes/registers/boots the repaired generation,
+serves a real backend request, and preserves the release/policy/grants tuple.
 
 Run `41330590646` completed install, A-to-B update, failed-update recovery,
 managed disable, managed enable, a real reader backend request after enable, and

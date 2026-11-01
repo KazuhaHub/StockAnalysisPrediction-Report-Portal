@@ -4,7 +4,7 @@ Reviewed: 2026-11-01, America/Los_Angeles.
 
 During this pass, Portal main was `d0158f19`
 and Apps main was `54239874c3e8c7af7071cfc6d8de669449440925`. The current
-integration candidates are Portal draft PR 364 (`602f91fe`) and Apps draft PR 36
+integration candidates are Portal draft PR 364 (`ffdd3b16`) and Apps draft PR 36
 (`78531bf`); the earlier reviewable network chain remains open. The verified
 candidate and SDK WIP commits in the table are the starting points. An integration
 tree now also contains H01-H03, the current-main regression fixes and the
@@ -56,8 +56,11 @@ tests cover successful repair, grant drift refusal, healthy-app refusal,
 concurrent worker claims, enable/repair operator races, failure to
 `recovery_required`, retry after that failure, and backend history. Repeated
 enable cycles now reconstruct enable sources instead of assuming install
-generation one. A repair leg was added after enable in the disposable Linux/XFS/
-Docker native lifecycle workflow; its new CI result is still pending.
+generation one. The disposable Linux/XFS/Docker native lifecycle then stopped
+the enabled generation again, reviewed and executed repair, served a real reader
+backend request on the repaired generation, stopped it once more, and completed
+standalone `delete_data` for its retained namespace. Candidate `ffdd3b16`
+passed quota/browser run `41353916160`.
 
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
