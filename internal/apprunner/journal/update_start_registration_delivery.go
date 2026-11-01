@@ -194,8 +194,17 @@ func (s *Store) executeUpdateStartRegistration(ctx context.Context, raw, signatu
 		}
 		facts = fresh
 	}
+	request, expected, err := updateStartExpectedSnapshot(
+		facts.source.start, facts.source.running.Claim, descriptor)
+	if err != nil {
+		return zero, fmt.Errorf(
+			"update-start registration delivery request: %w", err)
+	}
+	facts.source.request = request
+	facts.source.expected = expected
 	if err := checkUpdateStartRegistrationCurrent(ctx, facts); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration delivery current: %w", err)
 	}
 	if s.closing.Load() {
 		return zero, ErrFenceReconciliation
@@ -203,12 +212,12 @@ func (s *Store) executeUpdateStartRegistration(ctx context.Context, raw, signatu
 	var observed driver.UpdateStartRegistrationObservation
 	if recovery {
 		observed, err = native.ObserveUpdateStartRegistration(
-			ctx, facts.source.request, facts.source.expected,
+			ctx, request, expected,
 			facts.source.running.NativeID, updateStartRegistrationBinding(marker),
 			document)
 	} else {
 		observed, err = native.DeliverUpdateStartRegistration(
-			ctx, facts.source.request, facts.source.expected,
+			ctx, request, expected,
 			facts.source.running.NativeID, updateStartRegistrationBinding(marker),
 			document)
 	}
@@ -231,6 +240,8 @@ func (s *Store) settleUpdateStartRegistration(ctx context.Context, before update
 		return zero, err
 	}
 	defer tx.Rollback()
+	facts.source.request = before.source.request
+	facts.source.expected = before.source.expected
 	if !sameUpdateStartRegistrationSource(before, facts) {
 		return zero, ErrFenceReconciliation
 	}
