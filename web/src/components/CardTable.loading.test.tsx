@@ -1,20 +1,16 @@
-import { act, render } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import CardTable from './CardTable'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }))
 
-afterEach(() => vi.useRealTimers())
-
 const columns = [{ title: 'Name', dataIndex: 'name', key: 'name' }]
 
-// A first load has no rows to dim under a spinner: it shows skeleton rows instead, after a short
-// delay so a fast answer never flashes. A refresh keeps the rows and antd's (delayed) spinner.
+// A first load has no rows to dim under a spinner: it shows skeleton rows instead, from the first
+// frame (a delay is a blank table). A refresh keeps the rows and antd's (delayed) spinner.
 it('shows skeleton rows on a first load, not an empty table under a spinner', () => {
-  vi.useFakeTimers()
   const { container } = render(<CardTable rowKey="name" columns={columns} dataSource={[]} loading />)
   expect(container.querySelector('.ant-empty')).toBeNull()
-  act(() => vi.advanceTimersByTime(300))
   expect(container.querySelector('.ant-skeleton')).not.toBeNull()
   expect(container.querySelector('.ant-spin-spinning')).toBeNull()
 })

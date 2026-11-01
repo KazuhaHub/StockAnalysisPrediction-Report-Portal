@@ -22,19 +22,11 @@ it('says it is waiting for the connection, still without children, while the con
   expect(screen.queryByText('defaults')).toBeNull()
 })
 
-// Nothing flashes for an answer that arrives at once; a slower one gets the shared loading ring in
-// the middle of the space the view will fill, with its words, shortly after the click.
-it('shows a centred spinner only after a short delay, and keeps an accessible loading status', () => {
-  vi.useFakeTimers()
-  try {
-    const { container } = render(<LoadGate loading><span>defaults</span></LoadGate>)
-    expect(screen.getByRole('status').textContent).toBe('common.loading')
-    expect(container.querySelector('.ant-spin')).toBeNull()
-    act(() => vi.advanceTimersByTime(150))
-    expect(container.querySelector('.ant-spin')).not.toBeNull()
-    expect(container.querySelector('.ant-skeleton')).toBeNull()
-    expect(container.querySelector('.rp-route-progress')).toBeNull()
-  } finally {
-    vi.useRealTimers()
-  }
+// The ring is there from the first frame: a delay before it is a blank frame, repeated on every
+// Suspense layer a page passes through. Its fade-in is CSS (.rp-loading).
+it('shows the loading ring and status from the first frame', () => {
+  const { container } = render(<LoadGate loading><span>defaults</span></LoadGate>)
+  expect(screen.getByRole('status').textContent).toBe('common.loading')
+  expect(container.querySelector('.ant-spin')).not.toBeNull()
+  expect(container.querySelector('.ant-skeleton')).toBeNull()
 })

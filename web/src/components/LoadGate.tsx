@@ -3,7 +3,6 @@ import { Button, Result, Spin, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import WaitingForConnection from './WaitingForConnection'
-import useDelayedFlag from '../lib/useDelayedFlag'
 
 // What a view shows while the answer it describes is still on the wire.
 //
@@ -25,9 +24,10 @@ import useDelayedFlag from '../lib/useDelayedFlag'
 // muted line that it is waiting.
 //
 // The placeholder is the shared loading ring, centred in the space the view will fill, with its
-// words. It appears after a short delay, so an answer that arrives at once flashes nothing, and a
-// slow one is acknowledged almost at once where the reader is looking. (A generic skeleton was tried
-// and dropped: one set of grey bars for every page previews none of them, and reads as a flicker.)
+// words. It is there from the first frame and fades in, so a fast answer leaves at most a faint
+// trace while a slow one is acknowledged at once where the reader is looking. (Holding it back
+// behind a delay left a blank frame instead, once per Suspense layer a page passes through; and a
+// generic skeleton, one set of grey bars for every page, previewed none of them.)
 // The loading status is announced from the first frame.
 export default function LoadGate({
   loading,
@@ -79,15 +79,10 @@ export function LoadingPlaceholder({
   label?: string
 }) {
   const { t } = useTranslation()
-  const shown = useDelayedFlag(true, 150)
-  // One status line: read out from the first frame, and shown under the ring once the delay has
-  // passed. Until then the placeholder takes no room, so a fast answer moves nothing.
   return (
-    <div aria-busy className={`rp-loading${shown ? ' rp-loading--shown' : ''}`} style={{ minHeight }}>
-      {shown && <Spin />}
-      <Typography.Text role="status" type="secondary" className={shown ? undefined : 'rp-sr-only'}>
-        {label ?? t('common.loading')}
-      </Typography.Text>
+    <div aria-busy className="rp-loading" style={{ minHeight }}>
+      <Spin />
+      <Typography.Text role="status" type="secondary">{label ?? t('common.loading')}</Typography.Text>
       <WaitingForConnection />
     </div>
   )

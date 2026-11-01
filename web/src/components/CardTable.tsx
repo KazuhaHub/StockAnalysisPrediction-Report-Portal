@@ -2,7 +2,6 @@ import { useRef } from 'react'
 import { Button, Empty, Grid, Skeleton, Table, type TableProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { ColumnType } from 'antd/es/table'
-import useDelayedFlag from '../lib/useDelayedFlag'
 
 /** A column may name itself for the phone card when its title is not plain text. */
 export type CardColumn<T> = ColumnType<T> & { phoneLabel?: string }
@@ -36,16 +35,15 @@ export default function CardTable<T>({
   // A vertical scroll still bounds a long list; only the sideways one goes.
   const scroll = phone ? (props.scroll?.y ? { y: props.scroll.y } : undefined) : props.scroll
   // Nothing matching is not nothing there [Carbon search / empty states].
-  // A first load has no rows to dim under a spinner, so it shows skeleton rows (after a short delay,
-  // so a fast answer flashes nothing); a refresh keeps its rows under antd's own spinner, delayed
-  // the same way [Primer loading; Geist skeleton].
+  // A first load has no rows to dim under a spinner, so it shows skeleton rows in the shape of the
+  // list, from the first frame and fading in (a delay left a blank table); a refresh keeps its rows
+  // under antd's own spinner, which waits 300 ms because the rows are already there to read.
   const loadingFlag = typeof props.loading === 'object' ? props.loading.spinning !== false : !!props.loading
   // Only before the first answer: a reload of a list that is genuinely empty (or filtered to
   // nothing) keeps its empty state under the spinner. A different list (another scope) remounts.
   const answered = useRef(false)
   if (!loadingFlag) answered.current = true
   const firstLoad = loadingFlag && !props.dataSource?.length && !answered.current
-  const skeleton = useDelayedFlag(firstLoad)
   const loading = firstLoad
     ? false
     : typeof props.loading === 'object'
@@ -57,7 +55,7 @@ export default function CardTable<T>({
         emptyText: (
           <div aria-busy>
             <span role="status" className="rp-sr-only">{t('common.loading')}</span>
-            {skeleton && <Skeleton active title={false} paragraph={{ rows: 5 }} />}
+            <Skeleton active title={false} paragraph={{ rows: 5 }} className="rp-fade-in" />
           </div>
         ),
       }
