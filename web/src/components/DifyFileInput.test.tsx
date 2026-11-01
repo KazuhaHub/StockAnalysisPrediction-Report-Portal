@@ -5,6 +5,7 @@ import { App } from 'antd'
 import { useState } from 'react'
 import DifyFileInput from './DifyFileInput'
 import { MAX_FILES, MAX_FILE_BYTES, type UploadedFile } from '../lib/difyInputs'
+import { findFailure } from '../test/notifications'
 
 const uploads = vi.hoisted(() => ({ calls: [] as Array<[string, FormData]>, fail: false, seq: 0 }))
 vi.mock('../api/client', () => ({
@@ -73,7 +74,7 @@ describe('DifyFileInput', () => {
     const user = userEvent.setup()
     const { container } = render(<Harness type="file-list" />)
     await user.upload(picker(container), bigFile('huge.pdf', MAX_FILE_BYTES + 1))
-    expect(await screen.findByText(/run\.fileTooLarge/)).toBeTruthy()
+    expect(await findFailure(/run\.fileTooLarge/)).toBeTruthy()
     expect(uploads.calls).toHaveLength(0)
     expect(screen.getByTestId('ids').textContent).toBe('')
   })
@@ -85,7 +86,7 @@ describe('DifyFileInput', () => {
     // yet" as the first and sail past the ceiling together.
     const files = Array.from({ length: MAX_FILES + 1 }, (_, i) => new File(['x'], `f${i}.pdf`, { type: 'text/plain' }))
     await user.upload(picker(container), files)
-    expect(await screen.findByText(/run\.fileTooMany/)).toBeTruthy()
+    expect(await findFailure(/run\.fileTooMany/)).toBeTruthy()
     await waitFor(() => expect(screen.getByTestId('ids').textContent.split(',')).toHaveLength(MAX_FILES))
     expect(uploads.calls).toHaveLength(MAX_FILES)
   })
@@ -112,7 +113,7 @@ describe('DifyFileInput', () => {
     const user = userEvent.setup()
     const { container } = render(<Harness type="file-list" />)
     await user.upload(picker(container), new File(['hello'], 'a.pdf', { type: 'application/pdf' }))
-    expect(await screen.findByText('run.uploadFailed')).toBeTruthy()
+    expect(await findFailure('run.uploadFailed')).toBeTruthy()
     expect(screen.getByTestId('ids').textContent).toBe('')
   })
 })

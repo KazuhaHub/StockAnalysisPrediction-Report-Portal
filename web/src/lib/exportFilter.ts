@@ -332,12 +332,21 @@ export function clearBelowEntryPreset(f: ExportFilter): ExportFilter {
 
 export interface AuditFilterInput {
   action?: string
+  notAction?: string
   /** A category's events, used when a category is picked without one event. */
   categoryActions?: string[]
   actor?: string
+  notActor?: string
   ip?: string
+  notIp?: string
+  target?: string
+  notTarget?: string
   q?: string
+  /** A civil date, the older form of from. */
   since?: string
+  /** The range as RFC 3339 instants, both ends inclusive. */
+  from?: string
+  to?: string
 }
 
 export function auditFilterToTree(a: AuditFilterInput): ExportFilter {
@@ -348,10 +357,18 @@ export function auditFilterToTree(a: AuditFilterInput): ExportFilter {
   }
   if (a.action?.trim()) add('action', 'in', a.action)
   else if (a.categoryActions?.length) items.push({ field: 'action', operator: 'in', values: [...a.categoryActions] })
+  add('action', 'not_in', a.notAction)
   add('actor', 'is', a.actor)
+  add('actor', 'is_not', a.notActor)
   add('ip', 'is', a.ip)
+  add('ip', 'is_not', a.notIp)
+  add('target_id', 'is', a.target)
+  add('target_id', 'is_not', a.notTarget)
   add('q', 'contains', a.q)
   add('at', 'after', a.since)
+  if (a.from && a.to) items.push({ field: 'at', operator: 'between', values: [a.from, a.to] })
+  else if (a.from) add('at', 'after', a.from)
+  else if (a.to) add('at', 'before', a.to)
   return { op: 'and', items }
 }
 

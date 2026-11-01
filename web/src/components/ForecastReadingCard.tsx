@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Skeleton, Space, Steps, Table, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Card, Collapse, Descriptions, Skeleton, Space, Steps, Tag, Typography, theme } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +13,7 @@ import ScrollRegion from './forecast/ScrollRegion'
 import { formatReportDateTime, isInstant } from '../lib/datetime'
 import { forecastLinkColor, forecastPalette } from '../lib/forecastPresentation'
 import WarnTag from './forecast/WarnTag'
+import CardTable from './CardTable'
 
 // The report's own prediction panel (plan §8.2). It is part of the READING page, not an admin view:
 // a reader is looking at what this report promised, and whether the market has answered yet.
@@ -322,7 +323,7 @@ export default function ForecastReadingCard({
               <div
                 data-testid="forecast-scenario-band"
                 data-stops={JSON.stringify(bandStops)}
-                style={{ height: 8, borderRadius: 8, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
+                style={{ height: 8, borderRadius: token.borderRadius, background: `linear-gradient(90deg, ${bandStops.join(', ')})` }}
               />
               {cursor !== undefined && (
                 <div data-testid="forecast-scenario-cursor" data-position={cursor} style={{ position: 'absolute', insetBlockStart: 0, insetInlineStart: `${cursor}%`, width: 0, height: 8 }}>
@@ -346,7 +347,7 @@ export default function ForecastReadingCard({
                       insetInlineStart: -1,
                       width: 2,
                       height: 18,
-                      borderRadius: 1,
+                      borderRadius: token.borderRadiusXS,
                       background: token.colorText,
                       // A hairline of the card colour keeps the tick distinct where it crosses the band.
                       boxShadow: `0 0 0 1px ${token.colorBgContainer}`,
@@ -387,7 +388,7 @@ export default function ForecastReadingCard({
                   status: m.status === 'resolved' ? 'finish' : m.phase === 'final' ? 'error' : m.phase === 'settling' || m.phase === 'retrying' || m.phase === 'overdue' ? 'process' : 'wait',
                 }))}
               />
-              <ScrollRegion label={t('forecast.panel.checkpoints')}><Table
+              <ScrollRegion label={t('forecast.panel.checkpoints')}><CardTable
                 size="small"
                 rowKey="key"
                 pagination={false}
@@ -421,7 +422,7 @@ export default function ForecastReadingCard({
           {others.length > 0 && (
             <div>
               <Typography.Text strong>{t('forecast.panel.others')}</Typography.Text>
-              <ScrollRegion label={t('forecast.panel.others')}><Table
+              <ScrollRegion label={t('forecast.panel.others')}><CardTable
                 size="small" pagination={false} rowKey="id" dataSource={others} style={{ minWidth: 550 }}
                 onRow={(other) => ({ style: { color: other.report_id ? undefined : token.colorTextSecondary } })}
                 columns={[
@@ -435,10 +436,11 @@ export default function ForecastReadingCard({
           )}
 
           {allowPayload && set.payload && (
-            <details>
-              <summary style={{ cursor: 'pointer' }}>{t('forecast.panel.payload')}</summary>
-              <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 12 }}>{set.payload}</pre>
-            </details>
+            <Collapse
+              ghost
+              size="small"
+              items={[{ key: 'payload', label: t('forecast.panel.payload'), children: <pre className="rp-code">{set.payload}</pre> }]}
+            />
           )}
         </div>
       )}

@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react'
-import { Button, ConfigProvider, Drawer, Dropdown, Menu, Spin, Typography, theme } from 'antd'
+import { Button, ConfigProvider, Drawer, Dropdown, Menu, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
-import { DownOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
+import { DownOutlined, ExportOutlined, HomeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { prefetch } from '../../lib/prefetch'
@@ -10,6 +10,8 @@ import { useSite } from '../../site'
 import { useNarrow } from '../../lib/useNarrow'
 import AdminSearch from './AdminSearch'
 import { ADMIN_GROUPS, adminPage } from './adminNavigation'
+import { RADIUS } from '../../theme/radius'
+import { LoadingPlaceholder } from '../../components/LoadGate'
 
 const COLLAPSE_KEY = 'rp.manage.sider.collapsed'
 const OPEN_KEY = 'rp.manage.sider.open'
@@ -72,7 +74,7 @@ export default function ManageLayout() {
   ]
   const menu = <ConfigProvider theme={{ components: { Menu: {
     itemBg: 'transparent', subMenuItemBg: 'transparent', popupBg: token.colorBgContainer,
-    itemBorderRadius: 8,
+    itemBorderRadius: RADIUS.base,
     itemSelectedBg: token.colorFillSecondary, itemSelectedColor: token.colorText,
     subMenuItemSelectedColor: token.colorText, itemHoverBg: token.colorFillQuaternary,
   } } }}><Menu className="rp-admin-menu" mode="inline" inlineCollapsed={railCollapsed} selectedKeys={[active]}
@@ -89,10 +91,14 @@ export default function ManageLayout() {
       {!railCollapsed && t('manage.search')}
     </Button>
   )
-  const relatedItems: MenuProps['items'] = (page?.related ?? []).flatMap((key) => {
+  const relatedItems: NonNullable<MenuProps['items']> = (page?.related ?? []).flatMap((key) => {
     const related = adminPage(key)
     return related ? [{ key, label: t(related.label), icon: related.icon }] : []
   })
+  // The reader-facing page leaves the console, so it sits apart, after a divider, with the open icon.
+  if (page?.readerPage) {
+    relatedItems.push({ type: 'divider' }, { key: `reader:${page.readerPage.to}`, label: t(page.readerPage.label), icon: <ExportOutlined /> })
+  }
   const header = (
     <header className="rp-admin-page-header">
       <div className="rp-admin-page-header__row">
@@ -105,7 +111,7 @@ export default function ManageLayout() {
         {!page && <div id="rp-admin-page-actions" className="rp-admin-page-actions" />}
         {page && relatedItems.length > 0 && (
           <Dropdown trigger={['click']} placement="bottomRight"
-            menu={{ items: relatedItems, onClick: ({ key }) => go(`/manage/${key}`) }}>
+            menu={{ items: relatedItems, onClick: ({ key }) => (key.startsWith('reader:') ? navigate(key.slice('reader:'.length)) : go(`/manage/${key}`)) }}>
             <Button size="small" aria-label={t('manage.related')}>
               {t('manage.related')} <DownOutlined />
             </Button>
@@ -124,7 +130,7 @@ export default function ManageLayout() {
     <div className={`rp-admin-content${active === 'users' ? ' rp-admin-content--directory' : ''}`} id="rp-admin-content">
       {header}
       <div className="rp-admin-page-body" key={loc.pathname}>
-      <Suspense fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
+      <Suspense fallback={<LoadingPlaceholder minHeight="40vh" />}>
         <Outlet />
       </Suspense>
       </div>

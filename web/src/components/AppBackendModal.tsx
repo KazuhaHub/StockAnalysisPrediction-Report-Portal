@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Form, Input, Modal, Popconfirm, Space, Switch, Typography } from 'antd'
+import { Alert, App, Button, Form, Input, Modal, Space, Switch, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import { api, ApiError, errText } from '../api/client'
 import type { AppSummary } from '../api/types'
 import WaitingForConnection from './WaitingForConnection'
@@ -82,6 +83,6 @@ export default function AppBackendModal({ app, onClose }: { app: AppSummary | nu
       <Form.Item name="policy" label={t('apps.backendPolicy')} rules={[{ required: true }]}><Input.TextArea rows={10} spellCheck={false} /></Form.Item>
       <Form.Item name="enabled" label={t('apps.backendEnabled')} valuePropName="checked"><Switch /></Form.Item>
     </Form>
-    {connection && <Popconfirm title={t('apps.backendDeleteConfirm')} onConfirm={remove}><Button danger loading={saving}>{t('common.delete')}</Button></Popconfirm>}
+    {connection && <Confirm title={t('apps.backendDeleteConfirm')} onConfirm={remove} okText={t('apps.backendDeleteAction')}><Button danger loading={saving}>{t('common.delete')}</Button></Confirm>}
   </Modal>
 }

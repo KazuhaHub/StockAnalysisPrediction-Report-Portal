@@ -108,16 +108,18 @@ describe('SettingsWorkspace', () => {
         </SettingsWorkspace>
       )
       const { container, rerender } = render(view('a'))
+      const atMount = created
       rerender(view('b'))
       const bar = container.querySelector('.rp-settings-tab-ink') as HTMLElement
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
       rerender(view('b'))
-      expect(created).toBe(1)
-      // A callback that finds the tab unmoved (only the list changed) leaves the slide running.
-      observers[0]()
+      expect(created).toBe(atMount)
+      // A callback that finds the tab unmoved (only the list changed) leaves the slide running. The
+      // underline's observer is the last one made; the edge-fade hook's comes first.
+      observers[observers.length - 1]()
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(true)
       boxes.Beta = { left: 70, width: 52 }
-      observers[0]()
+      observers[observers.length - 1]()
       expect(bar.style.transform).toBe('translateX(70px)')
       expect(bar.classList.contains('rp-settings-tab-ink--animated')).toBe(false)
     })
@@ -129,6 +131,63 @@ describe('SettingsWorkspace', () => {
         </SettingsWorkspace>,
       )
       expect((container.querySelector('.rp-settings-tab-ink') as HTMLElement).style.visibility).toBe('hidden')
+    })
+  })
+
+  // More tabs than fit: the row scrolls, but without a scrollbar under it. A fade marks the side
+  // that has more, and choosing a tab brings it fully into view.
+  describe('a row wider than its space', () => {
+    let scrollLeft = 0
+    const scrollTo = vi.fn((opts: ScrollToOptions) => {
+      scrollLeft = opts.left ?? scrollLeft
+    })
+    const boxes: Record<string, { left: number; width: number }> = { Alpha: { left: 0, width: 60 }, Beta: { left: 200, width: 60 } }
+    const setup = () => {
+      vi.spyOn(HTMLElement.prototype, 'offsetLeft', 'get').mockImplementation(function (this: HTMLElement) {
+        return boxes[this.textContent ?? '']?.left ?? 0
+      })
+      vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return boxes[this.textContent ?? '']?.width ?? 0
+      })
+      vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.getAttribute('role') === 'tablist' ? 100 : 0
+      })
+      vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.getAttribute('role') === 'tablist' ? 260 : 0
+      })
+      vi.spyOn(HTMLElement.prototype, 'scrollLeft', 'get').mockImplementation(() => scrollLeft)
+      HTMLElement.prototype.scrollTo = scrollTo as unknown as typeof HTMLElement.prototype.scrollTo
+    }
+    const original = HTMLElement.prototype.scrollTo
+    afterEach(() => {
+      // Assigned rather than spied, so put back by hand: later tests must not see the mock.
+      HTMLElement.prototype.scrollTo = original
+      vi.restoreAllMocks()
+      scrollLeft = 0
+      scrollTo.mockClear()
+    })
+
+    it('marks the side that has more tabs, and follows the scroll', () => {
+      setup()
+      render(<Harness />)
+      const list = screen.getByRole('tablist')
+      expect(list.dataset.end).toBe('true')
+      expect(list.dataset.start).toBeUndefined()
+      scrollLeft = 160
+      fireEvent.scroll(list)
+      expect(list.dataset.start).toBe('true')
+      expect(list.dataset.end).toBeUndefined()
+    })
+
+    it('brings a chosen tab that is out of view into view', () => {
+      setup()
+      render(<Harness />)
+      fireEvent.click(screen.getByRole('tab', { name: 'Beta' }))
+      expect(scrollTo).toHaveBeenCalled()
+      const left = scrollTo.mock.calls[scrollTo.mock.calls.length - 1][0].left ?? 0
+      // Beta spans 200..260 in a 100px window: the window must end at or past 260 and start at or before 200.
+      expect(left).toBeLessThanOrEqual(200)
+      expect(left + 100).toBeGreaterThanOrEqual(260)
     })
   })
 })

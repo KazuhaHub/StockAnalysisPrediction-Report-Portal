@@ -72,6 +72,17 @@ describe('ManageLayout — grouped rail', () => {
     await waitFor(() => expect(screen.getAllByRole('menuitem').length).toBeGreaterThan(before))
   })
 
+  // A page whose readers see it elsewhere (the forecast record) offers that page in the related
+  // menu, after the admin pages, rather than as a link among its own actions.
+  it('offers the reader page in the related menu and goes there', async () => {
+    locState.pathname = '/manage/forecast'
+    render(<ManageLayout />)
+    fireEvent.click(screen.getByRole('button', { name: /manage\.related/ }))
+    const item = await screen.findByRole('menuitem', { name: /nav\.forecast_record/ })
+    fireEvent.click(item)
+    expect(navigate).toHaveBeenCalledWith('/forecast')
+  })
+
   it('keeps the page actions slot inside the header title row so it can wrap', () => {
     locState.pathname = '/manage'
     const { container } = render(<ManageLayout />)

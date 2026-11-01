@@ -39,7 +39,7 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
   const palette = forecastPalette(token)
 
   const box: CSSProperties = {
-    borderRadius: 6,
+    borderRadius: token.borderRadiusSM,
     padding: '8px 10px',
     minHeight: 64,
     flex: '1 1 0%',
@@ -109,7 +109,7 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
     return (
       <button type="button" data-state="pending" className="rp-fc-cell" onClick={onOpen} style={{ ...box, ...quiet, ...press }}>
         <span>{t('forecast.cell.pending', { done, total })}</span>
-        <div data-part="progress" aria-hidden="true" style={{ height: 4, borderRadius: 2, background: token.colorFillSecondary, overflow: 'hidden' }}>
+        <div data-part="progress" aria-hidden="true" style={{ height: 4, borderRadius: token.borderRadiusXS, background: token.colorFillSecondary, overflow: 'hidden' }}>
           <div
             style={{
               height: 4,
@@ -169,7 +169,7 @@ export default function ForecastCellView({ cell: c, cp, metric, mode, gateHintId
             fontSize: 11,
             lineHeight: '16px',
             padding: '0 5px',
-            borderRadius: 4,
+            borderRadius: token.borderRadiusSM,
             border: `1px solid ${token.colorBorderSecondary}`,
             color: token.colorTextSecondary,
           }}

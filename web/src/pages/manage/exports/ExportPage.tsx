@@ -249,7 +249,10 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
       {source && (
         <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '260px minmax(0, 1fr)', gap: compact ? 16 : 24, alignItems: 'start' }}>
-            <aside style={compact ? undefined : { position: 'sticky', top: 16, background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
+            {/* Sticks at its scroll area's own top edge. In the console that is the page body, which has
+                no top padding, so any offset would push the rail below the results before anything
+                has scrolled. The reader's page scrolls the window, under the sticky app header. */}
+            <aside style={compact ? undefined : { position: 'sticky', top: reader ? 'calc(var(--rp-header-h, 64px) + 16px)' : 0, background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
               {rail}
             </aside>
             <main style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>

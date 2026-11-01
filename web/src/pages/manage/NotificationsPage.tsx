@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Drawer, Form, Input, InputNumber, Modal, Select, Space, Switch, Tabs, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { notifications, type NotificationChannel, type NotificationDelivery, type NotificationDeliveryDetail, type NotificationOverview, type NotificationRoute, type NotificationChannelInput, type NotificationRouteInput, type NotificationState } from '../../api/notifications'
 import { errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { LoadOpts } from '../../lib/loadFailure'
 import LoadGate from '../../components/LoadGate'
 import useFormDraft from './useFormDraft'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
@@ -60,7 +63,7 @@ export default function NotificationsPage() {
   useEffect(() => { if (historyWanted) void loadHistory() }, [state, retryKey, historyWanted]) // eslint-disable-line react-hooks/exhaustive-deps
   const run = async (fn: () => Promise<unknown>, refreshHistory = true) => {
     setBusy(true)
-    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
+    try { await fn(); await load({ quiet: true }); if (historyLoaded && refreshHistory) await loadHistory(false, { quiet: true }) } catch (e) { notifyError(errText(e, t)) } finally { setBusy(false) }
   }
   const eventLabel = (kind: string) => t(`webhook.event.${kind}`, kind)
   const stateLabel = (value: string) => t(`notify.state.${value}`, value)
@@ -121,7 +124,7 @@ export default function NotificationsPage() {
         { key: 'channels', label: t('notify.channels'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Typography.Paragraph>{t('notify.channelHelp')}</Typography.Paragraph>
           <Button type="primary" onClick={() => openChannel(null)}>{t('notify.addChannel')}</Button>
-          <Table<NotificationChannel> rowKey="id" dataSource={channels} scroll={{ x: 850 }} columns={[
+          <CardTable<NotificationChannel> rowKey="id" dataSource={channels} scroll={{ x: 850 }} columns={[
             { title: t('notify.label'), dataIndex: 'label' },
             { title: t('notify.adapter'), render: (_, c) => t(`notify.adapter.${c.adapter}`) },
             { title: t('notify.destination'), render: (_, c) => c.adapter === 'email' ? c.recipients.join(', ') || t('notify.personalEmail') : c.url_host || '—' },
@@ -129,27 +132,27 @@ export default function NotificationsPage() {
             { title: t('batch.col.actions'), render: (_, c) => <Space wrap>
               <Button size="small" onClick={() => openChannel(c)}>{t('common.edit')}</Button>
               {c.adapter !== 'inbox' && <Button size="small" disabled={!c.enabled || busy} onClick={() => { setTestTo(''); setTestChannel(c) }}>{t('notify.test')}</Button>}
-              {(!c.id.startsWith('legacy:') || c.legacy_ref.startsWith('webhook:')) && <Popconfirm title={t('notify.deleteChannel')} onConfirm={() => run(() => notifications.deleteChannel(c.id, c.revision))}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Popconfirm>}
+              {(!c.id.startsWith('legacy:') || c.legacy_ref.startsWith('webhook:')) && <Confirm title={t('notify.deleteChannel')} onConfirm={() => run(() => notifications.deleteChannel(c.id, c.revision))} okText={t('notify.deleteChannelAction')} irreversible><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Confirm>}
             </Space> },
           ]} />
         </Space> },
         { key: 'rules', label: t('notify.rules'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Alert type="info" showIcon title={t('notify.ruleHelp')} />
           <Button type="primary" onClick={() => openRule(null)}>{t('notify.addRule')}</Button>
-          <Table<NotificationRoute> rowKey="id" dataSource={rules} scroll={{ x: 750 }} columns={[
+          <CardTable<NotificationRoute> rowKey="id" dataSource={rules} scroll={{ x: 750 }} columns={[
             { title: t('notify.label'), dataIndex: 'label' },
             { title: t('notify.channels'), render: (_, r) => channels.find(c => c.id === r.channel_id)?.label || r.channel_id },
             { title: t('notify.events'), render: (_, r) => r.events.split(',').map(kind => <Tag key={kind}>{eventLabel(kind)}</Tag>) },
             { title: t('notify.audience'), render: (_, r) => t(`notify.mode.${r.recipient_mode}`) },
             { title: t('notify.status'), render: (_, r) => t(r.enabled ? 'notify.enabled' : 'notify.disabled') },
-            { title: t('batch.col.actions'), render: (_, r) => <Space><Button size="small" onClick={() => openRule(r)}>{t('common.edit')}</Button><Popconfirm title={t('notify.deleteRule')} onConfirm={() => run(() => notifications.deleteRoute(r.id, r.revision))}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Popconfirm></Space> },
+            { title: t('batch.col.actions'), render: (_, r) => <Space><Button size="small" onClick={() => openRule(r)}>{t('common.edit')}</Button><Confirm title={t('notify.deleteRule')} onConfirm={() => run(() => notifications.deleteRoute(r.id, r.revision))} okText={t('notify.deleteRuleAction')}><Button size="small" danger disabled={busy}>{t('common.delete')}</Button></Confirm></Space> },
           ]} />
         </Space> },
         { key: 'history', label: t('notify.history'), children: <Space orientation="vertical" style={{ width: '100%' }}>
           <Alert type="info" title={t('notify.acceptanceHelp')} />
           <Space><Select allowClear placeholder={t('notify.status')} value={state} onChange={setState} style={{ width: 180 }} options={['pending', 'leased', 'retry_wait', 'accepted', 'failed', 'uncertain', 'canceled', 'expired'].map(value => ({ value, label: stateLabel(value) }))} /><Button onClick={() => run(() => loadHistory())} disabled={busy}>{t('common.refresh')}</Button></Space>
           {historyError && <Alert type="error" title={historyError} />}
-          <Table<NotificationDelivery> rowKey="id" dataSource={history} loading={!historyLoaded && !historyError} pagination={false} scroll={{ x: 850 }} columns={[
+          <CardTable<NotificationDelivery> rowKey="id" dataSource={history} loading={!historyLoaded && !historyError} pagination={false} scroll={{ x: 850 }} columns={[
             { title: t('notify.occurredAt'), dataIndex: 'occurred_at' },
             { title: t('notify.events'), render: (_, d) => eventLabel(d.event_type) },
             { title: t('notify.channels'), render: (_, d) => channels.find(c => c.id === d.channel_id)?.label || d.channel_id },
@@ -222,7 +225,7 @@ export default function NotificationsPage() {
       {detail && <Space orientation="vertical" style={{ width: '100%' }}>
         <Typography.Text copyable>{detail.delivery.id}</Typography.Text><Tag>{stateLabel(detail.delivery.state)}</Tag><Typography.Text>{detail.delivery.error_code}</Typography.Text>
         <Typography.Title level={5}>{detail.preview.subject}</Typography.Title><Typography.Paragraph style={{ whiteSpace: 'pre-wrap' }}>{detail.preview.text}</Typography.Paragraph>
-        <Table rowKey="id" size="small" dataSource={detail.attempts} columns={[{ title: t('notify.occurredAt'), dataIndex: 'started_at' }, { title: t('notify.status'), dataIndex: 'outcome', render: stateLabel }, { title: t('notify.error'), dataIndex: 'error_code' }]} />
+        <CardTable rowKey="id" size="small" dataSource={detail.attempts} columns={[{ title: t('notify.occurredAt'), dataIndex: 'started_at' }, { title: t('notify.status'), dataIndex: 'outcome', render: stateLabel }, { title: t('notify.error'), dataIndex: 'error_code' }]} />
         <Space>{!['pending', 'leased', 'retry_wait'].includes(detail.delivery.state) && <Button onClick={() => { setAction('replay'); setReason(''); setConfirmed(false); setRequestID(crypto.randomUUID()) }}>{t('notify.replay')}</Button>}{detail.delivery.state === 'uncertain' && <Button onClick={() => { setAction('review'); setReason('') }}>{t('notify.dismissUncertain')}</Button>}</Space>
       </Space>}
     </Drawer>

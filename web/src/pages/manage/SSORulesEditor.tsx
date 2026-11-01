@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, ConfigProvider, Input, Select, Space, Switch, Tooltip, Typography } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
@@ -9,6 +9,9 @@ import type { Role, SSOProviderAdmin, SSORuleRow, SSORulesResp, UserGroupRow } f
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 // The group-rules editor.
 //
@@ -99,7 +102,7 @@ export default function SSORulesEditor({
       message.success(t('common.saved'))
       await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -201,6 +204,7 @@ export default function SSORulesEditor({
           <span>{t('sso.rules.keepOnMiss')}</span>
         </Tooltip>
       ),
+      phoneLabel: t('sso.rules.keepOnMiss'),
       width: 100,
       render: (_: unknown, _r: SSORuleRow, i: number) => (
         <Switch size="small" checked={rules[i].keep_on_miss} onChange={(v) => patch(i, { keep_on_miss: v })} />
@@ -213,7 +217,7 @@ export default function SSORulesEditor({
         <Space size={4}>
           {shadowed.includes(rules[i].id) && !dirty && (
             <Tooltip title={t('sso.rules.shadowedHint')}>
-              <Tag color="warning">{t('sso.rules.shadowed')}</Tag>
+              <StatusTag tone="warning">{t('sso.rules.shadowed')}</StatusTag>
             </Tooltip>
           )}
           <Button
@@ -248,7 +252,7 @@ export default function SSORulesEditor({
           setDirty(true)
         }}
       >
-        <Table<RuleTableRow>
+        <CardTable<RuleTableRow>
           rowKey="_rowKey"
           size="small"
           loading={loading}

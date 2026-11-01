@@ -9,13 +9,11 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Progress,
   Segmented,
   Select,
   Space,
   Switch,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -31,6 +29,7 @@ import {
 } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 import type { Dayjs } from 'dayjs'
 import { api, errText } from '../api/client'
 import { exportLink, runsFilterToTree } from '../lib/exportFilter'
@@ -55,6 +54,8 @@ import LoadGate from './LoadGate'
 import JobDetailDrawer from './JobDetailDrawer'
 import { loadFailure } from '../lib/loadFailure'
 import { useTableView } from './TableView'
+import CardTable from './CardTable'
+import { notifyError } from '../lib/notify'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
 
@@ -206,6 +207,13 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, fStatus, fUser, fTarget, search, targets])
+  const filtering = !!(search.trim() || fStatus || fUser || fTarget)
+  const clearFilters = () => {
+    setSearch('')
+    setFStatus('')
+    setFUser('')
+    setFTarget(undefined)
+  }
 
   const act = async (fn: () => Promise<unknown>, okMsg?: string) => {
     try {
@@ -213,7 +221,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       if (okMsg) message.success(okMsg)
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
   const cancel = (id: number) => act(() => api.post(`/api/admin/batch/jobs/${id}/cancel`), t('batch.msg.cancelRequested'))
@@ -242,7 +250,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
       message.success(t('queue.clearedN', { n: r.n }))
       load()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -324,6 +332,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
     {
       title: t('batch.col.actions'),
       key: 'actions', minWidth: 100,
+      fixed: 'right',
       width: 150,
       render: (_: unknown, j) => (
         <Space size={[2, 2]} wrap>
@@ -337,14 +346,14 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           )}
           {!isTerminal(j.status)
             ? canCancel(j) && (
-                <Popconfirm title={t('queue.cancelConfirm')} onConfirm={() => cancel(j.id)}>
+                <Confirm title={t('queue.cancelConfirm')} onConfirm={() => cancel(j.id)} okText={t('queue.cancelRunAction')}>
                   <Button size="small" type="text" danger icon={<StopOutlined />} title={t('common.cancel')} />
-                </Popconfirm>
+                </Confirm>
               )
             : admin && (
-                <Popconfirm title={t('queue.deleteConfirm')} onConfirm={() => del(j.id)}>
+                <Confirm title={t('queue.deleteConfirm')} onConfirm={() => del(j.id)} okText={t('queue.deleteRunAction')} irreversible>
                   <Button size="small" type="text" danger icon={<DeleteOutlined />} title={t('common.delete')} />
-                </Popconfirm>
+                </Confirm>
               )}
         </Space>
       ),
@@ -393,11 +402,11 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </span>
       )}
       {selectedJobs.length > 0 && (
-        <Popconfirm title={t('queue.cancelJobsConfirm', { n: selectedJobs.length })} onConfirm={() => cancelJobs(selectedJobs)}>
+        <Confirm title={t('queue.cancelJobsConfirm', { n: selectedJobs.length })} onConfirm={() => cancelJobs(selectedJobs)} okText={t('queue.cancelRunsAction')}>
           <Button size="small" danger icon={<StopOutlined />}>
             {t('queue.cancelSelected', { n: selectedJobs.length })}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
       {admin && (
         // Hands the current filters to the Export page. Only status, submitter and workflow have a
@@ -418,11 +427,11 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
         </Button>
       )}
       {admin && (
-        <Popconfirm title={t('queue.clearFinishedConfirm')} onConfirm={clearFinished}>
+        <Confirm title={t('queue.clearFinishedConfirm')} onConfirm={clearFinished} okText={t('queue.clearFinishedAction')} irreversible>
           <Button size="small" icon={<DeleteOutlined />}>
             {t('queue.clearFinished')}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
       <Typography.Text type="secondary" style={{ fontSize: 12 }}>
         {t('queue.autoRefresh')}
@@ -466,7 +475,6 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           {admin && <Select showSearch optionFilterProp="label" allowClear placeholder={t('batch.col.createdBy')} style={{ width: 140 }} value={fUser || undefined} onChange={(v) => setFUser(v || '')} options={submitters.map((u) => ({ value: u, label: u }))} />}
           {/* loading, not an empty dropdown: "no workflows" is not something this filter knows. */}
           <Select showSearch optionFilterProp="label" allowClear loading={!targetsLoaded} placeholder={t('run.workflow')} style={{ width: 200 }} value={fTarget} onChange={setFTarget} options={targets.map((tg) => ({ value: tg.id, label: tg.name }))} />
-          {tableView.controls}
         </Space>
         {total > jobs.length && (
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
@@ -482,12 +490,15 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
           minHeight={220}
           title={t('common.loadFailedContent')}
         >
-        {rows.length === 0 ? (
+        {rows.length === 0 && !filtering ? (
           <Empty description={t('queue.empty')} />
         ) : (
-          <Table
+          <CardTable
+            key={scope}
             rowKey="id"
             size="small"
+            filtered={filtering}
+            onClearFilters={clearFilters}
             rowSelection={{
               selectedRowKeys: selectedJobs,
               onChange: setSelectedJobs,
@@ -497,6 +508,7 @@ export default function QueueTable({ showStats = false }: { showStats?: boolean 
             }}
             dataSource={rows}
             columns={tableView.columns}
+            components={tableView.components}
             className={tableView.className}
             tableLayout="fixed"
             pagination={{ pageSize: 15 }}

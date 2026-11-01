@@ -61,7 +61,7 @@ describe('ExportHistory', () => {
     const cancels = screen.getAllByRole('button', { name: 'export.history.cancel' })
     expect(cancels).toHaveLength(1)
     await user.click(cancels[0])
-    await user.click(await screen.findByRole('button', { name: /^OK$/ }))
+    await user.click(await screen.findByRole('button', { name: 'export.history.cancelAction' }))
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/api/admin/exports/r1/cancel'))
   })
 
@@ -85,11 +85,11 @@ describe('ExportHistory', () => {
 describe('ExportHistory table', () => {
   beforeEach(() => localStorage.clear())
 
-  it('uses the shared adaptive table with its display control', async () => {
+  it('uses the shared adaptive table with its column menu', async () => {
     const { container } = renderIt()
     await screen.findByText('Done one')
     expect(container.querySelector('.ant-table-wrapper.rp-adaptive-table')).not.toBeNull()
-    expect(screen.getByRole('button', { name: /table\.display/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /table\.columnMenu/ })).toBeTruthy()
   })
 
   it('fits every column into the width by default, so an empty list has no sideways scroll', async () => {

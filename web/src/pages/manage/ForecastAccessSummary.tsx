@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Tag, Typography } from 'antd'
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import type { ForecastAccessOverview, ForecastOUAccess, ForecastScope, UserGroupRow } from '../../api/types'
+import CardTable from '../../components/CardTable'
 
 // Who may read the forecast record, per OU, as the SERVER resolved it (GET /api/admin/forecast/access).
 //
@@ -69,7 +70,7 @@ export default function ForecastAccessSummary() {
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Typography.Text>{t('forecast.access.summary', { all: counts.all, own: counts.own, none: counts.none })}</Typography.Text>
-            <Table<ForecastOUAccess>
+            <CardTable<ForecastOUAccess>
               size="small"
               rowKey="id"
               dataSource={rows}

@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { App, ConfigProvider } from 'antd'
 import { ApiError } from '../../api/client'
 import QuoteSourcesPage from './QuoteSourcesPage'
+import { findFailure } from '../../test/notifications'
 
 // The admin console for the quote sources. What is worth pinning is everything the page DERIVES
 // rather than displays: which source is primary (a position among the enabled ones, not a field),
@@ -268,7 +269,7 @@ describe('QuoteSourcesPage', () => {
     await user.dblClick(save)
     expect(apiMock.post).toHaveBeenCalledTimes(1)
     rejectSave(new Error('save unavailable'))
-    await screen.findByText('common.error')
+    await findFailure('common.error')
     await waitFor(() => expect(save.classList.contains('ant-btn-loading')).toBe(false))
     await user.click(save)
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(2))

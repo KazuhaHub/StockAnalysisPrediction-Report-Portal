@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Empty, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Alert, Empty, Space, Tag, Typography, theme } from 'antd'
 import { DesktopOutlined, EnvironmentOutlined, GlobalOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
@@ -8,6 +8,7 @@ import type { LoginActivityResponse } from '../api/types'
 import { auditTime } from '../lib/auditTime'
 import { formatRegion } from '../lib/geo'
 import { clientLabel } from '../lib/clientInfo'
+import { LoadingPlaceholder } from './LoadGate'
 
 export default function LoginActivityPanel() {
   const { t, i18n } = useTranslation()
@@ -33,7 +34,7 @@ export default function LoginActivityPanel() {
   }, [retryKey])
 
   if (failed) return <Alert type="error" showIcon title={t('loginActivity.loadFailed')} />
-  if (!data) return <div style={{ minHeight: 180, display: 'grid', placeItems: 'center' }}><Spin /></div>
+  if (!data) return <LoadingPlaceholder minHeight={180} />
 
   return (
     <div style={{ width: '100%' }}>

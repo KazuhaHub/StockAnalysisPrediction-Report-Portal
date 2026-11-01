@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Input, Space, Table, Typography, theme } from 'antd'
+import { Button, Card, Input, Space, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
 import { Link, useNavigate } from 'react-router'
@@ -9,6 +9,7 @@ import AppInstall from './AppInstall'
 import AppReorderModal from './AppReorderModal'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
+import CardTable from '../../components/CardTable'
 
 // The Apps list: every built-in and installed app with where it is switched on, in the administrator's
 // order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
@@ -65,7 +66,7 @@ export default function AppsAdminPage() {
           </Button>
           <AppInstall onInstalled={() => reload({ quiet: true })} />
         </Space>
-        <Card styles={{ body: { padding: 0 } }}>
+        <Card className="rp-flush-card" styles={{ body: { padding: 0 } }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${token.colorBorderSecondary}` }}>
             <Input.Search
               allowClear
@@ -75,18 +76,21 @@ export default function AppsAdminPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto' }}>
+            {/* The count keeps one line; the search box is what gives way. */}
+            <Typography.Text type="secondary" style={{ marginInlineStart: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>
               {t('apps.count', { count: shown.length })}
             </Typography.Text>
           </div>
           <div className="rp-table-scroll">
-          <Table
+          <CardTable
             className="rp-apps-table"
             rowKey="key"
             dataSource={shown}
             columns={columns}
             pagination={false}
             locale={{ emptyText: t('apps.empty') }}
+            filtered={!!search.trim()}
+            onClearFilters={() => setSearch('')}
             onRow={(a) => ({ onClick: () => navigate(appPath(a.key)), style: { cursor: 'pointer' } })}
           />
           </div>

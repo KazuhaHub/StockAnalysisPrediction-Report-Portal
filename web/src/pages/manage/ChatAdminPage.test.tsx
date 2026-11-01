@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { App } from 'antd'
 import ChatAdminPage from './ChatAdminPage'
+import { findFailure } from '../../test/notifications'
 
 const server = vi.hoisted(() => ({ poll: null as null | (() => unknown), post: vi.fn(), config: { max_concurrent: 4, stream: false, turn_timeout_minutes: 30, turns: [] } }))
 vi.mock('../../api/client', () => ({ api: {
@@ -27,8 +28,10 @@ describe('Assistant settings and monitoring', () => {
     mount()
     fireEvent.change(await screen.findByRole('spinbutton', { name: 'chatAdmin.limit' }), { target: { value: '7' } })
     fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
-    await screen.findByText('Offline')
+    await findFailure('Offline')
     expect((screen.getByRole('spinbutton', { name: 'chatAdmin.limit' }) as HTMLInputElement).value).toBe('7')
+    // The failure is raised before the save button leaves its loading state; a click during it is dropped.
+    await waitFor(() => expect(screen.getByRole('button', { name: /common.save/ }).classList.contains('ant-btn-loading')).toBe(false))
     fireEvent.click(screen.getByRole('button', { name: /common.save/ }))
     await waitFor(() => expect(server.post).toHaveBeenCalledTimes(2))
     expect(server.post).toHaveBeenLastCalledWith('/api/admin/chat/config', { max_concurrent: 7, stream: false, turn_timeout_minutes: 30 })

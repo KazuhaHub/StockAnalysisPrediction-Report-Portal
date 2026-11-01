@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Card, Drawer, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, TimePicker, Typography, Upload } from 'antd'
+import { App, Button, Card, Drawer, Input, InputNumber, Modal, Select, Space, Switch, Tag, TimePicker, Typography, Upload } from 'antd'
 import { ClockCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, HistoryOutlined, PlayCircleOutlined, PlusOutlined, UploadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
+import { confirmAction } from '../components/Confirm'
 import { visibleOn } from '../lib/batchUi'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
@@ -11,6 +12,9 @@ import { csvToRows, downloadCSV, toCSV } from '../lib/csv'
 import LoadGate from '../components/LoadGate'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
+import CardTable from '../components/CardTable'
+import { notifyError } from '../lib/notify'
+import useLeaveGuard from './manage/useLeaveGuard'
 
 // Recurring-tasks console (计划任务; docs/adr/0018-recurring-tasks.md). A first-party app card
 // (gated by run_batch) that manages saved job templates + a daily/weekly/monthly cadence the server
@@ -52,6 +56,11 @@ export default function RecurringConsole() {
   // back on) — derived from the stored template so editing an orphaned task never blanks its rows.
   const [fallbackKeys, setFallbackKeys] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  // The editor's values as opened (blank, or the task as fetched). Dirty is any difference from it,
+  // so a failed save stays dirty and a successful one closes the editor.
+  const [baseline, setBaseline] = useState('')
+  const dirty = modalOpen && JSON.stringify(draft) !== baseline
+  const closeEditor = useLeaveGuard(dirty, modalOpen && saving, () => setModalOpen(false))
 
   const [history, setHistory] = useState<{ task: RecurringTask; runs: RecurringRun[] } | null>(null)
 
@@ -132,6 +141,7 @@ export default function RecurringConsole() {
   const openCreate = () => {
     setEditingId(null)
     setDraft(emptyDraft)
+    setBaseline(JSON.stringify(emptyDraft))
     setFallbackKeys([])
     setModalOpen(true)
   }
@@ -147,7 +157,7 @@ export default function RecurringConsole() {
     const csvText = toCSV(keys, (d.rows || []).map((r) => keys.map((k) => r[k] ?? '')))
     setFallbackKeys(keys)
     setEditingId(task.id)
-    setDraft({
+    const opened: Draft = {
       name: d.name,
       targetId: d.target_id,
       freq: d.freq as RecurringTask['freq'],
@@ -159,17 +169,19 @@ export default function RecurringConsole() {
       maxRetries: d.max_retries || 0,
       enabled: d.enabled,
       csvText,
-    })
+    }
+    setDraft(opened)
+    setBaseline(JSON.stringify(opened))
     setModalOpen(true)
   }
 
   const save = async () => {
     if (!draft.name.trim()) {
-      message.error(t('recurring.errName'))
+      notifyError(t('recurring.errName'))
       return
     }
     if (!draft.targetId || rows.length === 0) {
-      message.error(t('recurring.errRows'))
+      notifyError(t('recurring.errRows'))
       return
     }
     setSaving(true)
@@ -193,7 +205,7 @@ export default function RecurringConsole() {
       setModalOpen(false)
       loadTasks(true).catch(() => {})
     } catch (e) {
-      message.error(errText(e, t) || t('recurring.errSave'))
+      notifyError(errText(e, t) || t('recurring.errSave'))
     } finally {
       setSaving(false)
     }
@@ -204,36 +216,35 @@ export default function RecurringConsole() {
       await api.post(`/api/admin/batch/recurring/${task.id}/enable`, { enabled })
       loadTasks(true).catch(() => {})
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
   const runNow = (task: RecurringTask) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('recurring.runNowTitle', { name: task.name }),
-      content: t('recurring.runNowBody'),
-      okText: t('recurring.runNow'),
-      cancelText: t('common.cancel'),
+      description: t('recurring.runNowBody'),
+      okText: t('recurring.runNowAction'),
+      danger: false,
       onOk: async () => {
         const r = await api.post<{ job_id: number }>(`/api/admin/batch/recurring/${task.id}/run`, {})
         message.success(t('recurring.firedJob', { id: r.job_id }))
         loadTasks(true).catch(() => {})
       },
-    })
+    }, t)
 
   const remove = (task: RecurringTask) =>
-    modal.confirm({
+    confirmAction(modal, {
       title: t('recurring.deleteTitle', { name: task.name }),
-      content: t('recurring.deleteBody'),
-      okText: t('common.delete'),
-      cancelText: t('common.cancel'),
-      okButtonProps: { danger: true },
+      description: t('recurring.deleteBody'),
+      okText: t('recurring.deleteAction'),
+      irreversible: true,
       onOk: async () => {
         await api.del(`/api/admin/batch/recurring/${task.id}`)
         message.success(t('recurring.deleted'))
         loadTasks(true).catch(() => {})
       },
-    })
+    }, t)
 
   const openHistory = async (task: RecurringTask) => {
     const d = await api.get<RecurringDetail>(`/api/admin/batch/recurring/${task.id}`)
@@ -325,7 +336,7 @@ export default function RecurringConsole() {
           {targetsLoaded && targets.length === 0 && <Typography.Text type="warning">{t('recurring.noTargets')}</Typography.Text>}
           <LoadGate loading={loading && !loaded} error={loaded ? undefined : loadErr} onRetry={load} minHeight={200} title={t('common.loadFailedContent')}>
           <div style={{ overflowX: 'auto' }}>
-            <Table
+            <CardTable
               rowKey="id"
               size="small"
               loading={loading}
@@ -342,7 +353,7 @@ export default function RecurringConsole() {
       <Modal
         open={modalOpen}
         title={editingId == null ? t('recurring.new') : t('recurring.edit')}
-        onCancel={() => setModalOpen(false)}
+        onCancel={closeEditor}
         onOk={save}
         okText={t('common.save')}
         cancelText={t('common.cancel')}
@@ -498,7 +509,7 @@ export default function RecurringConsole() {
         size={440}
         title={history ? t('recurring.historyTitle', { name: history.task.name }) : ''}
       >
-        <Table
+        <CardTable
           rowKey="id"
           size="small"
           pagination={false}

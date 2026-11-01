@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { ConfigProvider, theme } from 'antd'
 import axe from 'axe-core'
 import en from '../../locales/en-US.json'
@@ -26,4 +26,14 @@ it.each([theme.defaultAlgorithm, theme.darkAlgorithm])('renders accessible share
   // jsdom cannot measure layout or contrast; the palette suite measures contrast separately.
   const result = await axe.run(container, { rules: { 'color-contrast': { enabled: false } } })
   expect(result.violations).toEqual([])
+})
+
+it('folds the method by default and keeps the disclaimer in view', async () => {
+  render(<ForecastMethodology />)
+  expect(screen.queryByText(en['forecast.methodology.gates'])).toBeNull()
+  expect(screen.getByText(en['forecast.disclaimer'])).toBeTruthy()
+  const toggle = screen.getByRole('button', { name: en['forecast.methodology.read'] })
+  expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  fireEvent.click(toggle)
+  expect(await screen.findByText(en['forecast.methodology.gates'])).toBeTruthy()
 })

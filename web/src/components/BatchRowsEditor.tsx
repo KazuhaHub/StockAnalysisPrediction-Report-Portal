@@ -4,17 +4,14 @@ import {
   Button,
   Input,
   InputNumber,
-  Popconfirm,
   Popover,
   Segmented,
   Select,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
   Upload,
-  type TableColumnsType,
 } from 'antd'
 import {
   DeleteOutlined,
@@ -24,6 +21,7 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from './Confirm'
 
 import type { PluginInput } from '../api/types'
 import {
@@ -36,6 +34,7 @@ import {
 } from '../lib/batchRows'
 import { csvToRows, downloadCSV, toCSV } from '../lib/csv'
 import { inputDisplayMeta } from '../lib/difyInputs'
+import CardTable, { type CardColumn } from './CardTable'
 
 type EditorMode = 'grid' | 'csv'
 type TableRow = { values: BatchDraftRow; rowIndex: number }
@@ -162,7 +161,7 @@ export default function BatchRowsEditor({
     return <Input {...common} onChange={(event) => updateCell(rowIndex, input.key, event.target.value)} />
   }
 
-  const columns: TableColumnsType<TableRow> = [
+  const columns: CardColumn<TableRow>[] = [
     {
       title: '#',
       dataIndex: 'rowIndex',
@@ -198,6 +197,7 @@ export default function BatchRowsEditor({
             {title !== input.key && <Typography.Text code>{input.key}</Typography.Text>}
           </div>
         ),
+        phoneLabel: title,
         key: input.key,
         width: 220,
         render: (_value: string, record: TableRow) => fieldControl(input, record.rowIndex, columnIndex),
@@ -246,15 +246,16 @@ export default function BatchRowsEditor({
           <Button size="small" icon={<DownloadOutlined />} onClick={() => downloadCSV('batch-rows.csv', currentCSV())}>
             {t('batch.editor.downloadRows')}
           </Button>
-          <Popconfirm
+          <Confirm
             title={t('batch.editor.clearConfirm')}
             onConfirm={() => {
               setRawCSV(toCSV(keys, []))
               onChange([blankBatchRow(inputs)])
             }}
+            okText={t('batch.editor.clearAction')}
           >
             <Button size="small" danger>{t('batch.editor.clear')}</Button>
-          </Popconfirm>
+          </Confirm>
         </Space>
       </div>
 
@@ -264,7 +265,7 @@ export default function BatchRowsEditor({
             {t('batch.editor.pasteHint')}
           </Typography.Paragraph>
           <div className="rp-batch-grid">
-            <Table<TableRow>
+            <CardTable<TableRow>
               size="small"
               rowKey={(record) => String(record.rowIndex)}
               columns={columns}

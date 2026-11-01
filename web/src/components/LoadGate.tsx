@@ -16,12 +16,19 @@ import WaitingForConnection from './WaitingForConnection'
 // "queue is empty" / "no apps available" rendered off it is a claim nobody made. Such a view
 // passes `title` to say what failed to load in its own words instead of the settings wording.
 //
-// So: a spinner until the answer is in, and if it never comes, say so and offer the retry —
+// So: a placeholder until the answer is in, and if it never comes, say so and offer the retry —
 // never fall through to the defaults.
 //
 // A connection loss is not an answer either: the caller keeps `loading` true and passes no error,
 // the shell's connection strip says the connection is down, and the spinner here only adds a
 // muted line that it is waiting.
+//
+// The placeholder is the shared loading ring, centred in the space the view will fill, with its
+// words. It is there from the first frame and fades in, so a fast answer leaves at most a faint
+// trace while a slow one is acknowledged at once where the reader is looking. (Holding it back
+// behind a delay left a blank frame instead, once per Suspense layer a page passes through; and a
+// generic skeleton, one set of grey bars for every page, previewed none of them.)
+// The loading status is announced from the first frame.
 export default function LoadGate({
   loading,
   error,
@@ -55,15 +62,28 @@ export default function LoadGate({
     )
   }
   if (loading) {
-    // Spinner + label as two siblings rather than antd's `tip`, which only renders in Spin's
-    // nest mode and would need a dummy child to wrap.
-    return (
-      <div style={{ display: 'grid', alignContent: 'center', justifyItems: 'center', gap: 12, minHeight }}>
-        <Spin size="large" />
-        <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        <WaitingForConnection />
-      </div>
-    )
+    return <LoadingPlaceholder minHeight={minHeight} />
   }
   return <>{children}</>
+}
+
+/**
+ * The placeholder LoadGate shows, for a view that loads in its own way: the loading ring after a
+ * short delay, the loading status announced from the first frame, and the waiting-for-connection line.
+ */
+export function LoadingPlaceholder({
+  minHeight,
+  label,
+}: {
+  minHeight?: number | string
+  label?: string
+}) {
+  const { t } = useTranslation()
+  return (
+    <div aria-busy className="rp-loading" style={{ minHeight }}>
+      <Spin />
+      <Typography.Text role="status" type="secondary">{label ?? t('common.loading')}</Typography.Text>
+      <WaitingForConnection />
+    </div>
+  )
 }

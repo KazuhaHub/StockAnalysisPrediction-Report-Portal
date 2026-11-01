@@ -1,7 +1,8 @@
-import { Alert, Card, Descriptions, Table, Typography } from 'antd'
+import { Alert, Card, Descriptions, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { useTranslation } from 'react-i18next'
 import type { ForecastSettings } from '../../api/types'
+import CardTable from '../../components/CardTable'
 
 export default function ForecastBacklog({ backlog }: { backlog: ForecastSettings['backlog'] }) {
   const { t } = useTranslation()
@@ -18,7 +19,7 @@ export default function ForecastBacklog({ backlog }: { backlog: ForecastSettings
       { key: 'oldest', label: t('forecast.backlog.oldest'), children: t('forecast.backlog.minutes', { n: backlog.oldest_late_minutes ?? 0 }) },
     ]} />
     <Typography.Paragraph type="secondary">{t('forecast.backlog.hint')} {t('forecast.backlog.asof', { at: dayjs(backlog.as_of).format('YYYY-MM-DD HH:mm:ss') })}</Typography.Paragraph>
-    {backlog.items.length > 0 && <Table size="small" pagination={false} scroll={{ x: 650 }} rowKey={(r) => `${r.set_id}-${r.checkpoint}`} dataSource={backlog.items} columns={[
+    {backlog.items.length > 0 && <CardTable size="small" pagination={false} scroll={{ x: 650 }} rowKey={(r) => `${r.set_id}-${r.checkpoint}`} dataSource={backlog.items} columns={[
       { title: t('forecast.backlog.record'), render: (_, r) => `${r.symbol} · #${r.set_id} · ${t(`forecast.cp.${r.checkpoint}`)}` },
       { title: t('forecast.backlog.session'), dataIndex: 'due' },
       { title: t('forecast.backlog.retry'), render: (_, r) => r.next_attempt_at ? dayjs(r.next_attempt_at).format('YYYY-MM-DD HH:mm:ss') : '—' },

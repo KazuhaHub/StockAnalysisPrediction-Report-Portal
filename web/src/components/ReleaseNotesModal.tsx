@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Modal, Select, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Modal, Select, Space, Tag, Typography, theme } from 'antd'
 import { ExportOutlined, HistoryOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../api/client'
@@ -8,6 +8,7 @@ import { productVersionLabel } from '../lib/productVersionLabel'
 import type { UpdatePolicy } from '../lib/updateState'
 import Markdown from './Markdown'
 import { selectNotesLanguage } from '../lib/releaseNotes'
+import { LoadingPlaceholder } from './LoadGate'
 
 // The one place the portal shows release notes.
 //
@@ -227,9 +228,7 @@ export default function ReleaseNotesModal({
         )}
         <div className="rp-release-notes-body">
         {state.status === 'loading' && (
-          <div className="rp-release-notes-state">
-            <Spin />
-          </div>
+          <LoadingPlaceholder />
         )}
         {state.status === 'error' && (
           <Alert

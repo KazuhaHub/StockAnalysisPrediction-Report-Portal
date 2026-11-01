@@ -8,16 +8,15 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Popover,
   Space,
-  Table,
   Tag,
   Tooltip,
   Typography,
 } from 'antd'
 import { DeleteOutlined, DownOutlined, PlusOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { useLoadFailure } from '../../lib/useOnReconnect'
 import { settleOnAnswer, type LoadOpts } from '../../lib/loadFailure'
@@ -25,6 +24,8 @@ import type { TypeGroup, TypeRow, TypesResp } from '../../api/types'
 import { DragHandle, SortableWrapper, sortableTableComponents } from './dnd'
 import LoadGate from '../../components/LoadGate'
 import SettingsSaveBar from './SettingsSaveBar'
+import CardTable, { NoMatches } from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
 
 // antd's Tag preset colors (https://ant.design/components/tag) — "default" maps
 // to no color prop (the neutral grey Tag).
@@ -120,7 +121,7 @@ function KindColorPicker({ color, onChange }: { color: string; onChange: (color:
           gap: 5,
           padding: '3px 7px',
           border: '1px solid var(--ant-color-border)',
-          borderRadius: 6,
+          borderRadius: 'var(--ant-border-radius-sm)',
           background: 'var(--ant-color-bg-container)',
           cursor: 'pointer',
         }}
@@ -200,7 +201,7 @@ export default function TypesPage() {
     api.post('/api/admin/types/reorder', { names: orderedNames }).then(() => {
       setSavedGroups((gs) => gs.map((g) => g.kind === kind ? { ...g, rows: orderedNames.map((n) => g.rows.find((r) => r.name === n)!) } : g))
     }).catch(async (e) => {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
       await load({ quiet: true })
     }).finally(() => setOrdering(false))
   }
@@ -221,7 +222,7 @@ export default function TypesPage() {
       setSavedGroups(groups)
       await load({ quiet: true })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -322,12 +323,14 @@ export default function TypesPage() {
       width: 60,
       align: 'right' as const,
       render: (_: any, r: TypeRow) => (
-        <Popconfirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.name)}>
+        <Confirm title={t('common.deleteConfirm')} onConfirm={() => remove(r.name)} okText={t('types.deleteAction')}>
           <Button size="small" danger disabled={dirty || busy} icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
       ),
     },
   ]
+
+  const matchesSearch = (r: TypeRow) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())
 
   return (
     // A plain flex column (not antd Space) so the sticky save bar's parent is a tall block it can
@@ -342,27 +345,28 @@ export default function TypesPage() {
         <Button type="primary" disabled={dirty || busy} icon={<PlusOutlined />} onClick={openAdd}>
           {t('common.add')}
         </Button>
-        <Popconfirm title={t('types.reclassifyConfirm')} onConfirm={reclassify}>
+        <Confirm title={t('types.reclassifyConfirm')} onConfirm={reclassify} okText={t('types.reclassifyAction')} danger={false}>
           <Button disabled={dirty || busy} icon={<ReloadOutlined />} loading={reclassifying}>
             {t('types.reclassify')}
           </Button>
-        </Popconfirm>
-        <Popconfirm title={t('types.restoreDefaultsConfirm')} onConfirm={restoreDefaults}>
+        </Confirm>
+        <Confirm title={t('types.restoreDefaultsConfirm')} onConfirm={restoreDefaults} okText={t('types.restoreDefaultsAction')} irreversible>
           <Button disabled={dirty || busy} icon={<RollbackOutlined />} loading={restoring}>
             {t('types.restoreDefaults')}
           </Button>
-        </Popconfirm>
+        </Confirm>
         {selected.length > 0 && (
-          <Popconfirm title={t('common.deleteConfirm')} onConfirm={removeSelected}>
+          <Confirm title={t('common.deleteConfirm')} onConfirm={removeSelected} okText={t('types.deleteSelectedAction')}>
             <Button danger disabled={dirty || busy} icon={<DeleteOutlined />}>
               {t('common.deleteSelected')} ({selected.length})
             </Button>
-          </Popconfirm>
+          </Confirm>
         )}
       </Space>
       <Typography.Text type="secondary">{t('manage.typesSaveScope')}</Typography.Text>
       <ConfigProvider componentDisabled={busy}>
-      {groups.filter((g) => g.rows.some((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))).map((g) => {
+      {search.trim() && !groups.some((g) => g.rows.some(matchesSearch)) && <NoMatches onClear={() => setSearch('')} />}
+      {groups.filter((g) => g.rows.some(matchesSearch)).map((g) => {
         const groupNames = g.rows.map((r) => r.name)
         return (
           <div key={g.kind}>
@@ -373,11 +377,11 @@ export default function TypesPage() {
               <KindColorPicker color={colors[g.kind] || 'default'} onChange={(color) => saveColor(g.kind, color)} />
             </Space>
             <SortableWrapper ids={groupNames} onReorder={(names) => reorderGroup(g.kind, names)}>
-              <Table<TypeRow>
+              <CardTable<TypeRow>
                 rowKey="name"
                 size="small"
                 loading={loading}
-                dataSource={g.rows.filter((r) => `${r.name} ${r.label} ${r.kind}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))}
+                dataSource={g.rows.filter(matchesSearch)}
                 pagination={false}
                 scroll={{ x: 700 }}
                 components={sortableTableComponents}

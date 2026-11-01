@@ -3,6 +3,7 @@ import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import StockPage from './StockPage'
+import { mockNarrowViewport } from '../test/narrow'
 
 // StockPage renders a loading spinner first (data null), then re-renders with the report.
 // A hook called after those early returns (Grid.useBreakpoint) would run on the second
@@ -327,5 +328,24 @@ describe('StockPage', () => {
     expect(await screen.findByText('export-menu')).toBeTruthy()
     expect(screen.queryByText('pdf')).toBeNull()
     expect(screen.queryByText('day')).toBeNull()
+  })
+})
+
+// On a phone the four ranges fold into one dropdown and the toggle keeps only its chevron, so the
+// quote card's title and its controls share one line even at the narrowest widths.
+describe('StockPage on a phone', () => {
+  mockNarrowViewport()
+
+  it('offers the chart range as a dropdown beside an icon-only toggle', async () => {
+    render(<StockPage />)
+    await screen.findByText('001238 Test Co Report Title')
+    const toggle = screen.getByRole('button', { name: /quote\.expandChart/ })
+    expect(toggle.textContent).not.toContain('quote.expandChart')
+    await userEvent.click(toggle)
+    const range = await screen.findByRole('combobox', { name: 'quote.rangeLabel' })
+    expect(range).toBeTruthy()
+    // Only the chosen range shows until the dropdown is opened.
+    expect(screen.getByText('quote.range.3m')).toBeTruthy()
+    expect(screen.queryByText('quote.range.1m')).toBeNull()
   })
 })

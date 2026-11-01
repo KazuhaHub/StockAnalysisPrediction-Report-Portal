@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, Empty, Modal, Space, Switch, Tag, Typography } from 'antd'
+import { Alert, Button, Card, Empty, Modal, Space, Switch, Tag, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { notificationInbox, type InboxItem } from '../api/notifications'
 import { errText } from '../api/client'
@@ -7,10 +7,10 @@ import LoadGate from '../components/LoadGate'
 import { INBOX_CHANGED } from '../components/NotificationBell'
 import { startVisiblePoll } from '../lib/visiblePoll'
 import { loadFailure } from '../lib/loadFailure'
+import { notifyError } from '../lib/notify'
 
 export default function NotificationsPage() {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const [items, setItems] = useState<InboxItem[]>([])
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
@@ -37,7 +37,7 @@ export default function NotificationsPage() {
   }, [])
   const run = async (task: () => Promise<unknown>, refresh = true) => {
     setBusy(true)
-    try { await task(); if (refresh) { await load(); window.dispatchEvent(new Event(INBOX_CHANGED)) } } catch (e) { message.error(errText(e, t)) } finally { setBusy(false) }
+    try { await task(); if (refresh) { await load(); window.dispatchEvent(new Event(INBOX_CHANGED)) } } catch (e) { notifyError(errText(e, t)) } finally { setBusy(false) }
   }
   return <LoadGate loading={!loaded} error={error} onRetry={() => load()}>
     <Space orientation="vertical" size="large" style={{ width: '100%', maxWidth: 1000, marginInline: 'auto' }}>

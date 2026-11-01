@@ -1,10 +1,11 @@
 import { StarFilled, StarOutlined } from '@ant-design/icons'
-import { App, Button, theme } from 'antd'
+import { Button, theme } from 'antd'
 import type { MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { QuoteResp } from '../api/types'
 import { errText } from '../api/client'
 import { useFavorites } from '../favorites'
+import { notifyError } from '../lib/notify'
 
 export function FavoriteButton({
   market,
@@ -20,7 +21,6 @@ export function FavoriteButton({
   size?: 'small' | 'middle' | 'large'
 }) {
   const { t } = useTranslation()
-  const { message } = App.useApp()
   const { token } = theme.useToken()
   const favorites = useFavorites()
   const active = favorites.isFavorite(market, symbol)
@@ -33,7 +33,7 @@ export function FavoriteButton({
     const action = favorites.error
       ? favorites.ensureLoaded(true).then(() => favorites.toggle(market, symbol))
       : favorites.toggle(market, symbol)
-    void action.catch((cause) => message.error(errText(cause, t)))
+    void action.catch((cause) => notifyError(errText(cause, t)))
   }
 
   return (

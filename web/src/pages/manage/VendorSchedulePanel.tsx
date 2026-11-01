@@ -1,5 +1,6 @@
-import { Alert, Card, InputNumber, Space, Table, Typography } from 'antd'
+import { Alert, Card, InputNumber, Space, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
+import CardTable from '../../components/CardTable'
 
 export type VendorRatePolicy = { requestsPerMinute: number; backgroundPerMinute: number }
 export type VendorScheduleStatus = {
@@ -52,7 +53,7 @@ export default function VendorSchedulePanel({ policies, schedule, sources, sourc
   return <Card title={t('quoteAdmin.traffic.title')}>
     <Space orientation="vertical" size={12} style={{ width: '100%' }}>
       <Alert type="info" showIcon title={t('quoteAdmin.traffic.hint')} />
-      <Table<string> rowKey={(source) => source} dataSource={sources} columns={columns} pagination={false} size="small" scroll={{ x: 1500 }} />
+      <CardTable<string> rowKey={(source) => source} dataSource={sources} columns={columns} pagination={false} size="small" scroll={{ x: 1500 }} />
       <Typography.Text type="secondary">{t('quoteAdmin.traffic.scope')}</Typography.Text>
     </Space>
   </Card>

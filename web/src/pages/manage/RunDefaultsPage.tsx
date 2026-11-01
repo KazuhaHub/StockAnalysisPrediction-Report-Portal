@@ -16,6 +16,7 @@ import SettingsSaveBar from './SettingsSaveBar'
 import SettingsField from './SettingsField'
 import useSettingsDraft from './useSettingsDraft'
 import type { ReactElement, ReactNode } from 'react'
+import { notifyError } from '../../lib/notify'
 
 // The run form's defaults, on their own page (docs/adr/0014 §4): what the run dialog opens on before the
 // user touches anything — which workflow, which mode button, which preset window, whether idle mode
@@ -106,7 +107,7 @@ function RunDefaultsEditor({ ou }: { ou?: number }) {
       }
       draft.acknowledge(draft.value)
       message.success(t('common.saved'))
-    } catch (e) { message.error(errText(e, t)) } finally { setSaving(false) }
+    } catch (e) { notifyError(errText(e, t)) } finally { setSaving(false) }
   }
 
   // Only a workflow the run dialog can actually offer is worth defaulting to. A saved default that has

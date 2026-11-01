@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Popconfirm, Radio, Select, Space, Switch, Table, Tag, Typography } from 'antd'
+import { Alert, App, Breadcrumb, Button, Card, Checkbox, ConfigProvider, Empty, Input, InputNumber, Modal, Radio, Select, Space, Switch, Tag, Typography } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../../components/Confirm'
 import { api, errText } from '../../api/client'
 import { loadFailure } from '../../lib/loadFailure'
 import { useLoadFailure } from '../../lib/useOnReconnect'
@@ -10,6 +11,9 @@ import InheritField from './InheritField'
 import { ouPath, presentOUPolicies, resolveOU, type UrgentPolicy } from './ouSettings'
 import { subtreeOf } from './OrgUnitPicker'
 import { usePendingSettings } from './AdminDraftBoundary'
+import CardTable from '../../components/CardTable'
+import { notifyError } from '../../lib/notify'
+import StatusTag from '../../components/StatusTag'
 
 const RUN_SURFACES = ['run', 'batch', 'recurring', 'chat'] as const
 const FORECAST_SCOPES = ['all', 'own', 'none'] as const
@@ -258,7 +262,7 @@ export default function OrgUnitDetail({
       onChanged()
       setAcknowledged(d)
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -284,7 +288,7 @@ export default function OrgUnitDetail({
       }
       await doRemove()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
@@ -296,7 +300,7 @@ export default function OrgUnitDetail({
       setImpact(null)
       onDeleted()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setDeleting(false)
     }
@@ -561,11 +565,11 @@ export default function OrgUnitDetail({
       {show('targets') && !group.restricted_effective && <Alert type="info" showIcon title={t('ou.unrestrictedTargets')} />}
 
       {show('directory') && !isDefault && (
-        <Popconfirm title={t('users.deleteGroupConfirm')} onConfirm={remove}>
+        <Confirm title={t('users.deleteGroupConfirm')} onConfirm={remove} okText={t('ou.deleteOu')}>
           <Button danger icon={<DeleteOutlined />}>
             {t('ou.deleteOu')}
           </Button>
-        </Popconfirm>
+        </Confirm>
       )}
 
       <Modal
@@ -585,7 +589,7 @@ export default function OrgUnitDetail({
               <Space key={a.id} size={6}>
                 <Typography.Text>{a.title || t('announcementAdmin.untitled')}</Typography.Text>
                 {a.orphaned ? (
-                  <Tag color="red">{t('ou.announcementOrphaned')}</Tag>
+                  <StatusTag tone="error">{t('ou.announcementOrphaned')}</StatusTag>
                 ) : (
                   <Tag>{t('ou.announcementKeepsWorking')}</Tag>
                 )}
@@ -639,7 +643,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
       // the table waits for `data`, a failure has to settle the wait too — otherwise the pane
       // spins for ever after a message the admin has already scrolled past.
       .catch((e) => {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
         setLoadFailed(true)
       })
   }, [group.id])
@@ -654,7 +658,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
       message.success(t('common.saved'))
       setSaved({ inherit, granted })
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setSaving(false)
     }
@@ -692,7 +696,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
         // only appeared once the workflow was switched on, so you could not see what a workflow
         // WOULD offer; and there was no way to compare one column across workflows, which is the
         // question an admin actually has ("who can use 批量?").
-        <Table
+        <CardTable
           size="small"
           rowKey="id"
           pagination={false}
@@ -768,6 +772,7 @@ function TargetsSection({ group, onPendingChange }: { group: UserGroupRow; onPen
                   />
                 </Space>
               ),
+              phoneLabel: t(`users.surface.${sf}`),
               width: 92,
               align: 'center' as const,
               render: (_: unknown, tg: GroupTargetRow) =>

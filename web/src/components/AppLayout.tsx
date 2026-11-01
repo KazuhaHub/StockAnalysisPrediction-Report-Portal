@@ -1,5 +1,5 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, Spin, theme } from 'antd'
+import { Badge, Breadcrumb, Button, Divider, Dropdown, Grid, Layout, Popover, Segmented, Select, Space, theme } from 'antd'
 import { AppstoreOutlined, AuditOutlined, DownOutlined, DownloadOutlined, EditOutlined, GlobalOutlined, LineChartOutlined, LogoutOutlined, MessageOutlined, PlayCircleOutlined, SettingOutlined, UnorderedListOutlined, UserOutlined } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import { ConnectionContent, ConnectionNotice } from './ConnectionBoundary'
@@ -35,6 +35,7 @@ import { isActiveTask } from '../lib/useMyTasks'
 import { useTaskCenter } from '../lib/useTaskCenter'
 import type { BatchQueueSummary } from '../api/types'
 import { AutoIcon, MoonIcon, SunIcon } from './icons'
+import { LoadingPlaceholder } from './LoadGate'
 
 const { Header, Content, Footer } = Layout
 
@@ -442,7 +443,7 @@ function AppShell() {
               open={workbenchOpen}
               onOpenChange={setWorkbenchOpen}
               destroyOnHidden
-              styles={{ container: { padding: 12, borderRadius: 18 } }}
+              styles={{ container: { padding: 12, borderRadius: token.borderRadiusLG } }}
               content={
                 // The card grows with its tiles (see .rp-workbench-menu): a fixed width held three.
                 <div
@@ -729,7 +730,7 @@ function AppShell() {
         {/* Keyed by suspenseKey (above) so a cross-page navigation to a not-yet-loaded chunk shows the
             spinner immediately instead of freezing on the old page. A cached/prefetched route resolves
             synchronously, so this never flashes a spinner for an already-loaded page. */}
-        <Suspense key={suspenseKey} fallback={<div style={{ display: 'grid', placeItems: 'center', minHeight: '40vh' }}><Spin size="large" /></div>}>
+        <Suspense key={suspenseKey} fallback={<LoadingPlaceholder minHeight="40vh" />}>
           <ConnectionContent><Outlet /></ConnectionContent>
         </Suspense>
       </Content>

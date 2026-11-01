@@ -7,15 +7,14 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Space,
-  Spin,
   Tag,
   Tabs,
   Typography,
 } from 'antd'
 import { KeyOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import Confirm from '../components/Confirm'
 import { useLocation, useNavigate } from 'react-router'
 import { api, errText } from '../api/client'
 import { useAuth } from '../auth'
@@ -26,6 +25,9 @@ import { createCredential, passkeySupported } from '../lib/webauthn'
 import SettingsWorkspace, { SettingsPanel } from './manage/SettingsWorkspace'
 import LoginActivityPanel from '../components/LoginActivityPanel'
 import AccountSessionsPanel from '../components/AccountSessionsPanel'
+import { notifyError } from '../lib/notify'
+import StatusTag from '../components/StatusTag'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // Self-service account security (ADR 0023). The 2FA, recovery-code and passkey endpoints existed
 // with no way for a user to reach them: enrolment was an admin errand. Security settings remain one
@@ -153,7 +155,7 @@ function PasswordCard() {
             message.success(t('account.passwordChanged'))
             form.resetFields()
           } catch (e) {
-            message.error(errText(e, t))
+            notifyError(errText(e, t))
           } finally {
             setBusy(false)
           }
@@ -223,7 +225,7 @@ function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allow
       setUri(r.uri)
       setStage('confirm')
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -238,7 +240,7 @@ function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allow
       setCode('')
       onChange()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -251,7 +253,7 @@ function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allow
       message.success(t('account.totpDisabled'))
       onChange()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -260,7 +262,7 @@ function TwoFactorCard({ enabled, allowed, onChange }: { enabled: boolean; allow
   return (
     <Card
       title={<Space><SafetyCertificateOutlined />{t('account.totpTitle')}</Space>}
-      extra={enabled ? <Tag color="green">{t('account.on')}</Tag> : <Tag>{t('account.off')}</Tag>}
+      extra={enabled ? <StatusTag tone="success">{t('account.on')}</StatusTag> : <StatusTag tone="neutral">{t('account.off')}</StatusTag>}
     >
       <Typography.Paragraph type="secondary">{t('account.totpHint')}</Typography.Paragraph>
       {!allowed && <Alert type="info" showIcon title={t('account.totpEnrolOff')} />}
@@ -379,7 +381,7 @@ function PasskeyCard({
     } catch (e) {
       // A user who dismisses the browser prompt is not an error worth shouting about.
       if (e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'AbortError')) return
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -392,7 +394,7 @@ function PasskeyCard({
       message.success(t('account.passkeyRemoved'))
       onChange()
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     } finally {
       setBusy(false)
     }
@@ -421,11 +423,11 @@ function PasskeyCard({
                     : t('account.passkeyNeverUsed')}
                 </Typography.Text>
               </span>
-              <Popconfirm title={t('account.passkeyRevokeConfirm')} onConfirm={() => setProofFor(k.id)}>
+              <Confirm title={t('account.passkeyRevokeConfirm')} onConfirm={() => setProofFor(k.id)} okText={t('account.passkeyRevokeAction')}>
                 <Button type="text" danger size="small">
                   {t('account.passkeyRevoke')}
                 </Button>
-              </Popconfirm>
+              </Confirm>
             </div>
           ))}
         </div>
@@ -562,10 +564,7 @@ function ProofModal({
         // read, but drawn straight away it also hides the SSO buttons — so an account whose only
         // way through is a provider is shown a password box and nothing else, until the answer
         // lands. A moment's spinner says the same thing without deciding it.
-        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, padding: 24 }}>
-          <Spin />
-          <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        </div>
+        <LoadingPlaceholder />
       ) : (
       <>
       <Typography.Paragraph type="secondary">

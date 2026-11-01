@@ -13,7 +13,7 @@ export default function ForecastLegend({ coverage = false, custom = false }: { c
   const palette = forecastPalette(token)
   const cov = coveragePalette(token)
   const list = { display: 'flex', flexWrap: 'wrap', gap: 12, listStyle: 'none', padding: 0, margin: 0, alignItems: 'center' } as const
-  const swatch = { display: 'inline-block', width: 12, height: 12, borderRadius: 3, verticalAlign: -1, marginRight: 5 } as const
+  const swatch = { display: 'inline-block', width: 12, height: 12, borderRadius: token.borderRadiusXS, verticalAlign: -1, marginRight: 5 } as const
   const entries = [
     ['member', cov.member], ['duplicate', cov.duplicate], ['missing', cov.missing], ['other', cov.other], ['pre_live', cov.preLive],
   ] as const
@@ -21,7 +21,7 @@ export default function ForecastLegend({ coverage = false, custom = false }: { c
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <ul aria-label={t('forecast.legend.title')} style={list}>
         {(['positive', 'negative', 'neutral'] as const).map((name) => (
-          <li key={name} style={{ background: palette[name].background, color: palette[name].foreground, padding: '4px 8px', borderRadius: 4 }}>
+          <li key={name} style={{ background: palette[name].background, color: palette[name].foreground, padding: '4px 8px', borderRadius: token.borderRadiusSM }}>
             <span aria-hidden="true">{name === 'positive' ? '▲' : name === 'negative' ? '▼' : '○'} </span>
             {t(`forecast.legend.${name}${custom && name !== 'neutral' ? '_custom' : ''}`)}
           </li>

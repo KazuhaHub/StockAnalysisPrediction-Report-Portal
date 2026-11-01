@@ -35,22 +35,46 @@ body {
   color: var(--ant-color-text-secondary);
   white-space: nowrap;
 }
-.rp-table-view-options { display: flex; flex-direction: column; gap: 12px; width: min(380px, 85vw); }
-.rp-table-column-option { display: grid; grid-template-columns: 24px minmax(70px, 1fr) 76px 48px; gap: 6px; align-items: center; padding-block: 4px; }
-.rp-table-column-option .ant-input-number { width: 76px; }
-.rp-table-column-move { display: flex; }
+.rp-column-menu { display: flex; flex-direction: column; gap: 10px; width: min(280px, 85vw); padding: 12px;
+  background: var(--ant-color-bg-elevated); border-radius: var(--ant-border-radius-lg); box-shadow: var(--ant-box-shadow-secondary); }
+.rp-column-menu-list { display: flex; flex-direction: column; gap: 6px; max-height: min(320px, 50vh); overflow-y: auto; }
+.rp-column-menu-trigger { flex: none; margin-inline-start: auto; }
+/* Headers drag after a short press on touch screens; a plain swipe still scrolls the table. */
+.rp-adaptive-table .ant-table-thead > tr > th[aria-roledescription] { touch-action: manipulation; }
+.rp-column-menu-trigger .ant-btn { cursor: pointer; }
 /* Resizable headers own their separator; suppress the table's decorative duplicate. */
 .rp-adaptive-table .ant-table-thead > tr > th:has(.rp-table-resize-handle)::before { display: none; }
-.rp-table-column-title { padding-inline-end: 8px; }
+.rp-table-column-title { display: flex; align-items: center; gap: 4px; padding-inline-end: 8px; }
 .rp-table-resize-handle { position: absolute; inset-inline-end: 0; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; z-index: 2; }
-.rp-table-resize-handle::after { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 3px; width: 1px; border-radius: 2px; background: var(--ant-color-border-secondary); }
+.rp-table-resize-handle::after { content: ''; position: absolute; inset-block: 8px; inset-inline-start: 3px; width: 1px; border-radius: var(--ant-border-radius-xs); background: var(--ant-color-border-secondary); }
 .rp-table-resize-handle:hover::after, .rp-table-resize-handle:focus-visible::after { width: 2px; background: var(--ant-color-primary); }
 .rp-table-resize-handle:focus-visible { outline: 1px solid var(--ant-color-primary); outline-offset: -1px; }
+/* A card whose table runs edge to edge (rp-flush-card): once the table turns into stacked cards on a
+   narrow screen, those cards need the inset the flush table did without, or they sit on its border. */
+.rp-flush-card .rp-card-table--cards { padding: 0 12px 4px; }
+/* Every card header: when the title and its controls do not fit on one line, the controls move to a
+   line of their own instead of squeezing the title to an ellipsis or running into it. */
+.ant-card .ant-card-head > .ant-card-head-wrapper { flex-wrap: wrap; column-gap: 12px; row-gap: 8px; padding-block: 8px; }
+.ant-card-head .ant-card-head-title { flex: 1 0 auto; max-width: 100%; }
+.ant-card-head .ant-card-extra { margin-inline-start: auto; max-width: 100%; }
+/* LoadingPlaceholder: the loading ring and its words, centred in the space the view will fill. */
+.rp-loading {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding-block: 24px;
+  animation: rp-loading-in 0.2s ease-out;
+}
+@keyframes rp-loading-in { from { opacity: 0; } }
+.rp-fade-in { animation: rp-loading-in 0.2s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .rp-loading, .rp-fade-in { animation: none; }
+}
 .rp-audit-card > .ant-card-head > .ant-card-head-wrapper { flex-wrap: wrap; gap: 12px; padding-block: 12px; }
 .rp-audit-card > .ant-card-head .ant-card-head-title { flex: none; overflow: visible; white-space: normal; text-overflow: clip; }
 .rp-audit-card > .ant-card-head .ant-card-extra { flex: 1 1 720px; min-width: 0; margin-inline-start: auto; }
 .rp-audit-card > .ant-card-head .ant-card-extra > .ant-space { display: flex; justify-content: flex-end; }
-.rp-table-view-options .ant-checkbox-group { display: flex; flex-direction: column; gap: 8px; }
 .rp-table-view-fit { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .rp-adaptive-table :is(th, td) { overflow-wrap: anywhere; white-space: normal; }
 .rp-adaptive-table :is(.ant-space, .ant-tag, .ant-typography) { max-width: 100%; overflow-wrap: anywhere; }
@@ -62,14 +86,25 @@ body {
     inset-inline-end: 12px;
     height: auto;
     max-width: calc(100% - 24px);
-    border-radius: 12px;
+    border-radius: var(--ant-border-radius-lg);
   }
   .ant-drawer.ant-drawer-right > .ant-drawer-content-wrapper > .ant-drawer-section {
     border: 1px solid var(--ant-color-border-secondary);
-    border-radius: 12px;
+    border-radius: var(--ant-border-radius-lg);
     overflow: hidden;
     box-shadow: var(--ant-box-shadow-secondary);
   }
+}
+
+/* Dark mode elevation: on a black page a shadow is all but invisible, so a floating surface would
+   read as a hole rather than a layer. antd already lifts overlays to colorBgElevated; a hairline on
+   their edge supplies the missing separation [Atlassian elevation; Apple dark mode]. Drawers and
+   sheets carry the same border above. An inset outline, not a border, so no overlay changes size. */
+:root[data-theme='dark'] :is(.ant-popover-inner, .ant-dropdown-menu, .rp-column-menu, .ant-select-dropdown,
+  .ant-picker-dropdown .ant-picker-panel-container, .ant-modal-container, .ant-notification-notice,
+  .ant-message-notice-content) {
+  outline: 1px solid var(--ant-color-border-secondary);
+  outline-offset: -1px;
 }
 
 /* OU management follows the directory-console model: one persistent tree scopes a wide settings
@@ -253,14 +288,14 @@ body {
 }
 .rp-admin-menu .ant-menu-item-selected { font-weight: 600; }
 .rp-admin-menu.ant-menu .ant-menu-item,
-.rp-admin-menu.ant-menu .ant-menu-submenu-title { border-radius: 8px; }
+.rp-admin-menu.ant-menu .ant-menu-submenu-title { border-radius: var(--ant-border-radius); }
 .rp-admin-menu .ant-menu-item-selected::before {
   content: '';
   position: absolute;
   inset-inline-start: 10px;
   inset-block: 12px;
   width: 2px;
-  border-radius: 2px;
+  border-radius: var(--ant-border-radius-xs);
   background: var(--ant-color-primary);
 }
 .rp-admin-menu .ant-menu-item-selected .anticon { color: var(--ant-color-primary); }
@@ -361,7 +396,7 @@ body {
 .rp-dashboard-widget-content { flex: 1; min-height: 0; }
 .rp-dashboard-widget-content > .ant-card, .rp-dashboard-widget-content > section, .rp-dashboard-widget-content > section > .ant-card { height: 100%; }
 .rp-dashboard-summary .rp-dashboard-widget-content > section { height: 100%; }
-.rp-dashboard-editable { cursor: grab; touch-action: none; border: 1px dashed var(--ant-color-primary-border); border-radius: 10px; padding: 8px; }
+.rp-dashboard-editable { cursor: grab; touch-action: none; border: 1px dashed var(--ant-color-primary-border); border-radius: var(--ant-border-radius-lg); padding: 8px; }
 .rp-dashboard-editable .rp-dashboard-widget-content { pointer-events: none; user-select: none; }
 .rp-dashboard-drop-target { outline: none; border-color: var(--ant-color-primary); box-shadow: inset 0 0 0 1px var(--ant-color-primary); }
 .rp-dashboard-widget-tools { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; min-height: 30px; }
@@ -370,7 +405,7 @@ body {
 .rp-dashboard-width-1 .rp-dashboard-widget-tools { flex-wrap: wrap; }
 .rp-dashboard-width-1 .rp-dashboard-widget-tools .ant-typography { flex-basis: calc(100% - 28px); }
 .rp-dashboard-width-1 .rp-dashboard-widget-tools .ant-select { flex: 1; }
-.rp-dashboard-drag-preview { padding: 0; pointer-events: none; overflow: hidden; background: var(--ant-color-bg-elevated); position: relative; border-radius: 10px; box-shadow: var(--ant-box-shadow); cursor: grabbing; }
+.rp-dashboard-drag-preview { padding: 0; pointer-events: none; overflow: hidden; background: var(--ant-color-bg-elevated); position: relative; border-radius: var(--ant-border-radius-lg); box-shadow: var(--ant-box-shadow); cursor: grabbing; }
 .rp-dashboard-drag-preview::after { content: ""; position: absolute; inset: 0; border: 2px solid var(--ant-color-primary); border-radius: inherit; pointer-events: none; z-index: 1; }
 .rp-dashboard-layout-tools { align-items: center; gap: 12px; flex-wrap: wrap; }
 .rp-dashboard-layout-tools > .ant-typography { flex: 1; min-width: 200px; }
@@ -392,9 +427,9 @@ body {
 .rp-dashboard-width-3 .rp-dashboard-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .rp-dashboard-width-2 .rp-dashboard-shortcuts { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 767px) { .rp-dashboard-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.rp-dashboard-shortcut { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 12px; border-radius: 8px; color: var(--ant-color-text); text-align: center; }
+.rp-dashboard-shortcut { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 20px 12px; border-radius: var(--ant-border-radius); color: var(--ant-color-text); text-align: center; }
 .rp-dashboard-shortcut:hover, .rp-dashboard-shortcut:focus-visible { background: var(--ant-color-fill-tertiary); color: var(--ant-color-primary); }
-.rp-dashboard-shortcut-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 10px; background: var(--ant-color-primary-bg); color: var(--ant-color-primary); font-size: 24px; }
+.rp-dashboard-shortcut-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: var(--ant-border-radius-lg); background: var(--ant-color-primary-bg); color: var(--ant-color-primary); font-size: 24px; }
 
 .rp-admin-overview__pages {
   display: flex;
@@ -468,8 +503,18 @@ body {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: thin;
   box-shadow: inset 0 -1px 0 var(--ant-color-border-secondary);
+}
+/* One swipeable line (useScrollEdges): no scrollbar, which under tabs reads as a second underline,
+   and a fade at each side that has more instead. */
+.rp-scroll-row { overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain; }
+.rp-scroll-row::-webkit-scrollbar { display: none; }
+.rp-scroll-row[data-dragging] { cursor: grabbing; user-select: none; }
+.rp-scroll-row[data-dragging] * { cursor: grabbing; }
+.rp-scroll-row[data-start] { mask-image: linear-gradient(to right, transparent, #000 32px); }
+.rp-scroll-row[data-end] { mask-image: linear-gradient(to left, transparent, #000 32px); }
+.rp-scroll-row[data-start][data-end] {
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
 }
 .rp-settings-tab {
   flex: 0 0 auto;
@@ -551,19 +596,38 @@ body {
 .rp-settings-panel h4.ant-typography {
   margin-top: 0;
 }
+/* A form reads down one column of comfortable width, as in Workspace's admin console, rather than
+   stretching every input across a wide screen; tables and cards in a panel keep the full width. */
+.rp-settings-panel > .ant-form-item { max-width: 720px; }
+.rp-image-field { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; }
+.rp-image-field__preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  background: var(--ant-color-fill-quaternary);
+}
 .rp-settings-save-dock {
+  /* A floating panel, raised on every side like the app's other overlays, held a little above the
+     bottom of the scroll area rather than a strip with only a top edge. */
   position: sticky;
-  bottom: 0;
+  bottom: 12px;
   z-index: 3;
-  margin-top: 12px;
-  padding: 10px 16px;
+  margin-top: 16px;
+  padding: 10px 12px 10px 16px;
   background: var(--ant-color-bg-elevated);
-  border-top: 1px solid var(--ant-color-border-secondary);
-  box-shadow: 0 -2px 8px var(--ant-color-fill-tertiary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  box-shadow: var(--ant-box-shadow-secondary);
   animation: rp-save-dock-in 160ms ease-out;
 }
 @keyframes rp-save-dock-in {
-  from { transform: translateY(100%); opacity: 0; }
+  from { transform: translateY(12px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -607,13 +671,19 @@ body {
   .rp-policy-scope { border-inline-end: 0; border-bottom: 1px solid var(--ant-color-border-secondary); padding: 0 0 12px; }
   .rp-policy-content { padding-inline-end: 0; scrollbar-gutter: auto; }
   .rp-policy-scope-header > .rp-policy-scope-toggle { max-width: 60%; }
+  /* Content as wide as the header. Touch devices overlay their scrollbars, so nothing is reserved. */
   .rp-admin-page-body { scrollbar-gutter: auto; padding-inline-end: 0; }
   .rp-batch-targets-section > .ant-space-item { min-width: 0; }
-  .rp-table-scroll { overflow-x: auto; }
-  .rp-table-scroll .ant-table table, .rp-ou-targets .ant-table table { min-width: 640px; }
+  /* Wide tables no longer scroll sideways on a phone: CardTable lays their rows out as cards. */
   .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
   .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
   .rp-policy-scope > .ant-typography { display: none; }
+}
+/* A narrow window with a mouse has a classic 6px scrollbar that takes space. It and a 6px gap sit in
+   the page's own end padding: the body reaches into it by exactly that much, so the content stays as
+   wide as the header and the bar is not drawn on the right borders of inputs and cards. */
+@media (max-width: 767px) and (pointer: fine) {
+  .rp-admin-page-body { scrollbar-gutter: stable; padding-inline-end: 6px; margin-inline-end: -12px; }
 }
 
 .rp-plain-list {
@@ -664,7 +734,7 @@ body {
   height: 22px;
   padding-inline: 7px;
   border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 4px;
+  border-radius: var(--ant-border-radius-sm);
   background: var(--ant-color-fill-quaternary);
   color: var(--ant-color-text-secondary);
   line-height: 20px;
@@ -1361,7 +1431,7 @@ body {
   min-width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: 8px;
+  border-radius: var(--ant-border-radius);
   font-size: 16px;
   color: var(--ant-color-text-secondary);
 }
@@ -1401,7 +1471,7 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--ant-border-radius-lg);
   background: var(--ant-color-fill-quaternary);
 }
 .rp-task-row {
@@ -1418,7 +1488,7 @@ body {
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
-  border-radius: 6px;
+  border-radius: var(--ant-border-radius-sm);
   -webkit-tap-highlight-color: transparent;
 }
 .rp-task-row__main[role='button'] { cursor: pointer; }
@@ -1552,13 +1622,13 @@ body {
   height: auto;
   min-height: 92px;
   padding: 10px 4px 8px;
-  border-radius: 14px;
+  border-radius: var(--ant-border-radius-lg);
   white-space: normal;
 }
 .rp-workbench-menu__icon {
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: var(--ant-border-radius-lg);
   font-size: 22px;
   line-height: 44px;
 }
@@ -1723,7 +1793,7 @@ body {
 @media (max-width: 575px) {
   .md-table-wrap {
     border: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.3));
-    border-radius: 8px;
+    border-radius: var(--ant-border-radius);
     box-shadow: inset -10px 0 12px -14px rgba(0, 0, 0, 0.45);
   }
   .md-table-wrap > table {
@@ -1779,7 +1849,7 @@ body {
   color: var(--ant-color-primary-text, #1677ff);
   background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.1));
   padding: 0.1em 0.4em;
-  border-radius: 5px;
+  border-radius: var(--ant-border-radius-sm);
   font-size: 0.9em;
 }
 .md-body pre {
@@ -1787,7 +1857,7 @@ body {
   color: #d4d4d4;
   border: 1px solid rgba(255, 255, 255, 0.08);
   padding: 12px 15px;
-  border-radius: 12px;
+  border-radius: var(--ant-border-radius-lg);
   overflow: auto;
 }
 .md-body pre code {
@@ -1800,7 +1870,7 @@ body {
   margin: 0.9em 0;
   padding: 0.6em 1em;
   border-left: 4px solid var(--ant-color-primary, #1677ff);
-  border-radius: 0 10px 10px 0;
+  border-radius: 0 var(--ant-border-radius-lg) var(--ant-border-radius-lg) 0;
   background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.06));
   color: var(--ant-color-text, inherit);
 }
@@ -1837,7 +1907,7 @@ body {
   height: 28px;
   padding: 0 7px;
   border: 1px solid var(--ant-color-border, rgba(0, 0, 0, 0.15));
-  border-radius: 6px;
+  border-radius: var(--ant-border-radius-sm);
   color: var(--ant-color-text, inherit);
   background: var(--ant-color-bg-container, #fff);
   font: inherit;
@@ -1868,7 +1938,7 @@ body {
   max-height: 72vh;
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
-  border-radius: 8px;
+  border-radius: var(--ant-border-radius);
   cursor: grab;
   touch-action: none;
   user-select: none;
@@ -1913,7 +1983,7 @@ body {
 .rp-recurring-execution {
   padding: 12px 14px 14px;
   border: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.2));
-  border-radius: 10px;
+  border-radius: var(--ant-border-radius-lg);
   background: var(--ant-color-fill-quaternary, rgba(128, 128, 128, 0.04));
 }
 .rp-recurring-execution-heading {
@@ -2057,6 +2127,7 @@ body {
   .rp-doc-card > .ant-card-head .ant-card-head-wrapper {
     flex-wrap: wrap;
     row-gap: 8px;
+    padding-block: 0;
   }
   /* A report title is a sentence, and on its own line there is no reason to cut it short. */
   .rp-doc-card > .ant-card-head .ant-card-head-title {
@@ -2180,40 +2251,366 @@ body {
   }
 }
 
-/* Audit log on a phone: the table becomes a list of cards (see pages/manage/AuditPage.tsx).
-   Each card is a whole row, so every field gets the full width instead of a column narrow
-   enough to wrap CJK one character per line. */
-.rp-audit-filters {
+/* Touch screens: small controls get a target a finger can hit (WCAG 2.2: 24px; Apple: 44pt) with no
+   change to how they look. A switch's hit area grows past its edges; an unlabelled checkbox gains
+   padding that a negative margin of the same size cancels, so nothing moves; number-input arrows,
+   about 1px wide on a phone, give way to typing the number. */
+@media (pointer: coarse) {
+  .ant-switch { overflow: visible; }
+  .ant-switch::after { content: ''; position: absolute; inset: -12px -8px; }
+  .ant-checkbox-wrapper:not(:has(> .ant-checkbox + span)) { padding: 10px; margin: -10px; }
+  .ant-input-number-actions { display: none; }
+}
+/* A spinning status icon holds still for readers who ask for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .anticon-spin, .anticon-spin::before { animation: none; }
+}
+
+/* Every antd tab row that does not fit scrolls (antd's own swipe and wheel) and fades at the side
+   that has more, like the settings workspace; antd's "…" overflow menu hid tabs behind a click. */
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-operations { display: none !important; }
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-wrap::before,
+.ant-tabs > .ant-tabs-nav .ant-tabs-nav-wrap::after { display: none; }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-left { mask-image: linear-gradient(to right, transparent, #000 32px); }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-right { mask-image: linear-gradient(to left, transparent, #000 32px); }
+.ant-tabs-nav-wrap.ant-tabs-nav-wrap-ping-left.ant-tabs-nav-wrap-ping-right {
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+/* CardTable (components/CardTable.tsx) on a phone: each row is a card of label and value, so no
+   table needs a sideways scroll. The !important lines undo widths, offsets and stickiness antd
+   writes inline for columns and fixed cells, which a card has no use for. */
+.rp-card-table--cards .ant-table { background: transparent; }
+.rp-card-table--cards .ant-table-thead,
+.rp-card-table--cards colgroup { display: none; }
+.rp-card-table--cards table,
+.rp-card-table--cards tbody { display: block; width: 100% !important; min-width: 0 !important; table-layout: auto !important; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row {
+  display: block;
+  margin-bottom: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  background: var(--ant-color-bg-container);
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td {
   display: flex;
-  flex-direction: column;
+  align-items: baseline;
+  gap: 12px;
+  width: auto !important;
+  min-width: 0;
+  padding: 5px 0 !important;
+  border: 0 !important;
+  position: static !important;
+  inset: auto !important;
+  background: transparent !important;
+  text-align: start !important;
+  overflow-wrap: anywhere;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td::before {
+  content: attr(data-label);
+  flex: 0 0 32%;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-label='']::before,
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td:not([data-label])::before { content: none; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td > * { min-width: 0; }
+/* The first column is the card's title: full width, unlabelled, set apart from the fields below. */
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary] {
+  padding-block: 6px 8px !important;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--ant-color-split) !important;
+  font-weight: 500;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]::before { content: none; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-primary]:last-child { border-bottom: 0 !important; }
+/* Row controls sit in the card's top corner, not on a line of their own: antd's expand arrow and
+   selection box, and an unlabelled trailing column (an open arrow or the row's actions). */
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row { position: relative; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td.ant-table-selection-column,
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td[data-label='']:last-child:not([data-primary]),
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row > td.ant-table-row-expand-icon-cell {
+  position: absolute !important;
+  inset: 10px 10px auto auto !important;
+  width: auto !important;
+  padding: 0 !important;
+}
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:has(> td.ant-table-row-expand-icon-cell, > td.ant-table-selection-column, > td[data-label='']:last-child) > td[data-primary] { padding-inline-end: 36px !important; }
+.rp-card-table--cards .ant-table-tbody > tr.ant-table-row:hover > td { background: transparent !important; }
+.rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) { display: block; }
+.rp-card-table--cards .ant-table-tbody > tr:not(.ant-table-row) > td { display: block; border: 0; }
+.rp-card-table--cards .ant-table-container,
+.rp-card-table--cards .ant-table-content { overflow: visible !important; }
+
+/* Audit log toolbar: the filtering controls wrap as the card narrows, with the search taking what
+   is left of its line and never less than a usable width. */
+.rp-audit-toolbar {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
-.rp-audit-filters__top {
-  display: flex;
-  gap: 8px;
-}
-/* The search box takes whatever the filter button leaves; min-width: 0 is what lets a flex
-   child shrink below the width of its own placeholder. */
-.rp-audit-filters__top > .ant-input-affix-wrapper,
-.rp-audit-filters__top > .ant-input-outlined {
-  flex: 1;
+.rp-audit-toolbar__search {
+  flex: 1 1 200px;
   min-width: 0;
 }
-.rp-audit-filters__top > .ant-badge {
-  flex: none;
-}
-.rp-audit-filters__grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+/* The results bar: the count on the left, what acts on the results on the right. */
+.rp-audit-results {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  margin-bottom: 8px;
 }
-/* Two half-width controls on a very narrow phone show about four characters each. */
-@media (max-width: 400px) {
-  .rp-audit-filters__grid {
-    grid-template-columns: 1fr;
+/* A bottom sheet floats like the side drawers do (see the right-drawer rule near the top): inset
+   from the window's edges, rounded, bordered and shadowed, and no wider than reads well. */
+.ant-drawer.rp-sheet > .ant-drawer-content-wrapper {
+  inset-inline: 12px;
+  bottom: 12px;
+  width: auto;
+  max-width: 560px;
+  margin-inline: auto;
+  border-radius: var(--ant-border-radius-lg);
+  box-shadow: none;
+}
+.ant-drawer.rp-sheet > .ant-drawer-content-wrapper > .ant-drawer-section {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: var(--ant-border-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--ant-box-shadow-secondary);
+}
+.ant-drawer.rp-sheet .ant-drawer-header {
+  padding: 12px 16px;
+}
+.ant-drawer.rp-sheet .ant-drawer-body {
+  padding: 12px 16px 16px;
+}
+/* In a sheet the presets are pills that wrap, rather than a column of full-width rows. */
+.ant-drawer .rp-audit-range__presets {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ant-drawer .rp-audit-range__presets button {
+  width: auto;
+  padding: 4px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 999px;
+}
+.ant-drawer .rp-audit-range__presets button.is-selected {
+  border-color: var(--ant-color-primary-border);
+}
+/* In a bottom sheet the panels take the sheet's width rather than a popover's. */
+.ant-drawer .rp-audit-filter-panel,
+.ant-drawer .rp-audit-range {
+  width: auto;
+  max-width: none;
+}
+/* The sheet's own header names the panel, so the panel does not name itself twice. */
+.ant-drawer .rp-audit-filter-panel__head > .ant-typography {
+  visibility: hidden;
+}
+/* Audit log filters (pages/manage/AuditFilterPanel.tsx): one row per condition, attribute,
+   operator and value, as Cloudflare's log filters lay them out. */
+.rp-audit-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(480px, calc(100vw - 48px));
+}
+.rp-audit-filter-panel__head,
+.rp-audit-filter-panel__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.rp-audit-filter-row {
+  display: grid;
+  grid-template-columns: 110px 80px minmax(0, 1fr) 24px;
+  grid-template-areas: 'field op value remove';
+  gap: 6px;
+  align-items: center;
+}
+.rp-audit-filter-row__field { grid-area: field; }
+.rp-audit-filter-row__op { grid-area: op; }
+.rp-audit-filter-row__value { grid-area: value; min-width: 0; }
+.rp-audit-filter-row__remove { grid-area: remove; }
+/* Sized by the panel, not the window: the same panel is a 480px popover or a sheet as wide as the
+   phone, so its own width decides whether the value takes a line of its own. */
+.rp-audit-filter-panel {
+  container-type: inline-size;
+}
+@container (max-width: 440px) {
+  .rp-audit-filter-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px;
+    grid-template-areas:
+      'field op remove'
+      'value value .';
   }
 }
+/* Audit time range (pages/manage/AuditTimeRange.tsx): presets beside an absolute range. */
+.rp-audit-range {
+  display: flex;
+  gap: 12px;
+  max-width: calc(100vw - 48px);
+}
+.rp-audit-range__presets {
+  display: flex;
+  flex-direction: column;
+  min-width: 120px;
+  margin: 0;
+  padding: 0 12px 0 0;
+  border-right: 1px solid var(--ant-color-split);
+  list-style: none;
+}
+.rp-audit-range__presets button {
+  width: 100%;
+  padding: 5px 10px;
+  border: 0;
+  border-radius: var(--ant-border-radius);
+  background: none;
+  color: var(--ant-color-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.rp-audit-range__presets button:hover {
+  background: var(--ant-color-fill-tertiary);
+}
+.rp-audit-range__presets button.is-selected {
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+}
+.rp-audit-range__presets button:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: -2px;
+}
+.rp-audit-range__absolute {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .rp-audit-range {
+    flex-direction: column;
+  }
+  .rp-audit-range__presets {
+    padding: 0 0 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--ant-color-split);
+  }
+}
+/* An audit row's record, expanded under it (pages/manage/AuditPage.tsx): label and value side by
+   side, labels never wrapping, and labels above values once the space is too narrow for both. */
+.rp-audit-record {
+  container-type: inline-size;
+  padding: 4px 4px 8px;
+  cursor: auto;
+}
+.rp-audit-record__fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 20px;
+  margin: 0;
+}
+.rp-audit-record__fields > dt {
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+.rp-audit-record__fields > dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@container (max-width: 420px) {
+  .rp-audit-record:not(.rp-audit-record--compact) .rp-audit-record__fields { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rp-audit-record:not(.rp-audit-record--compact) .rp-audit-record__fields > dd { margin-bottom: 8px; }
+}
+@container (max-width: 240px) {
+  .rp-audit-record--compact .rp-audit-record__fields { grid-template-columns: minmax(0, 1fr); }
+}
+.rp-audit-record__raw {
+  margin-top: 8px;
+}
+.rp-audit-record__raw.ant-collapse > .ant-collapse-item > .ant-collapse-header { padding-inline: 0; color: var(--ant-color-primary); }
+.rp-audit-record__raw.ant-collapse .ant-collapse-content-box { padding-inline: 0; }
+/* Code and payload blocks (codeBlocks.test.ts): one template, wrapped rather than scrolled sideways
+   so a command or a payload reads on a phone, bounded in height. */
+.rp-code {
+  max-height: 320px;
+  margin: 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: var(--ant-border-radius);
+  background: var(--ant-color-fill-quaternary);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* The leading chevron: small and quiet, turning down to point at its open record. */
+.rp-audit-expand.ant-btn { width: 24px; height: 24px; color: var(--ant-color-text-tertiary); }
+.rp-audit-expand.ant-btn:hover { color: var(--ant-color-text); }
+.rp-audit-expand .anticon { font-size: 11px; transition: transform var(--ant-motion-duration-mid, 0.2s); }
+.rp-audit-expand.is-open .anticon { transform: rotate(90deg); }
+/* A record unfolds from its row and folds back into it: the grid row grows from 0fr to 1fr while it
+   fades in, and the reverse on close, before the record is unmounted. */
+.rp-expand {
+  display: grid;
+  grid-template-rows: 1fr;
+  animation: rp-expand-in 0.2s var(--ant-motion-ease-out, ease-out);
+}
+.rp-expand > * { min-height: 0; overflow: hidden; }
+.rp-expand.is-closing { animation: rp-expand-out 0.18s var(--ant-motion-ease-in, ease-in) forwards; }
+@keyframes rp-expand-in {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+@keyframes rp-expand-out {
+  from { grid-template-rows: 1fr; opacity: 1; }
+  to { grid-template-rows: 0fr; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-audit-expand .anticon { transition: none; }
+  .rp-expand, .rp-expand.is-closing { animation: none; }
+}
+/* Expand: the same fold, as transitions, so a toggle pressed again mid-fold turns back from where
+   it is instead of restarting. It unfolds from nothing when it mounts (@starting-style; a browser
+   without it just shows the content). */
+.rp-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 0.2s var(--ant-motion-ease-out, ease-out), opacity 0.2s var(--ant-motion-ease-out, ease-out);
+}
+.rp-fold > * { min-height: 0; overflow: hidden; }
+@starting-style {
+  .rp-fold:not(.rp-fold--static) { grid-template-rows: 0fr; opacity: 0; }
+}
+.rp-fold.is-closing { grid-template-rows: 0fr; opacity: 0; transition-timing-function: var(--ant-motion-ease-in, ease-in); }
+@media (prefers-reduced-motion: reduce) {
+  .rp-fold { transition: none; }
+}
+/* The expanded row's cell carries no padding of its own, so the fold starts from nothing. */
+.rp-audit-card .ant-table-wrapper .ant-table-tbody > tr.ant-table-expanded-row > td { padding: 0; }
+.rp-audit-card .ant-table-expanded-row .rp-audit-record { padding: 12px 16px 14px 52px; }
+/* A clickable row says so. */
+.rp-audit-card .ant-table-tbody > tr.ant-table-row { cursor: pointer; }
+.rp-audit-row.is-open { border-color: var(--ant-color-primary-border); }
+.rp-audit-row .rp-audit-record { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--ant-color-split); }
+.rp-audit-row:focus-visible {
+  outline: 2px solid var(--ant-color-primary);
+  outline-offset: 2px;
+}
+/* The phone record is a compact two-column list: labels small, beside their values. */
+.rp-audit-record--compact .rp-audit-record__fields { gap: 6px 12px; font-size: 13px; }
+.rp-audit-record--compact .rp-audit-record__fields > dt { font-size: 12px; }
+
+/* Audit log on a phone: the table becomes a list of cards (see pages/manage/AuditPage.tsx).
+   Each card is a whole row, so every field gets the full width instead of a column narrow
+   enough to wrap CJK one character per line. */
 .rp-audit-list {
   display: flex;
   flex-direction: column;
@@ -2225,17 +2622,13 @@ body {
   gap: 4px;
   padding: 10px 12px;
   border: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.3));
-  border-radius: 10px;
+  border-radius: var(--ant-border-radius-lg);
   background: var(--ant-color-bg-container, transparent);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.rp-audit-row:active {
+.rp-audit-row:active:not(:has(.rp-audit-record:active)) {
   background: var(--ant-color-fill-quaternary, rgba(128, 128, 128, 0.06));
-}
-.rp-audit-row:focus-visible {
-  outline: 2px solid var(--ant-color-primary, #1677ff);
-  outline-offset: 2px;
 }
 .rp-audit-row__head {
   display: flex;
@@ -2339,7 +2732,7 @@ body {
   gap: 4px;
   padding: 8px 10px;
   border: 1px solid var(--ant-color-border-secondary, rgba(128, 128, 128, 0.3));
-  border-radius: 8px;
+  border-radius: var(--ant-border-radius);
 }
 /* A name this long always wraps, and an inline background splits across the break with the
    padding and the rounded corners only on the outer ends — which reads as two ragged boxes.
@@ -2369,7 +2762,7 @@ body {
   display: flex;
   gap: 12px;
   padding: 12px 14px;
-  border-radius: 16px;
+  border-radius: var(--ant-border-radius-lg);
   color: var(--rp-n-text);
   background: var(--rp-n-solid);
   background: var(--rp-n-bg);
@@ -2389,7 +2782,7 @@ body {
   flex: none;
   width: 34px;
   height: 34px;
-  border-radius: 9px;
+  border-radius: var(--ant-border-radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2429,7 +2822,7 @@ body {
 .rp-notify-more {
   align-self: flex-end;
   padding: 6px 12px;
-  border-radius: 12px;
+  border-radius: var(--ant-border-radius-lg);
   font-size: 12.5px;
   color: var(--rp-n-muted);
   background: var(--rp-n-solid);
@@ -2542,7 +2935,7 @@ body {
 
 .rp-dashboard-palette-groups { margin-top: 16px; }
 .rp-dashboard-preview-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
-.rp-dashboard-catalog-card { min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: 8px; padding: 10px; }
+.rp-dashboard-catalog-card { min-width: 0; border: 1px solid var(--ant-color-border-secondary); border-radius: var(--ant-border-radius); padding: 10px; }
 .rp-dashboard-example { margin-bottom: 10px; min-height: 120px; }
 .rp-dashboard-example-label { display: block; font-size: 11px; color: var(--ant-color-text-tertiary); margin-bottom: 8px; }
 .rp-dashboard-example .rp-dashboard-chart figcaption { display: none; }
@@ -2550,7 +2943,7 @@ body {
 .rp-dashboard-example-metrics > div { display: flex; flex: 1; flex-direction: column; gap: 8px; color: var(--ant-color-text-secondary); }
 .rp-dashboard-example-metrics strong { color: var(--ant-color-text); font-size: 24px; }
 .rp-dashboard-example-links { display: flex; gap: 12px; flex-wrap: wrap; padding: 24px 12px; }
-.rp-dashboard-example-links span { border-radius: 6px; padding: 8px; background: var(--ant-color-primary-bg); color: var(--ant-color-primary); }
+.rp-dashboard-example-links span { border-radius: var(--ant-border-radius-sm); padding: 8px; background: var(--ant-color-primary-bg); color: var(--ant-color-primary); }
 .rp-dashboard-shortcut-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .rp-dashboard-shortcut-options > .ant-btn { justify-content: flex-start; white-space: normal; height: auto; min-height: 36px; text-align: start; }
 .rp-sso-page > .ant-tabs > .ant-tabs-nav { margin-bottom: 16px; }
@@ -2565,8 +2958,8 @@ body {
 @media (max-width: 1050px) { .rp-dashboard-catalog-modal .rp-dashboard-preview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .rp-dashboard-catalog-modal .rp-dashboard-shortcut-options { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .rp-dashboard-catalog-modal { width: calc(100vw - 16px) !important; max-width: none; } .rp-dashboard-catalog-modal .rp-dashboard-preview-grid { grid-template-columns: minmax(0, 1fr); } .rp-dashboard-catalog-modal .ant-modal-body { max-height: calc(100dvh - 110px) !important; } }
 .rp-dashboard-size-label { display: inline-flex; align-items: center; gap: 8px; }
-.rp-dashboard-size-diagram { display: inline-flex; align-items: stretch; width: 30px; height: 14px; padding: 2px; border: 1px solid var(--ant-color-border); border-radius: 3px; background: var(--ant-color-fill-quaternary); }
-.rp-dashboard-size-diagram > span { min-width: 3px; background: var(--ant-color-primary); border-radius: 1px; }
+.rp-dashboard-size-diagram { display: inline-flex; align-items: stretch; width: 30px; height: 14px; padding: 2px; border: 1px solid var(--ant-color-border); border-radius: var(--ant-border-radius-xs); background: var(--ant-color-fill-quaternary); }
+.rp-dashboard-size-diagram > span { min-width: 3px; background: var(--ant-color-primary); border-radius: 0; }
 .rp-dashboard-widget-tools { animation: rp-dashboard-tools-in 180ms ease-out; }
 .rp-dashboard-editable { transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease; }
 @keyframes rp-dashboard-tools-in { from { opacity: 0; translate: 0 -4px; } to { opacity: 1; translate: 0 0; } }
@@ -2579,16 +2972,16 @@ body {
 .rp-dashboard-summary .ant-card { min-height: 180px; }
 .rp-dashboard-example-shortcuts { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 10px; padding: 20px 4px; }
 .rp-dashboard-example-shortcuts > span { display: flex; flex-direction: column; align-items: center; gap: 10px; font-size: 11px; text-align: center; }
-.rp-dashboard-example-shortcuts i { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 8px; background: var(--ant-color-primary-bg); color: var(--ant-color-primary); font-size: 20px; }
+.rp-dashboard-example-shortcuts i { display: grid; place-items: center; width: 36px; height: 36px; border-radius: var(--ant-border-radius); background: var(--ant-color-primary-bg); color: var(--ant-color-primary); font-size: 20px; }
 .rp-dashboard-example-directory { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; font-size: 11px; }
-.rp-dashboard-example-directory > div { border: 1px solid var(--ant-color-border-secondary); padding: 8px; border-radius: 6px; }
+.rp-dashboard-example-directory > div { border: 1px solid var(--ant-color-border-secondary); padding: 8px; border-radius: var(--ant-border-radius-sm); }
 .rp-dashboard-example-directory strong { display: block; margin-bottom: 6px; }
 .rp-dashboard-example-directory span { display: flex; align-items: center; gap: 5px; padding-block: 5px; color: var(--ant-color-text-secondary); }
 .rp-dashboard-example-directory b { margin-inline-start: auto; }
 .rp-scroll-top { inset-inline-end: 24px; inset-block-end: 24px; z-index: 90; }
 
 
-.rp-captcha-field { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 3px 4px 3px 10px; margin-bottom: 12px; border: 1px solid var(--ant-color-border); border-radius: 8px; background: var(--ant-color-bg-container); transition: border-color 180ms ease, box-shadow 180ms ease; }
+.rp-captcha-field { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 3px 4px 3px 10px; margin-bottom: 12px; border: 1px solid var(--ant-color-border); border-radius: var(--ant-border-radius); background: var(--ant-color-bg-container); transition: border-color 180ms ease, box-shadow 180ms ease; }
 .rp-captcha-field:focus-within { border-color: var(--ant-color-primary); box-shadow: 0 0 0 2px var(--ant-color-primary-bg); }
 .rp-captcha-field .ant-input { min-width: 0; flex: 1; border: 0; padding-inline: 0; background: transparent; box-shadow: none !important; }
 .rp-captcha-image { width: 96px; height: 32px; object-fit: contain; cursor: pointer; flex-shrink: 0; }
@@ -2615,6 +3008,9 @@ body {
 
 .rp-dashboard-echart { container-type: inline-size; }
 .rp-dashboard-chart-visual { width: 100%; min-width: 0; }
+/* No rows: the empty state sits in the middle of the space the chart would take, both ways. */
+.rp-dashboard-chart-visual.is-empty { display: flex; flex: 1; align-items: center; justify-content: center; min-height: clamp(220px, 46cqw, 340px); }
+.rp-dashboard-chart-visual.is-empty .ant-empty { margin: 0; }
 .rp-dashboard-echart-host { width: 100%; height: clamp(220px, 46cqw, 340px); }
 .rp-dashboard-echart-host svg { width: auto; height: auto; }
 .rp-dashboard-chart-card .rp-dashboard-echart-host svg { min-height: 0; }
@@ -2726,7 +3122,8 @@ body {
    tables scroll inside their container instead of being clipped. */
 .rp-settings-content .rp-settings-panel .ant-card .ant-card { box-shadow: none; border-color: var(--ant-color-border-secondary); }
 .rp-settings-content .ant-card > .ant-card-head { min-height: 40px; padding-inline: 16px; }
-.rp-settings-content .ant-card > .ant-card-head .ant-card-head-title { padding-block: 8px; font-size: 15px; }
+/* The header row's own 8px (see the shared card header rule) is the title's padding. */
+.rp-settings-content .ant-card > .ant-card-head .ant-card-head-title { padding-block: 0; font-size: 15px; }
 .rp-settings-content .ant-card > .ant-card-body { padding: 12px 16px; }
 .rp-settings-content .ant-card .ant-card > .ant-card-head { padding-inline: 12px; }
 .rp-settings-content .ant-card .ant-card > .ant-card-body { padding: 8px 12px; }
@@ -2740,7 +3137,7 @@ body.rp-has-save-dock .rp-scroll-top { inset-block-end: 88px; }
 .rp-task-views { margin: 12px 0 4px; }
 .rp-task-views__label { display: inline-flex; align-items: center; gap: 6px; }
 .rp-task-views__count {
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px;
   background: var(--ant-color-primary); color: var(--ant-color-white);
   font-size: 11px; line-height: 18px; text-align: center; font-variant-numeric: tabular-nums;
 }

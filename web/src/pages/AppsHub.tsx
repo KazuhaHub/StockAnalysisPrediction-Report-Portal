@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { Alert, Button, Card, Col, Empty, Row, Space, Spin, Tag, Typography, theme } from 'antd'
+import { Alert, Button, Card, Col, Empty, Row, Space, Tag, Typography, theme } from 'antd'
 import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
@@ -10,6 +10,7 @@ import type { AppsResp, AppSummary } from '../api/types'
 import { clickable } from '../lib/clickable'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
 // permission; the registry lives in lib/builtinApps so the entry-button picker and shortcut router
@@ -109,10 +110,7 @@ export default function AppsHub() {
         />
       )}
       {loading && !resp ? (
-        <div style={{ display: 'grid', justifyItems: 'center', gap: 12, minHeight: 200, alignContent: 'center' }}>
-          <Spin size="large" />
-          <Typography.Text type="secondary">{t('common.loading')}</Typography.Text>
-        </div>
+        <LoadingPlaceholder minHeight={200} />
       ) : isEmpty && !loadErr ? (
         <Empty description={t('apps.empty')} />
       ) : (

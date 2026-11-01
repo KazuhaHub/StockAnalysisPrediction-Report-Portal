@@ -32,7 +32,8 @@ describe('TimelinePanel (horizontal / mobile)', () => {
     const onSelect = vi.fn()
     render(<TimelinePanel nodes={nodes} selected="2026-05-09" onSelect={onSelect} horizontal />)
     const scroll = screen.getByTestId('timeline-hscroll')
-    expect(scroll.style.overflowX).toBe('auto')
+    // The shared swipeable row: scrolls sideways, no scrollbar, faded edges (.rp-scroll-row).
+    expect(scroll.classList.contains('rp-scroll-row')).toBe(true)
     fireEvent.click(screen.getByText('2026-01-17'))
     expect(onSelect).toHaveBeenCalledWith('2026-01-17')
   })

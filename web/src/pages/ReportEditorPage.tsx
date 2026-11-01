@@ -7,13 +7,11 @@ import {
   DatePicker,
   Form,
   Input,
-  Popconfirm,
   Radio,
   Row,
   Segmented,
   Select,
   Space,
-  Spin,
   Tag,
   Typography,
   Upload,
@@ -28,12 +26,15 @@ import {
 import dayjs from 'dayjs'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
+import Confirm, { confirmAction } from '../components/Confirm'
 import { ApiError, api, errText } from '../api/client'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import type { Principal } from '../api/types'
 import Markdown from '../components/Markdown'
 import { principalOptions } from '../components/principals'
 import ReportHistoryDrawer from '../components/ReportHistoryDrawer'
+import { notifyError } from '../lib/notify'
+import { LoadingPlaceholder } from '../components/LoadGate'
 
 // The report editor (ADR 0026).
 //
@@ -163,7 +164,7 @@ export default function ReportEditorPage() {
         // A lost connection keeps the editor loading and loads it again when the connection returns.
         const text = failure(e)
         if (text === null) lost = true
-        else if (live) message.error(text)
+        else if (live) notifyError(text)
       })
       .finally(() => { if (live && !lost) setLoading(false) })
     return () => {
@@ -229,14 +230,12 @@ export default function ReportEditorPage() {
       go()
       return
     }
-    modal.confirm({
+    confirmAction(modal, {
       title: t('reportEditor.discardTitle'),
-      content: t('reportEditor.discardBody'),
+      description: t('reportEditor.discardBody'),
       okText: t('reportEditor.discardOk'),
-      okButtonProps: { danger: true },
-      cancelText: t('common.cancel'),
       onOk: go,
-    })
+    }, t)
   }
 
   // Importing a .md file fills the body rather than uploading anything: the report is the text, and
@@ -253,7 +252,7 @@ export default function ReportEditorPage() {
       }
       setPane('write')
     }
-    reader.onerror = () => message.error(t('reportEditor.importFailed'))
+    reader.onerror = () => notifyError(t('reportEditor.importFailed'))
     reader.readAsText(file)
     return false // never let antd upload it
   }
@@ -261,7 +260,7 @@ export default function ReportEditorPage() {
   const save = async () => {
     const v = await form.validateFields()
     if (!body.trim()) {
-      message.error(t('reportEditor.bodyRequired'))
+      notifyError(t('reportEditor.bodyRequired'))
       setPane('write')
       return
     }
@@ -296,15 +295,15 @@ export default function ReportEditorPage() {
         ? (e.data as { id?: number } | undefined)?.id
         : undefined
       if (other) {
-        modal.confirm({
+        confirmAction(modal, {
           title: t('reportEditor.existsTitle'),
-          content: t('reportEditor.existsBody'),
+          description: t('reportEditor.existsBody'),
           okText: t('reportEditor.existsOpen'),
-          cancelText: t('common.cancel'),
+          danger: false,
           onOk: () => navigate(`/report/${other}/edit`),
-        })
+        }, t)
       } else {
-        message.error(errText(e, t))
+        notifyError(errText(e, t))
       }
     } finally {
       setSaving(false)
@@ -318,15 +317,13 @@ export default function ReportEditorPage() {
       message.success(t('reportEditor.deleted'))
       navigate('/')
     } catch (e) {
-      message.error(errText(e, t))
+      notifyError(errText(e, t))
     }
   }
 
   if (loading) {
     return (
-      <div style={{ padding: 80, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
+      <LoadingPlaceholder minHeight="40vh" />
     )
   }
   if (!data) return null
@@ -497,11 +494,11 @@ export default function ReportEditorPage() {
                   {t('common.save')}
                 </Button>
                 {editingId && (
-                  <Popconfirm title={t('reportEditor.deleteConfirm')} onConfirm={remove}>
+                  <Confirm title={t('reportEditor.deleteConfirm')} onConfirm={remove} okText={t('reportEditor.deleteAction')} irreversible>
                     <Button danger icon={<DeleteOutlined />}>
                       {t('common.delete')}
                     </Button>
-                  </Popconfirm>
+                  </Confirm>
                 )}
               </Space>
             </Space>
