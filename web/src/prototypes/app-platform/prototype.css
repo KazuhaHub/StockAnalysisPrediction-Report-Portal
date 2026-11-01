@@ -1,0 +1,87 @@
+.prototype-app-platform {
+  min-height: 100vh;
+}
+.prototype-global-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--prototype-border);
+}
+.prototype-main {
+  max-width: 1248px;
+  padding: 24px;
+  margin: 0 auto;
+}
+.prototype-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 20px 0 28px;
+}
+.prototype-page-header h2 {
+  margin: 0 0 8px;
+}
+.prototype-full-width {
+  width: 100%;
+}
+.prototype-search {
+  max-width: 420px;
+  margin-bottom: 24px;
+}
+.prototype-app-card {
+  height: 100%;
+}
+.prototype-app-card h4 {
+  margin: 0 0 8px;
+}
+.prototype-app-icon {
+  font-size: 36px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.prototype-card-copy {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.prototype-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 24px;
+}
+.prototype-discover {
+  margin-top: 24px;
+}
+.prototype-setup {
+  max-width: 560px;
+}
+.prototype-preview-controls {
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--prototype-border);
+}
+.prototype-preview-controls .ant-select {
+  min-width: 130px;
+}
+.prototype-preview-controls .ant-form-item {
+  margin-bottom: 8px;
+}
+@media (max-width: 600px) {
+  .prototype-main {
+    padding: 16px 12px;
+  }
+  .prototype-global-header,
+  .prototype-preview-controls {
+    padding: 12px;
+  }
+  .prototype-global-header nav {
+    width: 100%;
+  }
+  .prototype-page-header {
+    align-items: flex-start;
+    margin: 16px 0 20px;
+  }
+}
