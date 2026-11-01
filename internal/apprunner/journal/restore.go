@@ -393,7 +393,8 @@ func (s *Store) settleRestore(ctx context.Context, source restoreSource, observa
 		Fingerprint: deployment.Fingerprint,
 	}
 	now := time.Now().UTC().UnixMilli()
-	if _, err := control.VerifyRestore(source.raw, source.signature, authority, now); err != nil {
+	if _, err := control.VerifyRestoreSettlement(
+		source.raw, source.signature, authority, now); err != nil {
 		return zero, fmt.Errorf(
 			"restore settlement command: %w",
 			ErrFenceReconciliation)

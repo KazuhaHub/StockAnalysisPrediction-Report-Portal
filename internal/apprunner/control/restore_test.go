@@ -110,9 +110,22 @@ func TestRestoreCommandRejectsAuthorityAndTime(t *testing.T) {
 	if _, err := VerifyRestore(raw, signature, authority, 55000); err == nil {
 		t.Fatal("expired restore accepted")
 	}
+	if verified, err := VerifyRestoreSettlement(
+		raw, signature, authority, 55000); err != nil ||
+		verified.Command() != command {
+		t.Fatal("admitted restore could not settle after expiry", err)
+	}
+	if _, err := VerifyRestoreSettlement(
+		raw, signature, authority, 28000); err == nil {
+		t.Fatal("restore settled before issue")
+	}
 	changed := append([]byte(nil), raw...)
 	changed[len(changed)/2] ^= 1
 	if _, err := VerifyRestore(changed, signature, authority, now); err == nil {
 		t.Fatal("changed restore bytes accepted")
+	}
+	if _, err := VerifyRestoreSettlement(
+		changed, signature, authority, 55000); err == nil {
+		t.Fatal("changed settlement bytes accepted")
 	}
 }

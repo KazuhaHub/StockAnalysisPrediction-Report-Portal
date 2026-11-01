@@ -144,6 +144,17 @@ func parseRestore(raw []byte) (RestoreCommand, error) {
 }
 
 func VerifyRestore(raw, signature []byte, authority Authority, nowMS int64) (VerifiedRestoreCommand, error) {
+	return verifyRestore(raw, signature, authority, nowMS, false)
+}
+
+// VerifyRestoreSettlement checks the exact command already admitted for an
+// in-flight effect. Expiry governs dispatch; a native restore that finishes
+// after the signed window must still be settled without reissuing the effect.
+func VerifyRestoreSettlement(raw, signature []byte, authority Authority, nowMS int64) (VerifiedRestoreCommand, error) {
+	return verifyRestore(raw, signature, authority, nowMS, true)
+}
+
+func verifyRestore(raw, signature []byte, authority Authority, nowMS int64, settling bool) (VerifiedRestoreCommand, error) {
 	fail := func() (VerifiedRestoreCommand, error) { return VerifiedRestoreCommand{}, ErrInvalidCommand }
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 || nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return fail()
@@ -165,7 +176,8 @@ func VerifyRestore(raw, signature []byte, authority Authority, nowMS int64) (Ver
 		return fail()
 	}
 	expires, ok := counter(c.ExpiresMS, false)
-	if !ok || expires <= issued || expires-issued > 30000 || issued > nowMS || nowMS >= expires {
+	if !ok || expires <= issued || expires-issued > 30000 ||
+		issued > nowMS || (!settling && nowMS >= expires) {
 		return fail()
 	}
 	digest, err := RestoreLogicalDigest(c)
