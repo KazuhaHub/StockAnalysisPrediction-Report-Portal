@@ -301,13 +301,9 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 	command := before.verified.Command()
 	expectedObservationState := "exited"
 	state := "stopped"
-	nextRevision := int64(3)
-	nextDesired := "stopped"
 	if command.Stage == "remove_code" {
 		expectedObservationState = "absent"
 		state = "absent"
-		nextRevision = 4
-		nextDesired = "absent"
 	}
 	if snapshot.State != expectedObservationState {
 		return zero, fmt.Errorf(
@@ -331,20 +327,17 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 			current.running.NativeID, before.running.NativeID)
 	}
 	now := time.Now().UTC().UnixMilli()
-	changed, err := tx.ExecContext(ctx,
-		`UPDATE runner_resources SET desired_state=?,observed_state=?,revision=?,observed_ms=?,updated_ms=?
-		WHERE id=? AND kind='container' AND native_id=? AND revision=2
-		AND desired_state='present' AND observed_state='running'`,
-		nextDesired, state, nextRevision,
-		snapshot.ObservedMS, now, current.start.command.Payload.ResourceID,
-		current.running.NativeID)
+	updatedRows, err := advanceUpdateStartRemovalResource(
+		ctx, tx, current.start.command.Payload.ResourceID,
+		current.running.NativeID, command.Stage,
+		snapshot.ObservedMS, now)
 	if err != nil {
 		return zero, err
 	}
-	if n, err := changed.RowsAffected(); err != nil || n != 1 {
+	if updatedRows != 1 {
 		return zero, fmt.Errorf(
-			"%w: update-start removal resource CAS rows=%d err=%v",
-			ErrFenceReconciliation, n, err)
+			"%w: update-start removal resource CAS rows=%d",
+			ErrFenceReconciliation, updatedRows)
 	}
 	start := current.verified.Start().Command()
 	receipt := ManagedRemovalReceipt{
@@ -375,7 +368,7 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 			"%w: update-start removal receipt parse: %v",
 			ErrFenceReconciliation, err)
 	}
-	changed, err = tx.ExecContext(ctx,
+	changed, err := tx.ExecContext(ctx,
 		`UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND ack_attempted_ms IS NULL`,
 		string(encoded), now, command.EffectID)
 	if err != nil {
@@ -390,6 +383,36 @@ func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature
 		return zero, err
 	}
 	return receipt, nil
+}
+
+func advanceUpdateStartRemovalResource(
+	ctx context.Context,
+	tx *sql.Tx,
+	resourceID, nativeID, stage string,
+	observedMS, now int64,
+) (int64, error) {
+	var priorDesired, priorState, nextDesired, nextState string
+	var priorRevision, nextRevision int64
+	switch stage {
+	case "stop":
+		priorDesired, priorState, priorRevision = "present", "running", 2
+		nextDesired, nextState, nextRevision = "stopped", "stopped", 3
+	case "remove_code":
+		priorDesired, priorState, priorRevision = "stopped", "stopped", 3
+		nextDesired, nextState, nextRevision = "absent", "absent", 4
+	default:
+		return 0, ErrFenceReconciliation
+	}
+	changed, err := tx.ExecContext(ctx,
+		`UPDATE runner_resources SET desired_state=?,observed_state=?,revision=?,observed_ms=?,updated_ms=?
+		WHERE id=? AND kind='container' AND native_id=? AND revision=?
+		AND desired_state=? AND observed_state=?`,
+		nextDesired, nextState, nextRevision, observedMS, now,
+		resourceID, nativeID, priorRevision, priorDesired, priorState)
+	if err != nil {
+		return 0, err
+	}
+	return changed.RowsAffected()
 }
 
 func (store *Store) ReadUpdateStartRemovalReceipt(

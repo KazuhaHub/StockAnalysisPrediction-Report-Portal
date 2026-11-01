@@ -861,3 +861,38 @@ func TestUpdateStartRemovalUnknownReloadUsesExactHistoricalSource(t *testing.T) 
 		t.Fatal("unknown removal source reload", facts)
 	}
 }
+
+func TestUpdateStartRemovalResourceAdvancesStopThenRemoveCode(t *testing.T) {
+	f, _, command, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	running, err := ParseUpdateStartRunningReceipt(runningRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.store.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().UnixMilli()
+	changed, err := advanceUpdateStartRemovalResource(
+		context.Background(), tx, command.Payload.ResourceID,
+		running.NativeID, "stop", now, now)
+	if err != nil || changed != 1 {
+		t.Fatal("stop resource transition", changed, err)
+	}
+	changed, err = advanceUpdateStartRemovalResource(
+		context.Background(), tx, command.Payload.ResourceID,
+		running.NativeID, "remove_code", now+1, now+1)
+	if err != nil || changed != 1 {
+		t.Fatal("remove-code resource transition", changed, err)
+	}
+	if changed, err := advanceUpdateStartRemovalResource(
+		context.Background(), tx, command.Payload.ResourceID,
+		running.NativeID, "remove_code", now+2, now+2); err != nil ||
+		changed != 0 {
+		t.Fatal("replayed remove-code transition", changed, err)
+	}
+}
