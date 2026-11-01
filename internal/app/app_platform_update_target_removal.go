@@ -308,7 +308,8 @@ func (s *Server) preparePlatformUpdateTargetRemoval(ctx context.Context, lease p
 		case "applied":
 			parsed, err := journal.ParseManagedRemovalReceipt([]byte(receipt))
 			if err != nil ||
-				!updateStartRemovalReceiptMatchesIntent(parsed, result) ||
+				validateUpdateStartRemovalReceiptIntent(
+					parsed, result) != nil ||
 				observed != lease.fence {
 				return zero, errAppPlatformStageEvidence
 			}
@@ -324,18 +325,49 @@ func (s *Server) preparePlatformUpdateTargetRemoval(ctx context.Context, lease p
 	return result, nil
 }
 
-func updateStartRemovalReceiptMatchesIntent(receipt journal.ManagedRemovalReceipt, intent platformUpdateTargetRemovalIntent) bool {
-	return receipt.OperationID == intent.command.OperationID &&
-		receipt.SourceOperationID == intent.start.command.OperationID &&
-		receipt.SourceEffectID == intent.start.effectID &&
-		receipt.SourceReceiptSHA256 == intent.command.RunningReceiptSHA256 &&
-		receipt.Stage == intent.command.Stage &&
-		receipt.EffectID == intent.command.EffectID &&
-		receipt.PayloadSHA256 == intent.command.PayloadSHA256 &&
-		receipt.ResourceID == intent.start.resourceID &&
-		receipt.DataNamespaceID == intent.start.command.Payload.NamespaceID &&
-		receipt.ReleaseSHA256 == intent.start.command.Payload.TargetReleaseSHA256 &&
-		receipt.NativeID == intent.nativeID
+func validateUpdateStartRemovalReceiptIntent(receipt journal.ManagedRemovalReceipt, intent platformUpdateTargetRemovalIntent) error {
+	var mismatch []string
+	if receipt.OperationID != intent.command.OperationID {
+		mismatch = append(mismatch, "operation")
+	}
+	if receipt.SourceOperationID != intent.start.command.OperationID {
+		mismatch = append(mismatch, "source operation")
+	}
+	if receipt.SourceEffectID != intent.start.effectID {
+		mismatch = append(mismatch, "source effect")
+	}
+	if receipt.SourceReceiptSHA256 != intent.command.RunningReceiptSHA256 {
+		mismatch = append(mismatch, "source receipt")
+	}
+	if receipt.Stage != intent.command.Stage {
+		mismatch = append(mismatch, "stage")
+	}
+	if receipt.EffectID != intent.command.EffectID {
+		mismatch = append(mismatch, "effect")
+	}
+	if receipt.PayloadSHA256 != intent.command.PayloadSHA256 {
+		mismatch = append(mismatch, "payload")
+	}
+	if receipt.ResourceID != intent.start.resourceID {
+		mismatch = append(mismatch, "resource")
+	}
+	if receipt.DataNamespaceID !=
+		intent.start.command.Payload.NamespaceID {
+		mismatch = append(mismatch, "namespace")
+	}
+	if receipt.ReleaseSHA256 !=
+		intent.start.command.Payload.TargetReleaseSHA256 {
+		mismatch = append(mismatch, "release")
+	}
+	if receipt.NativeID != intent.nativeID {
+		mismatch = append(mismatch, "native")
+	}
+	if len(mismatch) != 0 {
+		return fmt.Errorf(
+			"update target removal receipt fields %v: %w",
+			mismatch, errAppPlatformStageEvidence)
+	}
+	return nil
 }
 
 type platformUpdateTargetRemovalObservation interface {
@@ -348,8 +380,12 @@ type platformUpdateTargetRemovalObservation interface {
 
 func validatePlatformUpdateTargetRemovalObservation(observation platformUpdateTargetRemovalObservation, intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint) error {
 	receipt, err := observation.ManagedRemovalReceipt()
-	if err != nil || !updateStartRemovalReceiptMatchesIntent(receipt, intent) {
+	if err != nil {
 		return fmt.Errorf("receipt binding: %w", errAppPlatformStageEvidence)
+	}
+	if err := validateUpdateStartRemovalReceiptIntent(
+		receipt, intent); err != nil {
+		return err
 	}
 	if observation.CommandSHA256() != platformDigest(intent.raw) {
 		return fmt.Errorf("command digest: %w", errAppPlatformStageEvidence)
