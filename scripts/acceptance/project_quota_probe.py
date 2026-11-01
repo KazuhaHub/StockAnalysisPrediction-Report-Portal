@@ -472,7 +472,7 @@ def main(args):
                             raise RuntimeError("Managed update A-to-B acceptance missing")
                         report["native_managed_update_a_to_b"] = True
                         if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout:
-                            raise RuntimeError("Managed uninstall clear-on-remove acceptance missing")
+                            raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
