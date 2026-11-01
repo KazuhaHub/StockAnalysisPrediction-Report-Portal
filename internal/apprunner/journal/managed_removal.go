@@ -399,6 +399,12 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 				"%w: managed removal update preflight",
 				ErrFenceReconciliation)
 		}
+		projectID := mustDataUint(p.ProjectID)
+		if projectID > uint64(^uint32(0)) {
+			return zero, fmt.Errorf(
+				"%w: managed removal update project",
+				ErrFenceReconciliation)
+		}
 		request := driver.UpdateStartLaunchRequest{
 			CandidateLaunchRequest: driver.CandidateLaunchRequest{
 				Identity: driver.CandidateIdentity{
@@ -420,7 +426,7 @@ func managedRemovalNativeRequest(source managedRemovalSource, descriptor []byte)
 						FilesystemUUID: p.RootFilesystemUUID,
 						Inode:          mustDataUint(p.RootInode),
 					},
-					ProjectID:      uint32(mustDataUint(p.ProjectID)),
+					ProjectID:      uint32(projectID),
 					Device:         mustDataUint(p.Device),
 					NamespaceInode: mustDataUint(p.NamespaceInode),
 					QuotaBytes:     mustDataInt(p.QuotaBytes),
