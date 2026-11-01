@@ -78,9 +78,15 @@ def owned_mount_present(mountpoint, loop):
 
 
 def require_loop_unmounted(loop):
-    data = json.loads(command(
-        "findmnt", "--json", "--source", loop,
-        "--output", "TARGET,FSTYPE"))
+    try:
+        raw = command(
+            "findmnt", "--json", "--source", loop,
+            "--output", "TARGET,FSTYPE")
+    except ProbeCommandError as error:
+        if error.code == 1:
+            return
+        raise
+    data = json.loads(raw)
     if data.get("filesystems"):
         raise RuntimeError("owned loop remains mounted outside the fixture path")
 
@@ -115,9 +121,17 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     require_loop_owner(loop, image)
     os.sync()
     command("blockdev", "--flushbufs", loop)
-    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", loop, str(mountpoint))
-    require_mount_owner(mountpoint, loop)
-    return replacement_uuid
+    command("losetup", "--detach", loop)
+    if discover_owned_loop(image) is not None:
+        raise RuntimeError("owned loop remained attached after UUID replacement")
+    replacement_loop = command(
+        "losetup", "--find", "--show", str(image))
+    if not re.fullmatch(r"/dev/loop[0-9]+", replacement_loop):
+        raise RuntimeError("UUID replacement did not return an exact loop")
+    require_loop_owner(replacement_loop, image)
+    command("mount", "-t", "xfs", "-o", "prjquota,nodev,nosuid,noexec", replacement_loop, str(mountpoint))
+    require_mount_owner(mountpoint, replacement_loop)
+    return replacement_uuid, replacement_loop
 
 
 def candidate_configuration():
@@ -617,7 +631,7 @@ def main(args):
         run_workload("released-unlinked", folders["unlinked"])
         report["same_project_limit_controls"] = True
         if native_root is not None:
-            replace_owned_uuid(
+            _, loop = replace_owned_uuid(
                 mountpoint, loop, image,
                 native_env["APP_DATA_NATIVE_UUID"])
             native_env["APP_DATA_NATIVE_PHASE"] = "replaced"
