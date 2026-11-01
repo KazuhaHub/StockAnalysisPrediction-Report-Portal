@@ -576,6 +576,12 @@ func testNativeManagedDisableEnable(
 	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_access_grants WHERE installation_id=?`,
 		installation)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants
+		WHERE installation_id=? AND principal_type='user' AND username=?
+		AND account_created=? AND account_generation=?`, installation,
+		actor.username, actor.created, actor.generation) != 1 {
+		t.Fatal("native managed lifecycle lost the current user audience")
+	}
 	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
@@ -692,6 +698,11 @@ func testNativeManagedDisableEnable(
 		t.Fatal("native managed enable changed the retained tuple")
 	}
 	t.Log("MANAGED_ENABLE_START_PROBE_ACTIVATED")
+	if binding, err := s.inspectPlatformLaunchAccess(
+		actor, installation); err != nil {
+		t.Fatalf("native managed enable launch access %+v: %v",
+			binding, err)
+	}
 	response, err := s.requestPlatformWritableBackend(
 		ctx, actor, installation, "GET", "/v1/echo", nil, endpoint)
 	if err != nil || response.Status != 200 {
