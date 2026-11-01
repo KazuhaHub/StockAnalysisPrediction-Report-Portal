@@ -60,7 +60,9 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 		targetGeneration != int64(lease.snapshot.Generation) ||
 		stage != "recovery_required" ||
 		sourceFence < 1 || epoch != lease.controllerEpoch {
-		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update operation: %w",
+			errAppPlatformStageEvidence)
 	}
 	sourceLease := platformOperationLease{
 		id: checkpoint.OperationID, installationID: installation,
@@ -74,16 +76,19 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 	source, err := loadPlatformCheckpointSource(
 		e, lease, runtime, now)
 	if err != nil {
-		return zero, zeroPlan, zeroSource, nil, err
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target checkpoint source: %w", err)
 	}
 	plan, descriptor, err := loadPlatformManagedUpdatePlan(
 		e, sourceLease, source)
 	if err != nil {
-		return zero, zeroPlan, zeroSource, nil, err
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update plan: %w", err)
 	}
 	if _, _, err := loadPlatformUpdateStartCheckpoint(
 		e, sourceLease, plan); err != nil {
-		return zero, zeroPlan, zeroSource, nil, err
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update checkpoint: %w", err)
 	}
 	var effectID, kind, digest, state, receipt string
 	var observed int64
@@ -94,28 +99,36 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 		Scan(&effectID, &kind, &digest, &state, &observed, &receipt); err != nil ||
 		kind != "update-start" || state != "applied" ||
 		observed != sourceFence {
-		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update start effect: %w",
+			errAppPlatformStageEvidence)
 	}
 	activation, err := platformResourceForUpdateStartEffect(
 		e, sourceLease, effectID)
 	if err != nil {
-		return zero, zeroPlan, zeroSource, nil, err
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update activation: %w", err)
 	}
 	checkpointReceipt, _, err := loadPlatformUpdateStartCheckpoint(
 		e, sourceLease, plan)
 	if err != nil {
-		return zero, zeroPlan, zeroSource, nil, err
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update checkpoint reload: %w", err)
 	}
 	command, err := platformUpdateStartCommand(
 		sourceLease, runtime, source, checkpointReceipt,
 		plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
-		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update start command: %w",
+			errAppPlatformStageEvidence)
 	}
 	running, err := journal.ParseUpdateStartRunningReceipt([]byte(receipt))
 	if err != nil || !platformUpdateStartRunningMatches(
 		running, command, activation, effectID, nil) {
-		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update running receipt: %w",
+			errAppPlatformStageEvidence)
 	}
 	return platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
