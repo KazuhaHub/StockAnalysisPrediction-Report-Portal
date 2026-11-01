@@ -16,7 +16,7 @@ import (
 // has an independently bounded operation owner without staging a start by hand.
 type platformWritableFixtureOwner struct {
 	Format, DeploymentID, Epoch, OperationID, InstallationID, ReleaseSHA, Image string
-	ControlRevision, IssuedMS, ExpiresMS                                        int64
+	Generation, ControlRevision, IssuedMS, ExpiresMS                            int64
 }
 type platformWritableFixtureOwnerEnvelope struct{ Raw, Signature []byte }
 
@@ -31,7 +31,7 @@ func verifyPlatformWritableFixtureOwner(encoded []byte, a control.Authority, ima
 	}
 	outer, _ := json.Marshal(envelope)
 	inner, _ := json.Marshal(p)
-	if !bytes.Equal(outer, encoded) || !bytes.Equal(inner, envelope.Raw) || p.Format != "portal.fixture.writable-install-owner/1-dev.1" || p.DeploymentID != a.DeploymentID || p.Epoch != a.ControllerEpoch || p.ControlRevision != a.ControlRevision || !platformValidUUID(p.OperationID) || !platformValidUUID(p.InstallationID) || !platformValidSHA(p.ReleaseSHA) || p.Image == "" || p.Image != image || p.IssuedMS < 0 || p.ExpiresMS <= p.IssuedMS || p.ExpiresMS-p.IssuedMS > 90000 || now < p.IssuedMS || now > p.ExpiresMS {
+	if !bytes.Equal(outer, encoded) || !bytes.Equal(inner, envelope.Raw) || p.Format != "portal.fixture.writable-install-owner/1-dev.1" || p.DeploymentID != a.DeploymentID || p.Epoch != a.ControllerEpoch || p.ControlRevision != a.ControlRevision || p.Generation < 1 || !platformValidUUID(p.OperationID) || !platformValidUUID(p.InstallationID) || !platformValidSHA(p.ReleaseSHA) || p.Image == "" || p.Image != image || p.IssuedMS < 0 || p.ExpiresMS <= p.IssuedMS || p.ExpiresMS-p.IssuedMS > 90000 || now < p.IssuedMS || now > p.ExpiresMS {
 		return zero, errors.New("unbound fixture owner")
 	}
 	return p, nil
@@ -40,7 +40,7 @@ func verifyPlatformWritableFixtureOwner(encoded []byte, a control.Authority, ima
 func TestPlatformWritableFixtureOwnership(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{8}, ed25519.SeedSize))
 	a := control.Authority{DeploymentID: platformFixtureID(980), ControllerEpoch: platformFixtureID(981), ControlRevision: 1, PublicKey: key.Public().(ed25519.PublicKey)}
-	p := platformWritableFixtureOwner{"portal.fixture.writable-install-owner/1-dev.1", a.DeploymentID, a.ControllerEpoch, platformFixtureID(982), platformFixtureID(983), platformDigest([]byte("release")), "fixture@sha256:" + platformDigest([]byte("image")), 1, 1000, 90000}
+	p := platformWritableFixtureOwner{"portal.fixture.writable-install-owner/1-dev.1", a.DeploymentID, a.ControllerEpoch, platformFixtureID(982), platformFixtureID(983), platformDigest([]byte("release")), "fixture@sha256:" + platformDigest([]byte("image")), 2, 1, 1000, 90000}
 	sign := func(p platformWritableFixtureOwner) []byte {
 		raw, _ := json.Marshal(p)
 		out, _ := json.Marshal(platformWritableFixtureOwnerEnvelope{raw, ed25519.Sign(key, platformWritableFixtureOwnerFrame(raw))})
@@ -50,7 +50,7 @@ func TestPlatformWritableFixtureOwnership(t *testing.T) {
 	if actual, err := verifyPlatformWritableFixtureOwner(encoded, a, p.Image, 2000); err != nil || actual != p {
 		t.Fatal("valid fixture ownership refused", err)
 	}
-	for _, mode := range []string{"signature", "epoch", "deployment", "revision", "operation", "installation", "release", "image", "future", "expired", "lifetime", "canonical"} {
+	for _, mode := range []string{"signature", "epoch", "deployment", "revision", "generation", "operation", "installation", "release", "image", "future", "expired", "lifetime", "canonical"} {
 		t.Run(mode, func(t *testing.T) {
 			q := p
 			now := int64(2000)
@@ -64,6 +64,8 @@ func TestPlatformWritableFixtureOwnership(t *testing.T) {
 				q.DeploymentID = platformFixtureID(984)
 			case "revision":
 				q.ControlRevision++
+			case "generation":
+				q.Generation = 0
 			case "operation":
 				q.OperationID = "invalid"
 			case "installation":

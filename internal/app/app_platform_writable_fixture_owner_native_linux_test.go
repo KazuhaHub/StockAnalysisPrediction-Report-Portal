@@ -45,7 +45,13 @@ func savePlatformWritableFixtureOwner(t *testing.T, s *Server, operation, instal
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
 	now := time.Now().UnixMilli()
-	p := platformWritableFixtureOwner{"portal.fixture.writable-install-owner/1-dev.1", r.deploymentID, epoch, operation, installation, release, image, r.controlRevision, now, now + 90000}
+	var generation int64
+	if err := e.queryRow(`SELECT target_generation
+		FROM app_platform_operations WHERE id=?`, operation).
+		Scan(&generation); err != nil || generation < 1 {
+		t.Fatal("fixture owner generation", generation, err)
+	}
+	p := platformWritableFixtureOwner{"portal.fixture.writable-install-owner/1-dev.1", r.deploymentID, epoch, operation, installation, release, image, generation, r.controlRevision, now, now + 90000}
 	raw, _ := json.Marshal(p)
 	encoded, _ := json.Marshal(platformWritableFixtureOwnerEnvelope{raw, ed25519.Sign(key, platformWritableFixtureOwnerFrame(raw))})
 	if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "writable-auto-owner.json"), encoded, 0600); err != nil {
@@ -197,7 +203,7 @@ func checkPlatformWritableUpdateStartFixture(t *testing.T, path string, owner pl
 	if start.OperationID != owner.OperationID ||
 		start.InstallationID != owner.InstallationID ||
 		start.Payload.TargetReleaseSHA256 != owner.ReleaseSHA ||
-		start.TargetGeneration != "2" ||
+		start.TargetGeneration != strconv.FormatInt(owner.Generation, 10) ||
 		command.EffectID != message.Receipt.Claim.EffectID ||
 		command.PayloadSHA256 != message.Receipt.Claim.PayloadSHA256 ||
 		command.RunningReceiptSHA256 !=
@@ -205,7 +211,8 @@ func checkPlatformWritableUpdateStartFixture(t *testing.T, path string, owner pl
 		command.DocumentSHA256 != message.Receipt.Claim.DocumentSHA256 ||
 		message.Running.OperationID != owner.OperationID ||
 		message.Running.TargetReleaseSHA256 != owner.ReleaseSHA ||
-		message.Running.TargetGeneration != "2" {
+		message.Running.TargetGeneration !=
+			strconv.FormatInt(owner.Generation, 10) {
 		t.Fatal("updated writable fixture owner changed")
 	}
 	run := func(args ...string) []byte {
