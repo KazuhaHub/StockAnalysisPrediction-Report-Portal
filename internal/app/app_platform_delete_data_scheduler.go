@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -166,7 +167,11 @@ func (s *Server) runPlatformDeleteData(
 			observation, err := platformDeleteApplicationData(
 				ctx, endpoint, intent)
 			if err != nil {
-				return platformInstallRun{lease: result}, err
+				return platformInstallRun{lease: result}, fmt.Errorf(
+					"delete-data dispatch target=%s writer=%s namespace=%s: %w",
+					intent.command.TargetGeneration,
+					intent.command.Payload.WriterFence,
+					intent.command.Payload.NamespaceID, err)
 			}
 			receipt, ok := validPlatformDeleteDataObservation(
 				observation, intent, endpoint)

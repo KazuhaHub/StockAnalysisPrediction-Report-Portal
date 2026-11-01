@@ -287,7 +287,14 @@ func loadDeleteDataSource(
 		result.volume.controlFence > fence ||
 		result.container.writerFence+1 != writer {
 		return result, fmt.Errorf(
-			"%w: delete-data writer/container binding",
+			"delete-data writer/container binding release=%s/%s desired=%s/%s observed=%s/%s generation=%d/%d control=%d/%d volume-control=%d writer=%d/%d target=%d: %w",
+			containerRelease.String, c.Payload.ReleaseSHA256,
+			containerDesired.String, "absent",
+			containerObserved.String, "absent",
+			result.container.generation, target-1,
+			result.container.controlFence, fence,
+			result.volume.controlFence,
+			result.container.writerFence, writer-1, target,
 			ErrFenceReconciliation)
 	}
 	var pending int
