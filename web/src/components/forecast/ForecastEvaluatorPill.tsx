@@ -174,10 +174,9 @@ export default function ForecastEvaluatorPill() {
         </span>
       ) : (
         status && (
+          // Same size and shape as the page's other header buttons (Export CSV) it sits beside.
           <Button
             ref={trigger}
-            size="small"
-            shape="round"
             aria-haspopup="dialog"
             onClick={() => {
               setOpen(true)
