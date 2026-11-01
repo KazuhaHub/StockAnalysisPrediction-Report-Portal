@@ -237,16 +237,21 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	request.Header.Set("Accept", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: candidate IPC inventory request: %v",
+			ErrUnavailable, err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf(
+			"%w: candidate IPC inventory status %d",
+			ErrUnavailable, response.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	defer clear(raw)
 	if err != nil || ctx.Err() != nil {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf(
+			"%w: candidate IPC inventory read: %v context=%v",
+			ErrUnavailable, err, ctx.Err())
 	}
 	if len(raw) > maxResponseBytes {
 		return nil, ErrInvalidResponse
