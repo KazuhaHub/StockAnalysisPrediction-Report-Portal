@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -180,50 +181,62 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 func (s *Server) handleUpdateStartBackendHandshake(ctx context.Context, conn *net.UnixConn) {
 	provider := s.candidateExecution
 	if provider == nil || provider.store == nil || provider.native == nil {
+		log.Printf("update-start handshake unavailable provider")
 		return
 	}
 	header := make([]byte, 44)
 	copy(header, updateStartBackendHandshakeQueryMagic)
 	if _, err := io.ReadFull(conn, header[8:]); err != nil {
+		log.Printf("update-start handshake header read: %v", err)
 		return
 	}
 	count := binary.BigEndian.Uint32(header[40:44])
 	if count == 0 || count > control.MaxCommandBytes {
+		log.Printf("update-start handshake frame size: %d", count)
 		return
 	}
 	body := make([]byte, int(count)+64)
 	if _, err := io.ReadFull(conn, body); err != nil {
+		log.Printf("update-start handshake body read: %v", err)
 		return
 	}
 	descriptor, err := readCandidateDescriptor(conn)
 	if err != nil {
+		log.Printf("update-start handshake descriptor read: %v", err)
 		return
 	}
 	var size [4]byte
 	if _, err := io.ReadFull(conn, size[:]); err != nil {
+		log.Printf("update-start handshake challenge size read: %v", err)
 		return
 	}
 	n := binary.BigEndian.Uint32(size[:])
 	if n == 0 || n > 4096 {
+		log.Printf("update-start handshake challenge size: %d", n)
 		return
 	}
 	challenge := make([]byte, int(n))
 	if _, err := io.ReadFull(conn, challenge); err != nil ||
 		!appplatform.ValidBackendHandshakeToken(string(challenge)) {
+		log.Printf("update-start handshake challenge invalid: %v", err)
 		return
 	}
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
+		log.Printf("update-start handshake trailing data: n=%d err=%v", n, err)
 		return
 	}
 	evidence, err := provider.store.ExchangeUpdateStartBackendHandshake(
 		ctx, body[:count], body[count:], descriptor,
 		string(challenge), provider.native)
 	if err != nil {
+		log.Printf("update-start handshake exchange: %v", err)
 		return
 	}
 	encoded, err := json.Marshal(evidence)
 	if err != nil || len(encoded) > 8192 {
+		log.Printf("update-start handshake reply encode: bytes=%d err=%v",
+			len(encoded), err)
 		return
 	}
 	digest := sha256.New()
