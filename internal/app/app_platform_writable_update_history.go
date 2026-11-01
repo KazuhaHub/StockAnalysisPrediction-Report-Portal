@@ -303,13 +303,12 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 	}
 	sourceOperation = checkpoint.SourceOperationID
 	var dataReceipt string
-	var dataAction, dataRelease string
+	var dataAction string
 	var dataGeneration, dataCompleted int64
 	if err := e.queryRow(`SELECT f.receipt_json,o.action,o.target_generation,
-		p.target_release_sha256,o.completed_ms
+		o.completed_ms
 		FROM app_platform_operation_effects f
 		JOIN app_platform_operations o ON o.id=f.operation_id
-		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE f.effect_id=? AND o.installation_id=? AND f.stage='prepare_data'
 		AND f.kind='prepare-data' AND f.state='applied'
 		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
@@ -318,17 +317,15 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		AND o.action IN ('install','update','restore')`,
 		checkpoint.SourceDataEffectID, expected.installationID).
 		Scan(&dataReceipt, &dataAction, &dataGeneration,
-			&dataRelease, &dataCompleted); err != nil ||
+			&dataCompleted); err != nil ||
 		platformDigest([]byte(dataReceipt)) !=
 			checkpoint.SourceDataReceiptSHA256 ||
 		dataGeneration < 1 || dataGeneration > plan.SourceGeneration ||
-		dataRelease != plan.SourceReleaseSHA256 ||
 		dataCompleted < 0 || dataCompleted > now {
 		return zero, fmt.Errorf(
-			"update history data effect action=%s generation=%d/%d release=%s/%s completed=%d: %w",
+			"update history data effect action=%s generation=%d/%d completed=%d: %w",
 			dataAction, dataGeneration, plan.SourceGeneration,
-			dataRelease, plan.SourceReleaseSHA256, dataCompleted,
-			errAppPlatformLaunchUnavailable)
+			dataCompleted, errAppPlatformLaunchUnavailable)
 	}
 	data, err := journal.ParseDataPreparationReceipt([]byte(dataReceipt))
 	if err != nil || data.Claim.ResourceID != running.NamespaceID ||
