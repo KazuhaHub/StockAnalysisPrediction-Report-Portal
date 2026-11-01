@@ -457,11 +457,17 @@ def main(args):
                             if "PORTAL_WRITABLE_" + suffix not in result.stdout:
                                 raise RuntimeError("Writable document HTTP acceptance missing: " + suffix)
                             report["native_portal_writable_" + suffix.lower()] = True
-                        for suffix in ("COMPLETE", "CURRENT_VIEWER", "NATIVE_WITNESS", "OWNED_CLEANUP", "FALLBACK_CLEANUP", "NEIGHBOR_PRESERVED"):
+                        for suffix in ("COMPLETE", "CURRENT_VIEWER", "NATIVE_WITNESS", "OWNED_CLEANUP", "NEIGHBOR_PRESERVED"):
                             marker = "PORTAL_WRITABLE_BACKGROUND_" + suffix
                             if marker not in result.stdout:
                                 raise RuntimeError("Writable background completion acceptance missing: " + marker)
                             report["native_portal_writable_background_" + suffix.lower()] = True
+                        if "PORTAL_WRITABLE_UPDATED_FIXTURE_CLEANUP" not in result.stdout and "PORTAL_WRITABLE_BACKGROUND_FALLBACK_CLEANUP" not in result.stdout:
+                            raise RuntimeError("Writable background fixture cleanup evidence missing")
+                        report["native_portal_writable_background_fixture_cleanup"] = True
+                        if "MANAGED_UPDATE_A_TO_B" not in result.stdout:
+                            raise RuntimeError("Managed update A-to-B acceptance missing")
+                        report["native_managed_update_a_to_b"] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
                         report["native_portal_writable_background_claimed_progress"] = True
