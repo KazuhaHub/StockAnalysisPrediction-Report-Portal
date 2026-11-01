@@ -48,7 +48,9 @@ async function main(){
    await page.waitForTimeout(500);
    console.error('SDK browser credential result after dispatch: '+await result.innerText());
    await result.filter({hasNotText:'pending'}).waitFor({timeout:25000});
-   const text=await result.innerText(),value=JSON.parse(text);
+   const text=await result.innerText();
+   if(text.startsWith('error:'))throw new Error('credential request returned '+text);
+   const value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('credential SDK result changed');
   }
   const reportsReady=await frame.getByTestId('reports-ready').innerText();

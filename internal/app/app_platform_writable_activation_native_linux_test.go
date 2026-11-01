@@ -231,6 +231,16 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("viewer admission changed completed history")
 	}
 	t.Log("PORTAL_WRITABLE_POST_IO_OU_REVOKED")
+	facts, err := loadPlatformSecretBindingFacts(s.st.poolExec(), lease.installationID, false)
+	if err != nil {
+		t.Fatal("current policy credential facts unavailable", err)
+	}
+	_, _, credentialHeader, err := s.resolvePlatformSecretBindingCommand(s.st.poolExec(), lease.installationID, "upstream-api")
+	clear(credentialHeader)
+	if err != nil || facts.policyRevision != 2 {
+		t.Fatal("current policy credential binding unavailable", facts, err)
+	}
+	t.Log("PORTAL_NETWORK_CREDENTIAL_REAPPROVED")
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		browserHost := &Server{st: s.st, cfg: s.cfg, loginThr: newLoginThrottle(), v1Rate: newRateLimiter()}
 		if err := browserHost.bindPlatformBackendHTTP(endpoint); err != nil {
