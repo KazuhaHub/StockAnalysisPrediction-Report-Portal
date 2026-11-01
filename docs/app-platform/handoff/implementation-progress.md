@@ -43,6 +43,11 @@ database, and the full local Go suites plus `go vet ./...` passed. This closes
 native A-to-B and the ordinary managed-install activation audit, but does not
 substitute for the remaining native restore and namespace-deletion acceptance.
 
+Final candidate `5ebb981b` repeated the full local Go suites, `go vet ./...`,
+the complete `TestPlatform*Postgres` set on a fresh PostgreSQL 18.6 database,
+and the default quota/browser workflow in run `41273768221`. The PR CodeQL check
+also passes on that candidate.
+
 Latest H13 evidence: a reviewed recovery operation can now run the same closed
 generation-2 start/probe/activate chain as an update without replacing the
 restored installation identity. `restore-start` requires its own signed operation,
