@@ -249,6 +249,7 @@ def main(args):
     mountpoint = root / "mount"
     mountpoint.mkdir()
     loop = None
+    loop_cleanup_deferred = False
     report = {"profile": "xfs-project-quota/disposable-v1-dev", "kernel": os.uname().release,
               "architecture": os.uname().machine, "execution_ready": False, "workloads": []}
     try:
@@ -736,12 +737,18 @@ def main(args):
             remaining = discover_owned_loop(image)
             if remaining is not None:
                 holders = loop_holder_summary(remaining)
-                if holders:
-                    raise RuntimeError(
-                        "owned loop holders remain after detach: " + holders)
-                raise RuntimeError("owned loop attachment remains after detach")
-        shutil.rmtree(root)
-    report["owned_resources_cleaned"] = True
+                loop_cleanup_deferred = True
+                report["owned_loop_cleanup"] = (
+                    "deferred_to_disposable_worker_teardown")
+                report["owned_loop_cleanup_holders"] = holders
+                print(
+                    "WARNING: owned loop cleanup deferred to disposable "
+                    f"worker teardown (holders={holders or 'unattributed'})",
+                    file=sys.stderr,
+                )
+        if not loop_cleanup_deferred:
+            shutil.rmtree(root)
+    report["owned_resources_cleaned"] = not loop_cleanup_deferred
     print(json.dumps(report, sort_keys=True, indent=2))
 
 
