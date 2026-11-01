@@ -1,6 +1,11 @@
 name: app project quota probe
 on:
   workflow_dispatch:
+    inputs:
+      skip_browser:
+        description: Skip browser fixtures for a native-only diagnostic run
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
@@ -177,6 +182,7 @@ jobs:
         with:
           node-version: '24'
       - name: Build the exact shared SDK and Portal browser fixtures
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         env:
           PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
         run: |
@@ -202,10 +208,11 @@ jobs:
             echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
           } >> "$GITHUB_ENV"
       - name: Exercise the generated template in the actual Portal shell
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         run: |
           APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" APP_V2_AUTHORING_BROWSER_RUNNER="$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/template.cjs" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateBrowser$' -count=1 -v -timeout=90s
       - name: Preserve generated-template browser evidence
-        if: always()
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
         uses: actions/upload-artifact@v4
         with:
           name: v2-template-browser
