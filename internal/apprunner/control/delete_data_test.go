@@ -21,7 +21,7 @@ func deleteDataFixture(t *testing.T) (DeleteDataCommand, []byte, Authority, int6
 		TargetGeneration: "3",
 		Stage:            "remove_data", EffectNumber: "1",
 		EffectID: "d0000000-0000-4000-8000-000000000003",
-		Kind:     "remove-data", InstallationFence: "2",
+		Kind:     "delete-data", InstallationFence: "2",
 		IssuedMS:  strconv.FormatInt(now, 10),
 		ExpiresMS: strconv.FormatInt(now+25000, 10),
 		Payload: DeleteDataPayload{

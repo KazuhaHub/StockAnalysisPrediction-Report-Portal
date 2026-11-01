@@ -54,7 +54,7 @@ func (v VerifiedDeleteDataCommand) Command() DeleteDataCommand { return v.comman
 func validDeleteDataLogical(c DeleteDataCommand) bool {
 	p := c.Payload
 	if c.Format != DeleteDataFormat || c.Stage != "remove_data" ||
-		c.Kind != "remove-data" || len(c.EffectNumber) == 0 ||
+		c.Kind != "delete-data" || len(c.EffectNumber) == 0 ||
 		!shaPattern.MatchString(p.ReleaseSHA256) {
 		return false
 	}

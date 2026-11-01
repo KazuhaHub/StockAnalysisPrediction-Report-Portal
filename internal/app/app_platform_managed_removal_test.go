@@ -329,7 +329,7 @@ func testPlatformManagedRemovalSettlesStopAndRemoveCode(t *testing.T, pg bool) {
 		t.Fatal("managed data delete intent", err)
 	}
 	if deleteIntent.command.Stage != "remove_data" ||
-		deleteIntent.command.Kind != "remove-data" ||
+		deleteIntent.command.Kind != "delete-data" ||
 		deleteIntent.command.OperationID != lease.id ||
 		deleteIntent.command.Payload.NamespaceID !=
 			stopIntent.command.Payload.DataNamespaceID ||

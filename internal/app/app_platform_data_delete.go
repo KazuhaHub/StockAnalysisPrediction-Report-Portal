@@ -45,7 +45,7 @@ func platformDeleteDataCommand(
 		TargetGeneration: strconv.FormatUint(
 			expected.snapshot.Generation, 10),
 		Stage: "remove_data", EffectNumber: "1",
-		EffectID: effectID, Kind: "remove-data",
+		EffectID: effectID, Kind: "delete-data",
 		InstallationFence: strconv.FormatInt(expected.fence, 10),
 		Payload: control.DeleteDataPayload{
 			NamespaceID:    namespaceID,

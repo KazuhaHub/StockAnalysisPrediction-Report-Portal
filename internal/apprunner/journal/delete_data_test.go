@@ -20,7 +20,7 @@ func deleteDataCommandFixture(t *testing.T) control.DeleteDataCommand {
 		OperationID:      fixtureID(923),
 		TargetGeneration: "2",
 		Stage:            "remove_data", EffectNumber: "1",
-		EffectID: fixtureID(924), Kind: "remove-data",
+		EffectID: fixtureID(924), Kind: "delete-data",
 		InstallationFence: "2",
 		Payload: control.DeleteDataPayload{
 			NamespaceID:   fixtureID(925),
