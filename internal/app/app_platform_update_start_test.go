@@ -458,7 +458,10 @@ func testPlatformUpdateStartCommitsRunningReceipt(t *testing.T, pg bool) {
 	if err != nil || receipt.NativeID != observation.running.NativeID ||
 		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id) != "applied" ||
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "probe" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_running' AND target_id=?`, lease.id) != 1 {
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
+			WHERE action='app_platform.update_start_running'
+			AND target_id=? AND detail LIKE ?`,
+			lease.id, "%"+observation.running.NativeID+"%") != 1 {
 		t.Fatal("running receipt did not commit with stage advance", receipt, err)
 	}
 }
