@@ -542,7 +542,15 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		t.Fatal("child did not prove activation/launch", output.String())
 	}
 	if useService {
+		if !bytes.Contains(output.Bytes(),
+			[]byte("MANAGED_UNINSTALL_REMOVE_DATA")) {
+			t.Fatalf(
+				"child did not verify clear-on-uninstall data deletion: %s",
+				output.String())
+		}
 		t.Log("PORTAL_MANAGED_SERVICE_UI_INSTALL_VERIFIED")
+		t.Log("MANAGED_UNINSTALL_STOP_REMOVE_CODE")
+		t.Log("MANAGED_UNINSTALL_REMOVE_DATA")
 		return
 	}
 	receipt, err := store.ReadDataPreparationReceipt(ctx, message.Raw, message.Signature)
