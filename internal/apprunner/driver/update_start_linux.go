@@ -127,5 +127,22 @@ func (r *CandidateRuntime) StopUpdateStart(ctx context.Context, launch UpdateSta
 }
 
 func (r *CandidateRuntime) RemoveUpdateStart(ctx context.Context, launch UpdateStartLaunch, nativeID string) (CandidateRemovalObservation, error) {
-	return r.changeCandidateLifecycle(ctx, launch.launch, nativeID, true)
+	observed, err := r.changeCandidateLifecycle(
+		ctx, launch.launch, nativeID, true)
+	if err != nil {
+		return observed, err
+	}
+	snapshot, err := launch.Snapshot()
+	if err != nil {
+		return CandidateRemovalObservation{}, err
+	}
+	identity := snapshot.Launch.Identity
+	releaseCtx, cancel := context.WithTimeout(
+		context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := r.ReleaseCandidateHTTPStorage(
+		releaseCtx, identity); err != nil {
+		return CandidateRemovalObservation{}, err
+	}
+	return observed, nil
 }
