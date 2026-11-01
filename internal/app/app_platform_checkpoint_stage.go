@@ -312,6 +312,8 @@ func platformFinalizeManagedEnablePlan(
 		plan.DataNamespaceID != checkpoint.source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(checkpoint.source.dataFormat) ||
 		plan.SourceWriterFence != mustPlatformCheckpointInt(sourceWriterFence) ||
+		plan.CheckpointWriterFence !=
+			mustPlatformCheckpointInt(checkpoint.source.writerFence) ||
 		plan.SourceActivationGeneration != plan.SourceGeneration ||
 		!platformValidSHA(plan.GrantsSHA256) ||
 		!platformValidSHA(plan.AudienceSHA256) {

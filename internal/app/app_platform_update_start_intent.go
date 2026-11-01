@@ -43,6 +43,7 @@ type platformManagedUpdatePlan struct {
 	DataNamespaceID            string                        `json:"data_namespace_id"`
 	DataFormat                 int64                         `json:"data_format"`
 	SourceWriterFence          int64                         `json:"source_writer_fence"`
+	CheckpointWriterFence      int64                         `json:"checkpoint_writer_fence,omitempty"`
 	SourceControlFence         int64                         `json:"source_control_fence,omitempty"`
 	SourceActivationID         string                        `json:"source_activation_id,omitempty"`
 	SourceActivationGeneration int64                         `json:"source_activation_generation,omitempty"`
@@ -100,6 +101,10 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		action == appplatform.ActionEnable &&
 			plan.SourceReleaseSHA256 == plan.TargetReleaseSHA256 &&
 			plan.TargetPolicyRevision == plan.SourcePolicyRevision
+	sourceWriterFence := source.writerFence
+	if source.currentWriterFence != "" {
+		sourceWriterFence = source.currentWriterFence
+	}
 	if unmarshalErr != nil || marshalErr != nil || string(canonical) != planRaw ||
 		platformDigest([]byte(planRaw)) != planSHA || operationScope != planScope ||
 		!validFormat ||
@@ -114,7 +119,12 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		plan.SourcePolicyRevision < 1 || !validReleasePolicy ||
 		plan.DataNamespaceID != source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(source.dataFormat) ||
-		plan.SourceWriterFence != mustPlatformCheckpointInt(source.writerFence) ||
+		plan.SourceWriterFence != mustPlatformCheckpointInt(sourceWriterFence) ||
+		(action == appplatform.ActionEnable &&
+			plan.CheckpointWriterFence !=
+				mustPlatformCheckpointInt(source.writerFence)) ||
+		(action == appplatform.ActionUpdate &&
+			plan.CheckpointWriterFence != 0) ||
 		!samePlatformManagedUpdateRuntime(
 			plan.TargetRuntime, source.runtimeTarget) ||
 		!platformValidSHA(plan.SourceReleaseSHA256) || !platformValidSHA(plan.TargetReleaseSHA256) ||
@@ -185,6 +195,10 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
 			"checkpoint effect: %w", errAppPlatformStageEvidence)
 	}
+	expectedWriterFence := plan.SourceWriterFence
+	if plan.Action == appplatform.ActionEnable {
+		expectedWriterFence = plan.CheckpointWriterFence
+	}
 	receipt, err := journal.ParseCheckpointReceipt([]byte(receiptRaw))
 	if err != nil || receipt.EffectID != effectID || receipt.PayloadSHA256 != payload ||
 		receipt.OperationID != expected.id || receipt.CheckpointID != checkpointID ||
@@ -193,7 +207,7 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 		receipt.ReleaseSHA256 != plan.SourceReleaseSHA256 ||
 		receipt.NamespaceID != plan.DataNamespaceID ||
 		mustPlatformCheckpointInt(receipt.DataFormat) != plan.DataFormat ||
-		mustPlatformCheckpointInt(receipt.WriterFence) != plan.SourceWriterFence {
+		mustPlatformCheckpointInt(receipt.WriterFence) != expectedWriterFence {
 		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
 			"checkpoint receipt: %w", errAppPlatformStageEvidence)
 	}
@@ -233,8 +247,8 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 			Device: source.device, QuotaBytes: source.quotaBytes,
 			QuotaInodes: source.quotaInodes, RootFilesystemUUID: source.rootFilesystemUUID,
 			RootInode: source.rootInode, DataFormat: source.dataFormat,
-			SourceWriterFence: source.writerFence,
-			TargetWriterFence: strconv.FormatInt(mustPlatformCheckpointInt(source.writerFence)+1, 10),
+			SourceWriterFence: strconv.FormatInt(plan.SourceWriterFence, 10),
+			TargetWriterFence: strconv.FormatInt(plan.SourceWriterFence+1, 10),
 			Platform:          source.platform, SandboxProfile: source.sandboxProfile,
 		},
 	}

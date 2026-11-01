@@ -653,4 +653,16 @@ func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t 
 	if err != nil || startLease.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("restored enable checkpoint commit", startLease, err)
 	}
+	start, err := s.preparePlatformUpdateStart(
+		context.Background(), startLease)
+	if err != nil {
+		t.Fatal("restored enable start intent", err)
+	}
+	if start.command.Kind != "enable-start" ||
+		start.command.Payload.SourceGeneration !=
+			strconv.FormatInt(source.sourceGeneration, 10) ||
+		start.command.Payload.SourceWriterFence !=
+			strconv.FormatInt(currentWriterFence, 10) {
+		t.Fatalf("restored enable start command: %+v", start.command)
+	}
 }
