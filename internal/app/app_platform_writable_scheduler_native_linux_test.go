@@ -450,8 +450,8 @@ func testNativeWritableManagedRestore(
 			witness, err := json.Marshal(
 				platformWritableUpdateStartFixtureMessage{
 					Format:    "portal.fixture.writable-update-start/1-dev.1",
-					Raw:       intent.start.raw,
-					Signature: intent.start.signature,
+					Raw:       intent.raw,
+					Signature: intent.signature,
 					Receipt:   intent.receipt,
 					Running:   *intent.start.running,
 				})
