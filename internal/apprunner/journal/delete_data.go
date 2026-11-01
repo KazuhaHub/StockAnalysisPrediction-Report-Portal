@@ -280,8 +280,10 @@ func loadDeleteDataSource(
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
 	if !containerRelease.Valid ||
 		result.container.release != c.Payload.ReleaseSHA256 ||
-		result.container.desired != "absent" ||
-		result.container.observed != "absent" ||
+		!((result.container.desired == "absent" &&
+			result.container.observed == "absent") ||
+			(result.container.desired == "stopped" &&
+				result.container.observed == "stopped")) ||
 		result.container.generation+1 != target ||
 		result.container.controlFence > fence ||
 		result.volume.controlFence > fence ||
@@ -289,8 +291,8 @@ func loadDeleteDataSource(
 		return result, fmt.Errorf(
 			"delete-data writer/container binding release=%s/%s desired=%s/%s observed=%s/%s generation=%d/%d control=%d/%d volume-control=%d writer=%d/%d target=%d: %w",
 			containerRelease.String, c.Payload.ReleaseSHA256,
-			containerDesired.String, "absent",
-			containerObserved.String, "absent",
+			containerDesired.String, "absent|stopped",
+			containerObserved.String, "absent|stopped",
 			result.container.generation, target-1,
 			result.container.controlFence, fence,
 			result.volume.controlFence,
