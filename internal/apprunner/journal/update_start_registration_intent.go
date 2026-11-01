@@ -266,11 +266,46 @@ func (s *Store) preflightUpdateStartRegistration(ctx context.Context, raw, signa
 			"update-start registration preflight recheck: %w", err)
 	}
 	defer post.Rollback()
-	if !sameUpdateStartRegistrationSource(before, after) ||
-		actual.ObservedMS < before.source.start.now ||
+	if before.source.running != after.source.running {
+		return zero, fmt.Errorf(
+			"update-start registration source running: %w",
+			ErrFenceReconciliation)
+	}
+	if !sameUpdateStartRegistrationRequest(
+		before.source.request, after.source.request) {
+		return zero, fmt.Errorf(
+			"update-start registration source request: %w",
+			ErrFenceReconciliation)
+	}
+	if before.source.expected != after.source.expected {
+		return zero, fmt.Errorf(
+			"update-start registration source snapshot: %w",
+			ErrFenceReconciliation)
+	}
+	if before.source.start.receipt != after.source.start.receipt ||
+		before.source.start.created != after.source.start.created ||
+		before.source.start.updated != after.source.start.updated {
+		return zero, fmt.Errorf(
+			"update-start registration source start row: %w",
+			ErrFenceReconciliation)
+	}
+	if before.row.receipt != after.row.receipt ||
+		before.row.created != after.row.created ||
+		before.row.updated != after.row.updated ||
+		before.row.stored != after.row.stored {
+		return zero, fmt.Errorf(
+			"update-start registration source registration row: %w",
+			ErrFenceReconciliation)
+	}
+	if after.source.start.now < before.source.start.now {
+		return zero, fmt.Errorf(
+			"update-start registration source clock: %w",
+			ErrFenceReconciliation)
+	}
+	if actual.ObservedMS < before.source.start.now ||
 		actual.ObservedMS > after.source.start.now {
 		return zero, fmt.Errorf(
-			"update-start registration preflight source changed: %w",
+			"update-start registration source observation: %w",
 			ErrFenceReconciliation)
 	}
 	if err := checkUpdateStartRegistrationCurrent(ctx, after); err != nil {
