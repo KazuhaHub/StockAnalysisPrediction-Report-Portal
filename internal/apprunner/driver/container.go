@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -255,7 +256,9 @@ func createCandidateContainerHTTP(ctx context.Context, client *http.Client, plan
 		return "", ErrContainerConflict
 	}
 	if response.StatusCode != http.StatusCreated {
-		return "", ErrContainerUncertain
+		return "", fmt.Errorf(
+			"container create status %d: %w",
+			response.StatusCode, ErrContainerUncertain)
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 65537))
 	var created struct {

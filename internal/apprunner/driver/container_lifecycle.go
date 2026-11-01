@@ -3,6 +3,7 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -82,7 +83,9 @@ func candidateLifecyclePOST(ctx context.Context, client *http.Client, nativeID, 
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
 	if response.StatusCode != http.StatusNoContent && response.StatusCode != http.StatusNotModified {
-		return ErrContainerUncertain
+		return fmt.Errorf(
+			"container %s status %d: %w",
+			action, response.StatusCode, ErrContainerUncertain)
 	}
 	if err := ctx.Err(); err != nil {
 		return errors.Join(ErrContainerUncertain, err)
