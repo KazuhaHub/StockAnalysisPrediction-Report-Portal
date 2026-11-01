@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -74,19 +75,23 @@ func (s *Store) prepareUpdateStartReadiness(ctx context.Context, raw, signature,
 	}
 	tx, facts, err := s.beginUpdateStartExecution(ctx, raw, signature, "applied")
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness execution: %w", err)
 	}
 	defer tx.Rollback()
 	running, err := ParseUpdateStartRunningReceipt([]byte(facts.receipt))
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness running receipt: %w", err)
 	}
 	request, expected, err := updateStartExpectedSnapshot(facts, running.Claim, descriptor)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness native snapshot: %w", err)
 	}
 	if err := finalUpdateStartCheck(ctx, facts); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness final check: %w", err)
 	}
 	if s.closing.Load() {
 		return zero, ErrUpdateStartExecutionUnavailable
@@ -128,7 +133,8 @@ func (s *Store) finishUpdateStartReadiness(ctx context.Context, before updateSta
 	var zero UpdateStartReadiness
 	tx, facts, err := s.beginUpdateStartExecution(ctx, before.facts.raw, before.facts.signature, "applied")
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start readiness finish execution: %w", err)
 	}
 	defer tx.Rollback()
 	if s.closing.Load() || facts.now < before.facts.now ||
@@ -136,7 +142,9 @@ func (s *Store) finishUpdateStartReadiness(ctx context.Context, before updateSta
 		!bytes.Equal(facts.source.source.raw, before.facts.source.source.raw) ||
 		facts.created != before.facts.created || facts.updated != before.facts.updated ||
 		facts.receipt != before.facts.receipt {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"update-start readiness finish source: %w",
+			ErrFenceReconciliation)
 	}
 	actual, err := observation.Snapshot()
 	if err != nil || actual.Launch != before.expected || actual.NativeID != before.running.NativeID ||
