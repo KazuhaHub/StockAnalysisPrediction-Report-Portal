@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -111,12 +112,14 @@ func (s *Store) DispatchUpdateStartRegistration(ctx context.Context, raw, signat
 	verified, err := control.VerifyUpdateStartRegistration(
 		raw, signature, authority, time.Now().UnixMilli())
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration command: %w", err)
 	}
 	private, err := control.ValidateUpdateStartRegistrationDocument(
 		verified, descriptor, document)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration document: %w", err)
 	}
 	private.Close()
 	expires, _ := strconv.ParseInt(verified.Start().Command().ExpiresMS, 10, 64)
@@ -124,18 +127,21 @@ func (s *Store) DispatchUpdateStartRegistration(ctx context.Context, raw, signat
 	defer cancel()
 	admitted, err := s.AdmitUpdateStartRegistrationCommand(ctx, raw, signature)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration admission: %w", err)
 	}
 	var attempt *updateStartRegistrationAttempt
 	switch admitted.State {
 	case "prepared":
 		if _, err := s.preflightUpdateStartRegistration(
 			ctx, raw, signature, descriptor, native, "prepared"); err != nil {
-			return zero, err
+			return zero, fmt.Errorf(
+				"update-start registration preflight: %w", err)
 		}
 		attempt, err = s.claimUpdateStartRegistration(ctx, raw, signature)
 		if err != nil {
-			return zero, err
+			return zero, fmt.Errorf(
+				"update-start registration claim: %w", err)
 		}
 	case "unknown":
 	case "applied":
