@@ -70,6 +70,16 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if storage[0].capability != "network.http" || !storage[0].granted || storage[1].capability != "reports.read" || !storage[1].granted || storage[2].capability != "storage.files" || !storage[2].granted {
 		t.Fatal("storage grant was not exact", storage)
 	}
+	m.Capabilities.Required = []string{"network.http", "reports.read", "secrets.use", "storage.files"}
+	allImplemented, err := platformInstallCapabilitySelection(m, target)
+	if err != nil || len(allImplemented) != 4 || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("implemented capability combination was refused", allImplemented, err)
+	}
+	for i, capability := range []string{"network.http", "reports.read", "secrets.use", "storage.files"} {
+		if allImplemented[i].capability != capability || !allImplemented[i].granted {
+			t.Fatal("implemented capability combination changed", allImplemented)
+		}
+	}
 	m.Capabilities.Required = []string{"network.http", "secrets.use"}
 	secrets, err := platformInstallCapabilitySelection(m, target)
 	if err != nil || len(secrets) != 2 || secrets[0].capability != "network.http" || !secrets[0].granted || secrets[1].capability != "secrets.use" || !secrets[1].granted || secrets[1].policy != "{}" || !platformSupportedRequiredCapabilities(m) {

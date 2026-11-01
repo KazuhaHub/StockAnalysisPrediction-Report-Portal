@@ -205,5 +205,5 @@ func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 		}
 		seen[capability] = true
 	}
-	return len(seen) <= 3
+	return len(seen) <= 6
 }
