@@ -479,12 +479,21 @@ func testPlatformWritableUpdateStartPreparesProbe(t *testing.T, pg bool) {
 	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
 		t.Fatal("writable update-start running commit", probe.snapshot, err)
 	}
+	mustExec(t, s.st, `UPDATE app_platform_operations SET lease_until_ms=1 WHERE id=?`, probe.id)
+	reclaimed, err := s.st.claimPlatformOperation(
+		probe.id, platformFixtureID(1535))
+	if err != nil || reclaimed.fence <= probe.fence ||
+		reclaimed.snapshot.Stage != appplatform.StageProbe {
+		t.Fatal("writable update-start probe reclaim", reclaimed.fence, err)
+	}
 	probeIntent, err := s.preparePlatformUpdateProbe(
-		context.Background(), probe)
+		context.Background(), reclaimed)
 	if err != nil || probeIntent.running == nil ||
 		probeIntent.running.OperationID != lease.id ||
 		probeIntent.command.Payload.SandboxProfile !=
-			control.WritableCandidateSandboxProfile {
+			control.WritableCandidateSandboxProfile ||
+		probeIntent.command.InstallationFence !=
+			strconv.FormatInt(lease.fence, 10) {
 		t.Fatal("writable update-start probe intent", err)
 	}
 }

@@ -305,12 +305,14 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		return invalidActivation("effect kind")
 	case effectEpoch != expected.controllerEpoch:
 		return invalidActivation("effect epoch")
-	case admitted != expected.fence:
+	case admitted < 1 || admitted > expected.fence:
 		return invalidActivation("effect fence")
 	case effectState != "prepared" && effectState != "applied":
 		return invalidActivation("effect state")
 	}
-	command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
+	effectLease := expected
+	effectLease.fence = admitted
+	command, err := platformUpdateStartCommand(effectLease, runtime, source, checkpoint, plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, false, fmt.Errorf(
 			"update-start activation command: %w",
@@ -332,7 +334,7 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 			}
 			return result, false, nil
 		}
-		if observedFence != expected.fence {
+		if observedFence != admitted {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		reservation, err := journal.ParseUpdateStartReservation([]byte(receipt))
@@ -341,7 +343,7 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		}
 		result.reservation = &reservation
 	case "applied":
-		if observedFence != expected.fence {
+		if observedFence != admitted {
 			return zero, false, fmt.Errorf(
 				"update-start activation fence: %w",
 				errAppPlatformStageEvidence)
@@ -410,12 +412,15 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 		return zero, errAppPlatformStageEvidence
 	}
 	if kind != "update-start" ||
-		effectEpoch != expected.controllerEpoch || admitted != expected.fence ||
-		observedFence != expected.fence || effectState != "applied" {
+		effectEpoch != expected.controllerEpoch ||
+		admitted < 1 || admitted > expected.fence ||
+		observedFence != admitted || effectState != "applied" {
 		return zero, fmt.Errorf("update-start activation effect: %w", errAppPlatformStageEvidence)
 	}
+	effectLease := expected
+	effectLease.fence = admitted
 	command, err := platformUpdateStartCommand(
-		expected, runtime, source, checkpoint, plan, activation, effectID)
+		effectLease, runtime, source, checkpoint, plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, fmt.Errorf("update-start activation digest: %w", errAppPlatformStageEvidence)
 	}

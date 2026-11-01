@@ -184,13 +184,14 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	effectFence := mustPlatformCheckpointInt(current.command.InstallationFence)
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
 		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start'
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=?
 		AND state='prepared' AND observed_fence=? AND receipt_json=?`,
-		expected.fence, string(encoded), now, expected.id, current.effectID,
-		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence,
-		expected.fence, string(reservationRaw))
+		effectFence, string(encoded), now, expected.id, current.effectID,
+		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, effectFence,
+		effectFence, string(reservationRaw))
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, fmt.Errorf("update-start running effect CAS: %w", err)
 	}
@@ -440,12 +441,13 @@ func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expec
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	effectFence := mustPlatformCheckpointInt(current.command.InstallationFence)
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET observed_fence=?,receipt_json=?,updated_ms=?
 		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start'
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
 		AND observed_fence=0 AND receipt_json='{}'`,
-		expected.fence, string(encoded), now, expected.id, current.effectID,
-		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence)
+		effectFence, string(encoded), now, expected.id, current.effectID,
+		current.command.PayloadSHA256, runtime.id, expected.controllerEpoch, effectFence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
