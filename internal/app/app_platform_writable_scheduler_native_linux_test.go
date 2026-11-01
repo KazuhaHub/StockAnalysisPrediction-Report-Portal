@@ -8,6 +8,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -694,8 +695,31 @@ func testNativeManagedDisableEnable(
 	t.Log("MANAGED_ENABLE_START_PROBE_ACTIVATED")
 	if binding, err := s.inspectPlatformLaunchAccess(
 		actor, installation); err != nil {
-		t.Fatalf("native managed enable launch access %+v: %v",
-			binding, err)
+		rows, queryErr := s.st.query(`SELECT principal_type,
+			COALESCE(username,''),account_created,account_generation,
+			COALESCE(group_id,0),COALESCE(group_created,'')
+			FROM app_platform_access_grants WHERE installation_id=?`,
+			installation)
+		grants := []string{}
+		if queryErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var principal, username, created, groupCreated string
+				var accountGeneration, groupID int64
+				if queryErr = rows.Scan(&principal, &username, &created,
+					&accountGeneration, &groupID, &groupCreated); queryErr != nil {
+					break
+				}
+				grants = append(grants, fmt.Sprintf(
+					"%s:%s:%s:%d:%d:%s", principal, username, created,
+					accountGeneration, groupID, groupCreated))
+			}
+		}
+		actorGroup := scalar[int64](t, s.st, `SELECT group_id
+			FROM users WHERE username=?`, actor.username)
+		t.Fatalf("native managed enable launch access %+v: %v grants=%v actor=%s/%s/%d/group=%d query=%v",
+			binding, err, grants, actor.username, actor.created,
+			actor.generation, actorGroup, queryErr)
 	}
 	response, err := s.requestPlatformWritableBackend(
 		ctx, actor, installation, "GET", "/v1/echo", nil, endpoint)
