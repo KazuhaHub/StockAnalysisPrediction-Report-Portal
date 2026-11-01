@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -131,13 +132,16 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 		command.Payload.SourceCheckpointEffectID).
 		Scan(&storedOperation, &storedInstallation, &storedStage, &storedKind, &storedPayload,
 			&storedGeneration, &state, &receipt); err != nil {
-		return result, ErrRestoreUnavailable
+		return result, fmt.Errorf(
+			"restore checkpoint command: %w", ErrRestoreUnavailable)
 	}
 	if storedOperation != command.Payload.SourceCheckpointOperationID ||
 		storedInstallation != command.InstallationID || storedStage != "snapshot" ||
 		storedKind != "snapshot" || state != "applied" ||
 		candidateHash([]byte(receipt)) != command.Payload.SourceCheckpointReceiptSHA {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint command evidence: %w",
+			ErrFenceReconciliation)
 	}
 	checkpoint, err := ParseCheckpointReceipt([]byte(receipt))
 	if err != nil || checkpoint.PayloadSHA256 != storedPayload ||
@@ -151,11 +155,15 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 		checkpoint.Device != command.Payload.Device ||
 		checkpoint.DataFormat != command.Payload.DataFormat ||
 		checkpoint.WriterFence != command.Payload.WriterFence {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint receipt: %w",
+			ErrFenceReconciliation)
 	}
 	target, _ := strconv.ParseInt(command.TargetGeneration, 10, 64)
 	if storedGeneration != target {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint generation=%d target=%d: %w",
+			storedGeneration, target, ErrFenceReconciliation)
 	}
 	result.checkpointCommand = control.CheckpointCommand{
 		Format: control.CheckpointFormat, DeploymentID: command.DeploymentID,
@@ -179,14 +187,18 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 	}
 	digest, err := control.CheckpointLogicalDigest(result.checkpointCommand)
 	if err != nil || digest != checkpoint.PayloadSHA256 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint command digest: %w",
+			ErrFenceReconciliation)
 	}
 	if err := validateRestoreCheckpointRecord(ctx, tx, result.checkpointCommand, checkpoint.ManifestSHA256, mustDataInt(checkpoint.ArchiveBytes)); err != nil {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint record: %w", err)
 	}
 	history, err := loadCheckpointSourceExcluding(ctx, tx, result.checkpointCommand, now, command.EffectID)
 	if err != nil {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore checkpoint source: %w", err)
 	}
 	result.checkpoint = checkpoint
 	result.resource = history.resource
@@ -195,7 +207,9 @@ func loadRestoreSource(ctx context.Context, tx *sql.Tx, command control.RestoreC
 		WHERE data_namespace_id=? AND kind='container'
 		AND observed_state NOT IN ('stopped','absent')`,
 		command.Payload.NamespaceID).Scan(&running); err != nil || running != 0 {
-		return result, ErrFenceReconciliation
+		return result, fmt.Errorf(
+			"restore running containers=%d err=%v: %w",
+			running, err, ErrFenceReconciliation)
 	}
 	return result, nil
 }
@@ -279,11 +293,15 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 	} else if errors.Is(err, sql.ErrNoRows) {
 		source, err := loadRestoreSource(ctx, tx, command, now)
 		if err != nil {
-			return zero, false, err
+			return zero, false, fmt.Errorf(
+				"restore source before intent: %w", err)
 		}
 		fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
 		if fence < source.resource.controlFence {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf(
+				"restore fence %d below resource %d: %w",
+				fence, source.resource.controlFence,
+				ErrFenceReconciliation)
 		}
 		generation, _ := strconv.ParseInt(command.TargetGeneration, 10, 64)
 		slot, _ := strconv.ParseInt(command.EffectNumber, 10, 64)
@@ -305,19 +323,25 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 			return zero, false, err
 		}
 		if n, err := changed.RowsAffected(); err != nil || n != 1 {
-			return zero, false, ErrFenceReconciliation
+			return zero, false, fmt.Errorf(
+				"restore checkpoint intent rows=%d err=%v: %w",
+				n, err, ErrFenceReconciliation)
 		}
 	}
 	source, err := loadRestoreSource(ctx, tx, command, now)
 	if err != nil {
-		return zero, false, err
+		return zero, false, fmt.Errorf(
+			"restore source after intent: %w", err)
 	}
 	var checkpointState string
 	var checkpointRevision int64
 	if err := tx.QueryRowContext(ctx, `SELECT state,revision FROM runner_checkpoints WHERE id=?`,
 		command.Payload.CheckpointID).Scan(&checkpointState, &checkpointRevision); err != nil ||
 		checkpointState != "restoring" || checkpointRevision != 3 {
-		return zero, false, ErrFenceReconciliation
+		return zero, false, fmt.Errorf(
+			"restore checkpoint state=%s revision=%d: %w",
+			checkpointState, checkpointRevision,
+			ErrFenceReconciliation)
 	}
 	changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='unknown',updated_ms=?
 		WHERE effect_id=? AND state='prepared' AND receipt_json='{}'`, now, command.EffectID)
@@ -325,7 +349,9 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 		return zero, false, err
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, false, ErrFenceReconciliation
+		return zero, false, fmt.Errorf(
+			"restore command intent rows=%d err=%v: %w",
+			n, err, ErrFenceReconciliation)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, false, err
@@ -449,7 +475,7 @@ func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, data
 	defer s.releaseDataExecution()
 	source, replay, err := s.beginRestore(ctx, raw, signature)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("begin restore: %w", err)
 	}
 	source.raw, source.signature = raw, signature
 	if replay {
@@ -457,7 +483,8 @@ func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, data
 	}
 	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"restore project identity: %w", ErrFenceReconciliation)
 	}
 	request := data.RestoreRequest{
 		CheckpointID:           source.command.Payload.CheckpointID,
@@ -474,9 +501,13 @@ func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, data
 	}
 	observation, err := checkpointRoot.Restore(ctx, checkpointPin, dataRoot, dataPin, request)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("restore data: %w", err)
 	}
-	return s.settleRestore(ctx, source, observation)
+	receipt, err := s.settleRestore(ctx, source, observation)
+	if err != nil {
+		return zero, fmt.Errorf("settle restore: %w", err)
+	}
+	return receipt, nil
 }
 
 func (s *Store) ReadRestoreReceipt(ctx context.Context, raw, signature []byte) (RestoreReceipt, error) {
