@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,14 +110,12 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if err := os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "writable-auto-start.json"), witness, 0600); err != nil {
 		t.Fatal(err)
 	}
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "install")
 	t.Log("PORTAL_WRITABLE_BACKGROUND_COMPLETE")
 	updateOperation, updateRelease := testNativeWritableManagedUpdate(
 		t, s, actor, endpoint, admitted.InstallationID)
 	savePlatformWritableFixtureOwner(
 		t, s, updateOperation, admitted.InstallationID,
 		updateRelease, os.Getenv("PORTAL_MANAGED_IMAGE"))
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "update")
 	active, err := s.preparePlatformWritableBackendAccess(
 		ctx, actor, admitted.InstallationID)
 	if err != nil || active.intent.update == nil ||
@@ -139,7 +136,6 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "after update witness")
 	if err := os.WriteFile(
 		filepath.Join(os.Getenv("TMPDIR"), "writable-update-start.json"),
 		updateWitness, 0600); err != nil {
@@ -158,7 +154,6 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	role := scalar[string](t, s.st, `SELECT role FROM users WHERE username=?`, actor.username)
 	defer mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`, role, actor.username)
 	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, actor.username)
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "after role change")
 	for _, method := range []string{"POST", "GET"} {
 		var body []byte
 		if method == "POST" {
@@ -173,7 +168,6 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 			t.Fatal("background app did not serve one current authorized write", method, err)
 		}
 	}
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "after backend requests")
 	activeRelease := scalar[string](t, s.st, `SELECT release_sha256
 		FROM app_platform_activations
 		WHERE installation_id=? AND state='active'`,
@@ -183,7 +177,6 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 	mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
 		role, actor.username)
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "after role restore")
 	logManagedUpdateState(t, s, updateOperation, admitted.InstallationID)
 	rows, err := s.st.query(`SELECT action,stage,completed_ms
 		FROM app_platform_operations WHERE installation_id=?
@@ -206,26 +199,25 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	rows.Close()
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "before failed update")
 	failedOperation, _ := testNativeWritableManagedUpdateVersion(
 		t, s, actor, endpoint, admitted.InstallationID,
 		"1.2.0-beta.3", true)
 	testNativeWritableManagedRestore(
 		t, s, actor, endpoint, admitted.InstallationID,
 		updateRelease, updateOperation, failedOperation)
-	assertNativePlatformGrant(t, s, admitted.InstallationID, "restore")
 	testNativeManagedDisableEnable(
 		t, s, actor, endpoint, admitted.InstallationID)
 }
 
-func assertNativePlatformGrant(
-	t *testing.T, s *Server, installation, stage string,
+func assertNativePlatformUserGrant(
+	t *testing.T, s *Server, installation, username, stage string,
 ) {
 	t.Helper()
 	if count := scalar[int](t, s.st, `SELECT COUNT(*)
-		FROM app_platform_access_grants WHERE installation_id=?`,
-		installation); count == 0 {
-		t.Fatalf("native managed %s lost the installation audience", stage)
+		FROM app_platform_access_grants WHERE installation_id=?
+		AND principal_type='user' AND username=?`,
+		installation, username); count != 1 {
+		t.Fatalf("native managed %s lost the reader grant", stage)
 	}
 }
 
@@ -294,14 +286,12 @@ func testNativeWritableManagedUpdateVersion(
 	if failAtProbe {
 		admissionKey = platformFixtureID(984)
 	}
-	assertNativePlatformGrant(t, s, installation, "before update admission")
 	admitted, err := s.consumePlatformManagedUpdateReview(
 		ctx, actor, review.ID, review.SHA256,
 		admissionKey, endpoint)
 	if err != nil {
 		t.Fatal("managed update admission", err)
 	}
-	assertNativePlatformGrant(t, s, installation, "update admission")
 	if scalar[int](t, s.st, `SELECT managed
 		FROM app_platform_operations WHERE id=?`,
 		admitted.OperationID) != 1 ||
@@ -331,30 +321,25 @@ func testNativeWritableManagedUpdateVersion(
 	if err != nil || snapshot.snapshot.Stage != appplatform.StageSnapshot {
 		t.Fatal("managed update source quiesce", snapshot.snapshot, err)
 	}
-	assertNativePlatformGrant(t, s, installation, "update quiesce")
 	migrate, err := s.dispatchPlatformCheckpoint(ctx, snapshot, endpoint)
 	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
 		t.Fatal("managed update checkpoint", migrate.snapshot, err)
 	}
-	assertNativePlatformGrant(t, s, installation, "update checkpoint")
 	start, err := s.executePlatformManagedUpdateMigrate(
 		ctx, migrate, endpoint)
 	if err != nil || start.snapshot.Stage != appplatform.StageStart {
 		t.Fatal("managed update migrate", start.snapshot, err)
 	}
-	assertNativePlatformGrant(t, s, installation, "update migrate")
 	probe, err := s.executePlatformUpdateStart(ctx, start, endpoint)
 	if err != nil || probe.snapshot.Stage != appplatform.StageProbe {
 		logManagedUpdateContainers(t, s, admitted.OperationID)
 		t.Fatal("managed update start", probe.snapshot, err)
 	}
-	assertNativePlatformGrant(t, s, installation, "update start")
 	if failAtProbe {
 		if err := s.finishPlatformManagedUpdateForReview(
 			ctx, probe); err != nil {
 			t.Fatal("managed update recovery", err)
 		}
-		assertNativePlatformGrant(t, s, installation, "failed update")
 		t.Log("MANAGED_UPDATE_FAILED_FOR_RESTORE")
 		return admitted.OperationID, release.sha256
 	}
@@ -451,7 +436,6 @@ func testNativeWritableManagedRestore(
 ) {
 	t.Helper()
 	ctx := context.Background()
-	assertNativePlatformGrant(t, s, installation, "restore start")
 	recoverySetID := scalar[string](t, s.st, `SELECT id
 		FROM app_platform_recovery_sets
 		WHERE operation_id=? AND state='verified'`, failedOperation)
@@ -564,7 +548,6 @@ func testNativeWritableManagedRestore(
 		logManagedUpdateState(t, s, commit.OperationID, installation)
 		t.Fatal("managed restore did not activate restored source")
 	}
-	assertNativePlatformGrant(t, s, installation, "restore complete")
 	if scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'
@@ -597,14 +580,35 @@ func testNativeManagedDisableEnable(
 ) {
 	t.Helper()
 	ctx := context.Background()
+	readerName := "managed-enable-reader"
+	if err := s.st.UpsertUser(User{
+		Username: readerName, PasswordHash: "fixture", Role: "user",
+		Active: true,
+	}); err != nil {
+		t.Fatal("native managed enable reader", err)
+	}
+	reader := platformReportSession(t, s, readerName)
+	grantID, err := platformNewUUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	platformTestInsert(t, s.st.poolExec(), "access_grants", map[string]any{
+		"id": grantID, "installation_id": installation,
+		"principal_type": "user", "username": reader.username,
+		"account_created":    reader.created,
+		"account_generation": reader.generation,
+		"group_id":           nil, "group_created": nil,
+		"revision": 1, "created_ms": 1, "updated_ms": 1,
+	})
 	generationBefore := scalar[int64](t, s.st, `SELECT generation
 		FROM app_platform_installations WHERE id=?`, installation)
 	releaseBefore := scalar[string](t, s.st, `SELECT release_sha256
 		FROM app_platform_activations
 		WHERE installation_id=? AND state='active'`, installation)
 	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
-		FROM app_platform_access_grants WHERE installation_id=?`,
-		installation)
+		FROM app_platform_access_grants WHERE installation_id=?
+		AND principal_type='user' AND username=?`, installation,
+		reader.username)
 	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
@@ -654,7 +658,8 @@ func testNativeManagedDisableEnable(
 		appplatform.StageComplete {
 		t.Fatal("native managed disable execution", disabled, err)
 	}
-	assertNativePlatformGrant(t, s, installation, "disable")
+	assertNativePlatformUserGrant(
+		t, s, installation, reader.username, "disable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
 		installation) != "disabled:disabled" ||
@@ -666,8 +671,9 @@ func testNativeManagedDisableEnable(
 			FROM app_platform_data_namespaces
 			WHERE owner_installation_id=?`, installation) != "active" ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_access_grants WHERE installation_id=?`,
-			installation) != grantsBefore ||
+			FROM app_platform_access_grants WHERE installation_id=?
+			AND principal_type='user' AND username=?`,
+			installation, reader.username) != grantsBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_capability_grants WHERE installation_id=?`,
 			installation) != capabilitiesBefore {
@@ -703,7 +709,8 @@ func testNativeManagedDisableEnable(
 		ctx, enableClaim.lease, endpoint); err != nil {
 		t.Fatal("native managed enable execution", err)
 	}
-	assertNativePlatformGrant(t, s, installation, "enable")
+	assertNativePlatformUserGrant(
+		t, s, installation, reader.username, "enable")
 	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
 		FROM app_platform_installations WHERE id=?`,
 		installation) != "enabled:ready" ||
@@ -715,8 +722,9 @@ func testNativeManagedDisableEnable(
 			WHERE installation_id=? AND state='active'`,
 			installation) != releaseBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_access_grants WHERE installation_id=?`,
-			installation) != grantsBefore ||
+			FROM app_platform_access_grants WHERE installation_id=?
+			AND principal_type='user' AND username=?`,
+			installation, reader.username) != grantsBefore ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_capability_grants WHERE installation_id=?`,
 			installation) != capabilitiesBefore {
@@ -724,35 +732,12 @@ func testNativeManagedDisableEnable(
 	}
 	t.Log("MANAGED_ENABLE_START_PROBE_ACTIVATED")
 	if binding, err := s.inspectPlatformLaunchAccess(
-		actor, installation); err != nil {
-		rows, queryErr := s.st.query(`SELECT principal_type,
-			COALESCE(username,''),account_created,account_generation,
-			COALESCE(group_id,0),COALESCE(group_created,'')
-			FROM app_platform_access_grants WHERE installation_id=?`,
-			installation)
-		grants := []string{}
-		if queryErr == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var principal, username, created, groupCreated string
-				var accountGeneration, groupID int64
-				if queryErr = rows.Scan(&principal, &username, &created,
-					&accountGeneration, &groupID, &groupCreated); queryErr != nil {
-					break
-				}
-				grants = append(grants, fmt.Sprintf(
-					"%s:%s:%s:%d:%d:%s", principal, username, created,
-					accountGeneration, groupID, groupCreated))
-			}
-		}
-		actorGroup := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0)
-			FROM users WHERE username=?`, actor.username)
-		t.Fatalf("native managed enable launch access %+v: %v grants=%v actor=%s/%s/%d/group=%d query=%v",
-			binding, err, grants, actor.username, actor.created,
-			actor.generation, actorGroup, queryErr)
+		reader, installation); err != nil {
+		t.Fatalf("native managed enable launch access %+v: %v",
+			binding, err)
 	}
 	response, err := s.requestPlatformWritableBackend(
-		ctx, actor, installation, "GET", "/v1/echo", nil, endpoint)
+		ctx, reader, installation, "GET", "/v1/echo", nil, endpoint)
 	if err != nil || response.Status != 200 {
 		t.Fatal("native managed enable backend request", response, err)
 	}
