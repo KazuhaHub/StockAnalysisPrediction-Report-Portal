@@ -114,6 +114,14 @@ func (s *Store) ExchangeUpdateStartBackendHandshake(ctx context.Context, raw, si
 	if parsed.SHA256 != before.facts.verified.Start().Command().Payload.TargetReleaseSHA256 {
 		return zero, ErrFenceReconciliation
 	}
+	request, expected, err := updateStartExpectedSnapshot(
+		before.facts.source.start,
+		before.facts.source.running.Claim, descriptor)
+	if err != nil {
+		return zero, err
+	}
+	before.request = request
+	before.binding.Launch = expected
 	expires, _ := strconv.ParseInt(
 		before.facts.verified.Start().Command().ExpiresMS, 10, 64)
 	ctx, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
