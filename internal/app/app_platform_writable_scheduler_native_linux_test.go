@@ -255,6 +255,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		}
 		if stage == "recovery_required" || stage == "failed" {
 			logManagedUpdateContainers(t, s, admitted.OperationID)
+			logManagedUpdateState(t, s, admitted.OperationID, installation)
 			t.Fatalf("managed update stopped at %s:%s: %+v",
 				stage, code, worker.currentStatus())
 		}
@@ -303,6 +304,55 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
+}
+
+func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {
+	t.Helper()
+	stage, code, revision := "", "", int64(0)
+	if err := s.st.queryRow(`SELECT stage,COALESCE(error_code,''),state_revision
+		FROM app_platform_operations WHERE id=?`,
+		operationID).Scan(&stage, &code, &revision); err != nil {
+		t.Logf("managed update operation state unavailable: %v", err)
+		return
+	}
+	t.Logf("managed update operation: stage=%s code=%s revision=%d",
+		stage, code, revision)
+	rows, err := s.st.query(`SELECT stage,state,effect_id,observed_fence
+		FROM app_platform_operation_effects
+		WHERE operation_id=? ORDER BY created_ms,stage`,
+		operationID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			effectStage, state, effectID := "", "", ""
+			var observed int64
+			if rows.Scan(&effectStage, &state, &effectID, &observed) == nil {
+				t.Logf("managed update effect: stage=%s state=%s id=%s observed=%d",
+					effectStage, state, effectID, observed)
+			}
+		}
+	} else {
+		t.Logf("managed update effects unavailable: %v", err)
+	}
+	rows, err = s.st.query(`SELECT generation,state,
+		CASE WHEN readiness_evidence='{}' THEN 'empty' ELSE 'set' END,
+		COALESCE(observed_ms,0)
+		FROM app_platform_activations
+		WHERE installation_id=? ORDER BY generation`,
+		installationID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var generation, observed int64
+			activationState, readiness := "", ""
+			if rows.Scan(&generation, &activationState, &readiness, &observed) == nil {
+				t.Logf("managed update activation: generation=%d state=%s readiness=%s observed=%d",
+					generation, activationState, readiness, observed)
+			}
+		}
+	} else {
+		t.Logf("managed update activations unavailable: %v", err)
+	}
 }
 
 func logManagedUpdateContainers(t *testing.T, s *Server, operationID string) {
