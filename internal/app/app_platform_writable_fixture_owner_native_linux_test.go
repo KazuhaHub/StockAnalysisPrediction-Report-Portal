@@ -200,20 +200,32 @@ func checkPlatformWritableUpdateStartFixture(t *testing.T, path string, owner pl
 		t.Fatal("updated writable fixture signature", err)
 	}
 	command := verified.Command()
-	if start.OperationID != owner.OperationID ||
-		start.InstallationID != owner.InstallationID ||
-		start.Payload.TargetReleaseSHA256 != owner.ReleaseSHA ||
-		start.TargetGeneration != strconv.FormatInt(owner.Generation, 10) ||
-		command.EffectID != message.Receipt.Claim.EffectID ||
-		command.PayloadSHA256 != message.Receipt.Claim.PayloadSHA256 ||
-		command.RunningReceiptSHA256 !=
-			message.Receipt.Claim.SourceSHA256 ||
-		command.DocumentSHA256 != message.Receipt.Claim.DocumentSHA256 ||
-		message.Running.OperationID != owner.OperationID ||
-		message.Running.TargetReleaseSHA256 != owner.ReleaseSHA ||
-		message.Running.TargetGeneration !=
-			strconv.FormatInt(owner.Generation, 10) {
-		t.Fatal("updated writable fixture owner changed")
+	generation := strconv.FormatInt(owner.Generation, 10)
+	checks := map[string]bool{
+		"start operation": start.OperationID == owner.OperationID,
+		"start installation": start.InstallationID ==
+			owner.InstallationID,
+		"start release": start.Payload.TargetReleaseSHA256 ==
+			owner.ReleaseSHA,
+		"start generation": start.TargetGeneration == generation,
+		"registration effect": command.EffectID ==
+			message.Receipt.Claim.EffectID,
+		"registration payload": command.PayloadSHA256 ==
+			message.Receipt.Claim.PayloadSHA256,
+		"registration running": command.RunningReceiptSHA256 ==
+			message.Receipt.Claim.SourceSHA256,
+		"registration document": command.DocumentSHA256 ==
+			message.Receipt.Claim.DocumentSHA256,
+		"running operation": message.Running.OperationID ==
+			owner.OperationID,
+		"running release": message.Running.TargetReleaseSHA256 ==
+			owner.ReleaseSHA,
+		"running generation": message.Running.TargetGeneration == generation,
+	}
+	for name, matched := range checks {
+		if !matched {
+			t.Fatalf("updated writable fixture owner changed: %s", name)
+		}
 	}
 	run := func(args ...string) []byte {
 		t.Helper()
