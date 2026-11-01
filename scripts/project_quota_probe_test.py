@@ -180,14 +180,14 @@ class ProjectQuotaProbeTests(unittest.TestCase):
             commands.append(args)
             if args[:2] == ("xfs_admin", "-U"):
                 replacement.append(args[2])
-                return ""
+                return f"new UUID = {args[2]}"
             if args[:2] == ("findmnt", "--json"):
                 return '{"filesystems":[]}'
             if args == ("losetup", "--find", "--show", "/tmp/owned/image"):
                 return "/dev/loop8"
             return ""
 
-        with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "require_loop_unmounted"), patch("builtins.open", mock_open()) as cache, patch.object(probe, "command", side_effect=run) as command:
+        with patch.object(probe, "require_loop_owner"), patch.object(probe, "require_mount_owner"), patch.object(probe, "owned_mount_present", return_value=False), patch.object(probe, "require_loop_unmounted"), patch("builtins.open", mock_open()) as cache, patch.object(probe, "command", side_effect=run) as command, patch.object(probe, "command_text", side_effect=run):
             changed = probe.replace_owned_uuid(
                 Path("/tmp/owned/mount"), "/dev/loop7",
                 Path("/tmp/owned/image"), old_uuid)

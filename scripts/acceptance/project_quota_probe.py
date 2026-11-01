@@ -29,6 +29,16 @@ def command(*args):
     return result.stdout.strip()
 
 
+def command_text(*args):
+    result = subprocess.run(args, env=ENV, check=False, capture_output=True, text=True, timeout=60)
+    output = result.stdout + result.stderr
+    if len(output) > 65536:
+        raise RuntimeError("unexpected probe command output size")
+    if result.returncode:
+        raise ProbeCommandError(result.returncode, f"{Path(args[0]).name} failed ({result.returncode}): {result.stderr[:2048]}")
+    return output.strip()
+
+
 def require_disposable(args):
     native_args = (
         len(args) in (5, 7, 9, 11)
@@ -117,7 +127,13 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     replacement_uuid = str(uuid.uuid4())
     if replacement_uuid == previous_uuid.lower():
         raise RuntimeError("owned UUID replacement reused the old UUID")
-    command("xfs_admin", "-U", replacement_uuid, loop)
+    uuid_output = command_text(
+        "xfs_admin", "-U", replacement_uuid, loop)
+    match = re.search(
+        r"new UUID = ([0-9a-f-]{36})", uuid_output, re.IGNORECASE)
+    if not match or match.group(1).lower() != replacement_uuid:
+        raise RuntimeError(
+            "owned UUID replacement failed: " + uuid_output[:2048])
     require_loop_owner(loop, image)
     os.sync()
     command("blockdev", "--flushbufs", loop)
