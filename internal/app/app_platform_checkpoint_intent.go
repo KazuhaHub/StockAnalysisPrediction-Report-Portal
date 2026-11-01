@@ -100,11 +100,6 @@ func loadPlatformCheckpointSourceMode(e migExec, expected platformOperationLease
 
 // The install source is a completed managed install whose applied start/data
 // effects provide the exact stopped resource and original data evidence.
-func loadPlatformCheckpointInstallSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformCheckpointSource, error) {
-	return loadPlatformCheckpointInstallSourceMode(
-		e, expected, runtime, now, false, 1)
-}
-
 func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64, allowDisabled bool, expectedPending int) (platformCheckpointSource, error) {
 	var zero platformCheckpointSource
 	var sourceOperation, sourcePlanRaw, sourcePlanSHA, sourceRelease, descriptorRaw string

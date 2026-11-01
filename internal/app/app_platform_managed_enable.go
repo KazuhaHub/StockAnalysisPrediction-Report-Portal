@@ -115,6 +115,7 @@ func platformBuildManagedEnablePlan(
 	return plan, revision, nil
 }
 
+//lint:ignore U1000 explicit managed lifecycle development entry point
 func (s *Server) createPlatformManagedEnableReviewContext(ctx context.Context, session platformActorSession, installation string, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
 	facts, err := s.observePlatformManagedRuntime(ctx, session, endpoint)
 	if err != nil {
@@ -183,7 +184,6 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 			plan.SourceGeneration+1 != plan.TargetGeneration ||
 			plan.TargetGeneration != generation ||
 			plan.SourceActivationGeneration != plan.SourceGeneration ||
-			plan.SourceControlFence >= math.MaxInt64 ||
 			revision == math.MaxInt64 {
 			return errAppPlatformPlanChanged
 		}
@@ -233,6 +233,7 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 	return result, nil
 }
 
+//lint:ignore U1000 explicit managed lifecycle development entry point
 func (s *Server) consumePlatformManagedEnableReviewContext(ctx context.Context, session platformActorSession, planID, planSHA, key string, endpoint platformRuntimeEndpoint) (platformRemovalCommit, error) {
 	if !platformValidUUID(planID) || !platformValidUUID(key) ||
 		!platformValidSHA(planSHA) {

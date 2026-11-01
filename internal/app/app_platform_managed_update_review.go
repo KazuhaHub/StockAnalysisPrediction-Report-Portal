@@ -37,16 +37,6 @@ func samePlatformManagedUpdateRuntime(a, b *platformManagedInstallTarget) bool {
 		a.Profile.WritableSandboxProfile == b.Profile.WritableSandboxProfile
 }
 
-func loadPlatformCheckpointUpdateSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64) (platformCheckpointSource, error) {
-	return loadPlatformCheckpointUpdateSourceMode(
-		e, expected, runtime, action, now, 1)
-}
-
-func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int) (platformCheckpointSource, error) {
-	return loadPlatformCheckpointUpdateSourceModeState(
-		e, expected, runtime, action, now, expectedPending, false)
-}
-
 func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int, allowDisabled bool) (platformCheckpointSource, error) {
 	if action != "update" && action != "restore" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
