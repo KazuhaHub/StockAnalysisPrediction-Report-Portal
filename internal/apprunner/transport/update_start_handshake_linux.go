@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -40,7 +41,9 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 		len(signature) != 64 || len(descriptor) == 0 ||
 		len(descriptor) > appplatform.MaxDescriptorBytes ||
 		!appplatform.ValidBackendHandshakeToken(challenge) {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake arguments: %w",
+			driver.ErrContainerUncertain)
 	}
 	raw, signature, descriptor, authority.PublicKey =
 		bytes.Clone(raw), bytes.Clone(signature), bytes.Clone(descriptor),
@@ -49,14 +52,20 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 	verified, err := control.VerifyUpdateStartRegistration(
 		raw, signature, authority, started.UnixMilli())
 	if err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake command: %w",
+			driver.ErrContainerUncertain)
 	}
 	expectedRaw, err := json.Marshal(expected)
 	if err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake receipt encode: %w",
+			driver.ErrContainerUncertain)
 	}
 	if _, err := journal.ParseUpdateStartRegistrationReceipt(expectedRaw); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake receipt parse: %w",
+			driver.ErrContainerUncertain)
 	}
 	expectedDigest := sha256.Sum256(expectedRaw)
 	command := verified.Command()
@@ -64,12 +73,16 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 		expected.Claim.PayloadSHA256 != command.PayloadSHA256 ||
 		expected.Claim.SourceSHA256 != command.RunningReceiptSHA256 ||
 		expected.Claim.DocumentSHA256 != command.DocumentSHA256 {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake claim: %w",
+			driver.ErrContainerUncertain)
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil ||
 		parsed.SHA256 != verified.Start().Command().Payload.TargetReleaseSHA256 {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake descriptor: %w",
+			driver.ErrContainerUncertain)
 	}
 	ctx, cancel := context.WithTimeout(ctx, sessionTimeout)
 	defer cancel()
@@ -96,29 +109,41 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 	frame = append(frame, size[:]...)
 	frame = append(frame, challenge...)
 	if _, err := io.Copy(conn, bytes.NewReader(frame)); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake write: %w",
+			driver.ErrContainerUncertain)
 	}
 	if err := conn.CloseWrite(); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake close write: %w",
+			driver.ErrContainerUncertain)
 	}
 	var header [44]byte
 	if _, err := io.ReadFull(conn, header[:]); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake header: %w",
+			driver.ErrContainerUncertain)
 	}
 	digest := sha256.Sum256(frame)
 	count := binary.BigEndian.Uint32(header[40:44])
 	if string(header[:8]) != updateStartBackendHandshakeReplyMagic ||
 		!bytes.Equal(header[8:40], digest[:]) ||
 		count == 0 || count > 8192 {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake header binding: %w",
+			driver.ErrContainerUncertain)
 	}
 	body := make([]byte, int(count))
 	if _, err := io.ReadFull(conn, body); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake body: %w",
+			driver.ErrContainerUncertain)
 	}
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake trailing data: %w",
+			driver.ErrContainerUncertain)
 	}
 	evidence, err := journal.ParseUpdateStartBackendHandshakeEvidence(body)
 	received := time.Now()
@@ -130,11 +155,15 @@ func handshakeUpdateStartBackendFrame(ctx context.Context, path string, profile 
 		evidence.ChallengeSHA256 != hex.EncodeToString(challengeSHA[:]) ||
 		observed < started.UnixMilli() || observed > received.UnixMilli() ||
 		received.Before(started) || ctx.Err() != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake evidence binding: %w",
+			driver.ErrContainerUncertain)
 	}
 	if _, err := control.VerifyUpdateStartRegistration(
 		raw, signature, authority, received.UnixMilli()); err != nil {
-		return zero, driver.ErrContainerUncertain
+		return zero, fmt.Errorf(
+			"update-start handshake final command: %w",
+			driver.ErrContainerUncertain)
 	}
 	commandSHA := sha256.Sum256(raw)
 	return UpdateStartBackendHandshakeObservation{
