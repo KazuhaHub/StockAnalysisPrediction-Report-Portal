@@ -24,15 +24,15 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		return zero, fmt.Errorf(
 			"update history generation: %w", errAppPlatformLaunchUnavailable)
 	}
-	var operationID, planRaw, planSHA string
+	var operationID, planRaw, planSHA, historyAction string
 	var descriptor []byte
 	var completed, created, updated, fence int64
 	if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,
-		r.descriptor,o.completed_ms,o.created_ms,o.updated_ms,o.fence
+		r.descriptor,o.action,o.completed_ms,o.created_ms,o.updated_ms,o.fence
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
-		WHERE o.installation_id=? AND o.action='update' AND o.managed=1
+		WHERE o.installation_id=? AND o.action IN ('update','enable') AND o.managed=1
 		AND o.target_generation=? AND o.stage='complete'
 		AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND o.lease_until_ms IS NULL AND o.error_code IS NULL
@@ -40,11 +40,14 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		AND p.target_release_sha256=? AND p.consumed_ms IS NOT NULL`,
 		b.installation, b.generation, b.epoch, b.release).
 		Scan(&operationID, &planRaw, &planSHA, &descriptor,
+			&historyAction,
 			&completed, &created, &updated, &fence); err != nil ||
 		created < 0 || completed < created || updated < completed ||
 		updated > now || fence < 1 || fence > b.fence {
 		return zero, fmt.Errorf(
-			"update history operation: %w", errAppPlatformLaunchUnavailable)
+			"update history operation err=%v created=%d completed=%d updated=%d fence=%d/%d: %w",
+			err, created, completed, updated, fence, b.fence,
+			errAppPlatformLaunchUnavailable)
 	}
 	if !platformValidUUID(operationID) ||
 		platformDigest([]byte(planRaw)) != planSHA {
@@ -54,9 +57,14 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	var plan platformManagedUpdatePlan
 	unmarshalErr := json.Unmarshal([]byte(planRaw), &plan)
 	canonical, marshalErr := json.Marshal(plan)
+	history := appplatform.Action(historyAction)
+	validFormat := history == appplatform.ActionUpdate &&
+		plan.Format == platformManagedUpdateFormat ||
+		history == appplatform.ActionEnable &&
+			plan.Format == platformManagedEnableFormat
 	if unmarshalErr != nil || marshalErr != nil ||
 		string(canonical) != planRaw ||
-		plan.Format != platformManagedUpdateFormat ||
+		!validFormat ||
 		plan.InstallationID != b.installation ||
 		plan.ControllerEpoch != b.epoch ||
 		plan.TargetReleaseSHA256 != b.release ||
@@ -67,13 +75,17 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		return zero, fmt.Errorf(
 			"update history plan tuple: %w", errAppPlatformLaunchUnavailable)
 	}
+	revision := uint64(11)
+	if history == appplatform.ActionEnable {
+		revision = 6
+	}
 	expected := platformOperationLease{
 		id: operationID, installationID: b.installation,
 		controllerEpoch: b.epoch, fence: fence,
 		snapshot: appplatform.OperationSnapshot{
-			Action: appplatform.ActionUpdate, Managed: true,
+			Action: history, Managed: true,
 			Generation: uint64(b.generation),
-			Revision:   11,
+			Revision:   revision,
 			Stage:      appplatform.StageActivate,
 		},
 	}
@@ -82,13 +94,17 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	if err != nil {
 		return zero, fmt.Errorf("update history checkpoint: %w", err)
 	}
-	var startEffect, startKind, startDigest, startState, runningRaw string
+	var startEffect, effectKind, startDigest, startState, runningRaw string
+	expectedStartKind := "update-start"
+	if history == appplatform.ActionEnable {
+		expectedStartKind = "enable-start"
+	}
 	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,state,receipt_json
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='start' AND effect_number=1`,
-		operationID).Scan(&startEffect, &startKind, &startDigest,
+		operationID).Scan(&startEffect, &effectKind, &startDigest,
 		&startState, &runningRaw); err != nil ||
-		!platformValidUUID(startEffect) || startKind != "update-start" ||
+		!platformValidUUID(startEffect) || effectKind != expectedStartKind ||
 		startState != "applied" || !platformValidSHA(startDigest) {
 		return zero, fmt.Errorf(
 			"update history start effect: %w", errAppPlatformLaunchUnavailable)

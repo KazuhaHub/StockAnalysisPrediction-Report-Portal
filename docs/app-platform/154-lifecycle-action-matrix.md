@@ -34,7 +34,9 @@ Implemented and tested:
   `snapshot -> enable-start -> probe -> registration -> boot -> activate`
   chain. The checkpoint binds the retained namespace and current writer fence;
   the target keeps the same release, policy and grant rows, while the new
-  generation gets fresh process, readiness, registration and boot evidence;
+  generation gets fresh process, readiness, registration and boot evidence.
+  Completed enable history reconstructs the current viewer request path from
+  the update-start registration and preserves the prior capability review IDs;
 - uninstall revocation of credential bindings and transactional clear/drop of
   dedicated plugin object tables;
 - reviewed frontend uninstall scheduling through
@@ -70,7 +72,7 @@ Still required for H13 completion:
 
 - reviewed `delete_data` review/consume entry point for legacy retained
   namespaces and orphan cleanup; normal uninstall no longer leaves one;
-- managed-enable backend history reconstruction plus native runner acceptance;
+- managed-enable native runner acceptance;
 - reviewed repair execution with current trust, runtime configuration, process
   start and health checks and no capability expansion;
 - full concurrent operator acceptance;

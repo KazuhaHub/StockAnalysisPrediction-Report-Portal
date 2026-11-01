@@ -37,6 +37,21 @@ func (s *Server) requestPlatformManagedBackend(ctx context.Context, session plat
 	defer clear(body)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
+	var generation int64
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT generation FROM app_platform_installations WHERE id=? AND desired_state='enabled' AND phase='ready' AND runtime_id IS NOT NULL`), installation).Scan(&generation); err != nil {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	if generation > 1 {
+		initial, err := s.preparePlatformWritableBackendAccess(
+			ctx, session, installation)
+		if err != nil {
+			return zero, err
+		}
+		defer initial.Close()
+		return s.requestPlatformUpdateStartBackend(
+			ctx, session, installation, nil, method, path, body,
+			endpoint, initial)
+	}
 	initial, err := s.preparePlatformManagedBackendAccess(ctx, session, installation)
 	if err != nil {
 		return zero, err

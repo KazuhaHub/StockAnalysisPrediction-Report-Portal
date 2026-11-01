@@ -285,8 +285,8 @@ func TestPlatformManagedEnableCheckpointToStartUsesEnableCommand(t *testing.T) {
 	}
 }
 
-func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuple(t *testing.T) {
-	s, snapshot := platformManagedEnableSnapshotFixture(t, false)
+func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) {
+	s, snapshot := platformManagedEnableSnapshotFixture(t, pg)
 	checkpoint, err := s.preparePlatformCheckpoint(
 		context.Background(), snapshot)
 	if err != nil {
@@ -406,6 +406,25 @@ func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuple(t *testing.T) 
 		policy, parsed.Manifest); err != nil {
 		t.Fatal("managed enable capability snapshot", err)
 	}
+	actor := platformManagedFixtureSession(t, s)
+	access, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, startLease.installationID)
+	if err != nil {
+		t.Fatal("managed enable backend history", err)
+	}
+	defer access.Close()
+	if !access.intent.applied || access.intent.update == nil ||
+		access.intent.generation != 2 {
+		t.Fatal("managed enable history did not retain the active tuple")
+	}
+}
+
+func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testing.T) {
+	testPlatformManagedEnableSyntheticStart(t, false)
+}
+
+func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuplePostgres(t *testing.T) {
+	testPlatformManagedEnableSyntheticStart(t, true)
 }
 
 func TestPlatformManagedEnableCheckpointToStartPostgres(t *testing.T) {
