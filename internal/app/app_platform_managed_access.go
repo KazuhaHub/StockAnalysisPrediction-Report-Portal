@@ -143,12 +143,12 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	dek, err := s.readPlatformDEK(e)
 	defer clear(dek)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("backend access DEK: %w", err)
 	}
 	runtime, seed, err := s.platformDataRuntime(e, epoch, dek)
 	defer clear(seed)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("backend access runtime: %w", err)
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
@@ -232,12 +232,12 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	}()
 	viewer, err := s.platformViewerIdentity(e, account, installationID, appID)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("backend access viewer: %w", err)
 	}
 	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
 	if read != nil {
 		if err := read(e, result, seed); err != nil {
-			return zero, err
+			return zero, fmt.Errorf("backend access read: %w", err)
 		}
 	}
 	now, err = platformDatabaseNow(e)
@@ -246,16 +246,23 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	}
 	current, err := platformReadSessionAccount(e, session, now, true, false)
 	if err != nil || current != account {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access final session: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if _, err := platformVerifyStoredRelease(e, release, trustRevision, trust, now); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access final release: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE (k='app_platform_controller_epoch' AND v=?) OR (k='app_platform_restore_paused' AND v='0')`, epoch).Scan(&markers); err != nil || markers != 2 {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access final markers: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if err := intent.verifyPlatformBackendIdentity(time.Now().UnixMilli()); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"backend access identity: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
