@@ -58,7 +58,10 @@ before serving any cleanup read. In one transaction it:
 
 The table cannot survive as an orphan containing old payload. Reinstall starts
 with a new empty table. If another live installation of the same plugin exists,
-only the uninstalled installation's rows are removed.
+only the uninstalled installation's rows are removed. The cleanup resolves the
+plugin from the selected installation row; it never enumerates or drops every
+registered plugin table. Uninstalling one application therefore leaves every
+other application's table, rows and counters intact.
 
 Managed backend apps apply the same clear-on-uninstall rule to their XFS data
 namespace. The managed removal sequence is
@@ -112,6 +115,8 @@ Focused tests cover:
 - private account and old-binding isolation;
 - per-account, per-plugin and global quota admission;
 - account deletion and transactional uninstall cleanup;
+- uninstalling one plugin without changing another plugin or a second live
+  installation of the same plugin;
 - empty table/store after uninstall and fresh reinstall behavior;
 - dynamic plugin table discovery in backup and restore;
 - pre-`0017` restore with an empty seeded store;

@@ -460,8 +460,12 @@ func refreshPlatformObjectStorage(e migExec, now int64) error {
 	return platformObjectCAS(changed, err)
 }
 
-func cleanupPlatformInstallationObjects(e migExec, installation, appID string, now int64) error {
+func cleanupPlatformInstallationObjects(e migExec, installation string, now int64) error {
 	if _, _, err := lockPlatformObjectStorage(e); err != nil {
+		return err
+	}
+	var appID string
+	if err := e.queryRow(`SELECT app_id FROM app_platform_installations WHERE id=?`, installation).Scan(&appID); err != nil {
 		return err
 	}
 	plugin, err := readPlatformPluginTable(e, appID, true)

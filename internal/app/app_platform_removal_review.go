@@ -407,7 +407,7 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 			return err
 		}
 		if action == appplatform.ActionUninstall {
-			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, p.AppID, control.nowMS); err != nil {
+			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, control.nowMS); err != nil {
 				return err
 			}
 		}

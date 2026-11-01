@@ -706,7 +706,7 @@ func TestPlatformPluginStorageUsesOneTablePerApp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cleanupPlatformInstallationObjects(e, platformFixtureID(901), "notebook", now); err != nil {
+	if err := cleanupPlatformInstallationObjects(e, platformFixtureID(901), now); err != nil {
 		t.Fatal(err)
 	}
 	if st.tableExists(first.TableName) || !st.tableExists(second.TableName) || scalar[int](t, st, `SELECT COUNT(*) FROM app_platform_plugin_tables WHERE app_id='ledger'`) != 1 {
@@ -723,6 +723,105 @@ func TestPlatformPluginStorageUsesOneTablePerApp(t *testing.T) {
 	if err := verifyPlatformObjectStorage(e); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func testPlatformPluginUninstallClearsOnlyItsOwnData(t *testing.T, pg bool) {
+	st := platformTestStore(t, pg)
+	e := st.poolExec()
+	platformSeedPublisher(t, e, "plugins")
+	if err := platformSeedInstallation(t, e, platformFixtureID(911), "plugins", "notebook"); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, st, `UPDATE app_platform_installations SET desired_state='removed' WHERE id=?`, platformFixtureID(911))
+	for id, appID := range map[string]string{
+		platformFixtureID(912): "notebook",
+		platformFixtureID(913): "ledger",
+	} {
+		if err := platformSeedInstallation(t, e, id, "plugins", appID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.UpsertUser(User{Username: "plugin-reader", PasswordHash: "fixture", Role: "user", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	notebook, err := ensurePlatformPluginTable(e, "notebook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := ensurePlatformPluginTable(e, "ledger")
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertObject := func(table, id, installation, content string) {
+		t.Helper()
+		mustExec(t, st, `INSERT INTO `+table+`(id,installation_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms)
+			VALUES(?,?,'plugin-reader','2026-11-01',1,'note',?,'application/json',?,?,?,1,?,100,100)`,
+			id, installation, id, []byte(content), platformDigest([]byte(content)), len(content), id)
+	}
+	insertObject(notebook.TableName, platformFixtureID(921), platformFixtureID(911), "notebook-a")
+	insertObject(notebook.TableName, platformFixtureID(922), platformFixtureID(912), "notebook-b")
+	insertObject(ledger.TableName, platformFixtureID(923), platformFixtureID(913), "ledger")
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for appID, pluginTable := range map[string]string{
+		"notebook": notebook.TableName,
+		"ledger":   ledger.TableName,
+	} {
+		plugin, err := readPlatformPluginTable(e, appID, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := refreshPlatformPluginUsage(e, plugin, now); err != nil {
+			t.Fatal(err)
+		}
+		if !st.tableExists(pluginTable) {
+			t.Fatalf("plugin table %s missing", pluginTable)
+		}
+	}
+	if err := refreshPlatformObjectStorage(e, now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := cleanupPlatformInstallationObjects(e, platformFixtureID(911), now); err != nil {
+		t.Fatal(err)
+	}
+	if !st.tableExists(notebook.TableName) || !st.tableExists(ledger.TableName) {
+		t.Fatal("uninstalling one installation dropped a table still used by another plugin or installation")
+	}
+	if scalar[int](t, st, `SELECT COUNT(*) FROM `+notebook.TableName+` WHERE id=?`, platformFixtureID(921)) != 0 ||
+		scalar[int](t, st, `SELECT COUNT(*) FROM `+notebook.TableName+` WHERE id=?`, platformFixtureID(922)) != 1 ||
+		scalar[int](t, st, `SELECT COUNT(*) FROM `+ledger.TableName+` WHERE id=?`, platformFixtureID(923)) != 1 {
+		t.Fatal("uninstall cleared rows outside the selected installation")
+	}
+	if scalar[int](t, st, `SELECT used_objects FROM app_platform_plugin_tables WHERE app_id='notebook'`) != 1 ||
+		scalar[int](t, st, `SELECT used_objects FROM app_platform_plugin_tables WHERE app_id='ledger'`) != 1 ||
+		scalar[int](t, st, `SELECT used_objects FROM app_platform_object_storage WHERE id=1`) != 2 {
+		t.Fatal("uninstall counters still include the removed installation or another plugin")
+	}
+
+	if err := cleanupPlatformInstallationObjects(e, platformFixtureID(912), now); err != nil {
+		t.Fatal(err)
+	}
+	if st.tableExists(notebook.TableName) || scalar[int](t, st, `SELECT COUNT(*) FROM app_platform_plugin_tables WHERE app_id='notebook'`) != 0 {
+		t.Fatal("last notebook installation did not drop its dedicated table")
+	}
+	if !st.tableExists(ledger.TableName) || scalar[int](t, st, `SELECT COUNT(*) FROM `+ledger.TableName) != 1 ||
+		scalar[int](t, st, `SELECT used_objects FROM app_platform_object_storage WHERE id=1`) != 1 {
+		t.Fatal("uninstalling notebook cleared the ledger plugin")
+	}
+	if err := verifyPlatformObjectStorage(e); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlatformPluginUninstallClearsOnlyItsOwnDataSQLite(t *testing.T) {
+	testPlatformPluginUninstallClearsOnlyItsOwnData(t, false)
+}
+
+func TestPlatformPluginUninstallClearsOnlyItsOwnDataPostgres(t *testing.T) {
+	testPlatformPluginUninstallClearsOnlyItsOwnData(t, true)
 }
 
 func TestPlatformObjectBackupAndOlderDumpRestore(t *testing.T) {
