@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
@@ -122,8 +123,11 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     os.sync()
     command("blockdev", "--flushbufs", loop)
     command("losetup", "--detach", loop)
-    if discover_owned_loop(image) is not None:
-        raise RuntimeError("owned loop remained attached after UUID replacement")
+    deadline = time.monotonic() + 5
+    while discover_owned_loop(image) is not None:
+        if time.monotonic() >= deadline:
+            raise RuntimeError("owned loop remained attached after UUID replacement")
+        time.sleep(0.05)
     replacement_loop = command(
         "losetup", "--find", "--show", str(image))
     if not re.fullmatch(r"/dev/loop[0-9]+", replacement_loop):
