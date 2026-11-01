@@ -193,6 +193,41 @@ func testPlatformLaunchRefusals(t *testing.T, pg bool) {
 func TestPlatformLaunchRefusalsSQLite(t *testing.T)   { testPlatformLaunchRefusals(t, false) }
 func TestPlatformLaunchRefusalsPostgres(t *testing.T) { testPlatformLaunchRefusals(t, true) }
 
+func testPlatformResolvedRestoreUnblocksLaunchState(t *testing.T, pg bool) {
+	s, restore, _ := platformRestoreStartActivatedFixture(t, pg)
+	if scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_operations
+		WHERE installation_id=? AND action='update'
+		AND stage='recovery_required'`, restore.installationID) != 1 ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations
+			WHERE id=? AND action='restore'`, restore.id) != "complete" {
+		t.Fatal("restore fixture did not retain its resolved failed update")
+	}
+	count, err := platformUnresolvedOperationCount(
+		s.st.poolExec(), restore.installationID)
+	if err != nil || count != 0 {
+		t.Fatalf("resolved restore remained unsafe: count=%d err=%v",
+			count, err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_operations
+		SET stage='failed',error_code='fixture_restore_failed'
+		WHERE id=?`, restore.id)
+	count, err = platformUnresolvedOperationCount(
+		s.st.poolExec(), restore.installationID)
+	if err != nil || count == 0 {
+		t.Fatalf("incomplete restore was treated as resolved: count=%d err=%v",
+			count, err)
+	}
+}
+
+func TestPlatformResolvedRestoreUnblocksLaunchStateSQLite(t *testing.T) {
+	testPlatformResolvedRestoreUnblocksLaunchState(t, false)
+}
+
+func TestPlatformResolvedRestoreUnblocksLaunchStatePostgres(t *testing.T) {
+	testPlatformResolvedRestoreUnblocksLaunchState(t, true)
+}
+
 func testPlatformLaunchOUAccess(t *testing.T, pg bool) {
 	s, reader, id := platformLaunchFixture(t, pg)
 	parent, err := s.st.CreateUserGroup("Launch parent", "", 0)
