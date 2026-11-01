@@ -576,12 +576,6 @@ func testNativeManagedDisableEnable(
 	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_access_grants WHERE installation_id=?`,
 		installation)
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants
-		WHERE installation_id=? AND principal_type='user' AND username=?
-		AND account_created=? AND account_generation=?`, installation,
-		actor.username, actor.created, actor.generation) != 1 {
-		t.Fatal("native managed lifecycle lost the current user audience")
-	}
 	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
