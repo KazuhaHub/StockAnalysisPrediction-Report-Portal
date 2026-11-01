@@ -371,7 +371,7 @@ func validateUpdateStartRemovalReceiptIntent(receipt journal.ManagedRemovalRecei
 }
 
 type platformUpdateTargetRemovalObservation interface {
-	ManagedRemovalReceipt() (journal.ManagedRemovalReceipt, error)
+	UpdateStartRemovalReceipt() (journal.ManagedRemovalReceipt, error)
 	Controller() control.Authority
 	Endpoint() transport.CandidateReceiptEndpoint
 	ReceivedAt() time.Time
@@ -379,7 +379,7 @@ type platformUpdateTargetRemovalObservation interface {
 }
 
 func validatePlatformUpdateTargetRemovalObservation(observation platformUpdateTargetRemovalObservation, intent platformUpdateTargetRemovalIntent, endpoint platformRuntimeEndpoint) error {
-	receipt, err := observation.ManagedRemovalReceipt()
+	receipt, err := observation.UpdateStartRemovalReceipt()
 	if err != nil {
 		return fmt.Errorf("receipt binding: %w", errAppPlatformStageEvidence)
 	}

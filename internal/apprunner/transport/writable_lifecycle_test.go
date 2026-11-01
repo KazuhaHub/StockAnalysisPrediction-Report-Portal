@@ -401,6 +401,16 @@ func TestWritableLifecycleUpdateStartRemoval(t *testing.T) {
 		now.Add(-time.Millisecond), time.Now()) {
 		t.Fatal("exact update-start removal refused")
 	}
+	proof := WritableLifecycleObservation{
+		action: UpdateStartRemovalStop, body: string(body),
+	}
+	if got, err := proof.UpdateStartRemovalReceipt(); err != nil ||
+		got != receipt {
+		t.Fatal("update-start removal evidence", got, err)
+	}
+	if _, err := proof.ManagedRemovalReceipt(); err == nil {
+		t.Fatal("update-start removal used as generic removal")
+	}
 	receipt.ResourceID = "11111111-1111-4111-8111-111111119977"
 	body, _ = json.Marshal(receipt)
 	if validWritableLifecycleReply(

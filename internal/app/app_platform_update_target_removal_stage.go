@@ -58,7 +58,7 @@ func (s *Server) commitPlatformUpdateTargetRemoval(ctx context.Context, lease pl
 			"update target removal %s proof binding: %w",
 			intent.command.Stage, err)
 	}
-	receipt, err := proof.ManagedRemovalReceipt()
+	receipt, err := proof.UpdateStartRemovalReceipt()
 	if err != nil {
 		return zero, fmt.Errorf(
 			"update target removal %s receipt parse: %w",

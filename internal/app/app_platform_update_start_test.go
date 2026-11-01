@@ -35,7 +35,7 @@ type platformUpdateTargetRemovalTestObservation struct {
 	commandSHA string
 }
 
-func (o platformUpdateTargetRemovalTestObservation) ManagedRemovalReceipt() (journal.ManagedRemovalReceipt, error) {
+func (o platformUpdateTargetRemovalTestObservation) UpdateStartRemovalReceipt() (journal.ManagedRemovalReceipt, error) {
 	return o.receipt, nil
 }
 func (o platformUpdateTargetRemovalTestObservation) Controller() control.Authority {
