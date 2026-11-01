@@ -766,8 +766,6 @@ func testNativeManagedDisableEnable(
 		appplatform.StageComplete {
 		t.Fatal("native repair disable execution", repairDisabled, err)
 	}
-	generationBeforeRepair := scalar[int64](t, s.st, `SELECT generation
-		FROM app_platform_installations WHERE id=?`, installation)
 	repairFacts, err := s.observePlatformManagedRuntime(
 		ctx, actor, endpoint)
 	if err != nil {
@@ -810,11 +808,11 @@ func testNativeManagedDisableEnable(
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
 	if actualState != "enabled:ready" ||
-		actualGeneration != generationBeforeRepair+1 ||
+		actualGeneration != repairCommit.Generation ||
 		actualRelease != releaseBefore ||
 		actualCapabilities != capabilitiesBefore {
 		t.Fatalf("native repair changed the retained tuple state=%s generation=%d/%d release=%s/%s capabilities=%d/%d",
-			actualState, actualGeneration, generationBeforeRepair+1,
+			actualState, actualGeneration, repairCommit.Generation,
 			actualRelease, releaseBefore, actualCapabilities,
 			capabilitiesBefore)
 	}
