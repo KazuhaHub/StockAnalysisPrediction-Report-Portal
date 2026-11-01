@@ -1,7 +1,8 @@
 # Application lifecycle action matrix
 
-Status: H13 implementation checklist, 2026-11-01. Managed restore now has native
-runner acceptance; rows without exact evidence remain open.
+Status: H13 implementation checklist, 2026-11-01. Managed restore and managed
+enable now have native runner acceptance; rows without exact evidence remain
+open.
 
 | Action | Entry state and review | Immediate authority | Data/code effect | Failure/uncertain |
 | --- | --- | --- | --- | --- |
@@ -72,11 +73,17 @@ Still required for H13 completion:
 
 - reviewed `delete_data` review/consume entry point for legacy retained
   namespaces and orphan cleanup; normal uninstall no longer leaves one;
-- managed-enable native runner acceptance;
 - reviewed repair execution with current trust, runtime configuration, process
   start and health checks and no capability expansion;
 - full concurrent operator acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
+
+Run `41330590646` completed install, A-to-B update, failed-update recovery,
+managed disable, managed enable, a real reader backend request after enable, and
+clear-on-managed-uninstall through `stop -> remove_code -> remove_data`. The
+same workflow later skipped the separate one-image UUID replacement check
+because the disposable loop remained externally held; that skip is recorded as
+an open identity-test gap, not as lifecycle evidence.
 
 No row may be made safe by a UI-only check, a cached generation, a copied database
 or a successful database mutation that was not observed at the actual runtime.

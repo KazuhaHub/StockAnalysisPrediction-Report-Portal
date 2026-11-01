@@ -73,12 +73,17 @@ of the Go observation. Native tests cover:
 - Widened permissions after Open, cancellation and closed-root refusal.
 - Existing real byte/inode/open-unlinked limits and fresh remount inspection.
 - Disabled project enforcement refusal.
-- After all quota controls, confirmed unmount of only the owned loop image,
-  generation of a new UUID with xfs_admin, remount, then rejection of old expected
-  identity for both prepare and inspect. The test also checks inode is unchanged
-  and no new namespace was created.
 - Exact owned mount/loop cleanup; Python tests refuse foreign/substituted loop
   ownership and uncertain unmount before UUID mutation.
+
+The one-image UUID replacement acceptance is currently skipped by
+`app project quota probe` because the disposable loop remains externally held
+after the full managed lifecycle. The report sets
+`native_go_rejects_changed_filesystem_uuid` to false and records
+`native_uuid_replacement_skip_reason`; this remains an open identity-test gap
+and is not treated as a pass. Wrong UUID, wrong inode, changed pathname/inode
+and pinned-descriptor behavior continue to be covered by the native tests that
+do execute.
 
 Do not run the privileged workflow commands against a developer or production
 data disk. The report remains `execution_ready: false`. Cross-compilation of

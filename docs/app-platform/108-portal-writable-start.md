@@ -134,6 +134,15 @@ written there. Required markers/report flags are:
 - `PORTAL_WRITABLE_START_FULL_QUOTA_VERIFIED` /
   `native_portal_writable_start_full_quota_verified`.
 
+When the same managed lifecycle completes clear-on-uninstall, the running
+fixture is intentionally gone before the outer supervisor can reinspect it.
+That path instead requires `MANAGED_ENABLE_BACKEND_REQUEST`,
+`MANAGED_UNINSTALL_STOP_REMOVE_CODE`, and `MANAGED_UNINSTALL_REMOVE_DATA`.
+The report records
+`native_portal_writable_start_superseded_by_managed_uninstall` and leaves the
+stale native-witness flags false rather than claiming evidence that no longer
+exists.
+
 This proves Portal rollback with an already applied runner result only after
 fresh native execution. Positive expired-unknown runner recovery through Portal
 is not claimed by this fixture.
