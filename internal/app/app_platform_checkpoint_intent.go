@@ -83,7 +83,8 @@ func loadPlatformCheckpointSourceForEnableReview(e migExec, expected platformOpe
 func loadPlatformCheckpointSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64, allowDisabled bool, expectedPending int) (platformCheckpointSource, error) {
 	var action string
 	if err := e.queryRow(`SELECT action FROM app_platform_operations
-		WHERE installation_id=? AND action IN ('install','update','restore')
+		WHERE installation_id=?
+		AND action IN ('install','update','enable','repair','restore')
 		AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL
 		AND lease_owner IS NULL AND lease_until_ms IS NULL
 		AND error_code IS NULL
@@ -123,7 +124,8 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 		parsed.SHA256 != sourceRelease || plan.Runtime.RuntimeID != runtime.id ||
 		validateManagedInstallTarget(e, plan.Runtime, expected.controllerEpoch) != nil ||
 		sourceGeneration < 1 || sourceFence < 1 ||
-		sourceGeneration+1 != int64(expected.snapshot.Generation) ||
+		(!allowDisabled &&
+			sourceGeneration+1 != int64(expected.snapshot.Generation)) ||
 		sourceCompleted < 0 || sourceCompleted > now {
 		return zero, fmt.Errorf("%w: checkpoint source plan", errAppPlatformStageEvidence)
 	}
@@ -149,10 +151,19 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 			expected.snapshot.Action == appplatform.ActionRestore)) &&
 		installationGeneration == sourceGeneration
 	if allowDisabled {
+		generationMatches := installationGeneration == sourceGeneration+1 ||
+			(expected.snapshot.Action == appplatform.ActionRepair &&
+				(phase == "recovery_required" ||
+					phase == "review_required") &&
+				installationGeneration == sourceGeneration)
 		validInstallationState =
-			((desired == "disabled" && phase == "disabled") ||
+			((desired == "disabled" &&
+				(phase == "disabled" ||
+					(expected.snapshot.Action == appplatform.ActionRepair &&
+						(phase == "recovery_required" ||
+							phase == "review_required")))) ||
 				(desired == "enabled" && phase == "pending")) &&
-				installationGeneration == sourceGeneration+1
+				generationMatches
 	}
 	if appID != plan.AppID || publisher != plan.PublisherID ||
 		!validInstallationState ||
@@ -337,6 +348,8 @@ func platformCheckpointCommand(expected platformOperationLease, runtime platform
 
 func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, now int64, create, allowVerified bool) (platformCheckpointIntent, bool, error) {
 	var zero platformCheckpointIntent
+	effectStage := platformSameReleaseCheckpointEffectStage(
+		expected.snapshot.Action)
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
@@ -345,7 +358,7 @@ func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, ru
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_recovery_sets WHERE operation_id=?`, expected.id).Scan(&recoveryCount); err != nil || recoveryCount > 1 {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot' AND effect_number=1`, expected.id).Scan(&effectCount); err != nil || effectCount > 1 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=1`, expected.id, effectStage).Scan(&effectCount); err != nil || effectCount > 1 {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	var recoverySetID, checkpointID, state, release, namespace, epoch, recoveryInstallation string
@@ -367,7 +380,7 @@ func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, ru
 	var effectID, kind, digest, runtimeID, effectEpoch, effectState, receipt string
 	var admitted, observed int64
 	effectErr := e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json
-		FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot' AND effect_number=1`+lock, expected.id).
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=1`+lock, expected.id, effectStage).
 		Scan(&effectID, &kind, &digest, &runtimeID, &effectEpoch, &admitted, &observed, &effectState, &receipt)
 	if effectErr != nil && !errors.Is(effectErr, sql.ErrNoRows) {
 		return zero, false, effectErr
@@ -400,8 +413,8 @@ func loadPlatformCheckpointIntent(e migExec, expected platformOperationLease, ru
 			return zero, false, err
 		}
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-			VALUES(?,'snapshot',1,?,'snapshot',?,?,?, ?,0,'prepared','{}',?,?)`,
-			expected.id, effectID, command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence, now, now); err != nil {
+			VALUES(?,?,1,?,'snapshot',?,?,?, ?,0,'prepared','{}',?,?)`,
+			expected.id, effectStage, effectID, command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence, now, now); err != nil {
 			return zero, false, err
 		}
 		zero = platformCheckpointIntent{
@@ -455,9 +468,11 @@ func mustPlatformCheckpointInt(value string) int64 {
 func (s *Server) preparePlatformCheckpoint(ctx context.Context, expected platformOperationLease) (platformCheckpointIntent, error) {
 	var zero platformCheckpointIntent
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
-		expected.snapshot.Stage != appplatform.StageSnapshot || expected.snapshot.Generation < 2 {
+		expected.snapshot.Stage != platformSameReleaseCheckpointStage(
+			expected.snapshot.Action) ||
+		expected.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
 	if ctx == nil || ctx.Err() != nil {
@@ -489,7 +504,7 @@ func (s *Server) preparePlatformCheckpoint(ctx context.Context, expected platfor
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {

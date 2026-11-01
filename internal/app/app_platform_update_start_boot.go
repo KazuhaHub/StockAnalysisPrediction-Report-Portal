@@ -105,7 +105,7 @@ func (s *Server) finishPlatformUpdateStartBoot(ctx context.Context, lease platfo
 	var zero platformUpdateStartBootObservation
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
-		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action)) ||
 		!lease.snapshot.Managed || lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 ||
 		!validPlatformUpdateStartHandshakeObservation(

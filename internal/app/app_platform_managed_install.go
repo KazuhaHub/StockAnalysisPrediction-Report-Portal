@@ -170,11 +170,11 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 			return nil, err
 		}
 		return update.TargetRuntime, nil
-	case platformManagedEnableFormat:
+	case platformManagedEnableFormat, platformManagedRepairFormat:
 		var enable platformManagedUpdatePlan
 		if json.Unmarshal([]byte(raw), &enable) != nil ||
 			enable.Format != probe.Format ||
-			enable.Action != appplatform.ActionEnable ||
+			!platformSameReleaseLifecycle(enable.Action) ||
 			enable.TargetRuntime == nil {
 			return nil, errAppPlatformStageEvidence
 		}

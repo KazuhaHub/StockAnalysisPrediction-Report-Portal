@@ -106,11 +106,11 @@ func platformUpdateStartCommandsEqual(a, b control.UpdateStartCommand) bool {
 func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartRunningObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
 	startKind := "update-start"
-	if expected.snapshot.Action == appplatform.ActionEnable {
-		startKind = "enable-start"
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
+		startKind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageStart || expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 || intent.reservation == nil {
@@ -163,7 +163,7 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {
@@ -249,7 +249,7 @@ func (s *Server) commitPlatformUpdateStartReceipt(ctx context.Context, expected 
 func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartReadinessObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageProbe || expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 || intent.reservation == nil || intent.running == nil {
@@ -295,7 +295,7 @@ func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expecte
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {
@@ -385,11 +385,11 @@ func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expecte
 func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expected platformOperationLease, intent platformUpdateStartIntent, endpoint platformRuntimeEndpoint, observation platformUpdateStartObservation, reservation journal.UpdateStartReservation) (platformUpdateStartAdmission, error) {
 	var zero platformUpdateStartAdmission
 	startKind := "update-start"
-	if expected.snapshot.Action == appplatform.ActionEnable {
-		startKind = "enable-start"
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
+		startKind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageStart || expected.snapshot.Generation < 2 ||
 		ctx == nil || ctx.Err() != nil {
@@ -434,7 +434,7 @@ func (s *Server) commitPlatformUpdateStartReservation(ctx context.Context, expec
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {

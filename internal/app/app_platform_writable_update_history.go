@@ -32,7 +32,8 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256
-		WHERE o.installation_id=? AND o.action IN ('update','enable') AND o.managed=1
+		WHERE o.installation_id=?
+		AND o.action IN ('update','enable','repair') AND o.managed=1
 		AND o.target_generation=? AND o.stage='complete'
 		AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND o.lease_until_ms IS NULL AND o.error_code IS NULL
@@ -60,8 +61,8 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	history := appplatform.Action(historyAction)
 	validFormat := history == appplatform.ActionUpdate &&
 		plan.Format == platformManagedUpdateFormat ||
-		history == appplatform.ActionEnable &&
-			plan.Format == platformManagedEnableFormat
+		platformSameReleaseLifecycle(history) &&
+			plan.Format == platformSameReleaseLifecycleFormat(history)
 	if unmarshalErr != nil || marshalErr != nil ||
 		string(canonical) != planRaw ||
 		!validFormat ||
@@ -78,6 +79,8 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	revision := uint64(11)
 	if history == appplatform.ActionEnable {
 		revision = 6
+	} else if history == appplatform.ActionRepair {
+		revision = 8
 	}
 	expected := platformOperationLease{
 		id: operationID, installationID: b.installation,
@@ -96,8 +99,8 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	}
 	var startEffect, effectKind, startDigest, startState, runningRaw string
 	expectedStartKind := "update-start"
-	if history == appplatform.ActionEnable {
-		expectedStartKind = "enable-start"
+	if platformSameReleaseLifecycle(history) {
+		expectedStartKind = platformSameReleaseStartKind(history)
 	}
 	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,state,receipt_json
 		FROM app_platform_operation_effects
@@ -261,7 +264,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 			running.TargetWriterFence, errAppPlatformLaunchUnavailable)
 	}
 	checkpointWriterFence := plan.SourceWriterFence
-	if plan.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(plan.Action) {
 		checkpointWriterFence = plan.CheckpointWriterFence
 	}
 	if checkpoint.ReleaseSHA256 != plan.SourceReleaseSHA256 ||
@@ -284,7 +287,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.managed=1
-		AND o.action IN ('install','update','restore')
+		AND o.action IN ('install','update','enable','repair','restore')
 		AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
@@ -314,7 +317,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
-		AND o.action IN ('install','update','restore')`,
+		AND o.action IN ('install','update','enable','repair','restore')`,
 		checkpoint.SourceDataEffectID, expected.installationID).
 		Scan(&dataReceipt, &dataAction, &dataGeneration,
 			&dataCompleted); err != nil ||
@@ -353,6 +356,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		!platformValidUUID(sourceStart) ||
 		(sourceStartKind != "start-candidate" &&
 			sourceStartKind != "update-start" &&
+			sourceStartKind != "enable-start" &&
 			sourceStartKind != "restore-start") ||
 		sourceStartState != "applied" ||
 		platformDigest([]byte(sourceStartRaw)) !=
@@ -396,7 +400,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		descriptor:              bytes.Clone(descriptor),
 		runtimeTarget:           plan.TargetRuntime,
 	}
-	if plan.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(plan.Action) {
 		historySource.currentWriterFence =
 			strconv.FormatInt(plan.SourceWriterFence, 10)
 	}

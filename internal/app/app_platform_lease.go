@@ -181,11 +181,13 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 		return zero, errAppPlatformLeaseConflict
 	}
 	if (phase == "review_required" &&
-		action != string(appplatform.ActionDeleteData)) ||
+		action != string(appplatform.ActionDeleteData) &&
+		action != string(appplatform.ActionRepair)) ||
 		phase == "quarantined" ||
 		(phase == "recovery_required" &&
 			action != string(appplatform.ActionRestore) &&
-			action != string(appplatform.ActionDeleteData)) ||
+			action != string(appplatform.ActionDeleteData) &&
+			action != string(appplatform.ActionRepair)) ||
 		(desired == "removed" &&
 			action != string(appplatform.ActionUninstall) &&
 			action != string(appplatform.ActionDeleteData)) {

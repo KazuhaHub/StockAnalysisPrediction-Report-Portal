@@ -49,7 +49,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	var zero platformActivationResult
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
-		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action)) ||
 		!lease.snapshot.Managed || lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || lease.rowRevision == math.MaxInt64 ||
 		!validPlatformUpdateStartBootForActivation(boot, lease, intent) {
@@ -84,7 +84,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		return zero, errAppPlatformStageEvidence
 	}
 	var source platformCheckpointSource
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, lease, runtime, facts.now)
 	} else {
@@ -144,7 +144,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}
 	var sourceActivation, sourceRelease, sourceState string
 	var sourceGeneration, sourcePolicy, sourceFormat int64
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		if err := e.queryRow(`SELECT id,release_sha256,generation,
 			policy_revision,data_format,state FROM app_platform_activations
 			WHERE installation_id=? AND id=? AND generation=?`,
@@ -225,7 +225,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	}
 	currentPhase := "ready"
 	currentGeneration := plan.SourceGeneration
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		currentPhase = "pending"
 		currentGeneration = plan.TargetGeneration
 	}
@@ -318,8 +318,11 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		int64(lease.snapshot.Generation), plan.TargetPolicyRevision,
 		bootDigest, current.command.DocumentSHA256})
 	audit := "app_platform.managed_update_activated"
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		audit = "app_platform.managed_enable_activated"
+		if lease.snapshot.Action == appplatform.ActionRepair {
+			audit = "app_platform.managed_repair_activated"
+		}
 	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)

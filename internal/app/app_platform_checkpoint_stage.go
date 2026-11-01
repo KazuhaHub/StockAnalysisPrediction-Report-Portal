@@ -52,9 +52,11 @@ func platformCheckpointCommandsEqual(a, b control.CheckpointCommand) bool {
 func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platformOperationLease, intent platformCheckpointIntent, endpoint platformRuntimeEndpoint, observation platformCheckpointObservation) (platformOperationLease, error) {
 	var zero platformOperationLease
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
-		expected.snapshot.Stage != appplatform.StageSnapshot || expected.snapshot.Generation < 2 ||
+		expected.snapshot.Stage != platformSameReleaseCheckpointStage(
+			expected.snapshot.Action) ||
+		expected.snapshot.Generation < 2 ||
 		expected.rowRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -93,7 +95,7 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {
@@ -130,11 +132,14 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	effectStage := platformSameReleaseCheckpointEffectStage(
+		expected.snapshot.Action)
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND stage='snapshot' AND effect_number=1 AND effect_id=? AND kind='snapshot'
+		WHERE operation_id=? AND stage=? AND effect_number=1 AND effect_id=? AND kind='snapshot'
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
 		AND observed_fence=0 AND receipt_json='{}'`,
-		expected.fence, string(encoded), now, expected.id, current.effectID, current.command.PayloadSHA256,
+		expected.fence, string(encoded), now, expected.id, effectStage,
+		current.effectID, current.command.PayloadSHA256,
 		runtime.id, expected.controllerEpoch, expected.fence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
@@ -155,7 +160,7 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 			e, expected, current, receipt, archiveBytes, now); err != nil {
 			return zero, err
 		}
-	} else if err := platformFinalizeManagedEnablePlan(
+	} else if err := platformFinalizeManagedSameReleasePlan(
 		e, expected, current, receipt, archiveBytes, now); err != nil {
 		return zero, err
 	}
@@ -164,7 +169,7 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 		return zero, errAppPlatformStageEvidence
 	}
 	nextStage := appplatform.StageMigrate
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		nextStage = appplatform.StageStart
 	}
 	next, err := model.Advance(expected.snapshot.Revision, nextStage)
@@ -174,10 +179,11 @@ func (s *Server) commitPlatformCheckpoint(ctx context.Context, expected platform
 	result := expected
 	result.snapshot, result.rowRevision = next.Snapshot(), expected.rowRevision+1
 	changed, err = e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=?
-		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage='snapshot' AND state_revision=?
+		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=?
 		AND row_revision=? AND fence=? AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`,
 		string(nextStage), int64(result.snapshot.Revision), now, expected.id,
 		expected.installationID, expected.controllerEpoch,
+		string(expected.snapshot.Stage),
 		int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner,
 		expected.leaseUntilMS, now)
 	if err := platformLeaseCAS(changed, err); err != nil {
@@ -274,20 +280,26 @@ func platformFinalizeManagedUpdatePlan(e migExec, expected platformOperationLeas
 	return platformLeaseCAS(changed, err)
 }
 
-func platformFinalizeManagedEnablePlan(
+func platformFinalizeManagedSameReleasePlan(
 	e migExec,
 	expected platformOperationLease,
 	checkpoint platformCheckpointIntent,
 	receipt journal.CheckpointReceipt,
 	archiveBytes, now int64,
 ) error {
+	action := expected.snapshot.Action
+	if !platformSameReleaseLifecycle(action) {
+		return errAppPlatformStageEvidence
+	}
+	format := platformSameReleaseLifecycleFormat(action)
 	var planID, raw, digest string
 	var consumed int64
 	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,p.consumed_ms
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.id=? AND p.action='enable'`,
-		expected.id).Scan(&planID, &raw, &digest, &consumed); err != nil ||
+		WHERE o.id=? AND p.action=?`,
+		expected.id, string(action)).Scan(
+		&planID, &raw, &digest, &consumed); err != nil ||
 		platformDigest([]byte(raw)) != digest || consumed > now ||
 		len(raw) > 65536 {
 		return errAppPlatformStageEvidence
@@ -301,8 +313,8 @@ func platformFinalizeManagedEnablePlan(
 	}
 	if unmarshalErr != nil || marshalErr != nil ||
 		string(canonical) != raw ||
-		plan.Format != platformManagedEnableFormat ||
-		plan.Action != appplatform.ActionEnable ||
+		plan.Format != format ||
+		plan.Action != action ||
 		plan.InstallationID != expected.installationID ||
 		plan.SourceReleaseSHA256 != checkpoint.source.releaseSHA256 ||
 		plan.TargetReleaseSHA256 != checkpoint.source.releaseSHA256 ||
@@ -332,9 +344,9 @@ func platformFinalizeManagedEnablePlan(
 	finalSHA := platformDigest(finalRaw)
 	changed, err := e.exec(`UPDATE app_platform_review_plans
 		SET plan_json=?,plan_sha256=?,updated_ms=?
-		WHERE id=? AND plan_sha256=? AND action='enable'
+		WHERE id=? AND plan_sha256=? AND action=?
 		AND consumed_ms IS NOT NULL AND plan_json LIKE ?`,
 		string(finalRaw), finalSHA, now, planID, digest,
-		`{"format":"`+platformManagedEnableFormat+`",%`)
+		string(action), `{"format":"`+format+`",%`)
 	return platformLeaseCAS(changed, err)
 }

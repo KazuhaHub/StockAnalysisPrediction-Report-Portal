@@ -742,6 +742,85 @@ func testNativeManagedDisableEnable(
 		t.Fatal("native managed enable backend request", response, err)
 	}
 	t.Log("MANAGED_ENABLE_BACKEND_REQUEST")
+
+	repairDisableReview, err := s.createPlatformRemovalReview(
+		actor, installation, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("native repair disable review", err)
+	}
+	repairDisableCommit, err := s.consumePlatformRemovalReview(
+		actor, repairDisableReview.ID, repairDisableReview.SHA256,
+		platformFixtureID(994))
+	if err != nil {
+		t.Fatal("native repair disable admission", err)
+	}
+	repairDisableClaim, err := s.claimNextPlatformManagedUninstall(
+		ctx, platformFixtureID(995))
+	if err != nil || repairDisableClaim.lease.id !=
+		repairDisableCommit.OperationID {
+		t.Fatal("native repair disable claim", repairDisableClaim, err)
+	}
+	repairDisabled, err := s.runPlatformManagedUninstall(
+		ctx, repairDisableClaim.lease, endpoint)
+	if err != nil || repairDisabled.lease.snapshot.Stage !=
+		appplatform.StageComplete {
+		t.Fatal("native repair disable execution", repairDisabled, err)
+	}
+	generationBeforeRepair := scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`, installation)
+	repairFacts, err := s.observePlatformManagedRuntime(
+		ctx, actor, endpoint)
+	if err != nil {
+		t.Fatal("native repair runtime", err)
+	}
+	repairTarget, err := managedInstallTarget(repairFacts, endpoint)
+	if err != nil {
+		t.Fatal("native repair target", err)
+	}
+	repairReview, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		ctx, actor, installation, repairTarget, repairFacts.runtime)
+	if err != nil {
+		t.Fatal("native repair review", err)
+	}
+	repairCommit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		ctx, actor, repairReview.ID, repairReview.SHA256,
+		platformFixtureID(996), repairTarget, repairFacts.runtime)
+	if err != nil {
+		t.Fatal("native repair admission", err)
+	}
+	repairClaim, err := s.claimNextPlatformManagedRepair(
+		ctx, platformFixtureID(997))
+	if err != nil || repairClaim.lease.id != repairCommit.OperationID {
+		t.Fatal("native repair claim", repairClaim, err)
+	}
+	if _, err := s.runPlatformManagedRepair(
+		ctx, repairClaim.lease, endpoint); err != nil {
+		t.Fatal("native repair execution", err)
+	}
+	assertNativePlatformUserGrant(
+		t, s, installation, reader.username, "repair")
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase
+		FROM app_platform_installations WHERE id=?`,
+		installation) != "enabled:ready" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			installation) != generationBeforeRepair+1 ||
+		scalar[string](t, s.st, `SELECT release_sha256
+			FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`,
+			installation) != releaseBefore ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_capability_grants WHERE installation_id=?`,
+			installation) != capabilitiesBefore {
+		t.Fatal("native repair changed the retained tuple")
+	}
+	response, err = s.requestPlatformWritableBackend(
+		ctx, reader, installation, "GET", "/v1/echo", nil, endpoint)
+	if err != nil || response.Status != 200 {
+		t.Fatal("native repair backend request", response, err)
+	}
+	t.Log("MANAGED_REPAIR_START_PROBE_ACTIVATED")
+	t.Log("MANAGED_REPAIR_BACKEND_REQUEST")
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {

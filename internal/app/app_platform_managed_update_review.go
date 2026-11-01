@@ -38,7 +38,8 @@ func samePlatformManagedUpdateRuntime(a, b *platformManagedInstallTarget) bool {
 }
 
 func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int, allowDisabled bool) (platformCheckpointSource, error) {
-	if action != "update" && action != "restore" {
+	if action != "update" && action != "enable" &&
+		action != "repair" && action != "restore" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	var sourceOperation, planRaw, planSHA, release string
@@ -64,13 +65,18 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	var startEffect, startKind, startPayload, startState, startRaw string
 	var startFence int64
+	expectedStartKind := action + "-start"
+	if action == "enable" || action == "repair" {
+		expectedStartKind = platformSameReleaseStartKind(
+			appplatform.Action(action))
+	}
 	if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,state,
 		admitted_fence,receipt_json FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='start' AND effect_number=1`,
 		sourceOperation).
 		Scan(&startEffect, &startKind, &startPayload, &startState,
 			&startFence, &startRaw); err != nil ||
-		startKind != action+"-start" || startState != "applied" ||
+		startKind != expectedStartKind || startState != "applied" ||
 		startFence < 1 || startFence > sourceFence {
 		return platformCheckpointSource{}, fmt.Errorf(
 			"enable source start effect kind=%s action=%s state=%s fence=%d/%d: %w",
@@ -126,12 +132,16 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	var checkpoint journal.CheckpointReceipt
 	switch action {
-	case "update":
+	case "update", "enable", "repair":
+		effectStage := "snapshot"
+		if action == "repair" {
+			effectStage = string(appplatform.StageQuiesce)
+		}
 		var checkpointRaw string
 		if err := e.queryRow(`SELECT receipt_json
 			FROM app_platform_operation_effects
-			WHERE operation_id=? AND stage='snapshot' AND effect_number=1
-			AND state='applied'`, sourceOperation).
+			WHERE operation_id=? AND stage=? AND effect_number=1
+			AND state='applied'`, sourceOperation, effectStage).
 			Scan(&checkpointRaw); err != nil {
 			return platformCheckpointSource{}, errAppPlatformStageEvidence
 		}
@@ -203,10 +213,19 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 				expected.snapshot.Action == appplatform.ActionRestore)) &&
 		installationGeneration == generation
 	if allowDisabled {
+		generationMatches := installationGeneration == generation+1 ||
+			(expected.snapshot.Action == appplatform.ActionRepair &&
+				(phase == "recovery_required" ||
+					phase == "review_required") &&
+				installationGeneration == generation)
 		validInstallationState =
-			((desired == "disabled" && phase == "disabled") ||
+			((desired == "disabled" &&
+				(phase == "disabled" ||
+					(expected.snapshot.Action == appplatform.ActionRepair &&
+						(phase == "recovery_required" ||
+							phase == "review_required")))) ||
 				(desired == "enabled" && phase == "pending")) &&
-				installationGeneration == generation+1
+				generationMatches
 	}
 	if !validInstallationState || epoch != expected.controllerEpoch ||
 		runtimeID != runtime.id {
@@ -238,10 +257,16 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			generation, activePolicy, installationPolicy, activeFormat,
 			running.DataFormat, errAppPlatformStageEvidence)
 	}
-	if action == "update" {
+	if action == "update" || action == "enable" || action == "repair" {
 		var plan platformManagedUpdatePlan
+		expectedFormat := platformManagedUpdateFormat
+		if action == "enable" {
+			expectedFormat = platformManagedEnableFormat
+		} else if action == "repair" {
+			expectedFormat = platformManagedRepairFormat
+		}
 		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
-			plan.Format != platformManagedUpdateFormat ||
+			plan.Format != expectedFormat ||
 			plan.TargetReleaseSHA256 != release ||
 			plan.TargetGeneration != generation ||
 			plan.TargetPolicyRevision != activePolicy {
@@ -331,7 +356,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		pending != expectedPending {
 		return platformCheckpointSource{}, fmt.Errorf(
 			"enable source pending=%d/%d: %w",
-			pending, expectedPending, errAppPlatformStageEvidence)
+			pending, expectedPending, errAppPlatformOperationConflict)
 	}
 	return source, nil
 }
@@ -344,7 +369,8 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		p.target_release_sha256,o.target_generation,o.fence,o.completed_ms,o.action
 		FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.installation_id=? AND o.action IN ('install','update','restore')
+		WHERE o.installation_id=?
+		AND o.action IN ('install','update','enable','repair','restore')
 		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 		AND o.error_code IS NULL
@@ -382,7 +408,7 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		}
 		result.format = plan.Format
 		result.runtime = plan.Runtime
-	case "update", "restore":
+	case "update", "enable", "repair", "restore":
 		switch action {
 		case "update":
 			var plan platformManagedUpdatePlan
@@ -395,6 +421,32 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 				plan.TargetGeneration != generation {
 				return platformManagedUpdateSource{}, fmt.Errorf(
 					"%w: managed update update source plan",
+					errAppPlatformStageEvidence)
+			}
+		case "enable":
+			var plan platformManagedUpdatePlan
+			unmarshalErr := json.Unmarshal([]byte(planRaw), &plan)
+			canonical, marshalErr := json.Marshal(plan)
+			if unmarshalErr != nil || marshalErr != nil ||
+				string(canonical) != planRaw ||
+				plan.Format != platformManagedEnableFormat ||
+				plan.TargetReleaseSHA256 != release ||
+				plan.TargetGeneration != generation {
+				return platformManagedUpdateSource{}, fmt.Errorf(
+					"%w: managed update enable source plan",
+					errAppPlatformStageEvidence)
+			}
+		case "repair":
+			var plan platformManagedUpdatePlan
+			unmarshalErr := json.Unmarshal([]byte(planRaw), &plan)
+			canonical, marshalErr := json.Marshal(plan)
+			if unmarshalErr != nil || marshalErr != nil ||
+				string(canonical) != planRaw ||
+				plan.Format != platformManagedRepairFormat ||
+				plan.TargetReleaseSHA256 != release ||
+				plan.TargetGeneration != generation {
+				return platformManagedUpdateSource{}, fmt.Errorf(
+					"%w: managed update repair source plan",
 					errAppPlatformStageEvidence)
 			}
 		case "restore":
@@ -413,13 +465,18 @@ func loadPlatformManagedUpdateSource(e migExec, installation, activeRelease stri
 		}
 		var effectID, kind, digest, state, receipt string
 		var observed int64
+		expectedStartKind := action + "-start"
+		if action == "enable" || action == "repair" {
+			expectedStartKind = platformSameReleaseStartKind(
+				appplatform.Action(action))
+		}
 		if err := e.queryRow(`SELECT effect_id,kind,payload_sha256,state,
 			observed_fence,receipt_json FROM app_platform_operation_effects
 			WHERE operation_id=? AND stage='start' AND effect_number=1`,
 			result.operationID).
 			Scan(&effectID, &kind, &digest, &state, &observed,
 				&receipt); err != nil ||
-			kind != action+"-start" || state != "applied" ||
+			kind != expectedStartKind || state != "applied" ||
 			observed < 1 || observed > result.fence ||
 			!platformValidSHA(digest) {
 			return platformManagedUpdateSource{}, fmt.Errorf(

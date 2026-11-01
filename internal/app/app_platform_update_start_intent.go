@@ -76,8 +76,9 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.actor_scope,p.actor_scope,
 		o.source_generation,o.target_generation,o.action
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.id=? AND o.installation_id=? AND o.action IN ('update','enable') AND o.managed=1
-		AND o.stage IN ('migrate','start','probe','activate','complete','recovery_required')
+		WHERE o.id=? AND o.installation_id=?
+		AND o.action IN ('update','enable','repair') AND o.managed=1
+		AND o.stage IN ('migrate','download','stage','quiesce','start','probe','activate','complete','recovery_required')
 		AND (o.stage<>'complete' OR (o.completed_ms IS NOT NULL
 			AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
 			AND o.error_code IS NULL))`,
@@ -93,12 +94,12 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 	format := plan.Format
 	validFormat := action == appplatform.ActionUpdate &&
 		format == platformManagedUpdateFormat ||
-		action == appplatform.ActionEnable &&
-			format == platformManagedEnableFormat
+		platformSameReleaseLifecycle(action) &&
+			format == platformSameReleaseLifecycleFormat(action)
 	validReleasePolicy := action == appplatform.ActionUpdate &&
 		plan.SourceReleaseSHA256 != plan.TargetReleaseSHA256 &&
 		plan.TargetPolicyRevision > plan.SourcePolicyRevision ||
-		action == appplatform.ActionEnable &&
+		platformSameReleaseLifecycle(action) &&
 			plan.SourceReleaseSHA256 == plan.TargetReleaseSHA256 &&
 			plan.TargetPolicyRevision == plan.SourcePolicyRevision
 	sourceWriterFence := source.writerFence
@@ -120,7 +121,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		plan.DataNamespaceID != source.namespaceID ||
 		plan.DataFormat != mustPlatformCheckpointInt(source.dataFormat) ||
 		plan.SourceWriterFence != mustPlatformCheckpointInt(sourceWriterFence) ||
-		(action == appplatform.ActionEnable &&
+		(platformSameReleaseLifecycle(action) &&
 			plan.CheckpointWriterFence !=
 				mustPlatformCheckpointInt(source.writerFence)) ||
 		(action == appplatform.ActionUpdate &&
@@ -133,7 +134,7 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		!platformValidSHA(plan.CheckpointManifestSHA256) || plan.CheckpointArchiveBytes <= 0 {
 		return zero, nil, errAppPlatformStageEvidence
 	}
-	if action == appplatform.ActionEnable &&
+	if platformSameReleaseLifecycle(action) &&
 		(!platformValidUUID(plan.SourceActivationID) ||
 			plan.SourceActivationGeneration != plan.SourceGeneration ||
 			plan.SourceControlFence < 1 ||
@@ -187,16 +188,22 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 			"checkpoint recovery tuple: %w", errAppPlatformStageEvidence)
 	}
 	var effectID, payload, receiptRaw, effectState string
+	checkpointEffectStage := platformSameReleaseCheckpointEffectStage(
+		expected.snapshot.Action)
+	if expected.snapshot.Action == appplatform.ActionUpdate {
+		checkpointEffectStage = string(appplatform.StageSnapshot)
+	}
 	if err := e.queryRow(`SELECT effect_id,payload_sha256,receipt_json,state
-		FROM app_platform_operation_effects WHERE operation_id=? AND stage='snapshot' AND effect_number=1`,
-		expected.id).Scan(&effectID, &payload, &receiptRaw, &effectState); err != nil ||
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=1`,
+		expected.id, checkpointEffectStage).Scan(
+		&effectID, &payload, &receiptRaw, &effectState); err != nil ||
 		effectID != plan.CheckpointEffectID || effectState != "applied" ||
 		!platformValidSHA(payload) {
 		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
 			"checkpoint effect: %w", errAppPlatformStageEvidence)
 	}
 	expectedWriterFence := plan.SourceWriterFence
-	if plan.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(plan.Action) {
 		expectedWriterFence = plan.CheckpointWriterFence
 	}
 	receipt, err := journal.ParseCheckpointReceipt([]byte(receiptRaw))
@@ -216,11 +223,11 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 
 func platformUpdateStartCommand(expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, resourceID, effectID string) (control.UpdateStartCommand, error) {
 	kind := "update-start"
-	if expected.snapshot.Action == appplatform.ActionEnable {
-		kind = "enable-start"
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
+		kind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
 	checkpointWriterFence := ""
-	if plan.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(plan.Action) {
 		checkpointWriterFence = strconv.FormatInt(
 			plan.CheckpointWriterFence, 10)
 	}
@@ -270,8 +277,8 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, now int64, create bool) (platformUpdateStartIntent, bool, error) {
 	var zero platformUpdateStartIntent
 	startKind := "update-start"
-	if expected.snapshot.Action == appplatform.ActionEnable {
-		startKind = "enable-start"
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
+		startKind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
@@ -299,27 +306,38 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 	if effectErr != nil && !errors.Is(effectErr, sql.ErrNoRows) {
 		return zero, false, effectErr
 	}
-	fresh := errors.Is(err, sql.ErrNoRows)
-	if fresh != errors.Is(effectErr, sql.ErrNoRows) {
+	activationMissing := errors.Is(err, sql.ErrNoRows)
+	effectMissing := errors.Is(effectErr, sql.ErrNoRows)
+	reuseRepairCandidate := !activationMissing && effectMissing &&
+		expected.snapshot.Action == appplatform.ActionRepair &&
+		release == plan.TargetReleaseSHA256 &&
+		generation == int64(expected.snapshot.Generation) &&
+		policy == plan.TargetPolicyRevision &&
+		namespace == plan.DataNamespaceID && format == plan.DataFormat &&
+		state == "candidate" && readiness == "{}" && !observed.Valid
+	if activationMissing != effectMissing && !reuseRepairCandidate {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	if fresh {
+	if activationMissing || reuseRepairCandidate {
 		if !create {
 			return zero, false, errAppPlatformStageEvidence
 		}
-		activation, err = platformNewUUID()
-		if err != nil {
-			return zero, false, err
+		if activationMissing {
+			activation, err = platformNewUUID()
+			if err != nil {
+				return zero, false, err
+			}
+			if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms)
+				VALUES(?,?,?,?,?,?,?,'candidate','{}',NULL,?,?)`,
+				activation, expected.installationID,
+				plan.TargetReleaseSHA256, expected.snapshot.Generation,
+				plan.TargetPolicyRevision, plan.DataNamespaceID,
+				plan.DataFormat, now, now); err != nil {
+				return zero, false, err
+			}
 		}
 		effectID, err = platformNewUUID()
 		if err != nil {
-			return zero, false, err
-		}
-		if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,'candidate','{}',NULL,?,?)`,
-			activation, expected.installationID, plan.TargetReleaseSHA256,
-			expected.snapshot.Generation, plan.TargetPolicyRevision, plan.DataNamespaceID,
-			plan.DataFormat, now, now); err != nil {
 			return zero, false, err
 		}
 		command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
@@ -452,8 +470,8 @@ func loadPlatformCompletedUpdateStartActivation(e migExec, expected platformOper
 func loadPlatformUpdateStartActivationState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, activationState string) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
 	startKind := "update-start"
-	if expected.snapshot.Action == appplatform.ActionEnable {
-		startKind = "enable-start"
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
+		startKind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
@@ -580,7 +598,7 @@ func (s *Server) preparePlatformUpdateRegistrationSource(ctx context.Context, ex
 func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected platformOperationLease, stage appplatform.Stage) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
 	if (expected.snapshot.Action != appplatform.ActionUpdate &&
-		expected.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(expected.snapshot.Action)) ||
 		!expected.snapshot.Managed ||
 		expected.snapshot.Stage != stage || expected.snapshot.Generation < 2 {
 		return zero, errAppPlatformStageEvidence
@@ -614,7 +632,7 @@ func (s *Server) preparePlatformUpdateStartMode(ctx context.Context, expected pl
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if expected.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, expected, runtime, facts.now)
 	} else {

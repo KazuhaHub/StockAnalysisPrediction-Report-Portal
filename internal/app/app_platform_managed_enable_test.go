@@ -3,8 +3,10 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -434,6 +436,683 @@ func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testi
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTuplePostgres(t *testing.T) {
 	testPlatformManagedEnableSyntheticStart(t, true)
+}
+
+func platformCompleteSyntheticDisable(
+	t *testing.T,
+	s *Server,
+	actor platformActorSession,
+	enabled platformOperationLease,
+) platformOperationLease {
+	t.Helper()
+	review, err := s.createPlatformRemovalReview(
+		actor, enabled.installationID, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("disable review", err)
+	}
+	commit, err := s.consumePlatformRemovalReview(
+		actor, review.ID, review.SHA256, platformFixtureID(1320))
+	if err != nil {
+		t.Fatal("disable admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(1321))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("disable claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage == appplatform.StageQueued ||
+		current.snapshot.Stage == appplatform.StageValidate {
+		current, err = s.st.advancePlatformRemovalControl(current)
+		if err != nil {
+			t.Fatal("disable control", current.snapshot.Stage, err)
+		}
+	}
+	current, err = s.advancePlatformManagedRemovalStage(
+		context.Background(), current, appplatform.StageStop)
+	if err != nil {
+		t.Fatal("disable stop intent", err)
+	}
+	intent, err := s.preparePlatformManagedRemovalIntent(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("disable intent", err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	receipt, ok := validPlatformManagedRemovalObservation(
+		platformManagedRemovalObservationFixture(intent, endpoint),
+		intent, endpoint)
+	if !ok {
+		t.Fatal("disable stop receipt")
+	}
+	completed, err := s.settlePlatformManagedRemoval(
+		context.Background(), current, intent, receipt)
+	if err != nil || completed.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("disable completion", completed.snapshot, err)
+	}
+	return completed
+}
+
+func testPlatformManagedEnableSecondCycle(t *testing.T, pg bool) {
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var target platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &target) != nil ||
+		target.TargetRuntime == nil {
+		t.Fatal("first enable target", err)
+	}
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil || now < 0 {
+		t.Fatal("second enable runtime", err)
+	}
+	review, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		target.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("second enable review", err)
+	}
+	var plan platformManagedUpdatePlan
+	if json.Unmarshal([]byte(review.JSON), &plan) != nil ||
+		plan.SourceGeneration != target.TargetGeneration ||
+		plan.TargetGeneration != target.TargetGeneration+1 ||
+		plan.SourceReleaseSHA256 != plan.TargetReleaseSHA256 {
+		t.Fatal("second enable plan", plan)
+	}
+	commit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
+		context.Background(), actor, review.ID, review.SHA256,
+		platformFixtureID(1322), target.TargetRuntime, runtime)
+	if err != nil || commit.Stage != appplatform.StageQueued {
+		t.Fatal("second enable admission", commit, err)
+	}
+	selected, err := s.claimNextPlatformManagedEnable(
+		context.Background(), platformFixtureID(1323))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("second enable claim", selected, err)
+	}
+	snapshotLease := selected.lease
+	for snapshotLease.snapshot.Stage == appplatform.StageQueued ||
+		snapshotLease.snapshot.Stage == appplatform.StageValidate {
+		snapshotLease, err = s.advancePlatformManagedEnableStage(
+			context.Background(), snapshotLease)
+		if err != nil {
+			t.Fatal("second enable control", snapshotLease.snapshot.Stage, err)
+		}
+	}
+	checkpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), snapshotLease)
+	if err != nil {
+		t.Fatal("second enable checkpoint", err)
+	}
+	checkpointEndpoint := platformCheckpointEndpointFixture()
+	startLease, err := s.commitPlatformCheckpoint(
+		context.Background(), snapshotLease, checkpoint,
+		checkpointEndpoint, platformCheckpointObservationFixture(
+			checkpoint, checkpointEndpoint))
+	if err != nil {
+		t.Fatal("second enable checkpoint commit", err)
+	}
+	result := platformRunSyntheticManagedEnable(t, s, startLease)
+	if result.snapshot.Stage != appplatform.StageComplete ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != "enabled:ready" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != plan.TargetGeneration {
+		t.Fatal("second enable did not activate current tuple")
+	}
+}
+
+func TestPlatformManagedEnableSecondCycleSQLite(t *testing.T) {
+	testPlatformManagedEnableSecondCycle(t, false)
+}
+
+func TestPlatformManagedEnableSecondCyclePostgres(t *testing.T) {
+	testPlatformManagedEnableSecondCycle(t, true)
+}
+
+func testPlatformManagedRepairCurrentTuple(t *testing.T, pg bool) {
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("repair source target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	grantsBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_capability_grants WHERE installation_id=?`,
+		firstEnable.installationID)
+	review, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("repair review", err)
+	}
+	var plan platformManagedUpdatePlan
+	if json.Unmarshal([]byte(review.JSON), &plan) != nil ||
+		plan.Format != platformManagedRepairFormat ||
+		plan.Action != appplatform.ActionRepair ||
+		plan.SourceReleaseSHA256 != plan.TargetReleaseSHA256 ||
+		plan.SourcePolicyRevision != plan.TargetPolicyRevision ||
+		plan.SourceGeneration != previous.TargetGeneration ||
+		plan.TargetGeneration != plan.SourceGeneration+1 {
+		t.Fatal("repair review plan", plan)
+	}
+	commit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, review.ID, review.SHA256,
+		platformFixtureID(1324), previous.TargetRuntime, runtime)
+	if err != nil || commit.Stage != appplatform.StageQueued {
+		t.Fatal("repair admission", commit, err)
+	}
+	selected, err := s.claimNextPlatformManagedRepair(
+		context.Background(), platformFixtureID(1325))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("repair claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage != appplatform.StageQuiesce {
+		current, err = s.advancePlatformManagedEnableStage(
+			context.Background(), current)
+		if err != nil {
+			t.Fatal("repair stage", current.snapshot.Stage, err)
+		}
+	}
+	checkpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("repair checkpoint", err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||kind FROM
+		app_platform_operation_effects WHERE effect_id=?`,
+		checkpoint.effectID) != "quiesce:snapshot" {
+		t.Fatal("repair checkpoint has wrong durable stage")
+	}
+	checkpointEndpoint := platformCheckpointEndpointFixture()
+	startLease, err := s.commitPlatformCheckpoint(
+		context.Background(), current, checkpoint, checkpointEndpoint,
+		platformCheckpointObservationFixture(
+			checkpoint, checkpointEndpoint))
+	if err != nil || startLease.snapshot.Stage != appplatform.StageStart {
+		t.Fatal("repair checkpoint commit", startLease.snapshot, err)
+	}
+	start, err := s.preparePlatformUpdateStart(
+		context.Background(), startLease)
+	if err != nil || start.command.Kind != "enable-start" {
+		t.Fatal("repair start intent", start.command.Kind, err)
+	}
+	result := platformRunSyntheticManagedEnable(t, s, startLease)
+	if result.snapshot.Stage != appplatform.StageComplete ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != "enabled:ready" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			firstEnable.installationID) != plan.TargetGeneration ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM
+			app_platform_capability_grants WHERE installation_id=?`,
+			firstEnable.installationID) != grantsBefore {
+		t.Fatal("repair did not activate the current tuple")
+	}
+	access, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, firstEnable.installationID)
+	if err != nil {
+		t.Fatal("repair backend history", err)
+	}
+	defer access.Close()
+	if !access.intent.applied ||
+		access.intent.generation != plan.TargetGeneration {
+		t.Fatal("repair backend history lost current generation")
+	}
+}
+
+func TestPlatformManagedRepairCurrentTupleSQLite(t *testing.T) {
+	testPlatformManagedRepairCurrentTuple(t, false)
+}
+
+func TestPlatformManagedRepairCurrentTuplePostgres(t *testing.T) {
+	testPlatformManagedRepairCurrentTuple(t, true)
+}
+
+func platformManagedRepairReviewFixture(
+	t *testing.T, pg bool,
+) (*Server, platformActorSession, platformOperationLease, platformManagedUpdatePlan, platformRuntimeRegistration) {
+	t.Helper()
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("repair review target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("repair review fixture", err)
+	}
+	var plan platformManagedUpdatePlan
+	if json.Unmarshal([]byte(review.JSON), &plan) != nil {
+		t.Fatal("repair review fixture plan")
+	}
+	commit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, review.ID, review.SHA256,
+		platformFixtureID(1330), previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("repair review fixture admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedRepair(
+		context.Background(), platformFixtureID(1331))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("repair review fixture claim", selected, err)
+	}
+	return s, actor, selected.lease, plan, runtime
+}
+
+func testPlatformManagedRepairGrantDriftRefused(t *testing.T, pg bool) {
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("repair grant drift target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("repair grant drift review", err)
+	}
+	installation := firstEnable.installationID
+	beforeGeneration := scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`, installation)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants
+		SET policy_revision=policy_revision+1
+		WHERE installation_id=?`, installation)
+	if _, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, review.ID, review.SHA256,
+		platformFixtureID(1332), previous.TargetRuntime,
+		runtime); err == nil {
+		t.Fatal("repair accepted grant drift")
+	}
+	if scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`,
+		installation) != beforeGeneration ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM
+			app_platform_operations WHERE action='repair'`) != 0 {
+		t.Fatal("refused repair changed installation or duplicated operation")
+	}
+}
+
+func TestPlatformManagedRepairGrantDriftRefusedSQLite(t *testing.T) {
+	testPlatformManagedRepairGrantDriftRefused(t, false)
+}
+
+func TestPlatformManagedRepairGrantDriftRefusedPostgres(t *testing.T) {
+	testPlatformManagedRepairGrantDriftRefused(t, true)
+}
+
+func testPlatformManagedRepairFailureRequiresRecovery(t *testing.T, pg bool) {
+	s, actor, lease, plan, runtime :=
+		platformManagedRepairReviewFixture(t, pg)
+	grants := scalar[int](t, s.st, `SELECT COUNT(*)
+		FROM app_platform_capability_grants WHERE installation_id=?`,
+		lease.installationID)
+	namespace := scalar[string](t, s.st, `SELECT id
+		FROM app_platform_data_namespaces WHERE owner_installation_id=?`,
+		lease.installationID)
+	current := lease
+	var err error
+	for current.snapshot.Stage != appplatform.StageQuiesce {
+		current, err = s.advancePlatformManagedEnableStage(
+			context.Background(), current)
+		if err != nil {
+			t.Fatal("repair failure stage", current.snapshot.Stage, err)
+		}
+	}
+	checkpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformCheckpointEndpointFixture()
+	current, err = s.commitPlatformCheckpoint(
+		context.Background(), current, checkpoint, endpoint,
+		platformCheckpointObservationFixture(checkpoint, endpoint))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.preparePlatformUpdateStart(
+		context.Background(), current); err != nil {
+		t.Fatal("repair start intent", err)
+	}
+	if err := s.finishPlatformManagedRepairForReview(
+		context.Background(), current); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||error_code
+		FROM app_platform_operations WHERE id=?`,
+		lease.id) != "recovery_required:managed_repair_recovery_required" ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase||':'||
+			generation FROM app_platform_installations WHERE id=?`,
+			lease.installationID) !=
+			"disabled:recovery_required:"+
+				platformDeleteDataDecimal(plan.SourceGeneration) ||
+		scalar[string](t, s.st, `SELECT state
+			FROM app_platform_data_namespaces WHERE id=?`,
+			namespace) != "active" ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_capability_grants WHERE installation_id=?`,
+			lease.installationID) != grants {
+		t.Fatal("repair failure lost data, grants or truthful phase")
+	}
+	retryReview, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, lease.installationID,
+		plan.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("retry repair review after recovery", err)
+	}
+	retryCommit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, retryReview.ID, retryReview.SHA256,
+		platformFixtureID(1348), plan.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("retry repair admission", err)
+	}
+	retryClaim, err := s.claimNextPlatformManagedRepair(
+		context.Background(), platformFixtureID(1349))
+	if err != nil || retryClaim.lease.id != retryCommit.OperationID {
+		t.Fatal("retry repair claim", retryClaim, err)
+	}
+	retryLease := retryClaim.lease
+	for retryLease.snapshot.Stage != appplatform.StageQuiesce {
+		retryLease, err = s.advancePlatformManagedEnableStage(
+			context.Background(), retryLease)
+		if err != nil {
+			t.Fatal("retry repair stage", retryLease.snapshot.Stage, err)
+		}
+	}
+	retryCheckpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), retryLease)
+	if err != nil {
+		t.Fatal("retry repair checkpoint", err)
+	}
+	checkpointEndpoint := platformCheckpointEndpointFixture()
+	retryStart, err := s.commitPlatformCheckpoint(
+		context.Background(), retryLease, retryCheckpoint,
+		checkpointEndpoint, platformCheckpointObservationFixture(
+			retryCheckpoint, checkpointEndpoint))
+	if err != nil {
+		t.Fatal("retry repair checkpoint commit", err)
+	}
+	retryResult := platformRunSyntheticManagedEnable(t, s, retryStart)
+	if retryResult.snapshot.Stage != appplatform.StageComplete ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			lease.installationID) != "enabled:ready" {
+		t.Fatal("retry repair did not recover the app")
+	}
+}
+
+func TestPlatformManagedRepairFailureRequiresRecoverySQLite(t *testing.T) {
+	testPlatformManagedRepairFailureRequiresRecovery(t, false)
+}
+
+func TestPlatformManagedRepairFailureRequiresRecoveryPostgres(t *testing.T) {
+	testPlatformManagedRepairFailureRequiresRecovery(t, true)
+}
+
+func testPlatformManagedRepairConcurrentClaim(t *testing.T, pg bool) {
+	s, _, lease, _, _ := platformManagedRepairReviewFixture(t, pg)
+	mustExec(t, s.st, `UPDATE app_platform_operations
+		SET lease_until_ms=0 WHERE id=?`, lease.id)
+	var wg sync.WaitGroup
+	selections := make(chan platformInstallSelection, 8)
+	for index := range 8 {
+		wg.Go(func() {
+			selected, _ := s.claimNextPlatformManagedRepair(
+				context.Background(),
+				platformFixtureID(1340+index))
+			selections <- selected
+		})
+	}
+	wg.Wait()
+	close(selections)
+	claimed := 0
+	for selected := range selections {
+		if selected.lease.id == lease.id {
+			claimed++
+		}
+	}
+	if claimed != 1 {
+		t.Fatalf("repair operation claimed %d times", claimed)
+	}
+}
+
+func TestPlatformManagedRepairConcurrentClaimSQLite(t *testing.T) {
+	testPlatformManagedRepairConcurrentClaim(t, false)
+}
+
+func TestPlatformManagedRepairConcurrentClaimPostgres(t *testing.T) {
+	testPlatformManagedRepairConcurrentClaim(t, true)
+}
+
+func TestPlatformManagedRepairActiveAppRefused(t *testing.T) {
+	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, false)
+	var target platformInstallProjection
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='install'
+		ORDER BY o.completed_ms DESC LIMIT 1`,
+		enabled.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &target) != nil ||
+		target.Runtime == nil {
+		t.Fatal("repair active target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		enabled.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, enabled.installationID,
+		target.Runtime, runtime); err == nil {
+		t.Fatal("repair review admitted a healthy active app")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_review_plans WHERE action='repair'`) != 0 {
+		t.Fatal("refused repair review was persisted")
+	}
+}
+
+func testPlatformManagedRepairEnableOperatorRace(t *testing.T, pg bool) {
+	s, actor, firstEnable := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, firstEnable)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete' ORDER BY o.completed_ms DESC LIMIT 1`,
+		firstEnable.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("operator race target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		firstEnable.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repair, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("operator repair review", err)
+	}
+	enable, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
+		context.Background(), actor, firstEnable.installationID,
+		previous.TargetRuntime, runtime)
+	if err != nil {
+		t.Fatal("operator enable review", err)
+	}
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for _, item := range []struct {
+		action appplatform.Action
+		review platformRemovalReview
+		key    string
+	}{
+		{appplatform.ActionRepair, repair, platformFixtureID(1346)},
+		{appplatform.ActionEnable, enable, platformFixtureID(1347)},
+	} {
+		wg.Go(func() {
+			var err error
+			if item.action == appplatform.ActionRepair {
+				_, err = s.consumePlatformManagedRepairReviewWithRuntimeContext(
+					context.Background(), actor, item.review.ID,
+					item.review.SHA256, item.key,
+					previous.TargetRuntime, runtime)
+			} else {
+				_, err = s.consumePlatformManagedSameReleaseReviewWithRuntimeContext(
+					context.Background(), actor, item.review.ID,
+					item.review.SHA256, item.key,
+					previous.TargetRuntime, runtime,
+					appplatform.ActionEnable)
+			}
+			results <- err
+		})
+	}
+	wg.Wait()
+	close(results)
+	success, refused := 0, 0
+	for err := range results {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, errAppPlatformPlanChanged),
+			errors.Is(err, errAppPlatformOperationConflict):
+			refused++
+		default:
+			t.Fatal(err)
+		}
+	}
+	pending := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_operations WHERE action IN ('enable','repair')
+		AND completed_ms IS NULL`)
+	consumed := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_review_plans WHERE id IN (?,?)
+		AND consumed_ms IS NOT NULL`, repair.ID, enable.ID)
+	if success != 1 || refused != 1 ||
+		pending != 1 || consumed != 1 {
+		t.Fatal("enable/repair operator race",
+			success, refused, pending, consumed)
+	}
+}
+
+func TestPlatformManagedRepairEnableOperatorRaceSQLite(t *testing.T) {
+	testPlatformManagedRepairEnableOperatorRace(t, false)
+}
+
+func TestPlatformManagedRepairEnableOperatorRacePostgres(t *testing.T) {
+	testPlatformManagedRepairEnableOperatorRace(t, true)
 }
 
 func testPlatformManagedDisablePreparesCurrentEnabledGeneration(t *testing.T, pg bool) {

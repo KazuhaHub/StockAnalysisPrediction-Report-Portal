@@ -17,7 +17,7 @@ import (
 func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lease platformOperationLease) (platformUpdateStartRegistrationIntent, error) {
 	var zero platformUpdateStartRegistrationIntent
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
-		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action)) ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 {
@@ -53,7 +53,7 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, lease, runtime, facts.now)
 	} else {
@@ -238,7 +238,7 @@ func (s *Server) commitPlatformUpdateStartRegistration(ctx context.Context, leas
 	var zero platformOperationLease
 	intent = clonePlatformUpdateStartRegistrationIntent(intent)
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
-		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action)) ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || lease.rowRevision == math.MaxInt64 ||
@@ -273,7 +273,7 @@ func (s *Server) commitPlatformUpdateStartRegistration(ctx context.Context, leas
 		return zero, err
 	}
 	var source platformCheckpointSource
-	if lease.snapshot.Action == appplatform.ActionEnable {
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		source, err = loadPlatformCheckpointSourceForEnable(
 			e, lease, runtime, facts.now)
 	} else {

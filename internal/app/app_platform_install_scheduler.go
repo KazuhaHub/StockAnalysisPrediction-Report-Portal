@@ -89,6 +89,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				selected, err = w.server.claimNextPlatformManagedUpdate(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRepair(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
@@ -163,6 +166,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedUpdate(
 			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedRepair(
+			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedEnable(
@@ -222,6 +229,9 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	finish := w.server.finishPlatformInstallForReview
 	if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedRepairForReview
 	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
 		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedEnableForReview

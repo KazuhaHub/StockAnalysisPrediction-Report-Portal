@@ -45,6 +45,20 @@ plugin table; clear-on-uninstall remains a separate reviewed action.
 Candidate `602f91fe` passed Portal test `41341861685`, quota/browser
 `41341861749`, runner daemon `41341861650` and CodeQL.
 
+Latest H13 repair evidence: the reviewed managed repair path now uses its own
+review format and `queued -> validate -> download -> stage -> quiesce -> start
+-> probe -> activate -> complete` operation. Review requires the current
+same-release runtime, policy, grants and audience. Admission moves the
+installation to a pending target generation without replacing grants; quiesce
+must produce a new verified checkpoint before start. Probe, registration, boot
+and activation reuse the signed update-start chain. SQLite and PostgreSQL 18.6
+tests cover successful repair, grant drift refusal, healthy-app refusal,
+concurrent worker claims, enable/repair operator races, failure to
+`recovery_required`, retry after that failure, and backend history. Repeated
+enable cycles now reconstruct enable sources instead of assuming install
+generation one. A repair leg was added after enable in the disposable Linux/XFS/
+Docker native lifecycle workflow; its new CI result is still pending.
+
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
 generation-2 start/probe/registration/boot/activation, current-generation

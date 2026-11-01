@@ -64,7 +64,7 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	var zero platformUpdateStartRegistrationIntent
 	if (lease.snapshot.Action != appplatform.ActionUpdate &&
 		lease.snapshot.Action != appplatform.ActionRestore &&
-		lease.snapshot.Action != appplatform.ActionEnable) ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action)) ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || start.running == nil ||

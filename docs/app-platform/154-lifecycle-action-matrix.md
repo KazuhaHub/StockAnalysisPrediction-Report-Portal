@@ -38,6 +38,18 @@ Implemented and tested:
   generation gets fresh process, readiness, registration and boot evidence.
   Completed enable history reconstructs the current viewer request path from
   the update-start registration and preserves the prior capability review IDs;
+- managed repair has a separate exact review and
+  `validate -> download -> stage -> quiesce -> start -> probe -> activate`
+  executor. It accepts only a disabled or recovery/review-required same-release
+  tuple, revalidates the current runtime, signed release, policy, grants and
+  audience, and takes a fresh checkpoint at `quiesce`. Start/probe/registration/
+  boot/activation then use the retained data namespace with no capability grant
+  replacement. A retry may reuse only an abandoned candidate activation whose
+  readiness is empty and has no observation; prepared work from a previous
+  attempt remains recovery evidence and is never replayed blindly;
+- checkpoint and update-start history now reconstruct `enable` and `repair`
+  source operations as well as install/update/restore, so repeated
+  disable/enable/repair cycles keep the current generation tuple;
 - uninstall revocation of credential bindings and transactional clear/drop of
   dedicated plugin object tables;
 - reviewed frontend uninstall scheduling through
@@ -81,11 +93,11 @@ Implemented and tested:
 
 Still required for H13 completion:
 
-- reviewed repair execution with current trust, runtime configuration, process
-  start and health checks and no capability expansion;
 - full concurrent operator acceptance across enable/update/repair, not only
   delete-data admission;
-- end-to-end lifecycle tests for every row above, including lost confirmations.
+- native repair execution against the disposable Linux/XFS/Docker runner;
+- static frontend repair and end-to-end lifecycle evidence for every row,
+  including lost confirmations.
 
 The standalone delete-data path has SQLite and PostgreSQL 18.6 repository
 coverage for stale plans, concurrent confirmations, two-admin conflicts,

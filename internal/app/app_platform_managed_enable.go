@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"time"
 
@@ -21,7 +22,26 @@ func platformBuildManagedEnablePlan(
 	source platformCheckpointSource,
 	now int64,
 ) (platformManagedUpdatePlan, int64, error) {
+	return platformBuildManagedSameReleasePlan(
+		e, installation, target, runtime, source, now,
+		appplatform.ActionEnable, platformManagedEnableFormat)
+}
+
+func platformBuildManagedSameReleasePlan(
+	e migExec,
+	installation string,
+	target *platformManagedInstallTarget,
+	runtime platformRuntimeRegistration,
+	source platformCheckpointSource,
+	now int64,
+	action appplatform.Action,
+	format string,
+) (platformManagedUpdatePlan, int64, error) {
 	var zero platformManagedUpdatePlan
+	if !platformSameReleaseLifecycle(action) ||
+		format != platformSameReleaseLifecycleFormat(action) {
+		return zero, 0, errAppPlatformPlanChanged
+	}
 	var appID, publisher, desired, phase, epoch, runtimeID string
 	var generation, revision, policyRevision, controlFence, trustRevision int64
 	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,
@@ -32,11 +52,21 @@ func platformBuildManagedEnablePlan(
 			&policyRevision, &epoch, &runtimeID, &controlFence); err != nil {
 		return zero, revision, err
 	}
+	expectedInstallationGeneration := source.sourceGeneration + 1
+	if action == appplatform.ActionRepair &&
+		(phase == "recovery_required" ||
+			phase == "review_required") {
+		expectedInstallationGeneration = source.sourceGeneration
+	}
 	if runtimeID != runtime.id || epoch != runtime.controllerEpoch ||
-		generation != source.sourceGeneration+1 ||
+		generation != expectedInstallationGeneration ||
 		policyRevision < 1 || controlFence < 1 ||
-		!(desired == "disabled" && phase == "disabled" ||
-			desired == "enabled" && phase == "pending") {
+		!((desired == "disabled" &&
+			(phase == "disabled" ||
+				(action == appplatform.ActionRepair &&
+					(phase == "recovery_required" ||
+						phase == "review_required")))) ||
+			(desired == "enabled" && phase == "pending")) {
 		return zero, revision, errAppPlatformPlanChanged
 	}
 	var activationID, activationRelease, namespace string
@@ -73,13 +103,13 @@ func platformBuildManagedEnablePlan(
 		return zero, revision, err
 	}
 	plan := platformManagedUpdatePlan{
-		Format:         platformManagedEnableFormat,
-		Action:         appplatform.ActionEnable,
+		Format:         format,
+		Action:         action,
 		InstallationID: installation, AppID: appID, PublisherID: publisher,
 		SourceReleaseSHA256:        source.releaseSHA256,
 		TargetReleaseSHA256:        source.releaseSHA256,
 		SourceGeneration:           source.sourceGeneration,
-		TargetGeneration:           generation,
+		TargetGeneration:           source.sourceGeneration + 1,
 		SourcePolicyRevision:       policyRevision,
 		TargetPolicyRevision:       policyRevision,
 		ControllerEpoch:            epoch,
@@ -107,7 +137,6 @@ func platformBuildManagedEnablePlan(
 		return zero, revision, err
 	}
 	if plan.SourceGeneration < 1 || plan.TargetGeneration != plan.SourceGeneration+1 ||
-		plan.TargetGeneration != generation ||
 		plan.SourceReleaseSHA256 == "" || plan.AppID == "" ||
 		plan.PublisherID == "" || plan.DataNamespaceID == "" ||
 		plan.DataFormat < 1 || plan.SourceWriterFence < 1 ||
@@ -143,7 +172,24 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 	target *platformManagedInstallTarget,
 	observedRuntime platformRuntimeRegistration,
 ) (platformRemovalReview, error) {
+	return s.createPlatformManagedSameReleaseReviewWithRuntimeContext(
+		ctx, session, installation, target, observedRuntime,
+		appplatform.ActionEnable)
+}
+
+func (s *Server) createPlatformManagedSameReleaseReviewWithRuntimeContext(
+	ctx context.Context,
+	session platformActorSession,
+	installation string,
+	target *platformManagedInstallTarget,
+	observedRuntime platformRuntimeRegistration,
+	action appplatform.Action,
+) (platformRemovalReview, error) {
 	var result platformRemovalReview
+	if !platformSameReleaseLifecycle(action) {
+		return result, errAppPlatformPlanChanged
+	}
+	format := platformSameReleaseLifecycleFormat(action)
 	err := s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl, trust appplatform.PublisherTrust) error {
 		if err := lockOUMutation(e); err != nil {
 			return err
@@ -172,7 +218,7 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 		expected := platformOperationLease{
 			installationID: installation, controllerEpoch: control.epoch,
 			snapshot: appplatform.OperationSnapshot{
-				Action: appplatform.ActionEnable, Managed: true,
+				Action: action, Managed: true,
 				Generation: uint64(generation), Revision: 1,
 				Stage: appplatform.StageQueued,
 			},
@@ -180,16 +226,18 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 		source, err := loadPlatformCheckpointSourceForEnableReview(
 			e, expected, runtime, control.nowMS)
 		if err != nil {
-			return err
+			return fmt.Errorf(
+				"managed %s review source: %w", action, err)
 		}
-		plan, revision, err := platformBuildManagedEnablePlan(
-			e, installation, target, runtime, source, control.nowMS)
+		plan, revision, err := platformBuildManagedSameReleasePlan(
+			e, installation, target, runtime, source, control.nowMS,
+			action, format)
 		if err != nil {
-			return err
+			return fmt.Errorf(
+				"managed %s review plan: %w", action, err)
 		}
 		if plan.SourceReleaseSHA256 != plan.TargetReleaseSHA256 ||
 			plan.SourceGeneration+1 != plan.TargetGeneration ||
-			plan.TargetGeneration != generation ||
 			plan.SourceActivationGeneration != plan.SourceGeneration ||
 			revision == math.MaxInt64 {
 			return errAppPlatformPlanChanged
@@ -226,7 +274,7 @@ func (s *Server) createPlatformManagedEnableReviewWithRuntimeContext(
 			plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
 			id, installation, plan.AppID, plan.PublisherID,
-			string(appplatform.ActionEnable), plan.SourceReleaseSHA256,
+			string(action), plan.SourceReleaseSHA256,
 			plan.TargetReleaseSHA256, revision, plan.SourcePolicyRevision,
 			plan.TrustRevision, plan.ControllerEpoch, actor.scope,
 			actor.username, actor.created, actor.generation,
@@ -265,7 +313,24 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 	target *platformManagedInstallTarget,
 	observedRuntime platformRuntimeRegistration,
 ) (platformRemovalCommit, error) {
+	return s.consumePlatformManagedSameReleaseReviewWithRuntimeContext(
+		ctx, session, planID, planSHA, key, target, observedRuntime,
+		appplatform.ActionEnable)
+}
+
+func (s *Server) consumePlatformManagedSameReleaseReviewWithRuntimeContext(
+	ctx context.Context,
+	session platformActorSession,
+	planID, planSHA, key string,
+	target *platformManagedInstallTarget,
+	observedRuntime platformRuntimeRegistration,
+	action appplatform.Action,
+) (platformRemovalCommit, error) {
 	var result platformRemovalCommit
+	if !platformSameReleaseLifecycle(action) {
+		return result, errAppPlatformPlanChanged
+	}
+	format := platformSameReleaseLifecycleFormat(action)
 	request, _ := json.Marshal([]string{
 		"portal-operation-commit/v1", planID, planSHA,
 	})
@@ -306,7 +371,7 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 			return errAppPlatformPlanExpired
 		}
 		if !installation.Valid ||
-			appplatform.Action(actionText) != appplatform.ActionEnable {
+			appplatform.Action(actionText) != action {
 			return errAppPlatformPlanChanged
 		}
 		if err := lockOUMutation(e); err != nil {
@@ -331,7 +396,7 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 			installationID:  installation.String,
 			controllerEpoch: control.epoch,
 			snapshot: appplatform.OperationSnapshot{
-				Action: appplatform.ActionEnable, Managed: true,
+				Action: action, Managed: true,
 				Generation: uint64(generation), Revision: 1,
 				Stage: appplatform.StageQueued,
 			},
@@ -341,8 +406,9 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 		if err != nil {
 			return err
 		}
-		current, revision, err := platformBuildManagedEnablePlan(
-			e, installation.String, target, runtime, source, control.nowMS)
+		current, revision, err := platformBuildManagedSameReleasePlan(
+			e, installation.String, target, runtime, source,
+			control.nowMS, action, format)
 		if err != nil {
 			return err
 		}
@@ -377,13 +443,18 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 		if err := platformLeaseCAS(changed, err); err != nil {
 			return err
 		}
+		phaseClause := "phase='disabled'"
+		if action == appplatform.ActionRepair {
+			phaseClause = "phase IN ('disabled','recovery_required','review_required')"
+		}
 		changed, err = e.exec(`UPDATE app_platform_installations
-			SET desired_state='enabled',phase='pending',
+			SET desired_state='enabled',phase='pending',generation=?,
 			revision=revision+1,control_fence=control_fence+1,updated_ms=?
-			WHERE id=? AND desired_state='disabled' AND phase='disabled'
+			WHERE id=? AND desired_state='disabled' AND `+phaseClause+`
 			AND generation=? AND revision=? AND policy_revision=?
 			AND control_fence=? AND controller_epoch=? AND runtime_id=?`,
-			control.nowMS, installation.String, current.TargetGeneration,
+			current.TargetGeneration, control.nowMS, installation.String,
+			generation,
 			revision, current.SourcePolicyRevision,
 			current.SourceControlFence, control.epoch, runtime.id)
 		if err := platformLeaseCAS(changed, err); err != nil {
@@ -401,7 +472,7 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 			VALUES(?,?,?,?,?,?,?,1,?,?,'queued',1,1,NULL,NULL,0,?,
 			NULL,NULL,?,?)`,
 			id, installation.String, planID, actor.scope, keyDigest,
-			requestDigest, string(appplatform.ActionEnable),
+			requestDigest, string(action),
 			current.SourceGeneration, current.TargetGeneration,
 			control.epoch, control.nowMS, control.nowMS)
 		if err != nil {
@@ -411,7 +482,7 @@ func (s *Server) consumePlatformManagedEnableReviewWithRuntimeContext(
 			Plan       string `json:"plan_id"`
 			Action     string `json:"action"`
 			Generation int64  `json:"generation"`
-		}{planID, string(appplatform.ActionEnable), current.TargetGeneration})
+		}{planID, string(action), current.TargetGeneration})
 		if _, err := e.exec(`INSERT INTO audit_log(
 			at,actor,actor_ou,action,target_type,target_id,detail,ip)
 			VALUES(?,?,?,'app_platform.operation_admitted',
@@ -442,7 +513,7 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 	var zeroPlan platformManagedUpdatePlan
 	var zeroSource platformCheckpointSource
 	var zeroRuntime platformRuntimeRegistration
-	if lease.snapshot.Action != appplatform.ActionEnable ||
+	if !platformSameReleaseLifecycle(lease.snapshot.Action) ||
 		!lease.snapshot.Managed ||
 		lease.snapshot.Generation < 2 {
 		return zeroPlan, zeroSource, zeroRuntime, errAppPlatformStageEvidence
@@ -472,8 +543,9 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 		len(raw) > 65536 || platformDigest([]byte(raw)) != digest ||
 		operationScope != planScope || managed != 1 ||
 		!consumed.Valid || consumed.Int64 > now ||
-		plan.Format != platformManagedEnableFormat ||
-		plan.Action != appplatform.ActionEnable ||
+		plan.Format != platformSameReleaseLifecycleFormat(
+			lease.snapshot.Action) ||
+		plan.Action != lease.snapshot.Action ||
 		plan.InstallationID != lease.installationID ||
 		plan.SourceGeneration != sourceGeneration ||
 		plan.TargetGeneration != targetGeneration ||
@@ -565,7 +637,10 @@ func (s *Server) loadPlatformAdmittedManagedEnable(
 			plan.CheckpointArchiveBytes <= 0)) ||
 		(!hasRecovery && lease.snapshot.Stage != appplatform.StageQueued &&
 			lease.snapshot.Stage != appplatform.StageValidate &&
-			lease.snapshot.Stage != appplatform.StageSnapshot) {
+			lease.snapshot.Stage != appplatform.StageDownload &&
+			lease.snapshot.Stage != appplatform.StageStage &&
+			lease.snapshot.Stage != platformSameReleaseCheckpointStage(
+				lease.snapshot.Action)) {
 		return zeroPlan, zeroSource, zeroRuntime, errAppPlatformStageEvidence
 	}
 	return plan, source, runtime, nil
@@ -577,8 +652,16 @@ func (s *Server) advancePlatformManagedEnableStage(ctx context.Context, expected
 		appplatform.StageQueued:   appplatform.StageValidate,
 		appplatform.StageValidate: appplatform.StageSnapshot,
 	}
+	if expected.snapshot.Action == appplatform.ActionRepair {
+		nextByStage = map[appplatform.Stage]appplatform.Stage{
+			appplatform.StageQueued:   appplatform.StageValidate,
+			appplatform.StageValidate: appplatform.StageDownload,
+			appplatform.StageDownload: appplatform.StageStage,
+			appplatform.StageStage:    appplatform.StageQuiesce,
+		}
+	}
 	next, ok := nextByStage[expected.snapshot.Stage]
-	if !ok || expected.snapshot.Action != appplatform.ActionEnable ||
+	if !ok || !platformSameReleaseLifecycle(expected.snapshot.Action) ||
 		!expected.snapshot.Managed || expected.rowRevision == math.MaxInt64 {
 		return zero, errAppPlatformStageEvidence
 	}
@@ -654,8 +737,18 @@ func (s *Server) advancePlatformManagedEnableStage(ctx context.Context, expected
 }
 
 func (s *Server) claimNextPlatformManagedEnable(ctx context.Context, worker string) (platformInstallSelection, error) {
+	return s.claimNextPlatformManagedSameRelease(
+		ctx, worker, appplatform.ActionEnable)
+}
+
+func (s *Server) claimNextPlatformManagedSameRelease(
+	ctx context.Context,
+	worker string,
+	action appplatform.Action,
+) (platformInstallSelection, error) {
 	var zero platformInstallSelection
-	if !platformValidUUID(worker) {
+	if !platformValidUUID(worker) ||
+		!platformSameReleaseLifecycle(action) {
 		return zero, errAppPlatformLeaseConflict
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
@@ -689,14 +782,16 @@ func (s *Server) claimNextPlatformManagedEnable(ctx context.Context, worker stri
 	rows, err := e.query(`SELECT o.id FROM app_platform_operations o
 		JOIN app_platform_installations i ON i.id=o.installation_id
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.action='enable' AND o.managed=1 AND o.completed_ms IS NULL
-		AND o.stage IN ('queued','validate','snapshot','start','probe','activate')
+		WHERE o.action=? AND o.managed=1 AND o.completed_ms IS NULL
+		AND o.stage IN ('queued','validate','download','stage','quiesce',
+			'snapshot','start','probe','activate')
 		AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?)
 		AND i.desired_state='enabled' AND i.phase='pending'
 		AND i.runtime_id IS NOT NULL AND i.generation=o.target_generation
 		AND i.controller_epoch=? AND o.controller_epoch=?
 		AND p.action=o.action AND p.controller_epoch=o.controller_epoch
-		ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch)
+		ORDER BY o.created_ms,o.id LIMIT 32`,
+		string(action), now, epoch, epoch)
 	if err != nil {
 		return zero, err
 	}
@@ -727,7 +822,7 @@ func (s *Server) claimNextPlatformManagedEnable(ctx context.Context, worker stri
 			return zero, err
 		}
 		if facts.lease.leaseUntilMS > facts.now ||
-			facts.lease.snapshot.Action != appplatform.ActionEnable ||
+			facts.lease.snapshot.Action != action ||
 			!facts.lease.snapshot.Managed {
 			continue
 		}
@@ -744,12 +839,15 @@ func (s *Server) claimNextPlatformManagedEnable(ctx context.Context, worker stri
 		detail, _ := json.Marshal(struct {
 			Worker string `json:"worker_id"`
 		}{worker})
+		audit := "app_platform.managed_enable_claimed"
+		if action == appplatform.ActionRepair {
+			audit = "app_platform.managed_repair_claimed"
+		}
 		if _, err := e.exec(`INSERT INTO audit_log(
 			at,actor,actor_ou,action,target_type,target_id,detail,ip)
-			VALUES(?,'system',0,'app_platform.managed_enable_claimed',
-			'app_platform_operation',?,?,'')`,
+			VALUES(?,'system',0,?,'app_platform_operation',?,?,'')`,
 			time.UnixMilli(facts.now).UTC().Format(time.RFC3339),
-			id, string(detail)); err != nil {
+			audit, id, string(detail)); err != nil {
 			return zero, err
 		}
 		if _, err := finalPlatformOperationLeaseCheck(e, check); err != nil {
@@ -764,14 +862,28 @@ func (s *Server) claimNextPlatformManagedEnable(ctx context.Context, worker stri
 }
 
 func (s *Server) runPlatformManagedEnable(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	return s.runPlatformManagedSameRelease(ctx, expected, endpoint)
+}
+
+func (s *Server) runPlatformManagedSameRelease(
+	ctx context.Context,
+	expected platformOperationLease,
+	endpoint platformRuntimeEndpoint,
+) (platformOperationLease, error) {
+	if !platformSameReleaseLifecycle(expected.snapshot.Action) {
+		return expected, errAppPlatformStageEvidence
+	}
 	result := expected
 	for result.snapshot.Stage != appplatform.StageComplete {
 		var next platformOperationLease
 		var err error
 		switch result.snapshot.Stage {
-		case appplatform.StageQueued, appplatform.StageValidate:
+		case appplatform.StageQueued, appplatform.StageValidate,
+			appplatform.StageDownload, appplatform.StageStage:
 			next, err = s.advancePlatformManagedEnableStage(ctx, result)
 		case appplatform.StageSnapshot:
+			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
+		case appplatform.StageQuiesce:
 			next, err = s.dispatchPlatformCheckpoint(ctx, result, endpoint)
 		case appplatform.StageStart:
 			next, err = s.executePlatformUpdateStart(ctx, result, endpoint)
@@ -805,7 +917,13 @@ func (s *Server) runPlatformManagedEnable(ctx context.Context, expected platform
 }
 
 func (s *Server) finishPlatformManagedEnableForReview(ctx context.Context, expected platformOperationLease) error {
-	if expected.snapshot.Action != appplatform.ActionEnable ||
+	return s.finishPlatformManagedSameReleaseForReview(ctx, expected)
+}
+
+func (s *Server) finishPlatformManagedSameReleaseForReview(
+	ctx context.Context, expected platformOperationLease,
+) error {
+	if !platformSameReleaseLifecycle(expected.snapshot.Action) ||
 		!expected.snapshot.Managed {
 		return errAppPlatformStageEvidence
 	}
@@ -844,10 +962,18 @@ func (s *Server) finishPlatformManagedEnableForReview(ctx context.Context, expec
 	}
 	outcome := appplatform.EffectsUnknown
 	errorCode := "managed_enable_recovery_required"
+	audit := "app_platform.managed_enable_failed"
+	if expected.snapshot.Action == appplatform.ActionRepair {
+		errorCode = "managed_repair_recovery_required"
+		audit = "app_platform.managed_repair_failed"
+	}
 	if expected.snapshot.Stage == appplatform.StageQueued ||
 		expected.snapshot.Stage == appplatform.StageValidate {
 		outcome = appplatform.EffectsNone
 		errorCode = "managed_enable_unavailable"
+		if expected.snapshot.Action == appplatform.ActionRepair {
+			errorCode = "managed_repair_unavailable"
+		}
 	}
 	failed, err := model.Fail(expected.snapshot.Revision, outcome)
 	if err != nil {
@@ -888,10 +1014,9 @@ func (s *Server) finishPlatformManagedEnableForReview(ctx context.Context, expec
 	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)
-		VALUES(?,'system',0,'app_platform.managed_enable_failed',
-		'app_platform_operation',?,'{}','')`,
+		VALUES(?,'system',0,?,'app_platform_operation',?,'{}','')`,
 		time.UnixMilli(now).UTC().Format(time.RFC3339),
-		expected.id); err != nil {
+		audit, expected.id); err != nil {
 		return err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
@@ -916,9 +1041,12 @@ func platformLoadManagedEnableFailurePlan(e migExec, lease platformOperationLeas
 	var plan platformManagedUpdatePlan
 	if json.Unmarshal([]byte(raw), &plan) != nil ||
 		len(raw) > 65536 || platformDigest([]byte(raw)) != digest ||
-		action != "enable" || managed != 1 || !consumed.Valid ||
-		plan.Format != platformManagedEnableFormat ||
-		plan.Action != appplatform.ActionEnable ||
+		!platformSameReleaseLifecycle(lease.snapshot.Action) ||
+		action != string(lease.snapshot.Action) || managed != 1 ||
+		!consumed.Valid ||
+		plan.Format != platformSameReleaseLifecycleFormat(
+			lease.snapshot.Action) ||
+		plan.Action != lease.snapshot.Action ||
 		plan.InstallationID != lease.installationID {
 		return zero, errAppPlatformStageEvidence
 	}
