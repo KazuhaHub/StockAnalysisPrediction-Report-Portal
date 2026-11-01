@@ -62,6 +62,16 @@ backend request on the repaired generation, stopped it once more, and completed
 standalone `delete_data` for its retained namespace. Candidate `ffdd3b16`
 passed quota/browser run `41353916160`.
 
+Latest H14 lifecycle-progress evidence: the management panel now renders a
+generic operation progress surface rather than an install-only one. All current
+lifecycle stages, including repair/quiesce/snapshot, managed stop/remove-code/
+remove-data and restore-data, have zh-CN/en-US/zh-TW labels. A paused controller
+is shown as a warning; failed and `recovery_required` operations are errors;
+complete is success. Unknown backend error codes use a bounded generic
+administrator-review explanation instead of displaying a raw key. Component
+tests cover repair recovery and paused `delete_data` progress. This is a
+truthfulness fix only; the full UX-01..10 visual and browser matrix remains open.
+
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
 generation-2 start/probe/registration/boot/activation, current-generation

@@ -166,6 +166,43 @@ describe('application installation confirmation', () => {
     expect(mock.post).not.toHaveBeenCalled()
   })
 
+  it('renders lifecycle progress and review-required states for repair and deletion', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases`
+      ? { items: [], next_cursor: '' }
+      : url.includes('/operations/')
+      ? {
+          operation_id: operation,
+          installation_id: operation,
+          action: 'repair',
+          stage: 'recovery_required',
+          terminal: true,
+          control_paused: false,
+          error_code: 'managed_repair_recovery_required',
+        }
+      : { items: [], next_cursor: '' }))
+    mount(`/manage/apps?operation=${operation}`)
+    expect(await screen.findByText('recovery_required')).toBeTruthy()
+    expect(screen.getByText('appPlatform.operationNeedsReview')).toBeTruthy()
+  })
+
+  it('shows a paused lifecycle as a warning rather than a terminal success', async () => {
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases`
+      ? { items: [], next_cursor: '' }
+      : url.includes('/operations/')
+      ? {
+          operation_id: operation,
+          installation_id: operation,
+          action: 'delete_data',
+          stage: 'remove_data',
+          terminal: false,
+          control_paused: true,
+        }
+      : { items: [], next_cursor: '' }))
+    mount(`/manage/apps?operation=${operation}`)
+    expect(await screen.findByText('err.app_platform_control_paused')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'appPlatform.goApps' })).toBeNull()
+  })
+
   it('reviews an installed app update without requiring an audience choice', async () => {
     const installedRelease = {
       release_sha256: release,

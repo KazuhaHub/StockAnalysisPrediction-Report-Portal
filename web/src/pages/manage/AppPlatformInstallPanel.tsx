@@ -58,7 +58,7 @@ type EnableReview = {
   data_effect: string
 }
 type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview | EnableReview }
-type Progress = { operation_id: string; installation_id: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
+type Progress = { operation_id: string; installation_id: string; action: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const sha = /^[0-9a-f]{64}$/
 const root = '/api/admin/app-platform'
@@ -280,6 +280,13 @@ export default function AppPlatformInstallPanel() {
     : review?.review.action === 'enable'
     ? 'appPlatform.confirmEnable'
     : 'appPlatform.confirm'
+  const progressType = progress?.control_paused
+    ? 'warning'
+    : progress?.terminal && ['failed', 'recovery_required'].includes(progress.stage)
+    ? 'error'
+    : progress?.stage === 'complete'
+    ? 'success'
+    : 'info'
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
     <Alert type="info" showIcon title={t('appPlatform.development')} description={t('appPlatform.installPreview')} />
     <AppPlatformMarketPanel disabled={busy || !!intent || !!review || loading} onReady={setMarketRelease} onBusyChange={setMarketBusy} />
@@ -290,7 +297,15 @@ export default function AppPlatformInstallPanel() {
     {operation && <div role="status" aria-live="polite">
       <Typography.Title level={5}>{t('appPlatform.progress')}</Typography.Title>
       {progressError && <Alert type="error" title={progressError} />}
-      {progress && <Alert type={progress.stage === 'complete' ? 'success' : progress.error_code ? 'error' : 'info'} title={t(`appPlatform.stage.${progress.stage}`, { defaultValue: progress.stage })} description={progress.control_paused ? t('err.app_platform_control_paused') : progress.error_code ? t(`err.${progress.error_code}`) : undefined} />}
+      {progress && <Alert
+        type={progressType}
+        title={progress.control_paused
+          ? t('err.app_platform_control_paused')
+          : t(`appPlatform.stage.${progress.stage}`, { defaultValue: progress.stage })}
+        description={progress.error_code && !progress.control_paused
+          ? t(`err.${progress.error_code}`, { defaultValue: t('appPlatform.operationNeedsReview') })
+          : undefined}
+      />}
       <Space><Button disabled={busy || marketBusy} onClick={() => setRefresh(v => v + 1)}>{t('appPlatform.refresh')}</Button>{progress?.stage === 'complete' && <Link to="/apps">{t('appPlatform.goApps')}</Link>}</Space>
     </div>}
     <Typography.Title level={5}>{t('appPlatform.audience')}</Typography.Title>
