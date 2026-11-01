@@ -15,11 +15,13 @@ func (s *Server) dispatchPlatformUpdateTargetRemoval(ctx context.Context, lease 
 	intent, err := s.preparePlatformUpdateTargetRemoval(
 		ctx, lease, stage, effectNumber)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"prepare update target removal %s: %w", stage, err)
 	}
 	if err := s.checkPlatformManagedRuntimeRoot(
 		ctx, lease, intent.runtime, intent.authority, endpoint); err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"check update target removal %s runtime: %w", stage, err)
 	}
 	action := transport.UpdateStartRemovalStop
 	if stage == "remove_code" {
@@ -28,7 +30,8 @@ func (s *Server) dispatchPlatformUpdateTargetRemoval(ctx context.Context, lease 
 	proof, err := platformRunUpdateTargetRemoval(
 		ctx, endpoint, intent, action)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, fmt.Errorf(
+			"run update target removal %s: %w", stage, err)
 	}
 	return s.commitPlatformUpdateTargetRemoval(
 		ctx, lease, intent, endpoint, proof)
