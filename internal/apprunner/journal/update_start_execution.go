@@ -294,15 +294,20 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 	command := verified.Command()
 	stored, err := loadAdmittedCommand(ctx, tx, command.EffectID)
 	if err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start command: %w", err)
 	}
 	if !sameLogicalCommand(stored, updateStartIndex(command)) || stored.state != state {
-		return nil, zero, ErrFenceReconciliation
+		return nil, zero, fmt.Errorf(
+			"update-start command state: %w",
+			ErrFenceReconciliation)
 	}
 	fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
 	floor, err := commandResourceFloor(ctx, tx, updateStartIndex(command))
 	if err != nil || fence < floor {
-		return nil, zero, ErrFenceReconciliation
+		return nil, zero, fmt.Errorf(
+			"update-start command fence: %w: %v",
+			ErrFenceReconciliation, err)
 	}
 	var receipt string
 	var ack sql.NullInt64
@@ -310,14 +315,18 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 	if err := tx.QueryRowContext(ctx, `SELECT receipt_json,ack_attempted_ms,created_ms,updated_ms
 		FROM runner_commands WHERE effect_id=?`, command.EffectID).
 		Scan(&receipt, &ack, &created, &updated); err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start command receipt: %w", err)
 	}
 	if ack.Valid || created < 0 || updated < created || updated > now {
-		return nil, zero, ErrFenceReconciliation
+		return nil, zero, fmt.Errorf(
+			"update-start command timestamps: %w",
+			ErrFenceReconciliation)
 	}
 	source, err := loadUpdateStartSource(ctx, tx, command, now)
 	if err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start command source: %w", err)
 	}
 	facts := updateStartFacts{
 		command: command, stored: stored, authority: authority, source: source,
@@ -327,19 +336,25 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 	switch state {
 	case "prepared":
 		if receipt != "{}" || updated != created {
-			return nil, zero, ErrFenceReconciliation
+			return nil, zero, fmt.Errorf(
+				"update-start prepared receipt: %w",
+				ErrFenceReconciliation)
 		}
 	case "unknown":
 		var marker UpdateStartClaimMarker
 		if !canonicalDataJSON(receipt, &marker) {
-			return nil, zero, ErrFenceReconciliation
+			return nil, zero, fmt.Errorf(
+				"update-start unknown marker: %w",
+				ErrFenceReconciliation)
 		}
 		expectedUpdated := marker.ClaimedMS
 		if marker.Preflight != nil {
 			expectedUpdated = marker.PreflightBoundMS
 		}
 		if !updateStartClaimMatches(facts, marker) || updated != mustDataInt(expectedUpdated) {
-			return nil, zero, ErrFenceReconciliation
+			return nil, zero, fmt.Errorf(
+				"update-start unknown claim: %w",
+				ErrFenceReconciliation)
 		}
 	case "applied":
 		receiptValue, err := ParseUpdateStartRunningReceipt([]byte(receipt))
@@ -349,11 +364,14 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 		resource, err := existingCandidateResourcePrefix(ctx, tx, updateStartIndex(command), updateStartPendingPrefix, command.Payload.ResourceID)
 		if err != nil || !updateStartRunningMatches(facts, resource, receiptValue) ||
 			updated != mustDataInt(receiptValue.SettledMS) {
-			return nil, zero, ErrFenceReconciliation
+			return nil, zero, fmt.Errorf(
+				"update-start applied receipt: %w",
+				ErrFenceReconciliation)
 		}
 	}
 	if err := finalUpdateStartCheck(ctx, facts); err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start command final check: %w", err)
 	}
 	ok = true
 	return tx, facts, nil

@@ -496,6 +496,23 @@ func testPlatformWritableUpdateStartPreparesProbe(t *testing.T, pg bool) {
 			strconv.FormatInt(lease.fence, 10) {
 		t.Fatal("writable update-start probe intent", err)
 	}
+	readinessObservation := platformUpdateStartReservationFixture(
+		probeIntent, endpoint)
+	readinessObservation.readiness = journal.UpdateStartReadiness{
+		Format:               "portal.runner.update-start-readiness/1-dev.1",
+		PayloadSHA256:        probeIntent.command.PayloadSHA256,
+		RunningReceiptSHA256: platformDigest(mustMarshalPlatformUpdateStartReceipt(*probeIntent.running)),
+		NativeID:             probeIntent.running.NativeID,
+		Protocol:             "portal.backend/1",
+		DataFormat:           probeIntent.command.Payload.DataFormat,
+		ObservedMS:           probeIntent.running.NativeObservedMS,
+	}
+	activated, err := s.commitPlatformUpdateStartReadiness(
+		context.Background(), reclaimed, probeIntent, endpoint, readinessObservation)
+	if err != nil || activated.snapshot.Stage != appplatform.StageActivate {
+		t.Fatal("writable update-start readiness commit",
+			activated.snapshot, err)
+	}
 }
 
 func TestPlatformWritableUpdateStartPreparesProbeSQLite(t *testing.T) {
