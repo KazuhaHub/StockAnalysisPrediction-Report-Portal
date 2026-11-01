@@ -713,10 +713,17 @@ func TestUpdateStartRegistrationRefusesChangedTargetEvidence(t *testing.T) {
 
 func updateStartRemovalCommandFixture(t *testing.T, command control.UpdateStartCommand, startRaw, startSignature, runningRaw []byte, stage string) (control.UpdateStartRemovalCommand, []byte, []byte) {
 	t.Helper()
+	return updateStartRemovalCommandFixtureAtFence(
+		t, command, startRaw, startSignature, runningRaw, stage,
+		command.InstallationFence)
+}
+
+func updateStartRemovalCommandFixtureAtFence(t *testing.T, command control.UpdateStartCommand, startRaw, startSignature, runningRaw []byte, stage, fence string) (control.UpdateStartRemovalCommand, []byte, []byte) {
+	t.Helper()
 	removal := control.UpdateStartRemovalCommand{
 		Format: control.UpdateStartRemovalFormat, EffectID: fixtureID(1532),
 		OperationID: fixtureID(1533), Stage: stage,
-		InstallationFence: command.InstallationFence,
+		InstallationFence: fence,
 		StartRaw:          startRaw, StartSignature: startSignature,
 		RunningReceiptSHA256: candidateHash(runningRaw),
 	}
@@ -778,5 +785,79 @@ func TestUpdateStartRemovalRefusesChangedCandidate(t *testing.T) {
 	if _, _, err := beginUpdateStartRemoval(
 		context.Background(), f.store, raw, signature, nil); err == nil {
 		t.Fatal("changed candidate state admitted for stop")
+	}
+}
+
+func TestUpdateStartRemovalAllowsHistoricalSourceAfterWriterAdvance(t *testing.T) {
+	f, _, command, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	_, raw, signature := updateStartRemovalCommandFixture(
+		t, command, startRaw, startSignature, runningRaw, "stop")
+	if _, err := f.store.db.Exec(
+		`UPDATE runner_resources SET writer_fence=writer_fence+1
+		WHERE kind='volume' AND data_namespace_id=?`,
+		command.Payload.NamespaceID); err != nil {
+		t.Fatal(err)
+	}
+	tx, facts, err := beginUpdateStartRemoval(
+		context.Background(), f.store, raw, signature, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Rollback()
+	if facts.running.NativeID == "" ||
+		facts.resource.writer != mustDataInt(command.Payload.TargetWriterFence) {
+		t.Fatal("historical removal source binding", facts)
+	}
+}
+
+func TestUpdateStartRemovalUnknownReloadUsesExactHistoricalSource(t *testing.T) {
+	f, _, command, startRaw, startSignature :=
+		updateStartJournalFixture(t)
+	runningRaw := seedUpdateStartRunningFixture(
+		t, f, command, startRaw, startSignature)
+	_, raw, signature := updateStartRemovalCommandFixtureAtFence(
+		t, command, startRaw, startSignature, runningRaw, "stop", "3")
+
+	tx, facts, err := beginUpdateStartRemoval(
+		context.Background(), f.store, raw, signature, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := updateStartRemovalIndex(facts.verified)
+	if _, err := tx.Exec(
+		`INSERT INTO runner_commands(effect_id,operation_id,installation_id,
+		stage,effect_number,kind,payload_sha256,target_generation,
+		controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,
+		created_ms,updated_ms)
+		VALUES(?,?,?,?,?,?,?,?,?,?,'unknown','{}',NULL,?,?)`,
+		index.EffectID, index.OperationID, index.InstallationID,
+		index.Stage, index.EffectNumber, index.Kind, index.PayloadSHA256,
+		mustDataInt(index.TargetGeneration), index.ControllerEpoch, 3,
+		facts.now, facts.now); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.db.Exec(
+		`UPDATE runner_resources SET writer_fence=writer_fence+1
+		WHERE kind='volume' AND data_namespace_id=?`,
+		command.Payload.NamespaceID); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, facts, err = beginUpdateStartRemoval(
+		context.Background(), f.store, raw, signature, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Rollback()
+	if facts.row.state != "unknown" ||
+		facts.resource.fence != mustDataInt(command.InstallationFence) ||
+		facts.resource.writer != mustDataInt(command.Payload.TargetWriterFence) {
+		t.Fatal("unknown removal source reload", facts)
 	}
 }

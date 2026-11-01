@@ -68,10 +68,10 @@ func loadUpdateStartRemovalSource(
 			"%w: update-start removal source command: %v",
 			ErrFenceReconciliation, err)
 	}
-	floor, err := commandResourceFloor(ctx, tx, index)
+	floor, err := commandFenceFloor(ctx, tx, index)
 	if err != nil || fence < floor || fence < stored.fence {
 		return result, fmt.Errorf(
-			"%w: update-start removal source floor fence=%d/%d/%d: %v",
+			"%w: update-start removal source fence=%d/%d/%d: %v",
 			ErrFenceReconciliation, fence, floor, stored.fence, err)
 	}
 	source, err := loadUpdateStartSourceExcludingRegistration(

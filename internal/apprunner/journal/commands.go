@@ -155,6 +155,26 @@ func commandResourceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (i
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
 	generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+	floor, err := commandFenceFloor(ctx, tx, c)
+	if err != nil {
+		return 0, err
+	}
+	var generationFloor, writerFloor int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
+		return 0, err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.DataNamespaceID).Scan(&writerFloor); err != nil {
+		return 0, err
+	}
+	if fence < floor || generation < generationFloor || writer < writerFloor {
+		return 0, ErrCommandConflict
+	}
+	return floor, nil
+}
+
+// commandFenceFloor guards the installation and namespace identity without
+// treating a historical source's writer or generation as current work.
+func commandFenceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (int64, error) {
 	var incompatible int
 	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`, c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.DataNamespaceID, c.ControllerEpoch).Scan(&incompatible); err != nil {
 		return 0, err
@@ -162,18 +182,15 @@ func commandResourceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (i
 	if incompatible != 0 {
 		return 0, ErrFenceReconciliation
 	}
-	var floor, generationFloor, writerFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0),COALESCE(MAX(generation),0) FROM (SELECT admitted_fence AS fence,target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence,generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor, &generationFloor); err != nil {
-		return 0, err
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.DataNamespaceID).Scan(&writerFloor); err != nil {
+	var floor int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor); err != nil {
 		return 0, err
 	}
 	var foreignNamespace int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND installation_id<>?`, c.Payload.DataNamespaceID, c.InstallationID).Scan(&foreignNamespace); err != nil {
 		return 0, err
 	}
-	if fence < floor || generation < generationFloor || writer < writerFloor || foreignNamespace != 0 {
+	if foreignNamespace != 0 {
 		return 0, ErrCommandConflict
 	}
 	return floor, nil
