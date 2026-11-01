@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -130,7 +131,9 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	if err := tx.QueryRowContext(ctx, `SELECT operation_id,installation_id,state,payload_sha256,receipt_json
 		FROM runner_commands WHERE effect_id=? AND stage='snapshot' AND kind='snapshot'`,
 		p.SourceCheckpointEffectID).Scan(&operation, &installation, &state, &payload, &raw); err != nil {
-		return zero, ErrUpdateStartUnavailable
+		return zero, fmt.Errorf(
+			"%w: update-start source checkpoint effect: %v",
+			ErrUpdateStartUnavailable, err)
 	}
 	if operation != p.SourceCheckpointOperationID ||
 		installation != c.InstallationID || state != "applied" ||
@@ -258,7 +261,8 @@ func (s *Store) beginUpdateStart(ctx context.Context, raw, signature []byte) (*s
 	now := time.Now().UTC().UnixMilli()
 	verified, err := control.VerifyUpdateStart(raw, signature, authority, now)
 	if err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start command: %w", err)
 	}
 	command := verified.Command()
 	index := updateStartIndex(command)
@@ -276,14 +280,22 @@ func (s *Store) beginUpdateStart(ctx context.Context, raw, signature []byte) (*s
 	floor, err := commandResourceFloor(ctx, tx, index)
 	if err != nil || fence < floor || generation != mustDataInt(command.Payload.SourceGeneration)+1 ||
 		writer <= mustDataInt(command.Payload.SourceWriterFence) {
-		return nil, zero, ErrFenceReconciliation
+		return nil, zero, fmt.Errorf(
+			"update-start floor fence=%d/%d generation=%d writer=%d/%d err=%v: %w",
+			fence, floor, generation,
+			writer, mustDataInt(command.Payload.SourceWriterFence),
+			err, ErrFenceReconciliation)
 	}
 	source, err := loadUpdateStartSource(ctx, tx, command, now)
 	if err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"update-start source: %w", err)
 	}
 	if fence < source.resource.controlFence {
-		return nil, zero, ErrFenceReconciliation
+		return nil, zero, fmt.Errorf(
+			"update-start fence %d below source %d: %w",
+			fence, source.resource.controlFence,
+			ErrFenceReconciliation)
 	}
 	facts := updateStartFacts{
 		command: command, stored: stored, authority: authority, source: source,
