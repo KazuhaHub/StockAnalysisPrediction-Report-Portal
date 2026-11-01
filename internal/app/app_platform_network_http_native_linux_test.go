@@ -28,14 +28,15 @@ func testNativePlatformNetworkHTTP(t *testing.T, s *Server, actor platformActorS
 		return string(raw)
 	}
 	body := payload("/v1/success")
-	if w := platformBackendHTTPCall(mux, path, cookie, body, nil); w.Code != 503 || platformNetworkFixtureCount(t) != 2 {
+	baseline := platformNetworkFixtureCount(t)
+	if w := platformBackendHTTPCall(mux, path, cookie, body, nil); w.Code != 503 || platformNetworkFixtureCount(t) != baseline {
 		t.Fatal("authorized request with no trusted endpoint performed IO", w.Code)
 	}
 	if err := host.bindPlatformBackendHTTP(endpoint); err != nil {
 		t.Fatal("network HTTP trusted bootstrap", err)
 	}
 	for _, bad := range []string{strings.Replace(body, `"generation":"1"`, `"generation":"2"`, 1), strings.Replace(body, `"policyRevision":"1"`, `"policyRevision":"2"`, 1)} {
-		if w := platformBackendHTTPCall(mux, path, cookie, bad, nil); w.Code != 404 || platformNetworkFixtureCount(t) != 2 {
+		if w := platformBackendHTTPCall(mux, path, cookie, bad, nil); w.Code != 404 || platformNetworkFixtureCount(t) != baseline {
 			t.Fatal("stale page reached HTTPS", w.Code)
 		}
 	}
@@ -45,7 +46,7 @@ func testNativePlatformNetworkHTTP(t *testing.T, s *Server, actor platformActorS
 		ContentType string `json:"contentType"`
 		Body        string `json:"bodyBase64"`
 	}
-	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Status != 200 || response.ContentType != "application/json" || response.Body != base64.StdEncoding.EncodeToString([]byte(`{"ok":true}`)) || w.Header().Get("Set-Cookie") != "" || w.Header().Get("Location") != "" || w.Header().Get("Cache-Control") != "no-store" || platformNetworkFixtureCount(t) != 3 {
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &response) != nil || response.Status != 200 || response.ContentType != "application/json" || response.Body != base64.StdEncoding.EncodeToString([]byte(`{"ok":true}`)) || w.Header().Get("Set-Cookie") != "" || w.Header().Get("Location") != "" || w.Header().Get("Cache-Control") != "no-store" || platformNetworkFixtureCount(t) != baseline+1 {
 		t.Fatal("session HTTP did not reach current-viewer HTTPS", w.Code, w.Body.String())
 	}
 	t.Log("PORTAL_NETWORK_SESSION_HTTP")
@@ -59,7 +60,7 @@ func testNativePlatformNetworkHTTP(t *testing.T, s *Server, actor platformActorS
 		Code      string `json:"code"`
 		Retryable *bool  `json:"retryable"`
 	}
-	if withdrawalErr != nil || w.Code != 502 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Code != "app_platform_request_uncertain" || failure.Retryable == nil || *failure.Retryable || strings.Contains(w.Body.String(), "bodyBase64") || w.Header().Get("Retry-After") != "" || platformNetworkFixtureCount(t) != 4 {
+	if withdrawalErr != nil || w.Code != 502 || json.Unmarshal(w.Body.Bytes(), &failure) != nil || failure.Code != "app_platform_request_uncertain" || failure.Retryable == nil || *failure.Retryable || strings.Contains(w.Body.String(), "bodyBase64") || w.Header().Get("Retry-After") != "" || platformNetworkFixtureCount(t) != baseline+2 {
 		t.Fatal("session HTTP leaked/retried uncertain network result", withdrawalErr, w.Code, w.Body.String())
 	}
 	t.Log("PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN")
