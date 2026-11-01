@@ -201,6 +201,18 @@ func (s *Server) checkPlatformManagedBackendRoot(ctx context.Context, operation 
 	}
 	return s.checkPlatformManagedOperationProfiles(ctx, operation, runtime, authority, endpoint, false)
 }
+
+func (s *Server) checkPlatformManagedUpdateBackendRoot(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint) error {
+	var completed int
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND action='update' AND managed=1 AND stage='complete' AND completed_ms IS NOT NULL`), operation).Scan(&completed); err != nil {
+		return err
+	}
+	if completed != 1 {
+		return errAppPlatformStageEvidence
+	}
+	return s.checkPlatformManagedOperationProfiles(
+		ctx, operation, runtime, authority, endpoint, false)
+}
 func (s *Server) checkPlatformManagedOperationProfiles(ctx context.Context, operation string, runtime platformRuntimeRegistration, authority control.Authority, endpoint platformRuntimeEndpoint, requireNetwork bool) error {
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
 	target, err := platformManagedTargetForOperation(pool, operation)

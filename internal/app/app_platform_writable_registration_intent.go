@@ -18,11 +18,22 @@ import (
 type platformWritableRegistrationIntent struct {
 	start            platformWritableStartIntent
 	command          control.WritableBackendRegistrationCommand
+	updateCommand    control.UpdateStartRegistrationCommand
 	raw, signature   []byte
 	registration     appplatform.BackendRegistration
+	update           *platformUpdateStartRegistrationIntent
 	applied          bool
+	generation       int64
 	receipt          journal.WritableBackendRegistrationReceipt
+	updateReceipt    journal.UpdateStartRegistrationReceipt
 	created, updated int64
+}
+
+func platformWritableRegistrationGeneration(i platformWritableRegistrationIntent) int64 {
+	if i.generation < 1 {
+		return 1
+	}
+	return i.generation
 }
 
 func freshPlatformWritableRegistrationSource(i platformWritableStartIntent) bool {
@@ -109,7 +120,7 @@ func loadPlatformWritableRegistration(e migExec, lease platformOperationLease, r
 	if err != nil {
 		return zero, false, err
 	}
-	result := platformWritableRegistrationIntent{start: start, command: c, registration: registration, created: created, updated: updated}
+	result := platformWritableRegistrationIntent{start: start, command: c, registration: registration, generation: 1, created: created, updated: updated}
 	if fresh {
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms) VALUES(?,'activate',1,?,'activate',?,?,?,?,0,'prepared','{}',?,?)`, lease.id, effect, c.PayloadSHA256, runtime.id, lease.controllerEpoch, lease.fence, now, now); err != nil {
 			return zero, false, err
@@ -145,6 +156,27 @@ func loadPlatformWritableRegistration(e migExec, lease platformOperationLease, r
 }
 
 func samePlatformWritableRegistrationIntent(a, b platformWritableRegistrationIntent) bool {
+	if platformWritableRegistrationGeneration(a) != platformWritableRegistrationGeneration(b) {
+		return false
+	}
+	if platformWritableRegistrationGeneration(a) >= 2 {
+		ar, _ := json.Marshal(a.updateReceipt)
+		br, _ := json.Marshal(b.updateReceipt)
+		aa, _ := json.Marshal(a.start.running)
+		bb, _ := json.Marshal(b.start.running)
+		return a.start.writer.namespaceID == b.start.writer.namespaceID &&
+			a.start.writer.resourceID == b.start.writer.resourceID &&
+			samePlatformManagedRuntime(a.start.writer.runtime, b.start.writer.runtime) &&
+			bytes.Equal(a.start.writer.descriptor, b.start.writer.descriptor) &&
+			a.updateCommand.Format == b.updateCommand.Format &&
+			a.updateCommand.EffectID == b.updateCommand.EffectID &&
+			a.updateCommand.PayloadSHA256 == b.updateCommand.PayloadSHA256 &&
+			a.updateCommand.RunningReceiptSHA256 == b.updateCommand.RunningReceiptSHA256 &&
+			a.updateCommand.DocumentSHA256 == b.updateCommand.DocumentSHA256 &&
+			a.applied == b.applied && a.created == b.created &&
+			a.updated == b.updated && bytes.Equal(aa, bb) &&
+			bytes.Equal(ar, br)
+	}
 	ar, _ := json.Marshal(a.receipt)
 	br, _ := json.Marshal(b.receipt)
 	return samePlatformWritableStartIntent(a.start, b.start) && a.command.Format == b.command.Format && a.command.EffectID == b.command.EffectID && a.command.PayloadSHA256 == b.command.PayloadSHA256 && a.command.DocumentSHA256 == b.command.DocumentSHA256 && a.command.RunningReceiptSHA256 == b.command.RunningReceiptSHA256 && a.applied == b.applied && a.created == b.created && a.updated == b.updated && bytes.Equal(ar, br)
@@ -153,6 +185,8 @@ func clonePlatformWritableRegistrationIntent(i platformWritableRegistrationInten
 	i.start = clonePlatformWritableStartIntent(i.start)
 	i.raw, i.signature = bytes.Clone(i.raw), bytes.Clone(i.signature)
 	i.command.CandidateRaw, i.command.CandidateSignature = bytes.Clone(i.command.CandidateRaw), bytes.Clone(i.command.CandidateSignature)
+	i.updateCommand.StartRaw = bytes.Clone(i.updateCommand.StartRaw)
+	i.updateCommand.StartSignature = bytes.Clone(i.updateCommand.StartSignature)
 	return i
 }
 

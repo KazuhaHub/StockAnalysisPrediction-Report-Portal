@@ -34,6 +34,13 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	if len(seed) != ed25519.SeedSize || b.observed < 0 || b.observed > now+1000 || b.observed > time.Now().UnixMilli() {
 		return zero, errAppPlatformLaunchUnavailable
 	}
+	if b.generation < 1 {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	if b.generation > 1 {
+		return s.loadPlatformWritableUpdateBackendHistory(
+			e, b, runtime, seed, dek, now)
+	}
 	source := platformManagedSource{installationID: b.installation, epoch: b.epoch, generation: 1, fence: b.fence}
 	var count int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=?`, b.installation).Scan(&count); err != nil || count != 1 {
@@ -186,7 +193,7 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	if regEffect.created < startEffect.updated {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	result := platformWritableRegistrationIntent{start: start, registration: registration, applied: true, created: regEffect.created, updated: regEffect.updated}
+	result := platformWritableRegistrationIntent{start: start, registration: registration, applied: true, generation: 1, created: regEffect.created, updated: regEffect.updated}
 	result.command = control.WritableBackendRegistrationCommand{Format: control.WritableBackendRegistrationFormat, EffectID: regEffect.id, CandidateRaw: bytes.Clone(start.raw), CandidateSignature: bytes.Clone(start.signature), RunningReceiptSHA256: platformDigest([]byte(startEffect.receipt)), DocumentSHA256: platformDigest(document)}
 	result.command.PayloadSHA256, err = control.WritableBackendRegistrationLogicalDigest(result.command)
 	if err != nil || result.command.PayloadSHA256 != regEffect.digest {

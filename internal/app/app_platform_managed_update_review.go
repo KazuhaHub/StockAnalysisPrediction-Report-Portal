@@ -36,6 +36,16 @@ func samePlatformManagedUpdateRuntime(a, b *platformManagedInstallTarget) bool {
 }
 
 func loadPlatformCheckpointUpdateSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointUpdateSourceMode(
+		e, expected, runtime, action, now, 1)
+}
+
+func loadPlatformCompletedCheckpointUpdateSource(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64) (platformCheckpointSource, error) {
+	return loadPlatformCheckpointUpdateSourceMode(
+		e, expected, runtime, action, now, 0)
+}
+
+func loadPlatformCheckpointUpdateSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, action string, now int64, expectedPending int) (platformCheckpointSource, error) {
 	if action != "update" && action != "restore" {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
@@ -263,7 +273,7 @@ func loadPlatformCheckpointUpdateSource(e migExec, expected platformOperationLea
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations
 		WHERE installation_id=? AND completed_ms IS NULL`,
 		expected.installationID).Scan(&pending); err != nil ||
-		pending != 1 {
+		pending != expectedPending {
 		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	return source, nil

@@ -27,3 +27,13 @@ func platformHandshakeWritableBackend(ctx context.Context, endpoint platformRunt
 func platformRequestWritableBackend(ctx context.Context, endpoint platformRuntimeEndpoint, i platformWritableRegistrationIntent, raw, signature, body []byte, assertion string) (transport.WritableBackendRequestObservation, error) {
 	return transport.RequestWritableControllerBackend(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID, raw, signature, i.start.writer.authority, i.start.writer.descriptor, i.receipt, body, assertion)
 }
+
+func platformRequestUpdateStartBackend(ctx context.Context, endpoint platformRuntimeEndpoint, i platformWritableRegistrationIntent, raw, signature, body []byte, assertion string) (transport.UpdateStartBackendRequestObservation, error) {
+	if i.update == nil {
+		return transport.UpdateStartBackendRequestObservation{}, errAppPlatformStageEvidence
+	}
+	return transport.RequestUpdateStartControllerBackend(
+		ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
+		raw, signature, i.start.writer.authority, i.start.writer.descriptor,
+		i.update.receipt, body, assertion)
+}

@@ -34,15 +34,49 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 			return fail
 		}
 	case "update":
-		var update platformUpdateProjection
-		if json.Unmarshal([]byte(raw), &update) != nil || update.Format != platformUpdateReviewFormat {
+		var formatProbe struct {
+			Format string `json:"format"`
+		}
+		if json.Unmarshal([]byte(raw), &formatProbe) != nil {
 			return fail
 		}
-		canonical, err := json.Marshal(update)
-		if err != nil || string(canonical) != raw {
+		switch formatProbe.Format {
+		case platformManagedUpdateFormat:
+			var update platformManagedUpdatePlan
+			if json.Unmarshal([]byte(raw), &update) != nil {
+				return fail
+			}
+			canonical, err := json.Marshal(update)
+			if err != nil || string(canonical) != raw ||
+				update.TargetRuntime == nil ||
+				update.AppID != m.ID || update.PublisherID != m.Publisher ||
+				update.TargetReleaseSHA256 != release ||
+				update.ControllerEpoch != epoch ||
+				installRequirementsForTarget(
+					m, platformWritableInstallFormat,
+					update.TargetRuntime) != nil {
+				return fail
+			}
+			expected, err := platformInstallCapabilitySelection(
+				m, update.TargetRuntime)
+			if err != nil {
+				return fail
+			}
+			return verifyPlatformSelectedCapabilityRows(
+				e, installation, expected, true, policy, planID, fail)
+		case platformUpdateReviewFormat:
+			var update platformUpdateProjection
+			if json.Unmarshal([]byte(raw), &update) != nil {
+				return fail
+			}
+			canonical, err := json.Marshal(update)
+			if err != nil || string(canonical) != raw {
+				return fail
+			}
+			projection = update.Target
+		default:
 			return fail
 		}
-		projection = update.Target
 	default:
 		return fail
 	}

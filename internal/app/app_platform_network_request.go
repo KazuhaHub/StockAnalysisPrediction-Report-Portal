@@ -56,25 +56,71 @@ func (i platformNetworkRequestIntent) GoString() string { return i.String() }
 // and profile; an app cannot select a review, actor scope or runtime identity.
 func loadPlatformNetworkGrant(e migExec, installation string, a platformWritableBackendAccess) (platformNetworkGrant, error) {
 	var g platformNetworkGrant
-	var raw, digest string
-	if err := e.queryRow(`SELECT g.policy_json,g.review_plan_id,p.plan_json,p.plan_sha256 FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='network.http' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL AND p.action='install'`, installation, a.policy).Scan(&g.policy, &g.review, &raw, &digest); err != nil {
+	var raw, digest, action string
+	release := platformDigest(a.intent.start.writer.descriptor)
+	if err := e.queryRow(`SELECT g.policy_json,g.review_plan_id,p.plan_json,p.plan_sha256,o.action
+		FROM app_platform_capability_grants g
+		JOIN app_platform_review_plans p ON p.id=g.review_plan_id
+		JOIN app_platform_operations o ON o.review_plan_id=p.id
+		WHERE g.installation_id=? AND g.capability='network.http'
+		AND g.granted=1 AND g.policy_revision=?
+		AND p.consumed_ms IS NOT NULL
+		AND p.target_release_sha256=?
+		AND o.installation_id=g.installation_id
+		AND o.stage='complete' AND o.completed_ms IS NOT NULL
+		AND o.controller_epoch=p.controller_epoch`,
+		installation, a.policy, release).
+		Scan(&g.policy, &g.review, &raw, &digest, &action); err != nil {
 		return g, errAppPlatformNetworkUnavailable
 	}
 	if len(raw) > 65536 || !platformValidUUID(g.review) || platformDigest([]byte(raw)) != digest {
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	var p platformInstallProjection
-	if json.Unmarshal([]byte(raw), &p) != nil || p.Format != platformWritableInstallFormat || p.Runtime == nil || p.Runtime.NetworkPolicy == "" || p.Runtime.NetworkPolicy != g.policy || p.ReleaseSHA256 != platformDigest(a.intent.start.writer.descriptor) || p.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch || p.Runtime.RuntimeID != a.intent.start.writer.runtime.id {
+	var target *platformManagedInstallTarget
+	switch action {
+	case "install":
+		var plan platformInstallProjection
+		if json.Unmarshal([]byte(raw), &plan) != nil ||
+			plan.Format != platformWritableInstallFormat ||
+			plan.Runtime == nil || plan.ReleaseSHA256 != release ||
+			plan.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+		canonical, err := json.Marshal(plan)
+		if err != nil || !bytes.Equal(canonical, []byte(raw)) {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+		target = plan.Runtime
+	case "update":
+		var plan platformManagedUpdatePlan
+		if json.Unmarshal([]byte(raw), &plan) != nil ||
+			plan.Format != platformManagedUpdateFormat ||
+			plan.TargetReleaseSHA256 != release ||
+			plan.TargetGeneration != a.intent.generation ||
+			plan.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+		canonical, err := json.Marshal(plan)
+		if err != nil || !bytes.Equal(canonical, []byte(raw)) {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+		target = plan.TargetRuntime
+	default:
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	canonical, err := json.Marshal(p)
-	if err != nil || !bytes.Equal(canonical, []byte(raw)) {
+	if target == nil || target.NetworkPolicy == "" ||
+		target.NetworkPolicy != g.policy ||
+		target.RuntimeID != a.intent.start.writer.runtime.id ||
+		target.DeploymentID != a.intent.start.writer.runtime.deploymentID ||
+		target.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch ||
+		target.ControlRevision != a.intent.start.writer.runtime.controlRevision ||
+		target.Fingerprint != a.intent.start.writer.runtime.fingerprint {
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	if _, err := platformNetworkTargetPolicy(p.Runtime); err != nil {
+	if _, err := platformNetworkTargetPolicy(target); err != nil {
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	g.profile = p.Runtime.NetworkProfile
+	g.profile = target.NetworkProfile
 	return g, nil
 }
 
@@ -121,7 +167,7 @@ func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session plat
 		now := time.Now().UnixMilli()
 		r := a.intent.start.writer.runtime
 		result.grant = grant
-		result.command = control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: "1", PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policy.SHA256, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+platformNetworkRequestLifetime.Milliseconds(), 10)}
+		result.command = control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policy.SHA256, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+platformNetworkRequestLifetime.Milliseconds(), 10)}
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
 		result.raw, result.signature, err = control.SignNetworkHTTPRequest(result.command, key, a.intent.start.writer.authority, now)

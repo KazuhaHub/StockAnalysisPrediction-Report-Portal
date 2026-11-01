@@ -513,6 +513,14 @@ func testPlatformWritableUpdateStartPreparesProbe(t *testing.T, pg bool) {
 		t.Fatal("writable update-start readiness commit",
 			activated.snapshot, err)
 	}
+	registration, err := s.preparePlatformUpdateStartRegistration(
+		context.Background(), activated)
+	if err != nil || registration.start.running == nil ||
+		registration.command.StartRaw == nil ||
+		registration.command.EffectID == "" {
+		t.Fatal("writable update-start registration intent", err)
+	}
+	registration.registration.Close()
 }
 
 func TestPlatformWritableUpdateStartPreparesProbeSQLite(t *testing.T) {
@@ -605,7 +613,18 @@ func TestPlatformUpdateStartRunningRollbackPostgres(t *testing.T) {
 
 func platformUpdateStartReadinessCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
 	t.Helper()
-	s, lease, runningIntent, endpoint, runningObservation := platformUpdateStartRunningCommitFixture(t, pg)
+	return platformUpdateStartReadinessCommitFixtureMode(t, pg, false)
+}
+
+func platformWritableUpdateStartReadinessCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	return platformUpdateStartReadinessCommitFixtureMode(t, pg, true)
+}
+
+func platformUpdateStartReadinessCommitFixtureMode(t *testing.T, pg, writable bool) (*Server, platformOperationLease, platformUpdateStartIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, lease, runningIntent, endpoint, runningObservation :=
+		platformUpdateStartRunningCommitFixtureMode(t, pg, writable)
 	probeLease, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, runningIntent, endpoint, runningObservation)
 	if err != nil {
 		t.Fatal(err)
@@ -652,7 +671,18 @@ func TestPlatformUpdateStartCommitsReadinessPostgres(t *testing.T) {
 
 func platformUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartRegistrationIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
 	t.Helper()
-	s, probeLease, probeIntent, endpoint, readinessObservation := platformUpdateStartReadinessCommitFixture(t, pg)
+	return platformUpdateStartRegistrationCommitFixtureMode(t, pg, false)
+}
+
+func platformWritableUpdateStartRegistrationCommitFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformUpdateStartRegistrationIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	return platformUpdateStartRegistrationCommitFixtureMode(t, pg, true)
+}
+
+func platformUpdateStartRegistrationCommitFixtureMode(t *testing.T, pg, writable bool) (*Server, platformOperationLease, platformUpdateStartRegistrationIntent, platformRuntimeEndpoint, platformUpdateStartTestObservation) {
+	t.Helper()
+	s, probeLease, probeIntent, endpoint, readinessObservation :=
+		platformUpdateStartReadinessCommitFixtureMode(t, pg, writable)
 	lease, err := s.commitPlatformUpdateStartReadiness(
 		context.Background(), probeLease, probeIntent, endpoint, readinessObservation)
 	if err != nil {
@@ -1145,7 +1175,8 @@ func testPlatformUpdateStartBootBindsRegistration(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartActivationSQLite(t *testing.T) {
-	testPlatformUpdateStartActivation(t, false)
+	testPlatformUpdateStartActivationMode(t, false, false)
+	testPlatformUpdateStartActivationMode(t, false, true)
 }
 
 func TestPlatformUpdateTargetRemovalSQLite(t *testing.T) {
@@ -1525,12 +1556,27 @@ func testPlatformRestoreStartActivationRollback(t *testing.T, pg bool) {
 }
 
 func TestPlatformUpdateStartActivationPostgres(t *testing.T) {
-	testPlatformUpdateStartActivation(t, true)
+	testPlatformUpdateStartActivationMode(t, true, false)
+	testPlatformUpdateStartActivationMode(t, true, true)
 }
 
 func testPlatformUpdateStartActivation(t *testing.T, pg bool) {
-	s, lease, intent, endpoint, registrationObservation :=
-		platformUpdateStartRegistrationCommitFixture(t, pg)
+	testPlatformUpdateStartActivationMode(t, pg, false)
+}
+
+func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
+	var s *Server
+	var lease platformOperationLease
+	var intent platformUpdateStartRegistrationIntent
+	var endpoint platformRuntimeEndpoint
+	var registrationObservation platformUpdateStartTestObservation
+	if writable {
+		s, lease, intent, endpoint, registrationObservation =
+			platformWritableUpdateStartRegistrationCommitFixture(t, pg)
+	} else {
+		s, lease, intent, endpoint, registrationObservation =
+			platformUpdateStartRegistrationCommitFixture(t, pg)
+	}
 	next, err := s.commitPlatformUpdateStartRegistration(
 		context.Background(), lease, intent, endpoint,
 		registrationObservation)
@@ -1555,6 +1601,74 @@ func testPlatformUpdateStartActivation(t *testing.T, pg bool) {
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "complete" {
 		t.Fatal("active generation tuple not committed atomically")
 	}
+	if !writable {
+		return
+	}
+	actor := platformManagedFixtureSession(t, s)
+	backend, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, lease.installationID)
+	if err != nil {
+		t.Fatal("updated managed backend history", err)
+	}
+	if backend.intent.generation != 2 ||
+		backend.activationID != applied.start.resourceID {
+		backend.Close()
+		t.Fatal("updated managed backend history selected another generation")
+	}
+	launch, err := s.inspectPlatformLaunchAccess(actor, lease.installationID)
+	if err != nil || launch.generation != "2" ||
+		launch.releaseSHA != applied.start.plan.TargetReleaseSHA256 {
+		backend.Close()
+		t.Fatal("updated managed generation cannot launch", launch, err)
+	}
+	grant, err := testPlatformUpdatedNetworkGrant(t, s, lease, backend)
+	backend.Close()
+	if err != nil || grant.policy == "" || grant.review == "" {
+		t.Fatal("updated managed network grant", grant, err)
+	}
+}
+
+func testPlatformUpdatedNetworkGrant(t *testing.T, s *Server, lease platformOperationLease, access platformWritableBackendAccess) (platformNetworkGrant, error) {
+	t.Helper()
+	var raw, digest string
+	if err := s.st.queryRow(`SELECT p.plan_json,p.plan_sha256
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=?`, lease.id).Scan(&raw, &digest); err != nil {
+		return platformNetworkGrant{}, err
+	}
+	var plan platformManagedUpdatePlan
+	if err := json.Unmarshal([]byte(raw), &plan); err != nil ||
+		plan.TargetRuntime == nil {
+		return platformNetworkGrant{}, errAppPlatformStageEvidence
+	}
+	target := platformNetworkTargetFixture(t)
+	plan.TargetRuntime.NetworkPolicy = target.NetworkPolicy
+	plan.TargetRuntime.NetworkProfile = target.NetworkProfile
+	updated, err := json.Marshal(plan)
+	if err != nil {
+		return platformNetworkGrant{}, err
+	}
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		return platformNetworkGrant{}, err
+	}
+	mustExec(t, s.st, `UPDATE app_platform_review_plans
+		SET plan_json=?,plan_sha256=?,updated_ms=? WHERE id=(
+			SELECT review_plan_id FROM app_platform_operations WHERE id=?)`,
+		string(updated), platformDigest(updated), now, lease.id)
+	mustExec(t, s.st, `DELETE FROM app_platform_capability_grants
+		WHERE installation_id=? AND capability='network.http'`,
+		lease.installationID)
+	review := scalar[string](t, s.st, `SELECT review_plan_id
+		FROM app_platform_operations WHERE id=?`, lease.id)
+	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(
+		installation_id,capability,granted,policy_json,policy_revision,
+		review_plan_id,created_ms,updated_ms)
+		VALUES(?,'network.http',1,?,2,?,?,?)`,
+		lease.installationID, target.NetworkPolicy, review, now, now)
+	return loadPlatformNetworkGrant(
+		s.st.poolExec(), lease.installationID, access)
 }
 
 func TestPlatformUpdateStartActivationRefusesChangedBootSQLite(t *testing.T) {

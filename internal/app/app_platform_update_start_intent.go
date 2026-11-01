@@ -69,7 +69,10 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 		o.source_generation,o.target_generation
 		FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.id=? AND o.installation_id=? AND o.action='update' AND o.managed=1
-		AND o.stage IN ('migrate','start','probe','activate','recovery_required')`,
+		AND o.stage IN ('migrate','start','probe','activate','complete','recovery_required')
+		AND (o.stage<>'complete' OR (o.completed_ms IS NOT NULL
+			AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
+			AND o.error_code IS NULL))`,
 		expected.id, expected.installationID).
 		Scan(&planRaw, &planSHA, &operationScope, &planScope,
 			&sourceGeneration, &targetGeneration); err != nil {
@@ -138,12 +141,14 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 		FROM app_platform_recovery_sets WHERE id=? AND installation_id=?`+lock,
 		plan.RecoverySetID, expected.installationID).
 		Scan(&state, &checkpointID, &manifest, &archiveBytes, &operation); err != nil {
-		return journal.CheckpointReceipt{}, nil, errAppPlatformStageEvidence
+		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
+			"checkpoint recovery set: %w", errAppPlatformStageEvidence)
 	}
 	if state != "verified" || checkpointID != plan.CheckpointID ||
 		manifest != plan.CheckpointManifestSHA256 || archiveBytes != plan.CheckpointArchiveBytes ||
 		operation != expected.id || plan.CheckpointOperationID != expected.id {
-		return journal.CheckpointReceipt{}, nil, errAppPlatformStageEvidence
+		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
+			"checkpoint recovery tuple: %w", errAppPlatformStageEvidence)
 	}
 	var effectID, payload, receiptRaw, effectState string
 	if err := e.queryRow(`SELECT effect_id,payload_sha256,receipt_json,state
@@ -151,7 +156,8 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 		expected.id).Scan(&effectID, &payload, &receiptRaw, &effectState); err != nil ||
 		effectID != plan.CheckpointEffectID || effectState != "applied" ||
 		!platformValidSHA(payload) {
-		return journal.CheckpointReceipt{}, nil, errAppPlatformStageEvidence
+		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
+			"checkpoint effect: %w", errAppPlatformStageEvidence)
 	}
 	receipt, err := journal.ParseCheckpointReceipt([]byte(receiptRaw))
 	if err != nil || receipt.EffectID != effectID || receipt.PayloadSHA256 != payload ||
@@ -162,7 +168,8 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 		receipt.NamespaceID != plan.DataNamespaceID ||
 		mustPlatformCheckpointInt(receipt.DataFormat) != plan.DataFormat ||
 		mustPlatformCheckpointInt(receipt.WriterFence) != plan.SourceWriterFence {
-		return journal.CheckpointReceipt{}, nil, errAppPlatformStageEvidence
+		return journal.CheckpointReceipt{}, nil, fmt.Errorf(
+			"checkpoint receipt: %w", errAppPlatformStageEvidence)
 	}
 	return receipt, []byte(receiptRaw), nil
 }
@@ -378,6 +385,16 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 // probe. The stored readiness receipt must still match the applied running
 // receipt and immutable update-start payload.
 func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan) (platformUpdateStartIntent, error) {
+	return loadPlatformUpdateStartActivationState(
+		e, expected, runtime, source, checkpoint, plan, "candidate")
+}
+
+func loadPlatformCompletedUpdateStartActivation(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan) (platformUpdateStartIntent, error) {
+	return loadPlatformUpdateStartActivationState(
+		e, expected, runtime, source, checkpoint, plan, "active")
+}
+
+func loadPlatformUpdateStartActivationState(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, activationState string) (platformUpdateStartIntent, error) {
 	var zero platformUpdateStartIntent
 	lock := ""
 	if e.s.driver == "postgres" {
@@ -398,7 +415,7 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 	if release != plan.TargetReleaseSHA256 ||
 		generation != int64(expected.snapshot.Generation) ||
 		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
-		format != plan.DataFormat || state != "candidate" ||
+		format != plan.DataFormat || state != activationState ||
 		readinessRaw == "{}" || observed <= 0 {
 		return zero, fmt.Errorf(
 			"update-start activation tuple: %w",

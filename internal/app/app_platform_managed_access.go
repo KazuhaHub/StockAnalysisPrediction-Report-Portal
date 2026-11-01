@@ -50,13 +50,18 @@ func (i platformBackendDeliveryIntent) verifyPlatformBackendIdentity(now int64) 
 }
 func (i platformWritableRegistrationIntent) closePlatformBackendIdentity() { i.registration.Close() }
 func (i platformWritableRegistrationIntent) verifyPlatformBackendIdentity(now int64) error {
+	if i.generation >= 2 {
+		_, err := control.VerifyUpdateStartRegistration(
+			i.raw, i.signature, i.start.writer.authority, now)
+		return err
+	}
 	_, err := control.VerifyWritableBackendRegistration(i.raw, i.signature, i.start.writer.authority, now)
 	return err
 }
 
 type platformBackendHistoryBinding struct {
 	installation, activation, release, namespace, epoch, readiness string
-	format, fence, observed                                        int64
+	format, fence, observed, generation                            int64
 }
 
 // No worker lease is manufactured or renewed here. Completed source operations
@@ -150,7 +155,7 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,controller_epoch,runtime_id,generation,policy_revision,control_fence FROM app_platform_installations WHERE id=?`+lock, installationID).Scan(&appID, &publisher, &desired, &phase, &storedEpoch, &runtimeID, &generation, &policy, &fence); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if desired != "enabled" || phase != "ready" || storedEpoch != epoch || !runtimeID.Valid || runtimeID.String != runtime.id || generation != 1 || policy < 1 || fence < 1 {
+	if desired != "enabled" || phase != "ready" || storedEpoch != epoch || !runtimeID.Valid || runtimeID.String != runtime.id || generation < 1 || policy < 1 || fence < 1 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	if err := platformLaunchAudience(e, account, installationID); err != nil {
@@ -167,9 +172,9 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	var unsafe int
 	if err := e.queryRow(`SELECT
  (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (completed_ms IS NULL OR stage='recovery_required'))+
- (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
+ (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state<>'applied')+
  (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
- (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>?)`, installationID, installationID, installationID, policy, installationID, activation).Scan(&unsafe); err != nil || unsafe != 0 {
+ (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>? AND (state<>'retired' OR generation>=?))`, installationID, installationID, installationID, policy, installationID, activation, generation).Scan(&unsafe); err != nil || unsafe != 0 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	var trustRevision int64
@@ -193,7 +198,7 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
 		return zero, err
 	}
-	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, readiness: readiness}, runtime, seed, dek, now)
+	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, generation: generation, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, err
 	}

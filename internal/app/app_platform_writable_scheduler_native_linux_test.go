@@ -301,6 +301,7 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 		actor, installation); err != nil ||
 		binding.generation != "2" ||
 		binding.releaseSHA != release.sha256 {
+		logManagedUpdateState(t, s, admitted.OperationID, installation)
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
@@ -308,15 +309,25 @@ func testNativeWritableManagedUpdate(t *testing.T, s *Server, actor platformActo
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {
 	t.Helper()
-	stage, code, revision := "", "", int64(0)
-	if err := s.st.queryRow(`SELECT stage,COALESCE(error_code,''),state_revision
+	stage, code, revision, generation, fence := "", "", int64(0), int64(0), int64(0)
+	if err := s.st.queryRow(`SELECT stage,COALESCE(error_code,''),state_revision,
+		target_generation,fence
 		FROM app_platform_operations WHERE id=?`,
-		operationID).Scan(&stage, &code, &revision); err != nil {
+		operationID).Scan(&stage, &code, &revision, &generation, &fence); err != nil {
 		t.Logf("managed update operation state unavailable: %v", err)
 		return
 	}
-	t.Logf("managed update operation: stage=%s code=%s revision=%d",
-		stage, code, revision)
+	t.Logf("managed update operation: stage=%s code=%s revision=%d target=%d fence=%d",
+		stage, code, revision, generation, fence)
+	phase, installGeneration, installPolicy, installFence := "", int64(0), int64(0), int64(0)
+	if err := s.st.queryRow(`SELECT phase,generation,policy_revision,control_fence
+		FROM app_platform_installations WHERE id=?`,
+		installationID).Scan(&phase, &installGeneration, &installPolicy, &installFence); err == nil {
+		t.Logf("managed update installation: phase=%s generation=%d policy=%d fence=%d",
+			phase, installGeneration, installPolicy, installFence)
+	} else {
+		t.Logf("managed update installation unavailable: %v", err)
+	}
 	rows, err := s.st.query(`SELECT stage,state,effect_id,observed_fence
 		FROM app_platform_operation_effects
 		WHERE operation_id=? ORDER BY created_ms,stage`,
@@ -352,6 +363,33 @@ func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID 
 		}
 	} else {
 		t.Logf("managed update activations unavailable: %v", err)
+	}
+	rows, err = s.st.query(`SELECT capability,granted,policy_revision,review_plan_id
+		FROM app_platform_capability_grants WHERE installation_id=?
+		ORDER BY capability`, installationID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			capability, review := "", ""
+			var granted, policy int64
+			if rows.Scan(&capability, &granted, &policy, &review) == nil {
+				t.Logf("managed update capability: capability=%s granted=%d policy=%d review=%s",
+					capability, granted, policy, review)
+			}
+		}
+	} else {
+		t.Logf("managed update capabilities unavailable: %v", err)
+	}
+	action, format, review := "", "", ""
+	if err := s.st.queryRow(`SELECT o.action,
+		COALESCE(json_extract(p.plan_json,'$.format'),''),p.id
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=?`, operationID).Scan(&action, &format, &review); err == nil {
+		t.Logf("managed update review: action=%s format=%s id=%s",
+			action, format, review)
+	} else {
+		t.Logf("managed update review unavailable: %v", err)
 	}
 }
 

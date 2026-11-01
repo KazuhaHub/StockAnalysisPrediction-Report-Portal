@@ -121,7 +121,9 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 			platformDigest(mustMarshalPlatformUpdateStartReceipt(*start.running)) ||
 		current.authority.Fingerprint != start.authority.Fingerprint ||
 		!bytes.Equal(current.authority.PublicKey, start.authority.PublicKey) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start registration activation current: %w",
+			errAppPlatformStageEvidence)
 	}
 	if fresh && !freshPlatformUpdateRegistrationSourceAt(current, now) {
 		return zero, fmt.Errorf(
@@ -135,7 +137,9 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 	}
 	defer after.registration.Close()
 	if !samePlatformUpdateStartRegistrationIntent(intent, after) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start registration after intent: %w",
+			errAppPlatformStageEvidence)
 	}
 	if _, err := control.VerifyUpdateStartRegistration(
 		intent.raw, intent.signature, start.authority,
@@ -228,7 +232,9 @@ func (s *Server) commitPlatformUpdateStartRegistration(ctx context.Context, leas
 		lease.snapshot.Stage != appplatform.StageActivate ||
 		lease.snapshot.Generation < 2 || lease.rowRevision == math.MaxInt64 ||
 		!validPlatformUpdateStartRegistrationObservation(proof, intent, endpoint) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start registration commit precondition: %w",
+			errAppPlatformStageEvidence)
 	}
 	dek, err := s.dek()
 	if err != nil {

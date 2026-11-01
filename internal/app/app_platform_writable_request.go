@@ -42,8 +42,10 @@ func (b platformBackendRequestBinding) valid() bool {
 }
 
 func (b platformBackendRequestBinding) matches(a platformWritableBackendAccess) bool {
-	// The completed writable source reader currently admits generation one.
-	return b.valid() && b.Generation == "1" && b.PolicyRevision == strconv.FormatInt(a.policy, 10) && b.ReleaseSHA256 == platformDigest(a.intent.start.writer.descriptor)
+	return b.valid() &&
+		b.Generation == strconv.FormatInt(a.intent.generation, 10) &&
+		b.PolicyRevision == strconv.FormatInt(a.policy, 10) &&
+		b.ReleaseSHA256 == platformDigest(a.intent.start.writer.descriptor)
 }
 
 func (s *Server) requestPlatformBoundWritableBackend(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, path string, body []byte, endpoint platformRuntimeEndpoint) (driver.BackendResponse, error) {
@@ -72,6 +74,11 @@ func (s *Server) requestPlatformWritableBackendBinding(ctx context.Context, sess
 		return zero, err
 	}
 	defer initial.Close()
+	if initial.intent.generation >= 2 {
+		return s.requestPlatformUpdateStartBackend(
+			ctx, session, installation, binding, method, path,
+			body, endpoint, initial)
+	}
 	intent := initial.intent
 	verified, err := control.VerifyWritableBackendRegistration(intent.raw, intent.signature, intent.start.writer.authority, time.Now().UnixMilli())
 	if err != nil {

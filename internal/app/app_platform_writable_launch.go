@@ -22,7 +22,7 @@ func (s *Server) withPlatformWritableLaunchReadContext(ctx context.Context, sess
 			return errAppPlatformLaunchUnavailable
 		}
 		m := parsed.Manifest
-		binding = platformLaunchAccess{installationID: installation, generation: "1", policyRevision: strconv.FormatInt(a.policy, 10), entry: m.Presentation.Entry, releaseSHA: parsed.SHA256, frontendSHA: m.Frontend.SHA256}
+		binding = platformLaunchAccess{installationID: installation, generation: strconv.FormatInt(a.intent.generation, 10), policyRevision: strconv.FormatInt(a.policy, 10), entry: m.Presentation.Entry, releaseSHA: parsed.SHA256, frontendSHA: m.Frontend.SHA256}
 		if read != nil {
 			return read(e, binding, m, a.account)
 		}
