@@ -391,14 +391,18 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 		expected.installationID, expected.snapshot.Generation).
 		Scan(&activation, &release, &generation, &policy, &namespace, &format,
 			&state, &readinessRaw, &observed); err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start activation row: %w",
+			errAppPlatformStageEvidence)
 	}
 	if release != plan.TargetReleaseSHA256 ||
 		generation != int64(expected.snapshot.Generation) ||
 		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
 		format != plan.DataFormat || state != "candidate" ||
 		readinessRaw == "{}" || observed <= 0 {
-		return zero, fmt.Errorf("update-start activation tuple: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation tuple: %w",
+			errAppPlatformStageEvidence)
 	}
 	var effectID, kind, digest, effectEpoch, effectState, runningRaw string
 	var admitted, observedFence int64
@@ -409,25 +413,33 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 		expected.id).
 		Scan(&effectID, &kind, &digest, &effectEpoch, &admitted,
 			&observedFence, &effectState, &runningRaw); err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start activation start effect: %w",
+			errAppPlatformStageEvidence)
 	}
 	if kind != "update-start" ||
 		effectEpoch != expected.controllerEpoch ||
 		admitted < 1 || admitted > expected.fence ||
 		observedFence != admitted || effectState != "applied" {
-		return zero, fmt.Errorf("update-start activation effect: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation start effect tuple: %w",
+			errAppPlatformStageEvidence)
 	}
 	effectLease := expected
 	effectLease.fence = admitted
 	command, err := platformUpdateStartCommand(
 		effectLease, runtime, source, checkpoint, plan, activation, effectID)
 	if err != nil || command.PayloadSHA256 != digest {
-		return zero, fmt.Errorf("update-start activation digest: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation start digest: %w",
+			errAppPlatformStageEvidence)
 	}
 	running, err := journal.ParseUpdateStartRunningReceipt([]byte(runningRaw))
 	if err != nil || !platformUpdateStartRunningMatches(
 		running, command, activation, effectID, nil) {
-		return zero, fmt.Errorf("update-start activation running receipt: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation running receipt: %w",
+			errAppPlatformStageEvidence)
 	}
 	reservation := journal.UpdateStartReservation{
 		ResourceID:     running.Claim.ResourceID,
@@ -443,7 +455,9 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 	}
 	if !platformUpdateStartReservationMatches(
 		reservation, command, activation, effectID) {
-		return zero, fmt.Errorf("update-start activation reservation: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation reservation: %w",
+			errAppPlatformStageEvidence)
 	}
 	readiness, err := journal.ParseUpdateStartReadiness([]byte(readinessRaw))
 	readinessObserved := mustPlatformCheckpointInt(readiness.ObservedMS)
@@ -455,7 +469,9 @@ func loadPlatformUpdateStartActivation(e migExec, expected platformOperationLeas
 		readiness.NativeID != running.NativeID ||
 		readiness.Protocol != "portal.backend/1" ||
 		readiness.DataFormat != command.Payload.DataFormat {
-		return zero, fmt.Errorf("update-start activation readiness: %w", errAppPlatformStageEvidence)
+		return zero, fmt.Errorf(
+			"update-start activation readiness: %w",
+			errAppPlatformStageEvidence)
 	}
 	return platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
