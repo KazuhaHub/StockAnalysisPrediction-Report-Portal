@@ -733,7 +733,12 @@ def main(args):
                 raise RuntimeError("owned filesystem remained mounted after unmount")
             require_loop_owner(loop, image)
             command("losetup", "--detach", loop)
-            if discover_owned_loop(image) is not None:
+            remaining = discover_owned_loop(image)
+            if remaining is not None:
+                holders = loop_holder_summary(remaining)
+                if holders:
+                    raise RuntimeError(
+                        "owned loop holders remain after detach: " + holders)
                 raise RuntimeError("owned loop attachment remains after detach")
         shutil.rmtree(root)
     report["owned_resources_cleaned"] = True
