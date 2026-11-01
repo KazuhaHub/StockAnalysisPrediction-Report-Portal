@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -226,12 +227,16 @@ func (store *Store) DispatchUpdateStartRemoval(ctx context.Context, raw, signatu
 	}
 	launch, err := native.PrepareUpdateStartRemoval(ctx, facts.request)
 	if err != nil {
-		return zero, errors.Join(ErrManagedRemovalUnavailable, err)
+		return zero, fmt.Errorf(
+			"%w: prepare update-start removal: %v",
+			ErrManagedRemovalUnavailable, err)
 	}
 	defer launch.Close()
 	snapshot, err := launch.Snapshot()
 	if err != nil || snapshot != facts.expected {
-		return zero, errors.Join(ErrFenceReconciliation, err)
+		return zero, fmt.Errorf(
+			"%w: update-start removal prepared snapshot: %v",
+			ErrFenceReconciliation, err)
 	}
 	var observed driver.CandidateRemovalObservation
 	if command.Stage == "stop" {
@@ -242,10 +247,18 @@ func (store *Store) DispatchUpdateStartRemoval(ctx context.Context, raw, signatu
 			ctx, launch, facts.running.NativeID)
 	}
 	if err != nil {
-		return zero, errors.Join(ErrManagedRemovalUnavailable, err)
+		return zero, fmt.Errorf(
+			"%w: %s update-start removal: %v",
+			ErrManagedRemovalUnavailable, command.Stage, err)
 	}
-	return store.settleUpdateStartRemoval(
+	receipt, err := store.settleUpdateStartRemoval(
 		ctx, raw, signature, facts, observed)
+	if err != nil {
+		return zero, fmt.Errorf(
+			"%w: settle update-start removal: %v",
+			ErrManagedRemovalUnavailable, err)
+	}
+	return receipt, nil
 }
 
 func (store *Store) settleUpdateStartRemoval(ctx context.Context, raw, signature []byte, before updateStartRemovalFacts, observation driver.CandidateRemovalObservation) (ManagedRemovalReceipt, error) {
