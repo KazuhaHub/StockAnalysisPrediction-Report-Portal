@@ -647,17 +647,40 @@ func platformUpdateStartReadinessCommitFixtureMode(t *testing.T, pg, writable bo
 
 func testPlatformUpdateStartCommitsReadiness(t *testing.T, pg bool) {
 	s, lease, intent, endpoint, observation := platformUpdateStartReadinessCommitFixture(t, pg)
+	auditsBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
+		WHERE action='app_platform.update_start_ready' AND target_id=?`,
+		lease.id)
 	next, err := s.commitPlatformUpdateStartReadiness(context.Background(), lease, intent, endpoint, observation)
 	if err != nil || next.snapshot.Stage != appplatform.StageActivate ||
 		next.snapshot.Revision != lease.snapshot.Revision+1 {
 		t.Fatal("update-start readiness commit", next.snapshot, err)
 	}
-	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "activate" ||
-		scalar[string](t, s.st, `SELECT state FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != "candidate" ||
-		scalar[int64](t, s.st, `SELECT observed_ms FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) != mustPlatformCheckpointInt(observation.readiness.ObservedMS) ||
-		scalar[string](t, s.st, `SELECT readiness_evidence FROM app_platform_activations WHERE installation_id=? AND generation=2`, lease.installationID) == "{}" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.update_start_ready' AND target_id=?`, lease.id) != 1 {
-		t.Fatal("update-start readiness did not commit to the candidate")
+	stage := scalar[string](t, s.st, `SELECT stage
+		FROM app_platform_operations WHERE id=?`, lease.id)
+	state := scalar[string](t, s.st, `SELECT state
+		FROM app_platform_activations
+		WHERE installation_id=? AND generation=2`,
+		lease.installationID)
+	observed := scalar[int64](t, s.st, `SELECT observed_ms
+		FROM app_platform_activations
+		WHERE installation_id=? AND generation=2`,
+		lease.installationID)
+	expectedObserved :=
+		mustPlatformCheckpointInt(observation.readiness.ObservedMS)
+	readiness := scalar[string](t, s.st, `SELECT readiness_evidence
+		FROM app_platform_activations
+		WHERE installation_id=? AND generation=2`,
+		lease.installationID)
+	audits := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
+		WHERE action='app_platform.update_start_ready' AND target_id=?`,
+		lease.id)
+	if stage != "activate" || state != "candidate" ||
+		observed != expectedObserved || readiness == "{}" ||
+		audits != auditsBefore+1 {
+		t.Fatalf(
+			"update-start readiness did not commit to the candidate: stage=%s state=%s observed=%d expected=%d readiness=%s audits=%d->%d",
+			stage, state, observed, expectedObserved, readiness,
+			auditsBefore, audits)
 	}
 }
 
