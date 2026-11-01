@@ -59,7 +59,8 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			&sourceTrustRevision); err != nil ||
 		sourceFence < 1 || completed < 0 ||
 		platformDigest([]byte(planRaw)) != planSHA {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source operation: %w", errAppPlatformStageEvidence)
 	}
 	var startEffect, startKind, startPayload, startState, startRaw string
 	var startFence int64
@@ -71,7 +72,10 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			&startFence, &startRaw); err != nil ||
 		startKind != action+"-start" || startState != "applied" ||
 		startFence < 1 || startFence > sourceFence {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source start effect kind=%s action=%s state=%s fence=%d/%d: %w",
+			startKind, action, startState, startFence, sourceFence,
+			errAppPlatformStageEvidence)
 	}
 	running, err := journal.ParseUpdateStartRunningReceipt(
 		[]byte(startRaw))
@@ -82,7 +86,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		running.Claim.EffectID != startEffect ||
 		running.Claim.PayloadSHA256 != startPayload ||
 		running.Claim.Preflight == nil {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source running receipt: %w",
+			errAppPlatformStageEvidence)
 	}
 	profile := transport.ManagedRuntimeProfile{
 		Protocol:           transport.ManagedRunnerProtocol,
@@ -109,12 +115,14 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	if err := validateManagedInstallTarget(
 		e, target, expected.controllerEpoch); err != nil {
-		return platformCheckpointSource{}, err
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source runtime target: %w", err)
 	}
 	sourcePlan, err := loadPlatformManagedUpdateSource(
 		e, expected.installationID, release, generation, target)
 	if err != nil {
-		return platformCheckpointSource{}, err
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source plan: %w", err)
 	}
 	var checkpoint journal.CheckpointReceipt
 	switch action {
@@ -133,16 +141,28 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		_, _, checkpoint, _, err = loadPlatformRestoreCheckpoint(
 			e, platformOperationLease{
 				id: sourceOperation, installationID: expected.installationID,
+				controllerEpoch: expected.controllerEpoch,
+				snapshot: appplatform.OperationSnapshot{
+					Generation: uint64(generation),
+				},
 			})
 	}
-	if err != nil ||
-		checkpoint.InstallationID != expected.installationID ||
+	if err != nil {
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source restore checkpoint: %w", err)
+	}
+	if checkpoint.InstallationID != expected.installationID ||
 		checkpoint.NamespaceID == "" ||
 		checkpoint.ReleaseSHA256 != running.SourceReleaseSHA256 ||
 		checkpoint.TargetGeneration != running.TargetGeneration ||
 		checkpoint.SourceDataEffectID == "" ||
 		checkpoint.SourceDataReceiptSHA256 == "" {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source checkpoint installation=%s/%s namespace=%s release=%s/%s generation=%s/%s: %w",
+			checkpoint.InstallationID, expected.installationID,
+			checkpoint.NamespaceID, checkpoint.ReleaseSHA256,
+			running.SourceReleaseSHA256, checkpoint.TargetGeneration,
+			running.TargetGeneration, errAppPlatformStageEvidence)
 	}
 	var dataKind, dataState, dataRaw string
 	if err := e.queryRow(`SELECT kind,state,receipt_json
@@ -152,7 +172,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		dataKind != "prepare-data" || dataState != "applied" ||
 		platformDigest([]byte(dataRaw)) !=
 			checkpoint.SourceDataReceiptSHA256 {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source data effect kind=%s state=%s: %w",
+			dataKind, dataState, errAppPlatformStageEvidence)
 	}
 	data, err := journal.ParseDataPreparationReceipt([]byte(dataRaw))
 	if err != nil || data.Claim.ResourceID != running.NamespaceID ||
@@ -161,7 +183,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		data.NamespaceInode != running.Claim.Preflight.NamespaceInode ||
 		data.QuotaBytes != running.Claim.Preflight.QuotaBytes ||
 		data.QuotaInodes != running.Claim.Preflight.QuotaInodes {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source data receipt: %w",
+			errAppPlatformStageEvidence)
 	}
 	var desired, phase, epoch, runtimeID string
 	var installationGeneration, installationPolicy int64
@@ -186,7 +210,11 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	if !validInstallationState || epoch != expected.controllerEpoch ||
 		runtimeID != runtime.id {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source installation state=%s/%s generation=%d/%d epoch=%s/%s runtime=%s/%s: %w",
+			desired, phase, installationGeneration, generation, epoch,
+			expected.controllerEpoch, runtimeID, runtime.id,
+			errAppPlatformStageEvidence)
 	}
 	var activeActivation, activeRelease string
 	var activeGeneration, activePolicy, activeFormat int64
@@ -196,15 +224,19 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	}
 	if err := e.queryRow(`SELECT id,release_sha256,generation,
 		policy_revision,data_format FROM app_platform_activations
-		WHERE installation_id=? AND state=?`,
-		expected.installationID, activationState).
+		WHERE installation_id=? AND state=? AND generation=?`,
+		expected.installationID, activationState, generation).
 		Scan(&activeActivation, &activeRelease, &activeGeneration,
 			&activePolicy, &activeFormat); err != nil ||
 		activeActivation == "" || activeRelease != release ||
 		activeGeneration != generation || activePolicy < 1 ||
 		activePolicy != installationPolicy ||
 		activeFormat != mustPlatformCheckpointInt(running.DataFormat) {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source activation state=%s release=%s/%s generation=%d/%d policy=%d/%d format=%d/%s: %w",
+			activationState, activeRelease, release, activeGeneration,
+			generation, activePolicy, installationPolicy, activeFormat,
+			running.DataFormat, errAppPlatformStageEvidence)
 	}
 	if action == "update" {
 		var plan platformManagedUpdatePlan
@@ -213,7 +245,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 			plan.TargetReleaseSHA256 != release ||
 			plan.TargetGeneration != generation ||
 			plan.TargetPolicyRevision != activePolicy {
-			return platformCheckpointSource{}, errAppPlatformStageEvidence
+			return platformCheckpointSource{}, fmt.Errorf(
+				"enable source update plan: %w",
+				errAppPlatformStageEvidence)
 		}
 	}
 	var namespace, namespaceState string
@@ -235,7 +269,11 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		(allowDisabled &&
 			writerFence < mustPlatformCheckpointInt(
 				running.TargetWriterFence)) {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source namespace state=%s format=%d/%s writer=%d/%s: %w",
+			namespaceState, namespaceFormat, running.DataFormat,
+			writerFence, running.TargetWriterFence,
+			errAppPlatformStageEvidence)
 	}
 	trust, err := loadPlatformPublisherTrust(e)
 	if err != nil {
@@ -244,7 +282,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	verified, err := platformVerifyStoredRelease(
 		e, release, sourceTrustRevision, trust, now)
 	if err != nil || verified.sha256 != release {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source release trust revision=%d: %w",
+			sourceTrustRevision, errAppPlatformStageEvidence)
 	}
 	var currentDescriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases
@@ -278,7 +318,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 	parsed, err := appplatform.ParseDescriptor(currentDescriptor)
 	if err != nil || parsed.SHA256 != release ||
 		sourcePlan.runtime.RuntimeID != runtime.id {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source descriptor: %w",
+			errAppPlatformStageEvidence)
 	}
 	source.appID = parsed.Manifest.ID
 	source.publisherID = parsed.Manifest.Publisher
@@ -287,7 +329,9 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		WHERE installation_id=? AND completed_ms IS NULL`,
 		expected.installationID).Scan(&pending); err != nil ||
 		pending != expectedPending {
-		return platformCheckpointSource{}, errAppPlatformStageEvidence
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source pending=%d/%d: %w",
+			pending, expectedPending, errAppPlatformStageEvidence)
 	}
 	return source, nil
 }

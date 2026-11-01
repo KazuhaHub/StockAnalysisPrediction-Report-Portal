@@ -511,3 +511,97 @@ func TestPlatformManagedEnableCheckpointToStartPostgres(t *testing.T) {
 		t.Fatal("PostgreSQL enable start", start.command, err)
 	}
 }
+
+func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t *testing.T) {
+	s, restored, _ := platformRestoreStartActivatedFixture(t, false)
+	actor := platformManagedFixtureSession(t, s)
+	review, err := s.createPlatformRemovalReview(
+		actor, restored.installationID, appplatform.ActionDisable)
+	if err != nil {
+		t.Fatal("restored disable review", err)
+	}
+	commit, err := s.consumePlatformRemovalReview(
+		actor, review.ID, review.SHA256, platformFixtureID(1317))
+	if err != nil {
+		t.Fatal("restored disable admission", err)
+	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(1318))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("restored disable claim", selected, err)
+	}
+	current := selected.lease
+	for current.snapshot.Stage == appplatform.StageQueued ||
+		current.snapshot.Stage == appplatform.StageValidate {
+		current, err = s.st.advancePlatformRemovalControl(current)
+		if err != nil {
+			t.Fatal("restored disable control stage",
+				current.snapshot.Stage, err)
+		}
+	}
+	current, err = s.advancePlatformManagedRemovalStage(
+		context.Background(), current, appplatform.StageStop)
+	if err != nil {
+		t.Fatal("restored disable stop stage", err)
+	}
+	intent, err := s.preparePlatformManagedRemovalIntent(
+		context.Background(), current)
+	if err != nil {
+		t.Fatal("restored disable intent", err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	observation := platformManagedRemovalObservationFixture(intent, endpoint)
+	receipt, ok := validPlatformManagedRemovalObservation(
+		observation, intent, endpoint)
+	if !ok {
+		t.Fatal("restored disable receipt")
+	}
+	if _, err := s.settlePlatformManagedRemoval(
+		context.Background(), current, intent, receipt); err != nil {
+		t.Fatal("restored disable settlement", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`, restored.installationID)
+	generation := scalar[int64](t, s.st, `SELECT generation
+		FROM app_platform_installations WHERE id=?`, restored.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal("restored enable runtime", err)
+	}
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := loadPlatformCheckpointSourceForEnableReview(
+		s.st.poolExec(), platformOperationLease{
+			installationID: restored.installationID, controllerEpoch: epoch,
+			snapshot: appplatform.OperationSnapshot{
+				Action: appplatform.ActionEnable, Managed: true,
+				Generation: uint64(generation), Revision: 1,
+				Stage: appplatform.StageQueued,
+			},
+		}, runtime, now)
+	if err != nil {
+		t.Fatal("restored enable source", err)
+	}
+	enableReview, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
+		context.Background(), actor, restored.installationID,
+		source.runtimeTarget, runtime)
+	if err != nil {
+		t.Fatal("restored enable review", err)
+	}
+	var plan platformManagedUpdatePlan
+	if err := json.Unmarshal([]byte(enableReview.JSON), &plan); err != nil ||
+		plan.Action != appplatform.ActionEnable ||
+		plan.SourceGeneration != source.sourceGeneration ||
+		plan.TargetGeneration != generation {
+		t.Fatalf("restored enable review plan: %+v source=%+v err=%v",
+			plan, source, err)
+	}
+}

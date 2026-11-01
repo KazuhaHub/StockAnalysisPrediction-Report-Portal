@@ -678,7 +678,7 @@ func testNativeManagedDisableEnable(
 		installation) != "enabled:ready" ||
 		scalar[int64](t, s.st, `SELECT generation
 			FROM app_platform_installations WHERE id=?`,
-			installation) != generationBefore+2 ||
+			installation) != generationBefore+1 ||
 		scalar[string](t, s.st, `SELECT release_sha256
 			FROM app_platform_activations
 			WHERE installation_id=? AND state='active'`,

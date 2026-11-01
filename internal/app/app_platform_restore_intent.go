@@ -97,7 +97,19 @@ func loadPlatformRestoreCheckpoint(e migExec, expected platformOperationLease) (
 		!platformValidUUID(plan.CheckpointEffectID) || !platformValidUUID(plan.CheckpointID) ||
 		!platformValidSHA(plan.ReleaseSHA256) || !platformValidSHA(plan.ManifestSHA256) ||
 		plan.ArchiveBytes <= 0 {
-		return "", "", journal.CheckpointReceipt{}, 0, fmt.Errorf("%w: restore plan binding", errAppPlatformStageEvidence)
+		return "", "", journal.CheckpointReceipt{}, 0, fmt.Errorf(
+			"%w: restore plan binding unmarshal=%v marshal=%v canonical=%v format=%s installation=%s/%s/%s epoch=%s/%s/%s source=%d/%d/%d target=%d/%d/%d recovery=%s checkpoint-operation=%s checkpoint-effect=%s checkpoint=%s release=%v manifest=%v bytes=%d",
+			errAppPlatformStageEvidence, unmarshalErr, marshalErr,
+			string(canonical) == planRaw, plan.Format,
+			plan.InstallationID, planInstallation, expected.installationID,
+			plan.ControllerEpoch, planEpoch, expected.controllerEpoch,
+			plan.SourceGeneration, planSource,
+			int64(expected.snapshot.Generation)-1,
+			plan.TargetGeneration, planTarget,
+			int64(expected.snapshot.Generation), plan.RecoverySetID,
+			plan.CheckpointOperationID, plan.CheckpointEffectID,
+			plan.CheckpointID, platformValidSHA(plan.ReleaseSHA256),
+			platformValidSHA(plan.ManifestSHA256), plan.ArchiveBytes)
 	}
 	lock := ""
 	if e.s.driver == "postgres" {
