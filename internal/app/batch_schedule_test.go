@@ -126,6 +126,22 @@ func TestQueuedItemsHidesFutureScheduledJobs(t *testing.T) {
 	}
 }
 
+func TestRunAtDueUsesLaterAmbiguousDSTOccurrence(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 05:36 UTC is the first 01:36 during the 2026 fall-back transition.
+	now := time.Date(2026, 11, 1, 5, 36, 0, 0, time.UTC).In(loc)
+	const runAt = "2026-11-01 01:36:00"
+	if runAtDueInLocation(runAt, now, loc) {
+		t.Fatal("ambiguous future schedule became due in the first occurrence")
+	}
+	if !runAtDueInLocation(runAt, now.Add(90*time.Minute), loc) {
+		t.Fatal("ambiguous schedule did not become due after both occurrences")
+	}
+}
+
 // A one-shot schedule (定时运行) is stored as a job_schedule row on an ordinary
 // queued job: run_at round-trips through GetBatchJob and QueuedJobs, reschedules,
 // clears cleanly, and DeleteBatchJob removes the job plus its side rows.

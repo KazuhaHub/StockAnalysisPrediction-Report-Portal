@@ -340,14 +340,31 @@ func parseEnqueueUnix(ts string) int64 {
 // timestamp can never strand a job forever. run_at shares created_at's local
 // basis (see docs/adr/0007-run-analysis-and-scheduling.md).
 func runAtDue(runAt string, now time.Time) bool {
+	return runAtDueInLocation(runAt, now, time.Local)
+}
+
+func runAtDueInLocation(runAt string, now time.Time, loc *time.Location) bool {
 	if runAt == "" {
 		return true
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", runAt, time.Local)
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", runAt, loc)
 	if err != nil {
 		return true
 	}
-	return !t.After(now)
+	if t.After(now) {
+		return false
+	}
+	// During a backward DST transition one wall-clock value occurs twice.
+	// ParseInLocation chooses one occurrence; a scheduled job is due only after
+	// the later occurrence when the stored timestamp is ambiguous.
+	latest := t
+	for step := time.Minute; step <= 2*time.Hour; step += time.Minute {
+		next := t.Add(step)
+		if next.Format("2006-01-02 15:04:05") == runAt {
+			latest = next
+		}
+	}
+	return !latest.After(now)
 }
 
 // userUsage returns each user's decayed recent run count for the fair-share factor:
