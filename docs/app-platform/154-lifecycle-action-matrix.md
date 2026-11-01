@@ -56,6 +56,16 @@ Implemented and tested:
 - managed uninstall failure/uncertainty is denial-only and lands in
   `recovery_required`; a prepared effect left by a crash is reclaimable only to
   record that review and is not automatically reissued;
+- reviewed standalone `delete_data` accepts only one exact installation and
+  namespace ID. The plan binds the retired activation/release, data revision,
+  writer fence, prepare-data operation/effect/receipt, quota, project, device,
+  inode, ownership digest, recovery-set digest, controller epoch and actor
+  authority. Admission changes only that namespace to `deleting`, clears its
+  owner and advances the writer fence; it does not remove code, access grants or
+  the dedicated plugin table. Completion requires an exact signed runner
+  receipt. Same-key retries replay one operation, two competing plans admit at
+  most one operation, and an uncertain prepared effect stops at
+  `recovery_required`;
 - a disposable GitHub-hosted Linux/XFS/Docker acceptance run completed ordinary
   and writable managed uninstall end to end, verified the exact plugin table was
   removed, the managed namespace became absent, and its project quota was
@@ -71,12 +81,17 @@ Implemented and tested:
 
 Still required for H13 completion:
 
-- reviewed `delete_data` review/consume entry point for legacy retained
-  namespaces and orphan cleanup; normal uninstall no longer leaves one;
 - reviewed repair execution with current trust, runtime configuration, process
   start and health checks and no capability expansion;
-- full concurrent operator acceptance;
+- full concurrent operator acceptance across enable/update/repair, not only
+  delete-data admission;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
+
+The standalone delete-data path has SQLite and PostgreSQL 18.6 repository
+coverage for stale plans, concurrent confirmations, two-admin conflicts,
+transaction rollback and uncertain runner results. A native standalone
+delete-data acceptance run has not yet replaced the existing managed-uninstall
+native evidence.
 
 Run `41330590646` completed install, A-to-B update, failed-update recovery,
 managed disable, managed enable, a real reader backend request after enable, and

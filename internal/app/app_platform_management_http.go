@@ -195,7 +195,9 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
-	fields, err := platformManagementObject(raw, "action", "release_sha256", "trust_revision", "audience", "installation_id")
+	fields, err := platformManagementObject(raw, "action",
+		"release_sha256", "trust_revision", "audience",
+		"installation_id", "data_namespace_id")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -212,7 +214,8 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-	} else if action != "uninstall" && action != "enable" {
+	} else if action != "uninstall" && action != "enable" &&
+		action != "delete_data" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -314,6 +317,55 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
 			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": false, "managed_data_cleared": projection.Managed && projection.Data != nil,
 		}})
+	case "delete_data":
+		if len(fields) != 3 || fields["installation_id"] == nil ||
+			fields["data_namespace_id"] == nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(
+			fields, "installation_id")
+		namespaceID, namespaceErr := platformManagementString(
+			fields, "data_namespace_id")
+		if installationErr != nil || namespaceErr != nil ||
+			!platformValidUUID(installation) ||
+			!platformValidUUID(namespaceID) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformDeleteDataReview(
+			r.Context(), actor, installation, namespaceID)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformDeleteDataReviewProjection
+		if err := json.Unmarshal(
+			[]byte(review.JSON), &projection); err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"plan_id": review.ID, "plan_sha256": review.SHA256,
+			"expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+			"review": map[string]any{
+				"action":            "delete_data",
+				"installation_id":   projection.InstallationID,
+				"app_id":            projection.AppID,
+				"publisher_id":      projection.PublisherID,
+				"data_namespace_id": projection.Data.ID,
+				"release_sha256":    projection.ReleaseSHA256,
+				"source_generation": strconv.FormatInt(
+					projection.Generation, 10),
+				"target_generation": strconv.FormatInt(
+					projection.TargetGeneration, 10),
+				"data_format": strconv.FormatInt(
+					projection.Data.Format, 10),
+				"writer_fence": strconv.FormatInt(
+					projection.Data.WriterFence, 10),
+				"scope": "exact namespace and recorded recovery sets",
+			},
+		})
 	case "enable":
 		if len(fields) != 2 || fields["installation_id"] == nil {
 			platformManagementError(w, errPlatformManagementInput)
@@ -391,6 +443,9 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 			r.Context(), actor, id, sha, key)
 	case "uninstall":
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
+	case "delete_data":
+		result, err = s.consumePlatformDeleteDataReviewContext(
+			r.Context(), actor, id, sha, key)
 	case "enable":
 		result, err = s.consumePlatformFrontendEnableReviewContext(
 			r.Context(), actor, id, sha, key)

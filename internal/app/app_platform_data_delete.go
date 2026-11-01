@@ -357,7 +357,15 @@ func platformDeleteDataReceiptMatchesIntent(
 		receipt.ExpectedDevice == c.Payload.ExpectedDevice &&
 		receipt.ExpectedNamespaceInode ==
 			c.Payload.ExpectedNamespaceInode &&
-		receipt.WriterFence == c.Payload.WriterFence
+		receipt.WriterFence == c.Payload.WriterFence &&
+		((receipt.AlreadyAbsent &&
+			receipt.NamespaceDevice == "" &&
+			receipt.NamespaceInode == "") ||
+			(!receipt.AlreadyAbsent &&
+				receipt.NamespaceDevice ==
+					c.Payload.ExpectedDevice &&
+				receipt.NamespaceInode ==
+					c.Payload.ExpectedNamespaceInode))
 }
 
 type platformDeleteDataObservation interface {
