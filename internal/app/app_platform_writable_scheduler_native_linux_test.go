@@ -139,6 +139,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "after update witness")
 	if err := os.WriteFile(
 		filepath.Join(os.Getenv("TMPDIR"), "writable-update-start.json"),
 		updateWitness, 0600); err != nil {
@@ -157,6 +158,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	role := scalar[string](t, s.st, `SELECT role FROM users WHERE username=?`, actor.username)
 	defer mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`, role, actor.username)
 	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, actor.username)
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "after role change")
 	for _, method := range []string{"POST", "GET"} {
 		var body []byte
 		if method == "POST" {
@@ -171,6 +173,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 			t.Fatal("background app did not serve one current authorized write", method, err)
 		}
 	}
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "after backend requests")
 	activeRelease := scalar[string](t, s.st, `SELECT release_sha256
 		FROM app_platform_activations
 		WHERE installation_id=? AND state='active'`,
@@ -180,6 +183,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 	t.Log("PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER")
 	mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
 		role, actor.username)
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "after role restore")
 	logManagedUpdateState(t, s, updateOperation, admitted.InstallationID)
 	rows, err := s.st.query(`SELECT action,stage,completed_ms
 		FROM app_platform_operations WHERE installation_id=?
@@ -202,6 +206,7 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	rows.Close()
+	assertNativePlatformGrant(t, s, admitted.InstallationID, "before failed update")
 	failedOperation, _ := testNativeWritableManagedUpdateVersion(
 		t, s, actor, endpoint, admitted.InstallationID,
 		"1.2.0-beta.3", true)
