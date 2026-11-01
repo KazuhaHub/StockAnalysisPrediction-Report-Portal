@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -118,7 +119,8 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	}
 	account, err := platformReadSessionAccount(e, session, now, true, false)
 	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access session: %w", errAppPlatformLaunchUnavailable)
 	}
 	if err := lockPlatformPublisherTrust(e); err != nil {
 		return zero, err
@@ -130,10 +132,13 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	var epoch string
 	var markers int
 	if err := e.queryRow(`SELECT v FROM meta WHERE k='app_platform_controller_epoch'`).Scan(&epoch); err != nil || !platformValidUUID(epoch) {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access epoch: %w", errAppPlatformLaunchUnavailable)
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE k='app_platform_restore_paused' AND v='0'`).Scan(&markers); err != nil || markers != 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access restore marker: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	dek, err := s.readPlatformDEK(e)
 	defer clear(dek)
@@ -153,29 +158,40 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	var runtimeID sql.NullString
 	var generation, policy, fence int64
 	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,controller_epoch,runtime_id,generation,policy_revision,control_fence FROM app_platform_installations WHERE id=?`+lock, installationID).Scan(&appID, &publisher, &desired, &phase, &storedEpoch, &runtimeID, &generation, &policy, &fence); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access installation: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if desired != "enabled" || phase != "ready" || storedEpoch != epoch || !runtimeID.Valid || runtimeID.String != runtime.id || generation < 1 || policy < 1 || fence < 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access installation tuple: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if err := platformLaunchAudience(e, account, installationID); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access audience: %w", errAppPlatformLaunchUnavailable)
 	}
 	var activation, release, namespace, readiness string
 	var ag, ap, format, observed int64
 	if err := e.queryRow(`SELECT id,release_sha256,data_namespace_id,generation,policy_revision,data_format,observed_ms,readiness_evidence FROM app_platform_activations WHERE installation_id=? AND state='active'`+lock, installationID).Scan(&activation, &release, &namespace, &ag, &ap, &format, &observed, &readiness); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access activation: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if !platformValidUUID(activation) || !platformValidUUID(namespace) || !platformValidSHA(release) || ag != generation || ap != policy || format < 1 || observed < 0 {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access activation tuple: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	var unsafe int
 	if err := e.queryRow(`SELECT
  (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND (completed_ms IS NULL OR stage='recovery_required'))+
- (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state<>'applied')+
+ (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
  (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
  (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>? AND (state<>'retired' OR generation>=?))`, installationID, installationID, installationID, policy, installationID, activation, generation).Scan(&unsafe); err != nil || unsafe != 0 {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access unsafe state (%d): %w", unsafe,
+			errAppPlatformLaunchUnavailable)
 	}
 	var trustRevision int64
 	for _, p := range trust.Publishers {
@@ -185,22 +201,28 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	}
 	verified, err := platformVerifyStoredRelease(e, release, trustRevision, trust, now)
 	if err != nil || verified.appID != appID || verified.publisherID != publisher {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access stored release: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	var descriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release).Scan(&descriptor); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access descriptor: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.SHA256 != release {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"backend access descriptor tuple: %w",
+			errAppPlatformLaunchUnavailable)
 	}
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
-		return zero, err
+		return zero, fmt.Errorf("backend access capabilities: %w", err)
 	}
 	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, generation: generation, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf("backend access history: %w", err)
 	}
 	failed := true
 	defer func() {
