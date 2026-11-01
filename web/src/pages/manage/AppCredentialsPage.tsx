@@ -7,7 +7,6 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Select,
   Space,
   Table,
@@ -19,7 +18,9 @@ import type { ColumnsType } from 'antd/es/table'
 import { useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import Confirm, { confirmAction } from '../../components/Confirm'
 import LoadGate from '../../components/LoadGate'
+import { notifyError } from '../../lib/notify'
 import { useAppsCatalog } from './appsAdminModel'
 import { AppsBreadcrumb } from './appsAdminParts'
 
@@ -162,14 +163,15 @@ export default function AppCredentialsPage() {
           await commit()
         } else {
           await new Promise<void>((resolve, reject) => {
-            modal.confirm({
+            confirmAction(modal, {
               title: t('appCredentials.rotationConfirm'),
-              content: t('appCredentials.affected', { count: review.affected.length }),
+              description: t('appCredentials.affected', { count: review.affected.length }),
               okText: t('appCredentials.rotate'),
+              danger: false,
               cancelText: t('common.cancel'),
               onOk: () => commit().then(resolve, reject),
               onCancel: () => reject(cancelled),
-            })
+            }, t)
           })
         }
       }
@@ -179,16 +181,15 @@ export default function AppCredentialsPage() {
       credentialForm.resetFields()
       await load()
     } catch (cause) {
-      if (cause !== cancelled) message.error(errText(cause, t))
+      if (cause !== cancelled) notifyError(errText(cause, t))
     }
   }
 
   const revokeCredential = (credential: Credential) => {
-    modal.confirm({
+    confirmAction(modal, {
       title: t('appCredentials.revokeCredential'),
-      content: credential.label,
+      description: credential.label,
       okText: t('appCredentials.revokeCredential'),
-      okButtonProps: { danger: true },
       cancelText: t('common.cancel'),
       onOk: async () => {
         try {
@@ -202,15 +203,14 @@ export default function AppCredentialsPage() {
           )
           if (!review.direct && review.affected.length) {
             await new Promise<void>((resolve, reject) => {
-              modal.confirm({
+              confirmAction(modal, {
                 title: t('appCredentials.credentialRevokeConfirm'),
-                content: t('appCredentials.affected', { count: review.affected.length }),
+                description: t('appCredentials.affected', { count: review.affected.length }),
                 okText: t('appCredentials.revokeCredential'),
-                okButtonProps: { danger: true },
                 cancelText: t('common.cancel'),
                 onOk: () => resolve(),
                 onCancel: () => reject(cancelled),
-              })
+              }, t)
             })
           }
           await api.post(`/api/admin/app-platform/credentials/${credential.id}/commit`, {
@@ -224,10 +224,10 @@ export default function AppCredentialsPage() {
           message.success(t('appCredentials.saved'))
           await load()
         } catch (cause) {
-          if (cause !== cancelled) message.error(errText(cause, t))
+          if (cause !== cancelled) notifyError(errText(cause, t))
         }
       },
-    })
+    }, t)
   }
 
   const finishBinding = async (values: { name: string; credential_id: string; operation: string }) => {
@@ -237,9 +237,9 @@ export default function AppCredentialsPage() {
         values,
       )
       await new Promise<void>((resolve, reject) => {
-        modal.confirm({
+        confirmAction(modal, {
           title: t('appCredentials.confirmBinding'),
-          content: (
+          description: (
             <Space orientation="vertical" size={4}>
               <span>{t('appCredentials.confirmBindingBody')}</span>
               <Typography.Text code>{plan.review.credential_label}</Typography.Text>
@@ -249,6 +249,7 @@ export default function AppCredentialsPage() {
             </Space>
           ),
           okText: t('appCredentials.approve'),
+          danger: false,
           cancelText: t('common.cancel'),
           onOk: async () => {
             try {
@@ -262,7 +263,7 @@ export default function AppCredentialsPage() {
             }
           },
           onCancel: () => reject(cancelled),
-        })
+        }, t)
       })
       message.success(t('appCredentials.saved'))
       setBindingOpen(false)
@@ -270,7 +271,7 @@ export default function AppCredentialsPage() {
       bindingForm.resetFields()
       await load()
     } catch (cause) {
-      if (cause !== cancelled) message.error(errText(cause, t))
+      if (cause !== cancelled) notifyError(errText(cause, t))
     }
   }
 
@@ -282,7 +283,7 @@ export default function AppCredentialsPage() {
       message.success(t('appCredentials.saved'))
       await load()
     } catch (cause) {
-      message.error(errText(cause, t))
+      notifyError(errText(cause, t))
     }
   }
 
@@ -361,16 +362,15 @@ export default function AppCredentialsPage() {
             {t('appCredentials.reapprove')}
           </Button>
         ) : (
-          <Popconfirm
+          <Confirm
             title={t('appCredentials.revokeBindingConfirm')}
             okText={t('appCredentials.revoke')}
-            cancelText={t('common.cancel')}
             onConfirm={() => revokeBinding(binding)}
           >
             <Button size="small" danger>
               {t('appCredentials.revoke')}
             </Button>
-          </Popconfirm>
+          </Confirm>
         ),
     },
   ]

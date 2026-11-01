@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Empty, Input, Popconfirm, Space, Table, Tag, Typography, Upload } from 'antd'
+import { App, Button, Card, Empty, Input, Space, Table, Tag, Typography, Upload } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { AppstoreOutlined, CloudDownloadOutlined, DeleteOutlined, ShopOutlined, UploadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
 import type { AppMarketEntry, AppMarketResp, AppPreviewResp, AppsResp, AppSummary } from '../../api/types'
 import AppBackendModal from '../../components/AppBackendModal'
+import Confirm from '../../components/Confirm'
 import ScopePermissionModal from '../../components/ScopePermissionModal'
+import { notifyError } from '../../lib/notify'
 
 // A pending install awaiting the admin's permission confirmation. `run` performs the
 // actual install once the scopes are approved.
@@ -70,7 +72,7 @@ export default function LegacyAppsAdminPage() {
       setMarket(r.apps || [])
       setIndexUrl(r.index_url || '')
     } catch (e) {
-      message.error(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.marketError', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setMarketLoading(false)
     }
@@ -92,7 +94,7 @@ export default function LegacyAppsAdminPage() {
         },
       })
     } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setUploading(false)
     }
@@ -120,7 +122,7 @@ export default function LegacyAppsAdminPage() {
       await pending.run()
       setPending(null)
     } catch (e) {
-      message.error(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
+      notifyError(t('apps.msgInstallFailed', { error: e instanceof Error ? e.message : String(e) }))
     } finally {
       setConfirming(false)
     }
@@ -155,9 +157,13 @@ export default function LegacyAppsAdminPage() {
       render: (_: unknown, a: AppSummary) => (
         <Space>
         <Button size="small" onClick={() => setBackendApp(a)}>{t('apps.backendButton')}</Button>
-        <Popconfirm title={t('apps.deleteConfirm')} onConfirm={() => remove(a.id)}>
+        <Confirm
+          title={t('apps.deleteConfirm')}
+          okText={t('common.delete')}
+          onConfirm={() => remove(a.id)}
+        >
           <Button size="small" danger icon={<DeleteOutlined />} aria-label={t('common.delete')} />
-        </Popconfirm>
+        </Confirm>
         </Space>
       ),
     },
@@ -270,7 +276,7 @@ export default function LegacyAppsAdminPage() {
                     message.success(t('common.saved'))
                     if (market) fetchMarket()
                   })
-                  .catch((e) => message.error(errText(e, t)))
+                  .catch((e) => notifyError(errText(e, t)))
                   .finally(() => setSavingIndex(false))
               }}
             >
