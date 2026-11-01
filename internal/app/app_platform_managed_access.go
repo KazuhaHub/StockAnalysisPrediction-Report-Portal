@@ -190,16 +190,22 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 			"backend access operations: %w",
 			errAppPlatformLaunchUnavailable)
 	}
-	var effectUnsafe int
-	if err := e.queryRow(`SELECT
- (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
- (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>? AND (state<>'retired' OR generation>=?))`, installationID, installationID, policy, installationID, activation, generation).Scan(&effectUnsafe); err != nil {
+	effectUnsafe, err := platformUnresolvedOperationEffectCount(
+		e, installationID)
+	if err != nil {
 		return zero, fmt.Errorf(
 			"backend access effects: %w",
 			errAppPlatformLaunchUnavailable)
 	}
-	unsafe := operationUnsafe + effectUnsafe
+	var aggregateUnsafe int
+	if err := e.queryRow(`SELECT
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
+ (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND id<>? AND (state<>'retired' OR generation>=?))`, installationID, policy, installationID, activation, generation).Scan(&aggregateUnsafe); err != nil {
+		return zero, fmt.Errorf(
+			"backend access effects: %w",
+			errAppPlatformLaunchUnavailable)
+	}
+	unsafe := operationUnsafe + effectUnsafe + aggregateUnsafe
 	if unsafe != 0 {
 		return zero, fmt.Errorf(
 			"backend access unsafe state (%d): %w", unsafe,

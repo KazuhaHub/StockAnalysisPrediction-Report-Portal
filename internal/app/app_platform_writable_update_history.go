@@ -237,7 +237,12 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		activePolicy != plan.TargetPolicyRevision ||
 		activeNamespace != plan.DataNamespaceID ||
 		activeFormat != plan.DataFormat {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"update history active activation release=%s/%s generation=%d/%d policy=%d/%d namespace=%s/%s format=%d/%d: %w",
+			activeRelease, plan.TargetReleaseSHA256, activeGeneration,
+			plan.TargetGeneration, activePolicy, plan.TargetPolicyRevision,
+			activeNamespace, plan.DataNamespaceID, activeFormat,
+			plan.DataFormat, errAppPlatformLaunchUnavailable)
 	}
 	var namespaceState string
 	var namespaceFormat, writerFence int64
@@ -249,40 +254,81 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		namespaceState != "active" || namespaceFormat != plan.DataFormat ||
 		writerFence != plan.SourceWriterFence+1 ||
 		mustPlatformCheckpointInt(running.TargetWriterFence) != writerFence {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"update history namespace state=%s format=%d/%d writer=%d/%d target=%s: %w",
+			namespaceState, namespaceFormat, plan.DataFormat,
+			writerFence, plan.SourceWriterFence+1,
+			running.TargetWriterFence, errAppPlatformLaunchUnavailable)
+	}
+	checkpointWriterFence := plan.SourceWriterFence
+	if plan.Action == appplatform.ActionEnable {
+		checkpointWriterFence = plan.CheckpointWriterFence
 	}
 	if checkpoint.ReleaseSHA256 != plan.SourceReleaseSHA256 ||
 		checkpoint.NamespaceID != plan.DataNamespaceID ||
 		mustPlatformCheckpointInt(checkpoint.DataFormat) != plan.DataFormat ||
-		mustPlatformCheckpointInt(checkpoint.WriterFence) != plan.SourceWriterFence {
-		return zero, errAppPlatformLaunchUnavailable
+		mustPlatformCheckpointInt(checkpoint.WriterFence) !=
+			checkpointWriterFence {
+		return zero, fmt.Errorf(
+			"update history checkpoint release=%s/%s namespace=%s/%s format=%d/%d writer=%d/%d: %w",
+			checkpoint.ReleaseSHA256, plan.SourceReleaseSHA256,
+			checkpoint.NamespaceID, plan.DataNamespaceID,
+			mustPlatformCheckpointInt(checkpoint.DataFormat), plan.DataFormat,
+			mustPlatformCheckpointInt(checkpoint.WriterFence),
+			checkpointWriterFence, errAppPlatformLaunchUnavailable)
 	}
 	var sourceOperation, sourceAction, sourceRelease string
 	var sourceGeneration, sourceCompleted int64
-	if err := e.queryRow(`SELECT o.id,o.action,o.target_generation,
+	if err := e.queryRow(`SELECT o.action,o.target_generation,
+		p.target_release_sha256,o.completed_ms
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND o.installation_id=? AND o.managed=1
+		AND o.action IN ('install','update','restore')
+		AND o.stage='complete' AND o.completed_ms IS NOT NULL
+		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
+		AND o.error_code IS NULL
+		AND p.action=o.action AND p.consumed_ms IS NOT NULL`,
+		checkpoint.SourceOperationID, expected.installationID).
+		Scan(&sourceAction, &sourceGeneration, &sourceRelease,
+			&sourceCompleted); err != nil ||
+		sourceGeneration != plan.SourceGeneration ||
+		sourceRelease != plan.SourceReleaseSHA256 ||
+		sourceCompleted < 0 || sourceCompleted > now {
+		return zero, fmt.Errorf(
+			"update history source operation action=%s generation=%d/%d release=%s/%s completed=%d: %w",
+			sourceAction, sourceGeneration, plan.SourceGeneration,
+			sourceRelease, plan.SourceReleaseSHA256, sourceCompleted,
+			errAppPlatformLaunchUnavailable)
+	}
+	sourceOperation = checkpoint.SourceOperationID
+	var dataReceipt string
+	var dataAction, dataRelease string
+	var dataGeneration, dataCompleted int64
+	if err := e.queryRow(`SELECT f.receipt_json,o.action,o.target_generation,
 		p.target_release_sha256,o.completed_ms
 		FROM app_platform_operation_effects f
 		JOIN app_platform_operations o ON o.id=f.operation_id
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE f.effect_id=? AND f.kind='prepare-data' AND f.state='applied'`,
-		checkpoint.SourceDataEffectID).
-		Scan(&sourceOperation, &sourceAction, &sourceGeneration,
-			&sourceRelease, &sourceCompleted); err != nil ||
-		!platformValidUUID(sourceOperation) ||
-		(sourceAction != "install" && sourceAction != "update" &&
-			sourceAction != "restore") ||
-		sourceGeneration != plan.SourceGeneration ||
-		sourceRelease != plan.SourceReleaseSHA256 || sourceCompleted < 0 {
-		return zero, errAppPlatformLaunchUnavailable
-	}
-	var dataReceipt string
-	if err := e.queryRow(`SELECT receipt_json FROM app_platform_operation_effects
-		WHERE operation_id=? AND effect_id=? AND stage='prepare_data'
-		AND kind='prepare-data' AND state='applied'`,
-		sourceOperation, checkpoint.SourceDataEffectID).
-		Scan(&dataReceipt); err != nil ||
-		platformDigest([]byte(dataReceipt)) != checkpoint.SourceDataReceiptSHA256 {
-		return zero, errAppPlatformLaunchUnavailable
+		WHERE f.effect_id=? AND o.installation_id=? AND f.stage='prepare_data'
+		AND f.kind='prepare-data' AND f.state='applied'
+		AND o.managed=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL
+		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
+		AND o.error_code IS NULL
+		AND o.action IN ('install','update','restore')`,
+		checkpoint.SourceDataEffectID, expected.installationID).
+		Scan(&dataReceipt, &dataAction, &dataGeneration,
+			&dataRelease, &dataCompleted); err != nil ||
+		platformDigest([]byte(dataReceipt)) !=
+			checkpoint.SourceDataReceiptSHA256 ||
+		dataGeneration < 1 || dataGeneration > plan.SourceGeneration ||
+		dataRelease != plan.SourceReleaseSHA256 ||
+		dataCompleted < 0 || dataCompleted > now {
+		return zero, fmt.Errorf(
+			"update history data effect action=%s generation=%d/%d release=%s/%s completed=%d: %w",
+			dataAction, dataGeneration, plan.SourceGeneration,
+			dataRelease, plan.SourceReleaseSHA256, dataCompleted,
+			errAppPlatformLaunchUnavailable)
 	}
 	data, err := journal.ParseDataPreparationReceipt([]byte(dataReceipt))
 	if err != nil || data.Claim.ResourceID != running.NamespaceID ||
@@ -291,27 +337,44 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		data.NamespaceInode != running.Claim.Preflight.NamespaceInode ||
 		data.QuotaBytes != running.Claim.Preflight.QuotaBytes ||
 		data.QuotaInodes != running.Claim.Preflight.QuotaInodes {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"update history data receipt resource=%s/%s project=%s/%s device=%s/%s inode=%s/%s: %w",
+			data.Claim.ResourceID, running.NamespaceID, data.ProjectID,
+			running.Claim.Preflight.ProjectID, data.Device,
+			running.Claim.Preflight.Device, data.NamespaceInode,
+			running.Claim.Preflight.NamespaceInode,
+			errAppPlatformLaunchUnavailable)
 	}
 	var sourceStart, sourceStartKind, sourceStartState, sourceStartRaw string
 	if err := e.queryRow(`SELECT effect_id,kind,state,receipt_json
 		FROM app_platform_operation_effects
-		WHERE operation_id=? AND stage='start' AND effect_number=1`,
-		sourceOperation).Scan(&sourceStart, &sourceStartKind,
-		&sourceStartState, &sourceStartRaw); err != nil ||
+		WHERE operation_id=? AND effect_id=? AND stage='start'
+		AND effect_number=1 AND state='applied'`,
+		sourceOperation, checkpoint.SourceStartEffectID).
+		Scan(&sourceStart, &sourceStartKind,
+			&sourceStartState, &sourceStartRaw); err != nil ||
 		!platformValidUUID(sourceStart) ||
 		(sourceStartKind != "start-candidate" &&
 			sourceStartKind != "update-start" &&
 			sourceStartKind != "restore-start") ||
-		sourceStartState != "applied" {
-		return zero, errAppPlatformLaunchUnavailable
+		sourceStartState != "applied" ||
+		platformDigest([]byte(sourceStartRaw)) !=
+			checkpoint.SourceReceiptSHA256 {
+		return zero, fmt.Errorf(
+			"update history source start kind=%s state=%s: %w",
+			sourceStartKind, sourceStartState,
+			errAppPlatformLaunchUnavailable)
 	}
 	if len(descriptor) == 0 || plan.AppID == "" || plan.PublisherID == "" ||
 		plan.SourceGeneration < 1 || plan.SourceWriterFence < 1 ||
 		now < sourceCompleted {
-		return zero, errAppPlatformLaunchUnavailable
+		return zero, fmt.Errorf(
+			"update history source tuple descriptor=%d app=%s publisher=%s generation=%d writer=%d completed=%d/%d: %w",
+			len(descriptor), plan.AppID, plan.PublisherID,
+			plan.SourceGeneration, plan.SourceWriterFence,
+			sourceCompleted, now, errAppPlatformLaunchUnavailable)
 	}
-	return platformCheckpointSource{
+	historySource := platformCheckpointSource{
 		operationID: sourceOperation, startEffectID: sourceStart,
 		dataEffectID:            checkpoint.SourceDataEffectID,
 		sourceReceiptSHA256:     platformDigest([]byte(sourceStartRaw)),
@@ -328,12 +391,17 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		quotaInodes:             data.QuotaInodes,
 		rootFilesystemUUID:      data.Claim.RootFilesystemUUID,
 		rootInode:               data.Claim.RootInode,
-		writerFence:             strconv.FormatInt(plan.SourceWriterFence, 10),
+		writerFence:             strconv.FormatInt(checkpointWriterFence, 10),
 		platform:                running.Claim.Preflight.Platform,
 		sandboxProfile:          running.Claim.SandboxProfile,
 		appID:                   plan.AppID,
 		publisherID:             plan.PublisherID,
 		descriptor:              bytes.Clone(descriptor),
 		runtimeTarget:           plan.TargetRuntime,
-	}, nil
+	}
+	if plan.Action == appplatform.ActionEnable {
+		historySource.currentWriterFence =
+			strconv.FormatInt(plan.SourceWriterFence, 10)
+	}
+	return historySource, nil
 }

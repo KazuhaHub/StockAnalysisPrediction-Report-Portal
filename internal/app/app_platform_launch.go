@@ -12,39 +12,69 @@ import (
 
 var errAppPlatformLaunchUnavailable = errors.New("application launch is unavailable")
 
-func platformUnresolvedOperationCount(e migExec, installation string) (int, error) {
+func platformResolvedRecoveryPredicate(e migExec) string {
 	restoreReference := `json_extract(rp.plan_json,'$.checkpoint_operation_id')=o.id`
 	if e.s.driver == "postgres" {
 		restoreReference = `(rp.plan_json::jsonb->>'checkpoint_operation_id')=o.id`
 	}
+	return `EXISTS (
+		SELECT 1
+		FROM app_platform_operations r
+		JOIN app_platform_review_plans rp ON rp.id=r.review_plan_id
+		WHERE r.installation_id=o.installation_id
+		AND r.action='restore' AND r.managed=1
+		AND r.stage='complete' AND r.completed_ms IS NOT NULL
+		AND r.completed_ms>=o.completed_ms
+		AND r.target_generation=o.target_generation
+		AND r.controller_epoch=i.controller_epoch
+		AND r.lease_owner IS NULL AND r.lease_until_ms IS NULL
+		AND r.error_code IS NULL
+		AND rp.action='restore' AND rp.consumed_ms IS NOT NULL
+		AND EXISTS (
+			SELECT 1 FROM app_platform_operation_effects f
+			WHERE f.operation_id=r.id AND f.stage='activate'
+			AND f.state='applied'
+		)
+		AND ` + restoreReference + `
+	)`
+}
+
+func platformUnresolvedOperationPredicate(e migExec) string {
+	return `(o.completed_ms IS NULL OR (
+		o.stage='recovery_required' AND NOT ` +
+		platformResolvedRecoveryPredicate(e) + `
+	))`
+}
+
+func platformUnsafeEffectPredicate(e migExec) string {
+	return `(o.completed_ms IS NULL OR
+		o.stage<>'recovery_required' OR
+		NOT ` + platformResolvedRecoveryPredicate(e) + `)`
+}
+
+func platformUnresolvedOperationCount(e migExec, installation string) (int, error) {
 	var count int
 	err := e.queryRow(`SELECT COUNT(*)
 		FROM app_platform_operations o
 		JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND (
-			o.completed_ms IS NULL OR (
-				o.stage='recovery_required' AND NOT EXISTS (
-					SELECT 1
-					FROM app_platform_operations r
-					JOIN app_platform_review_plans rp ON rp.id=r.review_plan_id
-					WHERE r.installation_id=o.installation_id
-					AND r.action='restore' AND r.managed=1
-					AND r.stage='complete' AND r.completed_ms IS NOT NULL
-					AND r.completed_ms>=o.completed_ms
-					AND r.target_generation=o.target_generation
-					AND r.controller_epoch=i.controller_epoch
-					AND r.lease_owner IS NULL AND r.lease_until_ms IS NULL
-					AND r.error_code IS NULL
-					AND rp.action='restore' AND rp.consumed_ms IS NOT NULL
-					AND EXISTS (
-						SELECT 1 FROM app_platform_operation_effects f
-						WHERE f.operation_id=r.id AND f.stage='activate'
-						AND f.state='applied'
-					)
-					AND `+restoreReference+`
-				)
-			)
-		)`, installation).Scan(&count)
+		WHERE o.installation_id=? AND `+
+		platformUnresolvedOperationPredicate(e),
+		installation).Scan(&count)
+	return count, err
+}
+
+func platformUnresolvedOperationEffectCount(
+	e migExec, installation string,
+) (int, error) {
+	var count int
+	err := e.queryRow(`SELECT COUNT(*)
+		FROM app_platform_operation_effects f
+		JOIN app_platform_operations o ON o.id=f.operation_id
+		JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.installation_id=?
+		AND f.state IN ('prepared','unknown')
+		AND `+platformUnsafeEffectPredicate(e),
+		installation).Scan(&count)
 	return count, err
 }
 
@@ -185,14 +215,18 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	if err != nil {
 		return zero, err
 	}
-	var effectUnsafe int
-	if err := e.queryRow(`SELECT
- (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown'))+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability NOT IN ('reports.read','storage.files'))`, installationID, installationID, policy, installationID).Scan(&effectUnsafe); err != nil {
+	effectUnsafe, err := platformUnresolvedOperationEffectCount(
+		e, installationID)
+	if err != nil {
 		return zero, err
 	}
-	unsafe := operationUnsafe + effectUnsafe
+	var aggregateUnsafe int
+	if err := e.queryRow(`SELECT
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability NOT IN ('reports.read','storage.files'))`, installationID, policy, installationID).Scan(&aggregateUnsafe); err != nil {
+		return zero, err
+	}
+	unsafe := operationUnsafe + effectUnsafe + aggregateUnsafe
 	if unsafe != 0 {
 		return fail("unsafe-effects")
 	}

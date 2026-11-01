@@ -304,6 +304,59 @@ func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) (*Server, pl
 	capsBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		startLease.installationID)
+	result := platformRunSyntheticManagedEnable(t, s, startLease)
+	if result.snapshot.Stage != appplatform.StageComplete ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			startLease.installationID) != "enabled:ready" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='active' AND generation=2`,
+			startLease.installationID) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*)
+			FROM app_platform_capability_grants WHERE installation_id=?`,
+			startLease.installationID) != capsBefore {
+		t.Fatal("managed enable did not activate the retained tuple")
+	}
+	var descriptor []byte
+	var release, epoch string
+	var policy int64
+	if err := s.st.queryRow(`SELECT a.release_sha256,a.policy_revision,
+		i.controller_epoch,r.descriptor
+		FROM app_platform_activations a
+		JOIN app_platform_installations i ON i.id=a.installation_id
+		JOIN app_platform_releases r ON r.sha256=a.release_sha256
+		WHERE a.installation_id=? AND a.state='active'`,
+		startLease.installationID).
+		Scan(&release, &policy, &epoch, &descriptor); err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyPlatformLaunchCapabilitySnapshot(
+		s.st.poolExec(), startLease.installationID, release, epoch,
+		policy, parsed.Manifest); err != nil {
+		t.Fatal("managed enable capability snapshot", err)
+	}
+	actor := platformManagedFixtureSession(t, s)
+	access, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, startLease.installationID)
+	if err != nil {
+		t.Fatal("managed enable backend history", err)
+	}
+	defer access.Close()
+	if !access.intent.applied || access.intent.update == nil ||
+		access.intent.generation != 2 {
+		t.Fatal("managed enable history did not retain the active tuple")
+	}
+	return s, actor, startLease
+}
+
+func platformRunSyntheticManagedEnable(
+	t *testing.T, s *Server, startLease platformOperationLease,
+) platformActivationResult {
+	t.Helper()
 	endpoint := platformUpdateStartEndpointFixture()
 	startIntent, err := s.preparePlatformUpdateStart(
 		context.Background(), startLease)
@@ -372,52 +425,7 @@ func testPlatformManagedEnableSyntheticStart(t *testing.T, pg bool) (*Server, pl
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.snapshot.Stage != appplatform.StageComplete ||
-		scalar[string](t, s.st, `SELECT desired_state||':'||phase
-			FROM app_platform_installations WHERE id=?`,
-			startLease.installationID) != "enabled:ready" ||
-		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations
-			WHERE installation_id=? AND state='active' AND generation=2`,
-			startLease.installationID) != 1 ||
-		scalar[int](t, s.st, `SELECT COUNT(*)
-			FROM app_platform_capability_grants WHERE installation_id=?`,
-			startLease.installationID) != capsBefore {
-		t.Fatal("managed enable did not activate the retained tuple")
-	}
-	var descriptor []byte
-	var release, epoch string
-	var policy int64
-	if err := s.st.queryRow(`SELECT a.release_sha256,a.policy_revision,
-		i.controller_epoch,r.descriptor
-		FROM app_platform_activations a
-		JOIN app_platform_installations i ON i.id=a.installation_id
-		JOIN app_platform_releases r ON r.sha256=a.release_sha256
-		WHERE a.installation_id=? AND a.state='active'`,
-		startLease.installationID).
-		Scan(&release, &policy, &epoch, &descriptor); err != nil {
-		t.Fatal(err)
-	}
-	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := verifyPlatformLaunchCapabilitySnapshot(
-		s.st.poolExec(), startLease.installationID, release, epoch,
-		policy, parsed.Manifest); err != nil {
-		t.Fatal("managed enable capability snapshot", err)
-	}
-	actor := platformManagedFixtureSession(t, s)
-	access, err := s.preparePlatformWritableBackendAccess(
-		context.Background(), actor, startLease.installationID)
-	if err != nil {
-		t.Fatal("managed enable backend history", err)
-	}
-	defer access.Close()
-	if !access.intent.applied || access.intent.update == nil ||
-		access.intent.generation != 2 {
-		t.Fatal("managed enable history did not retain the active tuple")
-	}
-	return s, actor, startLease
+	return result
 }
 
 func TestPlatformManagedEnableSyntheticStartActivatesCurrentTupleSQLite(t *testing.T) {
@@ -664,5 +672,20 @@ func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t 
 		start.command.Payload.SourceWriterFence !=
 			strconv.FormatInt(currentWriterFence, 10) {
 		t.Fatalf("restored enable start command: %+v", start.command)
+	}
+	result := platformRunSyntheticManagedEnable(t, s, startLease)
+	if result.snapshot.Stage != appplatform.StageComplete {
+		t.Fatalf("restored enable did not complete: %+v", result.snapshot)
+	}
+	access, err := s.preparePlatformWritableBackendAccess(
+		context.Background(), actor, restored.installationID)
+	if err != nil {
+		t.Fatalf("restored enable backend history: %v", err)
+	}
+	defer access.Close()
+	if access.intent.generation != generation ||
+		access.intent.update == nil {
+		t.Fatalf("restored enable history generation=%d want=%d",
+			access.intent.generation, generation)
 	}
 }
