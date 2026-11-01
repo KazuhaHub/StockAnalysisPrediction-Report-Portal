@@ -444,6 +444,10 @@ func platformUpdateStartRunningCommitFixtureMode(t *testing.T, pg, writable bool
 
 func testPlatformUpdateStartCommitsRunningReceipt(t *testing.T, pg bool) {
 	s, lease, intent, endpoint, observation := platformUpdateStartRunningCommitFixture(t, pg)
+	auditBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
+		WHERE action='app_platform.update_start_running'
+		AND target_id=? AND detail LIKE ?`,
+		lease.id, "%"+observation.running.NativeID+"%")
 	next, err := s.commitPlatformUpdateStartReceipt(context.Background(), lease, intent, endpoint, observation)
 	if err != nil || next.snapshot.Stage != appplatform.StageProbe ||
 		next.snapshot.Revision != lease.snapshot.Revision+1 {
@@ -461,7 +465,7 @@ func testPlatformUpdateStartCommitsRunningReceipt(t *testing.T, pg bool) {
 		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log
 			WHERE action='app_platform.update_start_running'
 			AND target_id=? AND detail LIKE ?`,
-			lease.id, "%"+observation.running.NativeID+"%") != 1 {
+			lease.id, "%"+observation.running.NativeID+"%") != auditBefore+1 {
 		t.Fatal("running receipt did not commit with stage advance", receipt, err)
 	}
 }
