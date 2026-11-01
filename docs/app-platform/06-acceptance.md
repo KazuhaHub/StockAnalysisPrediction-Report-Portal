@@ -105,9 +105,9 @@ complete screen-reader certification from an automated result.
 | LIFE-10 | Roll back after B has accepted new writes | Warn about restore data-loss boundary; controlled maintenance and verified recovery, never silent loss |
 | LIFE-11 | Disable during active handler and while runner unavailable | Broker denial immediate; shutdown pending truthful; no new claims |
 | LIFE-12 | Enable or repair disabled app | Same trusted release/config, health checked; no new grants or hidden schema change |
-| LIFE-13 | Uninstall and retain data | No runnable code, schedules, subscriptions, publication or secret use; retained data inspectable by admin |
-| LIFE-14 | Reinstall using retained data | Explicit compatibility/identity review; no automatic grants from old namespace |
-| LIFE-15 | Delete retained data with concurrent/stale request | Current confirmation/revision required; exact data scope cleaned; recovery copies accounted for |
+| LIFE-13 | Uninstall and clear data | No runnable code, schedules, subscriptions, publication or secret use; dedicated plugin table and managed namespace/quota are removed only with runner-backed evidence |
+| LIFE-14 | Reinstall after clear-on-uninstall | Fresh installation identity and empty namespace; no grants or payload inherited from the removed installation |
+| LIFE-15 | Delete legacy/recovery data with concurrent/stale request | Current confirmation/revision required; exact namespace scope cleaned; recovery copies accounted for |
 
 ## 6. Data, jobs and operations
 

@@ -10,8 +10,8 @@ every row is implemented.
 | Disable | live enabled/ready; exact current tuple | stop new viewer calls, task claims, network/secret use immediately | keep code/data/credential tombstones; physical process stop separately observed | runner offline reports stop pending, never claims stopped |
 | Enable | disabled install; fresh trust/state/health review | no capability expansion by enable | start current reviewed tuple and probe before traffic | failed probe remains disabled/recovery review |
 | Repair | recovery/paused state; current plan | only explicitly admitted recovery work | reconcile actual process/data/effect; no blind replay | uncertainty stays review-required |
-| Uninstall | live install; exact plan + affected counts | revoke access, launch, tasks, notifications, bindings and runtime authority first | clear owner-approved app object table; retain or delete managed backend namespace according to reviewed effect; remove code after drain | partial physical stop/code removal remains `recovery_required`; access stays denied |
-| Delete data | uninstalled or explicitly retained namespace; separate plan | no app authority | bounded namespace cleanup; revoke/delete data records and counters transactionally where Portal-owned | deletion idempotent; interrupted cleanup resumes only the recorded namespace |
+| Uninstall | live install; exact plan + affected counts | revoke access, launch, tasks, notifications, bindings and runtime authority first | clear the dedicated plugin table; managed apps then stop/remove code and delete their backend data namespace and project quota | completion requires a signed data-deletion receipt; any uncertain stop/code/data effect remains `recovery_required` |
+| Delete data | legacy retained namespace, recovery copy or orphan explicitly bound by review | no app authority | bounded namespace cleanup; revoke/delete data records and counters transactionally where Portal-owned | deletion idempotent; interrupted cleanup resumes only the recorded namespace |
 | Restore | isolated restored database; controller epoch newly rotated and dispatch paused | all old live authority invalid | reconcile process/data/effect identities and revocation floors; active work becomes review | no automatic resume, delivery, provider probe or task replay |
 
 ## Current implementation
@@ -28,19 +28,22 @@ Implemented and tested:
   `revoke -> remove_code -> complete`, with access/capability rows removed and
   the installation made permanently unavailable;
 - managed uninstall review and execution through
-  `revoke -> stop -> remove_code -> complete`. The exact signed command binds the
+  `revoke -> stop -> remove_code -> remove_data -> complete`. The exact signed
+  stop/remove-code commands bind the
   original ordinary or writable candidate operation/effect/receipt/native
   identity; stop and remove-code accept only opaque `exited` and `absent`
-  observations. Completion clears access/capability rows, makes the installation
-  unavailable, and retains the managed data namespace as `retained` for a
-  separate reviewed deletion;
+  observations. The separate signed delete-data command binds the original
+  preparation receipt, project ID, device, namespace inode, quota, writer fence
+  and current release. Completion requires a receipt proving the namespace tree
+  and quota are absent, then clears access/capability rows and marks the
+  namespace `deleted`;
 - managed uninstall failure/uncertainty is denial-only and lands in
   `recovery_required`; a prepared effect left by a crash is reclaimable only to
   record that review and is not automatically reissued;
 - a disposable GitHub-hosted Linux/XFS/Docker acceptance run completed ordinary
   and writable managed uninstall end to end, verified the exact plugin table was
-  removed, and verified the managed namespace remained for a separate deletion
-  review;
+  removed, the managed namespace became absent, and its project quota was
+  cleared;
 - restore at the frontend clear-on-uninstall crash point keeps the installation
   removed, recreates no plugin table or live activation, preserves an empty
   object store, and forces the unfinished operation to `recovery_required`
@@ -52,16 +55,10 @@ Implemented and tested:
 
 Still required for H13 completion:
 
-- managed update A-to-B execution (the current generic update executor is
-  frontend-only; the execution and checkpoint gate is specified in
-  [155-managed-update-checkpoint-design.md](155-managed-update-checkpoint-design.md));
 - managed restore and reconciliation around stop/remove-code against a live
   runner;
-- reviewed managed namespace deletion after the retained state (frontend plugin
-  object data is already cleared at uninstall admission);
-- retained-data adoption is superseded for the owner-approved static object
-  store by clear-on-uninstall; managed namespace retention/deletion remains;
-- explicit `delete_data` review/consume path after uninstall;
+- reviewed `delete_data` review/consume entry point for legacy retained
+  namespaces and orphan cleanup; normal uninstall no longer leaves one;
 - full concurrent operator acceptance;
 - end-to-end lifecycle tests for every row above, including lost confirmations.
 

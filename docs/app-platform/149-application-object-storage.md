@@ -60,6 +60,13 @@ The table cannot survive as an orphan containing old payload. Reinstall starts
 with a new empty table. If another live installation of the same plugin exists,
 only the uninstalled installation's rows are removed.
 
+Managed backend apps apply the same clear-on-uninstall rule to their XFS data
+namespace. The managed removal sequence is
+`revoke -> stop -> remove_code -> remove_data -> complete`; completion requires a
+signed runner receipt showing the namespace and project quota are absent. A run
+that fails or loses the deletion acknowledgement remains denied and enters
+recovery review instead of being reported as removed.
+
 Account deletion removes only that account's rows from every registered plugin
 table and recomputes plugin and global counters before the user transaction
 commits.

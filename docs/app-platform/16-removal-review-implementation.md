@@ -6,6 +6,11 @@ It uses the approved control tables and protected metadata; there is no migratio
 or extra database. Dependencies are control storage #193, operation leases #194
 and the independently reviewed atomic keyring repair #195.
 
+Current owner decision supersedes the retained-data wording in this historical
+P03 slice: normal uninstall clears the dedicated plugin table and, for managed
+apps, the backend namespace and project quota. Data is retained only for legacy
+or recovery cases that require a separate reviewed `delete_data` operation.
+
 ## Internal entry points
 
 `app_platform_actor.go` supplies:
@@ -77,10 +82,11 @@ action, current and reserved generation, installation/policy/trust revisions,
 controller epoch, actor authority fingerprint, runtime identity/revision, active
 release digest, grant-set digest and owned data namespace/fence/revision.
 
-Disable explicitly preserves data; uninstall explicitly retains it. There is no
-delete-data mode, image, shell command, destination credential or new permission
-in this projection. The review lasts 15 minutes using database time. Its exact
-bytes and SHA-256 are persisted in the approved immutable review record.
+Disable explicitly preserves data; uninstall records an irreversible clear-data
+effect. There is no caller-selected delete-data mode, image, shell command,
+destination credential or new permission in this projection. The review lasts
+15 minutes using database time. Its exact bytes and SHA-256 are persisted in the
+approved immutable review record.
 
 At consumption the repository regenerates the entire current projection and
 compares its exact canonical bytes, SHA-256 and duplicated relational columns.
@@ -107,9 +113,10 @@ are intentionally not inferred from these cleanup fixtures or stored rows.
 5. Consume the plan and advance installation generation/revision/control fence.
    Persist disabled/removed intent and retire the old active routing row. Keep the
    operation queued; these database changes do not prove physical shutdown.
-6. Advance the owned namespace's logical writer fence/revision while retaining its
-   ownership and data. A counter cannot stop an already running filesystem writer;
-   real stop/reconciliation evidence is still mandatory before reuse or deletion.
+6. Advance the owned namespace's logical writer fence/revision and retain
+   ownership only until the deletion stage commits. A counter cannot stop an
+   already running filesystem writer; real stop and deletion receipts are still
+   mandatory before data or authority is released.
 7. Insert exactly one queued operation and its safe audit record in that transaction.
    Failure rolls back the consumed plan, denial state, routing and data fences.
 
@@ -199,7 +206,7 @@ green check nor a local result replaces this head's exact-source CI gate.
 - Install/update/enable/repair/restore/delete-data review and typed admission,
   including current publisher signature/compatibility/capability checks.
 - Conditional stage commits, external effect intent/reconciliation and the runner
-  journal; actual stop/remove evidence and retained-data finalization.
+  journal; actual stop/remove/delete evidence and recovery handling.
 - HTTP/session-proof construction, localized DTOs and error mappings, enrollment/
   CSRF enforcement, visibility and the production host shell.
 - Capability/broker/background/notification revocation and coordinated data/key

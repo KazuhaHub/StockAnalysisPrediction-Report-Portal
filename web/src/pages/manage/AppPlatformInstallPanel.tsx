@@ -43,7 +43,6 @@ type UninstallReview = {
   managed: boolean
   data_effect: string
   plugin_data_cleared: boolean
-  managed_data_retained: boolean
   managed_data_cleared: boolean
 }
 type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview }
@@ -272,7 +271,7 @@ export default function AppPlatformInstallPanel() {
         { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
         ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
         ...(uninstallReview ? [] : [{ key: 'permissions', label: t('appPlatform.permissions'), children: updateDiff ? t('appPlatform.permissionDiff', { added: updateDiff.added.length ? updateDiff.added.map(capabilityLabel).join('、') : t('appPlatform.none'), removed: updateDiff.removed.length ? updateDiff.removed.map(capabilityLabel).join('、') : t('appPlatform.none') }) : review.review.action === 'install' && review.review.declined_capabilities.length ? review.review.declined_capabilities.map(capabilityLabel).join('、') : t('appPlatform.noPermissions') }]),
-        { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : t('appPlatform.noData') },
+        { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : t('appPlatform.noData') },
       ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>}
     </Modal>
   </Space>

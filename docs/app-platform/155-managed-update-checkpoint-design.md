@@ -55,8 +55,9 @@ before those pieces are available.
 - `app_platform_recovery_sets` has closed states `preparing`, `verified`,
   `restoring`, `deleted` and `review_required`; checkpoint and restore
   producers/verifiers now use the first three.
-- The data adapter can checkpoint and restore the existing project-quota
-  namespace. Reviewed retained-namespace deletion remains outstanding.
+- The data adapter can checkpoint, restore and delete the existing project-quota
+  namespace. Managed uninstall now dispatches that deletion as `remove_data`
+  before it can complete.
 - Portal completion, runner journal completion, Docker state and XFS state do not
   share one transaction. Every boundary must be recoverable by exact identity.
 

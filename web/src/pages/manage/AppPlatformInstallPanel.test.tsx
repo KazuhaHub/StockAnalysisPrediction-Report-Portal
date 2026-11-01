@@ -56,7 +56,6 @@ const uninstallReview = () => ({
     managed: false,
     data_effect: 'delete',
     plugin_data_cleared: true,
-    managed_data_retained: false,
     managed_data_cleared: false,
   },
 })
