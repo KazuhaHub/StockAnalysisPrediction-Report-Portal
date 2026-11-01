@@ -1,7 +1,7 @@
 # Application lifecycle action matrix
 
-Status: H13 implementation checklist, 2026-10-31. This is not evidence that
-every row is implemented.
+Status: H13 implementation checklist, 2026-11-01. Managed restore now has native
+runner acceptance; rows without exact evidence remain open.
 
 | Action | Entry state and review | Immediate authority | Data/code effect | Failure/uncertain |
 | --- | --- | --- | --- | --- |
@@ -55,8 +55,6 @@ Implemented and tested:
 
 Still required for H13 completion:
 
-- managed restore and reconciliation around stop/remove-code against a live
-  runner;
 - reviewed `delete_data` review/consume entry point for legacy retained
   namespaces and orphan cleanup; normal uninstall no longer leaves one;
 - full concurrent operator acceptance;
