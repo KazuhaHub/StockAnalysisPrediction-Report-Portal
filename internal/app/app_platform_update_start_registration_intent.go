@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -101,7 +102,9 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	}
 	if fresh {
 		if !create || count != baseEffects || !freshPlatformUpdateRegistrationSourceAt(start, now) {
-			return zero, false, errAppPlatformStageEvidence
+			return zero, false, fmt.Errorf(
+				"update-start registration source window: %w",
+				errAppPlatformStageEvidence)
 		}
 		effect, err = platformNewUUID()
 		if err != nil {
@@ -114,7 +117,9 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 		created < start.activationObserved ||
 		updated < created || updated > now ||
 		(state != "prepared" && state != "applied") {
-		return zero, false, errAppPlatformStageEvidence
+		return zero, false, fmt.Errorf(
+			"update-start registration effect tuple: %w",
+			errAppPlatformStageEvidence)
 	}
 	registration, err := platformBackendRegistrationForRelease(
 		e, platformManagedSource{

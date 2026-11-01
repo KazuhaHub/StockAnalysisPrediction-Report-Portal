@@ -75,7 +75,9 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 	}
 	if _, err := control.VerifyUpdateStart(
 		start.raw, start.signature, start.authority, time.Now().UnixMilli()); err != nil {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start registration start signature: %w",
+			errAppPlatformStageEvidence)
 	}
 	intent, fresh, err := loadPlatformUpdateStartRegistration(
 		e, lease, start, runtime, seed, dek, facts.now, true)
@@ -122,7 +124,9 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 		return zero, errAppPlatformStageEvidence
 	}
 	if fresh && !freshPlatformUpdateRegistrationSourceAt(current, now) {
-		return zero, errAppPlatformStageEvidence
+		return zero, fmt.Errorf(
+			"update-start registration source freshness: %w",
+			errAppPlatformStageEvidence)
 	}
 	after, _, err := loadPlatformUpdateStartRegistration(
 		e, lease, start, runtime, seed, dek, now, false)
@@ -136,7 +140,8 @@ func (s *Server) preparePlatformUpdateStartRegistration(ctx context.Context, lea
 	if _, err := control.VerifyUpdateStartRegistration(
 		intent.raw, intent.signature, start.authority,
 		time.Now().UnixMilli()); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration signature: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
