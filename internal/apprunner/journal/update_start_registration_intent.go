@@ -229,7 +229,8 @@ func (s *Store) preflightUpdateStartRegistration(ctx context.Context, raw, signa
 	var zero updateStartRegistrationFacts
 	tx, before, err := beginUpdateStartRegistration(ctx, s, raw, signature, state)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration preflight begin: %w", err)
 	}
 	tx.Rollback()
 	if native == nil || len(descriptor) == 0 {
@@ -261,22 +262,29 @@ func (s *Store) preflightUpdateStartRegistration(ctx context.Context, raw, signa
 	}
 	post, after, err := beginUpdateStartRegistration(ctx, s, raw, signature, state)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration preflight recheck: %w", err)
 	}
 	defer post.Rollback()
 	if !sameUpdateStartRegistrationSource(before, after) ||
 		actual.ObservedMS < before.source.start.now ||
 		actual.ObservedMS > after.source.start.now {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"update-start registration preflight source changed: %w",
+			ErrFenceReconciliation)
 	}
 	if err := checkUpdateStartRegistrationCurrent(ctx, after); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration preflight current: %w", err)
 	}
 	if s.closing.Load() {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"update-start registration preflight closing: %w",
+			ErrFenceReconciliation)
 	}
 	if err := post.Commit(); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration preflight commit: %w", err)
 	}
 	return after, nil
 }
