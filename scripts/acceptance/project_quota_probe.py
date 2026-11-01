@@ -42,7 +42,7 @@ def require_disposable(args):
         raise RuntimeError("probe requires explicit disposable Linux root acceptance")
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted":
         raise RuntimeError("probe refuses hosts outside a disposable GitHub-hosted worker")
-    for tool in ("losetup", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "xfs_admin", "blkid", "setpriv", "python3"):
+    for tool in ("losetup", "blockdev", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "xfs_admin", "blkid", "setpriv", "python3"):
         if not shutil.which(tool, path=PATH):
             raise RuntimeError("missing explicit acceptance tool")
 
@@ -100,6 +100,8 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     require_loop_owner(loop, image)
     command("xfs_admin", "-U", "generate", loop)
     require_loop_owner(loop, image)
+    os.sync()
+    command("blockdev", "--flushbufs", loop)
     raw_uuid = command("xfs_admin", "-u", loop)
     match = re.search(r"UUID\s*=\s*([0-9a-fA-F-]{36})", raw_uuid)
     changed_uuid = match.group(1).lower() if match else ""
