@@ -343,6 +343,7 @@ func testNativeWritableManagedUpdateVersion(
 			ctx, probe); err != nil {
 			t.Fatal("managed update recovery", err)
 		}
+		assertNativePlatformGrant(t, s, installation, "failed update")
 		t.Log("MANAGED_UPDATE_FAILED_FOR_RESTORE")
 		return admitted.OperationID, release.sha256
 	}
@@ -439,6 +440,7 @@ func testNativeWritableManagedRestore(
 ) {
 	t.Helper()
 	ctx := context.Background()
+	assertNativePlatformGrant(t, s, installation, "restore start")
 	recoverySetID := scalar[string](t, s.st, `SELECT id
 		FROM app_platform_recovery_sets
 		WHERE operation_id=? AND state='verified'`, failedOperation)
@@ -551,6 +553,7 @@ func testNativeWritableManagedRestore(
 		logManagedUpdateState(t, s, commit.OperationID, installation)
 		t.Fatal("managed restore did not activate restored source")
 	}
+	assertNativePlatformGrant(t, s, installation, "restore complete")
 	if scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'
