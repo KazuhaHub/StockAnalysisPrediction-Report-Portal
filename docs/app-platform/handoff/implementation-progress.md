@@ -72,6 +72,16 @@ administrator-review explanation instead of displaying a raw key. Component
 tests cover repair recovery and paused `delete_data` progress. This is a
 truthfulness fix only; the full UX-01..10 visual and browser matrix remains open.
 
+Latest H14 My Apps evidence: v2 directory cards now distinguish pending,
+disabled and attention states with separate explanations instead of one generic
+"unavailable" label. Administrators get a direct management-page recovery link
+only when the app is not openable; ordinary readers receive the truthful state
+without installation IDs, counts or an administrative action. Tests cover all
+three non-openable states, reader/admin visibility, absence of leaked
+installation IDs/counts, and axe violations. This advances UX-10 but does not
+replace its full backend-stop, readiness-timeout and protocol-mismatch browser
+matrix.
+
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
 generation-2 start/probe/registration/boot/activation, current-generation

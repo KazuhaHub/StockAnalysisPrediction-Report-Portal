@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { Alert, Button, Card, Col, Empty, Row, Space, Tag, Typography, theme } from 'antd'
-import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router'
+import { AppstoreOutlined, ClockCircleOutlined, PlayCircleOutlined, SettingOutlined } from '@ant-design/icons'
+import { Link, useNavigate } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../api/client'
 import { usePrefs } from '../prefs'
@@ -25,11 +25,11 @@ const BUILTIN_ICONS: Record<string, ReactNode> = {
   recurring: <ClockCircleOutlined />,
 }
 
-function AppCard({ icon, title, desc, tag, onClick, disabled = false }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void; disabled?: boolean }) {
+function AppCard({ icon, title, desc, tag, onClick, disabled = false, status, footer }: { icon: ReactNode; title: string; desc?: string; tag?: string; onClick: () => void; disabled?: boolean; status?: string; footer?: ReactNode }) {
   const { token } = theme.useToken()
   return (
     <Col xs={24} sm={12} lg={8}>
-      <Card hoverable={!disabled} {...(disabled ? { role: 'button', tabIndex: 0, 'aria-disabled': true, 'aria-label': title } : clickable(onClick, title))} style={{ height: '100%', opacity: disabled ? 0.65 : 1 }}>
+      <Card hoverable={!disabled} {...(!disabled ? clickable(onClick, title) : { 'aria-disabled': true })} style={{ height: '100%', opacity: disabled ? 0.8 : 1 }}>
         <Space align="start" size={16}>
           <span style={{ fontSize: 28, color: token.colorPrimary, lineHeight: 1 }}>{icon}</span>
           <div>
@@ -44,6 +44,8 @@ function AppCard({ icon, title, desc, tag, onClick, disabled = false }: { icon: 
                 {desc}
               </Typography.Paragraph>
             )}
+            {status && <Typography.Paragraph type="secondary" style={{ margin: '8px 0 0' }}>{status}</Typography.Paragraph>}
+            {footer && <div style={{ marginTop: 8 }}>{footer}</div>}
           </div>
         </Space>
       </Card>
@@ -58,7 +60,7 @@ const registryKeys = () => BUILTIN_APPS.map((a) => BUILTIN_PIN_PREFIX + a.key)
 export default function AppsHub() {
   const { t } = useTranslation()
   const { failure, catchLoad, retryKey } = useLoadFailure()
-  const { can, user } = useAuth()
+  const { admin, can, user } = useAuth()
   const { lang } = usePrefs()
   const directory = useAppDirectory(user)
   const navigate = useNavigate()
@@ -149,6 +151,10 @@ export default function AppsHub() {
             return (
             <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
               tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
+              status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
+              footer={admin && !a.openable
+                ? <Link to="/manage/apps"><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>
+                : undefined}
               onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
             )
           })}
