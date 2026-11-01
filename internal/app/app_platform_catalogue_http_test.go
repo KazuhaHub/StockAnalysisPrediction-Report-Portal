@@ -100,6 +100,36 @@ func TestPlatformStagedCatalogueAdvertisesReviewedUpdateCandidate(t *testing.T) 
 	}
 }
 
+func TestPlatformStagedCatalogueAdvertisesDisabledFrontendAsEnableable(t *testing.T) {
+	s, actor, _, installation := platformFrontendDisabledFixture(t, false)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(
+		*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	got := sessionTestRequest(
+		mux, "GET", "/api/admin/app-platform/releases", cookie, "")
+	var page struct {
+		Items []platformStagedSummary `json:"items"`
+	}
+	if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &page) != nil {
+		t.Fatal("release catalogue", got.Code, got.Body.String())
+	}
+	enableSeen := false
+	for _, item := range page.Items {
+		if item.InstallationID != installation {
+			continue
+		}
+		if !item.Enableable || item.Installed || item.Updateable ||
+			item.Installable || len(item.CurrentReleaseSHA256) != 64 {
+			t.Fatal("disabled release not advertised for enable", item)
+		}
+		enableSeen = true
+	}
+	if !enableSeen {
+		t.Fatal("disabled installation missing from catalogue")
+	}
+}
+
 func TestPlatformSubjectDirectoryPaginationSQLite(t *testing.T) {
 	s, mux, _, _, cookie := platformManagementFixture(t, false)
 	for i := 0; i < 35; i++ {

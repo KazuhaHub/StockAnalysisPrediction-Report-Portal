@@ -185,6 +185,61 @@ func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
 	}
 }
 
+func TestPlatformManagementEnableHTTPRestoresDisabledFrontend(t *testing.T) {
+	s, admin, reader, installation := platformFrontendDisabledFixture(t, false)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(admin.username),
+		admin.sessionID, admin.expires.Unix())
+	body := fmt.Sprintf(`{"action":"enable","installation_id":%q}`,
+		installation)
+	plan := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if plan.Code != 200 ||
+		!strings.Contains(plan.Body.String(), `"action":"enable"`) ||
+		!strings.Contains(plan.Body.String(), `"data_effect":"preserve"`) ||
+		strings.Contains(plan.Body.String(), "actor_authority") {
+		t.Fatal("enable review", plan.Code, plan.Body.String())
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil ||
+		!platformValidUUID(review.ID) || !platformValidSHA(review.SHA) {
+		t.Fatal("invalid enable review", plan.Body.String(), err)
+	}
+	commitBody := fmt.Sprintf(
+		`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`,
+		review.ID, review.SHA, platformFixtureID(1296))
+	commit := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/operations", cookie, commitBody)
+	if commit.Code != 202 ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`, installation) != "enabled:pending" {
+		t.Fatal("enable commit", commit.Code, commit.Body.String())
+	}
+	var admitted struct {
+		ID string `json:"operation_id"`
+	}
+	if err := json.Unmarshal(commit.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	platformStartFrontendService(t, s)
+	platformAwaitFrontendService(t, s, "complete")
+	progress := sessionTestRequest(
+		mux, "GET", "/api/admin/app-platform/operations/"+admitted.ID,
+		cookie, "")
+	if progress.Code != 200 ||
+		!strings.Contains(progress.Body.String(), `"action":"enable"`) ||
+		!strings.Contains(progress.Body.String(), `"stage":"complete"`) {
+		t.Fatal("enable progress", progress.Code, progress.Body.String())
+	}
+	if _, err := s.inspectPlatformLaunchAccess(reader, installation); err != nil {
+		t.Fatal("HTTP-enabled app is not launchable", err)
+	}
+}
+
 func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
 	s, admin, lease := platformManagedAccessFixture(t, false)
 	installation := lease.installationID

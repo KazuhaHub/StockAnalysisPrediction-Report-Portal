@@ -33,6 +33,7 @@ type platformStagedSummary struct {
 	InstallationID       string                    `json:"installation_id,omitempty"`
 	CurrentReleaseSHA256 string                    `json:"current_release_sha256,omitempty"`
 	Updateable           bool                      `json:"updateable,omitempty"`
+	Enableable           bool                      `json:"enableable,omitempty"`
 	Installed            bool                      `json:"installed,omitempty"`
 }
 
@@ -152,6 +153,33 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 				if err != nil && !errors.Is(err, sql.ErrNoRows) {
 					return err
 				}
+				if errors.Is(err, sql.ErrNoRows) {
+					err = e.queryRow(`SELECT i.id,a.release_sha256,i.generation,
+						i.revision,i.policy_revision,a.data_format
+						FROM app_platform_installations i
+						JOIN app_platform_activations a
+						  ON a.installation_id=i.id AND a.state='retired'
+						 AND a.generation=(
+						   SELECT MAX(generation)
+						   FROM app_platform_activations
+						   WHERE installation_id=i.id AND state='retired'
+						 )
+						WHERE i.app_id=? AND i.publisher_id=?
+						  AND i.desired_state='disabled' AND i.phase='disabled'
+						  AND i.runtime_id IS NULL
+						  AND NOT EXISTS(
+						    SELECT 1 FROM app_platform_data_namespaces d
+						    WHERE d.origin_installation_id=i.id
+						       OR d.owner_installation_id=i.id
+						  )
+						ORDER BY i.updated_ms DESC,i.id LIMIT 1`,
+						record.app, record.publisher).
+						Scan(&item.InstallationID, &current, &generation,
+							&revision, &policy, &currentFormat)
+					if err != nil && !errors.Is(err, sql.ErrNoRows) {
+						return err
+					}
+				}
 				if err == nil {
 					if currentFormat == 0 {
 						var sourceDescriptor []byte
@@ -166,7 +194,19 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 					}
 					item.CurrentReleaseSHA256 = current
 					if current == record.release {
-						item.Installed = true
+						if generation > 0 {
+							var desired, phase string
+							if err := e.queryRow(`SELECT desired_state,phase
+								FROM app_platform_installations WHERE id=?`,
+								item.InstallationID).Scan(&desired, &phase); err != nil {
+								return err
+							}
+							if desired == "disabled" && phase == "disabled" {
+								item.Enableable = true
+							} else {
+								item.Installed = true
+							}
+						}
 					} else {
 						target := platformStagedIdentity(verified)
 						if _, projectionErr := platformBuildUpdateProjection(e, item.InstallationID, current, generation, revision, policy, currentFormat, facts, final, target); projectionErr == nil {

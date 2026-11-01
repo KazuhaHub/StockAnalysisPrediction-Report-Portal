@@ -212,7 +212,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-	} else if action != "uninstall" {
+	} else if action != "uninstall" && action != "enable" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -314,6 +314,41 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
 			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": false, "managed_data_cleared": projection.Managed && projection.Data != nil,
 		}})
+	case "enable":
+		if len(fields) != 2 || fields["installation_id"] == nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		if installationErr != nil || !platformValidUUID(installation) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformFrontendEnableReviewContext(
+			r.Context(), actor, installation)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var projection platformFrontendEnablePlan
+		if err := json.Unmarshal([]byte(review.JSON), &projection); err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"plan_id": review.ID, "plan_sha256": review.SHA256,
+			"expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+			"review": map[string]any{
+				"action": "enable", "installation_id": projection.InstallationID,
+				"app_id": projection.AppID, "publisher_id": projection.PublisherID,
+				"release_sha256":    projection.SourceReleaseSHA256,
+				"source_generation": strconv.FormatInt(projection.SourceGeneration, 10),
+				"target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
+				"policy_revision":   strconv.FormatInt(projection.TargetPolicyRevision, 10),
+				"grants_sha256":     projection.GrantsSHA256,
+				"data_effect":       projection.DataEffect,
+			},
+		})
 	default:
 		platformManagementError(w, errPlatformManagementInput)
 	}
@@ -356,6 +391,9 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 			r.Context(), actor, id, sha, key)
 	case "uninstall":
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
+	case "enable":
+		result, err = s.consumePlatformFrontendEnableReviewContext(
+			r.Context(), actor, id, sha, key)
 	default:
 		err = errAppPlatformPlanChanged
 	}

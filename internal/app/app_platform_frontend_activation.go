@@ -125,7 +125,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	if unsafe != 0 {
 		return fail
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND managed=0 AND stage='complete' AND completed_ms=? AND controller_epoch=? AND lease_owner IS NULL AND lease_until_ms IS NULL AND ((action='install' AND source_generation=0 AND target_generation=?) OR (action='update' AND source_generation=? AND target_generation=?))`, installation, observed, epoch, generation, generation-1, generation).Scan(&count); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND managed=0 AND stage='complete' AND completed_ms=? AND controller_epoch=? AND lease_owner IS NULL AND lease_until_ms IS NULL AND ((action='install' AND source_generation=0 AND target_generation=?) OR ((action='update' OR action='enable') AND source_generation=? AND target_generation=?))`, installation, observed, epoch, generation, generation-1, generation).Scan(&count); err != nil {
 		return err
 	}
 	if count != 1 {
@@ -133,7 +133,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	}
 	var plan, digest, request, planID, action, source, target string
 	var consumed, completed int64
-	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.request_sha256,p.id,o.action,COALESCE(p.source_release_sha256,''),p.target_release_sha256,p.consumed_ms,o.completed_ms FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.installation_id=? AND o.managed=0 AND o.stage='complete' AND o.completed_ms=? AND o.controller_epoch=? AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND p.action=o.action AND ((o.action='install' AND o.source_generation=0 AND o.target_generation=?) OR (o.action='update' AND o.source_generation=? AND o.target_generation=?))`, installation, observed, epoch, generation, generation-1, generation).Scan(&plan, &digest, &request, &planID, &action, &source, &target, &consumed, &completed); err != nil {
+	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.request_sha256,p.id,o.action,COALESCE(p.source_release_sha256,''),p.target_release_sha256,p.consumed_ms,o.completed_ms FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.installation_id=? AND o.managed=0 AND o.stage='complete' AND o.completed_ms=? AND o.controller_epoch=? AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND p.action=o.action AND ((o.action='install' AND o.source_generation=0 AND o.target_generation=?) OR ((o.action='update' OR o.action='enable') AND o.source_generation=? AND o.target_generation=?))`, installation, observed, epoch, generation, generation-1, generation).Scan(&plan, &digest, &request, &planID, &action, &source, &target, &consumed, &completed); err != nil {
 		return fail
 	}
 	if len(plan) > 65536 || !platformValidSHA(digest) || digest != proof.ReviewSHA || target != release || consumed < 0 || completed < consumed {
@@ -152,6 +152,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	}
 	var encoded []byte
 	var actualDeclined []byte
+	var enableAudienceSHA, enableGrantsSHA string
 	switch action {
 	case "install":
 		if generation != 1 || policy != 1 {
@@ -179,15 +180,60 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		if p.InstallationID != installation || p.InstallationRevision < 1 || p.PolicyRevision < 1 || p.TargetPolicyRevision != policy || p.SourceReleaseSHA256 != source || p.SourceGeneration != generation-1 || p.TargetGeneration != generation || p.CurrentDataFormat != int64(manifest.Data.Schema) || p.Target.Format != platformFrontendInstallFormat || p.Target.ReleaseSHA256 != release || p.Target.DataQuotaBytes != quota || p.Target.ControllerEpoch != epoch || p.Target.PlatformAPI != platformDevelopmentAPI || p.AppID != manifest.ID || p.PublisherID != manifest.Publisher || p.Target.AppID != manifest.ID || p.Target.PublisherID != manifest.Publisher || !platformValidSHA(p.GrantsSHA256) {
 			return fail
 		}
+	case "enable":
+		if generation < 2 || source == "" || source != release {
+			return fail
+		}
+		var p platformFrontendEnablePlan
+		if json.Unmarshal([]byte(plan), &p) != nil ||
+			p.Format != platformFrontendEnableFormat {
+			return fail
+		}
+		encoded, _ = json.Marshal(p)
+		if p.InstallationID != installation ||
+			p.AppID != manifest.ID || p.PublisherID != manifest.Publisher ||
+			p.Action != appplatform.ActionEnable ||
+			p.SourceReleaseSHA256 != source ||
+			p.SourceGeneration != generation-1 ||
+			p.TargetGeneration != generation ||
+			p.SourceActivationGeneration < 1 ||
+			p.SourceActivationGeneration >= p.SourceGeneration ||
+			p.SourcePolicyRevision != policy ||
+			p.TargetPolicyRevision != policy ||
+			p.ControllerEpoch != epoch ||
+			p.DeclaredDataSchema != int64(manifest.Data.Schema) ||
+			p.FrontendSHA256 != manifest.Frontend.SHA256 ||
+			p.SourceDesiredState != "disabled" ||
+			p.SourcePhase != "disabled" ||
+			p.TargetDesiredState != "enabled" ||
+			p.TargetPhase != "pending" ||
+			p.SourceRuntimeRequired ||
+			p.DataEffect != "preserve" ||
+			!platformValidSHA(p.GrantsSHA256) ||
+			!platformValidSHA(p.DocumentSHA256) ||
+			!platformValidSHA(p.AudienceSHA256) {
+			return fail
+		}
+		enableAudienceSHA, enableGrantsSHA =
+			p.AudienceSHA256, p.GrantsSHA256
 	default:
 		return fail
 	}
-	if string(encoded) != plan || string(actualDeclined) != string(expectedDeclined) {
+	if string(encoded) != plan ||
+		(action != "enable" &&
+			string(actualDeclined) != string(expectedDeclined)) {
 		return fail
 	}
 	audienceSHA, err := platformInstallationAudienceSHA(e, installation)
 	if err != nil || audienceSHA != proof.AudienceSHA {
 		return fail
+	}
+	if action == "enable" {
+		grantsSHA, err := platformRemovalGrantsDigest(e, installation)
+		if err != nil || grantsSHA != enableGrantsSHA ||
+			audienceSHA != enableAudienceSHA {
+			return fail
+		}
 	}
 	var archive []byte
 	if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, manifest.Frontend.SHA256).Scan(&archive); err != nil {

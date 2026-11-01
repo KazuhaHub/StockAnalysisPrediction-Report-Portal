@@ -45,7 +45,19 @@ type UninstallReview = {
   plugin_data_cleared: boolean
   managed_data_cleared: boolean
 }
-type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview }
+type EnableReview = {
+  action: 'enable'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  release_sha256: string
+  source_generation: string
+  target_generation: string
+  policy_revision: string
+  grants_sha256: string
+  data_effect: string
+}
+type Review = { plan_id: string; plan_sha256: string; expires_ms: string; review: InstallReview | UpdateReview | UninstallReview | EnableReview }
 type Progress = { operation_id: string; installation_id: string; stage: string; terminal: boolean; control_paused: boolean; error_code?: string }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const sha = /^[0-9a-f]{64}$/
@@ -179,7 +191,7 @@ export default function AppPlatformInstallPanel() {
     finally { if (live(account, epoch)) { writing.current = false; setBusy(false) } }
   }
 
-  const preview = async (release: Release, action: 'install' | 'update' | 'uninstall') => {
+  const preview = async (release: Release, action: 'install' | 'update' | 'enable' | 'uninstall') => {
     if (writing.current || marketBusy || intent) return
     if (action !== 'install' && !release.installation_id) return
     reviewTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
@@ -189,6 +201,8 @@ export default function AppPlatformInstallPanel() {
     const audience: Audience[] = closed ? [] : selected.map(value => value.startsWith('user:') ? { type: 'user', username: value.slice(5) } : { type: 'ou', group_id: value.slice(3) })
     try {
       const body = action === 'uninstall'
+        ? { action, installation_id: release.installation_id }
+        : action === 'enable'
         ? { action, installation_id: release.installation_id }
         : action === 'update'
         ? { action, release_sha256: release.release_sha256, trust_revision: release.trust_revision, installation_id: release.installation_id }
@@ -236,6 +250,7 @@ export default function AppPlatformInstallPanel() {
   const audienceLabel = (target: Audience) => target.type === 'user' ? `${t('appPlatform.user')}: ${target.username}` : `${t('appPlatform.ou')}: ${groups.find(g => g.id === target.group_id)?.name ?? target.group_id}`
   const capabilityLabel = (capability: string) => t(`appPlatform.capability.${capability}`, { defaultValue: capability })
   const updateReview = review?.review.action === 'update' ? review.review : null
+  const enableReview = review?.review.action === 'enable' ? review.review : null
   const uninstallReview = review?.review.action === 'uninstall' ? review.review : null
   const updateDiff = updateReview ? {
     added: updateReview.target_capabilities.filter(capability => !updateReview.previous_capabilities.includes(capability)),
@@ -251,6 +266,20 @@ export default function AppPlatformInstallPanel() {
     pids: reviewRelease.resources.pids,
   }) : reviewRelease ? t('appPlatform.frontendOnly') : '—'
   const declined = review?.review.action === 'install' ? review.review.declined_capabilities : review?.review.action === 'update' ? review.review.declined_capabilities : []
+  const lifecycleTitle = review?.review.action === 'update'
+    ? 'appPlatform.confirmUpdateTitle'
+    : review?.review.action === 'uninstall'
+    ? 'appPlatform.confirmUninstallTitle'
+    : review?.review.action === 'enable'
+    ? 'appPlatform.confirmEnableTitle'
+    : 'appPlatform.confirmTitle'
+  const lifecycleOK = review?.review.action === 'update'
+    ? 'appPlatform.confirmUpdate'
+    : review?.review.action === 'uninstall'
+    ? 'appPlatform.confirmUninstall'
+    : review?.review.action === 'enable'
+    ? 'appPlatform.confirmEnable'
+    : 'appPlatform.confirm'
   return <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
     <Alert type="info" showIcon title={t('appPlatform.development')} description={t('appPlatform.installPreview')} />
     <AppPlatformMarketPanel disabled={busy || !!intent || !!review || loading} onReady={setMarketRelease} onBusyChange={setMarketBusy} />
@@ -270,26 +299,26 @@ export default function AppPlatformInstallPanel() {
     <Space>{userCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('user')}>{t('appPlatform.moreUsers')}</Button>}{groupCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('ou')}>{t('appPlatform.moreGroups')}</Button>}</Space>
     <Table<Release> rowKey="release_sha256" loading={loading} dataSource={marketRelease ? [marketRelease, ...releases.filter(r => r.release_sha256 !== marketRelease.release_sha256)] : releases} pagination={false} locale={{ emptyText: <Empty description={loadError ? t('appPlatform.loadFailed') : t('appPlatform.noReleases')} /> }} columns={[
       { title: t('appPlatform.application'), render: (_, r) => { const copy = appDisplayText(r.app_id, r.display, lang); return <><Typography.Text strong>{copy.name}</Typography.Text><div>{copy.description}</div><Typography.Text type="secondary">{r.publisher_id} · {r.version}</Typography.Text></> } },
-      { title: t('appPlatform.action'), render: (_, r) => r.installed ? <Button danger disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'uninstall')}>{t('appPlatform.reviewUninstall')}</Button> : r.installable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r, 'install')}>{t('appPlatform.review')}</Button> : r.updateable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'update')}>{t('appPlatform.reviewUpdate')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
+      { title: t('appPlatform.action'), render: (_, r) => r.installed ? <Button danger disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'uninstall')}>{t('appPlatform.reviewUninstall')}</Button> : r.enableable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'enable')}>{t('appPlatform.reviewEnable')}</Button> : r.installable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError || (!closed && selected.length === 0)} onClick={() => void preview(r, 'install')}>{t('appPlatform.review')}</Button> : r.updateable ? <Button disabled={loading || busy || marketBusy || !!intent || !!loadError} onClick={() => void preview(r, 'update')}>{t('appPlatform.reviewUpdate')}</Button> : <Tag>{t(`appPlatform.reason.${r.reason}`)}</Tag> },
     ]} />
     {releaseCursor && <Button disabled={busy || marketBusy || loading || !!loadError} onClick={() => void loadMore('release')}>{t('appPlatform.moreReleases')}</Button>}
-    <Modal open={!!review && !intent} title={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdateTitle' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstallTitle' : 'appPlatform.confirmTitle')} confirmLoading={busy} okText={t(review?.review.action === 'update' ? 'appPlatform.confirmUpdate' : review?.review.action === 'uninstall' ? 'appPlatform.confirmUninstall' : 'appPlatform.confirm')} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
+    <Modal open={!!review && !intent} title={t(lifecycleTitle)} confirmLoading={busy} okText={t(lifecycleOK)} cancelText={t('appPlatform.cancel')} okButtonProps={{ danger: review?.review.action === 'uninstall', disabled: expired }} cancelButtonProps={{ disabled: busy }} mask={{ closable: false }} closable={!busy} onCancel={() => { if (!busy) setReview(null) }} onOk={() => void confirm()}>
       {review && <div ref={reviewFocus} role="document" tabIndex={-1}><Space orientation="vertical" style={{ width: '100%' }}><Descriptions column={1} items={[
-        { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : 'appPlatform.install') },
+        { key: 'action', label: t('appPlatform.action'), children: t(review.review.action === 'update' ? 'appPlatform.update' : review.review.action === 'uninstall' ? 'appPlatform.uninstall' : review.review.action === 'enable' ? 'appPlatform.enable' : 'appPlatform.install') },
         { key: 'app', label: t('appPlatform.application'), children: `${appDisplayText(review.review.app_id, reviewRelease?.display, lang).name} · ${reviewRelease?.version ?? ''}` },
         { key: 'publisher', label: t('appPlatform.publisher'), children: review.review.publisher_id },
         { key: 'release', label: t('appPlatform.releaseDigest'), children: <Typography.Text code copyable style={{ wordBreak: 'break-all' }}>{review.review.release_sha256}</Typography.Text> },
         { key: 'compatibility', label: t('appPlatform.compatibility'), children: compatibility },
         { key: 'resources', label: t('appPlatform.resources'), children: resources },
-        ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
+        ...(review.review.action === 'install' ? [{ key: 'audience', label: t('appPlatform.audience'), children: review.review.audience.length ? review.review.audience.map(audienceLabel).join('、') : t('appPlatform.noAudience') }] : review.review.action === 'update' || review.review.action === 'enable' ? [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.source_generation} → ${review.review.target_generation}` }] : [{ key: 'generation', label: t('appPlatform.generation'), children: `${review.review.generation} → ${review.review.target_generation}` }]),
         ...(uninstallReview ? [] : [
           { key: 'requiredPermissions', label: t('appPlatform.requiredPermissions'), children: permissionList(reviewRelease?.required_capabilities) },
           { key: 'optionalPermissions', label: t('appPlatform.optionalPermissions'), children: permissionList(reviewRelease?.optional_capabilities) },
           ...(declined.length ? [{ key: 'declinedPermissions', label: t('appPlatform.declinedPermissions'), children: permissionList(declined) }] : []),
           ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
         ]),
-        { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : t('appPlatform.noData') },
-      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>}
+        { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : t('appPlatform.noData') },
+      ]} /><Alert type={expired ? 'warning' : 'info'} title={t(expired ? 'err.app_platform_plan_expired' : uninstallReview ? 'appPlatform.uninstallConfirmHint' : review.review.action === 'update' ? 'appPlatform.updateConfirmHint' : enableReview ? 'appPlatform.enableConfirmHint' : 'appPlatform.confirmHint')} /></Space></div>}
     </Modal>
   </Space>
 }

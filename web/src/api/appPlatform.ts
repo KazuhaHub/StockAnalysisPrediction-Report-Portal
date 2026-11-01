@@ -26,6 +26,7 @@ export interface PlatformRelease {
   installation_id?: string
   current_release_sha256?: string
   updateable?: boolean
+  enableable?: boolean
   installed?: boolean
 }
 

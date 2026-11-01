@@ -59,6 +59,23 @@ const uninstallReview = () => ({
     managed_data_cleared: false,
   },
 })
+const enableReview = () => ({
+  plan_id: plan,
+  plan_sha256: digest,
+  expires_ms: String(Date.now() + 900000),
+  review: {
+    action: 'enable',
+    installation_id: operation,
+    app_id: 'notes',
+    publisher_id: 'publisher',
+    release_sha256: release,
+    source_generation: '2',
+    target_generation: '3',
+    policy_revision: '1',
+    grants_sha256: digest,
+    data_effect: 'preserve',
+  },
+})
 function mount(path = '/manage/apps') { return render(<MemoryRouter initialEntries={[path]}><AppPlatformInstallPanel /></MemoryRouter>) }
 async function preview() {
   const user = userEvent.setup()
@@ -170,6 +187,31 @@ describe('application installation confirmation', () => {
     await screen.findByText('appPlatform.permissionDiff')
     expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'update', release_sha256: release, trust_revision: '1', installation_id: operation })
     await user.click(screen.getByRole('button', { name: 'appPlatform.confirmUpdate' }))
+    await screen.findByRole('link', { name: 'appPlatform.goApps' })
+    expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(1)
+  })
+
+  it('reviews a disabled app enable without changing release or permissions', async () => {
+    const disabledRelease = {
+      release_sha256: release,
+      app_id: 'notes',
+      publisher_id: 'publisher',
+      version: '1.0.0',
+      trust_revision: '1',
+      installable: false,
+      reason: 'already_installed',
+      installation_id: operation,
+      current_release_sha256: release,
+      enableable: true,
+    }
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [disabledRelease], next_cursor: '' } : url.includes('/operations/') ? { operation_id: operation, installation_id: operation, stage: 'complete', terminal: true, control_paused: false } : { items: [], next_cursor: '' }))
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? enableReview() : { operation_id: operation }))
+    mount()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewEnable' }))
+    expect(await screen.findByText('appPlatform.enableConfirmHint')).toBeTruthy()
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'enable', installation_id: operation })
+    await user.click(screen.getByRole('button', { name: 'appPlatform.confirmEnable' }))
     await screen.findByRole('link', { name: 'appPlatform.goApps' })
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(1)
   })

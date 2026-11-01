@@ -100,6 +100,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				selected, err = w.server.claimNextPlatformFrontendUpdate(ctx, w.worker)
 			}
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendEnable(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformFrontendUninstall(ctx, w.worker)
 			}
 		} else {
@@ -159,6 +162,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
 	} else if w.writable {
 		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
+	} else if w.active.snapshot.Action == appplatform.ActionEnable {
+		result.lease, err = w.server.runPlatformFrontendEnable(ctx, w.active)
 	} else if w.active.snapshot.Action == appplatform.ActionDisable {
 		result.lease, err = w.server.runPlatformFrontendDisable(ctx, w.active)
 	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
@@ -200,6 +205,9 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	finish := w.server.finishPlatformInstallForReview
 	if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		!w.active.snapshot.Managed {
+		finish = w.server.finishPlatformFrontendEnableForReview
 	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
 		w.active.snapshot.Managed {
 		finish = w.server.finishPlatformManagedRestoreForReview
