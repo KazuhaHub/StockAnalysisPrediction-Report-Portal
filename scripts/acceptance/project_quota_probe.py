@@ -137,7 +137,17 @@ def replace_owned_uuid(mountpoint, loop, image, previous_uuid=None):
     uuid_output = command_text(
         "xfs_admin", "-U", replacement_uuid, loop)
     if "valuable metadata changes in a log" in uuid_output:
-        command("xfs_repair", "-L", loop)
+        try:
+            command("xfs_repair", "-L", loop)
+        except ProbeCommandError as error:
+            if error.code != 1 or "Device or resource busy" not in str(error):
+                raise
+            require_loop_owner(loop, image)
+            command("xfs_repair", "-L", "-f", str(image))
+            os.sync()
+            command("blockdev", "--flushbufs", loop)
+            with open("/proc/sys/vm/drop_caches", "w", encoding="ascii") as cache:
+                cache.write("3\n")
         require_loop_owner(loop, image)
         uuid_output = command_text(
             "xfs_admin", "-U", replacement_uuid, loop)
