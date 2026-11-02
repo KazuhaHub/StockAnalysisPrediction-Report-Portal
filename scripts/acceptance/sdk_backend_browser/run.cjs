@@ -13,6 +13,36 @@ async function main(){
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
+  stage='theme-refresh';
+  let delayedThemeAssets=0;
+  await page.route('**/app-documents/**',async route=>{
+   delayedThemeAssets++;
+   await new Promise(resolve=>setTimeout(resolve,900));
+   await route.continue().catch(()=>{});
+  });
+  async function themeRefresh(mode){
+   const expected=mode==='dark'?'rgb(0, 0, 0)':'rgb(245, 245, 245)';
+   await page.evaluate(theme=>localStorage.setItem('sdk-fixture-theme',theme),mode);
+   await page.reload({waitUntil:'domcontentloaded'});
+   await page.locator('.portal-app-frame-v2-cover').waitFor();
+   for(let sample=0;sample<18;sample++){
+    const colors=await page.evaluate(()=>{
+     const host=document.querySelector('[data-testid="host-surface"]');
+     const cover=document.querySelector('.portal-app-frame-v2-cover');
+     const iframe=document.querySelector('iframe');
+     return {host:host&&getComputedStyle(host).backgroundColor,cover:cover?.parentElement&&getComputedStyle(cover.parentElement).backgroundColor,frame:iframe&&getComputedStyle(iframe).backgroundColor,scheme:iframe?.style.colorScheme};
+    });
+    if(colors.host!==expected||colors.cover!==expected||colors.frame!==expected||colors.scheme!==mode)throw new Error(mode+' loading frame did not retain its initial tokens: '+JSON.stringify(colors));
+    await page.waitForTimeout(40);
+   }
+   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
+   await frame.getByTestId('dark').filter({hasText:String(mode==='dark')}).waitFor();
+   const bodyColors=await frame.locator('body').evaluate(element=>({background:getComputedStyle(element).backgroundColor,colorScheme:document.documentElement.style.colorScheme}));
+   if(bodyColors.background!==expected||bodyColors.colorScheme!==mode)throw new Error(mode+' SDK committed mismatched initial tokens: '+JSON.stringify(bodyColors));
+  }
+  for(const mode of ['dark','light','dark','light','dark'])await themeRefresh(mode);
+  if(delayedThemeAssets<5)throw new Error('theme refresh did not delay the application document');
+  await page.unroute('**/app-documents/**');
   let issued=0;
   async function dispatch(name){
    await frame.getByRole('button',{name,exact:true}).click();
@@ -222,6 +252,7 @@ async function main(){
   if(await page.locator('iframe').count()!==0)throw new Error('retired app remained mounted');
   await context.close();
   console.log('SDK_NATIVE_BROWSER_CURRENT_VIEWER');
+  console.log('SDK_NATIVE_BROWSER_THEME_REFRESH');
   console.log('SDK_NATIVE_BROWSER_DOCUMENT_LAYOUT');
   console.log('SDK_NATIVE_BROWSER_VIEWPORT_EDITOR');
   console.log('SDK_NATIVE_BROWSER_KEYBOARD_FORM_DIALOG');

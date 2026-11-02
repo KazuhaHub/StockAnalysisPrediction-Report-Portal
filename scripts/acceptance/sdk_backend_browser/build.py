@@ -126,14 +126,15 @@ import AppFrameV2 from ''' + json.dumps(str(PORTAL / "web/src/components/apps/Ap
 import AppPageHeader from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppPageHeader.tsx")) + ''';
 import {createBrowserRouter,RouterProvider,Link,useLocation,useNavigate} from 'react-router';
 import {AppDraftPrompt,useAppDraftBlocker} from ''' + json.dumps(str(PORTAL / "web/src/components/apps/AppDraftGuard.tsx")) + ''';
-const initial={locale:'zh-CN',timeZone:'UTC',layout:'document',theme:{dark:true,colorPrimary:'#1677ff',colorBg:'#141414',colorText:'#ffffff',colorBorder:'#424242',colorBgLayout:'#000000',borderRadius:8}};
-function Fixture(){const location=useLocation(),navigate=useNavigate();const [dirty,setDirty]=useState(false);const blocker=useAppDraftBlocker(dirty);const [launch,setLaunch]=useState<any>(null),[status,setStatus]=useState('loading'),[presentation,setPresentation]=useState<any>(initial),[page,setPage]=useState<any>(null);
+const fixtureThemes={dark:{dark:true,colorPrimary:'#1677ff',colorBg:'#141414',colorText:'#ffffff',colorBorder:'#424242',colorBgLayout:'#000000',borderRadius:8},light:{dark:false,colorPrimary:'#1677ff',colorBg:'#ffffff',colorText:'#000000',colorBorder:'#d9d9d9',colorBgLayout:'#f5f5f5',borderRadius:8}};
+function initialPresentation(){const dark=localStorage.getItem('sdk-fixture-theme')!=='light';return {locale:'zh-CN',timeZone:'UTC',layout:'document',theme:dark?fixtureThemes.dark:fixtureThemes.light}}
+function Fixture(){const location=useLocation(),navigate=useNavigate();const [dirty,setDirty]=useState(false);const blocker=useAppDraftBlocker(dirty);const [launch,setLaunch]=useState<any>(null),[status,setStatus]=useState('loading'),[presentation,setPresentation]=useState<any>(()=>initialPresentation()),[page,setPage]=useState<any>(null);
  const framePresentation=useMemo(()=>launch?{...presentation,layout:launch.routes.find(route=>route.path===location.pathname).layout,navigation:{path:location.pathname,search:location.search,routes:launch.routes}}:null,[launch,presentation,location.pathname,location.search]);
  useEffect(()=>{fetch('/__sdk_fixture/info').then(r=>r.json()).then(info=>fetch(info.launch)).then(async r=>{setStatus('launch:'+r.status);if(r.ok)setLaunch(await r.json())})},[]);
- return <div style={{background:initial.theme.colorBgLayout,color:initial.theme.colorText,minHeight:'100vh'}}><h1>SDK native backend fixture</h1>
- <AppDraftPrompt dirty={dirty} blocker={blocker}/><Link to="/away">Leave fixture</Link><p data-testid="launch-status">{status}</p><button onClick={()=>setPresentation({...initial,locale:'zh-TW'})}>Traditional Chinese</button>
+ return <div data-testid="host-surface" style={{background:presentation.theme.colorBgLayout,color:presentation.theme.colorText,minHeight:'100vh'}}><h1>SDK native backend fixture</h1>
+ <AppDraftPrompt dirty={dirty} blocker={blocker}/><Link to="/away">Leave fixture</Link><p data-testid="launch-status">{status}</p><button onClick={()=>setPresentation(p=>({...p,locale:'zh-TW'}))}>Traditional Chinese</button>
  <button onClick={()=>setPresentation(p=>({...p,locale:'en-US'}))}>Set English</button>
- <button onClick={()=>setPresentation(p=>({...p,theme:{...p.theme,dark:!p.theme.dark,colorBg:p.theme.dark?'#ffffff':'#141414',colorText:p.theme.dark?'#000000':'#ffffff',colorBgLayout:p.theme.dark?'#f5f5f5':'#000000'}}))}>Toggle host theme</button>
+ <button onClick={()=>setPresentation(p=>({...p,theme:p.theme.dark?fixtureThemes.light:fixtureThemes.dark}))}>Toggle host theme</button>
  <button onClick={()=>setPresentation(p=>({...p,timeZone:'Asia/Taipei'}))}>Set Taipei time</button>
  <button onClick={async()=>{const r=await fetch('/__sdk_fixture/revoke',{method:'POST'});setStatus('revoke:'+r.status)}}>Revoke fixture access</button>
  <AppPageHeader name="SDK native fixture" icon={null} state={page} onBack={()=>{void navigate('/away')}}/>
