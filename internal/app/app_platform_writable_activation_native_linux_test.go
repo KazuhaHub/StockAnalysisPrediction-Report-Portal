@@ -243,6 +243,9 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	t.Log("PORTAL_NETWORK_CREDENTIAL_REAPPROVED")
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		browserHost := &Server{st: s.st, cfg: s.cfg, loginThr: newLoginThrottle(), v1Rate: newRateLimiter()}
+		if _, err := browserHost.dek(); err != nil {
+			t.Fatal("browser credential key initialization", err)
+		}
 		if err := browserHost.bindPlatformBackendHTTP(endpoint); err != nil {
 			t.Fatal("browser network runtime bootstrap", err)
 		}

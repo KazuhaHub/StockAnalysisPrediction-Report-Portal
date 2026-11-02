@@ -10,9 +10,6 @@ async function main(){
  try{
   const context=await browser.newContext({acceptDownloads:false});
   const page=await context.newPage();page.setDefaultTimeout(8000);
-  page.on('console',message=>{if(message.type()==='error')console.error('SDK browser console: '+message.text())});
-  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/network')){try{const body=JSON.parse(request.postData()||'{}');console.error('SDK browser network request '+JSON.stringify({credential:body.credential,url:body.url,accept:body.accept,contentType:body.contentType,binding:body.binding}))}catch{console.error('SDK browser network request body unavailable')}}});
-  page.on('response',response=>{if(new URL(response.url()).pathname.endsWith('/network'))console.error('SDK browser network response: '+response.status())});
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
@@ -45,8 +42,6 @@ async function main(){
   if(credentialAvailable){
    stage='credential-network';await frame.getByRole('button',{name:'Read credentialed network',exact:true}).click();
    const result=frame.locator('[data-testid="credential-result"]');
-   await page.waitForTimeout(500);
-   console.error('SDK browser credential result after dispatch: '+await result.innerText());
    await result.filter({hasNotText:'pending'}).waitFor({timeout:25000});
    const text=await result.innerText();
    if(text.startsWith('error:'))throw new Error('credential request returned '+text);
