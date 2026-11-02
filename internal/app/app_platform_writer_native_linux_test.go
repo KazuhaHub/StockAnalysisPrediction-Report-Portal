@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -36,7 +35,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	manifest.ID = "notes-writer-notify-demo"
 	manifest.Version = "1.0.0-beta.4"
 	manifest.Capabilities.Required = []string{"network.http", "notifications.publish", "reports.read", "secrets.use", "storage.files"}
-	manifest.Capabilities.Optional = slices.DeleteFunc(manifest.Capabilities.Optional, func(c string) bool { return c == "network.http" })
+	manifest.Capabilities.Optional = nil
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
