@@ -106,5 +106,9 @@ Focused tests cover:
 
 Native browser acceptance now exercises the foreground SDK hook against the
 captured notification store and requires `SDK_NATIVE_BROWSER_NOTIFICATIONS`.
+Portal `58eadbba` and Apps `1dedcc0` passed quota/browser run `41375050128`,
+general test run `41375050171` and runner daemon run `41375050161`; the parent
+test also verified exactly one stored occurrence rather than trusting the
+browser marker alone.
 Real external providers remain a separate operational gate. H08A streaming
 remains a separate bounded protocol decision.
