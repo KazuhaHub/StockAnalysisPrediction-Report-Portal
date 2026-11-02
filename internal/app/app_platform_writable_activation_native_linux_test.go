@@ -249,6 +249,12 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		mux := http.NewServeMux()
 		browserHost.wireRoutes(mux)
 		currentBinding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "2", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND generation=1 AND state='active'`, lease.installationID)}
+		prepared, err := browserHost.preparePlatformNetworkRequest(context.Background(), actor, lease.installationID, currentBinding, "GET", "https://api.example.com/v1/credential", "application/json", "", "upstream-api", nil)
+		if err != nil {
+			t.Fatal("browser host credential preflight", err)
+		}
+		prepared.Close()
+		t.Log("PORTAL_NETWORK_CREDENTIAL_PREPARED")
 		credentialBody, err := json.Marshal(map[string]any{"binding": currentBinding, "method": "GET", "url": "https://api.example.com/v1/credential", "accept": "application/json", "contentType": "", "bodyBase64": "", "credential": "upstream-api"})
 		if err != nil {
 			t.Fatal(err)
