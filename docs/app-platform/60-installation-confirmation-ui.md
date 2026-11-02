@@ -42,7 +42,16 @@ already staged signed releases, not a completed remote marketplace.
    replay reconciliation. It never requests a second plan or silently changes
    permissions. Definitive 400/403/409 refusal permits explicit review again;
    server admission still independently rejects conflicts/stale authority.
-8. Success places the operation UUID in `?operation=...`. Progress uses serialized
+8. Disable and uninstall are separate reviewed actions. Disable immediately
+   rejects new live access and background work but retains code, grants,
+   credentials and application data; a managed process may remain physically
+   running until the runner confirms stop. Uninstall clears the selected
+   installation's rows from the plugin's dedicated table. The table is dropped
+   only when that was the last non-removed installation for the plugin; another
+   installation of the same plugin and every other plugin keep their data.
+   Reinstalling starts empty. Managed backend data deletion still requires the
+   exact runner receipt.
+9. Success places the operation UUID in `?operation=...`. Progress uses serialized
    two-second GET polling while nonterminal and unpaused. Refresh resumes this
    operation without POSTing another installation. Failure/pause stops polling
    and leaves an explicit refresh action. Completion links to the application hub;
@@ -137,14 +146,17 @@ SDK_BROWSER_PACKAGE=/absolute/path/to/playwright/package.json \
 ```
 
 It captures install reviews at 1440px English/light, 320px Simplified
-Chinese/dark and 390px Traditional Chinese/light, plus update and re-enable
-reviews against their real backend projections. After installation it opens the
-real uninstall review and verifies the “other plugins are unaffected” boundary.
-Every case checks page and dialog bounds, visible focus, Escape/focus
-restoration, WCAG A/AA axe results and browser errors. The install case then
-completes the no-audience installation and verifies background completion.
-CI uploads the screenshots and `acceptance.json`; this remains installation-page
-evidence, not approval of every lifecycle page or a substitute for D5 review.
+Chinese/dark and 390px Traditional Chinese/light, plus update, re-enable, disable
+and uninstall reviews against their real backend projections. It also renders
+queued, controller-paused and recovery-required progress from durable operation
+rows. Every review and progress case checks page bounds, overflow, visible focus,
+Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
+errors and screenshots. After installation the install case completes the
+no-audience installation and verifies background completion. The disable review
+states that data is retained; the uninstall review states the single-plugin
+clear boundary. CI uploads the screenshots and `acceptance.json`; this remains
+installation-page evidence, not approval of every lifecycle page or a substitute
+for D5 review.
 Portal `ff331b52` passed quota/browser run `41382711308` with all three axe scans
 clean and the background operation complete.
 Portal `7ff23d12` extended the same job to update and re-enable projections;
@@ -154,6 +166,13 @@ Portal `84c82eb2` adds the post-install uninstall review and passes
 quota/browser run `41393438806`, general test run `41393438788` and runner daemon
 run `41393438802`; the uninstall dialog confirms the single-plugin data boundary
 and has zero axe violations.
+Portal `ed04e66c` adds reviewed disable and queued/paused/recovery progress; the
+browser report binds that code revision. Candidate `2693793e`, which adds the
+report and screenshots, passed quota/browser run `41402057341`, general test run
+`41402057322` and runner daemon run `41402057334`. The page-level and
+dialog-level axe scans are clean across all eight captured scenarios; the full
+local web run passed 269 files / 2832 tests, typecheck, lint and the production
+build.
 
 ## Remaining platform scope
 
