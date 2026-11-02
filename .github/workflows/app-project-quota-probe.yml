@@ -197,6 +197,7 @@ jobs:
           APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateCandidate$' -count=1
           python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
           APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
+          python3 scripts/acceptance/notes_shell/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/notes-shell-fixture"
           python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
           sdk_public=$(python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --build "$RUNNER_TEMP/sdk-browser-fixture" --packages "$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/node_modules" --browsers "$RUNNER_TEMP/sdk-browser-browsers" --runner "$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs")
           {
@@ -245,6 +246,19 @@ jobs:
           name: platform-failure-browser
           if-no-files-found: ignore
           path: ${{ runner.temp }}/platform-failure-browser
+      - name: Exercise the Notes reference app in the shared shell
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_NOTES_BROWSER_ROOT: ${{ runner.temp }}/notes-shell-fixture
+          APP_NOTES_BROWSER_EVIDENCE: ${{ runner.temp }}/notes-shell-browser
+        run: node scripts/app-notes-shell-browser.cjs
+      - name: Preserve Notes shell browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: notes-shell-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/notes-shell-browser
       - name: Prepare real-runner lifecycle browser evidence
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         run: |
