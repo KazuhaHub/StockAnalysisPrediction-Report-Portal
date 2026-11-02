@@ -237,8 +237,9 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         run: |
           install -d -m 0777 "$RUNNER_TEMP/app-platform-lifecycle-browser"
+          install -m 0555 scripts/app-platform-lifecycle-browser.cjs "$RUNNER_TEMP/app-platform-lifecycle-browser.cjs"
           {
-            echo "APP_LIFECYCLE_BROWSER_RUNNER=$GITHUB_WORKSPACE/scripts/app-platform-lifecycle-browser.cjs"
+            echo "APP_LIFECYCLE_BROWSER_RUNNER=$RUNNER_TEMP/app-platform-lifecycle-browser.cjs"
             echo "APP_LIFECYCLE_BROWSER_EVIDENCE=$RUNNER_TEMP/app-platform-lifecycle-browser"
           } >> "$GITHUB_ENV"
       - name: Install ephemeral filesystem acceptance tools

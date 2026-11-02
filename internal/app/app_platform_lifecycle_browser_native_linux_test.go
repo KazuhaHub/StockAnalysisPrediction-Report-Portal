@@ -83,7 +83,7 @@ func runPlatformLifecycleBrowser(
 	ctx, cancel := context.WithTimeout(context.Background(), 210*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, node, runner)
-	command.Dir = filepath.Dir(runner)
+	command.Dir = evidence
 	command.Env = append(os.Environ(),
 		"APP_PLATFORM_BROWSER_URL="+host.server.URL,
 		"APP_PLATFORM_BROWSER_COOKIE_NAME="+cookieName,
