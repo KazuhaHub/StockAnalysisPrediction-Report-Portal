@@ -248,6 +248,16 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		}
 		mux := http.NewServeMux()
 		browserHost.wireRoutes(mux)
+		currentBinding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "2", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND generation=1 AND state='active'`, lease.installationID)}
+		credentialBody, err := json.Marshal(map[string]any{"binding": currentBinding, "method": "GET", "url": "https://api.example.com/v1/credential", "accept": "application/json", "contentType": "", "bodyBase64": "", "credential": "upstream-api"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookie := browserHost.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+		if response := platformBackendHTTPCall(mux, "/api/app-platform/installations/"+lease.installationID+"/network", cookie, string(credentialBody), map[string]string{"Sec-Fetch-Site": "same-origin"}); response.Code != http.StatusOK {
+			t.Fatal("browser bindings failed direct credential HTTP", response.Code, response.Body.String())
+		}
+		t.Log("PORTAL_NETWORK_CREDENTIAL_HTTP")
 		testNativeSDKBackendBrowser(t, browserHost, actor, lease.installationID, mux, true, true, true)
 		t.Log("PORTAL_NETWORK_BROWSER_SDK")
 	}

@@ -11,7 +11,7 @@ async function main(){
   const context=await browser.newContext({acceptDownloads:false});
   const page=await context.newPage();page.setDefaultTimeout(8000);
   page.on('console',message=>{if(message.type()==='error')console.error('SDK browser console: '+message.text())});
-  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/network')){let credential=false;try{credential=typeof JSON.parse(request.postData()||'{}').credential==='string'}catch{}console.error('SDK browser network request credential='+credential)}});
+  page.on('request',request=>{if(new URL(request.url()).pathname.endsWith('/network')){try{const body=JSON.parse(request.postData()||'{}');console.error('SDK browser network request '+JSON.stringify({credential:body.credential,url:body.url,accept:body.accept,contentType:body.contentType,binding:body.binding}))}catch{console.error('SDK browser network request body unavailable')}}});
   page.on('response',response=>{if(new URL(response.url()).pathname.endsWith('/network'))console.error('SDK browser network response: '+response.status())});
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
