@@ -1,5 +1,5 @@
 {
-  "gitCommit": "ed04e66cf76809acfdca143d554e0fc9af3e48d7",
+  "gitCommit": "f1a4550f9bb29ceb3c83038ab4960b8b85357ad3",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -40,10 +40,20 @@
       "name": "progress-recovery",
       "violations": [],
       "height": 900
+    },
+    {
+      "name": "settings-1440-en-light",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "settings-320-zh-cn-dark",
+      "violations": [],
+      "height": 800
     }
   ],
   "install": {
-    "operation": "482bd9fc-a490-42a2-86de-3aa0a2457a88"
+    "operation": "efcac121-5f95-42d8-8d45-9ebf18290b76"
   },
   "disable": {
     "violations": []

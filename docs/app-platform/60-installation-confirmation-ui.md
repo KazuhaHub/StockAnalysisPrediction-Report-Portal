@@ -15,7 +15,9 @@ already staged signed releases, not a completed remote marketplace.
 | web/src/pages/manage/AppsAdminPage.tsx | New/legacy tabs on the existing management route |
 | web/src/pages/manage/LegacyAppsAdminPage.tsx | Existing upload/market/backend behavior, moved without redesign |
 | web/src/pages/manage/AppPlatformInstallPanel.tsx | Explicit audience, reviewed confirmation, persistent request identity and progress observation |
+| web/src/pages/manage/AppPlatformSettingsPage.tsx | Read-only installation settings, audience/grants, backend, data, recovery and credential metadata |
 | web/src/pages/manage/AppPlatformInstallPanel.test.tsx | Confirmation, replay, refresh, identity and stale response tests |
+| internal/app/app_platform_settings_http.go | Bounded administrator-only installation settings projection |
 | internal/app/app_platform_management_browser_test.go | Opt-in loopback server with temporary store and synthetic trust/session |
 | scripts/app-install-browser-fixture.py | Real page/preferences/auth/Ant build and loopback relay for browser acceptance |
 
@@ -149,10 +151,12 @@ It captures install reviews at 1440px English/light, 320px Simplified
 Chinese/dark and 390px Traditional Chinese/light, plus update, re-enable, disable
 and uninstall reviews against their real backend projections. It also renders
 queued, controller-paused and recovery-required progress from durable operation
-rows. Every review and progress case checks page bounds, overflow, visible focus,
+rows and captures the installation settings page at 1440px English/light and
+320px Simplified Chinese/dark. Every case checks page bounds, overflow, visible focus,
 Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
 errors and screenshots. After installation the install case completes the
-no-audience installation and verifies background completion. The disable review
+no-audience installation and verifies the row changes from installable to
+installed. The disable review
 states that data is retained; the uninstall review states the single-plugin
 clear boundary. CI uploads the screenshots and `acceptance.json`; this remains
 installation-page evidence, not approval of every lifecycle page or a substitute
@@ -173,6 +177,13 @@ report and screenshots, passed quota/browser run `41402057341`, general test run
 dialog-level axe scans are clean across all eight captured scenarios; the full
 local web run passed 269 files / 2832 tests, typecheck, lint and the production
 build.
+Portal `f1a4550f` adds the administrator installation settings page and terminal
+operation refresh. Its browser report covers ten scenarios, including settings
+at 1440px and 320px, with no overflow, clipped tags or serious/critical axe
+violations. The full local web run passed 270 files / 2840 tests, typecheck,
+lint and the production build. quota/browser run `41437808872`, general test run
+`41437808855` and runner daemon run `41437808888` pass. See
+[application settings](156-application-settings.md).
 
 ## Remaining platform scope
 
