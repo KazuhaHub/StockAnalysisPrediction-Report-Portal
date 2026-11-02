@@ -447,16 +447,18 @@ export default function AppPlatformSettingsPage() {
       onOk={() => void confirmDelete()}
       onCancel={() => { if (!deleting) { setDeletePlan(null); setDeleteError('') } }}
     >
-      {deletePlan && <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-        <Alert type="error" showIcon title={t('appPlatform.settings.deleteDataWarning')} />
-        {deleteError && <Alert type="error" showIcon title={deleteError} />}
-        <Descriptions column={1} size="small" items={[
-          { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{deletePlan.review.data_namespace_id}</Typography.Text> },
-          { key: 'generation', label: t('appPlatform.settings.generation'), children: `${deletePlan.review.source_generation} → ${deletePlan.review.target_generation}` },
-          { key: 'format', label: t('appPlatform.settings.dataFormat'), children: deletePlan.review.data_format },
-          { key: 'scope', label: t('appPlatform.settings.deleteDataScope'), children: deletePlan.review.scope },
-        ]} />
-      </Space>}
+      {deletePlan && <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="error" showIcon title={t('appPlatform.settings.deleteDataWarning')} />
+          {deleteError && <Alert type="error" showIcon title={deleteError} />}
+          <Descriptions column={1} size="small" items={[
+            { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{deletePlan.review.data_namespace_id}</Typography.Text> },
+            { key: 'generation', label: t('appPlatform.settings.generation'), children: `${deletePlan.review.source_generation} → ${deletePlan.review.target_generation}` },
+            { key: 'format', label: t('appPlatform.settings.dataFormat'), children: deletePlan.review.data_format },
+            { key: 'scope', label: t('appPlatform.settings.deleteDataScope'), children: deletePlan.review.scope },
+          ]} />
+        </Space>
+      </div>}
     </Modal>
     <Modal
       className="rp-platform-review-modal"
@@ -470,17 +472,19 @@ export default function AppPlatformSettingsPage() {
       onOk={() => void confirmRepair()}
       onCancel={() => { if (!repairing) { setRepairPlan(null); setRepairError('') } }}
     >
-      {repairPlan && <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-        <Alert type="info" showIcon title={t('appPlatform.settings.repairWarning')} />
-        {repairError && <Alert type="error" showIcon title={repairError} />}
-        <Descriptions column={1} size="small" items={[
-          { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code copyable>{repairPlan.review.release_sha256}</Typography.Text> },
-          { key: 'generation', label: t('appPlatform.settings.generation'), children: `${repairPlan.review.source_generation} → ${repairPlan.review.target_generation}` },
-          { key: 'policy', label: t('appPlatform.settings.policyRevision'), children: repairPlan.review.policy_revision },
-          { key: 'data', label: t('appPlatform.storage'), children: t('appPlatform.settings.repairDataRetained') },
-          { key: 'grants', label: t('appPlatform.settings.repairGrants'), children: t('appPlatform.settings.repairGrantsUnchanged') },
-        ]} />
-      </Space>}
+      {repairPlan && <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="info" showIcon title={t('appPlatform.settings.repairWarning')} />
+          {repairError && <Alert type="error" showIcon title={repairError} />}
+          <Descriptions column={1} size="small" items={[
+            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code copyable>{repairPlan.review.release_sha256}</Typography.Text> },
+            { key: 'generation', label: t('appPlatform.settings.generation'), children: `${repairPlan.review.source_generation} → ${repairPlan.review.target_generation}` },
+            { key: 'policy', label: t('appPlatform.settings.policyRevision'), children: repairPlan.review.policy_revision },
+            { key: 'data', label: t('appPlatform.storage'), children: t('appPlatform.settings.repairDataRetained') },
+            { key: 'grants', label: t('appPlatform.settings.repairGrants'), children: t('appPlatform.settings.repairGrantsUnchanged') },
+          ]} />
+        </Space>
+      </div>}
     </Modal>
     <Modal
       className="rp-platform-review-modal"
@@ -495,19 +499,21 @@ export default function AppPlatformSettingsPage() {
       onOk={() => void confirmRestore()}
       onCancel={() => { if (!restoring) { setRestorePlan(null); setRestoreError('') } }}
     >
-      {restorePlan && <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-        <Alert type="warning" showIcon title={t('appPlatform.settings.restoreWarning')} />
-        {restoreError && <Alert type="error" showIcon title={restoreError} />}
-        <Descriptions column={1} size="small" items={[
-          { key: 'recovery', label: t('appPlatform.settings.recoveryPoint'), children: <Typography.Text code>{restorePlan.review.recovery_set_id}</Typography.Text> },
-          { key: 'checkpoint', label: t('appPlatform.settings.recoveryCheckpoint'), children: <Typography.Text code>{restorePlan.review.checkpoint_id}</Typography.Text> },
-          { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> },
-          { key: 'manifest', label: t('appPlatform.settings.recoveryManifest'), children: <Typography.Text code>{restorePlan.review.manifest_sha256}</Typography.Text> },
-          { key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` },
-          { key: 'bytes', label: t('appPlatform.settings.recoveryBytes'), children: bytes(restorePlan.review.archive_bytes) },
-          { key: 'scope', label: t('appPlatform.settings.restoreScope'), children: t('appPlatform.settings.restoreScopeValue') },
-        ]} />
-      </Space>}
+      {restorePlan && <div role="document" tabIndex={0} className="rp-platform-review-scroll">
+        <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+          <Alert type="warning" showIcon title={t('appPlatform.settings.restoreWarning')} />
+          {restoreError && <Alert type="error" showIcon title={restoreError} />}
+          <Descriptions column={1} size="small" items={[
+            { key: 'recovery', label: t('appPlatform.settings.recoveryPoint'), children: <Typography.Text code>{restorePlan.review.recovery_set_id}</Typography.Text> },
+            { key: 'checkpoint', label: t('appPlatform.settings.recoveryCheckpoint'), children: <Typography.Text code>{restorePlan.review.checkpoint_id}</Typography.Text> },
+            { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> },
+            { key: 'manifest', label: t('appPlatform.settings.recoveryManifest'), children: <Typography.Text code>{restorePlan.review.manifest_sha256}</Typography.Text> },
+            { key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` },
+            { key: 'bytes', label: t('appPlatform.settings.recoveryBytes'), children: bytes(restorePlan.review.archive_bytes) },
+            { key: 'scope', label: t('appPlatform.settings.restoreScope'), children: t('appPlatform.settings.restoreScopeValue') },
+          ]} />
+        </Space>
+      </div>}
     </Modal>
   </Space>
 }

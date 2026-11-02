@@ -18,6 +18,14 @@ const output = path.resolve(
 );
 mkdirSync(output, { recursive: true });
 
+// Browser page zoom at 200% keeps the physical display at 1440x900 while
+// halving the CSS viewport and doubling rendered pixels.
+const desktopZoom200 = {
+  viewport: { width: 720, height: 450 },
+  deviceScaleFactor: 2,
+  zoom: 200,
+};
+
 function startFixture(scenario = "install") {
   const fixture = spawn(
     "python3",
@@ -134,6 +142,75 @@ async function waitForReviewDialogStyles(page) {
   });
 }
 
+async function assertDialogViewport(page, label) {
+  const geometry = await page.evaluate(() => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const dialog = document.querySelector('[role="dialog"]');
+    const content =
+      dialog?.querySelector(".ant-modal-container, .ant-modal-content") ??
+      (dialog?.classList.contains("ant-modal-content") ? dialog : null);
+    const body = content?.querySelector(".ant-modal-body");
+    const footerButtons = dialog
+      ? [...dialog.querySelectorAll(".ant-modal-footer button")].map(
+          (button) => {
+            const rect = button.getBoundingClientRect();
+            return {
+              left: rect.left,
+              top: rect.top,
+              right: rect.right,
+              bottom: rect.bottom,
+              width: rect.width,
+              height: rect.height,
+            };
+          },
+        )
+      : [];
+    return {
+      scrollWidth: document.documentElement.scrollWidth,
+      viewportWidth,
+      viewportHeight,
+      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
+      footerButtons,
+      dialogTag: dialog?.tagName,
+      dialogClass: dialog?.className,
+      contentClass: content?.className,
+      dialogPosition: dialog ? getComputedStyle(dialog).position : "",
+      dialogTop: dialog ? getComputedStyle(dialog).top : "",
+      contentDisplay: content ? getComputedStyle(content).display : "",
+      contentMaxHeight: content ? getComputedStyle(content).maxHeight : "",
+      bodyMaxHeight: body ? getComputedStyle(body).maxHeight : "",
+      bodyOverflowY: body ? getComputedStyle(body).overflowY : "",
+    };
+  });
+  const box = await page.getByRole("dialog").boundingBox();
+  const footerInside =
+    geometry.footerButtons.length > 0 &&
+    geometry.footerButtons.every(
+      (button) =>
+        button.width > 0 &&
+        button.height > 0 &&
+        button.left >= -1 &&
+        button.top >= -1 &&
+        button.right <= geometry.viewportWidth + 1 &&
+        button.bottom <= geometry.viewportHeight + 1,
+    );
+  if (
+    geometry.scrollWidth > geometry.viewportWidth + 1 ||
+    !box ||
+    box.x < -1 ||
+    box.y < -1 ||
+    box.x + box.width > geometry.viewportWidth + 1 ||
+    box.y + box.height > geometry.viewportHeight + 1 ||
+    !geometry.activeInside ||
+    !footerInside
+  ) {
+    throw new Error(
+      `unsafe ${label} geometry, focus or footer reachability: ${JSON.stringify({ box, ...geometry })}`,
+    );
+  }
+}
+
 async function contrastStates(page, violations) {
   const targets = violations.flatMap((violation) =>
     violation.targets.map((target) => target.split(" ").at(-1)),
@@ -164,7 +241,12 @@ async function contrastStates(page, violations) {
     }), targets);
 }
 
-async function openReview(page, selectNoAudience = true, rowText = "fixture-publisher") {
+async function openReview(
+  page,
+  selectNoAudience = true,
+  rowText = "fixture-publisher",
+  buttonIndex = 0,
+) {
   await page.getByRole("tab").nth(1).click();
   await page.getByText(rowText, { exact: false }).first().waitFor({
     timeout: 20_000,
@@ -177,7 +259,7 @@ async function openReview(page, selectNoAudience = true, rowText = "fixture-publ
   if (selectNoAudience) {
     await page.getByRole("checkbox").first().click();
   }
-  const reviewButton = row.getByRole("button").first();
+  const reviewButton = row.getByRole("button").nth(buttonIndex);
   await reviewButton.click();
   const dialog = page.getByRole("dialog");
   await dialog.waitFor();
@@ -188,6 +270,7 @@ async function scenario(browser, url, options) {
   const context = await browser.newContext({
     viewport: options.viewport,
     colorScheme: options.dark ? "dark" : "light",
+    deviceScaleFactor: options.deviceScaleFactor ?? 1,
   });
   const page = await context.newPage();
   page.setDefaultTimeout(15_000);
@@ -207,23 +290,10 @@ async function scenario(browser, url, options) {
       page,
       options.selectNoAudience !== false,
       options.rowText,
+      options.buttonIndex ?? 0,
     );
     await page.waitForTimeout(400);
-    const dialogBox = await dialog.boundingBox();
-    const geometry = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      width: window.innerWidth,
-      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
-    }));
-    if (
-      geometry.scrollWidth > geometry.width + 1 ||
-      !dialogBox ||
-      dialogBox.x < 0 ||
-      dialogBox.x + dialogBox.width > geometry.width + 1 ||
-      !geometry.activeInside
-    ) {
-      throw new Error(`unsafe ${options.name} geometry or focus`);
-    }
+    await assertDialogViewport(page, options.name);
     const violations = await auditDialog(page);
     const serious = violations.filter(
       (violation) => violation.impact === "critical" || violation.impact === "serious",
@@ -245,7 +315,12 @@ async function scenario(browser, url, options) {
     if (errors.length) {
       throw new Error(`${options.name} console/page errors: ${errors.join(" | ")}`);
     }
-    return { name: options.name, violations, height: page.viewportSize().height };
+    return {
+      name: options.name,
+      violations,
+      viewport: page.viewportSize(),
+      zoom: options.zoom ?? 100,
+    };
   } catch (error) {
     await page.screenshot({
       path: path.join(output, `${options.name}-failure.png`),
@@ -335,21 +410,7 @@ async function uninstallScenario(browser, url) {
         `uninstall review did not state its isolation boundary: ${text}`,
       );
     }
-    const geometry = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      width: window.innerWidth,
-      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
-    }));
-    const box = await dialog.boundingBox();
-    if (
-      geometry.scrollWidth > geometry.width + 1 ||
-      !box ||
-      box.x < 0 ||
-      box.x + box.width > geometry.width + 1 ||
-      !geometry.activeInside
-    ) {
-      throw new Error("unsafe uninstall review geometry or focus");
-    }
+    await assertDialogViewport(page, "uninstall review");
     const violations = (await auditDialog(page)).filter(
       (violation) =>
         violation.impact === "critical" || violation.impact === "serious",
@@ -397,21 +458,7 @@ async function disableScenario(browser, url) {
     if (!text.includes("data is retained")) {
       throw new Error("disable review did not state the retained-data boundary");
     }
-    const geometry = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      width: window.innerWidth,
-      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
-    }));
-    const box = await dialog.boundingBox();
-    if (
-      geometry.scrollWidth > geometry.width + 1 ||
-      !box ||
-      box.x < 0 ||
-      box.x + box.width > geometry.width + 1 ||
-      !geometry.activeInside
-    ) {
-      throw new Error("unsafe disable review geometry or focus");
-    }
+    await assertDialogViewport(page, "disable review");
     const violations = (await auditDialog(page)).filter(
       (violation) =>
         violation.impact === "critical" || violation.impact === "serious",
@@ -434,9 +481,11 @@ async function disableScenario(browser, url) {
   }
 }
 
-async function progressScenario(browser, url, expected, name) {
+async function progressScenario(browser, url, expected, name, options = {}) {
+  const viewport = options.viewport ?? { width: 1440, height: 900 };
   const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
+    viewport,
+    deviceScaleFactor: options.deviceScaleFactor ?? 1,
   });
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
@@ -483,14 +532,22 @@ async function progressScenario(browser, url, expected, name) {
       path: path.join(output, `${name}.png`),
       fullPage: true,
     });
-    return { name, violations, height: page.viewportSize().height };
+    return {
+      name,
+      violations,
+      viewport: page.viewportSize(),
+      zoom: options.zoom ?? 100,
+    };
   } finally {
     await context.close();
   }
 }
 
 async function settingsScenario(browser, url, options) {
-  const context = await browser.newContext({ viewport: options.viewport });
+  const context = await browser.newContext({
+    viewport: options.viewport,
+    deviceScaleFactor: options.deviceScaleFactor ?? 1,
+  });
   const page = await context.newPage();
   page.setDefaultTimeout(20_000);
   try {
@@ -549,24 +606,10 @@ async function settingsScenario(browser, url, options) {
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       await waitForReviewDialogStyles(page);
+      await assertDialogViewport(page, "repair review");
       const text = await dialog.innerText();
       if (!text.includes(options.repairBoundary)) {
         throw new Error(`repair review boundary missing: ${text}`);
-      }
-      const geometry = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        width: window.innerWidth,
-        activeInside: !!document.activeElement?.closest('[role="dialog"]'),
-      }));
-      const box = await dialog.boundingBox();
-      if (
-        geometry.scrollWidth > geometry.width + 1 ||
-        !box ||
-        box.x < 0 ||
-        box.x + box.width > geometry.width + 1 ||
-        !geometry.activeInside
-      ) {
-        throw new Error(`unsafe repair review geometry at ${options.viewport.width}px`);
       }
       const dialogViolations = (await auditDialog(page)).filter(
         (violation) =>
@@ -587,24 +630,10 @@ async function settingsScenario(browser, url, options) {
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       await waitForReviewDialogStyles(page);
+      await assertDialogViewport(page, "restore review");
       const text = await dialog.innerText();
       if (!text.includes(options.restoreBoundary)) {
         throw new Error(`restore review boundary missing: ${text}`);
-      }
-      const geometry = await page.evaluate(() => ({
-        scrollWidth: document.documentElement.scrollWidth,
-        width: window.innerWidth,
-        activeInside: !!document.activeElement?.closest('[role="dialog"]'),
-      }));
-      const box = await dialog.boundingBox();
-      if (
-        geometry.scrollWidth > geometry.width + 1 ||
-        !box ||
-        box.x < 0 ||
-        box.x + box.width > geometry.width + 1 ||
-        !geometry.activeInside
-      ) {
-        throw new Error(`unsafe restore review geometry at ${options.viewport.width}px`);
       }
       const dialogViolations = (await auditDialog(page)).filter(
         (violation) =>
@@ -625,6 +654,7 @@ async function settingsScenario(browser, url, options) {
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       await waitForReviewDialogStyles(page);
+      await assertDialogViewport(page, "delete-data review");
       const text = await dialog.innerText();
       if (!text.includes("exact namespace and recorded recovery sets")) {
         throw new Error(`delete-data bound scope missing: ${text}`);
@@ -654,7 +684,12 @@ async function settingsScenario(browser, url, options) {
       path: path.join(output, `${options.name}.png`),
       fullPage: true,
     });
-    return { name: options.name, violations, height: page.viewportSize().height };
+    return {
+      name: options.name,
+      violations,
+      viewport: page.viewportSize(),
+      zoom: options.zoom ?? 100,
+    };
   } finally {
     await context.close();
   }
@@ -705,7 +740,32 @@ async function main() {
       ]) {
         report.scenarios.push(await scenario(browser, url, options));
       }
+      report.scenarios.push(
+        await scenario(browser, url, {
+          name: "install-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          ...desktopZoom200,
+        }),
+      );
       report.install = await installScenario(browser, url);
+      report.scenarios.push(
+        await scenario(browser, url, {
+          name: "disable-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          selectNoAudience: false,
+          ...desktopZoom200,
+        }),
+        await scenario(browser, url, {
+          name: "uninstall-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          selectNoAudience: false,
+          buttonIndex: 1,
+          ...desktopZoom200,
+        }),
+      );
       report.disable = await disableScenario(browser, url);
       report.uninstall = await uninstallScenario(browser, url);
     });
@@ -719,6 +779,14 @@ async function main() {
           selectNoAudience: false,
           rowText: "1.0.0-beta.2",
         }),
+        await scenario(browser, url, {
+          name: "update-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          selectNoAudience: false,
+          rowText: "1.0.0-beta.2",
+          ...desktopZoom200,
+        }),
       );
     });
     await withFixture("disabled", async (url) => {
@@ -730,6 +798,13 @@ async function main() {
           viewport: { width: 1440, height: 900 },
           selectNoAudience: false,
         }),
+        await scenario(browser, url, {
+          name: "enable-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          selectNoAudience: false,
+          ...desktopZoom200,
+        }),
       );
     });
     for (const [mode, expected, name] of [
@@ -740,6 +815,13 @@ async function main() {
       await withFixture(mode, async (url) => {
         report.scenarios.push(
           await progressScenario(browser, url, expected, name),
+          await progressScenario(
+            browser,
+            url,
+            expected,
+            `${name}-zoom-200`,
+            desktopZoom200,
+          ),
         );
       });
     }
@@ -763,6 +845,15 @@ async function main() {
           capability: "保存应用文件",
           ready: "未发现配置缺口",
         }),
+        await settingsScenario(browser, url, {
+          name: "settings-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          title: "Application settings",
+          capability: "Store application files",
+          ready: "No configuration gap detected",
+          ...desktopZoom200,
+        }),
       );
     });
     await withFixture("delete-data", async (url) => {
@@ -774,6 +865,14 @@ async function main() {
           viewport: { width: 1440, height: 900 },
           title: "Application settings",
           deleteButton: "Delete retained data",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-delete-data-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          title: "Application settings",
+          deleteButton: "Delete retained data",
+          ...desktopZoom200,
         }),
       );
     });
@@ -797,6 +896,15 @@ async function main() {
           repairButton: "审核修复",
           repairBoundary: "创建新的恢复点",
         }),
+        await settingsScenario(browser, url, {
+          name: "settings-repair-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          title: "Application settings",
+          repairButton: "Review repair",
+          repairBoundary: "creates a fresh checkpoint",
+          ...desktopZoom200,
+        }),
       );
     });
     await withFixture("restore", async (url) => {
@@ -818,6 +926,15 @@ async function main() {
           title: "应用设置",
           restoreButton: "审核恢复",
           restoreBoundary: "检查点之后的写入可能丢失",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-restore-review-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          title: "Application settings",
+          restoreButton: "Review restore",
+          restoreBoundary: "Writes after that checkpoint may be lost",
+          ...desktopZoom200,
         }),
       );
     });
@@ -842,6 +959,16 @@ async function main() {
           restorePausedText:
             "应用控制已暂停。管理员完成恢复审核前，不能规划或确认恢复。",
           pausedRestoreButton: "审核恢复",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-restore-paused-1440-en-light-zoom-200",
+          language: "English",
+          dark: false,
+          title: "Application settings",
+          restorePausedText:
+            "Application control is paused. Restore planning and admission remain disabled",
+          pausedRestoreButton: "Review restore",
+          ...desktopZoom200,
         }),
       );
     });

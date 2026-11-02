@@ -3197,6 +3197,13 @@ body {
 .rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover { background: #003eb3; border-color: #003eb3; }
 .rp-platform-review-modal .ant-btn-dangerous { background: #a8071a; border-color: #a8071a; }
 .rp-platform-review-modal .ant-btn-dangerous:not(:disabled):hover { background: #820014; border-color: #820014; }
+.rp-platform-review-modal { top: 24px; width: min(560px, calc(100vw - 24px)) !important; padding-bottom: 24px; }
+.rp-platform-review-modal :is(.ant-modal-container, .ant-modal-content),
+.rp-platform-review-modal.ant-modal-content { display: flex; flex-direction: column; max-height: calc(100dvh - 72px); }
+.rp-platform-review-modal :is(.ant-modal-header, .ant-modal-footer) { flex: none; }
+.rp-platform-review-modal .ant-modal-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.rp-platform-review-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.rp-platform-review-scroll:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
 
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */

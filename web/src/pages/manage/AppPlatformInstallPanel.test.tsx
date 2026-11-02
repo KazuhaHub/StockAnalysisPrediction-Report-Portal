@@ -377,6 +377,7 @@ describe('application installation confirmation', () => {
     mount()
     const user = userEvent.setup()
     await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUninstall' }))
+    expect((await screen.findByRole('document')).getAttribute('tabindex')).toBe('0')
     const result = await axe.run(document.body, {
       rules: {
         'color-contrast': { enabled: false },
