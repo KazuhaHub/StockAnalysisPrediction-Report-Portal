@@ -119,9 +119,10 @@ async function main(){
   await page.setViewportSize({width:1280,height:720});
   await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
   stage='layout-grow';
+  const collapsedHeight=await page.evaluate(()=>document.querySelector('iframe')?.getBoundingClientRect().height||0);
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
+  await page.waitForFunction((previous)=>{const height=document.querySelector('iframe')?.getBoundingClientRect().height||0;return height>previous+2500},collapsedHeight);
   const expandedHeight=await page.evaluate(()=>document.querySelector('iframe')?.getBoundingClientRect().height||0);
-  if(expandedHeight<=3000)throw new Error('long content did not expand document');
   const inner=await frame.locator('html').evaluate(element=>({scroll:element.scrollHeight,client:element.clientHeight}));
   if(inner.scroll>inner.client+2)throw new Error('document gained internal scroll');
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
