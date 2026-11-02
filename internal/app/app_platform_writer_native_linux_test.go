@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -46,7 +47,25 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal(err)
 	}
-	release, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
+	if _, err := appplatform.ParseDescriptor(raw); err != nil {
+		t.Fatal("writable notification descriptor", manifest.ID, manifest.Version, manifest.Backend.Image, err)
+	}
+	if _, err := appplatform.InspectFrontend(manifest, archive); err != nil {
+		t.Fatal("writable notification frontend", err)
+	}
+	trust, err := loadPlatformPublisherTrust(s.st.poolExec())
+	if err != nil {
+		t.Fatal("writable notification publisher trust", err)
+	}
+	signature := platformSignTestDescriptor(t, raw)
+	if _, err := appplatform.VerifyPublisherDescriptor(raw, signature, trust, strconv.FormatInt(time.Now().UnixMilli(), 10)); err != nil {
+		t.Fatal("writable notification descriptor signature", err)
+	}
+	if existing := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases WHERE app_id=? AND version=?`, manifest.ID, manifest.Version); existing != 0 {
+		t.Fatalf("writable notification release already exists: %d", existing)
+	}
+	t.Logf("writable notification release %s %s image=%s", manifest.ID, manifest.Version, manifest.Backend.Image)
+	release, err := s.stagePlatformRelease(session, raw, signature, archive)
 	if err != nil {
 		t.Fatal("stage writable package", err)
 	}
