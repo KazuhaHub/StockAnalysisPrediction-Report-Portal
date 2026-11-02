@@ -122,10 +122,11 @@ async function auditPage(page) {
 
 async function waitForReviewDialogStyles(page) {
   await page.waitForFunction(() => {
-    const primary = document.querySelector(
-      '[role="dialog"] .ant-btn-primary',
-    );
-    if (!primary) return false;
+    const dialog = document.querySelector('[role="dialog"]');
+    const primary = dialog?.querySelector(".ant-btn-primary");
+    if (!dialog || !primary || getComputedStyle(dialog).opacity !== "1") {
+      return false;
+    }
     const background = getComputedStyle(primary).backgroundColor;
     return primary.classList.contains("ant-btn-dangerous")
       ? background === "rgb(168, 7, 26)"
