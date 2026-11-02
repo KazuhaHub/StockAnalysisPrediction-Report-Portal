@@ -21,21 +21,35 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	var s *Server
 	var actor platformActorSession
 	var mux *http.ServeMux
-	if os.Getenv("APP_INSTALL_HTTP_FRESH") == "1" {
-		s, actor = platformActorTestServer(t, false)
+	scenario := os.Getenv("APP_INSTALL_HTTP_SCENARIO")
+	switch scenario {
+	case "updateable":
+		s, actor, _, _ = platformUpdateFixture(t, []int{1})
 		mux = http.NewServeMux()
 		s.wireRoutes(mux)
-	} else {
-		s, mux, actor, _, _ = platformManagementFixture(t, false)
+	case "disabled":
+		s, actor, _, _ = platformFrontendDisabledFixture(t, false)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
+	default:
+		if os.Getenv("APP_INSTALL_HTTP_FRESH") == "1" {
+			s, actor = platformActorTestServer(t, false)
+			mux = http.NewServeMux()
+			s.wireRoutes(mux)
+		} else {
+			s, mux, actor, _, _ = platformManagementFixture(t, false)
+		}
 	}
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
-	platformStartFrontendService(t, s)
+	if scenario != "updateable" && scenario != "disabled" {
+		platformStartFrontendService(t, s)
+	}
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
-	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie})
+	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie, "scenario": scenario})
 	if err != nil {
 		t.Fatal(err)
 	}

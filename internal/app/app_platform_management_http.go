@@ -24,6 +24,13 @@ var platformManagementOrigin = http.NewCrossOriginProtection()
 var errPlatformManagementInput = errors.New("invalid application management input")
 var errPlatformOperationMissing = errors.New("application operation not found")
 
+func platformNonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
+}
+
 func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handler) {
 	s.route(mux, pattern, authAdmin, "", platformDocumentHeaders(s.requireAdminJSON(func(w http.ResponseWriter, r *http.Request, user string) {
 		listPath := r.Method == "GET" && (r.URL.Path == "/api/admin/app-platform/releases" || r.URL.Path == "/api/admin/app-platform/subjects" || r.URL.Path == "/api/admin/app-platform/credentials" || strings.HasPrefix(r.URL.Path, "/api/admin/app-platform/installations/") && strings.HasSuffix(r.URL.Path, "/secret-bindings"))
@@ -289,7 +296,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"source_generation": strconv.FormatInt(projection.SourceGeneration, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
 			"policy_revision": strconv.FormatInt(projection.PolicyRevision, 10), "target_policy_revision": strconv.FormatInt(projection.TargetPolicyRevision, 10),
 			"trust_revision": revision, "declined_capabilities": projection.Target.DeclinedCapabilities,
-			"previous_capabilities": projection.PreviousCapabilities, "target_capabilities": projection.TargetCapabilities, "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
+			"previous_capabilities": platformNonNilStrings(projection.PreviousCapabilities), "target_capabilities": platformNonNilStrings(projection.TargetCapabilities), "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
 			"grants_sha256": projection.GrantsSHA256, "audience": nil,
 		}})
 	case "uninstall":

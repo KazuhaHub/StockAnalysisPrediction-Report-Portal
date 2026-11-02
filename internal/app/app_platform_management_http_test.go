@@ -98,7 +98,7 @@ func TestPlatformManagementUpdateHTTP(t *testing.T) {
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
 	body := fmt.Sprintf(`{"action":"update","release_sha256":%q,"trust_revision":"1","installation_id":%q}`, target.sha256, installation)
 	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
-	if plan.Code != 200 || !strings.Contains(plan.Body.String(), `"action":"update"`) || !strings.Contains(plan.Body.String(), `"target_generation":"2"`) || strings.Contains(plan.Body.String(), "actor_authority") {
+	if plan.Code != 200 || !strings.Contains(plan.Body.String(), `"action":"update"`) || !strings.Contains(plan.Body.String(), `"target_generation":"2"`) || !strings.Contains(plan.Body.String(), `"previous_capabilities":[]`) || !strings.Contains(plan.Body.String(), `"target_capabilities":[]`) || strings.Contains(plan.Body.String(), "actor_authority") {
 		t.Fatal("update review", plan.Code, plan.Body.String())
 	}
 	var review struct {

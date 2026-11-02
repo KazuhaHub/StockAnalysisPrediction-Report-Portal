@@ -1,6 +1,5 @@
 {
-  "gitCommit": "e71502de91a05098326e6e435dcec7ae7e7c891e",
-  "url": "http://127.0.0.1:63712/manage/apps",
+  "gitCommit": "a815940e60050448db4a197bbb17714f92fbaa99",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -16,10 +15,20 @@
       "name": "install-review-390-zh-tw-light",
       "violations": [],
       "height": 844
+    },
+    {
+      "name": "update-review-1440-en-light",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "enable-review-1440-en-light",
+      "violations": [],
+      "height": 900
     }
   ],
   "install": {
-    "operation": "28225ae4-590a-45a2-a61b-01ff2bffde27"
+    "operation": "f846d5c4-7c52-41d1-881b-7e27d199b244"
   },
   "accepted": true
 }

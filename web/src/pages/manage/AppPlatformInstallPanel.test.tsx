@@ -242,6 +242,31 @@ describe('application installation confirmation', () => {
     expect(mock.post.mock.calls.filter(([url]) => url.endsWith('/operations'))).toHaveLength(1)
   })
 
+  it('treats legacy null update capability lists as empty', async () => {
+    const installedRelease = {
+      release_sha256: release,
+      app_id: 'notes',
+      publisher_id: 'publisher',
+      version: '1.1.0',
+      trust_revision: '1',
+      installable: false,
+      reason: 'already_installed',
+      installation_id: operation,
+      current_release_sha256: 'c'.repeat(64),
+      updateable: true,
+    }
+    const legacy = updateReview()
+    legacy.review.previous_capabilities = null as never
+    legacy.review.target_capabilities = null as never
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installedRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
+    mock.post.mockResolvedValue(legacy)
+    mount()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUpdate' }))
+    expect(await screen.findByText('appPlatform.permissionDiff')).toBeTruthy()
+    expect(screen.getByText('appPlatform.confirmUpdate')).toBeTruthy()
+  })
+
   it('reviews a disabled app enable without changing release or permissions', async () => {
     const disabledRelease = {
       release_sha256: release,

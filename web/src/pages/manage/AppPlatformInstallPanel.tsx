@@ -252,10 +252,14 @@ export default function AppPlatformInstallPanel() {
   const updateReview = review?.review.action === 'update' ? review.review : null
   const enableReview = review?.review.action === 'enable' ? review.review : null
   const uninstallReview = review?.review.action === 'uninstall' ? review.review : null
-  const updateDiff = updateReview ? {
-    added: updateReview.target_capabilities.filter(capability => !updateReview.previous_capabilities.includes(capability)),
-    removed: updateReview.previous_capabilities.filter(capability => !updateReview.target_capabilities.includes(capability)),
-  } : null
+  const updateDiff = updateReview ? (() => {
+    const previous = updateReview.previous_capabilities ?? []
+    const target = updateReview.target_capabilities ?? []
+    return {
+      added: target.filter(capability => !previous.includes(capability)),
+      removed: previous.filter(capability => !target.includes(capability)),
+    }
+  })() : null
   const reviewRelease = review ? [...(marketRelease ? [marketRelease] : []), ...releases].find(r => r.release_sha256 === review.review.release_sha256) : undefined
   const permissionList = (values?: string[]) => values?.length ? values.map(capabilityLabel).join('、') : t('appPlatform.none')
   const compatibility = reviewRelease?.compatibility ? `${reviewRelease.compatibility.platform_api} · ${reviewRelease.compatibility.runner_protocol}` : '—'

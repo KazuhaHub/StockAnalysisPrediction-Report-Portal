@@ -18,10 +18,10 @@ const output = path.resolve(
 );
 mkdirSync(output, { recursive: true });
 
-function startFixture() {
+function startFixture(scenario = "install") {
   const fixture = spawn(
     "python3",
-    ["-B", "scripts/app-install-browser-fixture.py"],
+    ["-B", "scripts/app-install-browser-fixture.py", "--scenario", scenario],
     {
       cwd: root,
       env: {
@@ -105,17 +105,19 @@ async function auditDialog(page) {
   });
 }
 
-async function openReview(page) {
+async function openReview(page, selectNoAudience = true, rowText = "fixture-publisher") {
   await page.getByRole("tab").nth(1).click();
-  await page.getByText("fixture-publisher", { exact: false }).first().waitFor({
+  await page.getByText(rowText, { exact: false }).first().waitFor({
     timeout: 20_000,
   });
   const row = page
     .getByRole("row")
-    .filter({ hasText: "fixture-publisher" })
+    .filter({ hasText: rowText })
     .first();
   await row.waitFor({ timeout: 20_000 });
-  await page.getByRole("checkbox").first().click();
+  if (selectNoAudience) {
+    await page.getByRole("checkbox").first().click();
+  }
   const reviewButton = row.getByRole("button").first();
   await reviewButton.click();
   const dialog = page.getByRole("dialog");
@@ -142,7 +144,11 @@ async function scenario(browser, url, options) {
       await page.getByRole("button", { name: "Toggle theme", exact: true }).click();
     }
     await page.getByRole("tab").nth(1).waitFor();
-    const { dialog, reviewButton } = await openReview(page);
+    const { dialog, reviewButton } = await openReview(
+      page,
+      options.selectNoAudience !== false,
+      options.rowText,
+    );
     await page.waitForTimeout(400);
     const dialogBox = await dialog.boundingBox();
     const geometry = await page.evaluate(() => ({
@@ -226,43 +232,73 @@ async function installScenario(browser, url) {
 }
 
 async function main() {
-  const { fixture, outputLog } = startFixture();
   let browser;
   try {
-    const url = await fixtureUrl(fixture, outputLog);
     browser = await chromium.launch({ headless: true });
     const report = {
       gitCommit: execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: root,
         encoding: "utf8",
       }).trim(),
-      url,
       scenarios: [],
       install: null,
     };
-    for (const options of [
-      {
-        name: "install-review-1440-en-light",
-        language: "English",
-        dark: false,
-        viewport: { width: 1440, height: 900 },
-      },
-      {
-        name: "install-review-320-zh-cn-dark",
-        language: "Simplified Chinese",
-        dark: true,
-        viewport: { width: 320, height: 800 },
-      },
-      {
-        name: "install-review-390-zh-tw-light",
-        language: "Traditional Chinese",
-        dark: false,
-        viewport: { width: 390, height: 844 },
-      },
-    ]) {
-      report.scenarios.push(await scenario(browser, url, options));
+    async function withFixture(mode, run) {
+      const { fixture, outputLog } = startFixture(mode);
+      try {
+        return await run(await fixtureUrl(fixture, outputLog));
+      } finally {
+        await closeFixture(fixture);
+      }
     }
-    report.install = await installScenario(browser, url);
+    await withFixture("install", async (url) => {
+      for (const options of [
+        {
+          name: "install-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+        },
+        {
+          name: "install-review-320-zh-cn-dark",
+          language: "Simplified Chinese",
+          dark: true,
+          viewport: { width: 320, height: 800 },
+        },
+        {
+          name: "install-review-390-zh-tw-light",
+          language: "Traditional Chinese",
+          dark: false,
+          viewport: { width: 390, height: 844 },
+        },
+      ]) {
+        report.scenarios.push(await scenario(browser, url, options));
+      }
+      report.install = await installScenario(browser, url);
+    });
+    await withFixture("updateable", async (url) => {
+      report.scenarios.push(
+        await scenario(browser, url, {
+          name: "update-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          selectNoAudience: false,
+          rowText: "1.0.0-beta.2",
+        }),
+      );
+    });
+    await withFixture("disabled", async (url) => {
+      report.scenarios.push(
+        await scenario(browser, url, {
+          name: "enable-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          selectNoAudience: false,
+        }),
+      );
+    });
     report.accepted = true;
     writeFileSync(
       path.join(output, "acceptance.json"),
@@ -272,7 +308,6 @@ async function main() {
     console.log(JSON.stringify(report));
   } finally {
     await browser?.close();
-    await closeFixture(fixture);
   }
 }
 

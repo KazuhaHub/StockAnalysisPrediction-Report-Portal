@@ -3150,6 +3150,10 @@ body {
 .rp-platform-review .ant-descriptions-view { min-width: 0; }
 .rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
 .rp-platform-review .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
+.rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous) { background: #0958d9; border-color: #0958d9; }
+.rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover { background: #003eb3; border-color: #003eb3; }
+.rp-platform-review-modal .ant-btn-dangerous { background: #a8071a; border-color: #a8071a; }
+.rp-platform-review-modal .ant-btn-dangerous:not(:disabled):hover { background: #820014; border-color: #820014; }
 
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */
