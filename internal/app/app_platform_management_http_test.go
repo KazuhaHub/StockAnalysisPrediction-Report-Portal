@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func platformManagementFixture(t *testing.T, pg bool) (*Server, *http.ServeMux, platformActorSession, string, string) {
@@ -306,6 +309,85 @@ func TestPlatformManagementUninstallReviewsManagedNamespace(t *testing.T) {
 	}
 }
 
+func TestPlatformManagementRepairRequiresObservedRuntime(t *testing.T) {
+	s, actor, lease, _, _ := platformManagedRepairReviewFixture(t, false)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username),
+		actor.sessionID, actor.expires.Unix())
+	plansBefore := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_review_plans WHERE action='repair'`)
+	body := fmt.Sprintf(`{"action":"repair","installation_id":%q}`,
+		lease.installationID)
+	got := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if got.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(got.Body.String(),
+			`"app_platform_runtime_unavailable"`) ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM
+			app_platform_review_plans WHERE action='repair'`) != plansBefore {
+		t.Fatal("repair review without runtime", got.Code, got.Body.String())
+	}
+}
+
+func TestPlatformRepairManagementResponseIsBounded(t *testing.T) {
+	installation := platformFixtureID(2001)
+	plan := platformManagedUpdatePlan{
+		Format:               platformManagedRepairFormat,
+		Action:               appplatform.ActionRepair,
+		InstallationID:       installation,
+		AppID:                "notes-sample",
+		PublisherID:          "fixture-publisher",
+		SourceReleaseSHA256:  strings.Repeat("a", 64),
+		TargetReleaseSHA256:  strings.Repeat("a", 64),
+		SourceGeneration:     2,
+		TargetGeneration:     3,
+		SourcePolicyRevision: 4,
+		TargetPolicyRevision: 4,
+		ControllerEpoch:      platformFixtureID(2002),
+		DataNamespaceID:      platformFixtureID(2003),
+		DataFormat:           1,
+		SourceWriterFence:    5,
+		GrantsSHA256:         strings.Repeat("b", 64),
+	}
+	raw, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := platformRemovalReview{
+		ID: platformFixtureID(2004), SHA256: platformDigest(raw),
+		JSON: string(raw), ExpiresMS: 2005,
+	}
+	projection, err :=
+		platformRepairManagementProjection(review, installation)
+	if err != nil || projection.TargetGeneration != 3 ||
+		projection.TargetPolicyRevision != 4 {
+		t.Fatal("repair management projection", projection, err)
+	}
+	response, err := json.Marshal(
+		platformRepairManagementResponse(review, projection))
+	if err != nil || !strings.Contains(
+		string(response), `"action":"repair"`) ||
+		!strings.Contains(
+			string(response), `"data_effect":"checkpoint_and_retain"`) {
+		t.Fatal("repair management response", string(response), err)
+	}
+	for _, forbidden := range []string{
+		"actor_authority", "controller_epoch", "source_writer_fence",
+	} {
+		if strings.Contains(string(response), forbidden) {
+			t.Fatalf("repair response exposed %s: %s", forbidden, response)
+		}
+	}
+	plan.Action = appplatform.ActionEnable
+	changed, _ := json.Marshal(plan)
+	review.JSON = string(changed)
+	if _, err := platformRepairManagementProjection(
+		review, installation); !errors.Is(err, errAppPlatformPlanChanged) {
+		t.Fatal("repair response accepted another lifecycle action")
+	}
+}
+
 func TestPlatformManagementHTTPRefusals(t *testing.T) {
 	s, mux, actor, release, cookie := platformManagementFixture(t, false)
 	path := "/api/admin/app-platform/plans"
@@ -314,6 +396,9 @@ func TestPlatformManagementHTTPRefusals(t *testing.T) {
 		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[]`, `"audience":[]`, 1),
 		strings.Replace(strings.Replace(valid, `"action":"install"`, `"action":"update"`, 1), `"audience":[`, `"installation_id":"bad","audience":[`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"disable"`, 1),
+		`{"action":"repair"}`,
+		`{"action":"repair","installation_id":"bad"}`,
+		`{"action":"repair","installation_id":"` + platformFixtureID(1) + `","release_sha256":"` + strings.Repeat("a", 64) + `"}`,
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":1`, 1),
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":"01"`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"install","action":"install"`, 1),

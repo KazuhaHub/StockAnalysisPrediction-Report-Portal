@@ -63,6 +63,7 @@ type platformInstallationSettings struct {
 	Data                 *platformSettingsData        `json:"data,omitempty"`
 	Recovery             platformSettingsRecovery     `json:"recovery"`
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
+	RepairEligible       bool                         `json:"repair_eligible"`
 }
 
 func (s *Server) apiPlatformInstallationSettings(w http.ResponseWriter, r *http.Request, user string) {
@@ -291,6 +292,30 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			result.Recovery.Pending = result.Recovery.State == "review_required" ||
 				result.Recovery.State == "restoring" ||
 				result.Recovery.State == "preparing"
+		}
+		if generation >= 2 &&
+			result.Backend.Required &&
+			result.Backend.Registered &&
+			result.Backend.Enabled &&
+			platformValidSHA(result.CurrentReleaseSHA256) &&
+			result.Data != nil &&
+			result.Data.State == "active" &&
+			((result.DesiredState == "disabled" &&
+				(result.Phase == "disabled" ||
+					result.Phase == "recovery_required" ||
+					result.Phase == "review_required")) ||
+				(result.DesiredState == "enabled" &&
+					(result.Phase == "pending" ||
+						result.Phase == "recovery_required" ||
+						result.Phase == "review_required"))) {
+			var pending int
+			if err := e.queryRow(`SELECT COUNT(*)
+				FROM app_platform_operations
+				WHERE installation_id=? AND completed_ms IS NULL`,
+				installation).Scan(&pending); err != nil {
+				return err
+			}
+			result.RepairEligible = pending == 0
 		}
 		_, err = platformRefreshActor(e, session, actor, control)
 		return err

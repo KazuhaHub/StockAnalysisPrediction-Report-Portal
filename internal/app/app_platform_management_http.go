@@ -177,6 +177,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_package_untrusted"
 	case errors.Is(err, errAppPlatformInstallUnavailable):
 		status, code = 409, "app_platform_requirements_unavailable"
+	case errors.Is(err, errAppPlatformRuntimeConflict):
+		status, code = 503, "app_platform_runtime_unavailable"
 	case errors.Is(err, errAppPlatformControlPaused):
 		status, code = 503, "app_platform_control_paused"
 	case errors.Is(err, errPlatformOperationMissing):
@@ -196,6 +198,45 @@ func (s *Server) platformManagementSlot(w http.ResponseWriter) (func(), bool) {
 		jsonErrorCode(w, 429, "app_platform_busy", "application verification is busy")
 	}
 	return release, ok
+}
+
+func platformRepairManagementProjection(
+	review platformRemovalReview, installation string,
+) (platformManagedUpdatePlan, error) {
+	var projection platformManagedUpdatePlan
+	if err := json.Unmarshal(
+		[]byte(review.JSON), &projection); err != nil ||
+		projection.Action != appplatform.ActionRepair ||
+		projection.Format != platformManagedRepairFormat ||
+		projection.InstallationID != installation {
+		return projection, errAppPlatformPlanChanged
+	}
+	return projection, nil
+}
+
+func platformRepairManagementResponse(
+	review platformRemovalReview,
+	projection platformManagedUpdatePlan,
+) map[string]any {
+	return map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256,
+		"expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+		"review": map[string]any{
+			"action":          "repair",
+			"installation_id": projection.InstallationID,
+			"app_id":          projection.AppID,
+			"publisher_id":    projection.PublisherID,
+			"release_sha256":  projection.TargetReleaseSHA256,
+			"source_generation": strconv.FormatInt(
+				projection.SourceGeneration, 10),
+			"target_generation": strconv.FormatInt(
+				projection.TargetGeneration, 10),
+			"policy_revision": strconv.FormatInt(
+				projection.TargetPolicyRevision, 10),
+			"grants_sha256": projection.GrantsSHA256,
+			"data_effect":   "checkpoint_and_retain",
+		},
+	}
 }
 
 func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, user string) {
@@ -224,6 +265,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
+		action != "repair" &&
 		action != "delete_data" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
@@ -414,6 +456,35 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 				"data_effect":       projection.DataEffect,
 			},
 		})
+	case "repair":
+		if len(fields) != 2 || fields["installation_id"] == nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(
+			fields, "installation_id")
+		if installationErr != nil || !platformValidUUID(installation) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			platformManagementError(w, errAppPlatformRuntimeConflict)
+			return
+		}
+		review, err := s.createPlatformManagedRepairReviewContext(
+			r.Context(), actor, installation, endpoint)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		projection, projectionErr :=
+			platformRepairManagementProjection(review, installation)
+		if projectionErr != nil {
+			platformManagementError(w, projectionErr)
+			return
+		}
+		writeJSON(w, platformRepairManagementResponse(review, projection))
 	default:
 		platformManagementError(w, errPlatformManagementInput)
 	}
@@ -462,6 +533,14 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 	case "enable":
 		result, err = s.consumePlatformFrontendEnableReviewContext(
 			r.Context(), actor, id, sha, key)
+	case "repair":
+		endpoint, ok := s.platformRuntimeEndpoint()
+		if !ok {
+			err = errAppPlatformRuntimeConflict
+			break
+		}
+		result, err = s.consumePlatformManagedRepairReviewContext(
+			r.Context(), actor, id, sha, key, endpoint)
 	default:
 		err = errAppPlatformPlanChanged
 	}

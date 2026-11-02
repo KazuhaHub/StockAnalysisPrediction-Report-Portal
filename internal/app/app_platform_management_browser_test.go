@@ -59,6 +59,15 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 		s, actor, _, installation = platformObjectsFixture(t)
 		mux = http.NewServeMux()
 		s.wireRoutes(mux)
+	case "repair":
+		var target *platformManagedInstallTarget
+		var runtime platformRuntimeRegistration
+		s, actor, installation, target, runtime =
+			platformRepairBrowserFixture(t, false)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
+		mux = platformRepairBrowserMux(
+			t, s, actor, installation, target, runtime, mux)
 	case "delete-data":
 		s, actor, installation, _ = platformDeleteDataFixture(t, false)
 		mux = http.NewServeMux()
@@ -75,7 +84,9 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
-	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" && scenario != "settings" && scenario != "delete-data" {
+	if scenario != "updateable" && scenario != "disabled" &&
+		scenario != "progress" && scenario != "settings" &&
+		scenario != "repair" && scenario != "delete-data" {
 		platformStartFrontendService(t, s)
 	}
 	server := httptest.NewServer(mux)
@@ -112,6 +123,92 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 			t.Fatal("installation browser fixture expired")
 		}
 	}
+}
+
+func platformRepairBrowserFixture(
+	t *testing.T, pg bool,
+) (*Server, platformActorSession, string,
+	*platformManagedInstallTarget, platformRuntimeRegistration) {
+	t.Helper()
+	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, enabled)
+	var previous platformManagedUpdatePlan
+	var raw string
+	if err := s.st.queryRow(`SELECT p.plan_json
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='enable'
+		AND o.stage='complete'
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`,
+		enabled.installationID).Scan(&raw); err != nil ||
+		json.Unmarshal([]byte(raw), &previous) != nil ||
+		previous.TargetRuntime == nil {
+		t.Fatal("repair browser target", err)
+	}
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch
+		FROM app_platform_installations WHERE id=?`,
+		enabled.installationID)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, seed, err := s.platformDataRuntime(
+		s.st.poolExec(), epoch, dek)
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, actor, enabled.installationID,
+		previous.TargetRuntime, runtime
+}
+
+func platformRepairBrowserMux(
+	t *testing.T,
+	s *Server,
+	actor platformActorSession,
+	installation string,
+	target *platformManagedInstallTarget,
+	runtime platformRuntimeRegistration,
+	original *http.ServeMux,
+) *http.ServeMux {
+	t.Helper()
+	fixture := http.NewServeMux()
+	s.platformAdminRoute(fixture,
+		"POST /api/admin/app-platform/plans",
+		func(w http.ResponseWriter, r *http.Request, _ string) {
+			r.Body = http.MaxBytesReader(
+				w, r.Body, platformManagementBodyLimit)
+			var request struct {
+				Action       string `json:"action"`
+				Installation string `json:"installation_id"`
+			}
+			decoder := json.NewDecoder(r.Body)
+			decoder.DisallowUnknownFields()
+			if decoder.Decode(&request) != nil ||
+				request.Action != "repair" ||
+				request.Installation != installation {
+				platformManagementError(
+					w, errPlatformManagementInput)
+				return
+			}
+			review, err :=
+				s.createPlatformManagedRepairReviewWithRuntimeContext(
+					r.Context(), actor, installation, target, runtime)
+			if err != nil {
+				platformManagementError(w, err)
+				return
+			}
+			projection, projectionErr :=
+				platformRepairManagementProjection(review, installation)
+			if projectionErr != nil {
+				platformManagementError(w, projectionErr)
+				return
+			}
+			writeJSON(w,
+				platformRepairManagementResponse(review, projection))
+		})
+	fixture.Handle("/", original)
+	return fixture
 }
 
 func platformMarketBrowserMux(t *testing.T, s *Server, original *http.ServeMux) *http.ServeMux {

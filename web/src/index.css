@@ -106,10 +106,18 @@ body {
   background: #f6ffed;
   border-color: #b7eb8f;
 }
+.rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
+  color: #a8071a;
+  border-color: #a8071a;
+}
 :root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-success.ant-tag-filled {
   color: #73d13d;
   background: #162312;
   border-color: #274916;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
+  color: #ff7875;
+  border-color: #ff7875;
 }
 
 /* Dark mode elevation: on a black page a shadow is all but invisible, so a floating surface would
@@ -3167,6 +3175,8 @@ body {
 .rp-platform-review .ant-descriptions-view { min-width: 0; }
 .rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
 .rp-platform-review .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
+.rp-platform-review-modal .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.rp-platform-review-modal .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
 .rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous) { background: #0958d9; border-color: #0958d9; }
 .rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover { background: #003eb3; border-color: #003eb3; }
 .rp-platform-review-modal .ant-btn-dangerous { background: #a8071a; border-color: #a8071a; }

@@ -21,7 +21,7 @@ WEB = PORTAL / "web"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--market", action="store_true", help="Include an owned synthetic TLS catalogue for market acceptance")
 parser.add_argument("--fresh", action="store_true", help="Start with no application control identity or publisher trust")
-parser.add_argument("--scenario", choices=("install", "progress", "paused", "recovery", "updateable", "disabled", "settings", "delete-data"), default="install", help="Seed the real lifecycle projection to review")
+parser.add_argument("--scenario", choices=("install", "progress", "paused", "recovery", "updateable", "disabled", "settings", "repair", "delete-data"), default="install", help="Seed the real lifecycle projection to review")
 args = parser.parse_args()
 if args.market and args.fresh:
     parser.error("--fresh and --market are mutually exclusive")
@@ -128,7 +128,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
         probe_path = "/manage/apps"
         if args.scenario in ("progress", "paused", "recovery") and state.get("operation"):
             probe_path += "?operation=" + state["operation"]
-        elif args.scenario in ("settings", "delete-data") and state.get("installation"):
+        elif args.scenario in ("settings", "repair", "delete-data") and state.get("installation"):
             probe_path += "/installations/" + state["installation"]
         print(f"PROBE_URL=http://127.0.0.1:{server.server_port}{probe_path}", flush=True)
         if args.market:

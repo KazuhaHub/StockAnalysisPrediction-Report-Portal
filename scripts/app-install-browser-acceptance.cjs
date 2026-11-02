@@ -513,6 +513,43 @@ async function settingsScenario(browser, url, options) {
     if (clippedTags) {
       throw new Error(`settings clipped ${clippedTags} tag(s) at ${options.viewport.width}px`);
     }
+    if (options.repairButton) {
+      await page.getByRole("button", { name: options.repairButton }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.waitFor();
+      const text = await dialog.innerText();
+      if (!text.includes(options.repairBoundary)) {
+        throw new Error(`repair review boundary missing: ${text}`);
+      }
+      const geometry = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        width: window.innerWidth,
+        activeInside: !!document.activeElement?.closest('[role="dialog"]'),
+      }));
+      const box = await dialog.boundingBox();
+      if (
+        geometry.scrollWidth > geometry.width + 1 ||
+        !box ||
+        box.x < 0 ||
+        box.x + box.width > geometry.width + 1 ||
+        !geometry.activeInside
+      ) {
+        throw new Error(`unsafe repair review geometry at ${options.viewport.width}px`);
+      }
+      const dialogViolations = (await auditDialog(page)).filter(
+        (violation) =>
+          violation.impact === "critical" || violation.impact === "serious",
+      );
+      if (dialogViolations.length) {
+        throw new Error(`repair review axe at ${options.viewport.width}px: ${JSON.stringify(dialogViolations)}`);
+      }
+      await page.screenshot({
+        path: path.join(output, `${options.name}-review.png`),
+        fullPage: false,
+      });
+      await dialog.locator(".ant-modal-footer button").first().click();
+      await dialog.waitFor({ state: "hidden" });
+    }
     if (options.deleteButton) {
       await page.getByRole("button", { name: options.deleteButton }).click();
       const dialog = page.getByRole("dialog");
@@ -532,7 +569,7 @@ async function settingsScenario(browser, url, options) {
         path: path.join(output, `${options.name}-review.png`),
         fullPage: false,
       });
-      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await dialog.locator(".ant-modal-footer button").first().click();
       await dialog.waitFor({ state: "hidden" });
     }
     const violations = (await auditPage(page)).filter(
@@ -666,6 +703,28 @@ async function main() {
           viewport: { width: 1440, height: 900 },
           title: "Application settings",
           deleteButton: "Delete retained data",
+        }),
+      );
+    });
+    await withFixture("repair", async (url) => {
+      report.scenarios.push(
+        await settingsScenario(browser, url, {
+          name: "settings-repair-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          title: "Application settings",
+          repairButton: "Review repair",
+          repairBoundary: "creates a fresh checkpoint",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-repair-review-320-zh-cn-light",
+          language: "Simplified Chinese",
+          dark: false,
+          viewport: { width: 320, height: 800 },
+          title: "应用设置",
+          repairButton: "审核修复",
+          repairBoundary: "创建新的恢复点",
         }),
       );
     });

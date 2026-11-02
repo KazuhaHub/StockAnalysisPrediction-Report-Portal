@@ -39,6 +39,7 @@ const settings = {
   data: { id: '22222222-2222-4222-8222-222222222222', state: 'active', format: 2, quota_bytes: '268435456', observed_bytes: '128', revision: '4' },
   recovery: { count: 1, state: 'verified', pending: false },
   configuration_gaps: ['capability:network.http'],
+  repair_eligible: false,
 }
 
 function mount(path = `/manage/apps/installations/${installation}`) {
@@ -148,6 +149,65 @@ describe('application installation settings', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
       plan_id: plan,
       plan_sha256: 'b'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('reviews and confirms repair of the current managed release without changing grants', async () => {
+    const user = userEvent.setup()
+    const plan = '66666666-6666-4666-8666-666666666666'
+    const operation = '77777777-7777-4777-8777-777777777777'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'disabled',
+          phase: 'disabled',
+          generation: '2',
+          backend: { required: true, registered: true, enabled: true },
+          repair_eligible: true,
+        }
+      }
+      return { bindings: [] }
+    })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return {
+          plan_id: plan,
+          plan_sha256: 'c'.repeat(64),
+          expires_ms: String(Date.now() + 900000),
+          review: {
+            action: 'repair',
+            installation_id: installation,
+            app_id: 'notes',
+            publisher_id: 'publisher',
+            release_sha256: release,
+            source_generation: '2',
+            target_generation: '3',
+            policy_revision: '3',
+            grants_sha256: 'd'.repeat(64),
+            data_effect: 'checkpoint_and_retain',
+          },
+        }
+      }
+      return { operation_id: operation }
+    })
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.repair' }))
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+      action: 'repair',
+      installation_id: installation,
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('appPlatform.settings.repairWarning')
+    expect(dialog.textContent).toContain(release)
+    expect(dialog.textContent).toContain('2 → 3')
+    expect(dialog.textContent).toContain('appPlatform.settings.repairGrantsUnchanged')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.repairAction' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'c'.repeat(64),
       idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })))
     expect(await screen.findByText('apps')).toBeTruthy()

@@ -33,6 +33,7 @@ func testPlatformInstallationSettingsHTTP(t *testing.T, pg bool) {
 		!platformValidUUID(settings.Data.ID) ||
 		settings.Data.State != "active" ||
 		settings.Recovery.Count != 0 ||
+		settings.RepairEligible ||
 		len(settings.ConfigurationGaps) != 0 {
 		t.Fatalf("unexpected settings projection: %+v", settings)
 	}
@@ -70,4 +71,32 @@ func TestPlatformInstallationSettingsHTTPSQLite(t *testing.T) {
 
 func TestPlatformInstallationSettingsHTTPPostgres(t *testing.T) {
 	testPlatformInstallationSettingsHTTP(t, true)
+}
+
+func testPlatformInstallationSettingsRepairEligibility(
+	t *testing.T, pg bool,
+) {
+	t.Helper()
+	s, actor, enabled := testPlatformManagedEnableSyntheticStart(t, pg)
+	platformCompleteSyntheticDisable(t, s, actor, enabled)
+	settings, err := s.platformInstallationSettings(
+		actor, enabled.installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.DesiredState != "disabled" ||
+		settings.Phase != "disabled" ||
+		!settings.RepairEligible ||
+		settings.Data == nil ||
+		settings.Data.State != "active" {
+		t.Fatalf("repair eligibility projection: %+v", settings)
+	}
+}
+
+func TestPlatformInstallationSettingsRepairEligibilitySQLite(t *testing.T) {
+	testPlatformInstallationSettingsRepairEligibility(t, false)
+}
+
+func TestPlatformInstallationSettingsRepairEligibilityPostgres(t *testing.T) {
+	testPlatformInstallationSettingsRepairEligibility(t, true)
 }
