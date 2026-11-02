@@ -142,6 +142,8 @@ focus, Escape/focus restoration, WCAG A/AA axe results and browser errors; then
 completes the no-audience installation and verifies background completion.
 CI uploads the screenshots and `acceptance.json`; this remains installation-page
 evidence, not approval of every lifecycle page or a substitute for D5 review.
+Portal `ff331b52` passed quota/browser run `41382711308` with all three axe scans
+clean and the background operation complete.
 
 ## Remaining platform scope
 
