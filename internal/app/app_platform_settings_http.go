@@ -40,9 +40,21 @@ type platformSettingsData struct {
 }
 
 type platformSettingsRecovery struct {
-	Count   int    `json:"count"`
-	State   string `json:"state,omitempty"`
-	Pending bool   `json:"pending"`
+	Count   int                             `json:"count"`
+	State   string                          `json:"state,omitempty"`
+	Pending bool                            `json:"pending"`
+	Points  []platformSettingsRecoveryPoint `json:"points"`
+}
+
+type platformSettingsRecoveryPoint struct {
+	ID              string `json:"id"`
+	State           string `json:"state"`
+	CheckpointID    string `json:"checkpoint_id"`
+	ReleaseSHA256   string `json:"release_sha256"`
+	Format          int64  `json:"format"`
+	Bytes           string `json:"bytes"`
+	VerifiedMS      string `json:"verified_ms,omitempty"`
+	RestoreEligible bool   `json:"restore_eligible"`
 }
 
 type platformInstallationSettings struct {
@@ -64,6 +76,7 @@ type platformInstallationSettings struct {
 	Recovery             platformSettingsRecovery     `json:"recovery"`
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
+	ControlPaused        bool                         `json:"control_paused"`
 }
 
 func (s *Server) apiPlatformInstallationSettings(w http.ResponseWriter, r *http.Request, user string) {
@@ -90,9 +103,10 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 		InstallationID:    installation,
 		Audience:          []platformSettingsAudience{},
 		Capabilities:      []platformSettingsCapability{},
+		Recovery:          platformSettingsRecovery{Points: []platformSettingsRecoveryPoint{}},
 		ConfigurationGaps: []string{},
 	}
-	err := s.withAppPlatformActor(session, false, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.withAppPlatformActorRead(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var runtimeID sql.NullString
 		var release, version sql.NullString
 		var descriptor []byte
@@ -274,6 +288,23 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			return err
 		}
 
+		var pending int
+		if err := e.queryRow(`SELECT COUNT(*)
+			FROM app_platform_operations
+			WHERE installation_id=? AND completed_ms IS NULL`,
+			installation).Scan(&pending); err != nil {
+			return err
+		}
+		var paused string
+		if err := e.queryRow(`SELECT v FROM meta
+			WHERE k='app_platform_restore_paused'`).Scan(&paused); err != nil {
+			return err
+		}
+		result.ControlPaused = paused != "0"
+		if result.ControlPaused {
+			result.ConfigurationGaps = append(
+				result.ConfigurationGaps, "control_paused")
+		}
 		if err := e.queryRow(`SELECT COUNT(*)
 			FROM app_platform_recovery_sets
 			WHERE installation_id=? AND state<>'deleted'`,
@@ -292,8 +323,55 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			result.Recovery.Pending = result.Recovery.State == "review_required" ||
 				result.Recovery.State == "restoring" ||
 				result.Recovery.State == "preparing"
+			rows, err := e.query(`SELECT id,state,checkpoint_id,release_sha256,
+				data_format,bytes,verified_ms
+				FROM app_platform_recovery_sets
+				WHERE installation_id=? AND state<>'deleted'
+				ORDER BY created_ms DESC,id DESC LIMIT 16`,
+				installation)
+			if err != nil {
+				return err
+			}
+			restoreBaseEligible := !result.ControlPaused &&
+				pending == 0 &&
+				result.DesiredState == "enabled" &&
+				result.Phase == "recovery_required" &&
+				result.Backend.Required &&
+				result.Backend.Registered &&
+				result.Backend.Enabled &&
+				result.Data != nil &&
+				result.Data.State == "active"
+			for rows.Next() {
+				var point platformSettingsRecoveryPoint
+				var bytes int64
+				var verified sql.NullInt64
+				if err := rows.Scan(
+					&point.ID, &point.State, &point.CheckpointID,
+					&point.ReleaseSHA256, &point.Format, &bytes,
+					&verified); err != nil {
+					rows.Close()
+					return err
+				}
+				point.Bytes = strconv.FormatInt(bytes, 10)
+				if verified.Valid {
+					point.VerifiedMS = strconv.FormatInt(
+						verified.Int64, 10)
+				}
+				point.RestoreEligible = restoreBaseEligible &&
+					point.State == "verified" &&
+					point.ReleaseSHA256 == result.CurrentReleaseSHA256
+				result.Recovery.Points = append(
+					result.Recovery.Points, point)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			rows.Close()
 		}
 		if generation >= 2 &&
+			!result.ControlPaused &&
+			pending == 0 &&
 			result.Backend.Required &&
 			result.Backend.Registered &&
 			result.Backend.Enabled &&
@@ -308,16 +386,10 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 					(result.Phase == "pending" ||
 						result.Phase == "recovery_required" ||
 						result.Phase == "review_required"))) {
-			var pending int
-			if err := e.queryRow(`SELECT COUNT(*)
-				FROM app_platform_operations
-				WHERE installation_id=? AND completed_ms IS NULL`,
-				installation).Scan(&pending); err != nil {
-				return err
-			}
-			result.RepairEligible = pending == 0
+			result.RepairEligible = true
 		}
-		_, err = platformRefreshActor(e, session, actor, control)
+		_, err = platformRevalidateActorWithoutPause(
+			e, session, actor, control.nowMS)
 		return err
 	})
 	return result, err

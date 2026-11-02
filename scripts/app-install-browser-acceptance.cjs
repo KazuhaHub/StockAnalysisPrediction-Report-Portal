@@ -514,6 +514,17 @@ async function settingsScenario(browser, url, options) {
     if (options.ready) {
       await page.getByText(options.ready, { exact: true }).waitFor();
     }
+    if (options.restorePausedText) {
+      await page.getByText(options.restorePausedText, {
+        exact: false,
+      }).waitFor();
+      const restore = page.getByRole("button", {
+        name: options.pausedRestoreButton,
+      });
+      if ((await restore.count()) !== 1 || !(await restore.isDisabled())) {
+        throw new Error("restore remained enabled while control was paused");
+      }
+    }
     const geometry = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       width: window.innerWidth,
@@ -557,6 +568,44 @@ async function settingsScenario(browser, url, options) {
       );
       if (dialogViolations.length) {
         throw new Error(`repair review axe at ${options.viewport.width}px: ${JSON.stringify(dialogViolations)}`);
+      }
+      await page.screenshot({
+        path: path.join(output, `${options.name}-review.png`),
+        fullPage: false,
+      });
+      await dialog.locator(".ant-modal-footer button").first().click();
+      await dialog.waitFor({ state: "hidden" });
+    }
+    if (options.restoreButton) {
+      await page.getByRole("button", { name: options.restoreButton }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.waitFor();
+      await waitForReviewDialogStyles(page);
+      const text = await dialog.innerText();
+      if (!text.includes(options.restoreBoundary)) {
+        throw new Error(`restore review boundary missing: ${text}`);
+      }
+      const geometry = await page.evaluate(() => ({
+        scrollWidth: document.documentElement.scrollWidth,
+        width: window.innerWidth,
+        activeInside: !!document.activeElement?.closest('[role="dialog"]'),
+      }));
+      const box = await dialog.boundingBox();
+      if (
+        geometry.scrollWidth > geometry.width + 1 ||
+        !box ||
+        box.x < 0 ||
+        box.x + box.width > geometry.width + 1 ||
+        !geometry.activeInside
+      ) {
+        throw new Error(`unsafe restore review geometry at ${options.viewport.width}px`);
+      }
+      const dialogViolations = (await auditDialog(page)).filter(
+        (violation) =>
+          violation.impact === "critical" || violation.impact === "serious",
+      );
+      if (dialogViolations.length) {
+        throw new Error(`restore review axe at ${options.viewport.width}px: ${JSON.stringify(dialogViolations)}`);
       }
       await page.screenshot({
         path: path.join(output, `${options.name}-review.png`),
@@ -741,6 +790,52 @@ async function main() {
           title: "应用设置",
           repairButton: "审核修复",
           repairBoundary: "创建新的恢复点",
+        }),
+      );
+    });
+    await withFixture("restore", async (url) => {
+      report.scenarios.push(
+        await settingsScenario(browser, url, {
+          name: "settings-restore-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          title: "Application settings",
+          restoreButton: "Review restore",
+          restoreBoundary: "Writes after that checkpoint may be lost",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-restore-review-320-zh-cn-light",
+          language: "Simplified Chinese",
+          dark: false,
+          viewport: { width: 320, height: 800 },
+          title: "应用设置",
+          restoreButton: "审核恢复",
+          restoreBoundary: "检查点之后的写入可能丢失",
+        }),
+      );
+    });
+    await withFixture("restore-paused", async (url) => {
+      report.scenarios.push(
+        await settingsScenario(browser, url, {
+          name: "settings-restore-paused-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          title: "Application settings",
+          restorePausedText:
+            "Application control is paused. Restore planning and admission remain disabled",
+          pausedRestoreButton: "Review restore",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-restore-paused-320-zh-cn-light",
+          language: "Simplified Chinese",
+          dark: false,
+          viewport: { width: 320, height: 800 },
+          title: "应用设置",
+          restorePausedText:
+            "应用控制已暂停。管理员完成恢复审核前，不能规划或确认恢复。",
+          pausedRestoreButton: "审核恢复",
         }),
       );
     });

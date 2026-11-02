@@ -100,3 +100,52 @@ func TestPlatformInstallationSettingsRepairEligibilitySQLite(t *testing.T) {
 func TestPlatformInstallationSettingsRepairEligibilityPostgres(t *testing.T) {
 	testPlatformInstallationSettingsRepairEligibility(t, true)
 }
+
+func testPlatformInstallationSettingsRecovery(
+	t *testing.T, pg bool,
+) {
+	t.Helper()
+	s, actor, update, recoverySetID :=
+		platformManagedRestoreReviewFixture(t, pg)
+	settings, err := s.platformInstallationSettings(
+		actor, update.installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.ControlPaused ||
+		settings.Phase != "recovery_required" ||
+		len(settings.Recovery.Points) != 1 ||
+		settings.Recovery.Points[0].ID != recoverySetID ||
+		!settings.Recovery.Points[0].RestoreEligible {
+		t.Fatalf("restore projection: %+v", settings.Recovery)
+	}
+	mustExec(t, s.st, `UPDATE meta SET v='1'
+		WHERE k='app_platform_restore_paused'`)
+	settings, err = s.platformInstallationSettings(
+		actor, update.installationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.ControlPaused ||
+		settings.RepairEligible ||
+		len(settings.Recovery.Points) != 1 ||
+		settings.Recovery.Points[0].RestoreEligible {
+		t.Fatalf("paused restore projection: %+v", settings)
+	}
+	foundGap := false
+	for _, gap := range settings.ConfigurationGaps {
+		foundGap = foundGap || gap == "control_paused"
+	}
+	if !foundGap {
+		t.Fatalf("restore pause gap missing: %+v",
+			settings.ConfigurationGaps)
+	}
+}
+
+func TestPlatformInstallationSettingsRecoverySQLite(t *testing.T) {
+	testPlatformInstallationSettingsRecovery(t, false)
+}
+
+func TestPlatformInstallationSettingsRecoveryPostgres(t *testing.T) {
+	testPlatformInstallationSettingsRecovery(t, true)
+}

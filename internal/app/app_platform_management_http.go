@@ -239,6 +239,45 @@ func platformRepairManagementResponse(
 	}
 }
 
+func platformRestoreManagementProjection(
+	review platformRemovalReview,
+	installation, recoverySetID string,
+) (platformManagedRestorePlan, error) {
+	var projection platformManagedRestorePlan
+	if err := json.Unmarshal(
+		[]byte(review.JSON), &projection); err != nil ||
+		projection.Format != platformManagedRestoreFormat ||
+		projection.InstallationID != installation ||
+		projection.RecoverySetID != recoverySetID {
+		return projection, errAppPlatformPlanChanged
+	}
+	return projection, nil
+}
+
+func platformRestoreManagementResponse(
+	review platformRemovalReview,
+	projection platformManagedRestorePlan,
+) map[string]any {
+	return map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256,
+		"expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+		"review": map[string]any{
+			"action":                  "restore",
+			"installation_id":         projection.InstallationID,
+			"recovery_set_id":         projection.RecoverySetID,
+			"checkpoint_operation_id": projection.CheckpointOperationID,
+			"checkpoint_effect_id":    projection.CheckpointEffectID,
+			"checkpoint_id":           projection.CheckpointID,
+			"release_sha256":          projection.ReleaseSHA256,
+			"manifest_sha256":         projection.ManifestSHA256,
+			"archive_bytes":           strconv.FormatInt(projection.ArchiveBytes, 10),
+			"source_generation":       strconv.FormatInt(projection.SourceGeneration, 10),
+			"target_generation":       strconv.FormatInt(projection.TargetGeneration, 10),
+			"data_effect":             "restore_checkpoint",
+		},
+	}
+}
+
 func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, user string) {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
 	if err != nil {
@@ -247,7 +286,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	fields, err := platformManagementObject(raw, "action",
 		"release_sha256", "trust_revision", "audience",
-		"installation_id", "data_namespace_id")
+		"installation_id", "data_namespace_id", "recovery_set_id")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -265,7 +304,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
-		action != "repair" &&
+		action != "repair" && action != "restore" &&
 		action != "delete_data" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
@@ -485,6 +524,35 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		writeJSON(w, platformRepairManagementResponse(review, projection))
+	case "restore":
+		if len(fields) != 3 || fields["installation_id"] == nil ||
+			fields["recovery_set_id"] == nil {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		installation, installationErr := platformManagementString(
+			fields, "installation_id")
+		recoverySetID, recoveryErr := platformManagementString(
+			fields, "recovery_set_id")
+		if installationErr != nil || recoveryErr != nil ||
+			!platformValidUUID(installation) ||
+			!platformValidUUID(recoverySetID) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		review, err := s.createPlatformManagedRestoreReview(
+			r.Context(), actor, installation, recoverySetID)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		projection, projectionErr := platformRestoreManagementProjection(
+			review, installation, recoverySetID)
+		if projectionErr != nil {
+			platformManagementError(w, projectionErr)
+			return
+		}
+		writeJSON(w, platformRestoreManagementResponse(review, projection))
 	default:
 		platformManagementError(w, errPlatformManagementInput)
 	}
@@ -541,6 +609,9 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		}
 		result, err = s.consumePlatformManagedRepairReviewContext(
 			r.Context(), actor, id, sha, key, endpoint)
+	case "restore":
+		result, err = s.consumePlatformManagedRestoreReview(
+			r.Context(), actor, id, sha, key)
 	default:
 		err = errAppPlatformPlanChanged
 	}

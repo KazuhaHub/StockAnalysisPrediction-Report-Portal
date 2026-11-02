@@ -68,6 +68,20 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 		s.wireRoutes(mux)
 		mux = platformRepairBrowserMux(
 			t, s, actor, installation, target, runtime, mux)
+	case "restore":
+		var update platformOperationLease
+		s, actor, update, _ = platformManagedRestoreReviewFixture(t, false)
+		installation = update.installationID
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
+	case "restore-paused":
+		var update platformOperationLease
+		s, actor, update, _ = platformManagedRestoreReviewFixture(t, false)
+		installation = update.installationID
+		mustExec(t, s.st, `UPDATE meta SET v='1'
+			WHERE k='app_platform_restore_paused'`)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
 	case "delete-data":
 		s, actor, installation, _ = platformDeleteDataFixture(t, false)
 		mux = http.NewServeMux()
@@ -86,7 +100,9 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	}
 	if scenario != "updateable" && scenario != "disabled" &&
 		scenario != "progress" && scenario != "settings" &&
-		scenario != "repair" && scenario != "delete-data" {
+		scenario != "repair" && scenario != "restore" &&
+		scenario != "restore-paused" &&
+		scenario != "delete-data" {
 		platformStartFrontendService(t, s)
 	}
 	server := httptest.NewServer(mux)

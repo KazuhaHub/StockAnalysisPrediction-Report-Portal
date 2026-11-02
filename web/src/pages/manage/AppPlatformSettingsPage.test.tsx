@@ -37,9 +37,10 @@ const settings = {
   ],
   backend: { required: true, registered: true, enabled: true },
   data: { id: '22222222-2222-4222-8222-222222222222', state: 'active', format: 2, quota_bytes: '268435456', observed_bytes: '128', revision: '4' },
-  recovery: { count: 1, state: 'verified', pending: false },
+  recovery: { count: 1, state: 'verified', pending: false, points: [] },
   configuration_gaps: ['capability:network.http'],
   repair_eligible: false,
+  control_paused: false,
 }
 
 function mount(path = `/manage/apps/installations/${installation}`) {
@@ -211,5 +212,115 @@ describe('application installation settings', () => {
       idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
     })))
     expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('reviews and admits restore from the exact verified recovery point', async () => {
+    const user = userEvent.setup()
+    const recovery = '88888888-8888-4888-8888-888888888888'
+    const checkpointOperation = '99999999-9999-4999-8999-999999999999'
+    const checkpoint = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+    const plan = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const operation = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'enabled',
+          phase: 'recovery_required',
+          recovery: {
+            count: 1,
+            state: 'verified',
+            pending: false,
+            points: [{
+              id: recovery,
+              state: 'verified',
+              checkpoint_id: checkpoint,
+              release_sha256: release,
+              format: 2,
+              bytes: '4096',
+              verified_ms: String(Date.now()),
+              restore_eligible: true,
+            }],
+          },
+        }
+      }
+      return { bindings: [] }
+    })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return {
+          plan_id: plan,
+          plan_sha256: 'e'.repeat(64),
+          expires_ms: String(Date.now() + 900000),
+          review: {
+            action: 'restore',
+            installation_id: installation,
+            recovery_set_id: recovery,
+            checkpoint_operation_id: checkpointOperation,
+            checkpoint_effect_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+            checkpoint_id: checkpoint,
+            release_sha256: release,
+            manifest_sha256: 'f'.repeat(64),
+            archive_bytes: '4096',
+            source_generation: '1',
+            target_generation: '2',
+            data_effect: 'restore_checkpoint',
+          },
+        }
+      }
+      return { operation_id: operation }
+    })
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.restore' }))
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+      action: 'restore',
+      installation_id: installation,
+      recovery_set_id: recovery,
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('appPlatform.settings.restoreWarning')
+    expect(dialog.textContent).toContain(recovery)
+    expect(dialog.textContent).toContain(checkpoint)
+    expect(dialog.textContent).toContain('1 → 2')
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.restoreAction' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'e'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    expect(await screen.findByText('apps')).toBeTruthy()
+  })
+
+  it('shows the recovery pause reason and disables restore admission', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'enabled',
+          phase: 'recovery_required',
+          control_paused: true,
+          configuration_gaps: ['control_paused'],
+          recovery: {
+            count: 1,
+            state: 'verified',
+            pending: false,
+            points: [{
+              id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+              state: 'verified',
+              checkpoint_id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+              release_sha256: release,
+              format: 2,
+              bytes: '4096',
+              restore_eligible: false,
+            }],
+          },
+        }
+      }
+      return { bindings: [] }
+    })
+    mount()
+    expect(await screen.findByText('err.app_platform_control_paused')).toBeTruthy()
+    expect(screen.getByText('appPlatform.settings.restorePaused')).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'appPlatform.settings.restore' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

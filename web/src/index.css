@@ -106,6 +106,14 @@ body {
   background: #f6ffed;
   border-color: #b7eb8f;
 }
+.rp-platform-settings .ant-tag.ant-tag-error {
+  color: #a8071a;
+  background: #fff2f0;
+  border-color: #ffccc7;
+}
+.rp-platform-settings .ant-tag.ant-tag-filled.ant-tag-error {
+  color: #a8071a;
+}
 .rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
   color: #a8071a;
   border-color: #a8071a;
@@ -114,6 +122,14 @@ body {
   color: #73d13d;
   background: #162312;
   border-color: #274916;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-error {
+  color: #ff7875;
+  background: #2a1215;
+  border-color: #58181c;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-filled.ant-tag-error {
+  color: #ff7875;
 }
 :root[data-theme='dark'] .rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
   color: #ff7875;

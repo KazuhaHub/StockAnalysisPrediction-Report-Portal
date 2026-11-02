@@ -388,6 +388,62 @@ func TestPlatformRepairManagementResponseIsBounded(t *testing.T) {
 	}
 }
 
+func TestPlatformManagementRestoreHTTP(t *testing.T) {
+	s, actor, update, recoverySetID :=
+		platformManagedRestoreReviewFixture(t, false)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username),
+		actor.sessionID, actor.expires.Unix())
+	body := fmt.Sprintf(
+		`{"action":"restore","installation_id":%q,"recovery_set_id":%q}`,
+		update.installationID, recoverySetID)
+	plan := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if plan.Code != http.StatusOK ||
+		!strings.Contains(plan.Body.String(), `"action":"restore"`) ||
+		!strings.Contains(plan.Body.String(), recoverySetID) ||
+		!strings.Contains(
+			plan.Body.String(), `"data_effect":"restore_checkpoint"`) ||
+		strings.Contains(plan.Body.String(), "controller_epoch") {
+		t.Fatal("restore review", plan.Code, plan.Body.String())
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil ||
+		!platformValidUUID(review.ID) || !platformValidSHA(review.SHA) {
+		t.Fatal("invalid restore review", plan.Body.String(), err)
+	}
+	commit := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/operations", cookie,
+		fmt.Sprintf(
+			`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`,
+			review.ID, review.SHA, platformFixtureID(2010)))
+	if commit.Code != http.StatusAccepted ||
+		scalar[string](t, s.st, `SELECT action||':'||stage
+			FROM app_platform_operations
+			WHERE installation_id=? AND action='restore'`,
+			update.installationID) != "restore:quiesce" {
+		t.Fatal("restore admission", commit.Code, commit.Body.String())
+	}
+	var admitted struct {
+		Operation string `json:"operation_id"`
+	}
+	if err := json.Unmarshal(commit.Body.Bytes(), &admitted); err != nil {
+		t.Fatal(err)
+	}
+	progress := sessionTestRequest(
+		mux, "GET", "/api/admin/app-platform/operations/"+
+			admitted.Operation, cookie, "")
+	if progress.Code != http.StatusOK ||
+		!strings.Contains(progress.Body.String(), `"action":"restore"`) ||
+		!strings.Contains(progress.Body.String(), `"stage":"quiesce"`) {
+		t.Fatal("restore progress", progress.Code, progress.Body.String())
+	}
+}
+
 func TestPlatformManagementHTTPRefusals(t *testing.T) {
 	s, mux, actor, release, cookie := platformManagementFixture(t, false)
 	path := "/api/admin/app-platform/plans"
@@ -399,6 +455,9 @@ func TestPlatformManagementHTTPRefusals(t *testing.T) {
 		`{"action":"repair"}`,
 		`{"action":"repair","installation_id":"bad"}`,
 		`{"action":"repair","installation_id":"` + platformFixtureID(1) + `","release_sha256":"` + strings.Repeat("a", 64) + `"}`,
+		`{"action":"restore","installation_id":"` + platformFixtureID(1) + `"}`,
+		`{"action":"restore","installation_id":"bad","recovery_set_id":"` + platformFixtureID(2) + `"}`,
+		`{"action":"restore","installation_id":"` + platformFixtureID(1) + `","recovery_set_id":"` + platformFixtureID(2) + `","release_sha256":"` + strings.Repeat("a", 64) + `"}`,
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":1`, 1),
 		strings.Replace(valid, `"trust_revision":"1"`, `"trust_revision":"01"`, 1),
 		strings.Replace(valid, `"action":"install"`, `"action":"install","action":"install"`, 1),

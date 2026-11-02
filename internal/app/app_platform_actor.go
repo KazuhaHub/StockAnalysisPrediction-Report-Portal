@@ -132,6 +132,17 @@ func (s *Server) withAppPlatformActor(session platformActorSession, initialize b
 }
 
 func (s *Server) withAppPlatformActorContext(ctx context.Context, session platformActorSession, initialize bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
+	return s.withAppPlatformActorContextMode(
+		ctx, session, initialize, false, fn)
+}
+
+// Read-only projections must remain inspectable while mutation is paused.
+func (s *Server) withAppPlatformActorRead(session platformActorSession, fn func(migExec, platformActorFacts, platformActorControl) error) error {
+	return s.withAppPlatformActorContextMode(
+		context.Background(), session, false, true, fn)
+}
+
+func (s *Server) withAppPlatformActorContextMode(ctx context.Context, session platformActorSession, initialize, allowPaused bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
 	// Filter stale/non-admin proofs before lazy keyring creation. This unlocked
 	// read is only a precheck; the authoritative check is repeated under the
 	// shared principal-lifecycle lock below.
@@ -164,7 +175,8 @@ func (s *Server) withAppPlatformActorContext(ctx context.Context, session platfo
 	if err != nil {
 		return err
 	}
-	seed, epoch, err := platformControlIdentity(e, dek, initialize)
+	seed, epoch, err := platformControlIdentity(
+		e, dek, initialize, allowPaused)
 	if err != nil {
 		return err
 	}
@@ -181,7 +193,7 @@ func (s *Server) withAppPlatformActorContext(ctx context.Context, session platfo
 	return tx.Commit()
 }
 
-func platformControlIdentity(e migExec, dek []byte, initialize bool) ([]byte, string, error) {
+func platformControlIdentity(e migExec, dek []byte, initialize, allowPaused bool) ([]byte, string, error) {
 	rows, err := e.query(`SELECT k,v FROM meta WHERE k IN ('app_platform_actor_seed','app_platform_controller_epoch','app_platform_restore_paused')`)
 	if err != nil {
 		return nil, "", err
@@ -233,7 +245,11 @@ func platformControlIdentity(e migExec, dek []byte, initialize bool) ([]byte, st
 		}
 	}
 	sealed, epoch := values["app_platform_actor_seed"], values["app_platform_controller_epoch"]
-	if len(values) != 3 || values["app_platform_restore_paused"] != "0" || !platformValidUUID(epoch) || !strings.HasPrefix(sealed, sealPrefix) {
+	if len(values) != 3 ||
+		(values["app_platform_restore_paused"] != "0" &&
+			!(allowPaused && values["app_platform_restore_paused"] == "1")) ||
+		!platformValidUUID(epoch) ||
+		!strings.HasPrefix(sealed, sealPrefix) {
 		return nil, "", errAppPlatformControlPaused
 	}
 	seed, err := aesOpen(dek, strings.TrimPrefix(sealed, sealPrefix), aad("app-platform", "actor-seed"))
@@ -339,4 +355,25 @@ func platformRefreshActor(e migExec, session platformActorSession, actor platfor
 	}
 	control.nowMS = now
 	return control, nil
+}
+
+// Read-only projections remain available while platform mutations are paused so
+// an administrator can inspect the reason and the exact recovery boundary.
+func platformRevalidateActorWithoutPause(e migExec, session platformActorSession, actor platformActorFacts, since int64) (int64, error) {
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		return 0, err
+	}
+	account, err := platformReadActorAccount(e, session, now, true)
+	if err != nil {
+		return 0, err
+	}
+	current, err := platformActorAuthorityForScope(e, account, actor.scope)
+	if err != nil {
+		return 0, err
+	}
+	if now < since || current != actor {
+		return 0, errAppPlatformActorUnavailable
+	}
+	return now, nil
 }
