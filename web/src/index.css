@@ -3149,6 +3149,7 @@ body {
 .rp-platform-review { min-width: 0; }
 .rp-platform-review .ant-descriptions-view { min-width: 0; }
 .rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.rp-platform-review .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
 
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */

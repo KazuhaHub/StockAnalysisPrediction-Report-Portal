@@ -129,6 +129,20 @@ stop, joins it, closes the loopback listener and removes the temporary folder.
 The session state file is private and is never printed. Do not adapt the fixture
 to use production accounts, deployment credentials or an existing database.
 
+The repeatable browser matrix starts and cleans up that fixture itself:
+
+```sh
+SDK_BROWSER_PACKAGE=/absolute/path/to/playwright/package.json \
+  node scripts/app-install-browser-acceptance.cjs
+```
+
+It captures 1440px English/light, 320px Simplified Chinese/dark and 390px
+Traditional Chinese/light review dialogs; checks page and dialog bounds, visible
+focus, Escape/focus restoration, WCAG A/AA axe results and browser errors; then
+completes the no-audience installation and verifies background completion.
+CI uploads the screenshots and `acceptance.json`; this remains installation-page
+evidence, not approval of every lifecycle page or a substitute for D5 review.
+
 ## Remaining platform scope
 
 Remote v2 catalogue fetching, trust onboarding/publication, managed-backend

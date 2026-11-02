@@ -13,13 +13,13 @@ class PublicBrowserFixtureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             source = Path(folder)
             build, packages, browsers = source / "build", source / "packages", source / "browsers"
-            for path in (build / "host", packages / "playwright", packages / "playwright-core", browsers):
+            for path in (build / "host", packages / "axe-core", packages / "playwright", packages / "playwright-core", browsers):
                 path.mkdir(parents=True)
             (build / "frontend.zip").write_bytes(b"public frontend")
             (build / "host/host.js").write_text("public host")
             (build / "private-marker").write_text("must not be copied")
             (packages / "private-marker").write_text("must not be copied")
-            for name in ("playwright", "playwright-core"):
+            for name in ("axe-core", "playwright", "playwright-core"):
                 (packages / name / "index.js").write_text("public runtime")
             binary = browsers / "chrome"
             binary.write_bytes(b"public executable")

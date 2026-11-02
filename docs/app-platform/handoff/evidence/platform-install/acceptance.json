@@ -1,0 +1,25 @@
+{
+  "gitCommit": "4c07e062bbd1dd2e40d1c3b52da0b13ca067a1ba",
+  "url": "http://127.0.0.1:63712/manage/apps",
+  "scenarios": [
+    {
+      "name": "install-review-1440-en-light",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "install-review-320-zh-cn-dark",
+      "violations": [],
+      "height": 800
+    },
+    {
+      "name": "install-review-390-zh-tw-light",
+      "violations": [],
+      "height": 844
+    }
+  ],
+  "install": {
+    "operation": "28225ae4-590a-45a2-a61b-01ff2bffde27"
+  },
+  "accepted": true
+}

@@ -24,7 +24,7 @@ def prepare(build, packages, browsers, runner):
         shutil.copy2(build / "frontend.zip", root / "frontend.zip")
         shutil.copytree(build / "host", root / "host")
         shutil.copy2(runner, root / "run.cjs")
-        for name in ("playwright", "playwright-core"):
+        for name in ("axe-core", "playwright", "playwright-core"):
             shutil.copytree(packages / name, root / "node_modules" / name)
         shutil.copytree(browsers, root / "browsers")
         (root / "package.json").write_text('{"name":"sdk-browser-fixture","private":true}\n')

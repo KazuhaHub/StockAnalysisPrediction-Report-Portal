@@ -221,6 +221,18 @@ jobs:
             ${{ runner.temp }}/v2-template-fixture/failure.jpg
             ${{ runner.temp }}/v2-template-fixture/proof.jpg
             ${{ runner.temp }}/v2-template-fixture/browser-evidence.json
+      - name: Exercise the real installation lifecycle in Chromium
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_INSTALL_BROWSER_EVIDENCE: ${{ runner.temp }}/platform-install-browser
+        run: node scripts/app-install-browser-acceptance.cjs
+      - name: Preserve installation-browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-install-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/platform-install-browser
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq

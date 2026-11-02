@@ -298,7 +298,7 @@ function Themed() {
         // One radius scale for the whole portal; index.css and inline styles use these tokens rather
         // than numbers of their own: XS 4 (hairlines, bars), SM 6 (tags, small chips), base 8
         // (controls), LG 12 (cards, dialogs, drawers, panels). Pills and circles stay 999px / 50%.
-        token: { colorPrimary: '#1677ff', borderRadius: RADIUS.base, borderRadiusXS: RADIUS.xs, borderRadiusSM: RADIUS.sm, borderRadiusLG: RADIUS.lg },
+        token: { colorPrimary: '#0958d9', borderRadius: RADIUS.base, borderRadiusXS: RADIUS.xs, borderRadiusSM: RADIUS.sm, borderRadiusLG: RADIUS.lg },
         // antd 6 gives a left/right-titled Divider a leading rail (orientationMargin token,
         // default 5%) so the text floats inward. Our section headers want the title flush to
         // the edge, so zero the token globally — the native way, no per-Divider prop or CSS.
