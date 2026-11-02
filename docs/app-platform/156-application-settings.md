@@ -20,6 +20,12 @@ release, grants, audience and compatibility, then creates the existing exact
 repair plan. It retains the current data and policy tuple and cannot add
 permissions or change the data schema.
 
+A managed installation in `enabled/recovery_required` state exposes its bounded
+verified recovery points. An administrator can review restore from one exact
+recovery set; the review binds the checkpoint operation, checkpoint ID, release,
+manifest, data format, snapshot size and generation transition. Restore remains
+disabled while global application control is paused.
+
 ## Projection
 
 `GET /api/admin/app-platform/installations/{installation}/settings` returns the
@@ -33,7 +39,9 @@ current administrator projection for exactly one installation:
   descriptor;
 - managed backend requirement and bounded runtime registration state;
 - data namespace identity, state, schema, quota and observed usage when one exists;
-- whether a recovery point exists and whether it needs review;
+- up to 16 recovery points with exact checkpoint, release, format, size and
+  verification time, plus server-derived restore eligibility;
+- whether controls are paused and why restore admission is unavailable;
 - bounded configuration gaps.
 
 The response does not include the sealed identity seed, controller epoch,
@@ -71,6 +79,16 @@ revision, retained data and unchanged grants. The plan and commit APIs repeat
 all runtime, trust, authority, compatibility and state checks; the browser hint
 is not authority.
 
+Restore is offered per verified recovery point only for
+`enabled/recovery_required`, with no pending operation, an active data namespace,
+an enabled managed runtime and an unpaused controller. The destructive review
+states that writes after the checkpoint may be lost and that the app remains
+unavailable until the current writer stops, data is restored, health checks pass
+and a new generation activates. Plan and confirmation revalidate the entire
+recovery tuple and current grants/audience. Read-only settings remain available
+while control is paused so the administrator can inspect the reason and recovery
+boundary; all restore admission is refused.
+
 Completed operation polling now refreshes the release directory once when it
 first observes a terminal result. This removes the stale installable row without
 starting a refresh loop.
@@ -84,27 +102,30 @@ The repeatable Chromium matrix now captures:
 - a reviewed retained-data deletion with the exact namespace and recovery scope;
 - a reviewed managed repair at 1440 px English/light and 320 px Simplified
   Chinese/light, including retained data and unchanged grants;
+- reviewed restore at 1440 px English/light and 320 px Simplified
+  Chinese/light, including the exact recovery point and data-loss boundary;
+- paused-control settings at 1440 px English/light and 320 px Simplified
+  Chinese/light, with the pause reason and disabled restore action;
 - the existing install, update, enable, disable, uninstall and queued, paused,
   recovery-required lifecycle scenarios.
 
 All settings views have no page overflow, clipped tags or serious/critical axe
-violations. The 320 px repair dialog has no clipping, its focus starts inside the
-dialog and the footer remains reachable. The machine report binds code
-`49754cbb`; screenshots and
+violations. The 320 px repair and restore dialogs have no clipping, focus starts
+inside the dialog and the footer remains reachable. The machine report binds code
+`9137a466`; screenshots and
 `acceptance.json` are in
 [platform install evidence](handoff/evidence/platform-install).
 
-Full local Web verification passed 270 files / 2842 tests, typecheck, lint and
+Full local Web verification passed 270 files / 2844 tests, typecheck, lint and
 the production build. Focused settings tests pass against SQLite, with the same
 case included in the PostgreSQL `TestPlatform*Postgres` group. Full
-`internal/app` verification passed in 444.062s. Browser evidence binds
-`49754cbb`. Candidate `49754cbb` passed quota/browser run `41457471636`,
-general test run `41457471642` and runner daemon run `41457471418`.
+`internal/app` verification passed in 271.645s. Browser evidence binds
+`9137a466`. Hosted verification is pending for this candidate.
 
 ## Remaining scope
 
 Editing audiences, grants or credentials continues through their exact reviewed
 flows. The full D5 review still needs manual screen-reader testing, a repair
-confirmation/progress browser path against the real runner, restore actions,
+and restore confirmation/progress browser path against the real runner,
 retained-data reinstall, enlarged-text coverage and the remaining lifecycle
 pages.

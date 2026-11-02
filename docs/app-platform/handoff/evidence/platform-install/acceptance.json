@@ -1,5 +1,5 @@
 {
-  "gitCommit": "49754cbb0452a0b9761499e4414545b2a6921ec4",
+  "gitCommit": "9137a466c5a88276db9145f790dc8ae9e2c9605a",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -65,10 +65,30 @@
       "name": "settings-repair-review-320-zh-cn-light",
       "violations": [],
       "height": 800
+    },
+    {
+      "name": "settings-restore-review-1440-en-light",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "settings-restore-review-320-zh-cn-light",
+      "violations": [],
+      "height": 800
+    },
+    {
+      "name": "settings-restore-paused-1440-en-light",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "settings-restore-paused-320-zh-cn-light",
+      "violations": [],
+      "height": 800
     }
   ],
   "install": {
-    "operation": "5adacf3f-e26c-40e6-8457-0cf37415feb9"
+    "operation": "7ad3f1b2-242f-42ec-bf52-614aa67441c3"
   },
   "disable": {
     "violations": []

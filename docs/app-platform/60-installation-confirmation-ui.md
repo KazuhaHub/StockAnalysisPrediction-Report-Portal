@@ -64,6 +64,11 @@ already staged signed releases, not a completed remote marketplace.
     and no operation is pending. The dialog binds the current release, generation
     transition, retained data and unchanged grants; confirmation uses the same
     reviewed plan/commit API and durable progress route.
+11. A failed managed update exposes its exact verified recovery point. Restore
+    review binds the recovery set, checkpoint operation/ID, release, manifest,
+    data format, snapshot size and generation transition. It warns that writes
+    after the checkpoint may be lost. When application control is paused, the
+    settings projection remains readable but every restore action is disabled.
 
 The pending confirmed identity is scoped by username in the current browser tab.
 It is not an authorization proof. Server-side account lifecycle/session checks
@@ -160,7 +165,9 @@ queued, controller-paused and recovery-required progress from durable operation
 rows and captures the installation settings page at 1440px English/light and
 320px Simplified Chinese/dark, plus a reviewed retained-data deletion against a
 managed runtime and managed repair reviews at 1440px English/light and 320px
-Simplified Chinese/light. Every case checks page bounds, overflow, visible focus,
+Simplified Chinese/light. Reviewed restore and paused-control settings are also
+captured at those viewport/language pairs. Every case checks page bounds,
+overflow, visible focus,
 Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
 errors and screenshots. After installation the install case completes the
 no-audience installation and verifies the row changes from installable to
@@ -202,6 +209,11 @@ desktop and 320px Chinese, with zero serious/critical axe violations, bounded
 dialogs and no page overflow. Local Web passed 270 files / 2842 tests; full
 `internal/app` passed in 444.062s. Exact hosted runs for this candidate are
 recorded in [application settings](156-application-settings.md).
+Portal `9137a466` adds exact recovery-point restore review, pause-safe settings
+projection and disabled restore admission while control is paused. The matrix
+now covers seventeen scenarios, including restore and paused-control settings at
+1440px English and 320px Chinese. Local Web passed 270 files / 2844 tests; full
+`internal/app` passed in 271.645s.
 
 ## Remaining platform scope
 
