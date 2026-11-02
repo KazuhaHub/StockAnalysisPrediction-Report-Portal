@@ -21,8 +21,32 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	var s *Server
 	var actor platformActorSession
 	var mux *http.ServeMux
+	var operation string
 	scenario := os.Getenv("APP_INSTALL_HTTP_SCENARIO")
 	switch scenario {
+	case "progress", "paused", "recovery":
+		var release string
+		s, mux, actor, release, _ = platformManagementFixture(t, false)
+		review, err := s.createPlatformFrontendInstallReview(actor, release, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted, err := s.consumePlatformInstallReview(actor, review.ID, review.SHA256, platformFixtureID(5501))
+		if err != nil {
+			t.Fatal(err)
+		}
+		operation = admitted.OperationID
+		switch scenario {
+		case "paused":
+			mustExec(t, s.st, `UPDATE meta SET v='1' WHERE k='app_platform_restore_paused'`)
+		case "recovery":
+			now, err := platformDatabaseNow(s.st.poolExec())
+			if err != nil {
+				t.Fatal(err)
+			}
+			mustExec(t, s.st, `UPDATE app_platform_operations SET stage='recovery_required',state_revision=state_revision+1,row_revision=row_revision+1,error_code='fixture_review_required',completed_ms=?,lease_owner=NULL,lease_until_ms=NULL,updated_ms=? WHERE id=?`, now, now, operation)
+			mustExec(t, s.st, `UPDATE app_platform_installations SET phase='recovery_required',revision=revision+1,control_fence=control_fence+1,updated_ms=? WHERE id=(SELECT installation_id FROM app_platform_operations WHERE id=?)`, now, operation)
+		}
 	case "updateable":
 		s, actor, _, _ = platformUpdateFixture(t, []int{1})
 		mux = http.NewServeMux()
@@ -43,13 +67,13 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
-	if scenario != "updateable" && scenario != "disabled" {
+	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" {
 		platformStartFrontendService(t, s)
 	}
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
-	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie, "scenario": scenario})
+	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie, "scenario": scenario, "operation": operation})
 	if err != nil {
 		t.Fatal(err)
 	}

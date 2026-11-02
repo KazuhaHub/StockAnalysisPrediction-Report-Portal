@@ -221,7 +221,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-	} else if action != "uninstall" && action != "enable" &&
+	} else if action != "disable" && action != "uninstall" && action != "enable" &&
 		action != "delete_data" {
 		platformManagementError(w, errPlatformManagementInput)
 		return
@@ -299,7 +299,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"previous_capabilities": platformNonNilStrings(projection.PreviousCapabilities), "target_capabilities": platformNonNilStrings(projection.TargetCapabilities), "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
 			"grants_sha256": projection.GrantsSHA256, "audience": nil,
 		}})
-	case "uninstall":
+	case "disable", "uninstall":
 		if len(fields) != 2 || fields["installation_id"] == nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
@@ -309,7 +309,11 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		review, err := s.createPlatformRemovalReviewContext(r.Context(), actor, installation, appplatform.ActionUninstall)
+		removalAction := appplatform.ActionDisable
+		if action == "uninstall" {
+			removalAction = appplatform.ActionUninstall
+		}
+		review, err := s.createPlatformRemovalReviewContext(r.Context(), actor, installation, removalAction)
 		if err != nil {
 			platformManagementError(w, err)
 			return
@@ -320,9 +324,9 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
-			"action": "uninstall", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
+			"action": action, "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
 			"release_sha256": projection.SourceReleaseSHA256, "generation": strconv.FormatInt(projection.Generation, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
-			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": true, "managed_data_retained": false, "managed_data_cleared": projection.Managed && projection.Data != nil,
+			"managed": projection.Managed, "data_effect": projection.DataEffect, "plugin_data_cleared": action == "uninstall", "managed_data_retained": action == "disable", "managed_data_cleared": action == "uninstall" && projection.Managed && projection.Data != nil,
 		}})
 	case "delete_data":
 		if len(fields) != 3 || fields["installation_id"] == nil ||
@@ -448,7 +452,7 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 	case "update":
 		result, err = s.consumePlatformUpdateReviewContext(
 			r.Context(), actor, id, sha, key)
-	case "uninstall":
+	case "disable", "uninstall":
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
 	case "delete_data":
 		result, err = s.consumePlatformDeleteDataReviewContext(

@@ -63,6 +63,22 @@ const uninstallReview = () => ({
     managed_data_cleared: false,
   },
 })
+const disableReview = () => ({
+  plan_id: plan,
+  plan_sha256: digest,
+  expires_ms: String(Date.now() + 900000),
+  review: {
+    action: 'disable',
+    installation_id: operation,
+    app_id: 'notes',
+    publisher_id: 'publisher',
+    release_sha256: release,
+    generation: '1',
+    target_generation: '2',
+    managed: false,
+    data_effect: 'preserve',
+  },
+})
 const enableReview = () => ({
   plan_id: plan,
   plan_sha256: digest,
@@ -265,6 +281,30 @@ describe('application installation confirmation', () => {
     await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUpdate' }))
     expect(await screen.findByText('appPlatform.permissionDiff')).toBeTruthy()
     expect(screen.getByText('appPlatform.confirmUpdate')).toBeTruthy()
+  })
+
+  it('reviews disable without describing data deletion', async () => {
+    const installedRelease = {
+      release_sha256: release,
+      app_id: 'notes',
+      publisher_id: 'publisher',
+      version: '1.0.0',
+      trust_revision: '1',
+      installable: false,
+      reason: 'already_installed',
+      installation_id: operation,
+      installed: true,
+    }
+    mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installedRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
+    mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? disableReview() : { operation_id: operation }))
+    mount()
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewDisable' }))
+    expect(await screen.findByText('appPlatform.confirmDisableTitle')).toBeTruthy()
+    expect(screen.getByText('appPlatform.disableDataRetained')).toBeTruthy()
+    expect(screen.getByText('appPlatform.disableConfirmHint')).toBeTruthy()
+    expect(mock.post).toHaveBeenCalledWith(`${root}/plans`, { action: 'disable', installation_id: operation })
+    expect(screen.queryByText('appPlatform.uninstallPluginData')).toBeNull()
   })
 
   it('reviews a disabled app enable without changing release or permissions', async () => {

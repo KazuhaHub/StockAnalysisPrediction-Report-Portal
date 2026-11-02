@@ -60,7 +60,7 @@ async function fixtureUrl(fixture, outputLog) {
     }
     function read(chunk) {
       buffered += chunk;
-      const match = buffered.match(/^PROBE_URL=(http:\/\/127\.0\.0\.1:\d+\/manage\/apps)$/m);
+      const match = buffered.match(/^PROBE_URL=(http:\/\/127\.0\.0\.1:\d+\/manage\/apps(?:\?[^\s]+)?)$/m);
       if (match) finish(null, match[1]);
     }
     function exited(code) {
@@ -94,6 +94,21 @@ async function auditDialog(page) {
     const dialog = document.querySelector('[role="dialog"]');
     if (!dialog) return [{ id: "missing-dialog", impact: "critical" }];
     const result = await window.axe.run(dialog, {
+      runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
+    });
+    return result.violations.map((violation) => ({
+      id: violation.id,
+      impact: violation.impact,
+      nodes: violation.nodes.length,
+      targets: violation.nodes.map((node) => node.target.join(" ")),
+    }));
+  });
+}
+
+async function auditPage(page) {
+  await page.addScriptTag({ path: axePath });
+  return page.evaluate(async () => {
+    const result = await window.axe.run(document, {
       runOnly: { type: "tag", values: ["wcag2a", "wcag2aa"] },
     });
     return result.violations.map((violation) => ({
@@ -245,7 +260,9 @@ async function uninstallScenario(browser, url) {
       .filter({ hasText: "fixture-publisher" })
       .first();
     await row.waitFor();
-    const trigger = row.getByRole("button").first();
+    const trigger = row
+      .getByRole("button")
+      .filter({ hasText: "Review uninstall" });
     await trigger.click();
     const dialog = page.getByRole("dialog");
     await dialog.waitFor();
@@ -291,6 +308,123 @@ async function uninstallScenario(browser, url) {
   }
 }
 
+async function disableScenario(browser, url) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20_000);
+  try {
+    await page.goto(url, { waitUntil: "networkidle" });
+    await page.getByRole("tab").nth(1).click();
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: "fixture-publisher" })
+      .first();
+    await row.waitFor();
+    const trigger = row
+      .getByRole("button")
+      .filter({ hasText: "Review disable" });
+    await trigger.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    await page.waitForTimeout(400);
+    const text = await dialog.innerText();
+    if (!text.includes("data is retained")) {
+      throw new Error("disable review did not state the retained-data boundary");
+    }
+    const geometry = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      width: window.innerWidth,
+      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
+    }));
+    const box = await dialog.boundingBox();
+    if (
+      geometry.scrollWidth > geometry.width + 1 ||
+      !box ||
+      box.x < 0 ||
+      box.x + box.width > geometry.width + 1 ||
+      !geometry.activeInside
+    ) {
+      throw new Error("unsafe disable review geometry or focus");
+    }
+    const violations = (await auditDialog(page)).filter(
+      (violation) =>
+        violation.impact === "critical" || violation.impact === "serious",
+    );
+    if (violations.length) {
+      throw new Error(`disable review axe: ${JSON.stringify(violations)}`);
+    }
+    await page.screenshot({
+      path: path.join(output, "disable-review-1440-en-light.png"),
+      fullPage: false,
+    });
+    await dialog.getByRole("button").first().click();
+    await dialog.waitFor({ state: "hidden" });
+    if (!(await trigger.evaluate((element) => document.activeElement === element))) {
+      throw new Error("disable review did not restore trigger focus");
+    }
+    return { violations };
+  } finally {
+    await context.close();
+  }
+}
+
+async function progressScenario(browser, url, expected, name) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20_000);
+  try {
+    await page.goto(url, { waitUntil: "networkidle" });
+    const status = page.locator('div[role="status"]');
+    await status.waitFor();
+    await page.getByText("Operation progress", { exact: true }).waitFor();
+    const text = await status.innerText();
+    if (!text.includes(expected)) {
+      throw new Error(`progress state ${expected} missing: ${text}`);
+    }
+    if (await page.getByRole("link", { name: "Go to applications" }).count()) {
+      throw new Error(`nonterminal progress exposed completion link: ${expected}`);
+    }
+    const geometry = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      width: window.innerWidth,
+    }));
+    if (geometry.scrollWidth > geometry.width + 1) {
+      throw new Error(`progress state overflowed: ${expected}`);
+    }
+    const violations = (await auditPage(page)).filter(
+      (violation) =>
+        violation.impact === "critical" || violation.impact === "serious",
+    );
+    if (violations.length) {
+      const placeholder = page.locator(".ant-select-placeholder");
+      const placeholderState = (await placeholder.count())
+        ? await placeholder.evaluate((element) => {
+            const style = getComputedStyle(element);
+            return {
+              color: style.color,
+              opacity: style.opacity,
+              selector: element.closest(".ant-select")?.className ?? "",
+            };
+          })
+        : null;
+      throw new Error(
+        `progress axe for ${expected}: ${JSON.stringify(violations)} ${JSON.stringify(placeholderState)}`,
+      );
+    }
+    await page.screenshot({
+      path: path.join(output, `${name}.png`),
+      fullPage: true,
+    });
+    return { name, violations, height: page.viewportSize().height };
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   let browser;
   try {
@@ -302,6 +436,7 @@ async function main() {
       }).trim(),
       scenarios: [],
       install: null,
+      disable: null,
       uninstall: null,
     };
     async function withFixture(mode, run) {
@@ -336,6 +471,7 @@ async function main() {
         report.scenarios.push(await scenario(browser, url, options));
       }
       report.install = await installScenario(browser, url);
+      report.disable = await disableScenario(browser, url);
       report.uninstall = await uninstallScenario(browser, url);
     });
     await withFixture("updateable", async (url) => {
@@ -361,6 +497,17 @@ async function main() {
         }),
       );
     });
+    for (const [mode, expected, name] of [
+      ["progress", "Queued", "progress-queued"],
+      ["paused", "Application control is paused pending recovery review.", "progress-paused"],
+      ["recovery", "Recovery review required", "progress-recovery"],
+    ]) {
+      await withFixture(mode, async (url) => {
+        report.scenarios.push(
+          await progressScenario(browser, url, expected, name),
+        );
+      });
+    }
     report.accepted = true;
     writeFileSync(
       path.join(output, "acceptance.json"),

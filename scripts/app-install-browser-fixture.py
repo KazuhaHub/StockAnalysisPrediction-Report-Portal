@@ -21,7 +21,7 @@ WEB = PORTAL / "web"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--market", action="store_true", help="Include an owned synthetic TLS catalogue for market acceptance")
 parser.add_argument("--fresh", action="store_true", help="Start with no application control identity or publisher trust")
-parser.add_argument("--scenario", choices=("install", "updateable", "disabled"), default="install", help="Seed the real lifecycle projection to review")
+parser.add_argument("--scenario", choices=("install", "progress", "paused", "recovery", "updateable", "disabled"), default="install", help="Seed the real lifecycle projection to review")
 args = parser.parse_args()
 if args.market and args.fresh:
     parser.error("--fresh and --market are mutually exclusive")
@@ -34,9 +34,10 @@ with tempfile.TemporaryDirectory(prefix="portal-install-browser-") as directory:
     source = target / "host.tsx"
     source.write_text("import " + json.dumps(str(WEB / "src/index.css")) + ";\n" + """import React from 'react';import {createRoot} from 'react-dom/client';
 import {BrowserRouter,Routes,Route} from 'react-router';
-import {ConfigProvider,App,theme} from 'antd';
+import {ConfigProvider,App} from 'antd';
 import {AuthProvider,useAuth} from """ + json.dumps(str(WEB / "src/auth.tsx")) + ";\nimport {PrefsProvider,usePrefs} from " + json.dumps(str(WEB / "src/prefs.tsx")) + ";\nimport AppsAdminPage from " + json.dumps(str(WEB / "src/pages/manage/AppsAdminPage.tsx")) + """;
-function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={{algorithm:prefs.dark?theme.darkAlgorithm:theme.defaultAlgorithm,token:{colorPrimary:'#0958d9',borderRadius:8}}}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage/apps' element={<AppsAdminPage/>}/><Route path='/apps' element={<p>Application hub destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
+import {portalTheme} from """ + json.dumps(str(WEB / "src/theme/portal.ts")) + """;
+function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={portalTheme(prefs.dark)}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage/apps' element={<AppsAdminPage/>}/><Route path='/apps' element={<p>Application hub destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
 createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider><Host/></AuthProvider></PrefsProvider>);
 """)
     config = target / "vite.config.mjs"
@@ -103,7 +104,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                     cookie = fixture_cookie(state["cookieName"], state["cookie"])
                     set_cookie = cookie
                     cookie_script = f"<script>document.cookie={json.dumps(cookie)}</script>"
-                    data = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"><div id="host"></div>' + cookie_script + '<script src="/host.js"></script>').encode()
+                    data = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Installation development fixture</title><link rel="stylesheet" href="/style.css"></head><body><div id="host"></div>' + cookie_script + '<script src="/host.js"></script></body></html>').encode()
                     mime = "text/html; charset=utf-8"
                 elif path in ("/host.js", "/style.css"):
                     data = (target / "built" / path[1:]).read_bytes()
@@ -123,7 +124,10 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                 pass
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        print(f"PROBE_URL=http://127.0.0.1:{server.server_port}/manage/apps", flush=True)
+        probe_path = "/manage/apps"
+        if args.scenario in ("progress", "paused", "recovery") and state.get("operation"):
+            probe_path += "?operation=" + state["operation"]
+        print(f"PROBE_URL=http://127.0.0.1:{server.server_port}{probe_path}", flush=True)
         if args.market:
             print("FIXTURE_CATALOGUE_URL=https://127.0.0.1/index.json", flush=True)
         server.serve_forever()

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Card, Input, Space, Tabs, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import LoadGate from '../../components/LoadGate'
 import AppInstall from './AppInstall'
@@ -20,10 +20,16 @@ export default function AppsAdminPage() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const operation = params.get('operation')
   const labels = useAppLabels()
   const { apps, loading, error, reload } = useAppsCatalog()
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
+  const [activeTab, setActiveTab] = useState(operation ? 'platform' : 'apps')
+  useEffect(() => {
+    if (operation) setActiveTab('platform')
+  }, [operation])
 
   // The muted line under a name: what a built-in app is for, or which build of an installed app this is.
   const subtitle = (a: AdminApp) => (a.builtin ? labels.description(a) : [a.version && `v${a.version}`, a.key].filter(Boolean).join(' · '))
@@ -59,7 +65,7 @@ export default function AppsAdminPage() {
     { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]
 
-  return <Tabs items={[
+  return <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
     {
       key: 'apps',
       label: t('nav.apps'),

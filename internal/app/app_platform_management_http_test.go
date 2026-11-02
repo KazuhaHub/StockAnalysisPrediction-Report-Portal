@@ -185,6 +185,47 @@ func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
 	}
 }
 
+func TestPlatformManagementDisableHTTPPreservesPluginData(t *testing.T) {
+	s, admin, reader, installation := platformObjectsFixture(t)
+	binding := platformObjectBindingMap(t, s, reader, installation)
+	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"retain while disabled"}`)); response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	pluginTable := platformPluginTableForInstallation(t, s.st, installation)
+	beforeBytes := scalar[int64](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
+	body := fmt.Sprintf(`{"action":"disable","installation_id":%q}`, installation)
+	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, body)
+	if plan.Code != 200 || !strings.Contains(plan.Body.String(), `"action":"disable"`) || !strings.Contains(plan.Body.String(), `"data_effect":"preserve"`) || !strings.Contains(plan.Body.String(), `"plugin_data_cleared":false`) {
+		t.Fatal("disable review", plan.Code, plan.Body.String())
+	}
+	if !s.st.tableExists(pluginTable) || scalar[int](t, s.st, `SELECT COUNT(*) FROM `+pluginTable) != 1 {
+		t.Fatal("disable review cleared plugin data before confirmation")
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil || !platformValidUUID(review.ID) || !platformValidSHA(review.SHA) {
+		t.Fatal("invalid disable review", plan.Body.String(), err)
+	}
+	commitBody := fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA, platformFixtureID(1297))
+	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/operations", cookie, commitBody)
+	if commit.Code != 202 {
+		t.Fatal("disable commit", commit.Code, commit.Body.String())
+	}
+	platformStartFrontendService(t, s)
+	platformAwaitFrontendService(t, s, "complete")
+	if scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "disabled:disabled" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM `+pluginTable) != 1 ||
+		scalar[int64](t, s.st, `SELECT observed_bytes FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation) != beforeBytes ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != 0 {
+		t.Fatal("disable removed retained data or live authority")
+	}
+}
+
 func TestPlatformManagementEnableHTTPRestoresDisabledFrontend(t *testing.T) {
 	s, admin, reader, installation := platformFrontendDisabledFixture(t, false)
 	mux := http.NewServeMux()
