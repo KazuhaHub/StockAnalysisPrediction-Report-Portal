@@ -18,10 +18,12 @@ def build(apps, output):
     output.mkdir(parents=True, exist_ok=False)
     (output / "node_modules").symlink_to(apps / "node_modules", target_is_directory=True)
     child = output / "child.tsx"
-    child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
+    child.write_text('''import {useEffect,useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Button,Space,Typography} from 'antd';
+import {Button,Input,Modal,Space,Typography} from 'antd';
 import {AppRoot,useAppBackend,useAppNetwork,useAppNotifications,useAppObjects,useAppReports,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
+function MaliciousShell(){useAppPage({title:'Malicious\\nshell',actions:[]});return null}
+function RunawayRender(){const [,setTick]=useState(0);useEffect(()=>{setTick(value=>value+1)});return null}
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
@@ -29,10 +31,13 @@ function Fixture(){
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
+ const [fixtureName,setFixtureName]=useState(''),[savedName,setSavedName]=useState('none'),[appDialog,setAppDialog]=useState(false);
+ const [malicious,setMalicious]=useState(false),[huge,setHuge]=useState(false),[heightProbe,setHeightProbe]=useState(0),[runaway,setRunaway]=useState(false);
  useAppPage({title:'Fixture '+presentation.locale+' '+navigation.path,description:'Shared page controls',actions:[
   {id:'increment',label:longLabels?'L'.repeat(48):'Header increment',variant:'primary',onAction:()=>{setPageCount(n=>n+1)}},
   {id:'wait',label:'Header wait',onAction:(signal)=>new Promise<void>((_resolve,reject)=>{signal.addEventListener('abort',()=>{setPageCancelled(n=>n+1);reject(new Error('cancelled'))},{once:true})})},
  ]});
+ async function oscillateHeight(){for(let i=0;i<12;i++){setHeightProbe(i%2?260:3000);await new Promise(resolve=>setTimeout(resolve,30))}}
  const sequence=useRef(0),[result,setResult]=useState({id:0,text:'none'}),[busy,setBusy]=useState(false);
  async function run(method:string,path:string){const id=++sequence.current;setResult({id,text:'pending'});setBusy(true);try{
   const r=await backend.request({method,path,body:method==='GET'?'':'{"role":"admin","subject":"forged"}'});
@@ -70,7 +75,9 @@ function Fixture(){
  async function readObject(){const id=++objectsSequence.current;setObjectsResult({id,text:'pending'});setObjectsBusy(true);try{
   await readObjects(id);
  }catch(error){setObjectsResult({id,text:'error:'+error.code})}finally{setObjectsBusy(false)}}
- return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ const editor=navigation.path==='/editor';
+ return <div data-testid={editor?'viewport-editor':undefined} role={editor?'region':undefined} aria-label={editor?'Viewport editor':undefined} tabIndex={editor?0:undefined} style={editor?{height:'100%',overflowY:'auto',padding:8}:undefined}>
+ <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
  <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>
  <Typography.Text data-testid="notifications-ready">{String(notifications.ready)}</Typography.Text>
@@ -88,9 +95,13 @@ function Fixture(){
  <Typography.Text data-testid="locale">{presentation.locale}</Typography.Text>
  <Typography.Text data-testid="time-zone">{presentation.timeZone}</Typography.Text>
  <Typography.Text data-testid="dark">{String(presentation.theme.dark)}</Typography.Text>
+ <label htmlFor="fixture-name">Fixture name</label><Input id="fixture-name" value={fixtureName} maxLength={80} onChange={event=>setFixtureName(event.target.value)} onPressEnter={()=>fixtureName.trim()&&setSavedName(fixtureName)}/><Button disabled={!fixtureName.trim()} onClick={()=>setSavedName(fixtureName)}>Save form</Button><Typography.Text data-testid="saved-name">{savedName}</Typography.Text>
+ <Button onClick={()=>setAppDialog(true)}>Open app dialog</Button><Modal open={appDialog} title="App dialog" okText="Confirm app dialog" cancelText="Cancel app dialog" onOk={()=>setAppDialog(false)} onCancel={()=>setAppDialog(false)}><Typography.Text>Application-owned dialog content</Typography.Text></Modal>
  <Button onClick={()=>setExpanded(v=>!v)}>Toggle long content</Button>
  <Button onClick={()=>setDirty(v=>!v)}>{dirty?'Save draft':'Edit draft'}</Button>
  {expanded&&<div data-testid="long-content" style={{height:3000}}>Long document content</div>}
+ {editor&&<><Input.TextArea aria-label="Editor body" rows={18}/><div style={{height:2400}}>Long viewport editor content</div><Button>Editor end</Button></>}
+ {malicious&&<MaliciousShell/>}{huge&&<div data-testid="huge-height" style={{height:100001}}>Huge content</div>}{heightProbe>0&&<div data-testid="height-probe" style={{height:heightProbe}}>Height probe</div>}{runaway&&<RunawayRender/>}
  <Button disabled={!backend.ready||busy} onClick={()=>run('GET','/v1/echo')}>Read backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo')}>Write backend</Button>
  <Button disabled={!backend.ready||busy} onClick={()=>run('POST','/v1/echo?disconnect=1')}>Disconnect write</Button>
@@ -105,7 +116,8 @@ function Fixture(){
  <Typography.Text data-testid="reports-result" data-request-id={reportsResult.id}>{reportsResult.text}</Typography.Text>
  <Button disabled={!objects.ready||objectsBusy} onClick={()=>writeObject()}>Write object</Button>
  <Button disabled={!objects.ready||objectsBusy} onClick={()=>readObject()}>Read object</Button>
- <Typography.Text data-testid="objects-result" data-request-id={objectsResult.id}>{objectsResult.text}</Typography.Text></Space>
+ <Typography.Text data-testid="objects-result" data-request-id={objectsResult.id}>{objectsResult.text}</Typography.Text>
+ <Button onClick={()=>setMalicious(true)}>Malicious shell descriptor</Button><Button onClick={()=>setHuge(true)}>Huge document height</Button><Button onClick={()=>void oscillateHeight()}>Oscillate height</Button><Button onClick={()=>setRunaway(true)}>Runaway render</Button></Space></div>
 }
 createRoot(document.getElementById('app')!).render(<AppRoot parentOrigin=''' + json.dumps(ORIGIN) + '''><Fixture/></AppRoot>);''')
     host = output / "host.tsx"
