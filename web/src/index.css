@@ -3206,6 +3206,8 @@ body {
 .rp-platform-review-modal .ant-modal-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .rp-platform-review-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 .rp-platform-review-scroll:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
+.rp-safe-primary.ant-btn-primary { background: #0958d9 !important; border-color: #0958d9 !important; }
+.rp-safe-primary.ant-btn-primary > span { color: #fff !important; }
 
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */

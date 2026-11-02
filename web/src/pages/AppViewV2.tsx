@@ -93,7 +93,7 @@ function LaunchPage({ installation }: { installation: string }) {
         state={route ? page : null} onBack={() => { void navigate('/apps') }} />
       {failed || (launch && (!route || !presentation)) ? (
         <Alert type="error" showIcon title={t(launch && !route ? 'apps.v2InvalidRoute' : 'apps.v2Unavailable')}
-          action={launch && !route ? <Button type="primary" onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button type="primary" onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
+          action={launch && !route ? <Button className="rp-safe-primary" type="primary" onClick={() => { void navigate(base, { replace:true }) }}>{t('apps.v2Home')}</Button> : <Button className="rp-safe-primary" type="primary" onClick={() => { setLaunch(null); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
       ) : !launch ? (
         <div role="status" style={{ display: 'grid', placeItems: 'center', minHeight: 160 }}>
           <Spin /><span>{t('apps.v2Loading')}</span>
