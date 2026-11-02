@@ -32,7 +32,8 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	manifest.ID = "notes-writer-demo"
+	manifest.ID = "notes-writer-notify-demo"
+	manifest.Version = "1.0.0-beta.4"
 	manifest.Capabilities.Required = []string{"network.http", "notifications.publish", "reports.read", "secrets.use", "storage.files"}
 	manifest.Capabilities.Optional = slices.DeleteFunc(manifest.Capabilities.Optional, func(c string) bool { return c == "network.http" })
 	archive = platformSDKBrowserArchive(t, archive)
