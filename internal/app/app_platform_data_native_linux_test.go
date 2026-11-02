@@ -132,6 +132,16 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if err := os.Chown(childData, 41001, 41001); err != nil {
 		t.Fatal(err)
 	}
+	var lifecycleRunner, lifecycleEvidence, lifecycleEvidenceTarget string
+	if platformLifecycleBrowserConfigured() {
+		lifecycleEvidenceTarget = os.Getenv("APP_LIFECYCLE_BROWSER_EVIDENCE")
+		if !filepath.IsAbs(lifecycleEvidenceTarget) ||
+			filepath.Clean(lifecycleEvidenceTarget) != lifecycleEvidenceTarget {
+			t.Fatal("invalid lifecycle browser evidence target")
+		}
+		lifecycleRunner, lifecycleEvidence =
+			preparePlatformLifecycleBrowserChild(t, childData)
+	}
 	if os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != "" {
 		startPlatformNetworkHTTPSFixture(t, dir, childData)
 	}
@@ -258,16 +268,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 	}
 	if platformLifecycleBrowserConfigured() {
-		for _, key := range []string{
-			"APP_LIFECYCLE_BROWSER_RUNNER",
-			"APP_LIFECYCLE_BROWSER_EVIDENCE",
-		} {
-			value := os.Getenv(key)
-			if !filepath.IsAbs(value) || filepath.Clean(value) != value {
-				t.Fatal("invalid lifecycle browser environment", key)
-			}
-			child.Env = append(child.Env, key+"="+value)
-		}
+		child.Env = append(child.Env,
+			"APP_LIFECYCLE_BROWSER_RUNNER="+lifecycleRunner,
+			"APP_LIFECYCLE_BROWSER_EVIDENCE="+lifecycleEvidence)
 	}
 	if managed {
 		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1", "PORTAL_MANAGED_IMAGE="+os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"))
@@ -431,8 +434,15 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, sockets, authority, observerStore)
 	}
 	readyWriter.Close()
-	if err := child.Wait(); err != nil {
-		t.Fatalf("Portal data endpoint failed: %v\n%s", err, output.String())
+	waitErr := child.Wait()
+	if platformLifecycleBrowserConfigured() {
+		if err := copyPlatformLifecycleBrowserEvidence(
+			lifecycleEvidence, lifecycleEvidenceTarget); err != nil {
+			t.Errorf("preserve lifecycle browser evidence: %v", err)
+		}
+	}
+	if waitErr != nil {
+		t.Fatalf("Portal data endpoint failed: %v\n%s", waitErr, output.String())
 	}
 	if checkRegistrationRPC != nil {
 		checkRegistrationRPC()

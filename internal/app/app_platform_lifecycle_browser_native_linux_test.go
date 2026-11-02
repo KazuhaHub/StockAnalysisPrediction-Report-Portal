@@ -5,6 +5,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -34,6 +37,68 @@ var platformLifecycleBrowserResultLine = regexp.MustCompile(
 
 func platformLifecycleBrowserConfigured() bool {
 	return os.Getenv("APP_LIFECYCLE_BROWSER_RUNNER") != ""
+}
+
+func preparePlatformLifecycleBrowserChild(
+	t *testing.T, childData string,
+) (string, string) {
+	t.Helper()
+	source := os.Getenv("APP_LIFECYCLE_BROWSER_RUNNER")
+	if !filepath.IsAbs(source) || filepath.Clean(source) != source {
+		t.Fatal("invalid lifecycle browser runner")
+	}
+	input, err := os.Open(source)
+	if err != nil {
+		t.Fatal("open lifecycle browser runner", err)
+	}
+	defer input.Close()
+	raw, err := io.ReadAll(io.LimitReader(input, 64<<10+1))
+	if err != nil || len(raw) > 64<<10 {
+		t.Fatal("lifecycle browser runner unavailable or oversized", err)
+	}
+	runner := filepath.Join(childData, "app-platform-lifecycle-browser.cjs")
+	if err := os.WriteFile(runner, raw, 0444); err != nil {
+		t.Fatal("stage lifecycle browser runner", err)
+	}
+	evidence := filepath.Join(childData, "lifecycle-browser")
+	if err := os.Mkdir(evidence, 0700); err != nil {
+		t.Fatal("prepare lifecycle browser evidence", err)
+	}
+	if err := os.Chown(evidence, 41001, 41001); err != nil {
+		t.Fatal("own lifecycle browser evidence", err)
+	}
+	return runner, evidence
+}
+
+func copyPlatformLifecycleBrowserEvidence(source, target string) error {
+	if err := os.MkdirAll(target, 0755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(source)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(source, entry.Name()))
+		if err != nil {
+			return err
+		}
+		if len(raw) > 8<<20 {
+			return fmt.Errorf("lifecycle browser evidence is oversized: %s",
+				entry.Name())
+		}
+		if err := os.WriteFile(
+			filepath.Join(target, entry.Name()), raw, 0644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func startPlatformLifecycleBrowserHost(
