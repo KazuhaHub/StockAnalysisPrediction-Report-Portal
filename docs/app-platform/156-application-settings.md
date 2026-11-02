@@ -13,6 +13,13 @@ existing reviewed `delete_data` flow. It does not delete data while the
 application is active and does not bypass the exact namespace, runtime,
 activation, receipt, quota or recovery-set checks in the backend.
 
+A disabled or recovery/review-required managed installation can also request a
+reviewed repair when it has a usable current release, active data namespace and
+registered runtime. Repair re-observes the fixed runtime, rechecks the signed
+release, grants, audience and compatibility, then creates the existing exact
+repair plan. It retains the current data and policy tuple and cannot add
+permissions or change the data schema.
+
 ## Projection
 
 `GET /api/admin/app-platform/installations/{installation}/settings` returns the
@@ -56,6 +63,14 @@ created before confirmation; commit reuses one idempotency key while the dialog
 remains open, and successful admission navigates to the durable operation
 progress page.
 
+Repair is offered only from the projection's server-derived eligibility state:
+the installation must be disabled or in recovery/review state, have no pending
+operation, retain an active namespace and have an enabled runtime registration.
+The confirmation names the current release, generation transition, policy
+revision, retained data and unchanged grants. The plan and commit APIs repeat
+all runtime, trust, authority, compatibility and state checks; the browser hint
+is not authority.
+
 Completed operation polling now refreshes the release directory once when it
 first observes a terminal result. This removes the stale installable row without
 starting a refresh loop.
@@ -67,23 +82,29 @@ The repeatable Chromium matrix now captures:
 - settings at 1440 px English/light;
 - settings at 320 px Simplified Chinese/dark;
 - a reviewed retained-data deletion with the exact namespace and recovery scope;
+- a reviewed managed repair at 1440 px English/light and 320 px Simplified
+  Chinese/light, including retained data and unchanged grants;
 - the existing install, update, enable, disable, uninstall and queued, paused,
   recovery-required lifecycle scenarios.
 
 All settings views have no page overflow, clipped tags or serious/critical axe
-violations. The machine report binds code `8d882a2a`; screenshots and
+violations. The 320 px repair dialog has no clipping, its focus starts inside the
+dialog and the footer remains reachable. The machine report binds code
+`49754cbb`; screenshots and
 `acceptance.json` are in
 [platform install evidence](handoff/evidence/platform-install).
 
-Full local Web verification passed 270 files / 2841 tests, typecheck, lint and
+Full local Web verification passed 270 files / 2842 tests, typecheck, lint and
 the production build. Focused settings tests pass against SQLite, with the same
 case included in the PostgreSQL `TestPlatform*Postgres` group. Full
-`internal/app` verification passed in 164.353s. Browser evidence binds
-`8d882a2a`. Candidate `8d882a2a` passed quota/browser run `41445281563`,
-general test run `41445281473` and runner daemon run `41445281626`.
+`internal/app` verification passed in 444.062s. Browser evidence binds
+`49754cbb`. Candidate `49754cbb` passed quota/browser run pending, general test
+run pending and runner daemon run pending.
 
 ## Remaining scope
 
 Editing audiences, grants or credentials continues through their exact reviewed
-flows. The full D5 review still needs manual screen-reader testing, repair and
-restore actions, retained-data reinstall, and the remaining lifecycle pages.
+flows. The full D5 review still needs manual screen-reader testing, a repair
+confirmation/progress browser path against the real runner, restore actions,
+retained-data reinstall, enlarged-text coverage and the remaining lifecycle
+pages.

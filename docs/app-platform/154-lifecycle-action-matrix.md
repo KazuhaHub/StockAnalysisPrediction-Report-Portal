@@ -44,9 +44,13 @@ Implemented and tested:
   tuple, revalidates the current runtime, signed release, policy, grants and
   audience, and takes a fresh checkpoint at `quiesce`. Start/probe/registration/
   boot/activation then use the retained data namespace with no capability grant
-  replacement. A retry may reuse only an abandoned candidate activation whose
-  readiness is empty and has no observation; prepared work from a previous
-  attempt remains recovery evidence and is never replayed blindly;
+  replacement. The administrator settings page exposes this as an
+  installation-scoped reviewed action only when the server projection reports a
+  usable runtime, active namespace and no pending operation. The management
+  plan/commit API repeats every state, runtime, trust, grant and compatibility
+  check. A retry may reuse only an abandoned candidate activation whose readiness
+  is empty and has no observation; prepared work from a previous attempt remains
+  recovery evidence and is never replayed blindly;
 - checkpoint and update-start history now reconstruct `enable` and `repair`
   source operations as well as install/update/restore, so repeated
   disable/enable/repair cycles keep the current generation tuple;
@@ -96,7 +100,8 @@ Still required for H13 completion:
 - full concurrent operator acceptance across enable/update/repair, not only
   delete-data admission;
 - static frontend repair and end-to-end lifecycle evidence for every row,
-  including lost confirmations.
+  including lost confirmations. The managed repair review is browser-covered;
+  confirmation/progress against the real runner is still required.
 
 The standalone delete-data path has SQLite and PostgreSQL 18.6 repository
 coverage for stale plans, concurrent confirmations, two-admin conflicts,

@@ -58,6 +58,12 @@ already staged signed releases, not a completed remote marketplace.
    operation without POSTing another installation. Failure/pause stops polling
    and leaves an explicit refresh action. Completion links to the application hub;
    it does not bypass the actual app-use launch gate.
+10. The installation settings page derives repair eligibility from the bounded
+    server projection. A disabled or recovery/review-required managed app can
+    review repair only when its runtime is enabled, its data namespace is active
+    and no operation is pending. The dialog binds the current release, generation
+    transition, retained data and unchanged grants; confirmation uses the same
+    reviewed plan/commit API and durable progress route.
 
 The pending confirmed identity is scoped by username in the current browser tab.
 It is not an authorization proof. Server-side account lifecycle/session checks
@@ -153,7 +159,8 @@ and uninstall reviews against their real backend projections. It also renders
 queued, controller-paused and recovery-required progress from durable operation
 rows and captures the installation settings page at 1440px English/light and
 320px Simplified Chinese/dark, plus a reviewed retained-data deletion against a
-managed runtime. Every case checks page bounds, overflow, visible focus,
+managed runtime and managed repair reviews at 1440px English/light and 320px
+Simplified Chinese/light. Every case checks page bounds, overflow, visible focus,
 Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
 errors and screenshots. After installation the install case completes the
 no-audience installation and verifies the row changes from installable to
@@ -189,6 +196,12 @@ Portal `8d882a2a` adds reviewed permanent deletion for retained managed data.
 The destructive dialog binds and displays the exact namespace and recovery
 scope. quota/browser run `41445281563`, general test run `41445281473` and runner
 daemon run `41445281626` pass with eleven captured scenarios.
+Portal `49754cbb` adds management repair review/confirmation plumbing and browser
+repair evidence. The matrix now covers thirteen scenarios, including repair at
+desktop and 320px Chinese, with zero serious/critical axe violations, bounded
+dialogs and no page overflow. Local Web passed 270 files / 2842 tests; full
+`internal/app` passed in 444.062s. Exact hosted runs for this candidate are
+recorded in [application settings](156-application-settings.md).
 
 ## Remaining platform scope
 
