@@ -44,6 +44,14 @@ function operationIDFromURL(value) {
   return match?.[1] ?? "";
 }
 
+async function firstEnabled(locator) {
+  for (let index = 0; index < (await locator.count()); index += 1) {
+    const candidate = locator.nth(index);
+    if (await candidate.isEnabled()) return candidate;
+  }
+  throw new Error(`no enabled control found for ${locator}`);
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -86,7 +94,9 @@ async function main() {
         action === "repair"
           ? "creates a fresh checkpoint"
           : "Writes after that checkpoint may be lost";
-      await page.getByRole("button", { name: reviewName }).click();
+      await (await firstEnabled(
+        page.getByRole("button", { name: reviewName }),
+      )).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
       const text = await dialog.innerText();
