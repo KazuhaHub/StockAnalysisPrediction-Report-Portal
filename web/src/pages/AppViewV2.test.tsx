@@ -69,17 +69,17 @@ test('signed app routes stay usable while dirty; host history keeps the bounded 
  await act(async()=>router.navigate(-1));
  await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit'));
  act(()=>frames[frames.length-1].onDraftChange(true));
- act(()=>frames[frames.length-1].onNavigate('/',false,''));
- await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
- await act(async()=>router.navigate('/apps'));
- await screen.findByRole('dialog');expect(frames[frames.length-1].presentation.navigation.path).toBe('/');
+ act(()=>frames[frames.length-1].onNavigate('/',false,'',false));
+ await screen.findByRole('dialog');expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftStay'}));
  await waitFor(()=>expect([...router.state.blockers.values()].every(b=>b.state==='unblocked')).toBe(true));
- expect(router.state.location.pathname).toBe(`/apps/v2/${installation}`);
+ expect(router.state.location.pathname).toBe(`/apps/v2/${installation}/edit`);
+ act(()=>frames[frames.length-1].onNavigate('/',false,'',true));
+ await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
  await act(async()=>router.navigate('/apps'));await screen.findByRole('dialog');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftLeave'}));
  await waitFor(()=>expect(router.state.location.pathname).toBe('/apps'));
- expect(fetch).toHaveBeenCalledTimes(1);
+ expect(screen.queryByTestId('v2-frame')).toBeNull();expect(fetch).toHaveBeenCalledTimes(1);
 });
 test.each(['/unknown','/%65dit','/edit?token=secret','/edit#fragment'])('unsigned or noncanonical deep link never mounts a frame: %s',path=>{
  render(<Page path={`/apps/v2/${installation}${path}`}/>);

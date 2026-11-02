@@ -23,6 +23,7 @@ import {
   type RouteQueryRule,
 } from "./route-query-v2";
 export interface BridgeNavigationOptions {
+  readonly bypassDraft?: boolean;
   readonly replace?: boolean;
   readonly query?: RouteQueryValues;
 }
@@ -791,7 +792,12 @@ export interface BridgeHostOptions extends BaseOptions {
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
-  onNavigate?: (path: string, replace: boolean, search: string) => void;
+  onNavigate?: (
+    path: string,
+    replace: boolean,
+    search: string,
+    bypassDraft: boolean,
+  ) => void;
 }
 export interface BridgeClientOptions extends BaseOptions {
   onReset?: () => void;
@@ -1278,6 +1284,7 @@ export function createBridgeHost(
           "path",
           "search",
           "replace",
+          "bypassDraft",
         ])
       ) {
         fail("protocol_error");
@@ -1289,6 +1296,7 @@ export function createBridgeHost(
         !decimal(data.revision) ||
         !decimal(data.presentationRevision) ||
         typeof data.replace !== "boolean" ||
+        typeof data.bypassDraft !== "boolean" ||
         !isString(data.path) ||
         !isString(data.search) ||
         data.path.length > 257
@@ -1326,7 +1334,12 @@ export function createBridgeHost(
       )
         return;
       try {
-        options.onNavigate?.(data.path, data.replace, data.search);
+        options.onNavigate?.(
+          data.path,
+          data.replace,
+          data.search,
+          data.bypassDraft,
+        );
       } catch {
         fail("protocol_error");
       }
@@ -3147,15 +3160,21 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         !options ||
         typeof options !== "object" ||
         Array.isArray(options) ||
-        Object.keys(options).some((key) => key !== "replace" && key !== "query")
+        Object.keys(options).some(
+          (key) =>
+            key !== "replace" && key !== "query" && key !== "bypassDraft",
+        )
       )
         return false;
       const replace = options.replace === undefined ? false : options.replace;
+      const bypassDraft =
+        options.bypassDraft === undefined ? false : options.bypassDraft;
       const route = current?.navigation?.routes.find(
         (route) => route.path === path,
       );
       if (
         typeof replace !== "boolean" ||
+        typeof bypassDraft !== "boolean" ||
         !route ||
         Date.now() - lastNavigationAt < 100
       )
@@ -3184,6 +3203,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
           path,
           search: target.search,
           replace,
+          bypassDraft,
         });
         return true;
       } catch {

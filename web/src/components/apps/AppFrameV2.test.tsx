@@ -144,10 +144,10 @@ test('draft state retires on reload, failure and unmount; stale channels cannot 
 
 test('navigation callbacks from a replaced channel cannot move the host',()=>{
  const navigate=vi.fn();const view=render(<AppFrameV2 {...props} onNavigate={navigate}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame);const first=sessions[0];
- act(()=>first.options.onNavigate?.('/editor',true,''));expect(navigate).toHaveBeenCalledExactlyOnceWith('/editor',true,'');
- fireEvent.load(frame);navigate.mockClear();act(()=>first.options.onNavigate?.('/',false,''));expect(navigate).not.toHaveBeenCalled();
- act(()=>sessions[1].options.onNavigate?.('/',false,''));expect(navigate).toHaveBeenCalledExactlyOnceWith('/',false,'');
- view.unmount();navigate.mockClear();act(()=>sessions[1].options.onNavigate?.('/editor',false,''));expect(navigate).not.toHaveBeenCalled();
+ act(()=>first.options.onNavigate?.('/editor',true,'',true));expect(navigate).toHaveBeenCalledExactlyOnceWith('/editor',true,'',true);
+ fireEvent.load(frame);navigate.mockClear();act(()=>first.options.onNavigate?.('/',false,'',true));expect(navigate).not.toHaveBeenCalled();
+ act(()=>sessions[1].options.onNavigate?.('/',false,'',false));expect(navigate).toHaveBeenCalledExactlyOnceWith('/',false,'',false);
+ view.unmount();navigate.mockClear();act(()=>sessions[1].options.onNavigate?.('/editor',false,'',false));expect(navigate).not.toHaveBeenCalled();
 })
 
 test('page metadata cannot return through a retired document observer',()=>{

@@ -31,7 +31,8 @@ function LaunchPage({ installation }: { installation: string }) {
   const [page, setPage] = useState<PageActionSnapshot|null>(null)
   const [dirty, setDirty] = useState(false)
   const base = `/apps/v2/${installation}`
-  const blocker = useAppDraftBlocker(dirty, base)
+  const allowDraftNavigation = useRef(false)
+  const blocker = useAppDraftBlocker(dirty, allowDraftNavigation)
   const panel = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(64)
 
@@ -101,10 +102,12 @@ function LaunchPage({ installation }: { installation: string }) {
       ) : (
         <div ref={panel} style={{ flex: layout === 'viewport' ? '1 1 0' : '0 0 auto', minHeight: 64, minWidth: 0, overflow: 'hidden' }}>
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
-            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search) => {
+            capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search, bypassDraft) => {
               const destination=launch.routes.find(route=>route.path===target)
-              if (!destination || !parseRouteSearch(destination.query??[],search)) return
+              if ((blocker.state !== 'unblocked' && !bypassDraft) || !destination || !parseRouteSearch(destination.query??[],search)) return
+              if (bypassDraft) allowDraftNavigation.current = true
               void navigate((target === '/' ? base : base + target)+search, { replace })
+              if (bypassDraft) queueMicrotask(() => { allowDraftNavigation.current = false })
             }} presentation={presentation!} height={height} />
         </div>
       )}

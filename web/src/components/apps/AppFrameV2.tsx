@@ -20,7 +20,7 @@ export interface AppFrameV2Props {
   backendAvailable?: boolean
   onPageChange?: (snapshot:PageActionSnapshot|null)=>void
   onDraftChange?: (dirty: boolean) => void
-  onNavigate?: (path:string,replace:boolean,search:string)=>void
+  onNavigate?: (path:string,replace:boolean,search:string,bypassDraft:boolean)=>void
   // Viewport height, also used as the initial document loading-cover height.
   height: number
 }
@@ -101,7 +101,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       onReportRequest: capabilities.includes('reports.read') ? createAppReportsTransport(binding) : undefined,
       onObjectRequest: capabilities.includes('storage.files') ? createAppObjectsTransport(binding) : undefined,
       onNotificationRequest: capabilities.includes('notifications.publish') ? createAppNotificationsTransport(binding) : undefined,
-      onNavigate: (path,replace,search)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search)},
+      onNavigate: (path,replace,search,bypassDraft)=>{if(live.current&&epoch.current===generation)navigationObserver.current?.(path,replace,search,bypassDraft)},
       onPageChange: value=>{if(live.current&&epoch.current===generation)pageObserver.current?.(value)},
       onDraftChange: value => { if (live.current && epoch.current === generation) draftObserver.current?.(value) },
       onReady: () => { if (live.current && epoch.current === generation) {

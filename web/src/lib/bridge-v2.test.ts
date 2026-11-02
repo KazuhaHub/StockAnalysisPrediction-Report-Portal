@@ -1106,7 +1106,12 @@ test("registered navigation is source-bound and the host owns the committed path
   expect(client.navigate("/unknown")).toBe(false);
   expect(client.navigate("/editor")).toBe(true);
   await vi.waitFor(() =>
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/editor", false, ""),
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/editor",
+      false,
+      "",
+      false,
+    ),
   );
   expect(client.presentation()?.navigation?.path).toBe("/");
   host.updatePresentation({
@@ -1235,6 +1240,7 @@ test("host ignores stale navigation and refuses injected destinations before dis
     presentationRevision: "1",
     path: "/editor",
     replace: false,
+    bypassDraft: false,
   };
   port.postMessage({ ...message, generation: "2" });
   port.postMessage({ ...message, presentationRevision: "2" });
@@ -1296,6 +1302,7 @@ test("navigation query is validated against its signed destination rather than t
       "/editor",
       false,
       "?q=%E4%B8%AD%E6%96%87",
+      false,
     ),
   );
   const init = w.sent.find((item) => item.data.type === "app:init")!.data,
