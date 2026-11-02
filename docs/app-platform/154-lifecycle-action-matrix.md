@@ -108,9 +108,14 @@ Still required for H13 completion:
 - full concurrent operator acceptance across enable/update/repair, not only
   delete-data admission;
 - static frontend repair and end-to-end lifecycle evidence for every row,
-  including lost confirmations. Managed repair and restore reviews are
-  browser-covered; confirmation/progress against the real runner is still
-  required.
+  including lost confirmations.
+
+Managed repair and restore now have browser confirmation and durable progress
+coverage against the real runner. The browser opens the exact settings review,
+confirms through the normal management API, the native test executes the
+admitted operation through the signed runner path, and a second browser session
+requires terminal progress and a final Ready settings projection. Evidence is
+in [the lifecycle runner report](handoff/evidence/platform-lifecycle-runner/acceptance.json).
 
 The standalone delete-data path has SQLite and PostgreSQL 18.6 repository
 coverage for stale plans, concurrent confirmations, two-admin conflicts,

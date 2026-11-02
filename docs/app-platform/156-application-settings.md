@@ -132,9 +132,21 @@ daemon run `41493408984`, quota/browser run `41493409034` and CodeQL
 actual Cancel-button contrast assertion; footer-scoped high-contrast styling
 fixed the cause. Those failed runs remain recorded in PR #364.
 
+The native Linux quota/browser run now also drives repair and restore
+confirmation through the production SPA and normal management HTTP API. In each
+case the browser confirms the exact review, the admitted operation runs through
+the signed runner path, and a later browser session verifies `Operation
+complete` on the durable progress page plus `Ready` on the settings projection.
+The machine evidence binds candidate `ce3e07bd` and quota/browser run
+`41509323922`; general test `41509323957`, runner daemon `41509323798` and
+CodeQL `41509313480` also pass. Screenshots and operation IDs are in
+[lifecycle runner evidence](handoff/evidence/platform-lifecycle-runner/acceptance.json).
+Earlier controller isolation failures in this browser step remain recorded and
+were fixed by staging the script, HOME and evidence inside the controller-owned
+child directory.
+
 ## Remaining scope
 
 Editing audiences, grants or credentials continues through their exact reviewed
-flows. The full D5 review still needs manual screen-reader testing, a repair
-and restore confirmation/progress browser path against the real runner,
-retained-data reinstall and the remaining lifecycle pages.
+flows. The full D5 review still needs manual screen-reader testing, retained-data
+reinstall and the remaining lifecycle pages.

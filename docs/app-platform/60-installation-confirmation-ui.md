@@ -230,6 +230,13 @@ high-contrast text token with footer-scoped priority; both failed runs remain
 recorded.
 Exact hosted checks for `ba0f4667` are quota/browser `41493409034`, general test
 `41493408915`, runner daemon `41493408984` and CodeQL `41493401071`.
+Portal `ce3e07bd` adds real-runner repair/restore confirmation and durable
+progress browser evidence. Its quota/browser run `41509323922`, general test
+`41509323957`, runner daemon `41509323798` and CodeQL `41509313480` pass. The
+browser opens the exact review, confirms through the normal management API, the
+native test executes the admitted operation through the signed runner path, and
+a later browser session verifies `Operation complete` plus the final `Ready`
+settings projection.
 
 ## Remaining platform scope
 
