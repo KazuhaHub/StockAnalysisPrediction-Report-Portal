@@ -134,7 +134,7 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
     // The initial ready transition starts its own deadline above.
   }, [layout, fail])
   const visible = ready && (layout === 'viewport' || documentHeight !== null)
-  if (failed) return <Alert type="error" showIcon title={t('apps.v2Failed')} action={<Button onClick={() => { close(); setReady(false); setFailed(false); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
+  if (failed) return <Alert type="error" showIcon title={t('apps.v2Failed')} action={<Button type="primary" onClick={() => { close(); setReady(false); setFailed(false); setAttempt(value => value + 1) }}>{t('apps.v2Retry')}</Button>} />
   return <div className="portal-app-frame-v2" aria-busy={!visible} style={{ height: layout === 'document' ? documentHeight ?? height : height, background: presentation.theme.colorBgLayout, color: presentation.theme.colorText, colorScheme: presentation.theme.dark ? 'dark' : 'light' }}>
     <iframe key={attempt} ref={frame} src={source} title={title} sandbox="allow-scripts" referrerPolicy="no-referrer" onLoad={loaded} aria-hidden={visible ? undefined : true} tabIndex={visible ? 0 : -1} style={{ visibility: visible ? 'visible' : 'hidden', border: 0, background: presentation.theme.colorBgLayout, colorScheme: presentation.theme.dark ? 'dark' : 'light' }} />
     {!visible && <div className="portal-app-frame-v2-cover" role="status"><Spin aria-hidden="true" /><span>{t('apps.v2Loading')}</span></div>}
