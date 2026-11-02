@@ -2325,3 +2325,29 @@ the Friday-shape case. Back out: none needed; it is the documented rule.
 - The readiness fixtures in the tests now configure an email recipient, because a stamp with nothing
   configured to deliver to no longer satisfies the item. An SMTP save still deletes the stamp, as it
   did before; that fails safe and is left alone.
+
+### 2026-11-03 — ADR 0049 issuer capture, from a workstation egress
+
+Rollout step 1 of ADR 0049, measured from a developer workstation, not from the production egress.
+Raw bodies are kept outside the repository; fixtures will be cut from them at implementation time.
+
+- **Endpoint.** `GET https://www.csindex.com.cn/csindex-home/perf/index-perf?indexCode=<6 digits>&startDate=YYYYMMDD&endDate=YYYYMMDD`
+  answered 200 with JSON `{code:"200", msg, data:[...], success}` and no cookie or referer. One call
+  returned a two-year window (485 sessions, 166 KB).
+- **Identity.** Every row carries `indexCode` equal to the requested code and an English and Chinese
+  name. An unknown code (`999999`) and a future range both answer 200 with an empty `data`, so an
+  empty body must be `unavailable`, never `agree`.
+- **Calendar.** Rows are sessions only; the 2026-10-01..07 holiday is absent. Over 2024-11-01..2026-11-02
+  the issuer's and Tencent's date sets are identical for `sh000852` and `sh000906` (485 each, none on
+  one side only).
+- **Precision.** The issuer's prices are JSON numbers with at most 2 decimals (a trailing zero is
+  dropped, e.g. one decimal). Tencent's `bfq` index bars are strings with 3 decimals whose third is
+  always `0`. Both are hundredths of a point, so the closes compare exactly as integers once parsed
+  as decimals, never as floats.
+- **Closes.** 970 closes compared (485 per code): **0 differences**.
+- **Open, high and low.** 3 of 2910 differ by 0.01 (`sh000906` on 2026-10-14 low and 2026-10-15
+  open; one on `sh000852`). The index leg must compare closes only, which is what ADR 0049 §2
+  specifies; the ledger reads no index field but the close.
+- **Still open.** Reachability and the same result from the production egress; the issuer's
+  rate limits; the time of day a session's row first appears (the capture ran at 07:02 Shanghai,
+  after every compared session had closed).
