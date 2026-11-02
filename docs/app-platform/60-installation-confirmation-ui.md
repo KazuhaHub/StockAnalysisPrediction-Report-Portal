@@ -214,6 +214,8 @@ projection and disabled restore admission while control is paused. The matrix
 now covers seventeen scenarios, including restore and paused-control settings at
 1440px English and 320px Chinese. Local Web passed 270 files / 2844 tests; full
 `internal/app` passed in 271.645s.
+Exact hosted runs are quota/browser `41470397132`, general test `41470397336`
+and runner daemon `41470397185`.
 
 ## Remaining platform scope
 

@@ -120,7 +120,11 @@ Full local Web verification passed 270 files / 2844 tests, typecheck, lint and
 the production build. Focused settings tests pass against SQLite, with the same
 case included in the PostgreSQL `TestPlatform*Postgres` group. Full
 `internal/app` verification passed in 271.645s. Browser evidence binds
-`9137a466`. Hosted verification is pending for this candidate.
+`9137a466`. Candidate `9137a466` passed general test run `41470397336`,
+runner daemon run `41470397185` and quota/browser run `41470397132`. The first
+quota attempt failed in the existing native public-registration coordination
+pipe before project-quota enforcement; the same failed job passed on rerun. Both
+results remain recorded in PR #364.
 
 ## Remaining scope
 
