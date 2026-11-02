@@ -308,8 +308,9 @@ fixtures can stand for the live endpoint.
    the implementation log. If the capture fails, stop: the automatic gate is not built, and this ADR
    is amended to say so. A first capture from a workstation egress (2026-11-03, recorded in
    `forecast-verification-v2-log.md`) matched all 970 closes of `sh000852` and `sh000906` over two
-   years, with identical session sets and equal precision. The production egress is still to be
-   measured.
+   years, with identical session sets and equal precision. The same capture from the production
+   egress, the same day, returned byte-identical issuer bodies and the same result. Rate limits and
+   the time a session's row first appears remain to be measured during implementation.
 2. Implement behind `forecast_gate_auto=off` with the tests above, and run `scripts/e2e_check.py`.
 3. After deployment, the owner switches it on. The next benchmark scheduled for a new cohort is the
    first live use.

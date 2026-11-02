@@ -2348,6 +2348,11 @@ Raw bodies are kept outside the repository; fixtures will be cut from them at im
 - **Open, high and low.** 3 of 2910 differ by 0.01 (`sh000906` on 2026-10-14 low and 2026-10-15
   open; one on `sh000852`). The index leg must compare closes only, which is what ADR 0049 §2
   specifies; the ledger reads no index field but the close.
-- **Still open.** Reachability and the same result from the production egress; the issuer's
-  rate limits; the time of day a session's row first appears (the capture ran at 07:02 Shanghai,
-  after every compared session had closed).
+- **Production egress (same day, 2026-11-03).** The same two-year requests from the production host
+  answered 200 in under a second each (166 KB and 164 KB). The issuer bodies are byte-identical to
+  the workstation's (same SHA-256), and the production Tencent bodies again match all 970 closes
+  with identical session sets. The issuer also answered from inside the portal container (`wget`),
+  so the container's network path reaches it. Read-only `curl`/`wget` only; nothing in the
+  deployment was changed, and the temporary files were removed from the host.
+- **Still open.** The issuer's rate limits, and the time of day a session's row first appears (both
+  captures ran at about 07:00 Shanghai, after every compared session had closed).
