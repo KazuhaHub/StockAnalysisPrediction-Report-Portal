@@ -1,5 +1,5 @@
 {
-  "gitCommit": "9137a466c5a88276db9145f790dc8ae9e2c9605a",
+  "gitCommit": "497c1caf844c890ea2f3bebcc454056d98351906",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -88,7 +88,7 @@
     }
   ],
   "install": {
-    "operation": "7ad3f1b2-242f-42ec-bf52-614aa67441c3"
+    "operation": "0885a053-8e22-432b-b04d-fb158ec0f1bf"
   },
   "disable": {
     "violations": []
