@@ -133,11 +133,16 @@ Latest H14 My Apps evidence: v2 directory cards now distinguish pending,
 disabled and attention states with separate explanations instead of one generic
 "unavailable" label. Administrators get a direct management-page recovery link
 only when the app is not openable; ordinary readers receive the truthful state
-without installation IDs, counts or an administrative action. Tests cover all
-three non-openable states, reader/admin visibility, absence of leaked
-installation IDs/counts, and axe violations. This advances UX-10 but does not
-replace its full backend-stop, readiness-timeout and protocol-mismatch browser
-matrix.
+without installation IDs, counts or an administrative action. The production
+SPA failure matrix on candidate `27049931` covers all three non-openable
+directory states plus denied launch, stopped backend, missing app-ready and
+incompatible protocol. Refused and failed launches unmount executable content,
+show only fixed host errors, retain a keyboard-operable Reopen app action and
+never expose server diagnostics. The matrix has zero main-content
+serious/critical axe findings or browser errors. Evidence is in
+[application failure evidence](evidence/platform-failure/acceptance.json).
+Hosted quota/browser `41518210317`, general test `41518210506`, runner daemon
+`41518210239` and CodeQL `41518201148` pass.
 
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,

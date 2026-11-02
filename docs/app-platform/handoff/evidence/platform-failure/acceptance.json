@@ -1,0 +1,42 @@
+{
+  "format": "portal.application-failure-browser-acceptance/1-dev.1",
+  "candidate": "27049931d466f5fa9202527dbefb9b6f21e8bc5c",
+  "quotaBrowserRun": "41518210317",
+  "generalTestRun": "41518210506",
+  "runnerDaemonRun": "41518210239",
+  "codeQLRun": "41518201148",
+  "physicalViewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "scenarios": [
+    "directory-states-admin",
+    "directory-states-reader",
+    "denied",
+    "backend-stopped",
+    "ready-timeout",
+    "protocol-incompatible"
+  ],
+  "assertions": {
+    "pendingDisabledAttentionDistinct": true,
+    "adminRecoveryLinks": true,
+    "readerManagementLinksHidden": true,
+    "installationIdentityHidden": true,
+    "countsHidden": true,
+    "serverDiagnosticsHidden": true,
+    "refusedLaunchMountedNoFrame": true,
+    "retryRemainsAvailable": true,
+    "missingReadyMountedNoFrame": true,
+    "incompatibleProtocolMountedNoFrame": true,
+    "mainContentAxeSeriousOrCriticalViolations": 0,
+    "browserErrors": 0
+  },
+  "evidence": [
+    "directory-states-admin.png",
+    "directory-states-reader.png",
+    "denied.png",
+    "backend-stopped.png",
+    "ready-timeout.png",
+    "protocol-incompatible.png"
+  ]
+}

@@ -109,13 +109,20 @@ app-language selector, iframe wrapper or alternate theme system is introduced.
   failures, parser refusals, continuation, retry, account-switch stale responses
   and unmount cancellation. These are component/hook tests, not full browser or
   D5 visual acceptance.
+- Production SPA Chromium evidence on candidate `27049931` covers pending,
+  disabled and attention directory cards, reader/admin visibility, denied
+  launch, stopped backend, missing app-ready and incompatible protocol. No
+  refused state mounts a frame or exposes installation IDs, counts or server
+  diagnostics. See [failure evidence](handoff/evidence/platform-failure/acceptance.json).
 
 The preceding launch-page source at
 `bb98074e5414975b964da0ff1a5d9ecf81e79c6c` passed CI run 40273040782.
 Full local web regression passed 1657 tests across 148 files. Typecheck, lint
 (existing unrelated warnings), production web build, Go vet, staticcheck and Go
 build passed. Targeted directory/launch/HTTP race checks with disposable PostgreSQL
-passed in 46.990 seconds. Exact-source CI for this slice must still be checked.
+passed in 46.990 seconds. Candidate `27049931` passed general test `41518210506`,
+quota/browser `41518210317`, runner daemon `41518210239` and CodeQL
+`41518201148`.
 Production and server beta configuration are untouched. Full installer activation,
 market linkage, verified display names, managed launch, navigation/drafts,
 document sizing, sensitive broker policy and remaining P00–P14 acceptance stay
