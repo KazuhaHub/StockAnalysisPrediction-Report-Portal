@@ -98,8 +98,8 @@ Full local Web verification passed 270 files / 2842 tests, typecheck, lint and
 the production build. Focused settings tests pass against SQLite, with the same
 case included in the PostgreSQL `TestPlatform*Postgres` group. Full
 `internal/app` verification passed in 444.062s. Browser evidence binds
-`49754cbb`. Candidate `49754cbb` passed quota/browser run pending, general test
-run pending and runner daemon run pending.
+`49754cbb`. Candidate `49754cbb` passed quota/browser run `41457471636`,
+general test run `41457471642` and runner daemon run `41457471418`.
 
 ## Remaining scope
 
