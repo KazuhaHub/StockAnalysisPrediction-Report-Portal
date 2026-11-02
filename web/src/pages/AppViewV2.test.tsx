@@ -57,7 +57,7 @@ test('signed host title and frame label change language without another launch r
 })
 
 
-test('signed deep links and history update one mounted document; dirty route cancellation never commits',async()=>{
+test('signed app routes stay usable while dirty; host history keeps the bounded prompt',async()=>{
  const routes=[{id:'home',path:'/',layout:'document'},{id:'edit',path:'/edit',layout:'viewport'}];
  vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({...response,routes}),{status:200})));
  render(<Page path={`/apps/v2/${installation}/edit`}/>);const element=await screen.findByTestId('v2-frame');
@@ -68,15 +68,18 @@ test('signed deep links and history update one mounted document; dirty route can
  const router=routers[routers.length-1]!;
  await act(async()=>router.navigate(-1));
  await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit'));
- act(()=>frames[frames.length-1].onDraftChange(true));act(()=>frames[frames.length-1].onNavigate('/',false,''));
- await screen.findByRole('dialog');expect(frames[frames.length-1].presentation.navigation.path).toBe('/edit');
+ act(()=>frames[frames.length-1].onDraftChange(true));
+ act(()=>frames[frames.length-1].onNavigate('/',false,''));
+ await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
+ await act(async()=>router.navigate('/apps'));
+ await screen.findByRole('dialog');expect(frames[frames.length-1].presentation.navigation.path).toBe('/');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftStay'}));
  await waitFor(()=>expect([...router.state.blockers.values()].every(b=>b.state==='unblocked')).toBe(true));
- expect(router.state.location.pathname).toBe(`/apps/v2/${installation}/edit`);
- act(()=>frames[frames.length-1].onNavigate('/',false,''));await screen.findByRole('dialog');
+ expect(router.state.location.pathname).toBe(`/apps/v2/${installation}`);
+ await act(async()=>router.navigate('/apps'));await screen.findByRole('dialog');
  fireEvent.click(screen.getByRole('button',{name:'apps.draftLeave'}));
- await waitFor(()=>expect(frames[frames.length-1].presentation.navigation.path).toBe('/'));
- expect(screen.getByTestId('v2-frame')).toBe(element);expect(fetch).toHaveBeenCalledTimes(1);
+ await waitFor(()=>expect(router.state.location.pathname).toBe('/apps'));
+ expect(fetch).toHaveBeenCalledTimes(1);
 });
 test.each(['/unknown','/%65dit','/edit?token=secret','/edit#fragment'])('unsigned or noncanonical deep link never mounts a frame: %s',path=>{
  render(<Page path={`/apps/v2/${installation}${path}`}/>);

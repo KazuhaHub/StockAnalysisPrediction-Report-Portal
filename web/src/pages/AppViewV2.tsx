@@ -30,7 +30,8 @@ function LaunchPage({ installation }: { installation: string }) {
   const [attempt, setAttempt] = useState(0)
   const [page, setPage] = useState<PageActionSnapshot|null>(null)
   const [dirty, setDirty] = useState(false)
-  const blocker = useAppDraftBlocker(dirty)
+  const base = `/apps/v2/${installation}`
+  const blocker = useAppDraftBlocker(dirty, base)
   const panel = useRef<HTMLDivElement>(null)
   const [height, setHeight] = useState(64)
 
@@ -54,7 +55,6 @@ function LaunchPage({ installation }: { installation: string }) {
     return () => { live = false; controller.abort() }
   }, [installation, attempt])
 
-  const base = `/apps/v2/${installation}`
   const path = location.pathname === base ? '/'
     : location.pathname.startsWith(base + '/') ? location.pathname.slice(base.length) : null
   const registered = launch?.routes.find(route => route.path === path)
@@ -103,7 +103,7 @@ function LaunchPage({ installation }: { installation: string }) {
           <AppFrameV2 source={launch.source} title={copy!.name} binding={launch.binding}
             capabilities={launch.capabilities} backendAvailable={launch.backendAvailable} onPageChange={setPage} onDraftChange={setDirty} onNavigate={(target, replace, search) => {
               const destination=launch.routes.find(route=>route.path===target)
-              if (blocker.state !== 'unblocked' || !destination || !parseRouteSearch(destination.query??[],search)) return
+              if (!destination || !parseRouteSearch(destination.query??[],search)) return
               void navigate((target === '/' ? base : base + target)+search, { replace })
             }} presentation={presentation!} height={height} />
         </div>

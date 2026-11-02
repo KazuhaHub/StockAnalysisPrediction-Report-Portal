@@ -3,7 +3,13 @@ import type {AppDisplay} from './descriptor-contract.generated'
 import {DESCRIPTOR_PATTERNS} from './descriptor-contract.generated'
 import {parseBridgeRoutes,type BridgeRoute,type BridgeBinding,type BridgePresentation} from './bridge-v2'
 export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boolean;display?:AppDisplay;source:string;binding:BridgeBinding;capabilities:readonly string[];applicationId:string;layout:BridgePresentation['layout'];timeZone:string}
-const hostCapabilities=new Set(['network.http'])
+const hostCapabilities=new Set([
+  'network.http',
+  'notifications.publish',
+  'reports.read',
+  'secrets.use',
+  'storage.files',
+])
 const uuid=/^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$/
 const digest=new RegExp(DESCRIPTOR_PATTERNS.digest)
 function counter(value:unknown):value is string{return typeof value==='string'&&/^[1-9][0-9]{0,18}$/.test(value)&&BigInt(value)<=9223372036854775807n}

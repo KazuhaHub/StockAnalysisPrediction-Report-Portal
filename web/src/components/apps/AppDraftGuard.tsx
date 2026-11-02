@@ -5,13 +5,21 @@ import { useTranslation } from "react-i18next";
 
 // Boolean document state only: the host never receives draft contents or an
 // app-authored prompt. Proceed is the user's decision and cannot await the app.
-export function useAppDraftBlocker(dirty: boolean) {
+export function useAppDraftBlocker(dirty: boolean, withinPath?: string) {
   const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) =>
-      dirty &&
-      (currentLocation.pathname !== nextLocation.pathname ||
-        currentLocation.search !== nextLocation.search ||
-        currentLocation.hash !== nextLocation.hash),
+    ({ currentLocation, nextLocation }) => {
+      const staysInApp =
+        !!withinPath &&
+        (nextLocation.pathname === withinPath ||
+          nextLocation.pathname.startsWith(withinPath + "/"));
+      return (
+        dirty &&
+        !staysInApp &&
+        (currentLocation.pathname !== nextLocation.pathname ||
+          currentLocation.search !== nextLocation.search ||
+          currentLocation.hash !== nextLocation.hash)
+      );
+    },
   );
   useBeforeUnload((event) => {
     if (dirty) {
