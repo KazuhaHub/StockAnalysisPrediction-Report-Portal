@@ -120,11 +120,12 @@ async function main(){
   await frame.getByRole('button',{name:'Toggle long labels',exact:true}).click();
   stage='layout-grow';
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('iframe')?.getBoundingClientRect().height>3000);
+  const expandedHeight=await page.evaluate(()=>document.querySelector('iframe')?.getBoundingClientRect().height||0);
+  if(expandedHeight<=3000)throw new Error('long content did not expand document');
   const inner=await frame.locator('html').evaluate(element=>({scroll:element.scrollHeight,client:element.clientHeight}));
   if(inner.scroll>inner.client+2)throw new Error('document gained internal scroll');
   await frame.getByRole('button',{name:'Toggle long content',exact:true}).click();
-  await page.waitForFunction(()=>{const height=document.querySelector('iframe')?.getBoundingClientRect().height;return height>=64&&height<1000});
+  await page.waitForFunction((previous)=>{const height=document.querySelector('iframe')?.getBoundingClientRect().height;return height>=64&&height<previous-2000},expandedHeight);
   stage='write';const write=JSON.parse(await dispatch('Write backend'));
   if(write.status!==200||write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
   stage='uncertain';if(await dispatch('Disconnect write')!=='error:uncertain')throw new Error('missing uncertainty');
