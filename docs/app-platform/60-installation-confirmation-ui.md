@@ -171,11 +171,11 @@ overflow, visible focus,
 Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
 errors and screenshots. After installation the install case completes the
 no-audience installation and verifies the row changes from installable to
-installed. The disable review
-states that data is retained; the uninstall review states the single-plugin
-clear boundary. CI uploads the screenshots and `acceptance.json`; this remains
-installation-page evidence, not approval of every lifecycle page or a substitute
-for D5 review.
+installed. The disable review states that data is retained; the uninstall review
+states that only the selected installation is cleared and that the dedicated
+plugin table is removed only when no other installation uses it. CI uploads the
+screenshots and `acceptance.json`; this remains installation-page evidence, not
+approval of every lifecycle page or a substitute for D5 review.
 Portal `ff331b52` passed quota/browser run `41382711308` with all three axe scans
 clean and the background operation complete.
 Portal `7ff23d12` extended the same job to update and re-enable projections;

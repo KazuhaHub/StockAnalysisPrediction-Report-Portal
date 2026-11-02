@@ -326,8 +326,14 @@ async function uninstallScenario(browser, url) {
     await dialog.waitFor();
     await page.waitForTimeout(400);
     const text = await dialog.innerText();
-    if (!text.includes("other plugins are unaffected")) {
-      throw new Error("uninstall review did not state its isolation boundary");
+    const normalized = text.toLowerCase().replace(/\s+/g, " ");
+    if (
+      !normalized.includes("other plugins are unaffected") ||
+      !normalized.includes("no other installation uses it")
+    ) {
+      throw new Error(
+        `uninstall review did not state its isolation boundary: ${text}`,
+      );
     }
     const geometry = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
