@@ -1,5 +1,5 @@
 {
-  "gitCommit": "d335c963985264662e550d1f6e2f8cdd0a1f4e9b",
+  "gitCommit": "ed04e66cf76809acfdca143d554e0fc9af3e48d7",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -25,10 +25,28 @@
       "name": "enable-review-1440-en-light",
       "violations": [],
       "height": 900
+    },
+    {
+      "name": "progress-queued",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "progress-paused",
+      "violations": [],
+      "height": 900
+    },
+    {
+      "name": "progress-recovery",
+      "violations": [],
+      "height": 900
     }
   ],
   "install": {
-    "operation": "aea16fa1-19e3-49ce-84da-743848925820"
+    "operation": "482bd9fc-a490-42a2-86de-3aa0a2457a88"
+  },
+  "disable": {
+    "violations": []
   },
   "uninstall": {
     "violations": []
