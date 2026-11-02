@@ -299,7 +299,19 @@ async function scenario(browser, url, options) {
       (violation) => violation.impact === "critical" || violation.impact === "serious",
     );
     if (serious.length) {
-      throw new Error(`axe violations in ${options.name}: ${JSON.stringify(serious)}`);
+      const footerStyles = await page.evaluate(() =>
+        [...document.querySelectorAll('[role="dialog"] .ant-modal-footer button')].map(
+          (button) => ({
+            text: button.textContent,
+            color: getComputedStyle(button).color,
+            textColor: getComputedStyle(button.querySelector("span") ?? button).color,
+            background: getComputedStyle(button).backgroundColor,
+          }),
+        ),
+      );
+      throw new Error(
+        `axe violations in ${options.name}: ${JSON.stringify(serious)} ${JSON.stringify(footerStyles)}`,
+      );
     }
     const base = path.join(output, options.name);
     await page.screenshot({ path: `${base}-review.png`, fullPage: false });
