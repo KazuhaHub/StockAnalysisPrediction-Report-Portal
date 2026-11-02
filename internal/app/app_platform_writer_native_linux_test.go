@@ -48,7 +48,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 		t.Fatal(err)
 	}
 	if _, err := appplatform.ParseDescriptor(raw); err != nil {
-		t.Fatal("writable notification descriptor", manifest.ID, manifest.Version, manifest.Backend.Image, err)
+		t.Fatal("writable notification descriptor", manifest.ID, manifest.Version, manifest.Backend.Image, err, string(raw))
 	}
 	if _, err := appplatform.InspectFrontend(manifest, archive); err != nil {
 		t.Fatal("writable notification frontend", err)

@@ -24,6 +24,9 @@ func TestPlatformNotificationWriterFixtureStages(t *testing.T) {
 	manifest.Version = "1.0.0-beta.4"
 	manifest.Capabilities.Required = []string{"network.http", "notifications.publish", "reports.read", "secrets.use", "storage.files"}
 	manifest.Capabilities.Optional = nil
+	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
+		manifest.Presentation.Routes = []appplatform.Route{{ID: "editor", Path: "/editor", Layout: "viewport", Query: platformRouteQueryFixture()}, {ID: "home", Path: "/", Layout: "document", Query: platformRouteQueryFixture()}}
+	}
 	if dir := os.Getenv("APP_SDK_BROWSER_DIR"); dir != "" {
 		if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir {
 			t.Fatal("invalid SDK browser fixture directory")
@@ -40,6 +43,9 @@ func TestPlatformNotificationWriterFixtureStages(t *testing.T) {
 	}
 	manifest.Frontend.SHA256 = platformDigest(archive)
 	manifest.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{"linux/amd64"}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
+	if image := os.Getenv("PORTAL_MANAGED_IMAGE"); image != "" {
+		manifest.Backend.Image = image
+	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
