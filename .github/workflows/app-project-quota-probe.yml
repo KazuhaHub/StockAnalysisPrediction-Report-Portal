@@ -233,6 +233,18 @@ jobs:
           name: platform-install-browser
           if-no-files-found: ignore
           path: ${{ runner.temp }}/platform-install-browser
+      - name: Exercise truthful application failure states in Chromium
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_PLATFORM_FAILURE_BROWSER_EVIDENCE: ${{ runner.temp }}/platform-failure-browser
+        run: node scripts/app-platform-failure-browser.cjs
+      - name: Preserve application failure browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-failure-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/platform-failure-browser
       - name: Prepare real-runner lifecycle browser evidence
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         run: |
