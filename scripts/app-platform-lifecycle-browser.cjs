@@ -99,6 +99,10 @@ async function main() {
       )).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
+      await page.waitForFunction(() => {
+        const current = document.querySelector('[role="dialog"]');
+        return current && getComputedStyle(current).opacity === "1";
+      });
       const text = await dialog.innerText();
       if (!text.includes(boundary)) {
         throw new Error(`${action} review boundary missing: ${text}`);
