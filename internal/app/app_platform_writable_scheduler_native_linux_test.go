@@ -439,21 +439,43 @@ func testNativeWritableManagedRestore(
 	recoverySetID := scalar[string](t, s.st, `SELECT id
 		FROM app_platform_recovery_sets
 		WHERE operation_id=? AND state='verified'`, failedOperation)
-	review, err := s.createPlatformManagedRestoreReview(
-		ctx, actor, installation, recoverySetID)
-	if err != nil {
-		t.Fatal("managed restore review", err)
-	}
-	commit, err := s.consumePlatformManagedRestoreReview(
-		ctx, actor, review.ID, review.SHA256,
-		platformFixtureID(982))
-	if err != nil || commit.Stage != appplatform.StageQuiesce ||
-		commit.OperationID == "" {
-		t.Fatal("managed restore admission", commit, err)
+	var operationID string
+	var expectedGeneration int64
+	if platformLifecycleBrowserConfigured() {
+		host := startPlatformLifecycleBrowserHost(t, s, actor, endpoint)
+		confirmed := runPlatformLifecycleBrowser(
+			t, host, installation, "restore", "confirm", "")
+		operationID = confirmed.OperationID
+		expectedGeneration = scalar[int64](t, s.st, `SELECT target_generation
+			FROM app_platform_operations WHERE id=?`, operationID)
+		if scalar[string](t, s.st, `SELECT action||':'||stage
+			FROM app_platform_operations WHERE id=?`,
+			operationID) != "restore:quiesce" ||
+			scalar[int64](t, s.st, `SELECT COALESCE(completed_ms,0)
+				FROM app_platform_operations WHERE id=?`,
+				operationID) != 0 {
+			t.Fatal("browser restore confirmation was not durable")
+		}
+		t.Log("NATIVE_RESTORE_BROWSER_CONFIRMED")
+	} else {
+		review, err := s.createPlatformManagedRestoreReview(
+			ctx, actor, installation, recoverySetID)
+		if err != nil {
+			t.Fatal("managed restore review", err)
+		}
+		commit, err := s.consumePlatformManagedRestoreReview(
+			ctx, actor, review.ID, review.SHA256,
+			platformFixtureID(982))
+		if err != nil || commit.Stage != appplatform.StageQuiesce ||
+			commit.OperationID == "" {
+			t.Fatal("managed restore admission", commit, err)
+		}
+		operationID = commit.OperationID
+		expectedGeneration = commit.Generation
 	}
 	worker := platformFixtureID(983)
 	selected, err := s.claimNextPlatformManagedRestore(ctx, worker)
-	if err != nil || selected.lease.id != commit.OperationID {
+	if err != nil || selected.lease.id != operationID {
 		t.Fatal("managed restore claim", selected, err)
 	}
 	current := selected.lease
@@ -497,7 +519,7 @@ func testNativeWritableManagedRestore(
 				FROM app_platform_operation_effects
 				WHERE operation_id=? AND stage='activate'
 				AND state='applied'`,
-				commit.OperationID).Scan(&receiptRaw); err != nil {
+				operationID).Scan(&receiptRaw); err != nil {
 				t.Fatal("managed restore registration receipt",
 					err)
 			}
@@ -544,8 +566,11 @@ func testNativeWritableManagedRestore(
 			"recovery_required:update_recovery_required" ||
 		scalar[string](t, s.st, `SELECT stage
 			FROM app_platform_operations WHERE id=?`,
-			commit.OperationID) != "complete" {
-		logManagedUpdateState(t, s, commit.OperationID, installation)
+			operationID) != "complete" ||
+		scalar[int64](t, s.st, `SELECT generation
+			FROM app_platform_installations WHERE id=?`,
+			installation) != expectedGeneration {
+		logManagedUpdateState(t, s, operationID, installation)
 		t.Fatal("managed restore did not activate restored source")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*)
@@ -553,22 +578,28 @@ func testNativeWritableManagedRestore(
 		WHERE operation_id=? AND stage='quiesce'
 		AND state='applied'
 		AND json_extract(receipt_json,'$.state') IN ('stopped','absent')`,
-		commit.OperationID) != 2 ||
+		operationID) != 2 ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_operation_effects
 			WHERE operation_id=? AND stage='restore_data'
 			AND kind='restore' AND state='applied'`,
-			commit.OperationID) != 1 ||
+			operationID) != 1 ||
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_operation_effects
 			WHERE operation_id=? AND stage IN ('start','activate')
 			AND state='applied'`,
-			commit.OperationID) != 2 {
+			operationID) != 2 {
 		t.Fatal("managed restore effects incomplete")
 	}
 	savePlatformWritableFixtureOwner(
-		t, s, commit.OperationID, installation,
+		t, s, operationID, installation,
 		sourceRelease, os.Getenv("PORTAL_MANAGED_IMAGE"))
+	if platformLifecycleBrowserConfigured() {
+		host := startPlatformLifecycleBrowserHost(t, s, actor, endpoint)
+		runPlatformLifecycleBrowser(
+			t, host, installation, "restore", "progress", operationID)
+		t.Log("NATIVE_RESTORE_BROWSER_COMPLETE")
+	}
 	t.Log("MANAGED_RESTORE_STOP_REMOVE_TARGET")
 	t.Log("MANAGED_RESTORE_DATA_VERIFIED")
 	t.Log("MANAGED_RESTORE_START_ACTIVATED")
@@ -775,25 +806,57 @@ func testNativeManagedDisableEnable(
 	if err != nil {
 		t.Fatal("native repair target", err)
 	}
-	repairReview, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
-		ctx, actor, installation, repairTarget, repairFacts.runtime)
-	if err != nil {
-		t.Fatal("native repair review", err)
-	}
-	repairCommit, err := s.consumePlatformManagedRepairReviewWithRuntimeContext(
-		ctx, actor, repairReview.ID, repairReview.SHA256,
-		platformFixtureID(996), repairTarget, repairFacts.runtime)
-	if err != nil {
-		t.Fatal("native repair admission", err)
+	var repairBrowserHost *platformLifecycleBrowserHost
+	var repairOperationID string
+	var expectedRepairGeneration int64
+	if platformLifecycleBrowserConfigured() {
+		repairBrowserHost = startPlatformLifecycleBrowserHost(
+			t, s, actor, endpoint)
+		confirmed := runPlatformLifecycleBrowser(
+			t, repairBrowserHost, installation, "repair", "confirm", "")
+		repairOperationID = confirmed.OperationID
+		expectedRepairGeneration = scalar[int64](t, s.st, `SELECT target_generation
+			FROM app_platform_operations WHERE id=?`, repairOperationID)
+		if scalar[string](t, s.st, `SELECT action
+			FROM app_platform_operations WHERE id=?`,
+			repairOperationID) != "repair" ||
+			scalar[int64](t, s.st, `SELECT COALESCE(completed_ms,0)
+				FROM app_platform_operations WHERE id=?`,
+				repairOperationID) != 0 {
+			t.Fatal("browser repair confirmation was not durable")
+		}
+		t.Log("NATIVE_REPAIR_BROWSER_CONFIRMED")
+	} else {
+		repairReview, err :=
+			s.createPlatformManagedRepairReviewWithRuntimeContext(
+				ctx, actor, installation, repairTarget, repairFacts.runtime)
+		if err != nil {
+			t.Fatal("native repair review", err)
+		}
+		repairCommit, err :=
+			s.consumePlatformManagedRepairReviewWithRuntimeContext(
+				ctx, actor, repairReview.ID, repairReview.SHA256,
+				platformFixtureID(996), repairTarget, repairFacts.runtime)
+		if err != nil {
+			t.Fatal("native repair admission", err)
+		}
+		repairOperationID = repairCommit.OperationID
+		expectedRepairGeneration = repairCommit.Generation
 	}
 	repairClaim, err := s.claimNextPlatformManagedRepair(
 		ctx, platformFixtureID(997))
-	if err != nil || repairClaim.lease.id != repairCommit.OperationID {
+	if err != nil || repairClaim.lease.id != repairOperationID {
 		t.Fatal("native repair claim", repairClaim, err)
 	}
 	if _, err := s.runPlatformManagedRepair(
 		ctx, repairClaim.lease, endpoint); err != nil {
 		t.Fatal("native repair execution", err)
+	}
+	if repairBrowserHost != nil {
+		runPlatformLifecycleBrowser(
+			t, repairBrowserHost, installation, "repair", "progress",
+			repairOperationID)
+		t.Log("NATIVE_REPAIR_BROWSER_COMPLETE")
 	}
 	assertNativePlatformUserGrant(
 		t, s, installation, reader.username, "repair")
@@ -808,11 +871,11 @@ func testNativeManagedDisableEnable(
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
 	if actualState != "enabled:ready" ||
-		actualGeneration != repairCommit.Generation ||
+		actualGeneration != expectedRepairGeneration ||
 		actualRelease != releaseBefore ||
 		actualCapabilities != capabilitiesBefore {
 		t.Fatalf("native repair changed the retained tuple state=%s generation=%d/%d release=%s/%s capabilities=%d/%d",
-			actualState, actualGeneration, repairCommit.Generation,
+			actualState, actualGeneration, expectedRepairGeneration,
 			actualRelease, releaseBefore, actualCapabilities,
 			capabilitiesBefore)
 	}

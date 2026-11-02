@@ -233,6 +233,14 @@ jobs:
           name: platform-install-browser
           if-no-files-found: ignore
           path: ${{ runner.temp }}/platform-install-browser
+      - name: Prepare real-runner lifecycle browser evidence
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        run: |
+          install -d -m 0777 "$RUNNER_TEMP/app-platform-lifecycle-browser"
+          {
+            echo "APP_LIFECYCLE_BROWSER_RUNNER=$GITHUB_WORKSPACE/scripts/app-platform-lifecycle-browser.cjs"
+            echo "APP_LIFECYCLE_BROWSER_EVIDENCE=$RUNNER_TEMP/app-platform-lifecycle-browser"
+          } >> "$GITHUB_ENV"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
@@ -266,7 +274,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
       - name: Remove only the owned readiness registry
         if: always()
         run: bash scripts/acceptance/ready_app/cleanup-fixture.sh
@@ -281,5 +289,13 @@ jobs:
           path: |
             project-quota-evidence.json
             portal-quota-failure.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve real-runner lifecycle browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-platform-lifecycle-browser
+          path: ${{ runner.temp }}/app-platform-lifecycle-browser
           if-no-files-found: warn
           retention-days: 14

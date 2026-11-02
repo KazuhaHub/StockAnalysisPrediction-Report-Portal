@@ -488,13 +488,20 @@ def main(args):
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
                     browser_enabled = bool(os.environ.get("APP_SDK_BROWSER_DIR"))
-                    for name in ("APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH"):
+                    lifecycle_browser_enabled = bool(os.environ.get("APP_LIFECYCLE_BROWSER_RUNNER"))
+                    for name in ("APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH", "APP_LIFECYCLE_BROWSER_RUNNER", "APP_LIFECYCLE_BROWSER_EVIDENCE"):
                         if browser_enabled:
                             value = os.environ.get(name, "")
+                            if name.startswith("APP_LIFECYCLE_") and not lifecycle_browser_enabled:
+                                continue
                             if not Path(value).is_absolute():
                                 raise RuntimeError("SDK browser bootstrap missing: " + name)
                             portal_env[name] = value
-                    portal_limit = 140 if browser_enabled else 100
+                    portal_limit = 100
+                    if browser_enabled:
+                        portal_limit = 140
+                    if lifecycle_browser_enabled:
+                        portal_limit = 240
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=" + str(portal_limit) + "s"], env=portal_env, capture_output=True, text=True, timeout=portal_limit + 10)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         output = result.stdout + result.stderr
@@ -508,6 +515,11 @@ def main(args):
                                 raise RuntimeError("SDK native browser assertion missing: " + marker)
                             report[marker.lower()] = True
                         report["native_app_notification_sdk"] = True
+                    if lifecycle_browser_enabled:
+                        for marker in ("NATIVE_RESTORE_BROWSER_CONFIRMED", "NATIVE_RESTORE_BROWSER_COMPLETE", "NATIVE_REPAIR_BROWSER_CONFIRMED", "NATIVE_REPAIR_BROWSER_COMPLETE"):
+                            if marker not in result.stdout:
+                                raise RuntimeError("lifecycle browser assertion missing: " + marker)
+                            report[marker.lower()] = True
                     report["native_portal_install_data_stage"] = True
                     report["native_portal_data_stage_not_activation"] = True
                     report["native_portal_static_activation_and_launch"] = True

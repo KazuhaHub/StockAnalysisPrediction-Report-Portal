@@ -237,7 +237,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
 	childTimeout := "-test.timeout=60s"
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
-		childTimeout = "-test.timeout=95s"
+		childTimeout = "-test.timeout=140s"
+	}
+	if os.Getenv("APP_LIFECYCLE_BROWSER_RUNNER") != "" {
+		childTimeout = "-test.timeout=230s"
 	}
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", childTimeout)
 	child.Dir = work
@@ -250,6 +253,18 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			value := os.Getenv(key)
 			if !filepath.IsAbs(value) || filepath.Clean(value) != value {
 				t.Fatal("invalid SDK browser environment", key)
+			}
+			child.Env = append(child.Env, key+"="+value)
+		}
+	}
+	if platformLifecycleBrowserConfigured() {
+		for _, key := range []string{
+			"APP_LIFECYCLE_BROWSER_RUNNER",
+			"APP_LIFECYCLE_BROWSER_EVIDENCE",
+		} {
+			value := os.Getenv(key)
+			if !filepath.IsAbs(value) || filepath.Clean(value) != value {
+				t.Fatal("invalid lifecycle browser environment", key)
 			}
 			child.Env = append(child.Env, key+"="+value)
 		}
