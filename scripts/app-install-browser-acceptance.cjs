@@ -494,8 +494,12 @@ async function settingsScenario(browser, url, options) {
     } catch (error) {
       throw new Error(`settings page did not render: ${(await page.locator("body").innerText()).slice(0, 2000)}`, { cause: error });
     }
-    await page.getByText(options.capability, { exact: false }).waitFor();
-    await page.getByText(options.ready, { exact: true }).waitFor();
+    if (options.capability) {
+      await page.getByText(options.capability, { exact: false }).waitFor();
+    }
+    if (options.ready) {
+      await page.getByText(options.ready, { exact: true }).waitFor();
+    }
     const geometry = await page.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       width: window.innerWidth,
@@ -508,6 +512,28 @@ async function settingsScenario(browser, url, options) {
     );
     if (clippedTags) {
       throw new Error(`settings clipped ${clippedTags} tag(s) at ${options.viewport.width}px`);
+    }
+    if (options.deleteButton) {
+      await page.getByRole("button", { name: options.deleteButton }).click();
+      const dialog = page.getByRole("dialog");
+      await dialog.waitFor();
+      const text = await dialog.innerText();
+      if (!text.includes("exact namespace and recorded recovery sets")) {
+        throw new Error(`delete-data bound scope missing: ${text}`);
+      }
+      const dialogViolations = (await auditDialog(page)).filter(
+        (violation) =>
+          violation.impact === "critical" || violation.impact === "serious",
+      );
+      if (dialogViolations.length) {
+        throw new Error(`delete-data axe at ${options.viewport.width}px: ${JSON.stringify(dialogViolations)}`);
+      }
+      await page.screenshot({
+        path: path.join(output, `${options.name}-review.png`),
+        fullPage: false,
+      });
+      await dialog.getByRole("button", { name: "Cancel" }).click();
+      await dialog.waitFor({ state: "hidden" });
     }
     const violations = (await auditPage(page)).filter(
       (violation) =>
@@ -628,6 +654,18 @@ async function main() {
           title: "应用设置",
           capability: "保存应用文件",
           ready: "未发现配置缺口",
+        }),
+      );
+    });
+    await withFixture("delete-data", async (url) => {
+      report.scenarios.push(
+        await settingsScenario(browser, url, {
+          name: "settings-delete-data-review-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          title: "Application settings",
+          deleteButton: "Delete retained data",
         }),
       );
     });

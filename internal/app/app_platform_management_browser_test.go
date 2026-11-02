@@ -59,6 +59,10 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 		s, actor, _, installation = platformObjectsFixture(t)
 		mux = http.NewServeMux()
 		s.wireRoutes(mux)
+	case "delete-data":
+		s, actor, installation, _ = platformDeleteDataFixture(t, false)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
 	default:
 		if os.Getenv("APP_INSTALL_HTTP_FRESH") == "1" {
 			s, actor = platformActorTestServer(t, false)
@@ -71,7 +75,7 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
-	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" && scenario != "settings" {
+	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" && scenario != "settings" && scenario != "delete-data" {
 		platformStartFrontendService(t, s)
 	}
 	server := httptest.NewServer(mux)

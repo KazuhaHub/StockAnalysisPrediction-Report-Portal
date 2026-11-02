@@ -30,6 +30,7 @@ func testPlatformInstallationSettingsHTTP(t *testing.T, pg bool) {
 		settings.CurrentReleaseSHA256 != release ||
 		settings.Backend.Required ||
 		settings.Data == nil ||
+		!platformValidUUID(settings.Data.ID) ||
 		settings.Data.State != "active" ||
 		settings.Recovery.Count != 0 ||
 		len(settings.ConfigurationGaps) != 0 {

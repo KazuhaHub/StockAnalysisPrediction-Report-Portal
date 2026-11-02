@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Empty, Result, Space, Tag, Typography, theme } from 'antd'
-import { AppstoreOutlined, ArrowLeftOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
-import { Link, useParams } from 'react-router'
+import { Alert, Button, Card, Descriptions, Empty, Modal, Result, Space, Tag, Typography, theme } from 'antd'
+import { AppstoreOutlined, ArrowLeftOutlined, DeleteOutlined, KeyOutlined, LinkOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { Link, useNavigate, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, errText } from '../../api/client'
 import type { AppDisplay } from '../../lib/descriptor-contract.generated'
@@ -27,7 +27,7 @@ type Settings = {
   audience: Audience[]
   capabilities: Capability[]
   backend: { required: boolean; registered: boolean; enabled: boolean }
-  data?: { state: string; format: number; quota_bytes: string; observed_bytes: string; revision: string }
+  data?: { id: string; state: string; format: number; quota_bytes: string; observed_bytes: string; revision: string }
   recovery: { count: number; state?: string; pending: boolean }
   configuration_gaps: string[]
 }
@@ -39,6 +39,20 @@ type Binding = {
   state: string
   revision: number
 }
+type DeleteReview = {
+  action: 'delete_data'
+  installation_id: string
+  app_id: string
+  publisher_id: string
+  data_namespace_id: string
+  release_sha256: string
+  source_generation: string
+  target_generation: string
+  data_format: string
+  writer_fence: string
+  scope: string
+}
+type DeletePlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: DeleteReview }
 const root = '/api/admin/app-platform'
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -54,6 +68,7 @@ export default function AppPlatformSettingsPage() {
   const { t } = useTranslation()
   const { lang } = usePrefs()
   const { token } = theme.useToken()
+  const navigate = useNavigate()
   const installation = useParams().installation ?? ''
   const [settings, setSettings] = useState<Settings | null>(null)
   const [bindings, setBindings] = useState<Binding[]>([])
@@ -62,6 +77,9 @@ export default function AppPlatformSettingsPage() {
   const [error, setError] = useState('')
   const [missing, setMissing] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const [deletePlan, setDeletePlan] = useState<DeletePlan | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     setSettings(null)
@@ -121,6 +139,47 @@ export default function AppPlatformSettingsPage() {
   const bytes = (value: string) => t('appPlatform.settings.bytes', {
     value: new Intl.NumberFormat(lang).format(BigInt(value)),
   })
+  const canDeleteData = !!settings.data && settings.backend.required && settings.backend.registered &&
+    (settings.desired_state === 'disabled' || settings.desired_state === 'removed')
+  const prepareDelete = async () => {
+    if (!settings.data || deleting) return
+    setDeleting(true); setDeleteError('')
+    try {
+      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: DeleteReview }>(
+        `${root}/plans`,
+        { action: 'delete_data', installation_id: installation, data_namespace_id: settings.data.id },
+      )
+      if (result.review.action !== 'delete_data' ||
+        result.review.installation_id !== installation ||
+        result.review.data_namespace_id !== settings.data.id ||
+        !uuid.test(result.plan_id) || !/^[0-9a-f]{64}$/.test(result.plan_sha256)) {
+        throw new Error(t('appPlatform.invalidOperation'))
+      }
+      setDeletePlan({ ...result, idempotency_key: crypto.randomUUID() })
+    } catch (failure) {
+      setDeleteError(errText(failure, t))
+    } finally {
+      setDeleting(false)
+    }
+  }
+  const confirmDelete = async () => {
+    if (!deletePlan || deleting) return
+    setDeleting(true); setDeleteError('')
+    try {
+      const result = await api.post<{ operation_id: string }>(`${root}/operations`, {
+        plan_id: deletePlan.plan_id,
+        plan_sha256: deletePlan.plan_sha256,
+        idempotency_key: deletePlan.idempotency_key,
+      })
+      if (!uuid.test(result.operation_id)) throw new Error(t('appPlatform.invalidOperation'))
+      setDeletePlan(null)
+      navigate(`/manage/apps?operation=${result.operation_id}`)
+    } catch (failure) {
+      setDeleteError(errText(failure, t))
+    } finally {
+      setDeleting(false)
+    }
+  }
   return <Space className="rp-platform-settings" orientation="vertical" size={16} style={{ width: '100%' }}>
     <Link to="/manage/apps"><ArrowLeftOutlined aria-hidden="true" /> {t('appPlatform.settings.back')}</Link>
     <Typography.Title level={4} style={{ margin: 0 }}>{t('appPlatform.settings.title')}</Typography.Title>
@@ -178,8 +237,12 @@ export default function AppPlatformSettingsPage() {
       ]} />
     </Card>
 
-    <Card title={t('appPlatform.settings.data')}>
+    <Card title={t('appPlatform.settings.data')} extra={canDeleteData
+      ? <Button danger loading={deleting} icon={<DeleteOutlined aria-hidden="true" />} onClick={() => void prepareDelete()}>{t('appPlatform.settings.deleteData')}</Button>
+      : undefined}>
+      {deleteError && !deletePlan && <Alert type="error" showIcon title={deleteError} style={{ marginBottom: 12 }} />}
       {settings.data ? <Descriptions column={1} size="small" items={[
+        { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{settings.data.id}</Typography.Text> },
         { key: 'state', label: t('appPlatform.settings.dataState'), children: settings.data.state },
         { key: 'format', label: t('appPlatform.settings.dataFormat'), children: settings.data.format },
         { key: 'quota', label: t('appPlatform.settings.dataQuota'), children: bytes(settings.data.quota_bytes) },
@@ -205,5 +268,28 @@ export default function AppPlatformSettingsPage() {
         </div>)}
       </Space> : (!bindingError && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('appPlatform.settings.noCredentials')} />)}
     </Card>
+    <Modal
+      open={!!deletePlan}
+      title={t('appPlatform.settings.deleteDataTitle')}
+      okText={t('appPlatform.settings.deleteDataAction')}
+      cancelText={t('common.cancel')}
+      okButtonProps={{ danger: true }}
+      confirmLoading={deleting}
+      closable={!deleting}
+      mask={{ closable: false }}
+      onOk={() => void confirmDelete()}
+      onCancel={() => { if (!deleting) { setDeletePlan(null); setDeleteError('') } }}
+    >
+      {deletePlan && <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        <Alert type="error" showIcon title={t('appPlatform.settings.deleteDataWarning')} />
+        {deleteError && <Alert type="error" showIcon title={deleteError} />}
+        <Descriptions column={1} size="small" items={[
+          { key: 'namespace', label: t('appPlatform.settings.dataNamespace'), children: <Typography.Text code>{deletePlan.review.data_namespace_id}</Typography.Text> },
+          { key: 'generation', label: t('appPlatform.settings.generation'), children: `${deletePlan.review.source_generation} → ${deletePlan.review.target_generation}` },
+          { key: 'format', label: t('appPlatform.settings.dataFormat'), children: deletePlan.review.data_format },
+          { key: 'scope', label: t('appPlatform.settings.deleteDataScope'), children: deletePlan.review.scope },
+        ]} />
+      </Space>}
+    </Modal>
   </Space>
 }

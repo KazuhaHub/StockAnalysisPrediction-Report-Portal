@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
 
-const apiMock = vi.hoisted(() => ({ get: vi.fn() }))
+const apiMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 const translate = vi.hoisted(() => (key: string, options?: Record<string, unknown>) => options ? `${key}:${JSON.stringify(options)}` : key)
 vi.mock('../../api/client', async original => ({
   ...await original<typeof import('../../api/client')>(),
@@ -17,6 +18,7 @@ vi.mock('react-i18next', () => ({
 
 const installation = '11111111-1111-4111-8111-111111111111'
 const release = 'a'.repeat(64)
+const root = '/api/admin/app-platform'
 const settings = {
   installation_id: installation,
   app_id: 'notes',
@@ -34,7 +36,7 @@ const settings = {
     { capability: 'network.http', granted: false, required: true },
   ],
   backend: { required: true, registered: true, enabled: true },
-  data: { state: 'active', format: 2, quota_bytes: '268435456', observed_bytes: '128', revision: '4' },
+  data: { id: '22222222-2222-4222-8222-222222222222', state: 'active', format: 2, quota_bytes: '268435456', observed_bytes: '128', revision: '4' },
   recovery: { count: 1, state: 'verified', pending: false },
   configuration_gaps: ['capability:network.http'],
 }
@@ -54,6 +56,7 @@ function mount(path = `/manage/apps/installations/${installation}`) {
 
 beforeEach(() => {
   apiMock.get.mockReset()
+  apiMock.post.mockReset()
   apiMock.get.mockImplementation(async (url: string) => {
     if (url.endsWith('/settings')) return settings
     if (url.endsWith('/secret-bindings')) {
@@ -89,5 +92,64 @@ describe('application installation settings', () => {
     mount('/manage/apps/installations/not-a-uuid')
     expect(await screen.findAllByText('appPlatform.settings.notFound')).toHaveLength(2)
     expect(apiMock.get).not.toHaveBeenCalled()
+  })
+
+  it('reviews and confirms permanent deletion of the exact retained data namespace', async () => {
+    const user = userEvent.setup()
+    const namespace = '33333333-3333-4333-8333-333333333333'
+    const plan = '44444444-4444-4444-8444-444444444444'
+    const operation = '55555555-5555-4555-8555-555555555555'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) {
+        return {
+          ...settings,
+          desired_state: 'disabled',
+          phase: 'disabled',
+          backend: { required: true, registered: true, enabled: false },
+          data: { ...settings.data, id: namespace },
+        }
+      }
+      return { bindings: [] }
+    })
+    apiMock.post.mockImplementation(async (url: string) => {
+      if (url.endsWith('/plans')) {
+        return {
+          plan_id: plan,
+          plan_sha256: 'b'.repeat(64),
+          expires_ms: String(Date.now() + 900000),
+          review: {
+            action: 'delete_data',
+            installation_id: installation,
+            app_id: 'notes',
+            publisher_id: 'publisher',
+            data_namespace_id: namespace,
+            release_sha256: release,
+            source_generation: '2',
+            target_generation: '3',
+            data_format: '2',
+            writer_fence: '4',
+            scope: 'exact namespace and recorded recovery sets',
+          },
+        }
+      }
+      return { operation_id: operation }
+    })
+    mount()
+    await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.deleteData' }))
+    expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+      action: 'delete_data',
+      installation_id: installation,
+      data_namespace_id: namespace,
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.textContent).toContain('appPlatform.settings.deleteDataWarning')
+    expect(dialog.textContent).toContain(namespace)
+    await user.click(screen.getByRole('button', { name: 'appPlatform.settings.deleteDataAction' }))
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({
+      plan_id: plan,
+      plan_sha256: 'b'.repeat(64),
+      idempotency_key: expect.stringMatching(/^[0-9a-f-]{36}$/),
+    })))
+    expect(await screen.findByText('apps')).toBeTruthy()
   })
 })
