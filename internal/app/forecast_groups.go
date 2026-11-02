@@ -466,7 +466,7 @@ func scoreForecastCell(cell *forecastCell, sets []*groupSet, cp string, seedPart
 		var probSum float64
 		pos, calibTotal := 0, 0
 		for _, gs := range sets {
-			if gs.ProbabilityMethod == "approved_policy_default" || gs.ProbabilityTransform != "" || gs.PProfitBp == nil {
+			if gs.ProbabilityMethod == "approved_policy_default" || predCalibrationDeferred[gs.ProbabilityMethod] || gs.ProbabilityTransform != "" || gs.PProfitBp == nil {
 				continue
 			}
 			m := gs.Marks[cp]

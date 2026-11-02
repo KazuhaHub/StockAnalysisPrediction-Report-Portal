@@ -568,3 +568,54 @@ func TestGroupMembersMirrorTheCell(t *testing.T) {
 		t.Fatalf("unknown label: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// calibCell scores h12 for sets of the given method counts and returns the cell.
+func calibCell(t *testing.T, counts map[string]int) *forecastCell {
+	t.Helper()
+	s := newV1Server(t)
+	i := 0
+	for _, method := range []string{"subjective_committee", "evidence_based_uncalibrated", "evidence_based_calibrated"} {
+		for k := 0; k < counts[method]; k++ {
+			p := int32(6000)
+			if method != "subjective_committee" {
+				p = 1000
+			}
+			seedGroupSet(t, s, gsSeed{
+				Symbol: symbolFor(i), MadeOn: "2025-06-10", Method: method, HorizonStd: true,
+				S0Fen: ip(10000), TerminalFen: ip(11000), BearFen: ip(8000), BullFen: ip(14000), PProfitBp: bp(p),
+				Marks: map[string]gsMark{"h12": {Status: markResolved, Close: ip(10600), Low: ip(10300), RetBp: bp(200), BenchRetBp: bp(100)}},
+			})
+			i++
+		}
+	}
+	sets, err := s.st.loadForecastGroupSets(predTestRtype, "2025-06-01", "2025-06-30", forecastPopulation{Key: "all"})
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	cell := &forecastCell{State: "mature"}
+	n := len(sets)
+	cell.N = &n
+	scoreForecastCell(cell, sets, "h12", []string{"calib-test"})
+	return cell
+}
+
+// TestEvidenceBasedMethodsAreNeverPooledIntoCalibration: the deferred methods are scored on the other
+// metrics but leave the p_profit calibration exactly as the subjective-only cell has it.
+func TestEvidenceBasedMethodsAreNeverPooledIntoCalibration(t *testing.T) {
+	base := calibCell(t, map[string]int{"subjective_committee": 6})
+	if base.Calib == nil || base.CalibN == nil || *base.CalibN != 6 {
+		t.Fatalf("baseline calib = %v/%v", base.Calib, base.CalibN)
+	}
+	for _, method := range []string{"evidence_based_uncalibrated", "evidence_based_calibrated"} {
+		mixed := calibCell(t, map[string]int{"subjective_committee": 6, method: 4})
+		if mixed.Calib == nil || mixed.CalibN == nil {
+			t.Fatalf("%s: calib missing", method)
+		}
+		if *mixed.Calib != *base.Calib || *mixed.CalibN != *base.CalibN {
+			t.Errorf("%s: calib = %v/%d, want %v/%d (subjective-only)", method, *mixed.Calib, *mixed.CalibN, *base.Calib, *base.CalibN)
+		}
+		if mixed.N == nil || *mixed.N != 10 {
+			t.Errorf("%s: n = %v, want 10 (still scored on the other metrics)", method, mixed.N)
+		}
+	}
+}

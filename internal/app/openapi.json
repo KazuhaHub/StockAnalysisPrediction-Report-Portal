@@ -518,9 +518,11 @@
               "approved_valuation_source",
               "approved_policy_default",
               "subjective_committee",
-              "unavailable"
+              "unavailable",
+              "evidence_based_uncalibrated",
+              "evidence_based_calibrated"
             ],
-            "description": "情景概率的来源。approved_policy_default 表示用的是策略默认值（25/50/25），概率校准统计会排除这类样本。"
+            "description": "情景概率的来源。approved_policy_default 表示用的是策略默认值（25/50/25），概率校准统计会排除这类样本。evidence_based_* 取值（基础比率结合证据更新所得的概率）目前同样不计入概率校准统计。"
           },
           "probability_transform": {
             "type": "string",

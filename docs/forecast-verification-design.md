@@ -119,7 +119,7 @@ Everything else is selection:
 | `horizon_end` | `decision.investment_horizon_end` |
 | `decision_status` | `v3calc.decision_status` |
 | `decision_quality` | `v3decisionadapt` quality (`normal` / `degraded` / `repaired`) |
-| `probability_method` | `decision.probability_method` (`approved_valuation_source`, `approved_policy_default`, `subjective_committee`, `unavailable`) |
+| `probability_method` | `decision.probability_method` (`approved_valuation_source`, `approved_policy_default`, `subjective_committee`, `unavailable`, `evidence_based_uncalibrated`, `evidence_based_calibrated`) |
 | `probability_transform` | `rule_id` of any calibration applied |
 | `policy_version` | version of `v3config.policy_json` |
 | `stance` | §5.3 |
