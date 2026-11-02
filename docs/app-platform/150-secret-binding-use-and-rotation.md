@@ -101,5 +101,21 @@ Focused tests cover:
   forwarding; and
 - existing restore-pause and revocation-floor tests.
 
-Real native browser acceptance, restored credential inspection and complete CI
-remain H06 evidence gates. No real credential or production provider is used.
+Focused native acceptance at Portal `bdc9cb4c` now exercises the complete
+disposable HTTPS path:
+
+- a reviewed policy-2 credential binding is used by a real Chromium app through
+  the SDK network hook;
+- Portal resolves only the stable binding name, and the runner injects the fixed
+  `Authorization` header at the actual HTTPS request;
+- the app receives the response body but never the credential value or header;
+- the previous policy-generation binding is unavailable until an administrator
+  performs the explicit reapproval review; and
+- the portal and browser hosts initialize credential custody before entering the
+  current-authority SQL transaction, avoiding SQLite self-lock without weakening
+  the transaction boundary.
+
+Quota/browser run `41367466784`, general test run `41367466839` and runner daemon
+run `41367466921` all pass on that code candidate. Restored credential inspection
+uses the existing custody/restore tests; no real credential, production provider
+or production deployment is used.
