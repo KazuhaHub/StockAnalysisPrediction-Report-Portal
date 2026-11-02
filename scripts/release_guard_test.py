@@ -109,7 +109,7 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['go-test','web typecheck + build','web lint + typecheck + build','workflow lint',
+                ['go-test','go tests','go checks','web typecheck + build','web lint + typecheck + build','workflow lint',
                  'docker image (font gate + smoke)','go race full (other packages)',
                  'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
         self.assertFalse(ci_ready(jobs))
@@ -157,17 +157,33 @@ class GuardTests(unittest.TestCase):
         self.assertIn('--shard=${{ matrix.shard }}/${{ strategy.job-total }}', block)
 
     def test_summary_checks_fail_rather_than_skip(self):
-        # "go race" and "web typecheck + build" are required checks that now only summarise their
-        # shards. A job whose `needs` failed is skipped unless it says always(), and a skipped
+        # "go-test", "go race" and "web typecheck + build" are required checks that now only
+        # summarise the jobs they need. A job whose `needs` failed is skipped unless it says always(), and a skipped
         # required check counts as passed, so each must run always() and test every result itself.
         workflow = read_workflow('test.yml')
-        for job_id in ('go-race', 'web-build'):
+        for job_id in ('go-test', 'go-race', 'web-build'):
             with self.subTest(job=job_id):
                 block = job_block(workflow, job_id)
                 self.assertRegex(re.search(r'^    if: (.+?)\s*$', block, re.M)[1], r'^always\(\)')
                 needs = re.search(r'^    needs: (.+?)\s*$', block, re.M)[1].strip('[]').split(',')
                 for need in (n.strip() for n in needs):
                     self.assertIn(f'test "${{{{ needs.{need}.result }}}}" = success', block)
+
+    def test_go_checks_share_the_suite_cache_without_saving_it(self):
+        # "go checks" restores the key "go tests" saves. A cache's version includes its path list, so
+        # the two lists must match or every restore is a miss, and only one of them may save: a key
+        # cannot be written twice, so a second writer would race the first for it.
+        workflow = read_workflow('test.yml')
+        suite = job_block(workflow, 'go-test-suite')
+        checks = job_block(workflow, 'go-checks')
+
+        def paths(block):
+            return re.search(r'actions/cache/restore@v6\n\s+with:\n\s+path: \|\n((?:\s+~[^\n]+\n)+)', block)[1].split()
+
+        self.assertEqual(paths(suite), paths(checks))
+        self.assertIn('actions/cache/save@v6', suite)
+        self.assertNotIn('actions/cache/save', checks)
+        self.assertNotIn('services:', checks)
 
     def test_ci_compiles_every_release_target(self):
         # release.yml's build matrix is the list of platforms a release ships, and test.yml compiles
