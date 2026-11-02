@@ -150,6 +150,10 @@ clean and the background operation complete.
 Portal `7ff23d12` extended the same job to update and re-enable projections;
 quota/browser run `41388136069`, general test run `41388136067` and runner daemon
 run `41388136083` pass. All five dialog scenarios have zero axe violations.
+Portal `84c82eb2` adds the post-install uninstall review and passes
+quota/browser run `41393438806`, general test run `41393438788` and runner daemon
+run `41393438802`; the uninstall dialog confirms the single-plugin data boundary
+and has zero axe violations.
 
 ## Remaining platform scope
 
