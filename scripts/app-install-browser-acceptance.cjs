@@ -120,6 +120,19 @@ async function auditPage(page) {
   });
 }
 
+async function waitForReviewDialogStyles(page) {
+  await page.waitForFunction(() => {
+    const primary = document.querySelector(
+      '[role="dialog"] .ant-btn-primary',
+    );
+    if (!primary) return false;
+    const background = getComputedStyle(primary).backgroundColor;
+    return primary.classList.contains("ant-btn-dangerous")
+      ? background === "rgb(168, 7, 26)"
+      : background === "rgb(9, 88, 217)";
+  });
+}
+
 async function contrastStates(page, violations) {
   const targets = violations.flatMap((violation) =>
     violation.targets.map((target) => target.split(" ").at(-1)),
@@ -517,6 +530,7 @@ async function settingsScenario(browser, url, options) {
       await page.getByRole("button", { name: options.repairButton }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
+      await waitForReviewDialogStyles(page);
       const text = await dialog.innerText();
       if (!text.includes(options.repairBoundary)) {
         throw new Error(`repair review boundary missing: ${text}`);
@@ -554,6 +568,7 @@ async function settingsScenario(browser, url, options) {
       await page.getByRole("button", { name: options.deleteButton }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
+      await waitForReviewDialogStyles(page);
       const text = await dialog.innerText();
       if (!text.includes("exact namespace and recorded recovery sets")) {
         throw new Error(`delete-data bound scope missing: ${text}`);
