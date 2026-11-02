@@ -1,0 +1,24 @@
+{
+  "format": "portal.sdk-host-browser-acceptance/1-dev.1",
+  "candidate": "9354239123ec331edfa7dfa1f55445214479d2a7",
+  "quotaBrowserRun": "41537868706",
+  "generalTestRun": "41537868765",
+  "runnerDaemonRun": "41537868781",
+  "codeQLRun": "41537862896",
+  "assertions": {
+    "presentationPreservesUnsavedDraft": true,
+    "liveThemeChange": true,
+    "liveTimeZoneChange": true,
+    "liveLocaleChange": true,
+    "independentLanguagePickerAbsent": true,
+    "presentationDidNotReplayQueryEffects": true,
+    "registeredRouteNavigation": true,
+    "deepLinkAndHistory": true,
+    "typedQueryRoundTrip": true,
+    "draftGuardCancelAndConfirm": true,
+    "retiredAppUnmounted": true,
+    "singleOuterDocumentScroll": true,
+    "documentHeightBounds": true
+  },
+  "hostedEvidence": "project-quota-evidence"
+}

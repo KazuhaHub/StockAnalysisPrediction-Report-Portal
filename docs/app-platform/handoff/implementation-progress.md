@@ -146,6 +146,17 @@ Hosted quota/browser `41528975733`, general test `41528975837`, runner daemon
 `41528976293` and CodeQL `41528970251` pass. The two intermediate CI contrast
 failures remain recorded.
 
+Latest H14 SDK-host evidence: candidate `93542391` changes theme, time zone and
+locale while an unsaved app form remains open. The app presentation updates
+live, the draft remains, query effects are not replayed and no independent
+language picker appears. The same Chromium run verifies registered-route deep
+links, browser back/forward, typed-query round trips, dirty-form Stay/Leave and
+final unmount. Long document content grows one outer frame without internal
+scroll; the registered editor route remains mounted across history traversal.
+The quota/browser run is `41537868706` and CodeQL is `41537862896`; evidence is
+in [SDK host evidence](evidence/platform-sdk-host/acceptance.json). General
+test `41537868765` and runner daemon `41537868781` also pass.
+
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
 generation-2 start/probe/registration/boot/activation, current-generation
