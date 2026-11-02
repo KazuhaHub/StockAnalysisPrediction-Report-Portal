@@ -216,6 +216,20 @@ now covers seventeen scenarios, including restore and paused-control settings at
 `internal/app` passed in 271.645s.
 Exact hosted runs are quota/browser `41470397132`, general test `41470397336`
 and runner daemon `41470397185`.
+Portal `ba0f4667` extends the matrix to thirty scenarios. Thirteen lifecycle
+states run at browser-equivalent 200% zoom: the physical display remains
+1440x900 while the CSS viewport is 720x450 and rendered pixels are doubled.
+Coverage includes install, update, enable, disable, uninstall, queued, paused,
+recovery-required, settings, permanent deletion, repair, restore and
+paused-control screens. Dialog assertions now require the modal and both footer
+actions to remain inside the viewport. The review body is a keyboard-focusable
+scroll region, so large text can reach every confirmation action without
+page-wide overflow or an inaccessible scroll area. The CI-discovered low
+contrast Cancel text is fixed by binding ordinary review buttons to the
+high-contrast text token with footer-scoped priority; both failed runs remain
+recorded.
+Exact hosted checks for `ba0f4667` are quota/browser `41493409034`, general test
+`41493408915`, runner daemon `41493408984` and CodeQL `41493401071`.
 
 ## Remaining platform scope
 

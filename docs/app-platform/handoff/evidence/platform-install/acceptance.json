@@ -1,94 +1,279 @@
 {
-  "gitCommit": "497c1caf844c890ea2f3bebcc454056d98351906",
+  "gitCommit": "ba0f46674081e9a4dbf1144566a916ca8e270481",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
     },
     {
       "name": "install-review-320-zh-cn-dark",
       "violations": [],
-      "height": 800
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
     },
     {
       "name": "install-review-390-zh-tw-light",
       "violations": [],
-      "height": 844
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "zoom": 100
+    },
+    {
+      "name": "install-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "disable-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "uninstall-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "update-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "update-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "enable-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "enable-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "progress-queued",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-queued-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "progress-paused",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-paused-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "progress-recovery",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-recovery-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "settings-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
     },
     {
       "name": "settings-320-zh-cn-dark",
       "violations": [],
-      "height": 800
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "settings-delete-data-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-delete-data-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "settings-repair-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
     },
     {
       "name": "settings-repair-review-320-zh-cn-light",
       "violations": [],
-      "height": 800
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-repair-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "settings-restore-review-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
     },
     {
       "name": "settings-restore-review-320-zh-cn-light",
       "violations": [],
-      "height": 800
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     },
     {
       "name": "settings-restore-paused-1440-en-light",
       "violations": [],
-      "height": 900
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
     },
     {
       "name": "settings-restore-paused-320-zh-cn-light",
       "violations": [],
-      "height": 800
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-paused-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
     }
   ],
   "install": {
-    "operation": "0885a053-8e22-432b-b04d-fb158ec0f1bf"
+    "operation": "07ceaa77-3765-4897-97f2-786d9ce6b164"
   },
   "disable": {
     "violations": []

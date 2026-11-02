@@ -106,13 +106,19 @@ The repeatable Chromium matrix now captures:
   Chinese/light, including the exact recovery point and data-loss boundary;
 - paused-control settings at 1440 px English/light and 320 px Simplified
   Chinese/light, with the pause reason and disabled restore action;
+- settings and every deletion, repair, restore and paused-control review at
+  browser-equivalent 200% zoom on a 1440x900 physical display;
 - the existing install, update, enable, disable, uninstall and queued, paused,
   recovery-required lifecycle scenarios.
 
 All settings views have no page overflow, clipped tags or serious/critical axe
 violations. The 320 px repair and restore dialogs have no clipping, focus starts
-inside the dialog and the footer remains reachable. The machine report binds code
-`9137a466`; screenshots and
+inside the dialog and the footer remains reachable. At 200% zoom the scrollable
+review body remains keyboard focusable, the dialog stays inside the viewport and
+both footer actions remain reachable. Ordinary review buttons use the
+high-contrast text token, including the CI-discovered Cancel contrast case. The
+machine report binds code `ba0f4667`;
+screenshots and
 `acceptance.json` are in
 [platform install evidence](handoff/evidence/platform-install).
 
@@ -120,16 +126,15 @@ Full local Web verification passed 270 files / 2844 tests, typecheck, lint and
 the production build. Focused settings tests pass against SQLite, with the same
 case included in the PostgreSQL `TestPlatform*Postgres` group. Full
 `internal/app` verification passed in 271.645s. Browser evidence binds
-`9137a466`. Candidate `9137a466` passed general test run `41470397336`,
-runner daemon run `41470397185` and quota/browser run `41470397132`. The first
-quota attempt failed in the existing native public-registration coordination
-pipe before project-quota enforcement; the same failed job passed on rerun. Both
-results remain recorded in PR #364.
+`ba0f4667`. Candidate `ba0f4667` passed general test run `41493408915`, runner
+daemon run `41493408984`, quota/browser run `41493409034` and CodeQL
+`41493401071`. Two earlier attempts of the same browser step failed on the
+actual Cancel-button contrast assertion; footer-scoped high-contrast styling
+fixed the cause. Those failed runs remain recorded in PR #364.
 
 ## Remaining scope
 
 Editing audiences, grants or credentials continues through their exact reviewed
 flows. The full D5 review still needs manual screen-reader testing, a repair
 and restore confirmation/progress browser path against the real runner,
-retained-data reinstall, enlarged-text coverage and the remaining lifecycle
-pages.
+retained-data reinstall and the remaining lifecycle pages.
