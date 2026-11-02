@@ -5,10 +5,12 @@ let stage='start';
 async function main(){
  const browser=await chromium.launch({headless:true,timeout:10000});
  const deadline=setTimeout(()=>void browser.close(),30000);
- let page;const responses=[];
+  let page;const responses=[],browserErrors=[];
  try{
   const context=await browser.newContext({locale:'en-US',colorScheme:'light'});
   page=await context.newPage();page.setDefaultTimeout(8000);
+  page.on('console',message=>{if(message.type()==='error')browserErrors.push(message.text())});
+  page.on('pageerror',error=>browserErrors.push(String(error)));
   page.on('response',response=>{const path=new URL(response.url()).pathname;if(path==='/api/me'||path.includes('/launch')||path.startsWith('/app-documents/')||response.request().resourceType()==='document')responses.push({kind:path.includes('/launch')?'launch':path.startsWith('/app-documents/')?'app-document':path==='/api/me'?'viewer':'document',status:response.status()})});
   let backendCalls=0;
   page.on('request',request=>{if(/\/api\/app-platform\/installations\/[^/]+\/backend$/.test(new URL(request.url()).pathname))backendCalls++});
@@ -42,7 +44,7 @@ async function main(){
   if(unexpectedDialog||backendCalls!==0)throw new Error('unexpected starter side effect');
   await context.close();await require('node:fs/promises').writeFile(process.env.APP_V2_TEMPLATE_PROOF,proof);console.log('V2_TEMPLATE_BROWSER_ACCEPTED');
  }catch(error){
-  if(page){try{await page.screenshot({path:process.env.APP_V2_TEMPLATE_FAILURE,fullPage:false});console.error('Template diagnostic '+JSON.stringify({route:new URL(page.url()).pathname,headings:(await page.getByRole('heading').allTextContents()).map(value=>value.slice(0,100)),responses:responses.slice(-12)}))}catch{console.error('Template diagnostic unavailable')}}
+  if(page){try{await page.screenshot({path:process.env.APP_V2_TEMPLATE_FAILURE,fullPage:false});console.error('Template diagnostic '+JSON.stringify({route:new URL(page.url()).pathname,headings:(await page.getByRole('heading').allTextContents()).map(value=>value.slice(0,100)),responses:responses.slice(-12),browserErrors:browserErrors.slice(-12)}))}catch{console.error('Template diagnostic unavailable')}}
   throw error;
  }finally{clearTimeout(deadline);await browser.close()}
 }
