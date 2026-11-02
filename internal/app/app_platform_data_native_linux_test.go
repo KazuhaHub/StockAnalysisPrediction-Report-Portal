@@ -447,6 +447,20 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if checkRegistrationRPC != nil {
 		checkRegistrationRPC()
 	}
+	if platformLifecycleBrowserConfigured() {
+		for _, marker := range []string{
+			"NATIVE_RESTORE_BROWSER_CONFIRMED",
+			"NATIVE_RESTORE_BROWSER_COMPLETE",
+			"NATIVE_REPAIR_BROWSER_CONFIRMED",
+			"NATIVE_REPAIR_BROWSER_COMPLETE",
+		} {
+			if !bytes.Contains(output.Bytes(), []byte(marker)) {
+				t.Fatal("lifecycle browser child assertion missing", marker,
+					output.String())
+			}
+			t.Log(marker)
+		}
+	}
 	if managed {
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
 			t.Fatal("Portal did not validate managed profile", output.String())
