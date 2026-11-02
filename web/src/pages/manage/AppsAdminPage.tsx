@@ -22,14 +22,15 @@ export default function AppsAdminPage() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const operation = params.get('operation')
+  const installation = params.get('installation')
   const labels = useAppLabels()
   const { apps, loading, error, reload } = useAppsCatalog()
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
-  const [activeTab, setActiveTab] = useState(operation ? 'platform' : 'apps')
+  const [activeTab, setActiveTab] = useState(operation || installation ? 'platform' : 'apps')
   useEffect(() => {
-    if (operation) setActiveTab('platform')
-  }, [operation])
+    if (operation || installation) setActiveTab('platform')
+  }, [installation, operation])
 
   // The muted line under a name: what a built-in app is for, or which build of an installed app this is.
   const subtitle = (a: AdminApp) => (a.builtin ? labels.description(a) : [a.version && `v${a.version}`, a.key].filter(Boolean).join(' · '))

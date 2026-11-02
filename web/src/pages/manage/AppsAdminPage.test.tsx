@@ -139,6 +139,20 @@ describe('Apps list', () => {
     expect(await screen.findByText(/appPlatform\.stage\.queued/)).toBeTruthy()
   })
 
+  it('opens lifecycle actions when an installation settings link is followed', async () => {
+    const installation = '22222222-2222-4222-8222-222222222222'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url === '/api/admin/app-platform/releases' || url.startsWith('/api/admin/app-platform/subjects')) return { items: [], next_cursor: '' }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage(`/manage/apps?installation=${installation}`)
+    const platform = screen.getByRole('tab', { name: 'appPlatform.tab' })
+    await waitFor(() => expect(platform.getAttribute('aria-selected')).toBe('true'))
+    expect(await screen.findByText('appPlatform.development')).toBeTruthy()
+  })
+
   it('says the load failed instead of claiming there are no apps', async () => {
     apiMock.get.mockRejectedValue(new Error('boom'))
     renderPage()

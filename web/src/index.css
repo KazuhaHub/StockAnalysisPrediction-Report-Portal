@@ -29,6 +29,12 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
+:root[data-theme='light'] a:not([class]) { color: #0958d9; }
+:root[data-theme='light'] a:not([class]):hover { color: #003eb3; }
+:root[data-theme='light'] a:not([class]):active { color: #002766; }
+:root[data-theme='dark'] a:not([class]) { color: #91caff; }
+:root[data-theme='dark'] a:not([class]):hover { color: #bae0ff; }
+:root[data-theme='dark'] a:not([class]):active { color: #e6f4ff; }
 
 .rp-number-input-addon.ant-btn:disabled {
   background: var(--ant-color-fill-quaternary);
@@ -93,6 +99,17 @@ body {
     overflow: hidden;
     box-shadow: var(--ant-box-shadow-secondary);
   }
+}
+
+.rp-platform-settings .ant-tag.ant-tag-success.ant-tag-filled {
+  color: #237804;
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-success.ant-tag-filled {
+  color: #73d13d;
+  background: #162312;
+  border-color: #274916;
 }
 
 /* Dark mode elevation: on a black page a shadow is all but invisible, so a floating surface would

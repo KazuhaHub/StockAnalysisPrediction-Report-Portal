@@ -56,4 +56,14 @@ describe.each([
       expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5)
     },
   )
+
+  it.each([
+    ['colorLink', 'colorBgContainer'],
+    ['colorSuccessText', 'colorSuccessBg'],
+  ] as const)('%s meets WCAG AA against %s', (foregroundName, backgroundName) => {
+    const token = theme.getDesignToken(portalTheme(dark))
+    const background = over(parseColour(token[backgroundName]), parseColour(token.colorBgContainer))
+    const foreground = over(parseColour(token[foregroundName]), background)
+    expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5)
+  })
 })

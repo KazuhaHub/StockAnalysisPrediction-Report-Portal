@@ -60,7 +60,7 @@ async function fixtureUrl(fixture, outputLog) {
     }
     function read(chunk) {
       buffered += chunk;
-      const match = buffered.match(/^PROBE_URL=(http:\/\/127\.0\.0\.1:\d+\/manage\/apps(?:\?[^\s]+)?)$/m);
+      const match = buffered.match(/^PROBE_URL=(http:\/\/127\.0\.0\.1:\d+\/manage\/apps(?:\/[^\s?]+)?(?:\?[^\s]+)?)$/m);
       if (match) finish(null, match[1]);
     }
     function exited(code) {
@@ -118,6 +118,36 @@ async function auditPage(page) {
       targets: violation.nodes.map((node) => node.target.join(" ")),
     }));
   });
+}
+
+async function contrastStates(page, violations) {
+  const targets = violations.flatMap((violation) =>
+    violation.targets.map((target) => target.split(" ").at(-1)),
+  );
+  return page.evaluate((selectors) =>
+    selectors.map((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return { selector, missing: true };
+      let background = element;
+      let backgroundStyle = getComputedStyle(background);
+      while (
+        background.parentElement &&
+        (backgroundStyle.backgroundColor === "rgba(0, 0, 0, 0)" ||
+          backgroundStyle.backgroundColor === "transparent")
+      ) {
+        background = background.parentElement;
+        backgroundStyle = getComputedStyle(background);
+      }
+      return {
+        selector,
+        className: element.className,
+        color: getComputedStyle(element).color,
+        background: backgroundStyle.backgroundColor,
+        backgroundClass: background.className,
+        theme: document.documentElement.dataset.theme,
+        inSettings: !!element.closest(".rp-platform-settings"),
+      };
+    }), targets);
 }
 
 async function openReview(page, selectNoAudience = true, rowText = "fixture-publisher") {
@@ -232,15 +262,29 @@ async function installScenario(browser, url) {
     await page.getByText("Operation complete", { exact: true }).waitFor({
       timeout: 60_000,
     });
-    const body = await page.locator("body").innerText();
-    if (!body.includes("Installed or operation in progress")) {
-      throw new Error("completed operation did not refresh installed state");
+    const installedRow = page
+      .getByRole("row")
+      .filter({ hasText: "fixture-publisher" });
+    await installedRow
+      .getByRole("button", { name: "Review disable" })
+      .waitFor();
+    if (await installedRow.getByRole("button", { name: "Review installation" }).count()) {
+      throw new Error("completed operation still offered installation");
     }
     await page.screenshot({
       path: path.join(output, "install-complete-1440-en-light.png"),
       fullPage: true,
     });
     return { operation: new URL(page.url()).searchParams.get("operation") };
+  } catch (error) {
+    await page.screenshot({
+      path: path.join(output, "install-complete-1440-en-light-failure.png"),
+      fullPage: true,
+    });
+    throw new Error(
+      `install scenario failed: ${(await page.locator("body").innerText()).slice(0, 2000)}`,
+      { cause: error },
+    );
   } finally {
     await context.close();
   }
@@ -425,6 +469,63 @@ async function progressScenario(browser, url, expected, name) {
   }
 }
 
+async function settingsScenario(browser, url, options) {
+  const context = await browser.newContext({ viewport: options.viewport });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20_000);
+  try {
+    await page.goto(url, { waitUntil: "networkidle" });
+    if (options.language !== "English") {
+      await page.getByRole("button", { name: options.language }).click();
+    }
+    if (options.dark) {
+      await page.getByRole("button", { name: "Toggle theme" }).click();
+      await page.waitForFunction(() => {
+        const tag = document.querySelector(".rp-platform-success-tag");
+        return (
+          document.documentElement.dataset.theme === "dark" &&
+          tag &&
+          getComputedStyle(tag).color === "rgb(115, 209, 61)"
+        );
+      });
+    }
+    try {
+      await page.getByText(options.title, { exact: true }).waitFor();
+    } catch (error) {
+      throw new Error(`settings page did not render: ${(await page.locator("body").innerText()).slice(0, 2000)}`, { cause: error });
+    }
+    await page.getByText(options.capability, { exact: false }).waitFor();
+    await page.getByText(options.ready, { exact: true }).waitFor();
+    const geometry = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      width: window.innerWidth,
+    }));
+    if (geometry.scrollWidth > geometry.width + 1) {
+      throw new Error(`settings overflowed at ${options.viewport.width}px`);
+    }
+    const clippedTags = await page.locator(".rp-platform-settings .ant-tag").evaluateAll(
+      (tags) => tags.filter((tag) => tag.scrollWidth > tag.clientWidth + 1).length,
+    );
+    if (clippedTags) {
+      throw new Error(`settings clipped ${clippedTags} tag(s) at ${options.viewport.width}px`);
+    }
+    const violations = (await auditPage(page)).filter(
+      (violation) =>
+        violation.impact === "critical" || violation.impact === "serious",
+    );
+    if (violations.length) {
+      throw new Error(`settings axe at ${options.viewport.width}px: ${JSON.stringify(violations)} ${JSON.stringify(await contrastStates(page, violations))}`);
+    }
+    await page.screenshot({
+      path: path.join(output, `${options.name}.png`),
+      fullPage: true,
+    });
+    return { name: options.name, violations, height: page.viewportSize().height };
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   let browser;
   try {
@@ -508,6 +609,28 @@ async function main() {
         );
       });
     }
+    await withFixture("settings", async (url) => {
+      report.scenarios.push(
+        await settingsScenario(browser, url, {
+          name: "settings-1440-en-light",
+          language: "English",
+          dark: false,
+          viewport: { width: 1440, height: 900 },
+          title: "Application settings",
+          capability: "Store application files",
+          ready: "No configuration gap detected",
+        }),
+        await settingsScenario(browser, url, {
+          name: "settings-320-zh-cn-dark",
+          language: "Simplified Chinese",
+          dark: true,
+          viewport: { width: 320, height: 800 },
+          title: "应用设置",
+          capability: "保存应用文件",
+          ready: "未发现配置缺口",
+        }),
+      );
+    });
     report.accepted = true;
     writeFileSync(
       path.join(output, "acceptance.json"),

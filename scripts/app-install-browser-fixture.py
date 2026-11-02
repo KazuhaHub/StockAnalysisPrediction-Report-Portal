@@ -21,7 +21,7 @@ WEB = PORTAL / "web"
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--market", action="store_true", help="Include an owned synthetic TLS catalogue for market acceptance")
 parser.add_argument("--fresh", action="store_true", help="Start with no application control identity or publisher trust")
-parser.add_argument("--scenario", choices=("install", "progress", "paused", "recovery", "updateable", "disabled"), default="install", help="Seed the real lifecycle projection to review")
+parser.add_argument("--scenario", choices=("install", "progress", "paused", "recovery", "updateable", "disabled", "settings"), default="install", help="Seed the real lifecycle projection to review")
 args = parser.parse_args()
 if args.market and args.fresh:
     parser.error("--fresh and --market are mutually exclusive")
@@ -37,7 +37,8 @@ import {BrowserRouter,Routes,Route} from 'react-router';
 import {ConfigProvider,App} from 'antd';
 import {AuthProvider,useAuth} from """ + json.dumps(str(WEB / "src/auth.tsx")) + ";\nimport {PrefsProvider,usePrefs} from " + json.dumps(str(WEB / "src/prefs.tsx")) + ";\nimport AppsAdminPage from " + json.dumps(str(WEB / "src/pages/manage/AppsAdminPage.tsx")) + """;
 import {portalTheme} from """ + json.dumps(str(WEB / "src/theme/portal.ts")) + """;
-function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={portalTheme(prefs.dark)}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage/apps' element={<AppsAdminPage/>}/><Route path='/apps' element={<p>Application hub destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
+import AppPlatformSettingsPage from """ + json.dumps(str(WEB / "src/pages/manage/AppPlatformSettingsPage.tsx")) + """;
+function Host(){const prefs=usePrefs();const auth=useAuth();return <ConfigProvider locale={prefs.antd} theme={portalTheme(prefs.dark)}><App><main style={{minHeight:'100vh',padding:24,background:prefs.dark?'#000':'#fff',color:prefs.dark?'#fff':'#000'}}><nav><button onClick={()=>prefs.setLang('en-US')}>English</button><button onClick={()=>prefs.setLang('zh-CN')}>Simplified Chinese</button><button onClick={()=>prefs.setLang('zh-TW')}>Traditional Chinese</button><button onClick={()=>prefs.setMode(prefs.dark?'light':'dark')}>Toggle theme</button></nav>{!auth.loading&&auth.admin&&<BrowserRouter><Routes><Route path='/manage/apps' element={<AppsAdminPage/>}/><Route path='/manage/apps/installations/:installation' element={<AppPlatformSettingsPage/>}/><Route path='/apps' element={<p>Application hub destination</p>}/><Route path='/apps/v2/:installation' element={<p>Application destination</p>}/><Route path='/manage/apps/:key/credentials' element={<p>Credential destination</p>}/></Routes></BrowserRouter>}</main></App></ConfigProvider>}
 createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider><Host/></AuthProvider></PrefsProvider>);
 """)
     config = target / "vite.config.mjs"
@@ -100,7 +101,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
                     return
                 path = urlsplit(self.path).path
                 set_cookie = None
-                if path in ("/", "/manage/apps", "/apps"):
+                if path in ("/", "/manage/apps", "/apps") or path.startswith("/manage/apps/installations/"):
                     cookie = fixture_cookie(state["cookieName"], state["cookie"])
                     set_cookie = cookie
                     cookie_script = f"<script>document.cookie={json.dumps(cookie)}</script>"
@@ -127,6 +128,8 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
         probe_path = "/manage/apps"
         if args.scenario in ("progress", "paused", "recovery") and state.get("operation"):
             probe_path += "?operation=" + state["operation"]
+        elif args.scenario == "settings" and state.get("installation"):
+            probe_path += "/installations/" + state["installation"]
         print(f"PROBE_URL=http://127.0.0.1:{server.server_port}{probe_path}", flush=True)
         if args.market:
             print("FIXTURE_CATALOGUE_URL=https://127.0.0.1/index.json", flush=True)

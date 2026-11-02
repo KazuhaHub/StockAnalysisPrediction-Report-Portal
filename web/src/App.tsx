@@ -66,6 +66,7 @@ const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
 const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
 const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
 const AppCredentialsPage = lazyRetry(() => import('./pages/manage/AppCredentialsPage'))
+const AppPlatformSettingsPage = lazyRetry(() => import('./pages/manage/AppPlatformSettingsPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
 const RecurringEditor = lazyRetry(() => import('./pages/RecurringEditor'))
@@ -264,6 +265,7 @@ function AppRoutes() {
           <Route path="assistant" element={<ChatAdminPage />} />
           <Route path="apps" element={<AppsAdminPage />} />
           <Route path="apps/:key" element={<AppDetailPage />} />
+          <Route path="apps/installations/:installation" element={<AppPlatformSettingsPage />} />
           <Route path="apps/:key/access" element={<AppAccessPage />} />
           <Route path="apps/:key/credentials" element={<AppCredentialsPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />

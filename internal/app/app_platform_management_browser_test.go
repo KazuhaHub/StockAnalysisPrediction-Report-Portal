@@ -21,7 +21,7 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	var s *Server
 	var actor platformActorSession
 	var mux *http.ServeMux
-	var operation string
+	var operation, installation string
 	scenario := os.Getenv("APP_INSTALL_HTTP_SCENARIO")
 	switch scenario {
 	case "progress", "paused", "recovery":
@@ -55,6 +55,10 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 		s, actor, _, _ = platformFrontendDisabledFixture(t, false)
 		mux = http.NewServeMux()
 		s.wireRoutes(mux)
+	case "settings":
+		s, actor, _, installation = platformObjectsFixture(t)
+		mux = http.NewServeMux()
+		s.wireRoutes(mux)
 	default:
 		if os.Getenv("APP_INSTALL_HTTP_FRESH") == "1" {
 			s, actor = platformActorTestServer(t, false)
@@ -67,13 +71,13 @@ func TestPlatformManagementBrowserFixture(t *testing.T) {
 	if os.Getenv("APP_INSTALL_HTTP_MARKET") == "1" {
 		mux = platformMarketBrowserMux(t, s, mux)
 	}
-	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" {
+	if scenario != "updateable" && scenario != "disabled" && scenario != "progress" && scenario != "settings" {
 		platformStartFrontendService(t, s)
 	}
 	server := httptest.NewServer(mux)
 	defer server.Close()
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
-	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie, "scenario": scenario, "operation": operation})
+	raw, err := json.Marshal(map[string]string{"url": server.URL, "cookieName": cookieName, "cookie": cookie, "scenario": scenario, "operation": operation, "installation": installation})
 	if err != nil {
 		t.Fatal(err)
 	}

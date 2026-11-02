@@ -181,6 +181,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 503, "app_platform_control_paused"
 	case errors.Is(err, errPlatformOperationMissing):
 		status, code = 404, "app_platform_operation_missing"
+	case errors.Is(err, errPlatformInstallationMissing):
+		status, code = 404, "app_platform_installation_missing"
 	}
 	jsonErrorCode(w, status, code, "application management request could not be completed")
 }

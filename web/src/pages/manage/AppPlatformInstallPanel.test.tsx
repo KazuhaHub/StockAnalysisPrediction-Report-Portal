@@ -196,6 +196,33 @@ describe('application installation confirmation', () => {
     expect(mock.post).not.toHaveBeenCalled()
   })
 
+  it('refreshes the release directory exactly once after observing a terminal operation', async () => {
+    let releaseReads = 0
+    mock.get.mockImplementation((url: string) => {
+      if (url === `${root}/releases`) {
+        releaseReads++
+        return Promise.resolve({ items: [], next_cursor: '' })
+      }
+      if (url.includes('/operations/')) {
+        return Promise.resolve({
+          operation_id: operation,
+          installation_id: operation,
+          action: 'install',
+          stage: 'complete',
+          terminal: true,
+          control_paused: false,
+        })
+      }
+      return Promise.resolve({ items: [], next_cursor: '' })
+    })
+    mount(`/manage/apps?operation=${operation}`)
+    await screen.findByRole('link', { name: 'appPlatform.goApps' })
+    await waitFor(() => expect(releaseReads).toBe(2))
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    expect(releaseReads).toBe(2)
+    expect(mock.post).not.toHaveBeenCalled()
+  })
+
   it('renders lifecycle progress and review-required states for repair and deletion', async () => {
     mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases`
       ? { items: [], next_cursor: '' }

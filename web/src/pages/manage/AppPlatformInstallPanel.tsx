@@ -96,6 +96,7 @@ export default function AppPlatformInstallPanel() {
   const reviewTrigger = useRef<HTMLElement | null>(null)
   const generation = useRef(0)
   const directoryGeneration = useRef(0)
+  const terminalRefresh = useRef('')
   const [releases, setReleases] = useState<Release[]>([])
   const [releaseCursor, setReleaseCursor] = useState('')
   const [users, setUsers] = useState<Subject[]>([])
@@ -159,7 +160,10 @@ export default function AppPlatformInstallPanel() {
         if (abort.signal.aborted) return
         if (result.operation_id !== operation) throw new Error(t('appPlatform.invalidOperation'))
         setProgress(result)
-        if (!result.terminal && !result.control_paused) timer = setTimeout(poll, 2000)
+        if (result.terminal && terminalRefresh.current !== operation) {
+          terminalRefresh.current = operation
+          setRefresh(v => v + 1)
+        } else if (!result.terminal && !result.control_paused) timer = setTimeout(poll, 2000)
       } catch (e) { if (!abort.signal.aborted) setProgressError(errText(e, t)) }
     }
     void poll()

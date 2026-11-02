@@ -108,6 +108,11 @@ describe('AppsHub', () => {
     expect(screen.getByText('apps.v2Hint.disabled')).toBeTruthy()
     expect(screen.getByText('apps.v2Hint.attention')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ })).toHaveLength(3)
+    expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ }).map((link) => link.getAttribute('href'))).toEqual([
+      '/manage/apps/installations/11111111-1111-4111-8111-111111111111',
+      '/manage/apps/installations/22222222-2222-4222-8222-222222222222',
+      '/manage/apps/installations/33333333-3333-4333-8333-333333333333',
+    ])
     expect(screen.queryByText(/11111111-1111-4111-8111-111111111111/)).toBeNull()
     expect(screen.queryByText('apps.count')).toBeNull()
     const result = await axe.run(document.body, {

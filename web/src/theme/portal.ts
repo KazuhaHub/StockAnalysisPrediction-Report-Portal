@@ -6,6 +6,13 @@ const PRIMARY = '#0958d9'
 export function portalThemeToken(dark: boolean) {
   return {
     colorPrimary: PRIMARY,
+    colorLink: dark ? '#69b1ff' : PRIMARY,
+    colorLinkHover: dark ? '#91caff' : '#003eb3',
+    colorLinkActive: dark ? '#bae0ff' : '#002766',
+    colorSuccess: dark ? '#73d13d' : '#237804',
+    colorSuccessBg: dark ? '#162312' : '#f6ffed',
+    colorSuccessBorder: dark ? '#274916' : '#b7eb8f',
+    colorSuccessText: dark ? '#73d13d' : '#237804',
     colorTextSecondary: dark ? '#bfbfbf' : '#595959',
     colorTextDescription: dark ? '#bfbfbf' : '#595959',
     colorTextTertiary: dark ? '#8c8c8c' : '#737373',

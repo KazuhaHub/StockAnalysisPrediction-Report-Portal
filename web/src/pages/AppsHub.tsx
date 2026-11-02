@@ -153,7 +153,7 @@ export default function AppsHub() {
               tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
               status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
               footer={admin && !a.openable
-                ? <Link to="/manage/apps"><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>
+                ? <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>
                 : undefined}
               onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
             )
