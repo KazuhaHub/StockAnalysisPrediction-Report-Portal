@@ -86,6 +86,8 @@ function Fixture(){
  <Button onClick={()=>navigation.navigate('/editor')}>Open editor</Button><Button onClick={()=>navigation.navigate('/')}>Open home</Button>
  <Button onClick={()=>setRetained(n=>n+1)}>Retained {retained}</Button>
  <Typography.Text data-testid="locale">{presentation.locale}</Typography.Text>
+ <Typography.Text data-testid="time-zone">{presentation.timeZone}</Typography.Text>
+ <Typography.Text data-testid="dark">{String(presentation.theme.dark)}</Typography.Text>
  <Button onClick={()=>setExpanded(v=>!v)}>Toggle long content</Button>
  <Button onClick={()=>setDirty(v=>!v)}>{dirty?'Save draft':'Edit draft'}</Button>
  {expanded&&<div data-testid="long-content" style={{height:3000}}>Long document content</div>}
@@ -118,6 +120,9 @@ function Fixture(){const location=useLocation(),navigate=useNavigate();const [di
  useEffect(()=>{fetch('/__sdk_fixture/info').then(r=>r.json()).then(info=>fetch(info.launch)).then(async r=>{setStatus('launch:'+r.status);if(r.ok)setLaunch(await r.json())})},[]);
  return <div style={{background:initial.theme.colorBgLayout,color:initial.theme.colorText,minHeight:'100vh'}}><h1>SDK native backend fixture</h1>
  <AppDraftPrompt dirty={dirty} blocker={blocker}/><Link to="/away">Leave fixture</Link><p data-testid="launch-status">{status}</p><button onClick={()=>setPresentation({...initial,locale:'zh-TW'})}>Traditional Chinese</button>
+ <button onClick={()=>setPresentation(p=>({...p,locale:'en-US'}))}>Set English</button>
+ <button onClick={()=>setPresentation(p=>({...p,theme:{...p.theme,dark:!p.theme.dark,colorBg:p.theme.dark?'#ffffff':'#141414',colorText:p.theme.dark?'#000000':'#ffffff',colorBgLayout:p.theme.dark?'#f5f5f5':'#000000'}}))}>Toggle host theme</button>
+ <button onClick={()=>setPresentation(p=>({...p,timeZone:'Asia/Taipei'}))}>Set Taipei time</button>
  <button onClick={async()=>{const r=await fetch('/__sdk_fixture/revoke',{method:'POST'});setStatus('revoke:'+r.status)}}>Revoke fixture access</button>
  <AppPageHeader name="SDK native fixture" icon={null} state={page} onBack={()=>{void navigate('/away')}}/>
  {launch&&<AppFrameV2 {...launch} title="SDK native fixture" presentation={framePresentation} onPageChange={setPage} height={500} onDraftChange={setDirty} onNavigate={(path,replace,search)=>{if(blocker.state==='unblocked')void navigate(path+search,{replace})}}/>}</div>}

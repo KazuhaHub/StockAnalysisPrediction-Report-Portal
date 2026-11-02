@@ -164,6 +164,18 @@ async function main(){
   await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
   // The boolean hint is deliberately coalesced; wait for its bounded flush.
   await page.waitForTimeout(150);
+  const draftEffects=await frame.getByTestId('query-effects').innerText();
+  stage='draft-presentation';
+  await page.getByRole('button',{name:'Toggle host theme',exact:true}).click();
+  await frame.getByTestId('dark').filter({hasText:'false'}).waitFor();
+  await page.getByRole('button',{name:'Set Taipei time',exact:true}).click();
+  await frame.getByTestId('time-zone').filter({hasText:'Asia/Taipei'}).waitFor();
+  await page.getByRole('button',{name:'Set English',exact:true}).click();
+  await frame.getByTestId('locale').filter({hasText:'en-US'}).waitFor();
+  await frame.getByRole('button',{name:'Save draft',exact:true}).waitFor();
+  if(await frame.getByTestId('query-effects').innerText()!==draftEffects)throw new Error('presentation change replayed query effects');
+  if(await frame.getByRole('combobox').count())throw new Error('app exposed an independent language picker');
+  console.log('SDK_NATIVE_BROWSER_PRESENTATION_DRAFT');
   stage='draft-cancel';await page.getByRole('link',{name:'Leave fixture',exact:true}).click();
   const dialog=page.getByRole('dialog');await dialog.waitFor();
   await dialog.getByRole('button',{name:'apps.draftStay',exact:true}).click();
