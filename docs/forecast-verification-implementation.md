@@ -108,7 +108,7 @@ const (
 // Upstream vocabularies, copied from the live 1-6-4 graph (re-confirm in §0.3).
 var predDecisionStatus  = []string{"eligible", "no_trade"} // the only statuses that carry predictions
 var predDecisionQuality = []string{"normal", "degraded", "repaired"}
-var predProbMethods     = []string{"approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable"}
+var predProbMethods     = []string{"approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable", "evidence_based_uncalibrated", "evidence_based_calibrated"}
 
 // Checkpoints (D2). Order matters: it is the column order everywhere.
 var predCheckpoints = []string{"d5", "d20", "d60", "d120", "h12"}

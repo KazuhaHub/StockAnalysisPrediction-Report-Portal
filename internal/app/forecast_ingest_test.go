@@ -127,6 +127,52 @@ func TestClassifyPredictionsAcceptsAValidPayload(t *testing.T) {
 	}
 }
 
+// TestClassifyPredictionsAcceptsEvidenceBasedMethods pins the shape producer 1-6-4 V3.23 sends:
+// scenario probabilities from base rates updated with evidence, a null transform, and a no_trade
+// decision that still carries predictions.
+func TestClassifyPredictionsAcceptsEvidenceBasedMethods(t *testing.T) {
+	raw := predWire(func(m map[string]any) {
+		m["emitter"] = map[string]any{
+			"app": "1-6-4", "version": "V3.23",
+			"calculator": "scenario-calc-3.6", "decision_schema": "decision.v3.4",
+		}
+		m["policy_version"] = "V3.23|params28d1b026c1(2026-11-02)"
+		m["probability_method"] = "evidence_based_uncalibrated"
+		m["probability_transform"] = nil
+		m["scenario_basis"] = "estimated"
+		m["decision_status"] = "no_trade"
+		m["information_cutoff"] = "2026-10-17T23:59:59+08:00"
+		m["baseline"] = map[string]any{"price": "9.43", "as_of": "2026-10-16", "source": "company_quote"}
+		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
+		m["claims"] = []any{
+			map[string]any{"key": "stance", "kind": "stance", "stance": "no_position", "target_weight": "0.0000"},
+			map[string]any{"key": "expected_terminal", "kind": "terminal_value", "price": "3.67", "p_profit": "0.0000"},
+			map[string]any{"key": "scenario.bull", "kind": "scenario", "label": "bull", "price": "5.79", "probability": "0.3814"},
+			map[string]any{"key": "scenario.base", "kind": "scenario", "label": "base", "price": "3.79", "probability": "0.1132"},
+			map[string]any{"key": "scenario.bear", "kind": "scenario", "label": "bear", "price": "2.04", "probability": "0.5054"},
+			map[string]any{"key": "entry_price", "kind": "entry_price", "price": "3.18"},
+		}
+	})
+	for _, method := range []string{"evidence_based_uncalibrated", "evidence_based_calibrated"} {
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		m["probability_method"] = method
+		b, _ := json.Marshal(m)
+		set, _, errs := classify(t, b, predTestRtype)
+		if len(errs) != 0 {
+			t.Fatalf("%s payload was refused: %+v", method, errs)
+		}
+		if set.State != predStateAccepted {
+			t.Errorf("%s: state = %q, want %q", method, set.State, predStateAccepted)
+		}
+		if set.ProbabilityMethod != method {
+			t.Errorf("probability_method = %q, want %q", set.ProbabilityMethod, method)
+		}
+	}
+}
+
 // TestClassifyPredictionsRefusalReasons walks every refusal reason. Each case is a payload a real
 // producer could send, and each asserts the reason — the reason is what tells a producer what to fix.
 func TestClassifyPredictionsRefusalReasons(t *testing.T) {

@@ -43,6 +43,14 @@ var (
 	predDecisionQualities  = []string{"normal", "degraded", "repaired"}
 	predProbabilityMethods = []string{
 		"approved_valuation_source", "approved_policy_default", "subjective_committee", "unavailable",
+		"evidence_based_uncalibrated", "evidence_based_calibrated",
+	}
+	// Methods admitted at ingest but kept out of the p_profit calibration statistic. Calibration for
+	// them is deferred to a per-method design; pooling them with other methods would mix
+	// incomparable probability sources into one number.
+	predCalibrationDeferred = map[string]bool{
+		"evidence_based_uncalibrated": true,
+		"evidence_based_calibrated":   true,
 	}
 	predClaimKinds = []string{"stance", "terminal_value", "scenario", "entry_price", "stop_loss"}
 	predStances    = []string{"long", "no_position"}

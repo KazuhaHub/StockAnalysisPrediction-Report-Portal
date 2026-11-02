@@ -657,6 +657,14 @@ Two further questions the implementation plan raised are also settled:
 - **The UI strings named in plan §8.3 are the wording.** The PR 7 matrix's strings are still subject
   to the exact-text review the page gets on build; the key families are fixed.
 
+- **Amended 2026-11-02: `evidence_based_uncalibrated` and `evidence_based_calibrated` are admitted
+  as a `probability_method`.** Producer 1-6-4 V3.23 derives scenario probabilities from base rates
+  updated with evidence, and the closed vocabulary refused both values as `bad_enum`. Sets carrying
+  them are accepted and scored on every other metric, but are excluded from the `p_profit`
+  calibration (`h12`) exactly like `approved_policy_default`, because pooling them with other
+  methods would mix incomparable probability sources. Per-method calibration is deferred to a
+  follow-up design. No existing cell changes, because no accepted set carried these values before.
+
 ## What this replaces
 
 ADR 0029's deferred version is replaced, not merely extended. Four of its rules are **overturned**, and
