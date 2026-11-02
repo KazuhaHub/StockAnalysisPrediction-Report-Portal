@@ -48,6 +48,16 @@ async function main(){
    const value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('credential SDK result changed');
   }
+  const notificationsReady=await frame.getByTestId('notifications-ready').innerText()==='true';
+  if(notificationsReady){
+   stage='notifications';await frame.getByRole('button',{name:'Publish notification',exact:true}).click();
+   const result=frame.locator('[data-testid="notification-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   const text=await result.innerText();
+   if(text.startsWith('error:'))throw new Error('notification request returned '+text);
+   const value=JSON.parse(text);
+   if(!/^[A-Za-z0-9_.:-]{1,128}$/.test(value.id))throw new Error('notification result changed');
+  }
   const reportsReady=await frame.getByTestId('reports-ready').innerText();
   if(reportsReady==='true'){
    stage='reports';const reportText=await dispatchReports(),report=JSON.parse(reportText);
@@ -177,6 +187,9 @@ async function main(){
   }
   if(credentialAvailable){
    console.log('SDK_NATIVE_BROWSER_CREDENTIAL');
+  }
+  if(notificationsReady){
+   console.log('SDK_NATIVE_BROWSER_NOTIFICATIONS');
   }
   if(reportsReady==='true'){
    console.log('SDK_NATIVE_BROWSER_REPORTS');

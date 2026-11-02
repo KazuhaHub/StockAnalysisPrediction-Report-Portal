@@ -45,7 +45,7 @@ func platformSDKBrowserArchive(t *testing.T, original []byte) []byte {
 // Runs under the real non-root controller after the background scheduler has
 // completed the signed SDK package. No candidate, boot or browser response is
 // fabricated; only the browser/session bootstrap and revoke control are fixture.
-func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork, expectReports, expectObjects bool) {
+func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSession, installation string, mux *http.ServeMux, expectNetwork, expectReports, expectObjects, expectNotifications bool) {
 	t.Helper()
 	dir := os.Getenv("APP_SDK_BROWSER_DIR")
 	if dir == "" {
@@ -186,6 +186,13 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 	}
 	if expectObjects {
 		markers = append(markers, "SDK_NATIVE_BROWSER_OBJECTS")
+	}
+	if expectNotifications {
+		appID := scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, installation)
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events WHERE source_key=?`, "extension:app."+appID+":browser-notification") != 1 {
+			t.Fatal("SDK browser notification was not captured")
+		}
+		markers = append(markers, "SDK_NATIVE_BROWSER_NOTIFICATIONS")
 	}
 	for _, marker := range markers {
 		if !strings.Contains(output.String(), marker) {

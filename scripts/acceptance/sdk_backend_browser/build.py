@@ -21,11 +21,11 @@ def build(apps, output):
     child.write_text('''import {useRef,useState,useLayoutEffect} from 'react';
 import {createRoot} from 'react-dom/client';
 import {Button,Space,Typography} from 'antd';
-import {AppRoot,useAppBackend,useAppNetwork,useAppObjects,useAppReports,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
+import {AppRoot,useAppBackend,useAppNetwork,useAppNotifications,useAppObjects,useAppReports,useAppPresentation,useAppDraft,useAppNavigation,useAppPage} from '@portal-app/sdk/root-v2';
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
- const backend=useAppBackend(),network=useAppNetwork(),reports=useAppReports(),objects=useAppObjects(),{presentation}=useAppPresentation();
+ const backend=useAppBackend(),network=useAppNetwork(),notifications=useAppNotifications(),reports=useAppReports(),objects=useAppObjects(),{presentation}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
@@ -48,6 +48,11 @@ function Fixture(){
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/credential',accept:'application/json',contentType:'',credential:'upstream-api'});
   setCredentialResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
  }catch(error){setCredentialResult({id,text:'error:'+error.code})}finally{setCredentialBusy(false)}}
+ const notificationSequence=useRef(0),[notificationResult,setNotificationResult]=useState({id:0,text:'none'}),[notificationBusy,setNotificationBusy]=useState(false);
+ async function publishNotification(){const id=++notificationSequence.current;setNotificationResult({id,text:'pending'});setNotificationBusy(true);try{
+  const result=await notifications.publish({occurrenceId:'browser-notification',title:'Browser notification',message:'Published through the shared SDK.',severity:'info'});
+  setNotificationResult({id,text:JSON.stringify(result)});
+ }catch(error){setNotificationResult({id,text:'error:'+error.code})}finally{setNotificationBusy(false)}}
  const reportsSequence=useRef(0),[reportsResult,setReportsResult]=useState({id:0,text:'none'}),[reportsBusy,setReportsBusy]=useState(false);
  async function runReports(){const id=++reportsSequence.current;setReportsResult({id,text:'pending'});setReportsBusy(true);try{
   const page=await reports.query({q:'Browser current viewer report',limit:20});
@@ -68,6 +73,7 @@ function Fixture(){
  return <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
  <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>
+ <Typography.Text data-testid="notifications-ready">{String(notifications.ready)}</Typography.Text>
  <Typography.Text data-testid="reports-ready">{String(reports.ready)}</Typography.Text>
  <Typography.Text data-testid="objects-ready">{String(objects.ready)}</Typography.Text>
  <Button onClick={()=>setLongLabels(v=>!v)}>Toggle long labels</Button>
@@ -91,6 +97,8 @@ function Fixture(){
  <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text>
  <Button disabled={!network.ready||!network.credentialAvailable||credentialBusy} onClick={()=>runCredentialNetwork()}>Read credentialed network</Button>
  <Typography.Text data-testid="credential-result" data-request-id={credentialResult.id}>{credentialResult.text}</Typography.Text>
+ <Button disabled={!notifications.ready||notificationBusy} onClick={()=>publishNotification()}>Publish notification</Button>
+ <Typography.Text data-testid="notification-result" data-request-id={notificationResult.id}>{notificationResult.text}</Typography.Text>
  <Button disabled={!reports.ready||reportsBusy} onClick={()=>runReports()}>Read reports</Button>
  <Typography.Text data-testid="reports-result" data-request-id={reportsResult.id}>{reportsResult.text}</Typography.Text>
  <Button disabled={!objects.ready||objectsBusy} onClick={()=>writeObject()}>Write object</Button>

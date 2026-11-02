@@ -97,6 +97,20 @@ test('object transport exists only for a current storage.files grant and revocat
  expect(sessions[2].options.onObjectRequest).toBeUndefined()
 })
 
+test('notification transport exists only for a current notifications.publish grant and revocation retires the frame',()=>{
+ const view=render(<AppFrameV2 {...props}/>);const old=screen.getByTitle('Fixture');fireEvent.load(old)
+ expect(sessions[0].options.onNotificationRequest).toBeUndefined()
+ view.rerender(<AppFrameV2 {...props} capabilities={['notifications.publish']}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(old);expect(sessions[0].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[1].options.onNotificationRequest).toBeTypeOf('function')
+ const current=screen.getByTitle('Fixture')
+ view.rerender(<AppFrameV2 {...props} capabilities={[]}/>)
+ expect(screen.getByTitle('Fixture')).not.toBe(current);expect(sessions[1].close).toHaveBeenCalledOnce()
+ fireEvent.load(screen.getByTitle('Fixture'))
+ expect(sessions[2].options.onNotificationRequest).toBeUndefined()
+})
+
 test('document reveal waits for height and content can grow and shrink in one iframe',()=>{
  render(<AppFrameV2 {...props}/>);const frame=screen.getByTitle('Fixture');fireEvent.load(frame)
  act(()=>sessions[0].options.onReady?.(presentation));expect(frame.style.visibility).toBe('hidden')

@@ -9,6 +9,7 @@ import {
   type BridgeBinding,
   BridgeBackendError,
   BridgeObjectError,
+  BridgeNotificationError,
 } from "./bridge-v2";
 
 const cleanup: (() => void)[] = [];
@@ -1594,6 +1595,80 @@ test("report deadline is uncertain, cancels native work and never retries",async
  await rejected;
  expect(signal?.aborted).toBe(true);
  expect(dispatch).toHaveBeenCalledOnce();
+});
+const notificationRequest={
+ occurrenceId:"digest:2026-11-02",
+ title:"Daily digest",
+ message:"Three reports are ready.",
+ severity:"info" as const,
+};
+async function notificationsPair(
+ onNotificationRequest?: Parameters<typeof createBridgeHost>[0]["onNotificationRequest"],
+ granted=true,
+) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({
+  localWindow:w.host,
+  frameWindow:w.child,
+  binding,
+  presentation,
+  capabilities:granted?["notifications.publish"]:[],
+  onNotificationRequest,
+ });
+ const client=createBridgeClient({
+  localWindow:w.child,
+  parentWindow:w.host,
+  parentOrigin:"https://portal.example.invalid",
+  onPresentation:()=>{},
+ });
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
+test("notification channel preserves occurrence idempotency result",async()=>{
+ const dispatch=vi.fn(async()=>({id:"00000000-0000-4000-8000-000000000042"}));
+ const {client}=await notificationsPair(dispatch);
+ await expect(client.requestNotifications(notificationRequest)).resolves.toEqual({
+  id:"00000000-0000-4000-8000-000000000042",
+ });
+ expect(dispatch).toHaveBeenCalledWith(notificationRequest,expect.any(AbortSignal));
+});
+test("notification channel refuses missing grants, unsupported transports and malformed input",async()=>{
+ const dispatch=vi.fn(async()=>({id:"00000000-0000-4000-8000-000000000042"}));
+ const absent=await notificationsPair(dispatch,false);
+ await expect(absent.client.requestNotifications(notificationRequest)).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await notificationsPair();
+ await expect(unsupported.client.requestNotifications(notificationRequest)).rejects.toMatchObject({code:"unsupported"});
+ const ready=await notificationsPair(dispatch);
+ for(const request of [
+  {...notificationRequest,title:" "},
+  {...notificationRequest,severity:"critical"},
+  {...notificationRequest,message:"x".repeat(8193)},
+  {...notificationRequest,extra:true},
+ ]) await expect(ready.client.requestNotifications(request as never)).rejects.toMatchObject({code:"invalid_request"});
+ expect(dispatch).not.toHaveBeenCalled();
+});
+test("notification failures remain stable and close aborts pending publishing",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,abort:AbortSignal)=>{
+  signal=abort;
+  return new Promise<never>(()=>{});
+ });
+ const {client,host}=await notificationsPair(dispatch);
+ const pending=client.requestNotifications(notificationRequest);
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ host.close();
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ client.close();
+ await rejected;
+ const stable=await notificationsPair(vi.fn()
+  .mockRejectedValueOnce(new BridgeNotificationError("conflict"))
+  .mockRejectedValueOnce(new BridgeNotificationError("capacity")));
+ for(const code of ["conflict","capacity"]){
+  await expect(stable.client.requestNotifications(notificationRequest)).rejects.toMatchObject({code,retryable:false});
+ }
 });
 const networkRequest=()=>({method:"GET",url:"https://api.example.com/v1",accept:"application/json",contentType:"",bodyBase64:""});
 const objectSummary={

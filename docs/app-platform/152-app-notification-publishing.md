@@ -48,6 +48,27 @@ returns the original event and `created:false`; changed bytes under the same
 occurrence return conflict. New source events remain subject to existing global
 and per-source capacity.
 
+## Shared SDK
+
+`AppFrameV2` accepts the notification bridge only when the current launch
+advertises `notifications.publish`. `useAppNotifications()` exposes:
+
+```ts
+const result = await notifications.publish({
+  occurrenceId: "digest:2026-11-02",
+  title: "Daily digest",
+  message: "Three reports are ready.",
+  severity: "info",
+});
+```
+
+The occurrence ID is the caller's stable idempotency key. One publication is
+admitted per app document at a time; unknown fields, blank titles, oversized
+messages and unregistered severities are refused before crossing the bridge.
+`conflict`, `capacity`, `unavailable` and `uncertain` remain distinct and are
+never retried automatically. The SDK receives only the captured event ID, not
+recipient, route, channel or delivery details.
+
 ## Authority and delivery
 
 Foreground publication rechecks the current session, app audience, launch
@@ -83,5 +104,7 @@ Focused tests cover:
 - capability revocation and service-resource drift; and
 - capability selection for `notifications.publish`.
 
-Native browser acceptance, real external providers and complete CI remain
-evidence gates. H08A streaming remains a separate bounded protocol decision.
+Native browser acceptance now exercises the foreground SDK hook against the
+captured notification store and requires `SDK_NATIVE_BROWSER_NOTIFICATIONS`.
+Real external providers remain a separate operational gate. H08A streaming
+remains a separate bounded protocol decision.

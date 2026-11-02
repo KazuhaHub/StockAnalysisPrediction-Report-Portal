@@ -187,6 +187,20 @@ export type BridgeObjectResponse =
       readonly object: BridgeObjectSummary;
     }
   | { readonly action: "delete"; readonly id: string };
+export type BridgeNotificationSeverity =
+  | "info"
+  | "warning"
+  | "error"
+  | "resolved";
+export interface BridgeNotificationRequest {
+  readonly occurrenceId: string;
+  readonly title: string;
+  readonly message: string;
+  readonly severity: BridgeNotificationSeverity;
+}
+export interface BridgeNotificationResponse {
+  readonly id: string;
+}
 export type BridgeBackendFailure =
   | "not_ready"
   | "unsupported"
@@ -207,6 +221,15 @@ const objectFailures = new Set<BridgeObjectFailure>([
   ...backendFailures,
   "conflict",
   "storage_full",
+]);
+export type BridgeNotificationFailure =
+  | BridgeBackendFailure
+  | "conflict"
+  | "capacity";
+const notificationFailures = new Set<BridgeNotificationFailure>([
+  ...backendFailures,
+  "conflict",
+  "capacity",
 ]);
 export class BridgeBackendError extends Error {
   readonly retryable = false;
@@ -231,6 +254,13 @@ export class BridgeObjectError extends Error {
   constructor(readonly code: BridgeObjectFailure) {
     super(`Application objects: ${code}`);
     this.name = "BridgeObjectError";
+  }
+}
+export class BridgeNotificationError extends Error {
+  readonly retryable = false;
+  constructor(readonly code: BridgeNotificationFailure) {
+    super(`Application notifications: ${code}`);
+    this.name = "BridgeNotificationError";
   }
 }
 export function parseBridgeBackendRequest(
@@ -284,6 +314,49 @@ export function parseBridgeBackendResponse(
     return null;
   }
   return Object.freeze({ status: value.status, body: value.body });
+}
+const notificationOccurrencePattern = /^[A-Za-z0-9_.:-]{1,128}$/;
+const notificationSeverities = new Set<BridgeNotificationSeverity>([
+  "info",
+  "warning",
+  "error",
+  "resolved",
+]);
+export function parseBridgeNotificationRequest(
+  value: unknown,
+): BridgeNotificationRequest | null {
+  if (
+    !exact(value, ["occurrenceId", "title", "message", "severity"]) ||
+    !isString(value.occurrenceId) ||
+    !notificationOccurrencePattern.test(value.occurrenceId) ||
+    !isString(value.title) ||
+    value.title.length > 240 ||
+    value.title.trim() === "" ||
+    new TextEncoder().encode(value.title).length > 240 ||
+    !isString(value.message) ||
+    value.message.length > 8192 ||
+    new TextEncoder().encode(value.message).length > 8192 ||
+    !isString(value.severity) ||
+    !notificationSeverities.has(value.severity as BridgeNotificationSeverity)
+  )
+    return null;
+  return Object.freeze({
+    occurrenceId: value.occurrenceId,
+    title: value.title,
+    message: value.message,
+    severity: value.severity as BridgeNotificationSeverity,
+  });
+}
+export function parseBridgeNotificationResponse(
+  value: unknown,
+): BridgeNotificationResponse | null {
+  if (
+    !exact(value, ["id"]) ||
+    !isString(value.id) ||
+    !notificationOccurrencePattern.test(value.id)
+  )
+    return null;
+  return Object.freeze({ id: value.id });
 }
 const reportQueryKeys = [
   "symbol",
@@ -711,6 +784,10 @@ export interface BridgeHostOptions extends BaseOptions {
     request: BridgeObjectRequest,
     signal: AbortSignal,
   ) => Promise<BridgeObjectResponse>;
+  onNotificationRequest?: (
+    request: BridgeNotificationRequest,
+    signal: AbortSignal,
+  ) => Promise<BridgeNotificationResponse>;
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -996,6 +1073,7 @@ export function createBridgeHost(
   let lastNetworkRequest = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
+  let notificationIssued = 0n;
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
@@ -1023,6 +1101,10 @@ export function createBridgeHost(
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
   const objectRequests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const notificationRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
@@ -1127,6 +1209,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     objectRequests.clear();
+    for (const request of notificationRequests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    notificationRequests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -1442,6 +1529,112 @@ export function createBridgeHost(
             }
           },
           Math.max(0, 100 - (Date.now() - lastHeightAt)),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "notifications.request" ||
+        data.type === "notifications.cancel")
+    ) {
+      const cancel = data.type === "notifications.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > notificationIssued) {
+          fail("protocol_error");
+          return;
+        }
+        const active = notificationRequests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          notificationRequests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= notificationIssued) {
+        fail("protocol_error");
+        return;
+      }
+      notificationIssued = BigInt(id);
+      const request = parseBridgeNotificationRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "notifications.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (
+        !options.onNotificationRequest ||
+        !granted?.includes("notifications.publish")
+      ) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (notificationRequests.size >= 1) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = notificationRequests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        notificationRequests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 20_000);
+      notificationRequests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new BridgeNotificationError("uncertain");
+          return options.onNotificationRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseBridgeNotificationResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof BridgeNotificationError &&
+                notificationFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
         );
       return;
     }
@@ -2050,6 +2243,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeObjectRequest,
     signal?: AbortSignal,
   ): Promise<BridgeObjectResponse>;
+  requestNotifications(
+    request: BridgeNotificationRequest,
+    signal?: AbortSignal,
+  ): Promise<BridgeNotificationResponse>;
   describePage(
     scope: string,
     page: AppPage | null,
@@ -2177,6 +2374,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   let networkIssued = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
+  let notificationIssued = 0n;
   const requests = new Map<
     string,
     {
@@ -2209,6 +2407,14 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       dispose: () => void;
     }
   >();
+  const notificationRequests = new Map<
+    string,
+    {
+      resolve: (value: BridgeNotificationResponse) => void;
+      reject: (error: BridgeNotificationError) => void;
+      dispose: () => void;
+    }
+  >();
   function retireRequests() {
     for (const request of requests.values()) {
       request.dispose();
@@ -2230,6 +2436,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new BridgeObjectError("uncertain"));
     }
     objectRequests.clear();
+    for (const request of notificationRequests.values()) {
+      request.dispose();
+      request.reject(new BridgeNotificationError("uncertain"));
+    }
+    notificationRequests.clear();
   }
   let pageRevision = 0n,
     lastInvocation = 0n,
@@ -2539,6 +2750,59 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         );
       return;
     }
+    if (
+      data &&
+      typeof data === "object" &&
+      data.type === "notifications.result"
+    ) {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (
+        !decimal(data.requestId) ||
+        BigInt(data.requestId) > notificationIssued
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response
+        ? parseBridgeNotificationResponse(data.response)
+        : null;
+      if (
+        (response && !value) ||
+        (failure &&
+          !notificationFailures.has(data.code as BridgeNotificationFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = notificationRequests.get(data.requestId);
+      if (!pending) return;
+      notificationRequests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new BridgeNotificationError(
+            data.code as BridgeNotificationFailure,
+          ),
+        );
+      return;
+    }
     if (data && typeof data === "object" && data.type === "objects.result") {
       const response = exact(data, [
         "type",
@@ -2737,6 +3001,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         networkIssued = 0n;
         reportIssued = 0n;
         objectIssued = 0n;
+        notificationIssued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -3164,6 +3429,61 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "objects.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestNotifications(
+      value: BridgeNotificationRequest,
+      signal?: AbortSignal,
+    ): Promise<BridgeNotificationResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new BridgeNotificationError("not_ready"));
+      if (!context.capabilities.includes("notifications.publish"))
+        return Promise.reject(new BridgeNotificationError("unsupported"));
+      const request = parseBridgeNotificationRequest(value);
+      if (!request)
+        return Promise.reject(new BridgeNotificationError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new BridgeNotificationError("not_ready"));
+      if (
+        notificationRequests.size >= 1 ||
+        notificationIssued === MAX_REVISION
+      )
+        return Promise.reject(new BridgeNotificationError("busy"));
+      const id = (++notificationIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = notificationRequests.get(id);
+          if (!active) return;
+          notificationRequests.delete(id);
+          active.dispose();
+          reject(new BridgeNotificationError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "notifications.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 20_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        notificationRequests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "notifications.request",
             ...envelope,
             requestId: id,
             request,
