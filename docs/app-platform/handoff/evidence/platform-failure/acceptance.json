@@ -1,10 +1,10 @@
 {
   "format": "portal.application-failure-browser-acceptance/1-dev.1",
-  "candidate": "9b00be60a0315b67fffc7d4f32e4547e541603b2",
-  "quotaBrowserRun": "41523634496",
-  "generalTestRun": "41523634476",
-  "runnerDaemonRun": "41523634639",
-  "codeQLRun": "41523626446",
+  "candidate": "9b605cdb1ddc28befd36c25d4b8941061b36c2b9",
+  "quotaBrowserRun": "41528975733",
+  "generalTestRun": "41528975837",
+  "runnerDaemonRun": "41528976293",
+  "codeQLRun": "41528970251",
   "physicalViewport": {
     "width": 1440,
     "height": 900

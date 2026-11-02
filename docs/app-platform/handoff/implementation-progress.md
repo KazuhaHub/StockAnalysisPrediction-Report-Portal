@@ -134,15 +134,17 @@ disabled and attention states with separate explanations instead of one generic
 "unavailable" label. Administrators get a direct management-page recovery link
 only when the app is not openable; ordinary readers receive the truthful state
 without installation IDs, counts or an administrative action. The production
-SPA failure matrix on candidate `9b00be60` covers all three non-openable
+SPA failure matrix on candidate `9b605cdb` covers all three non-openable
 directory states plus denied launch, stopped backend, missing app-ready and
 incompatible protocol. Refused and failed launches unmount executable content,
-show only fixed host errors, retain a keyboard-operable high-contrast Reopen app
-action and never expose server diagnostics. The matrix has zero main-content
+show only fixed host errors, retain a keyboard-operable Reopen app action with
+host-owned deep-blue/white contrast and never expose server diagnostics. The
+matrix has zero main-content
 serious/critical axe findings or browser errors. Evidence is in
 [application failure evidence](evidence/platform-failure/acceptance.json).
-Hosted quota/browser `41523634496`, general test `41523634476`, runner daemon
-`41523634639` and CodeQL `41523626446` pass.
+Hosted quota/browser `41528975733`, general test `41528975837`, runner daemon
+`41528976293` and CodeQL `41528970251` pass. The two intermediate CI contrast
+failures remain recorded.
 
 Native managed A-to-B acceptance now passes against the real Docker/XFS runner.
 Run `41272158463` completed install, update quiesce/checkpoint/source removal,
