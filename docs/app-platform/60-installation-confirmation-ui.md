@@ -146,6 +146,9 @@ CI uploads the screenshots and `acceptance.json`; this remains installation-page
 evidence, not approval of every lifecycle page or a substitute for D5 review.
 Portal `ff331b52` passed quota/browser run `41382711308` with all three axe scans
 clean and the background operation complete.
+Portal `7ff23d12` extended the same job to update and re-enable projections;
+quota/browser run `41388136069`, general test run `41388136067` and runner daemon
+run `41388136083` pass. All five dialog scenarios have zero axe violations.
 
 ## Remaining platform scope
 
