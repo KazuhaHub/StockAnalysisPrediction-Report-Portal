@@ -1,5 +1,5 @@
 {
-  "gitCommit": "f1a4550f9bb29ceb3c83038ab4960b8b85357ad3",
+  "gitCommit": "8d882a2a299d7d1e36593e476ebd01688d7cf7e2",
   "scenarios": [
     {
       "name": "install-review-1440-en-light",
@@ -50,10 +50,15 @@
       "name": "settings-320-zh-cn-dark",
       "violations": [],
       "height": 800
+    },
+    {
+      "name": "settings-delete-data-review-1440-en-light",
+      "violations": [],
+      "height": 900
     }
   ],
   "install": {
-    "operation": "efcac121-5f95-42d8-8d45-9ebf18290b76"
+    "operation": "95cf0c8e-b46a-4f06-86ee-19383116c126"
   },
   "disable": {
     "violations": []

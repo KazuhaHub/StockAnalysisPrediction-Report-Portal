@@ -15,7 +15,7 @@ already staged signed releases, not a completed remote marketplace.
 | web/src/pages/manage/AppsAdminPage.tsx | New/legacy tabs on the existing management route |
 | web/src/pages/manage/LegacyAppsAdminPage.tsx | Existing upload/market/backend behavior, moved without redesign |
 | web/src/pages/manage/AppPlatformInstallPanel.tsx | Explicit audience, reviewed confirmation, persistent request identity and progress observation |
-| web/src/pages/manage/AppPlatformSettingsPage.tsx | Read-only installation settings, audience/grants, backend, data, recovery and credential metadata |
+| web/src/pages/manage/AppPlatformSettingsPage.tsx | Installation settings, audience/grants, backend, retained data, recovery and credential metadata, plus reviewed retained-data deletion |
 | web/src/pages/manage/AppPlatformInstallPanel.test.tsx | Confirmation, replay, refresh, identity and stale response tests |
 | internal/app/app_platform_settings_http.go | Bounded administrator-only installation settings projection |
 | internal/app/app_platform_management_browser_test.go | Opt-in loopback server with temporary store and synthetic trust/session |
@@ -152,7 +152,8 @@ Chinese/dark and 390px Traditional Chinese/light, plus update, re-enable, disabl
 and uninstall reviews against their real backend projections. It also renders
 queued, controller-paused and recovery-required progress from durable operation
 rows and captures the installation settings page at 1440px English/light and
-320px Simplified Chinese/dark. Every case checks page bounds, overflow, visible focus,
+320px Simplified Chinese/dark, plus a reviewed retained-data deletion against a
+managed runtime. Every case checks page bounds, overflow, visible focus,
 Escape/focus restoration where a dialog exists, WCAG A/AA axe results, browser
 errors and screenshots. After installation the install case completes the
 no-audience installation and verifies the row changes from installable to
@@ -184,6 +185,10 @@ violations. The full local web run passed 270 files / 2840 tests, typecheck,
 lint and the production build. quota/browser run `41437808872`, general test run
 `41437808855` and runner daemon run `41437808888` pass. See
 [application settings](156-application-settings.md).
+Portal `8d882a2a` adds reviewed permanent deletion for retained managed data.
+The destructive dialog binds and displays the exact namespace and recovery
+scope. quota/browser run `41445281563`, general test run `41445281473` and runner
+daemon run `41445281626` pass with eleven captured scenarios.
 
 ## Remaining platform scope
 
