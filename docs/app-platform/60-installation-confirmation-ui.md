@@ -138,10 +138,11 @@ SDK_BROWSER_PACKAGE=/absolute/path/to/playwright/package.json \
 
 It captures install reviews at 1440px English/light, 320px Simplified
 Chinese/dark and 390px Traditional Chinese/light, plus update and re-enable
-reviews against their real backend projections. Every case checks page and
-dialog bounds, visible focus, Escape/focus restoration, WCAG A/AA axe results
-and browser errors. The install case then completes the no-audience installation
-and verifies background completion.
+reviews against their real backend projections. After installation it opens the
+real uninstall review and verifies the “other plugins are unaffected” boundary.
+Every case checks page and dialog bounds, visible focus, Escape/focus
+restoration, WCAG A/AA axe results and browser errors. The install case then
+completes the no-audience installation and verifies background completion.
 CI uploads the screenshots and `acceptance.json`; this remains installation-page
 evidence, not approval of every lifecycle page or a substitute for D5 review.
 Portal `ff331b52` passed quota/browser run `41382711308` with all three axe scans

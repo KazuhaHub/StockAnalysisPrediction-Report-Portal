@@ -231,6 +231,66 @@ async function installScenario(browser, url) {
   }
 }
 
+async function uninstallScenario(browser, url) {
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+  });
+  const page = await context.newPage();
+  page.setDefaultTimeout(20_000);
+  try {
+    await page.goto(url, { waitUntil: "networkidle" });
+    await page.getByRole("tab").nth(1).click();
+    const row = page
+      .getByRole("row")
+      .filter({ hasText: "fixture-publisher" })
+      .first();
+    await row.waitFor();
+    const trigger = row.getByRole("button").first();
+    await trigger.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.waitFor();
+    await page.waitForTimeout(400);
+    const text = await dialog.innerText();
+    if (!text.includes("other plugins are unaffected")) {
+      throw new Error("uninstall review did not state its isolation boundary");
+    }
+    const geometry = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      width: window.innerWidth,
+      activeInside: !!document.activeElement?.closest('[role="dialog"]'),
+    }));
+    const box = await dialog.boundingBox();
+    if (
+      geometry.scrollWidth > geometry.width + 1 ||
+      !box ||
+      box.x < 0 ||
+      box.x + box.width > geometry.width + 1 ||
+      !geometry.activeInside
+    ) {
+      throw new Error("unsafe uninstall review geometry or focus");
+    }
+    const violations = (await auditDialog(page)).filter(
+      (violation) =>
+        violation.impact === "critical" || violation.impact === "serious",
+    );
+    if (violations.length) {
+      throw new Error(`uninstall review axe: ${JSON.stringify(violations)}`);
+    }
+    await page.screenshot({
+      path: path.join(output, "uninstall-review-1440-en-light.png"),
+      fullPage: false,
+    });
+    await dialog.getByRole("button").first().click();
+    await dialog.waitFor({ state: "hidden" });
+    if (!(await trigger.evaluate((element) => document.activeElement === element))) {
+      throw new Error("uninstall review did not restore trigger focus");
+    }
+    return { violations };
+  } finally {
+    await context.close();
+  }
+}
+
 async function main() {
   let browser;
   try {
@@ -242,6 +302,7 @@ async function main() {
       }).trim(),
       scenarios: [],
       install: null,
+      uninstall: null,
     };
     async function withFixture(mode, run) {
       const { fixture, outputLog } = startFixture(mode);
@@ -275,6 +336,7 @@ async function main() {
         report.scenarios.push(await scenario(browser, url, options));
       }
       report.install = await installScenario(browser, url);
+      report.uninstall = await uninstallScenario(browser, url);
     });
     await withFixture("updateable", async (url) => {
       report.scenarios.push(
