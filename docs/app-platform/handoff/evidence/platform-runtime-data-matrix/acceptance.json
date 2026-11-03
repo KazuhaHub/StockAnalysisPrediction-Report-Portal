@@ -259,10 +259,40 @@
         "Retention with pending schedules/events/notifications remains blocked because H09/H10 persistence is unapproved and not implemented.",
         "DATA-08 remains partial until background-work retention/uncertainty is implemented under an approved structure."
       ]
+    },
+    "JOB-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformServiceNotificationUsesCentralRulesAndOccurrence|TestNotificationPublisherIsNamespacedAndIdempotent|TestNotificationPublisherQuotaDoesNotLeavePartialCapture|TestNotificationPublisherUsesAdministratorRulesForInbox|TestNotificationAppPublisherRechecksIssuerAndInstallation)$' -count=1"
+      ],
+      "coverage": [
+        "The application event type is registered in the administrator catalogue and delivery still uses the existing central webhook route.",
+        "Repeating the same occurrence ID returns created=false and creates no second event. A changed body under the same occurrence is a conflict.",
+        "An application cannot inject recipients or a destination. Audience revocation immediately removes inbox eligibility.",
+        "Publisher quota refusal leaves no partial event. App publisher identity is rechecked against the current issuer role and installed application."
+      ],
+      "limits": [
+        "This is the central notification service path with a local fake webhook. It does not send real email, Slack or webhook messages."
+      ]
+    },
+    "JOB-08": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestNotificationRestorePausesPreviouslyPendingWork|TestNotificationRuntimeHonorsRestorePause|TestNotificationReplayIsIdempotentAndDoesNotRewriteEvidence|TestNotificationReplayCannotRestoreDeletedAccount)$' -count=1"
+      ],
+      "coverage": [
+        "Restore sets notification dispatch paused and changes previously claimed work to uncertain; the runtime does not claim pending work while paused.",
+        "An uncertain delivery requires explicit review before replay. Replay creates a new reviewed occurrence with the same source event, not a second business event, and preserves the original uncertain attempt evidence.",
+        "A replay cannot bind to a deleted/recreated account or duplicate an already active replay request.",
+        "Same-request replay is idempotent."
+      ],
+      "limits": [
+        "This proves possible-delivery restore for the existing notification service, not paid task replay or newly proposed event-subscription persistence."
+      ]
     }
   },
   "open": [
-    "JOB-01 through JOB-08 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
+    "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
     "DATA-04 and DATA-05 still require a coordinated writer-fenced backup set and isolated fresh-host restore with all external effects paused.",
     "RUN-03 through RUN-06, RUN-08 and LIFE-02/03/08/14 retain explicit native/manual or implementation gaps."
   ]
