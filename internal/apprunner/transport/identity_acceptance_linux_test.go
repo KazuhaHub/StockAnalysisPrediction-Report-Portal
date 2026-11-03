@@ -5,6 +5,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -12,11 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -83,7 +86,7 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	enrollment, _, raw, sig := signedIntentFixture(t)
+	enrollment, command, raw, sig := signedIntentFixture(t)
 	if _, _, err := store.EnrollController(context.Background(), enrollment); err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +156,47 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 	if err != nil || !result.Replayed || result.State != "prepared" {
 		t.Fatalf("cross-UID intent not persisted: %+v %v", result, err)
 	}
+	successor := command
+	successor.ControllerEpoch = "00000000-0000-4000-8000-000000000402"
+	now := time.Now().UnixMilli()
+	successor.IssuedMS = strconv.FormatInt(now-1000, 10)
+	successor.ExpiresMS = strconv.FormatInt(now+29000, 10)
+	successor.PayloadSHA256, err = control.LogicalDigest(successor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successorRaw, successorSig, err := control.Sign(
+		successor,
+		ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, ed25519.SeedSize)),
+		control.Authority{
+			DeploymentID:    enrollment.DeploymentID,
+			ControllerEpoch: enrollment.ControllerEpoch,
+			ControlRevision: enrollment.ControlRevision,
+			PublicKey:       enrollment.PublicKey,
+			Fingerprint:     enrollment.Fingerprint,
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ExchangeController(
+		context.Background(),
+		path,
+		controllerTestUID,
+		controllerTestGID,
+		successorRaw,
+		successorSig,
+	); !errors.Is(err, ErrRefused) {
+		t.Fatalf("successor controller epoch admitted: %v", err)
+	}
+	replayed, err := store.AdmitControlCommand(context.Background(), raw, sig)
+	if err != nil || !replayed.Replayed ||
+		replayed.EffectID != result.EffectID ||
+		replayed.State != "prepared" {
+		t.Fatalf("old admitted intent replay was not inert: %+v %v", replayed, err)
+	}
+	t.Log("RUNNER_REJECTED_SUCCESSOR_EPOCH_AND_KEPT_OLD_REPLAY_INERT")
 	// Path metadata can be perfectly pinned while the listening process has the
 	// wrong identity. Create an impostor elsewhere, then move only its socket inode
 	// into the protected fixture directory as root to test the peer check itself.
