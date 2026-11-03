@@ -642,9 +642,10 @@ def main(args):
                         report["native_managed_disable_stop_verified"] = True
                         report["native_managed_enable_start_probe_activated"] = True
                         report["native_managed_enable_backend_request"] = True
-                        if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout:
+                        if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout or "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH" not in result.stdout:
                             raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True
+                        report["native_managed_reinstall_fresh_namespace_and_launch"] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
                         report["native_portal_writable_background_claimed_progress"] = True

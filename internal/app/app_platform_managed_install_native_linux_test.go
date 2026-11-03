@@ -196,6 +196,40 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 		testNativeRegistrationRPC(t, s, activated, endpoint, platformDigest(document))
+		oldNamespace := scalar[string](t, s.st,
+			`SELECT id FROM app_platform_data_namespaces
+			 WHERE owner_installation_id=?`,
+			activated.installationID)
+		plugin, err := ensurePlatformPluginTable(
+			s.st.poolExec(),
+			scalar[string](t, s.st,
+				`SELECT app_id FROM app_platform_installations WHERE id=?`,
+				activated.installationID),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := []byte("clear before managed reinstall")
+		platformTestInsert(
+			t, s.st.poolExec(),
+			plugin.TableName[len(platformPrefix):],
+			map[string]any{
+				"id":                       platformFixtureID(886),
+				"installation_id":          activated.installationID,
+				"owner_username":           session.username,
+				"owner_account_created":    session.created,
+				"owner_account_generation": session.generation,
+				"collection":               "note",
+				"label":                    "managed-reinstall",
+				"media_type":               "application/json",
+				"content":                  content,
+				"content_sha256":           platformDigest(content),
+				"size_bytes":               len(content),
+				"revision":                 1,
+				"idempotency_key":          "managed-reinstall-before",
+				"created_ms":               1,
+				"updated_ms":               1,
+			})
 		removal, err := s.createPlatformRemovalReview(session, activated.installationID, appplatform.ActionUninstall)
 		if err != nil {
 			t.Fatal("managed uninstall review", err)
@@ -224,5 +258,67 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		t.Log("MANAGED_UNINSTALL_STOP_REMOVE_CODE")
 		t.Log("MANAGED_UNINSTALL_REMOVE_DATA")
+		reinstallPlan, err := s.createPlatformManagedInstallReview(
+			ctx, session, release.sha256, release.trustRevision,
+			[]platformAudienceTarget{{
+				kind: "user", username: session.username,
+			}}, endpoint)
+		if err != nil {
+			t.Fatal("managed reinstall review", err)
+		}
+		reinstalled, err := s.consumePlatformManagedInstallReview(
+			ctx, session, reinstallPlan.ID, reinstallPlan.SHA256,
+			platformFixtureID(887), endpoint)
+		if err != nil || reinstalled.InstallationID == activated.installationID {
+			t.Fatal("managed reinstall identity", reinstalled, err)
+		}
+		worker, err := newPlatformInstallScheduler(
+			s, endpoint, platformFixtureID(888), 50*time.Millisecond)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reinstallDeadline := time.Now().Add(90 * time.Second)
+		for {
+			_ = worker.tick(ctx)
+			stage := scalar[string](t, s.st,
+				`SELECT stage FROM app_platform_operations WHERE id=?`,
+				reinstalled.OperationID)
+			if stage == "complete" {
+				break
+			}
+			status := worker.currentStatus()
+			if status.code == "review_required" ||
+				!time.Now().Before(reinstallDeadline) {
+				t.Fatalf("managed reinstall incomplete: stage=%s status=%+v",
+					stage, status)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		newNamespace := scalar[string](t, s.st,
+			`SELECT id FROM app_platform_data_namespaces
+			 WHERE owner_installation_id=? AND state='active'`,
+			reinstalled.InstallationID)
+		if newNamespace == "" || newNamespace == oldNamespace ||
+			scalar[string](t, s.st,
+				`SELECT state||':'||COALESCE(owner_installation_id,'')
+				 FROM app_platform_data_namespaces WHERE id=?`,
+				oldNamespace) != "deleted:" ||
+			s.st.tableExists(plugin.TableName) ||
+			scalar[int](t, s.st,
+				`SELECT COUNT(*) FROM app_platform_plugin_tables WHERE app_id=?`,
+				plugin.AppID) != 0 {
+			t.Fatal("managed reinstall inherited old namespace or plugin data")
+		}
+		binding, err := s.inspectPlatformLaunchAccess(
+			session, reinstalled.InstallationID)
+		if err != nil || binding.generation == "" {
+			t.Fatal("managed reinstall launch", err)
+		}
+		reinstallDocument, err := s.readPlatformLaunchDocumentContext(
+			ctx, session, binding)
+		if err != nil || len(reinstallDocument.Content) == 0 {
+			t.Fatal("managed reinstall document", err)
+		}
+		t.Log("MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH")
 	}
 }
