@@ -48,6 +48,13 @@ function Fixture(){
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/success',accept:'application/json',contentType:''});
   setNetworkResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
  }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
+ const networkStreamSequence=useRef(0),[networkStreamResult,setNetworkStreamResult]=useState({id:0,text:'none'}),[networkStreamBusy,setNetworkStreamBusy]=useState(false);
+ async function runNetworkStream(){const id=++networkStreamSequence.current;setNetworkStreamResult({id,text:'pending'});setNetworkStreamBusy(true);try{
+  const chunks:number[]=[];let started=false;
+  const result=await network.stream({method:'GET',url:'https://api.example.com/v1/stream',accept:'application/x-ndjson',contentType:''},{onStart:(status,contentType)=>{started=status===200&&contentType==='application/x-ndjson'},onChunk:async(data,sequence)=>{if(sequence!==chunks.length+1)throw Object.assign(new Error('stream sequence'),{code:'uncertain'});chunks.push(...data);await new Promise(resolve=>setTimeout(resolve,25))}});
+  if(!started)throw Object.assign(new Error('stream start'),{code:'uncertain'});
+  setNetworkStreamResult({id,text:JSON.stringify({status:result.status,contentType:result.contentType,bytes:result.bytes,frames:result.frames,body:new TextDecoder().decode(new Uint8Array(chunks))})});
+ }catch(error){setNetworkStreamResult({id,text:'error:'+error.code})}finally{setNetworkStreamBusy(false)}}
  const credentialSequence=useRef(0),[credentialResult,setCredentialResult]=useState({id:0,text:'none'}),[credentialBusy,setCredentialBusy]=useState(false);
  async function runCredentialNetwork(){const id=++credentialSequence.current;setCredentialResult({id,text:'pending'});setCredentialBusy(true);try{
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/credential',accept:'application/json',contentType:'',credential:'upstream-api'});
@@ -79,6 +86,7 @@ function Fixture(){
  return <div data-testid={editor?'viewport-editor':undefined} role={editor?'region':undefined} aria-label={editor?'Viewport editor':undefined} tabIndex={editor?0:undefined} style={editor?{height:'100%',overflowY:'auto',padding:8}:undefined}>
  <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
+ <Typography.Text data-testid="network-stream-ready">{String(network.streamReady)}</Typography.Text>
  <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>
  <Typography.Text data-testid="notifications-ready">{String(notifications.ready)}</Typography.Text>
  <Typography.Text data-testid="reports-ready">{String(reports.ready)}</Typography.Text>
@@ -108,6 +116,8 @@ function Fixture(){
  <Typography.Text data-testid="backend-result" data-request-id={result.id}>{result.text}</Typography.Text>
  <Button disabled={!network.ready||networkBusy} onClick={()=>runNetwork()}>Read network</Button>
  <Typography.Text data-testid="network-result" data-request-id={networkResult.id}>{networkResult.text}</Typography.Text>
+ <Button disabled={!network.streamReady||networkStreamBusy} onClick={()=>runNetworkStream()}>Read network stream</Button>
+ <Typography.Text data-testid="network-stream-result" data-request-id={networkStreamResult.id}>{networkStreamResult.text}</Typography.Text>
  <Button disabled={!network.ready||!network.credentialAvailable||credentialBusy} onClick={()=>runCredentialNetwork()}>Read credentialed network</Button>
  <Typography.Text data-testid="credential-result" data-request-id={credentialResult.id}>{credentialResult.text}</Typography.Text>
  <Button disabled={!notifications.ready||notificationBusy} onClick={()=>publishNotification()}>Publish notification</Button>

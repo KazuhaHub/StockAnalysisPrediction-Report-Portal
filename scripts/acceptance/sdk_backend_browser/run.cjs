@@ -54,6 +54,7 @@ async function main(){
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   const networkAvailable=await frame.getByTestId('network-ready').innerText()==='true';
+  const networkStreamAvailable=await frame.getByTestId('network-stream-ready').innerText()==='true';
   let reportsIssued=0;
   async function dispatchReports(){
    await frame.getByRole('button',{name:'Read reports',exact:true}).click();
@@ -67,6 +68,15 @@ async function main(){
    await result.filter({hasNotText:'pending'}).waitFor();
    const text=await result.innerText(),value=JSON.parse(text);
    if(value.status!==200||value.contentType!=='application/json'||value.body!=='{"ok":true}')throw new Error('network SDK result changed');
+  }
+  if(networkStreamAvailable){
+   stage='network-stream-success';await frame.getByRole('button',{name:'Read network stream',exact:true}).click();
+   const result=frame.locator('[data-testid="network-stream-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor({timeout:25000});
+   const text=await result.innerText();
+   if(text.startsWith('error:'))throw new Error('network stream returned '+text);
+   const value=JSON.parse(text);
+   if(value.status!==200||value.contentType!=='application/x-ndjson'||value.bytes!==8||value.frames<1||value.body!=='one\\ntwo\\n')throw new Error('network stream SDK result changed');
   }
   const credentialAvailable=await frame.getByTestId('credential-ready').innerText()==='true';
   if(credentialAvailable){
@@ -225,6 +235,12 @@ async function main(){
    await result.filter({hasNotText:'pending'}).waitFor();
    if(await result.innerText()!=='error:unavailable')throw new Error('revoked network remained available');
   }
+  if(networkStreamAvailable){
+   stage='network-stream-revoked';await frame.getByRole('button',{name:'Read network stream',exact:true}).click();
+   const result=frame.locator('[data-testid="network-stream-result"]');
+   await result.filter({hasNotText:'pending'}).waitFor();
+   if(await result.innerText()!=='error:unavailable')throw new Error('revoked network stream remained available');
+  }
   if(reportsReady==='true'){
    stage='reports-revoked';const revokedReport=await dispatchReports();
    if(revokedReport!=='error:unavailable')throw new Error('revoked reports returned '+revokedReport);
@@ -274,6 +290,9 @@ async function main(){
   console.log('SDK_NATIVE_BROWSER_REVOKED');
   if(networkAvailable){
    console.log('SDK_NATIVE_BROWSER_NETWORK');
+  }
+  if(networkStreamAvailable){
+   console.log('SDK_NATIVE_BROWSER_NETWORK_STREAM');
   }
   if(credentialAvailable){
    console.log('SDK_NATIVE_BROWSER_CREDENTIAL');

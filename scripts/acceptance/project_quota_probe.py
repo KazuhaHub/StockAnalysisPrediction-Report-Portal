@@ -543,7 +543,7 @@ def main(args):
                         report["native_portal_authenticated_managed_profile"] = True
                         portal_markers = ["PORTAL_WRITABLE_REVIEW_CONFIRMED", "PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT", "PORTAL_WRITABLE_NETWORK_GRANT_LAUNCHED", "PORTAL_NETWORK_CURRENT_VIEWER_SIGNED", "PORTAL_NETWORK_CURRENT_GRANT_RECHECKED", "PORTAL_NETWORK_HTTPS_CURRENT_VIEWER", "PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED", "PORTAL_NETWORK_HTTPS_POST_IO_REVOKED", "PORTAL_NETWORK_STREAM_CURRENT_VIEWER", "PORTAL_NETWORK_STREAM_PRE_IO_REVOKED", "PORTAL_NETWORK_STREAM_POST_FRAME_REVOKED", "PORTAL_NETWORK_STREAM_SESSION_NDJSON", "PORTAL_NETWORK_CREDENTIAL_INJECTED", "PORTAL_NETWORK_CREDENTIAL_REAPPROVED", "PORTAL_NETWORK_SESSION_HTTP", "PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN", "PORTAL_WRITER_SETTLEMENT_RECONCILED", "PORTAL_WRITER_RETAINED_IDENTITY"]
                         if os.environ.get("APP_SDK_BROWSER_DIR"):
-                            portal_markers.extend(("PORTAL_NETWORK_CREDENTIAL_PREPARED", "PORTAL_NETWORK_CREDENTIAL_HTTP"))
+                            portal_markers.extend(("PORTAL_NETWORK_CREDENTIAL_PREPARED", "PORTAL_NETWORK_CREDENTIAL_HTTP", "SDK_NATIVE_BROWSER_NETWORK_STREAM"))
                         for marker in portal_markers:
                             if marker not in result.stdout:
                                 raise RuntimeError("Portal writable writer acceptance did not execute: " + marker)
@@ -564,6 +564,7 @@ def main(args):
                         if os.environ.get("APP_SDK_BROWSER_DIR"):
                             report["native_portal_network_credential_prepared"] = True
                             report["native_portal_network_credential_http"] = True
+                            report["native_sdk_network_stream"] = True
                         report["native_portal_network_session_http"] = True
                         report["native_portal_network_session_http_uncertain"] = True
                         report["native_portal_writer_settlement_reconciled"] = True
