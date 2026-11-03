@@ -188,6 +188,73 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 		t.Fatalf("old admitted intent replay was not inert: %+v %v", replayed, err)
 	}
 	t.Log("RUNNER_REJECTED_SUCCESSOR_EPOCH_AND_KEPT_OLD_REPLAY_INERT")
+
+	restoredJournal := filepath.Join(root, "journal-restored")
+	if err := os.Mkdir(restoredJournal, 0700); err != nil {
+		t.Fatal(err)
+	}
+	restoredStore, err := journal.Open(restoredJournal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restoredStore.Close()
+	newerEnrollment := enrollment
+	newerEnrollment.ControllerEpoch = successor.ControllerEpoch
+	if _, _, err := restoredStore.EnrollController(
+		context.Background(), newerEnrollment); err != nil {
+		t.Fatal(err)
+	}
+	newerResult, err := restoredStore.AdmitControlCommand(
+		context.Background(), successorRaw, successorSig)
+	if err != nil || newerResult.State != "prepared" {
+		t.Fatalf("runner did not retain newer epoch state: %+v %v",
+			newerResult, err)
+	}
+	t.Log("RUNNER_HELD_NEWER_EPOCH_STATE")
+	if _, err := restoredStore.AdmitControlCommand(
+		context.Background(), raw, sig); err == nil {
+		t.Fatal("runner admitted restored old controller epoch")
+	}
+	newerReplay, err := restoredStore.AdmitControlCommand(
+		context.Background(), successorRaw, successorSig)
+	if err != nil || !newerReplay.Replayed ||
+		newerReplay.EffectID != newerResult.EffectID ||
+		newerReplay.State != "prepared" {
+		t.Fatalf("old epoch changed newer native state: %+v %v",
+			newerReplay, err)
+	}
+	restoredEndpoint := filepath.Join(root, "restored-control")
+	if err := os.Mkdir(restoredEndpoint, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(restoredEndpoint, 0, int(controllerTestGID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(restoredEndpoint, 0750); err != nil {
+		t.Fatal(err)
+	}
+	restoredPath := filepath.Join(restoredEndpoint, "control.sock")
+	restoredServer, err := ListenController(
+		restoredPath, controllerTestUID, controllerTestGID, restoredStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredCtx, restoredCancel := context.WithCancel(context.Background())
+	restoredDone := make(chan error, 1)
+	go func() { restoredDone <- restoredServer.Serve(restoredCtx) }()
+	defer func() {
+		restoredCancel()
+		if err := <-restoredDone; err != nil {
+			t.Error(err)
+		}
+	}()
+	if out, err := child(controllerTestUID, controllerTestGID,
+		"runner-refused", restoredPath, raw, sig).CombinedOutput(); err != nil {
+		t.Fatalf("restored old controller command reached runner: %v\n%s",
+			err, out)
+	}
+	t.Log("RESTORED_OLD_EPOCH_COMMAND_REFUSED")
+
 	// Path metadata can be perfectly pinned while the listening process has the
 	// wrong identity. Create an impostor elsewhere, then move only its socket inode
 	// into the protected fixture directory as root to test the peer check itself.
