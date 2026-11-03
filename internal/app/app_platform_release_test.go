@@ -211,11 +211,28 @@ func TestPostgresPlatformReleaseExpiryAfterAuditWait(t *testing.T) {
 }
 
 func testPlatformStoredReleaseRefusal(t *testing.T, pg bool) {
-	for _, name := range []string{"disabled", "namespace", "expired", "descriptor", "signature", "version", "frontend", "managed"} {
+	for _, name := range []string{"disabled", "namespace", "expired", "descriptor", "backend_digest", "signature", "version", "frontend", "managed"} {
 		t.Run(name, func(t *testing.T) {
 			s, session := platformTrustTestServer(t, pg)
 			platformRegisterTestPublisher(t, s, session)
 			raw, sig, frontend := platformSignedReleaseFixture(t, "1.0.0-beta.1")
+			if name == "backend_digest" {
+				managedRaw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var managed appplatform.Manifest
+				if err := json.Unmarshal(managedRaw, &managed); err != nil {
+					t.Fatal(err)
+				}
+				managed.Publisher = "fixture-publisher"
+				managed.Frontend.SHA256 = platformDigest(frontend)
+				raw, err = json.Marshal(managed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				sig = platformSignTestDescriptor(t, raw)
+			}
 			staged, err := s.stagePlatformRelease(session, raw, sig, frontend)
 			if err != nil {
 				t.Fatal(err)
@@ -235,6 +252,17 @@ func testPlatformStoredReleaseRefusal(t *testing.T, pg bool) {
 				mustExec(t, s.st, `UPDATE app_platform_publisher_keys SET not_after_ms=1`)
 			case "descriptor":
 				mustExec(t, s.st, `UPDATE app_platform_releases SET descriptor=?`, append(bytes.Clone(raw), byte('\n')))
+			case "backend_digest":
+				var changed appplatform.Manifest
+				if err := json.Unmarshal(raw, &changed); err != nil || changed.Backend == nil {
+					t.Fatal("managed fixture lost backend", err)
+				}
+				changed.Backend.Image = "ghcr.io/example/digest@sha256:" + strings.Repeat("c", 64)
+				replacement, err := json.Marshal(changed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				mustExec(t, s.st, `UPDATE app_platform_releases SET descriptor=?`, replacement)
 			case "signature":
 				mustExec(t, s.st, `UPDATE app_platform_releases SET signature=?`, []byte("invalid"))
 			case "version":

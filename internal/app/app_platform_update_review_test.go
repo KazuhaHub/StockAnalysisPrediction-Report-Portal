@@ -96,6 +96,45 @@ func TestPlatformUpdateReviewRefusesIncompatibleDataAndStaleSource(t *testing.T)
 	}
 }
 
+func testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t *testing.T, pg bool) {
+	for _, kind := range []string{"policy", "package", "trust"} {
+		t.Run(kind, func(t *testing.T) {
+			s, actor, installation, target := platformUpdateFixturePG(t, []int{1}, pg)
+			source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
+			review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch kind {
+			case "policy":
+				mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=policy_revision+1 WHERE id=?`, installation)
+			case "package":
+				frontendSHA := scalar[string](t, s.st, `SELECT frontend_sha256 FROM app_platform_releases WHERE sha256=?`, target.sha256)
+				archive := scalar[[]byte](t, s.st, `SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, frontendSHA)
+				archive[0] ^= 1
+				mustExec(t, s.st, `UPDATE app_platform_frontend_artifacts SET content=? WHERE sha256=?`, archive, frontendSHA)
+			case "trust":
+				mustExec(t, s.st, `UPDATE app_platform_publisher_keys SET revoked_ms=1 WHERE key_id='first-key'`)
+			}
+			if _, err := s.consumePlatformUpdateReview(actor, review.ID, review.SHA256, platformFixtureID(5311)); err == nil {
+				t.Fatal("changed package, policy or trust committed the old review")
+			}
+			if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=?`, installation) != 1 ||
+				scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation) != source {
+				t.Fatal("stale update review changed the live source")
+			}
+		})
+	}
+}
+
+func TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpenSQLite(t *testing.T) {
+	testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t, false)
+}
+
+func TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpenPostgres(t *testing.T) {
+	testPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(t, true)
+}
+
 func TestPlatformStaticUpdateActivatesCandidateAndRetiresSource(t *testing.T) {
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
