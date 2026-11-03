@@ -2260,6 +2260,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeNotificationRequest,
     signal?: AbortSignal,
   ): Promise<BridgeNotificationResponse>;
+  reportFailure(code: BridgeFailure): boolean;
   describePage(
     scope: string,
     page: AppPage | null,
@@ -3126,6 +3127,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   }
   const session = {
     state: () => state,
+    reportFailure(code: BridgeFailure): boolean {
+      if (terminal() || !failures.has(code)) return false;
+      fail(code);
+      return true;
+    },
     presentation: () => current,
     context: () => context,
     describePage(
