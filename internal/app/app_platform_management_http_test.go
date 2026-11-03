@@ -188,6 +188,75 @@ func TestPlatformManagementUninstallHTTPClearsPluginData(t *testing.T) {
 	}
 }
 
+func testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t *testing.T, pg bool) {
+	s, admin, reader, installation := platformObjectsFixturePG(t, pg)
+	publisherID := scalar[string](t, s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, installation)
+	neighbor := platformFixtureID(980)
+	if err := platformSeedInstallation(t, s.st.poolExec(), neighbor, publisherID, "ledger-sample"); err != nil {
+		t.Fatal(err)
+	}
+	binding := platformObjectBindingMap(t, s, reader, installation)
+	if response := platformObjectCall(t, s, reader, installation, platformObjectCreateBody(binding, `{"body":"selected installation"}`)); response.Code != http.StatusOK {
+		t.Fatal(response.Code, response.Body.String())
+	}
+	pluginTable := platformPluginTableForInstallation(t, s.st, installation)
+	neighborPlugin, err := ensurePlatformPluginTable(s.st.poolExec(), "ledger-sample")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `INSERT INTO `+neighborPlugin.TableName+`(id,installation_id,owner_username,owner_account_created,owner_account_generation,collection,label,media_type,content,content_sha256,size_bytes,revision,idempotency_key,created_ms,updated_ms)
+		VALUES(?,?,?,?,?,'note','Neighbor','application/json',?,?,?,1,?,100,100)`,
+		platformFixtureID(981), neighbor, reader.username, reader.created, reader.generation,
+		[]byte("neighbor"), platformDigest([]byte("neighbor")), len("neighbor"), platformFixtureID(982))
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshPlatformPluginUsage(s.st.poolExec(), neighborPlugin, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshPlatformObjectStorage(s.st.poolExec(), now); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_activations SET data_namespace_id=NULL,data_format=0 WHERE installation_id=?`, installation)
+	mustExec(t, s.st, `DELETE FROM app_platform_data_namespaces WHERE owner_installation_id=?`, installation)
+
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(admin.username), admin.sessionID, admin.expires.Unix())
+	plan := sessionTestRequest(mux, "POST", "/api/admin/app-platform/plans", cookie, fmt.Sprintf(`{"action":"uninstall","installation_id":%q}`, installation))
+	if plan.Code != 200 {
+		t.Fatal("uninstall review", plan.Code, plan.Body.String())
+	}
+	var review struct {
+		ID  string `json:"plan_id"`
+		SHA string `json:"plan_sha256"`
+	}
+	if err := json.Unmarshal(plan.Body.Bytes(), &review); err != nil {
+		t.Fatal(err)
+	}
+	commit := sessionTestRequest(mux, "POST", "/api/admin/app-platform/operations", cookie, fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`, review.ID, review.SHA, platformFixtureID(983)))
+	if commit.Code != 202 {
+		t.Fatal("uninstall commit", commit.Code, commit.Body.String())
+	}
+	if s.st.tableExists(pluginTable) ||
+		!s.st.tableExists(neighborPlugin.TableName) ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM `+neighborPlugin.TableName+` WHERE installation_id=? AND label='Neighbor'`, neighbor) != 1 {
+		t.Fatal("uninstalling one installation cleared or dropped another plugin table")
+	}
+	if err := verifyPlatformObjectStorage(s.st.poolExec()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlatformManagementUninstallHTTPKeepsAnotherPluginTableSQLite(t *testing.T) {
+	testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t, false)
+}
+
+func TestPlatformManagementUninstallHTTPKeepsAnotherPluginTablePostgres(t *testing.T) {
+	testPlatformManagementUninstallHTTPKeepsAnotherPluginTable(t, true)
+}
+
 func TestPlatformManagementDisableHTTPPreservesPluginData(t *testing.T) {
 	s, admin, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)

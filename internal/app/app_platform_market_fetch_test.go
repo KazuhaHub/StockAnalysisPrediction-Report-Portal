@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,7 +15,7 @@ import (
 )
 
 func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
-	for _, kind := range []string{"valid", "descriptor_changed", "signature_changed", "archive_changed", "trust_revoked", "trust_before_archive", "cancelled"} {
+	for _, kind := range []string{"valid", "descriptor_changed", "signature_changed", "archive_changed", "archive_interrupted", "archive_retry", "trust_revoked", "trust_before_archive", "cancelled"} {
 		t.Run(kind, func(t *testing.T) {
 			s, actor := platformTrustTestServer(t, pg)
 			platformRegisterTestPublisher(t, s, actor)
@@ -60,6 +61,9 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 					}
 					if kind == "archive_changed" {
 						w.Write([]byte("wrong archive"))
+					} else if kind == "archive_interrupted" || kind == "archive_retry" && archives.Load() == 1 {
+						w.Header().Set("Content-Length", strconv.Itoa(len(archive)+1))
+						w.Write(archive[:len(archive)/2])
 					} else {
 						w.Write(archive)
 					}
@@ -98,6 +102,15 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 				}
 				if kind == "cancelled" && requests.Load() != 0 {
 					t.Fatal("canceled fetch transmitted request")
+				}
+				if kind == "archive_interrupted" && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 {
+					t.Fatal("interrupted artifact left a staged release")
+				}
+				if kind == "archive_retry" {
+					result, retryErr := s.fetchAndStagePlatformMarketRelease(ctx, actor, base+"/index.json", digest, client)
+					if retryErr != nil || result.sha256 != digest || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 1 {
+						t.Fatal("complete retry did not replace the interrupted artifact", retryErr)
+					}
 				}
 			}
 		})
