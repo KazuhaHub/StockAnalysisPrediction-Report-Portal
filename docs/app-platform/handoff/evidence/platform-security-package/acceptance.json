@@ -1,9 +1,9 @@
 {
   "format": "portal.app-platform.security-package-acceptance/1-dev.1",
   "captured_at": "2026-11-03T01:40:00-08:00",
-  "candidate": "4a374dc1",
-  "runner_daemon_candidate": "8211d961",
-  "runner_daemon_ci": "41613324105",
+  "candidate": "bcb7081e",
+  "runner_daemon_candidate": "bcb7081e",
+  "runner_daemon_ci": "41623015662",
   "database_evidence": "SQLite plus a dedicated temporary PostgreSQL 18.6 database",
   "rows": {
     "SEC-01": {
@@ -195,26 +195,30 @@
       ]
     },
     "SEC-10": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/control ./internal/apprunner/journal -run '^(Test(NetworkHTTPRefusesSignedInvalidRequests|CandidateCommandRejectsSignedInvalidInputs|SignedCommandAdmissionAndReplay|CommandIdentityAndPendingWorkRefusal|ConcurrentSignedCommandHasOneIntent|ResourceIdentityAndGenerationRefusal))$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/service -run '^(TestConfigStrictAndBounded|TestConfigRefusesExposureAndOverlappingRoots|TestBootstrapConfigPinsPublicKey)$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/service -run '^(TestConfigStrictAndBounded|TestConfigRefusesExposureAndOverlappingRoots|TestBootstrapConfigPinsPublicKey)$' -count=1",
+        "Disposable app-runner workflow 41623015662: TestControllerIdentityAcceptance"
       ],
       "coverage": [
         "Every signed runner command carries deployment ID, controller epoch and control revision; changed values, malformed signed JSON, duplicate/alias fields, wrong signature domains and oversized frames are refused.",
         "One logical command/effect has one journal admission. Concurrent identical commands produce one intent; replay after reopen returns the prior result; changed payload, slot, pending work, signature, fence, generation, writer or foreign epoch is refused.",
         "Deployment enrollment refuses unowned work, mismatched keys, epochs, deployments, revisions and pins. Missing or corrupt deployment state cannot be silently replaced.",
-        "Service bootstrap configuration is strict and bounded, pins the public key and refuses exposed, overlapping or relative runtime roots."
+        "Service bootstrap configuration is strict and bounded, pins the public key and refuses exposed, overlapping or relative runtime roots.",
+        "On the disposable Linux runner, a command signed for a successor controller epoch was refused by the old enrolled runner. Replaying the already admitted old command returned only its existing prepared intent and did not create a second command or Docker action.",
+        "Wrong UID, same-group non-controller UID, missing endpoint group and impostor-server cases never reached command admission."
       ],
       "limits": [
-        "Peer-credential Unix-socket and wrong-UID transport tests are Linux-only and require exact-candidate runner-daemon CI evidence.",
-        "SEC-10 remains partial until those native transport results and restore-epoch stop/replay acceptance are bound to this candidate."
+        "The successor-epoch test proves the old runner refuses new authority and that replay of a previously admitted effect is inert. It does not invent an automatic re-enrollment or erase-and-reenroll flow.",
+        "The full Portal-restore-versus-newer-runner reconciliation drill remains DATA-06/H17 operator work and requires explicit recovery approval."
       ]
     }
   },
   "open": [
     "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
-    "SEC-09 and SEC-10 remain partial pending measured-capacity and restore-epoch native evidence.",
+    "SEC-09 remains partial pending measured-capacity evidence.",
+    "SEC-10 has development transport/replay evidence; automatic runner re-enrollment is intentionally absent and remains an operator-approved recovery boundary.",
     "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
   ]
 }

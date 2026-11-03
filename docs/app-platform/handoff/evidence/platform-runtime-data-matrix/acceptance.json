@@ -1,9 +1,9 @@
 {
   "format": "portal.app-platform.runtime-data-matrix/1-dev.1",
   "captured_at": "2026-11-03T01:48:00-08:00",
-  "candidate": "4a374dc1",
-  "runner_daemon_candidate": "8211d961",
-  "runner_daemon_ci": "41613324105",
+  "candidate": "bcb7081e",
+  "runner_daemon_candidate": "bcb7081e",
+  "runner_daemon_ci": "41623015662",
   "database_evidence": "SQLite plus separate fresh PostgreSQL 18.6 databases for lifecycle, migration, restore and cleanup batches",
   "test_isolation": "Schema-mutating batches used independent databases. Reusing one database across unrelated migration/restore groups produced lock or residual-product failures; those failed attempts are not counted as passes.",
   "rows": {
@@ -24,18 +24,21 @@
       ]
     },
     "RUN-04": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestCandidateLifecycleTransitionsAndReadOnlyIdempotence|TestCandidateIPCResolverDoesNotRestartTimedOutWork)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^TestCandidateReadinessMetadata$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^TestCandidateReadinessMetadata$' -count=1",
+        "Disposable app-runner workflow 41623015662: TestDockerAcceptanceCandidateLifecycle"
       ],
       "coverage": [
         "A container record in exited state is never implicitly restarted by the start adapter; it requires fresh reviewed authority. Readiness refusal and timeout do not fabricate a running process.",
-        "The runner service configuration uses a bounded systemd restart policy and start limit rather than an unbounded service crash loop."
+        "The runner service configuration uses a bounded systemd restart policy and start limit rather than an unbounded service crash loop.",
+        "On the disposable Linux/Docker runner, the same owned container was explicitly restarted by the test fixture and then killed three times. After each exit, the production start path refused to restart it. A final observation after 300ms still found it exited.",
+        "The native log marker CANDIDATE_REPEATED_EXIT_NO_AUTO_RESTART_VERIFIED was present on the exact candidate."
       ],
       "limits": [
-        "Repeatedly killing a real app, measuring restart/backoff behavior and proving a sustained crash circuit have not been run for this candidate.",
-        "RUN-04 remains partial despite the no-implicit-restart safety property."
+        "The platform's safe policy is no implicit app restart. Service-level systemd restart bounds are separate and tested by the runner service configuration/profile.",
+        "This is development acceptance on a disposable GitHub-hosted runner, not a production health/SLO claim."
       ]
     },
     "RUN-05": {
