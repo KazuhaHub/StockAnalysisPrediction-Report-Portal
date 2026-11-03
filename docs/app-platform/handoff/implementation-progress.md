@@ -81,6 +81,12 @@ The managed lifecycle run `41652513493` then completed an exact uninstall,
 removed the old namespace and plugin rows, reinstalled the same signed release
 under a distinct installation and fresh namespace, and launched the resulting
 document after registration and activation.
+The native checkpoint path now cross-checks one recovery set against the final
+update plan, source activation, namespace/schema, source and target releases,
+controller epoch, writer fence, runtime key fingerprint and applied journal
+receipt. `DATA-04` and `DATA-05` are stronger but remain partial until that
+coordinated set is exported as one Portal/runner/data/key bundle and restored
+on an isolated fresh host with external effects paused.
 `RUN-03`, `RUN-04`, `RUN-05`, `RUN-06`, `RUN-07` and `RUN-08`, `LIFE-01`,
 `LIFE-05`, `LIFE-07`, `LIFE-14`, `DATA-01`, `DATA-02`, `DATA-03`, `DATA-07`, `JOB-07` and `JOB-08`
 are `pass-development` for their stated repository surfaces. `OPS-03` remains

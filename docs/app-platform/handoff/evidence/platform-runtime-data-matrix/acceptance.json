@@ -261,6 +261,38 @@
         "This is logical repository restore, not restoration of the coordinated runtime/data/key recovery set on a fresh host."
       ]
     },
+    "DATA-04": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(TestCheckpointPersistsOneExactUnknownIntent|TestCheckpointRejectsChangedSourceAndPendingWork|TestCheckpointReceiptReadMatchesAppliedIntent)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformCheckpoint.*|TestPlatformRestore.*)$' -count=1",
+        "Disposable app-project-quota workflow 41663884010: real writable update checkpoint and coordinated association verification"
+      ],
+      "coverage": [
+        "A writable source with existing data is quiesced and checkpointed on the owned XFS project namespace. The archive is read back and its manifest digest and bounded archive size are persisted before the update advances.",
+        "The native recovery set was cross-checked in one operation against the current Portal review plan, source activation, data namespace/schema, source and target releases, controller epoch, writer fence, runtime binding key fingerprint and applied checkpoint receipt.",
+        "Checkpoint intent is persisted before native work and replay cannot replace its source, namespace, fence, checkpoint or effect identity. Prepared or unknown work cannot be checkpointed again."
+      ],
+      "limits": [
+        "This proves the consistency links around the data checkpoint, not yet one external recovery-set bundle that also captures the Portal database, runner journal database and protected key material under a single signed manifest.",
+        "The controlled update path stops the source before checkpointing. No online hot-copy claim is made for writes that race quiesce."
+      ]
+    },
+    "DATA-05": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(Test(AppPlatformRestorePausesAuthority|AppPlatformRestoreRetainsRevocations|PlatformCredentialRestore(SQLite|Postgres)|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1",
+        "Disposable app-project-quota workflow 41663884010: native managed restore and post-restore start activation"
+      ],
+      "coverage": [
+        "A verified native checkpoint can be restored to the retained namespace and the post-restore generation can start, register, pass readiness and activate.",
+        "Portal restore pauses authority, rotates the controller epoch, preserves revocation floors and fences old runtime identities. Credential and runtime restore fixtures fail closed on missing or newer key generations."
+      ],
+      "limits": [
+        "The recovery set has not yet been copied as one coordinated Portal/runner/data/key bundle to an isolated fresh Linux host.",
+        "The fresh-host drill still needs fixture-secret decryption, restored health and proof that every external effect remains paused before activation."
+      ]
+    },
     "DATA-06": {
       "status": "partial",
       "commands": [
