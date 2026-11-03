@@ -50,11 +50,11 @@ function Fixture(){
  }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
  const networkStreamSequence=useRef(0),[networkStreamResult,setNetworkStreamResult]=useState({id:0,text:'none'}),[networkStreamBusy,setNetworkStreamBusy]=useState(false);
  async function runNetworkStream(){const id=++networkStreamSequence.current;setNetworkStreamResult({id,text:'pending'});setNetworkStreamBusy(true);try{
-  const chunks:number[]=[];let started=false;
-  const result=await network.stream({method:'GET',url:'https://api.example.com/v1/stream',accept:'application/x-ndjson',contentType:''},{onStart:(status,contentType)=>{started=status===200&&contentType==='application/x-ndjson'},onChunk:async(data,sequence)=>{if(sequence!==chunks.length+1)throw Object.assign(new Error('stream sequence'),{code:'uncertain'});chunks.push(...data);await new Promise(resolve=>setTimeout(resolve,25))}});
+  const chunks:number[]=[];let frames=0,started=false;
+  const result=await network.stream({method:'GET',url:'https://api.example.com/v1/stream',accept:'application/x-ndjson',contentType:''},{onStart:(status,contentType)=>{started=status===200&&contentType==='application/x-ndjson'},onChunk:async(data,sequence)=>{if(sequence!==frames+1)throw Object.assign(new Error('stream sequence'),{code:'uncertain'});frames++;chunks.push(...data);await new Promise(resolve=>setTimeout(resolve,25))}});
   if(!started)throw Object.assign(new Error('stream start'),{code:'uncertain'});
   setNetworkStreamResult({id,text:JSON.stringify({status:result.status,contentType:result.contentType,bytes:result.bytes,frames:result.frames,body:new TextDecoder().decode(new Uint8Array(chunks))})});
- }catch(error){setNetworkStreamResult({id,text:'error:'+error.code+':started='+started+':chunks='+chunks.length+':bytes='+chunks.length})}finally{setNetworkStreamBusy(false)}}
+ }catch(error){setNetworkStreamResult({id,text:'error:'+error.code+':started='+started+':frames='+frames+':bytes='+chunks.length})}finally{setNetworkStreamBusy(false)}}
  const credentialSequence=useRef(0),[credentialResult,setCredentialResult]=useState({id:0,text:'none'}),[credentialBusy,setCredentialBusy]=useState(false);
  async function runCredentialNetwork(){const id=++credentialSequence.current;setCredentialResult({id,text:'pending'});setCredentialBusy(true);try{
   const r=await network.request({method:'GET',url:'https://api.example.com/v1/credential',accept:'application/json',contentType:'',credential:'upstream-api'});
