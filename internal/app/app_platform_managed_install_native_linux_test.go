@@ -40,7 +40,8 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if _, err := s.createPlatformNativeInstallReview(session, release.sha256, 1); err == nil {
 		t.Fatal("legacy review accepted backend")
 	}
-	plan, err := s.createPlatformManagedInstallReview(ctx, session, release.sha256, 1, nil, endpoint)
+	plan, err := s.createPlatformManagedInstallReview(
+		ctx, session, release.sha256, release.trustRevision, nil, endpoint)
 	if err != nil {
 		t.Fatal("managed review", err)
 	}
