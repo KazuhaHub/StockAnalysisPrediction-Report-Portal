@@ -43,10 +43,47 @@
         "An unsupported required capability is refused by package staging/capability selection before installation admission.",
         "Missing or mismatched runtime profiles for a required provider are refused instead of being synthesized."
       ]
+    },
+    "AUTH-04": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(Test(AppPlatformActorIdentity|PostgresAppPlatformActorIdentity|AppPlatformActorGuards|PostgresAppPlatformActorGuards|AppPlatformActorAuthorityContinuity|PostgresAppPlatformActorAuthorityContinuity|AppPlatformPrincipalCleanup|PostgresAppPlatformPrincipalCleanup))$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformManagementOUReviewBinding|PlatformInstallAudienceRefusals(SQLite|Postgres)|PlatformLaunchRefusals(SQLite|Postgres))$' -count=1"
+      ],
+      "coverage": [
+        "Role demotion, inactive account, expired/revoked session, changed session revision and deleted/recreated username invalidate the next actor/launch check rather than inheriting prior authority.",
+        "Moving an account between OUs changes the authority fingerprint without changing lifecycle identity. Deleted/recreated users and OUs cannot resurrect access grants.",
+        "Replacing an OU after review creation makes commit return 409 and creates no operation.",
+        "Deleted/recreated/inactive/expired audience principals and changed OU creation identities are refused with no persistent mutation."
+      ]
+    },
+    "AUTH-05": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformLaunchRefusals(SQLite|Postgres)|TestPlatformViewerIdentity(SQLite|Postgres)|TestPlatformViewerRefusals(SQLite|Postgres)|TestPlatformManagedRequestSigningSQLite|TestPlatformWritableRequestSigningSQLite)$' -count=1"
+      ],
+      "coverage": [
+        "Wrong app ID, wrong generation, stale policy/capability policy, inactive/expired account, session-revision mismatch and invalid installation IDs are refused before launch metadata is exposed.",
+        "Viewer derivation rejects revoked/expired sessions, changed account generation, removed grants, stale OU identity, corrupt/missing identity keys and restore pause.",
+        "Backend request signing derives viewer authority from the current host account; app-supplied role/subject fields do not become the execution viewer.",
+        "Writable and managed request tests fence policy/account drift before response consumption."
+      ]
+    },
+    "AUTH-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformServiceIdentityUsesNoUserAndRechecksCurrentState|TestPlatformServiceIdentityInvalidatedByLifecycleAndRestore|TestPlatformBackgroundProbeCannotSubmitAfterRevocation)$' -count=1"
+      ],
+      "coverage": [
+        "Background service assertions contain no user identity and cannot impersonate a user.",
+        "Every use rechecks current installation generation, policy revision, background capability grant and restore pause.",
+        "Disable, generation change, policy drift, grant removal and restored state invalidate the service assertion.",
+        "A background probe cannot submit after revocation and cannot claim results under a stale service identity."
+      ]
     }
   },
   "limits": [
     "These are development server/API tests, not the complete H16 machine matrix, capacity benchmark or manual browser review.",
-    "AUTH-04 through AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
+    "AUTH-06 and AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
   ]
 }
