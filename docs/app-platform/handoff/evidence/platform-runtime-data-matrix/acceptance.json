@@ -203,20 +203,23 @@
       ]
     },
     "LIFE-14": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformInstallRemovedFence(SQLite|Postgres)|TestPlatformPluginStorageUsesOneTablePerApp|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres)|TestPlatformReviewedReinstallStartsEmptySQLite)$' -count=1",
-        "TEST_POSTGRES_DSN=postgres://.../platform_reinstall GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformReviewedReinstallStartsEmptyPostgres$' -count=1"
+        "TEST_POSTGRES_DSN=postgres://.../platform_reinstall GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformReviewedReinstallStartsEmptyPostgres$' -count=1",
+        "Disposable app-project-quota workflow 41652513493: managed reinstall on the real runner and owned XFS project quota"
       ],
       "coverage": [
         "Reinstall after a completed removal creates a new installation identity and preserves the old tombstone.",
         "A reviewed management uninstall removed the selected installation's plugin table and object rows while preserving the other plugin, completed its operation, and left no old grant.",
         "A reviewed reinstall of the same release created a distinct installation. Its plugin table and registry entry were absent until first fresh use, the old payload was not listed, and a fresh object write succeeded without reviving the old row.",
+        "On the real runner, the managed uninstall completed stop, remove-code and remove-data. The old namespace became deleted and the dedicated plugin table was removed.",
+        "The same signed release was then reinstalled through the writable managed scheduler. It received a new installation and a new active namespace distinct from the deleted one, completed backend registration and activation, and served a launch document. The old namespace, access grants and plugin payload did not carry over.",
         "The deterministic plugin table is recreated empty after the last installation is removed; prior grants and payload do not carry into the new identity."
       ],
       "limits": [
-        "The reviewed reinstall/launch scenario covers static plugin storage. The fixture removes its synthetic data namespace before the frontend uninstall, so a fresh managed backend namespace still requires the native clear-on-uninstall data drill.",
-        "LIFE-14 remains partial only for that managed backend namespace composition."
+        "This is development acceptance on a disposable GitHub-hosted Linux/Docker/XFS runner and fresh SQLite/PostgreSQL fixtures, not a production upgrade or data-retention policy claim.",
+        "The reviewed lifecycle intentionally clears the selected plugin's data and backend namespace; applications needing retention must use the separate disable/repair or reviewed recovery workflow."
       ]
     },
     "DATA-01": {
@@ -367,7 +370,7 @@
   "open": [
     "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
     "DATA-04 and DATA-05 still require a coordinated writer-fenced backup set and isolated fresh-host restore with all external effects paused.",
-    "LIFE-02/03/08/14 retain manual or implementation gaps; LIFE-14 still needs the managed backend namespace composition.",
+    "LIFE-02/03/08 retain manual or implementation gaps.",
     "OPS-03 has its first runner-unavailable availability drill but still requires the complete application failure matrix."
   ]
 }
