@@ -1,7 +1,7 @@
 # Reviewed application network streams
 
-Status: H08A development implementation, 2026-11-03. No production enablement,
-public protocol freeze or native browser acceptance is claimed.
+Status: H08A development acceptance, 2026-11-03. No production enablement or
+public protocol freeze is claimed.
 
 ## Decision
 
@@ -113,10 +113,19 @@ Focused tests cover:
 - Apps `useAppNetwork().stream()` capability, binary delivery, ordering and
   unavailable/credential behavior.
 
+The full disposable Linux matrix passed in
+[run 41706400426](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/41706400426)
+with Portal `b7ce1d19` and Apps `b3a5d1b`. It exercised a real TLS upstream,
+runner and Portal NDJSON delivery, the shared SDK in Chromium, app-ack
+backpressure, and revocation before the first frame and after a released frame.
+The artifact records `native_sdk_network_stream=true`; the required browser
+marker is `SDK_NATIVE_BROWSER_NETWORK_STREAM`. The reduced native-only run
+`41693464881` also passed. Exact evidence is in
+[platform network stream](handoff/evidence/platform-network-stream/acceptance.json).
+
 ## Remaining gates
 
-Native Linux end-to-end acceptance with a disposable upstream stream, real
-Portal browser, runner restart/revocation and slow-client observations remains
-required. The public protocol remains experimental. Production grant issuance,
+The public protocol remains experimental. Production grant issuance,
 registry/auth exceptions, internet egress policy, SDK/protocol freeze and D6
-approval are unchanged.
+approval are unchanged. React and Node MessagePort coverage remains development
+protocol evidence, not a cross-browser production claim.
