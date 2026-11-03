@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -50,6 +51,92 @@ func platformUpdateFixturePG(t *testing.T, readable []int, pg bool) (*Server, pl
 		t.Fatal(err)
 	}
 	return s, actor, admitted.InstallationID, target
+}
+
+func testPlatformUpdateReviewRefusesNewRequiredCapability(
+	t *testing.T, pg bool,
+) {
+	t.Helper()
+	s, actor, installation, target := platformUpdateFixturePG(
+		t, []int{1}, pg)
+	sourceRelease := scalar[string](t, s.st,
+		`SELECT release_sha256 FROM app_platform_activations
+		 WHERE installation_id=? AND state='active'`, installation)
+	sourceGeneration := scalar[int64](t, s.st,
+		`SELECT generation FROM app_platform_installations WHERE id=?`,
+		installation)
+	sourcePolicy := scalar[int64](t, s.st,
+		`SELECT policy_revision FROM app_platform_installations WHERE id=?`,
+		installation)
+	sourceGrants := scalar[int](t, s.st,
+		`SELECT COUNT(*) FROM app_platform_capability_grants
+		 WHERE installation_id=? AND granted=1`, installation)
+	var descriptor, frontend []byte
+	if err := s.st.queryRow(
+		`SELECT r.descriptor,f.content
+		 FROM app_platform_releases r
+		 JOIN app_platform_frontend_artifacts f
+		   ON f.sha256=r.frontend_sha256
+		 WHERE r.sha256=?`, target.sha256,
+	).Scan(&descriptor, &frontend); err != nil {
+		t.Fatal(err)
+	}
+	var manifest appplatform.Manifest
+	if json.Unmarshal(descriptor, &manifest) != nil {
+		t.Fatal("invalid target descriptor")
+	}
+	manifest.Version = "1.0.0-beta.3"
+	manifest.Capabilities.Required = []string{"storage.files"}
+	descriptor, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err = s.stagePlatformRelease(
+		actor, descriptor,
+		platformSignTestDescriptor(t, descriptor), frontend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformFrontendUpdateReviewContext(
+		context.Background(), actor, installation, target.sha256, 1,
+	); !errors.Is(err, errAppPlatformInstallUnavailable) {
+		t.Fatalf("new required capability was admitted: %v", err)
+	}
+	if scalar[string](t, s.st,
+		`SELECT release_sha256 FROM app_platform_activations
+		 WHERE installation_id=? AND state='active'`, installation) !=
+		sourceRelease ||
+		scalar[int64](t, s.st,
+			`SELECT generation FROM app_platform_installations WHERE id=?`,
+			installation) != sourceGeneration ||
+		scalar[int64](t, s.st,
+			`SELECT policy_revision FROM app_platform_installations WHERE id=?`,
+			installation) != sourcePolicy ||
+		scalar[int](t, s.st,
+			`SELECT COUNT(*) FROM app_platform_capability_grants
+			 WHERE installation_id=? AND granted=1`, installation) !=
+			sourceGrants ||
+		scalar[int](t, s.st,
+			`SELECT COUNT(*) FROM app_platform_operations
+			 WHERE installation_id=?`, installation) != 1 {
+		t.Fatal("refused permission expansion changed source authority")
+	}
+	if _, err := s.inspectPlatformLaunchAccess(
+		actor, installation); err != nil {
+		t.Fatal("source stopped being launchable", err)
+	}
+}
+
+func TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite(
+	t *testing.T,
+) {
+	testPlatformUpdateReviewRefusesNewRequiredCapability(t, false)
+}
+
+func TestPlatformUpdateReviewRefusesNewRequiredCapabilityPostgres(
+	t *testing.T,
+) {
+	testPlatformUpdateReviewRefusesNewRequiredCapability(t, true)
 }
 
 func TestPlatformUpdateReviewQueuesTargetGenerationWithoutBreakingCurrent(t *testing.T) {

@@ -49,6 +49,19 @@ func platformCurrentCapabilities(e migExec, installation string) ([]string, erro
 	return result, rows.Err()
 }
 
+func platformCapabilitiesSubset(target, previous []string) bool {
+	known := make(map[string]bool, len(previous))
+	for _, capability := range previous {
+		known[capability] = true
+	}
+	for _, capability := range target {
+		if !known[capability] {
+			return false
+		}
+	}
+	return true
+}
+
 func platformBuildUpdateProjection(e migExec, installation string, sourceRelease string, sourceGeneration, installationRevision, policyRevision int64, currentFormat int64, actor platformActorFacts, control platformActorControl, targetRelease platformStagedRelease) (platformUpdateProjection, error) {
 	var descriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, targetRelease.sha256).Scan(&descriptor); err != nil {
@@ -82,6 +95,11 @@ func platformBuildUpdateProjection(e migExec, installation string, sourceRelease
 		if capability.granted {
 			targetCapabilities = append(targetCapabilities, capability.capability)
 		}
+	}
+	if !platformCapabilitiesSubset(targetCapabilities, previous) {
+		// A routine update cannot add host authority to an existing
+		// installation. A separate reviewed permission change is required.
+		return platformUpdateProjection{}, errAppPlatformInstallUnavailable
 	}
 	grants, err := platformRemovalGrantsDigest(e, installation)
 	if err != nil {
