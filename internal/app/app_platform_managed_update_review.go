@@ -63,6 +63,19 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		return platformCheckpointSource{}, fmt.Errorf(
 			"enable source operation: %w", errAppPlatformStageEvidence)
 	}
+	var currentTrustRevision int64
+	if err := e.queryRow(`SELECT p.revision
+		FROM app_platform_publishers p
+		JOIN app_platform_installations i ON i.publisher_id=p.id
+		WHERE i.id=?`, expected.installationID).
+		Scan(&currentTrustRevision); err != nil ||
+		sourceTrustRevision < 1 ||
+		currentTrustRevision < sourceTrustRevision {
+		return platformCheckpointSource{}, fmt.Errorf(
+			"enable source trust revision=%d/%d: %w",
+			sourceTrustRevision, currentTrustRevision,
+			errAppPlatformStageEvidence)
+	}
 	var startEffect, startKind, startPayload, startState, startRaw string
 	var startFence int64
 	expectedStartKind := action + "-start"
@@ -305,11 +318,12 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		return platformCheckpointSource{}, err
 	}
 	verified, err := platformVerifyStoredRelease(
-		e, release, sourceTrustRevision, trust, now)
+		e, release, currentTrustRevision, trust, now)
 	if err != nil || verified.sha256 != release {
 		return platformCheckpointSource{}, fmt.Errorf(
-			"enable source release trust revision=%d: %w",
-			sourceTrustRevision, errAppPlatformStageEvidence)
+			"enable source release trust revision=%d/%d: %w",
+			sourceTrustRevision, currentTrustRevision,
+			errAppPlatformStageEvidence)
 	}
 	var currentDescriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases

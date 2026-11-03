@@ -15,7 +15,7 @@ import (
 
 func platformManagedEnableSnapshotFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
-	s, _, lease := platformManagedRemovalStopFixtureAction(
+	s, actor, lease := platformManagedRemovalStopFixtureAction(
 		t, pg, appplatform.ActionDisable)
 	intent, err := s.preparePlatformManagedRemovalIntent(
 		context.Background(), lease)
@@ -32,6 +32,33 @@ func platformManagedEnableSnapshotFixture(t *testing.T, pg bool) (*Server, platf
 	if _, err := s.settlePlatformManagedRemoval(
 		context.Background(), lease, intent, receipt); err != nil {
 		t.Fatal(err)
+	}
+	publisherID := scalar[string](t, s.st, `SELECT publisher_id
+		FROM app_platform_installations WHERE id=?`, lease.installationID)
+	appID := scalar[string](t, s.st, `SELECT app_id
+		FROM app_platform_installations WHERE id=?`, lease.installationID)
+	trustRevision := scalar[int64](t, s.st, `SELECT revision
+		FROM app_platform_publishers WHERE id=?`, publisherID)
+	revoked, err := s.changePlatformPublisherTrust(
+		actor, platformPublisherChange{
+			kind: "policy", publisherID: publisherID,
+			expectedRevision: trustRevision, enabled: false,
+			namespaces: []appplatform.PublisherNamespace{{
+				Kind: "exact", Value: appID,
+			}},
+		})
+	if err != nil {
+		t.Fatal("disable publisher after managed stop", err)
+	}
+	if _, err := s.changePlatformPublisherTrust(
+		actor, platformPublisherChange{
+			kind: "policy", publisherID: publisherID,
+			expectedRevision: revoked.revision, enabled: true,
+			namespaces: []appplatform.PublisherNamespace{{
+				Kind: "prefix", Value: "notes-",
+			}},
+		}); err != nil {
+		t.Fatal("restore publisher before managed enable", err)
 	}
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {

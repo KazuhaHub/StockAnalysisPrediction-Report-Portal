@@ -133,7 +133,21 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 	if err != nil {
 		return zero, err
 	}
-	verified, err := platformVerifyStoredRelease(e, sourceRelease, plan.TrustRevision, trust, now)
+	var currentTrustRevision int64
+	if err := e.queryRow(`SELECT p.revision
+		FROM app_platform_publishers p
+		JOIN app_platform_installations i ON i.publisher_id=p.id
+		WHERE i.id=?`, expected.installationID).
+		Scan(&currentTrustRevision); err != nil ||
+		plan.TrustRevision < 1 ||
+		currentTrustRevision < plan.TrustRevision {
+		return zero, fmt.Errorf(
+			"%w: checkpoint source trust revision=%d/%d",
+			errAppPlatformStageEvidence, plan.TrustRevision,
+			currentTrustRevision)
+	}
+	verified, err := platformVerifyStoredRelease(
+		e, sourceRelease, currentTrustRevision, trust, now)
 	if err != nil || verified.sha256 != sourceRelease || verified.appID != plan.AppID || verified.publisherID != plan.PublisherID {
 		return zero, fmt.Errorf("%w: checkpoint source trust", errAppPlatformStageEvidence)
 	}
