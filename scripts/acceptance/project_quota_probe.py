@@ -664,6 +664,14 @@ def main(args):
                             "STANDALONE_DELETE_DATA_NAMESPACE_ABSENT",
                         ):
                             if marker not in result.stdout:
+                                diagnostic = Path.cwd() / "portal-quota-failure.txt"
+                                diagnostic.write_text(result.stdout[-262144:])
+                                print(
+                                    "Portal repair/delete-data output:\n" +
+                                    diagnostic.read_text(),
+                                    file=sys.stderr,
+                                    flush=True,
+                                )
                                 raise RuntimeError(
                                     "Native repair/standalone delete-data "
                                     "acceptance missing: " + marker)
