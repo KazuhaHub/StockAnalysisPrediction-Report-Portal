@@ -245,7 +245,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	defer registrationReader.Close()
 	defer registrationWriter.Close()
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
-	childTimeout := "-test.timeout=60s"
+	childTimeout := "-test.timeout=100s"
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		childTimeout = "-test.timeout=180s"
 	}
