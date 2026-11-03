@@ -25,7 +25,7 @@ func platformNetworkStreamPolicyFixture(t *testing.T) string {
 	raw, err := appplatform.CanonicalHTTPStreamPolicy(appplatform.HTTPStreamPolicy{
 		Origin: "https://api.example.com", Paths: []string{"/v1"}, Methods: []string{"GET"},
 		RequestBytes: 1024, StreamBytes: 1 << 20, Duration: 10 * time.Second, IdleTimeout: time.Second,
-		Concurrency: 1, MediaTypes: []string{"text/event-stream"},
+		Concurrency: 1, MediaTypes: []string{"application/x-ndjson"},
 	})
 	if err != nil {
 		t.Fatal(err)
