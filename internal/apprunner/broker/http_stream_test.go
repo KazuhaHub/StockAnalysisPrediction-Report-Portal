@@ -193,3 +193,25 @@ func TestHTTPStreamCredentialEchoAcrossFramesNeverLeaks(t *testing.T) {
 		t.Fatalf("err=%v emitted=%q", err, emitted.String())
 	}
 }
+
+func TestHTTPStreamCredentialGuardDeliversTheFinalBytes(t *testing.T) {
+	executor, _, _ := streamFixture(t, streamPolicyFixture(), func(context.Context) error { return nil }, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.(http.Flusher).Flush()
+		_, _ = w.Write([]byte("complete\n"))
+	})
+	var emitted bytes.Buffer
+	result, err := executor.Do(context.Background(), HTTPRequest{
+		Method: "POST", URL: "https://stream.example.com/v1/stream", Accept: "application/x-ndjson",
+		HeaderName: "Authorization", HeaderValue: []byte("Bearer disposable-stream-token"),
+	}, nil, HTTPStreamCallbacks{
+		Start: func(int, string) error { return nil },
+		Chunk: func(data []byte) error {
+			emitted.Write(data)
+			return nil
+		},
+	})
+	if err != nil || emitted.String() != "complete\n" || result.Bytes != 9 {
+		t.Fatalf("result=%+v err=%v emitted=%q", result, err, emitted.String())
+	}
+}

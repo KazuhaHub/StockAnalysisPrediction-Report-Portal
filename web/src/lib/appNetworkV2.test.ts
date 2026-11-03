@@ -200,7 +200,9 @@ test("pre-aborted or malformed requests never fetch", async () => {
 
 function streamResponse(lines: unknown[]) {
   const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
-  return new Response(body);
+  return new Response(body, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+  });
 }
 
 async function digest(bytes: Uint8Array) {

@@ -185,6 +185,13 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 			policySHA = policy.SHA256
 			duration = policy.Policy.Deadline
 		}
+		maxLifetime := platformNetworkRequestLifetime
+		if stream {
+			maxLifetime = platformNetworkStreamRequestLifetime
+		}
+		if duration <= 0 || duration > maxLifetime {
+			return errAppPlatformNetworkUnavailable
+		}
 		var credentialHeader string
 		var credentialValue []byte
 		if credential != "" {
@@ -214,9 +221,6 @@ func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platf
 		if stream {
 			format = control.NetworkHTTPStreamRequestFormat
 			lifetime = platformNetworkStreamRequestLifetime
-		}
-		if duration <= 0 || duration > lifetime {
-			return errAppPlatformNetworkUnavailable
 		}
 		result.stream = stream
 		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}

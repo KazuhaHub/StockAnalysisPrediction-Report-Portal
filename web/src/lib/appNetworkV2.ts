@@ -193,6 +193,13 @@ export function createAppNetworkStreamTransport(binding: BridgeBinding) {
         throw new AppNetworkError("unavailable");
       throw fixedNetworkError(response.status, code);
     }
+    const responseType = response.headers
+      .get("content-type")
+      ?.split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    if (responseType !== "application/x-ndjson")
+      throw new AppNetworkError("uncertain");
     if (!response.body) throw new AppNetworkError("uncertain");
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });

@@ -269,8 +269,10 @@ func (h *HTTPStream) Do(parent context.Context, input HTTPRequest, extra func(co
 				if authorize(ctx) != nil || ctx.Err() != nil {
 					return zero, ErrUncertain
 				}
-				safe, _ := guard.Accept(nil)
-				if err := emit(safe); err != nil {
+				if _, leaked := guard.Accept(nil); leaked {
+					return zero, ErrUncertain
+				}
+				if err := emit(guard.Flush()); err != nil {
 					return zero, err
 				}
 				return result, nil
@@ -341,6 +343,13 @@ func (g *httpStreamEchoGuard) Accept(data []byte) ([]byte, bool) {
 	g.tail = bytes.Clone(window[len(window)-keep:])
 	clear(window)
 	return safe, false
+}
+
+func (g *httpStreamEchoGuard) Flush() []byte {
+	result := bytes.Clone(g.tail)
+	clear(g.tail)
+	g.tail = nil
+	return result
 }
 
 func minDuration(left, right time.Duration) time.Duration {

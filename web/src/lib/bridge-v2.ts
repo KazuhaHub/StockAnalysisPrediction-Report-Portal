@@ -1508,14 +1508,15 @@ export function createBridgeHost(
         }
         const active = networkStreamRequests.get(id);
         if (ack) {
+          if (!active) return;
           if (
             !decimal(data.sequence) ||
-            Number(data.sequence) !== active?.nextSequence
+            Number(data.sequence) !== active.nextSequence
           ) {
             fail("protocol_error");
             return;
           }
-          if (active?.ack) {
+          if (active.ack) {
             const resolve = active.ack;
             active.ack = undefined;
             resolve();
