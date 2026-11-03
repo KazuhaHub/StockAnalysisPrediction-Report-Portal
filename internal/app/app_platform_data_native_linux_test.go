@@ -594,6 +594,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			"MANAGED_DISABLE_STOP_VERIFIED",
 			"MANAGED_ENABLE_START_PROBE_ACTIVATED",
 			"MANAGED_ENABLE_BACKEND_REQUEST",
+			"MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
 		} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatalf(
