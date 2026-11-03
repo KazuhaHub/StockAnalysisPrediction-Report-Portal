@@ -296,6 +296,23 @@
       "limits": [
         "This proves possible-delivery restore for the existing notification service, not paid task replay or newly proposed event-subscription persistence."
       ]
+    },
+    "OPS-02": {
+      "status": "pass-development",
+      "commands": [
+        "Disposable app-runner workflow 41623015662: explicit bootstrap, fail-closed startup, owned service stop/restart and controller observation",
+        "Disposable app-project-quota workflow 41623015503: service.Serve managed Portal fixture"
+      ],
+      "coverage": [
+        "The runtime administrator bootstrap document contains only the public controller identity, deployment, epoch, revision and fingerprint. Repeating the exact document is idempotent; changed identity conflicts.",
+        "The real service refused unsupported or unsafe prerequisites, started on the owned XFS project-quota root, bound its protected control endpoint, restarted without replacing the journal/enrollment, and removed its socket on stop.",
+        "The quota/browser fixture started the same service boundary and completed a managed Portal installation through data preparation, candidate start, readiness, protected registration and activation.",
+        "Static applications still do not require a runner, and the service boundary is initialized outside per-app installation."
+      ],
+      "limits": [
+        "This was performed on a disposable GitHub-hosted rootful Linux host. It is not production deployment approval.",
+        "A human operator walkthrough using only the handbook remains part of final D6/H17 acceptance."
+      ]
     }
   },
   "open": [
