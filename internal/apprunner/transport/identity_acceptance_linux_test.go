@@ -170,7 +170,7 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 		ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, ed25519.SeedSize)),
 		control.Authority{
 			DeploymentID:    enrollment.DeploymentID,
-			ControllerEpoch: enrollment.ControllerEpoch,
+			ControllerEpoch: successor.ControllerEpoch,
 			ControlRevision: enrollment.ControlRevision,
 			PublicKey:       enrollment.PublicKey,
 			Fingerprint:     enrollment.Fingerprint,
