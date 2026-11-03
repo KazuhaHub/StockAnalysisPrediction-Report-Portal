@@ -42,18 +42,24 @@
       ]
     },
     "RUN-05": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/service -run '^(TestConfigStrictAndBounded|TestConfigRefusesExposureAndOverlappingRoots|TestBootstrapConfigPinsPublicKey)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestAppPlatformRestorePausesAuthority|TestPlatformManagedDisableSchedulerRequiresRecovery(SQLite|Postgres)|TestPlatformWritableReadinessWaitRevocation(SQLite|Postgres))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestAppPlatformRestorePausesAuthority|TestPlatformManagedDisableSchedulerRequiresRecovery(SQLite|Postgres)|TestPlatformWritableReadinessWaitRevocation(SQLite|Postgres)|TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite)$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_runner_unavailable GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite$' -count=1",
+        "Portal CI test run 41631852903"
       ],
       "coverage": [
-        "Runner unavailability is represented separately from confirmed stop. Pending managed work becomes unavailable or recovery-required rather than claiming a physical stop.",
+        "A full HTTP route stack was exercised while the managed scheduler used an absent runner endpoint. /healthz, /api/site, login, /api/me, /api/home, an existing report read and /api/notifications/unread stayed available through the outage checks.",
+        "A reviewed managed disable reached the stop boundary three times. The operation settled at recovery_required / managed_disable_stop_pending with one prepared stop effect and no receipt, so the unavailable endpoint was never reported as a stopped process.",
+        "The affected installation became disabled and non-openable in the app directory, and its launch route failed closed without exposing the socket path. Portal business routes remained available.",
+        "A fresh Server over the same durable state retained the same bounded operation projection and kept the business routes available. Runner unavailability is represented separately from confirmed stop; pending managed work becomes unavailable or recovery-required rather than claiming a physical stop.",
         "Authority leases are fenced and restore pause invalidates old live authority. Readiness waits recheck revocation."
       ],
       "limits": [
-        "Independent stop of runner, Portal and app with continuous home/login/report/queue availability checks has not been performed in one native drill.",
-        "Production deployment and availability SLOs remain outside this evidence."
+        "The runner outage uses a local absent endpoint, and the Portal stop is a route-stack re-instantiation over the same store rather than an operating-system process kill.",
+        "This is development availability evidence across SQLite, a fresh PostgreSQL 18.6 database and race instrumentation. It is not a deployed multi-process drill, production availability claim or continuous-outage SLO."
       ]
     },
     "RUN-06": {
@@ -313,11 +319,28 @@
         "This was performed on a disposable GitHub-hosted rootful Linux host. It is not production deployment approval.",
         "A human operator walkthrough using only the handbook remains part of final D6/H17 acceptance."
       ]
+    },
+    "OPS-03": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_runner_unavailable GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres$' -count=1",
+        "Portal CI test run 41631852903"
+      ],
+      "coverage": [
+        "The first failure drill keeps Portal health, public branding, login, authenticated identity, home, an ordinary report read and the notification queue available while a managed disable cannot reach its runner.",
+        "The affected app and management progress enter a bounded disabled / recovery-required state; the error projection is sanitized and does not include the unavailable endpoint."
+      ],
+      "limits": [
+        "OPS-03 requires every application failure drill. This evidence covers the runner-unavailable drill, not the full download, verification, readiness, migration, task, notification and operator failure matrix.",
+        "This is not a production deployment or availability-SLO measurement."
+      ]
     }
   },
   "open": [
     "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
     "DATA-04 and DATA-05 still require a coordinated writer-fenced backup set and isolated fresh-host restore with all external effects paused.",
-    "RUN-03 through RUN-06, RUN-08 and LIFE-02/03/08/14 retain explicit native/manual or implementation gaps."
+    "RUN-06 and RUN-08 retain explicit native gaps; LIFE-02/03/08/14 retain manual or implementation gaps.",
+    "OPS-03 has its first runner-unavailable availability drill but still requires the complete application failure matrix."
   ]
 }
