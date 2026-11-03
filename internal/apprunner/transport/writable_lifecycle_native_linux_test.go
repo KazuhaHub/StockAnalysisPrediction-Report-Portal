@@ -256,25 +256,8 @@ func TestNativeWritableLifecycleTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err := os.Open(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer source.Close()
-	binaryPath := filepath.Join(dir, "child.test")
-	target, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0555)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, copyErr := io.Copy(target, source)
-	closeErr := target.Close()
-	if copyErr != nil || closeErr != nil {
-		t.Fatal("copy child binary")
-	}
+	binaryPath := transportAcceptanceChildBinary(
+		t, "portal-wlt-child-")
 	endpoint := filepath.Join(dir, "handshake")
 	if err := os.Mkdir(endpoint, 0750); err != nil {
 		t.Fatal(err)
@@ -332,25 +315,8 @@ func TestNativeWritableLifecycleTransport(t *testing.T) {
 // private registration document travels via a pipe and is cleared in the child.
 func nativeWritableLifecycleClient(t *testing.T, ctx context.Context, dir string, store *journal.Store, native *driver.CandidateRuntime, a control.Authority, descriptor []byte) (func(WritableLifecycleAction, []byte, []byte, []byte, bool) []byte, func()) {
 	t.Helper()
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err := os.Open(executable)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer source.Close()
-	binaryPath := filepath.Join(dir, "lifecycle.test")
-	target, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0555)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, copyErr := io.Copy(target, source)
-	closeErr := target.Close()
-	if copyErr != nil || closeErr != nil {
-		t.Fatal("copy lifecycle binary")
-	}
+	binaryPath := transportAcceptanceChildBinary(
+		t, "portal-wlt-lifecycle-")
 	endpoint := filepath.Join(dir, "lifecycle")
 	if err := os.Mkdir(endpoint, 0750); err != nil {
 		t.Fatal(err)
