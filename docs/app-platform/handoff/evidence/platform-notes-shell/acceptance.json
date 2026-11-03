@@ -1,0 +1,23 @@
+{
+  "format": "portal.notes-shell-browser-acceptance/1-dev.1",
+  "candidate": "14a1a3748c322896e08cdf88afdc0efb75ddf366",
+  "apps": "baa9a66f2fa1a048e19bbd1f6294e9adcc5fbd23",
+  "quotaBrowserRun": "41555201862",
+  "assertions": {
+    "singlePlatformTitle": true,
+    "noDuplicateVersionRow": true,
+    "noOuterApplicationFrame": true,
+    "viewportEditorInternalScroll": true,
+    "keyboardScrollableEditor": true,
+    "savedObjectSurvivesReload": true,
+    "shellContrastAA": true,
+    "desktopAxeSeriousCritical": 0,
+    "viewportEditorUsesHostHeight": true,
+    "narrowDarkTraditionalChinese": true
+  },
+  "screenshots": [
+    "notes-shell-1440-en-light.png",
+    "notes-shell-320-zh-tw-dark-editor.png"
+  ],
+  "passed": true
+}

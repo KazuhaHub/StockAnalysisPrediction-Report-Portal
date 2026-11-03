@@ -1,10 +1,11 @@
 {
   "format": "portal.sdk-host-browser-acceptance/1-dev.1",
-  "candidate": "9354239123ec331edfa7dfa1f55445214479d2a7",
-  "quotaBrowserRun": "41537868706",
-  "generalTestRun": "41537868765",
-  "runnerDaemonRun": "41537868781",
-  "codeQLRun": "41537862896",
+  "candidate": "14a1a3748c322896e08cdf88afdc0efb75ddf366",
+  "apps": "baa9a66f2fa1a048e19bbd1f6294e9adcc5fbd23",
+  "quotaBrowserRun": "41555201862",
+  "generalTestRun": "41555201842",
+  "runnerDaemonRun": "41555201826",
+  "codeQLRun": "41555197449",
   "assertions": {
     "presentationPreservesUnsavedDraft": true,
     "liveThemeChange": true,
@@ -17,8 +18,20 @@
     "typedQueryRoundTrip": true,
     "draftGuardCancelAndConfirm": true,
     "retiredAppUnmounted": true,
+    "themedRefreshWithoutLightFlash": true,
+    "delayedThemeAssets": true,
+    "matchingInitialThemeTokens": true,
     "singleOuterDocumentScroll": true,
-    "documentHeightBounds": true
+    "documentHeightBounds": true,
+    "viewportEditorInternalScroll": true,
+    "keyboardScrollableViewportEditor": true,
+    "keyboardFormAndDialog": true,
+    "dialogEscapeAndFocusRestore": true,
+    "invalidShellDescriptorFailsClosed": true,
+    "hugeHeightFailsClosed": true,
+    "oscillatingHeightBounded": true,
+    "runawayRerendersBounded": true,
+    "hostRemainsResponsiveToBoundedRerenders": true
   },
   "hostedEvidence": "project-quota-evidence"
 }
