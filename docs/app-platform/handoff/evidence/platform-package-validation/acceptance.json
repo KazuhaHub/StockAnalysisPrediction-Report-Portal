@@ -146,19 +146,21 @@
     },
     {
       "id": "PKG-10",
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformTrustQuarantine(Frontend|Managed)(SQLite|Postgres)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "Disposable app-project-quota-probe run 41594944957/job 125779995923 executes the native package-revocation stop and recovery path"
       ],
       "coverage": [
         "Publisher disable or key revocation verifies active signed releases and atomically queues the existing reviewed disable path for affected ready installations.",
         "Static quarantine immediately denies launch and the existing scheduler reaches complete without dropping the dedicated plugin table.",
         "Managed quarantine preserves runtime identity, namespace and data, advances the writer fence and queues managed stop; an unavailable runner records managed_disable_unavailable rather than claiming a stop.",
+        "A native publisher policy revocation initiated the queue and the real disposable runner reached a successful stop. Restoring trust and explicitly enabling or repairing reverified the same signed release under the current trust revision instead of accepting stale revision evidence.",
         "Repeated revocation does not duplicate quarantine operations, and launch refusal does not read executable content."
       ],
       "limits": [
-        "A native successful stop following this specific revocation trigger is not yet recorded, although the queued operation is the already-accepted managed disable path.",
+        "The native stop is development evidence on the disposable GitHub Linux root runner, not production deployment approval.",
         "Trust is deployment-local. There is no external trust fetch to make unreachable; a failed local trust read must continue to fail closed."
       ]
     },
@@ -197,7 +199,7 @@
   "open": [
     "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
     "PKG-08: same-fetch HTTP Range resume is implemented; persistent cache and managed-runner staging interruption/restart recovery remain open.",
-    "PKG-10: logical quarantine and managed stop scheduling are implemented; a native stop drill initiated by package revocation remains open.",
+    "PKG-10 development acceptance now includes a native stop initiated by package revocation and explicit enable/repair after trust restoration. Production deployment remains in H16-H18.",
     "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
   ]
 }
