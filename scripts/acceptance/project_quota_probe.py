@@ -643,6 +643,9 @@ def main(args):
                         report["native_managed_enable_start_probe_activated"] = True
                         report["native_managed_enable_backend_request"] = True
                         if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout or "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH" not in result.stdout:
+                            diagnostic = Path.cwd() / "portal-quota-failure.txt"
+                            diagnostic.write_text(result.stdout[-262144:])
+                            print("Portal managed lifecycle output:\n" + diagnostic.read_text(), file=sys.stderr, flush=True)
                             raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True
                         report["native_managed_reinstall_fresh_namespace_and_launch"] = True
