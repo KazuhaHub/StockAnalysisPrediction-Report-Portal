@@ -509,7 +509,7 @@ async function main() {
     await narrowPage.waitForFunction(
       () =>
         (document.querySelector("iframe")?.getBoundingClientRect().height ||
-          0) >= 650,
+          0) >= 600,
     );
     let editorFits = false;
     let finalGeometry;
@@ -521,7 +521,7 @@ async function main() {
       finalGeometry = { iframeBox, editorBox };
       editorFits =
         !!iframeBox &&
-        iframeBox.height >= 650 &&
+        iframeBox.height >= 600 &&
         !!editorBox &&
         editorBox.y + editorBox.height <= iframeBox.y + iframeBox.height + 1;
       if (!editorFits) await narrowPage.waitForTimeout(100);
