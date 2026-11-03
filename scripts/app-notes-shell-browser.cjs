@@ -511,17 +511,26 @@ async function main() {
         (document.querySelector("iframe")?.getBoundingClientRect().height ||
           0) >= 650,
     );
-    const iframeBox = await narrowPage.locator("iframe").boundingBox();
-    const editorBox = await narrowFrame
-      .getByRole("textbox", { name: /筆記/ })
-      .boundingBox();
-    if (
-      !iframeBox ||
-      iframeBox.height < 650 ||
-      !editorBox ||
-      editorBox.y + editorBox.height > iframeBox.y + iframeBox.height + 1
-    ) {
-      throw new Error("Notes viewport editor was clipped by its host frame");
+    let editorFits = false;
+    let finalGeometry;
+    for (let attempt = 0; attempt < 20 && !editorFits; attempt++) {
+      const iframeBox = await narrowPage.locator("iframe").boundingBox();
+      const editorBox = await narrowFrame
+        .getByRole("textbox", { name: /筆記/ })
+        .boundingBox();
+      finalGeometry = { iframeBox, editorBox };
+      editorFits =
+        !!iframeBox &&
+        iframeBox.height >= 650 &&
+        !!editorBox &&
+        editorBox.y + editorBox.height <= iframeBox.y + iframeBox.height + 1;
+      if (!editorFits) await narrowPage.waitForTimeout(100);
+    }
+    if (!editorFits) {
+      throw new Error(
+        "Notes viewport editor was clipped by its host frame: " +
+          JSON.stringify(finalGeometry),
+      );
     }
     assertions.viewportEditorUsesHostHeight = true;
     assertions.narrowDarkTraditionalChinese = true;
