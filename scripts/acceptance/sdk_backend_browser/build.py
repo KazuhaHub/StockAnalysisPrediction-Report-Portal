@@ -85,6 +85,7 @@ function Fixture(){
  const editor=navigation.path==='/editor';
  return <div data-testid={editor?'viewport-editor':undefined} role={editor?'region':undefined} aria-label={editor?'Viewport editor':undefined} tabIndex={editor?0:undefined} style={editor?{height:'100%',overflowY:'auto',padding:8}:undefined}>
  <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
+ <Typography.Text data-testid="capabilities">{JSON.stringify(presentation.context.capabilities)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
  <Typography.Text data-testid="network-stream-ready">{String(network.streamReady)}</Typography.Text>
  <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>

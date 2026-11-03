@@ -55,6 +55,9 @@ async function main(){
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   const networkAvailable=await frame.getByTestId('network-ready').innerText()==='true';
   const networkStreamAvailable=await frame.getByTestId('network-stream-ready').filter({hasText:'true'}).waitFor({timeout:5000}).then(()=>true).catch(()=>false);
+  if(!networkStreamAvailable){
+   console.log('SDK_NATIVE_BROWSER_NETWORK_STREAM_UNAVAILABLE '+await frame.getByTestId('capabilities').innerText()+' '+await frame.getByTestId('network-stream-ready').innerText());
+  }
   let reportsIssued=0;
   async function dispatchReports(){
    await frame.getByRole('button',{name:'Read reports',exact:true}).click();
