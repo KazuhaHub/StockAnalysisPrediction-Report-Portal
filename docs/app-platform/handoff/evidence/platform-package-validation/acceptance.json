@@ -1,0 +1,162 @@
+{
+  "format": "portal.app-platform.package-validation/1",
+  "captured_at": "2026-11-02T18:08:00-08:00",
+  "status": "partial",
+  "candidate": {
+    "portal": "3cdb06591b42ba65a6d07f5f57ecd9cdd31ffbae",
+    "apps": "baa9a66f2fa1a048e19bbd1f6294e9adcc5fbd23"
+  },
+  "results": [
+    {
+      "id": "PKG-02",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformStoredReleaseRefusal(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "A validly signed managed descriptor whose OCI image digest is changed afterward is refused before the staged-release callback runs.",
+        "A changed descriptor, signature, version, frontend artifact, publisher policy or namespace is refused with no durable mutation."
+      ],
+      "limits": [
+        "This is the repository admission boundary, not a replacement against a live production installation."
+      ]
+    },
+    {
+      "id": "PKG-03",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -count=1",
+        "npm test --workspace=@portal-app/sdk -- --run tests/publisher-v2.test.ts",
+        "npm run typecheck --workspace=@portal-app/sdk"
+      ],
+      "coverage": [
+        "The shared Go and TypeScript publisher corpus contains 55 cases with exact frame SHA-256 f0553de5a701b0d8f665a2e997a525c8022ba5039ab6bce4c62da18f3118d641.",
+        "Wrong key, namespace, algorithm, key revision, disabled publisher, expired key and revoked key are refused.",
+        "Catalogue discovery returns publisher_verified false; catalogue metadata alone does not establish trust."
+      ]
+    },
+    {
+      "id": "PKG-04",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestFrontendInspection.*$' -count=1",
+        "python3 -m unittest discover -s scripts/tests -v"
+      ],
+      "coverage": [
+        "Traversal, absolute and backslash paths, encoded separators, dot normalization, duplicate and case-colliding entries, file/directory conflicts, symlinks, devices, setuid entries, executables, server programs and unknown media are refused.",
+        "Archive, per-file, total-byte and entry-count limits are independent; CRC failures, forged ZIP metadata, ZIP64, multi-disk and trailing data are refused.",
+        "Inspection is in memory and returns no partial file metadata on failure; the package tools reject symlinked roots and private or non-regular assets."
+      ]
+    },
+    {
+      "id": "PKG-05",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestCompatibility.*$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformInstallRequirements$' -count=1"
+      ],
+      "coverage": [
+        "Platform API ranges, runner protocol, runtime architecture and backend protocol mismatches are refused.",
+        "A managed package without a compatible runner is refused before installation admission.",
+        "Invalid descriptor/schema versions, missing architectures and unsupported requirements return bounded refusal results."
+      ],
+      "limits": [
+        "The compatibility target is the development host contract, not a full matrix of deployed runner versions."
+      ]
+    },
+    {
+      "id": "PKG-06",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformInstallStaleReview(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "Changing publisher trust, policy revision or the stored target package while an update review is open makes the old confirmation unusable.",
+        "The live source release remains active and no update operation is admitted after refusal.",
+        "Install reviews reject trust changes, role demotion, altered plan JSON, wrong plan digests and an older unfinished installation."
+      ],
+      "limits": [
+        "Catalogue URL metadata is discovery-only. A catalogue edit cannot replace the exact signed bytes already bound by digest."
+      ]
+    },
+    {
+      "id": "PKG-07",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformStagedRelease(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "Replaying identical immutable bytes is idempotent and creates one release plus one frontend artifact.",
+        "Changing executable descriptor bytes for an already published app/version is refused.",
+        "Failed or refused staging leaves the old release assets and trust records unchanged."
+      ]
+    },
+    {
+      "id": "PKG-08",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "A truncated artifact transfer returns an error and leaves no staged release.",
+        "A later complete request starts from a new bounded download, validates the exact descriptor, signature and frontend digest, then stages once.",
+        "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission."
+      ],
+      "limits": [
+        "There is no HTTP Range resume or persistent market cache in this path.",
+        "Staging disk exhaustion and real managed-runner staging interruption remain unverified."
+      ]
+    },
+    {
+      "id": "PKG-10",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformLaunchRefusals(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "A disabled publisher or revoked signing key prevents a new launch and clears signed display metadata.",
+        "Launch refusal reads no executable content and does not delete application data."
+      ],
+      "limits": [
+        "An already running managed process is not physically quarantined by this test.",
+        "An unreachable external trust source and emergency revocation workflow remain open."
+      ]
+    },
+    {
+      "id": "DEV-03",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -count=1",
+        "npm test --workspace=@portal-app/sdk -- --run tests/descriptor.test.ts tests/descriptor-schema.test.ts tests/publisher-v2.test.ts",
+        "python3 -m unittest discover -s scripts/tests -v"
+      ],
+      "coverage": [
+        "The descriptor corpus contains 56 exact shared cases and the publisher corpus contains 55 exact shared cases.",
+        "Go and TypeScript consume the same bytes and expect the same acceptance or refusal for each shared descriptor and signature vector.",
+        "All 55 Python packaging and publication tests pass, including deterministic archives, path safety and signed-release provenance."
+      ],
+      "limits": [
+        "The Python package validator does not yet consume the same descriptor corpus and protocol error-code table as Go and TypeScript."
+      ]
+    }
+  ],
+  "uninstall_boundary": {
+    "commands": [
+      "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementUninstallHTTPKeepsAnotherPluginTable(SQLite|Postgres)$' -count=1",
+      "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres)$' -count=1"
+    ],
+    "coverage": [
+      "The normal reviewed uninstall clears the selected installation's dedicated plugin table.",
+      "When no non-removed installation of that app remains, the table, registry row and all corresponding rows are dropped in the same transaction.",
+      "Another plugin's table, rows and counters remain unchanged.",
+      "Reinstall creates the same deterministic plugin table name with zero rows."
+    ]
+  },
+  "open": [
+    "PKG-01: static market and offline-envelope validation is implemented, but managed market staging still rejects a backend descriptor; the complete static plus managed install equivalence is not proven.",
+    "PKG-08: genuine resumable download, persistent-cache corruption recovery and staging filesystem exhaustion remain open.",
+    "PKG-10: running code is denied future launch on current trust revocation, but physical quarantine of an already running managed process and an unreachable external trust source have not been exercised.",
+    "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
+  ]
+}
