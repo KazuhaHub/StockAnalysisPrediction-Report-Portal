@@ -15,7 +15,7 @@ import (
 )
 
 func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
-	for _, kind := range []string{"valid", "descriptor_changed", "signature_changed", "archive_changed", "archive_interrupted", "archive_retry", "trust_revoked", "trust_before_archive", "cancelled"} {
+	for _, kind := range []string{"valid", "descriptor_changed", "signature_changed", "archive_changed", "archive_interrupted", "archive_retry", "archive_range_retry", "trust_revoked", "trust_before_archive", "cancelled"} {
 		t.Run(kind, func(t *testing.T) {
 			s, actor := platformTrustTestServer(t, pg)
 			platformRegisterTestPublisher(t, s, actor)
@@ -30,6 +30,7 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 			signature = platformSignTestDescriptor(t, raw)
 			digest := platformDigest(raw)
 			var requests, archives atomic.Int32
+			var rangePartialServed atomic.Bool
 			var base string
 			remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
@@ -64,6 +65,36 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 					} else if kind == "archive_interrupted" || kind == "archive_retry" && archives.Load() == 1 {
 						w.Header().Set("Content-Length", strconv.Itoa(len(archive)+1))
 						w.Write(archive[:len(archive)/2])
+						w.(http.Flusher).Flush()
+					} else if kind == "archive_range_retry" {
+						half := len(archive) / 2
+						if r.Header.Get("Range") == "" &&
+							rangePartialServed.CompareAndSwap(false, true) {
+							w.Header().Set("Content-Length", strconv.Itoa(len(archive)+1))
+							w.Header().Set("ETag", `"archive-v1"`)
+							w.Write(archive[:half])
+							w.(http.Flusher).Flush()
+							return
+						}
+						if r.Header.Get("Range") == "" {
+							w.Write(archive)
+							return
+						}
+						expectedRange := "bytes=" + strconv.Itoa(half) + "-"
+						if r.Header.Get("Range") != expectedRange ||
+							r.Header.Get("If-Range") != `"archive-v1"` {
+							t.Errorf("range retry headers: Range=%q If-Range=%q",
+								r.Header.Get("Range"), r.Header.Get("If-Range"))
+							http.Error(w, "range required", http.StatusBadRequest)
+							return
+						}
+						w.Header().Set("ETag", `"archive-v1"`)
+						w.Header().Set("Content-Range",
+							"bytes "+strconv.Itoa(half)+"-"+
+								strconv.Itoa(len(archive)-1)+"/"+
+								strconv.Itoa(len(archive)))
+						w.WriteHeader(http.StatusPartialContent)
+						w.Write(archive[half:])
 					} else {
 						w.Write(archive)
 					}
@@ -82,9 +113,14 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 				cancel()
 			}
 			result, err := s.fetchAndStagePlatformMarketRelease(ctx, actor, base+"/index.json", digest, client)
-			if kind == "valid" {
+			if kind == "valid" || kind == "archive_retry" ||
+				kind == "archive_range_retry" {
 				if err != nil || result.sha256 != digest {
 					t.Fatal("verified package not staged", err)
+				}
+				if kind != "valid" && archives.Load() != 2 {
+					t.Fatalf("resumed download made %d archive requests",
+						archives.Load())
 				}
 				if _, err = s.createPlatformInstallReview(actor, digest, 1); err != nil {
 					t.Fatal("remote package cannot be reviewed", err)
@@ -106,12 +142,6 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 				if kind == "archive_interrupted" && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 {
 					t.Fatal("interrupted artifact left a staged release")
 				}
-				if kind == "archive_retry" {
-					result, retryErr := s.fetchAndStagePlatformMarketRelease(ctx, actor, base+"/index.json", digest, client)
-					if retryErr != nil || result.sha256 != digest || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 1 {
-						t.Fatal("complete retry did not replace the interrupted artifact", retryErr)
-					}
-				}
 			}
 		})
 	}
@@ -130,11 +160,22 @@ func TestPlatformMarketTransportBounds(t *testing.T) {
 			w.Write([]byte("not identity"))
 		case "/redirect":
 			http.Redirect(w, r, "https://127.0.0.1/private?signature=fixture", http.StatusFound)
+		case "/redirect-range":
+			if r.Header.Get("Range") != "bytes=3-" ||
+				r.Header.Get("If-Range") != `"fixture"` {
+				t.Errorf("redirect lost range headers: Range=%q If-Range=%q",
+					r.Header.Get("Range"), r.Header.Get("If-Range"))
+			}
+			http.Redirect(w, r, "https://127.0.0.1/ok", http.StatusFound)
 		case "/cycle":
 			http.Redirect(w, r, "https://127.0.0.1/cycle", http.StatusFound)
 		case "/partial":
 			w.WriteHeader(http.StatusPartialContent)
 			w.Write([]byte("partial"))
+		case "/range-too-large":
+			w.Header().Set("Content-Range", "bytes 3-5/65")
+			w.WriteHeader(http.StatusPartialContent)
+			w.Write([]byte("abc"))
 		default:
 			w.Write([]byte("ok"))
 		}
@@ -158,6 +199,17 @@ func TestPlatformMarketTransportBounds(t *testing.T) {
 	if got, err := client.fetch(context.Background(), "https://127.0.0.1/redirect", 64); err != nil || string(got) != "ok" {
 		t.Fatal("bounded signed-query redirect failed", err)
 	}
+	part, err := client.fetchPart(
+		context.Background(), "https://127.0.0.1/redirect-range",
+		64, 3, `"fixture"`, 0)
+	if err != nil || !part.restart || string(part.body) != "ok" {
+		t.Fatal("redirect range restart failed", part, err)
+	}
+	if _, err := client.fetchPart(
+		context.Background(), "https://127.0.0.1/range-too-large",
+		64, 3, `"fixture"`, 0); err == nil {
+		t.Fatal("range response exceeded the configured total limit")
+	}
 	for _, path := range []string{"/large", "/chunked", "/encoded", "/partial", "/cycle"} {
 		if _, err := client.fetch(context.Background(), "https://127.0.0.1"+path, 64); err == nil {
 			t.Fatal("invalid response accepted", path)
@@ -168,6 +220,26 @@ func TestPlatformMarketTransportBounds(t *testing.T) {
 	request.URL.Host = "127.0.0.1"
 	if err := client.safe.http.CheckRedirect(request, []*http.Request{{}}); err == nil {
 		t.Fatal("redirect to loopback allowed")
+	}
+}
+
+func TestPlatformMarketPartialPartRetainsBytes(t *testing.T) {
+	remote := httptest.NewTLSServer(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Length", "8")
+			w.Header().Set("ETag", `"partial-v1"`)
+			w.Write([]byte("abcd"))
+			w.(http.Flusher).Flush()
+		}))
+	defer remote.Close()
+	client := newPlatformMarketClient()
+	client.safe.allowInsecureForTest = true
+	platformMarketTestTLS(t, client, remote)
+	part, err := client.fetchPart(
+		t.Context(), "https://127.0.0.1/partial", 64, 0, "", 0)
+	if err == nil || string(part.body) != "abcd" ||
+		part.total != 8 || part.etag != `"partial-v1"` {
+		t.Fatalf("partial bytes lost: %+v %v", part, err)
 	}
 }
 
