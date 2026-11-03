@@ -68,7 +68,7 @@ func platformOfflineRequest(
 func testPlatformOfflineMarketHTTP(t *testing.T, pg bool) {
 	s, actor := platformTrustTestServer(t, pg)
 	platformRegisterTestPublisher(t, s, actor)
-	descriptor, signature, frontend := platformSignedReleaseFixture(
+	descriptor, _, frontend := platformSignedReleaseFixture(
 		t, "1.0.0-beta.4")
 	var manifest appplatform.Manifest
 	if err := json.Unmarshal(descriptor, &manifest); err != nil {
@@ -80,7 +80,7 @@ func testPlatformOfflineMarketHTTP(t *testing.T, pg bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signature = platformSignTestDescriptor(t, descriptor)
+	signature := platformSignTestDescriptor(t, descriptor)
 	envelope := platformOfflineEnvelope(
 		t, descriptor, signature, frontend)
 	mux := http.NewServeMux()
