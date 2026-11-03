@@ -37,14 +37,18 @@ type networkProvider struct {
 	activeLimit, cacheLimit int
 	store                   networkEnrollmentStore
 	pool                    networkExecutor
+	stream                  networkStreamExecution
 	current                 broker.CurrentNetworkAuthority
 	mu                      sync.Mutex
 	sessions                map[string]*networkControlSession
+	streamSessions          map[string]*networkControlSession
 }
 type networkControlSession struct {
 	conn       net.Conn
 	ctx        context.Context
 	requestSHA string
+	checkMagic string
+	maxChecks  int
 	sequence   byte
 	mu         sync.Mutex
 }
@@ -53,7 +57,13 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 	if store == nil {
 		return nil, broker.ErrDenied
 	}
-	p := &networkProvider{store: store, sessions: make(map[string]*networkControlSession), activeLimit: active, cacheLimit: entries}
+	p := &networkProvider{
+		store:          store,
+		sessions:       make(map[string]*networkControlSession),
+		streamSessions: make(map[string]*networkControlSession),
+		activeLimit:    active,
+		cacheLimit:     entries,
+	}
 	current, err := broker.NewConfirmedNetworkAuthority(p.enrollment, p.confirm)
 	if err != nil {
 		return nil, err
@@ -64,6 +74,11 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 		return nil, err
 	}
 	p.pool = pool
+	stream, err := broker.NewNetworkStreamPool(active, entries, current)
+	if err != nil {
+		return nil, err
+	}
+	p.stream = stream
 	return p, nil
 }
 func (p *networkProvider) enrollment(ctx context.Context) (control.Authority, error) {
@@ -81,6 +96,9 @@ func (p *networkProvider) confirm(ctx context.Context, c control.NetworkHTTPRequ
 	digest := sha256.Sum256(raw)
 	p.mu.Lock()
 	session := p.sessions[c.RequestID]
+	if session == nil {
+		session = p.streamSessions[c.RequestID]
+	}
 	p.mu.Unlock()
 	if session == nil || session.requestSHA != hex.EncodeToString(digest[:]) {
 		return nil, nil, broker.ErrDenied
@@ -91,7 +109,7 @@ func (p *networkProvider) confirm(ctx context.Context, c control.NetworkHTTPRequ
 	}
 	session.mu.Lock()
 	defer session.mu.Unlock()
-	if session.sequence >= 4 || ctx.Err() != nil || session.ctx.Err() != nil {
+	if int(session.sequence) >= session.maxChecks || ctx.Err() != nil || session.ctx.Err() != nil {
 		return nil, nil, broker.ErrDenied
 	}
 	session.sequence++
@@ -109,7 +127,7 @@ func (p *networkProvider) confirm(ctx context.Context, c control.NetworkHTTPRequ
 			session.conn.SetDeadline(end)
 		}
 	}()
-	message := append([]byte(networkCheckMagic), session.sequence)
+	message := append([]byte(session.checkMagic), session.sequence)
 	message = append(message, challenge...)
 	if _, err := io.Copy(session.conn, bytes.NewReader(message)); err != nil {
 		return nil, nil, broker.ErrDenied
@@ -197,7 +215,7 @@ func (p *networkProvider) serve(parent context.Context, conn net.Conn, magicCons
 	frameSHA := hasher.Sum(nil)
 	requestSHA := sha256.Sum256(raw)
 	c := verified.Command()
-	session := &networkControlSession{conn: conn, ctx: ctx, requestSHA: hex.EncodeToString(requestSHA[:])}
+	session := &networkControlSession{conn: conn, ctx: ctx, requestSHA: hex.EncodeToString(requestSHA[:]), checkMagic: networkCheckMagic, maxChecks: 4}
 	p.mu.Lock()
 	if len(p.sessions) >= 8 || p.sessions[c.RequestID] != nil {
 		p.mu.Unlock()

@@ -41,7 +41,7 @@ func NewConfirmedNetworkAuthority(enrollment NetworkEnrollment, confirm NetworkC
 		}
 		a.PublicKey = bytes.Clone(a.PublicKey)
 		// Do not allocate/copy an unbounded packet through an authority callback.
-		if control.ValidateNetworkHTTPRequestMetadata(c, a, time.Now().UnixMilli()) != nil {
+		if validateNetworkMetadata(c, a, time.Now().UnixMilli()) != nil {
 			return zero, ErrDenied
 		}
 		c.PolicyRaw = bytes.Clone(c.PolicyRaw)
@@ -66,9 +66,31 @@ func NewConfirmedNetworkAuthority(enrollment NetworkEnrollment, confirm NetworkC
 		if current.DeploymentID != a.DeploymentID || current.ControllerEpoch != a.ControllerEpoch || current.ControlRevision != a.ControlRevision || current.Fingerprint != a.Fingerprint || !bytes.Equal(current.PublicKey, a.PublicKey) {
 			return zero, ErrDenied
 		}
-		if control.VerifyNetworkHTTPCheck(c, challenge, raw, sig, current, time.Now().UnixMilli()) != nil || ctx.Err() != nil {
+		if verifyNetworkCheck(c, challenge, raw, sig, current, time.Now().UnixMilli()) != nil || ctx.Err() != nil {
 			return zero, ErrDenied
 		}
 		return current, nil
 	}, nil
+}
+
+func validateNetworkMetadata(c control.NetworkHTTPRequestCommand, a control.Authority, nowMS int64) error {
+	switch c.Format {
+	case control.NetworkHTTPRequestFormat:
+		return control.ValidateNetworkHTTPRequestMetadata(c, a, nowMS)
+	case control.NetworkHTTPStreamRequestFormat:
+		return control.ValidateNetworkHTTPStreamRequestMetadata(c, a, nowMS)
+	default:
+		return control.ErrInvalidCommand
+	}
+}
+
+func verifyNetworkCheck(c control.NetworkHTTPRequestCommand, challenge string, raw, signature []byte, a control.Authority, nowMS int64) error {
+	switch c.Format {
+	case control.NetworkHTTPRequestFormat:
+		return control.VerifyNetworkHTTPCheck(c, challenge, raw, signature, a, nowMS)
+	case control.NetworkHTTPStreamRequestFormat:
+		return control.VerifyNetworkHTTPStreamCheck(c, challenge, raw, signature, a, nowMS)
+	default:
+		return control.ErrInvalidCommand
+	}
 }

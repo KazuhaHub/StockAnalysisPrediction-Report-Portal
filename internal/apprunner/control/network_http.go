@@ -15,6 +15,8 @@ import (
 
 const NetworkHTTPRequestFormat = "portal.runner.viewer-http-request/1-dev.1"
 const networkHTTPRequestPurpose = "portal.app/runner-viewer-http/v1"
+const NetworkHTTPStreamRequestFormat = "portal.runner.viewer-http-stream-request/1-dev.1"
+const networkHTTPStreamRequestPurpose = "portal.app/runner-viewer-http-stream/v1"
 
 // NetworkHTTPRequestCommand binds one foreground request to a reviewed policy
 // and opaque current viewer scope. It is not a service/background delegation or
@@ -65,6 +67,14 @@ func (v *VerifiedNetworkHTTPRequest) Clear() {
 }
 
 func VerifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64) (VerifiedNetworkHTTPRequest, error) {
+	return verifyNetworkHTTPRequest(raw, signature, a, nowMS, NetworkHTTPRequestFormat, networkHTTPRequestPurpose, validateNetworkHTTPRequest)
+}
+
+func VerifyNetworkHTTPStreamRequest(raw, signature []byte, a Authority, nowMS int64) (VerifiedNetworkHTTPRequest, error) {
+	return verifyNetworkHTTPRequest(raw, signature, a, nowMS, NetworkHTTPStreamRequestFormat, networkHTTPStreamRequestPurpose, validateNetworkHTTPStreamRequest)
+}
+
+func verifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64, format, purpose string, validate func(NetworkHTTPRequestCommand, Authority, int64) error) (VerifiedNetworkHTTPRequest, error) {
 	var zero VerifiedNetworkHTTPRequest
 	if len(raw) == 0 || len(raw) > MaxCommandBytes || !utf8.Valid(raw) || len(signature) != ed25519.SignatureSize || len(a.PublicKey) != ed25519.PublicKeySize || a.ControlRevision < 1 || nowMS < 0 {
 		return zero, ErrInvalidCommand
@@ -89,19 +99,27 @@ func VerifyNetworkHTTPRequest(raw, signature []byte, a Authority, nowMS int64) (
 		return zero, ErrInvalidCommand
 	}
 	canonical, err := json.Marshal(c)
-	if err != nil || !bytes.Equal(canonical, raw) || c.Format != NetworkHTTPRequestFormat {
+	if err != nil || !bytes.Equal(canonical, raw) || c.Format != format {
 		return zero, ErrInvalidCommand
 	}
-	if validateNetworkHTTPRequest(c, a, nowMS) != nil {
+	if validate(c, a, nowMS) != nil {
 		return zero, ErrInvalidCommand
 	}
-	if !ed25519.Verify(ed25519.PublicKey(a.PublicKey), frame(networkHTTPRequestPurpose, raw), signature) {
+	if !ed25519.Verify(ed25519.PublicKey(a.PublicKey), frame(purpose, raw), signature) {
 		return zero, ErrInvalidCommand
 	}
 	return VerifiedNetworkHTTPRequest{command: c}, nil
 }
 
 func SignNetworkHTTPRequest(c NetworkHTTPRequestCommand, key ed25519.PrivateKey, a Authority, nowMS int64) ([]byte, []byte, error) {
+	return signNetworkHTTPRequest(c, key, a, nowMS, networkHTTPRequestPurpose, VerifyNetworkHTTPRequest)
+}
+
+func SignNetworkHTTPStreamRequest(c NetworkHTTPRequestCommand, key ed25519.PrivateKey, a Authority, nowMS int64) ([]byte, []byte, error) {
+	return signNetworkHTTPRequest(c, key, a, nowMS, networkHTTPStreamRequestPurpose, VerifyNetworkHTTPStreamRequest)
+}
+
+func signNetworkHTTPRequest(c NetworkHTTPRequestCommand, key ed25519.PrivateKey, a Authority, nowMS int64, purpose string, verify func([]byte, []byte, Authority, int64) (VerifiedNetworkHTTPRequest, error)) ([]byte, []byte, error) {
 	if len(key) != ed25519.PrivateKeySize {
 		return nil, nil, ErrInvalidCommand
 	}
@@ -109,8 +127,8 @@ func SignNetworkHTTPRequest(c NetworkHTTPRequestCommand, key ed25519.PrivateKey,
 	if err != nil {
 		return nil, nil, ErrInvalidCommand
 	}
-	sig := ed25519.Sign(key, frame(networkHTTPRequestPurpose, raw))
-	if _, err := VerifyNetworkHTTPRequest(raw, sig, a, nowMS); err != nil {
+	sig := ed25519.Sign(key, frame(purpose, raw))
+	if _, err := verify(raw, sig, a, nowMS); err != nil {
 		return nil, nil, err
 	}
 	return raw, sig, nil
@@ -119,6 +137,22 @@ func SignNetworkHTTPRequest(c NetworkHTTPRequestCommand, key ed25519.PrivateKey,
 func ValidateNetworkHTTPBody(v VerifiedNetworkHTTPRequest, body []byte) error {
 	c := v.command
 	if c.Format != NetworkHTTPRequestFormat {
+		return ErrInvalidCommand
+	}
+	length, ok := counter(c.BodyBytes, false)
+	if !ok || int64(len(body)) != length || length > 65536 {
+		return ErrInvalidCommand
+	}
+	sum := sha256.Sum256(body)
+	if hex.EncodeToString(sum[:]) != c.BodySHA256 {
+		return ErrInvalidCommand
+	}
+	return nil
+}
+
+func ValidateNetworkHTTPStreamBody(v VerifiedNetworkHTTPRequest, body []byte) error {
+	c := v.command
+	if c.Format != NetworkHTTPStreamRequestFormat {
 		return ErrInvalidCommand
 	}
 	length, ok := counter(c.BodyBytes, false)
@@ -185,11 +219,72 @@ func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS 
 	return nil
 }
 
+func validateNetworkHTTPStreamRequest(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
+	if c.Format != NetworkHTTPStreamRequestFormat || nowMS < 0 || a.ControlRevision < 1 || len(a.PublicKey) != ed25519.PublicKeySize {
+		return ErrInvalidCommand
+	}
+	keySHA := sha256.Sum256(a.PublicKey)
+	if a.Fingerprint != hex.EncodeToString(keySHA[:]) {
+		return ErrInvalidCommand
+	}
+	for _, id := range []string{c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.ReviewPlanID, c.RequestID} {
+		if !candidateUUID(id) {
+			return ErrInvalidCommand
+		}
+	}
+	revision, ok := counter(c.ControlRevision, true)
+	if !ok || revision != a.ControlRevision || c.DeploymentID != a.DeploymentID || c.ControllerEpoch != a.ControllerEpoch {
+		return ErrInvalidCommand
+	}
+	for _, number := range []string{c.Generation, c.PolicyRevision} {
+		if _, ok := counter(number, true); !ok {
+			return ErrInvalidCommand
+		}
+	}
+	for _, digest := range []string{c.ReleaseSHA256, c.ActorScope, c.BodySHA256} {
+		if !shaPattern.MatchString(digest) || digest == strings.Repeat("0", 64) {
+			return ErrInvalidCommand
+		}
+	}
+	parsed, err := appplatform.ParseHTTPStreamPolicy(c.PolicyRaw)
+	if err != nil ||
+		parsed.SHA256 != c.PolicySHA256 ||
+		appplatform.ValidateHTTPStreamPolicyTarget(parsed.Policy, c.Method, c.URL) != nil ||
+		!appplatform.ValidHTTPPolicyHeaderValue(c.Accept) ||
+		!appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
+		return ErrInvalidCommand
+	}
+	if !validNetworkCredential(c) {
+		return ErrInvalidCommand
+	}
+	length, ok := counter(c.BodyBytes, false)
+	if !ok || length > parsed.Policy.RequestBytes {
+		return ErrInvalidCommand
+	}
+	issued, ok := counter(c.IssuedMS, false)
+	if !ok {
+		return ErrInvalidCommand
+	}
+	expires, ok := counter(c.ExpiresMS, false)
+	if !ok || expires <= issued || expires-issued > 40000 || expires-issued < parsed.Policy.Duration.Milliseconds() || issued > nowMS || nowMS >= expires {
+		return ErrInvalidCommand
+	}
+	canonical, err := json.Marshal(c)
+	if err != nil || len(canonical) > MaxCommandBytes {
+		return ErrInvalidCommand
+	}
+	return nil
+}
+
 // ValidateNetworkHTTPRequestMetadata checks bounded logical metadata against
 // current enrollment. It verifies neither a request signature nor SQL authority.
 // Use only alongside VerifyNetworkHTTPRequest and current authorization.
 func ValidateNetworkHTTPRequestMetadata(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
 	return validateNetworkHTTPRequest(c, a, nowMS)
+}
+
+func ValidateNetworkHTTPStreamRequestMetadata(c NetworkHTTPRequestCommand, a Authority, nowMS int64) error {
+	return validateNetworkHTTPStreamRequest(c, a, nowMS)
 }
 
 func validNetworkCredential(c NetworkHTTPRequestCommand) bool {

@@ -184,3 +184,112 @@ func TestNetworkHTTPCredentialBindingIsPrivateAndBounded(t *testing.T) {
 		}
 	}
 }
+
+func networkStreamFixture(t *testing.T) (NetworkHTTPRequestCommand, ed25519.PrivateKey, Authority, int64, []byte) {
+	t.Helper()
+	c, key, a, now, body := networkFixture(t)
+	p := appplatform.HTTPStreamPolicy{
+		Origin:       "https://api.example.com",
+		Paths:        []string{"/v1"},
+		Methods:      []string{"POST"},
+		RequestBytes: 64,
+		StreamBytes:  4096,
+		Duration:     5 * time.Second,
+		IdleTimeout:  time.Second,
+		Concurrency:  1,
+		MediaTypes:   []string{"text/event-stream"},
+	}
+	raw, err := appplatform.CanonicalHTTPStreamPolicy(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := appplatform.ParseHTTPStreamPolicy(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Format = NetworkHTTPStreamRequestFormat
+	c.PolicyRaw = raw
+	c.PolicySHA256 = parsed.SHA256
+	c.URL = "https://api.example.com/v1/events"
+	c.Accept = "text/event-stream"
+	c.ExpiresMS = strconv.FormatInt(now+30000, 10)
+	return c, key, a, now, body
+}
+
+func TestNetworkHTTPStreamHasADistinctSignedDomain(t *testing.T) {
+	c, key, a, now, body := networkStreamFixture(t)
+	raw, sig, err := SignNetworkHTTPStreamRequest(c, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := VerifyNetworkHTTPStreamRequest(raw, sig, a, now)
+	if err != nil || ValidateNetworkHTTPStreamBody(v, body) != nil || ValidateNetworkHTTPStreamBody(v, []byte(`[]`)) == nil {
+		t.Fatalf("verify=%v", err)
+	}
+	if _, err := VerifyNetworkHTTPRequest(raw, sig, a, now); err == nil {
+		t.Fatal("stream command crossed buffered network domain")
+	}
+	if _, err := VerifyBackendRequest(raw, sig, a, now); err == nil {
+		t.Fatal("stream command crossed backend domain")
+	}
+	crossed := ed25519.Sign(key, frame(networkHTTPRequestPurpose, raw))
+	if _, err := VerifyNetworkHTTPStreamRequest(raw, crossed, a, now); err == nil {
+		t.Fatal("buffered signature authorized stream")
+	}
+}
+
+func TestNetworkHTTPStreamRefusesBroadenedPolicyAndBadLifetime(t *testing.T) {
+	for _, mode := range []string{"buffered_policy", "method", "path", "long", "short", "format", "signature"} {
+		t.Run(mode, func(t *testing.T) {
+			c, key, a, now, _ := networkStreamFixture(t)
+			switch mode {
+			case "buffered_policy":
+				buffered, _, _, _, body := networkFixture(t)
+				c.PolicyRaw = buffered.PolicyRaw
+				c.PolicySHA256 = buffered.PolicySHA256
+				_ = body
+			case "method":
+				c.Method = "DELETE"
+			case "path":
+				c.URL = "https://api.example.com/v10"
+			case "long":
+				c.ExpiresMS = strconv.FormatInt(now+40001, 10)
+			case "short":
+				c.ExpiresMS = strconv.FormatInt(now+4999, 10)
+			case "format":
+				c.Format = NetworkHTTPRequestFormat
+			}
+			raw, _ := json.Marshal(c)
+			sig := ed25519.Sign(key, frame(networkHTTPStreamRequestPurpose, raw))
+			if mode == "signature" {
+				sig[0] ^= 1
+			}
+			if _, err := VerifyNetworkHTTPStreamRequest(raw, sig, a, now); err == nil {
+				t.Fatal("accepted", mode)
+			}
+		})
+	}
+}
+
+func TestNetworkHTTPStreamCheckHasItsOwnProofDomain(t *testing.T) {
+	c, key, a, now, _ := networkStreamFixture(t)
+	challenge := strings.Repeat("c", 64)
+	raw, sig, err := SignNetworkHTTPStreamCheck(c, challenge, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if VerifyNetworkHTTPStreamCheck(c, challenge, raw, sig, a, now) != nil {
+		t.Fatal("stream check did not verify")
+	}
+	if VerifyNetworkHTTPCheck(c, challenge, raw, sig, a, now) == nil {
+		t.Fatal("stream proof authorized buffered request")
+	}
+	buffered, bufferedKey, bufferedAuthority, bufferedNow, _ := networkFixture(t)
+	bufferedRaw, bufferedSig, err := SignNetworkHTTPCheck(buffered, challenge, bufferedKey, bufferedAuthority, bufferedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if VerifyNetworkHTTPStreamCheck(c, challenge, bufferedRaw, bufferedSig, a, now) == nil {
+		t.Fatal("buffered proof authorized stream request")
+	}
+}
