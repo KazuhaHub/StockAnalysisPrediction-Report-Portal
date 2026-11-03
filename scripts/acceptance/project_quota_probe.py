@@ -658,6 +658,18 @@ def main(args):
                             raise RuntimeError("Managed uninstall clear-on-remove acceptance missing: " + result.stdout[-8192:])
                         report["native_managed_uninstall_remove_data"] = True
                         report["native_managed_reinstall_fresh_namespace_and_launch"] = True
+                        for marker in (
+                            "MANAGED_REPAIR_START_PROBE_ACTIVATED",
+                            "MANAGED_REPAIR_BACKEND_REQUEST",
+                            "STANDALONE_DELETE_DATA_NAMESPACE_ABSENT",
+                        ):
+                            if marker not in result.stdout:
+                                raise RuntimeError(
+                                    "Native repair/standalone delete-data "
+                                    "acceptance missing: " + marker)
+                        report["native_managed_repair_start_probe_activated"] = True
+                        report["native_managed_repair_backend_request"] = True
+                        report["native_standalone_delete_data_namespace_absent"] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
                         report["native_portal_writable_background_claimed_progress"] = True
