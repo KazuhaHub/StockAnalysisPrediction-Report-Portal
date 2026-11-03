@@ -637,6 +637,9 @@ def main(args):
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
                         report["native_portal_writable_background_claimed_progress"] = True
+                        if "MANAGED_INSTALL_STAGING_RESTART_RESUMED" not in result.stdout:
+                            raise RuntimeError("Managed staging restart recovery did not execute")
+                        report["native_managed_staging_restart_recovery"] = True
                         for stage in ("ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"):
                             marker = "PORTAL_WRITABLE_WORKER_" + stage
                             if marker not in result.stdout:

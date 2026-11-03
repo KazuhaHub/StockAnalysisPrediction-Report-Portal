@@ -20,8 +20,8 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
-// Fresh operation: no stage calls, fault injection, manually claimed lease or
-// candidate preparation advances this installation. Only serve drives it.
+// The scheduler resumes a side-effect-free staging lease after the first worker
+// is lost, then drives the remaining real runner work to completion.
 func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platformActorSession, endpoint platformRuntimeEndpoint) {
 	t.Helper()
 	ctx := context.Background()
@@ -58,6 +58,25 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal("background fixture did not start clean")
 	}
 	savePlatformWritableFixtureOwner(t, s, admitted.OperationID, admitted.InstallationID, release.sha256, m.Backend.Image)
+	interrupted, err := s.claimNextPlatformWritableInstall(
+		ctx, platformFixtureID(970))
+	if err != nil || interrupted.lease.id != admitted.OperationID {
+		t.Fatal("managed staging interruption claim", interrupted, err)
+	}
+	for _, stage := range []appplatform.Stage{
+		appplatform.StageValidate,
+		appplatform.StageDownload,
+		appplatform.StageStage,
+	} {
+		interrupted.lease, err =
+			s.st.advancePlatformInstallStaging(interrupted.lease)
+		if err != nil || interrupted.lease.snapshot.Stage != stage {
+			t.Fatal("managed staging interruption", stage, err)
+		}
+	}
+	t.Log("MANAGED_INSTALL_STAGING_INTERRUPTED")
+	mustExec(t, s.st, `UPDATE app_platform_operations
+		SET lease_until_ms=0 WHERE id=?`, admitted.OperationID)
 	worker, err := newPlatformWritableInstallScheduler(s, endpoint, platformFixtureID(976), 50*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
@@ -92,12 +111,13 @@ func testNativeWritableBackgroundCompletion(t *testing.T, s *Server, actor platf
 		t.Fatal(err)
 	}
 	joined = true
-	if worker.active.id != "" || worker.attempts != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, admitted.InstallationID) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND lease_owner IS NULL AND lease_until_ms IS NULL AND error_code IS NULL AND fence=1`, admitted.OperationID) != 1 {
+	if worker.active.id != "" || worker.attempts != 0 || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, admitted.InstallationID) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND lease_owner IS NULL AND lease_until_ms IS NULL AND error_code IS NULL AND fence=2`, admitted.OperationID) != 1 {
 		t.Fatal("background completion retained authority or hid a failure")
 	}
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, admitted.OperationID) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, admitted.OperationID) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.install_claimed' AND target_id=?`, admitted.OperationID) != 1 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.install_review_required' AND target_id=?`, admitted.OperationID) != 0 {
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, admitted.OperationID) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, admitted.OperationID) != 4 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.install_claimed' AND target_id=?`, admitted.OperationID) != 2 || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.install_review_required' AND target_id=?`, admitted.OperationID) != 0 {
 		t.Fatal("background install repeated/recovered an effect")
 	}
+	t.Log("MANAGED_INSTALL_STAGING_RESTART_RESUMED")
 	access, err := s.preparePlatformWritableBackendAccess(ctx, actor, admitted.InstallationID)
 	if err != nil {
 		t.Fatal("completed background history", err)

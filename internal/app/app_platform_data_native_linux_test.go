@@ -475,6 +475,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal("Portal writable background scheduler acceptance missing", output.String())
 		}
 		t.Log("PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS")
+		if !bytes.Contains(output.Bytes(),
+			[]byte("MANAGED_INSTALL_STAGING_RESTART_RESUMED")) {
+			t.Fatal("managed staging restart recovery missing",
+				output.String())
+		}
+		t.Log("MANAGED_INSTALL_STAGING_RESTART_RESUMED")
 		for _, stage := range []string{"ARTIFACT_DATA", "WRITER_ROLLBACK", "START_ROLLBACK", "PROBE_ROLLBACK", "REGISTRATION_ROLLBACK", "REGISTRATION_TOKEN", "ACTIVATED"} {
 			marker := "PORTAL_WRITABLE_WORKER_" + stage
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
