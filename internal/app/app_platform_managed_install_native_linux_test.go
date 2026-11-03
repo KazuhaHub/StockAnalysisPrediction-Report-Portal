@@ -258,7 +258,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		t.Log("MANAGED_UNINSTALL_STOP_REMOVE_CODE")
 		t.Log("MANAGED_UNINSTALL_REMOVE_DATA")
-		reinstallPlan, err := s.createPlatformManagedInstallReview(
+		reinstallPlan, err := s.createPlatformWritableInstallReview(
 			ctx, session, release.sha256, release.trustRevision,
 			[]platformAudienceTarget{{
 				kind: "user", username: session.username,
@@ -266,13 +266,13 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if err != nil {
 			t.Fatal("managed reinstall review", err)
 		}
-		reinstalled, err := s.consumePlatformManagedInstallReview(
+		reinstalled, err := s.consumePlatformWritableInstallReview(
 			ctx, session, reinstallPlan.ID, reinstallPlan.SHA256,
 			platformFixtureID(887), endpoint)
 		if err != nil || reinstalled.InstallationID == activated.installationID {
 			t.Fatal("managed reinstall identity", reinstalled, err)
 		}
-		worker, err := newPlatformInstallScheduler(
+		worker, err := newPlatformWritableInstallScheduler(
 			s, endpoint, platformFixtureID(888), 50*time.Millisecond)
 		if err != nil {
 			t.Fatal(err)
