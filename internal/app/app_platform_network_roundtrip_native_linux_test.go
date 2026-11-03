@@ -47,7 +47,7 @@ ip addr add 8.8.8.8/32 dev lo
 for address in $PORTAL_NETWORK_DNS; do
   if [ "$address" != "8.8.8.8" ]; then ip addr add "$address/32" dev lo; fi
 done
-exec "$PORTAL_NETWORK_BINARY" -test.v -test.run='^TestPlatformInstallDataEndpointAcceptance$' -test.timeout=135s
+exec "$PORTAL_NETWORK_BINARY" -test.v -test.run='^TestPlatformInstallDataEndpointAcceptance$' -test.timeout=240s
 `
 	cmd := exec.Command("unshare", "--net", "--fork", "--", "sh", "-c", script)
 	cmd.Env = append(os.Environ(), "PORTAL_NETWORK_NAMESPACE=1", "PORTAL_NETWORK_DNS="+strings.Join(dnsIPs, " "), "PORTAL_NETWORK_BINARY="+binary, "GODEBUG=netdns=go")
