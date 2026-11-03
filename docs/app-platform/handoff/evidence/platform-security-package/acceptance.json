@@ -2,6 +2,8 @@
   "format": "portal.app-platform.security-package-acceptance/1-dev.1",
   "captured_at": "2026-11-03T01:40:00-08:00",
   "candidate": "4a374dc1",
+  "runner_daemon_candidate": "8211d961",
+  "runner_daemon_ci": "41613324105",
   "database_evidence": "SQLite plus a dedicated temporary PostgreSQL 18.6 database",
   "rows": {
     "SEC-01": {
@@ -117,36 +119,40 @@
       ]
     },
     "SEC-06": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity|CandidateSeccomp.*))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity|CandidateSeccomp.*))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: TestDockerAcceptanceCandidateContainer, TestDockerAcceptanceCandidateLifecycle and TestNativeCandidateMountPins.*"
       ],
       "coverage": [
         "The candidate container request is a closed structure: fixed reviewed user, immutable image ID, network none, readonly rootfs, private cgroup namespace, no-new-privileges, fixed seccomp, dropped capabilities, bounded memory/swap/CPU/PIDs, no host ports, no devices, no sockets, no privileged mode and no inherited image healthcheck.",
         "Only the three reviewed bind mounts are accepted. Root, overlapping, ambiguous, traversal and overlong socket roots are refused before daemon access.",
         "The sealed candidate command rejects changed deployment, epoch, installation, operation, resource, namespace, release, generation, fences, sandbox profile, format, size, duplicate JSON fields and wrong signature domains.",
         "Container observation refuses substituted native identity, ownership labels, user, image, environment, network, seccomp, capabilities, ports, limits, mounts and writable data before removal.",
-        "Only an exact owned stopped container can be removed; running or restarting containers are not force-removed."
+        "Only an exact owned stopped container can be removed; running or restarting containers are not force-removed.",
+        "On the disposable Linux/Docker/XFS runner, an actual reference container and lifecycle passed with the reviewed no-network, non-root, readonly, seccomp, capability, resource and mount policy."
       ],
       "limits": [
-        "Portable policy/refusal tests passed locally. Actual mount pinning, candidate startup and seccomp enforcement require the repository's disposable Linux/root runner and remain part of the native CI gap.",
-        "Host runtime enrollment and production Docker authorization are outside this evidence."
+        "The exact-code runner workflow passed, but it is still development acceptance on a disposable GitHub-hosted host, not production Docker authorization.",
+        "Host runtime enrollment and production deployment remain separately gated."
       ]
     },
     "SEC-07": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(Test(JournalRejectsInsecurePaths|ResourceIdentityAndGenerationRefusal|CandidatePreflightBindsBeforeEffectAndRejectsOpaqueForgery|CandidateNativeHandlesCannotBeForgedByJSON))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(Test(JournalRejectsInsecurePaths|ResourceIdentityAndGenerationRefusal|CandidatePreflightBindsBeforeEffectAndRejectsOpaqueForgery|CandidateNativeHandlesCannotBeForgedByJSON))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: full apprunner test set plus TestNativeCandidateMountPins.*"
       ],
       "coverage": [
         "Journal storage refuses shared/writable directories, symlinked or hard-linked files, orphan WALs, unknown files and wrong permissions.",
         "Candidate native handles cannot be reconstructed from JSON. Preflight records the exact resource, namespace, release, generation, fences and controller epoch, and refuses substitution before effect.",
         "Resource history binds installation ownership, generation, writer fence and controller epoch; foreign owner or foreign epoch cannot be adopted.",
-        "Linux mount/socket tests define inode, parent, symlink, ownership, permission and wrong-plan refusal at pin, create and start boundaries."
+        "Linux mount/socket tests define inode, parent, symlink, ownership, permission and wrong-plan refusal at pin, create and start boundaries.",
+        "The disposable Linux workflow passed data-inode, symlink, parent replacement, permissions, owner, wrong-plan, unsafe-initial-state, create-boundary and start-boundary substitution checks."
       ],
       "limits": [
-        "The native mount/socket cases are Linux-only build-tag tests and were not executed on this Darwin host.",
-        "They must pass on the exact candidate in the disposable runner-daemon workflow before SEC-07 can be promoted beyond partial."
+        "The native results bind code candidate 4a374dc1 through docs-only candidate 8211d961.",
+        "Cross-installation and cross-host access still require maintained deployment isolation review; this evidence proves the socket/mount ownership and substitution boundaries tested by the repository."
       ]
     },
     "SEC-08": {
@@ -208,7 +214,7 @@
   },
   "open": [
     "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
-    "SEC-06, SEC-07, SEC-09 and SEC-10 remain partial pending exact-candidate native Linux runner/transport or measured-capacity evidence.",
+    "SEC-09 and SEC-10 remain partial pending measured-capacity and restore-epoch native evidence.",
     "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
   ]
 }

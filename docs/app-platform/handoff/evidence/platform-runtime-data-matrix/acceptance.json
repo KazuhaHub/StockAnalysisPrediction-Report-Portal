@@ -2,21 +2,25 @@
   "format": "portal.app-platform.runtime-data-matrix/1-dev.1",
   "captured_at": "2026-11-03T01:48:00-08:00",
   "candidate": "4a374dc1",
+  "runner_daemon_candidate": "8211d961",
+  "runner_daemon_ci": "41613324105",
   "database_evidence": "SQLite plus separate fresh PostgreSQL 18.6 databases for lifecycle, migration, restore and cleanup batches",
   "test_isolation": "Schema-mutating batches used independent databases. Reusing one database across unrelated migration/restore groups produced lock or residual-product failures; those failed attempts are not counted as passes.",
   "rows": {
     "RUN-03": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|CandidateSeccomp.*))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|CandidateSeccomp.*))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: TestDockerAcceptanceCandidateContainer, TestDockerAcceptanceCandidateLifecycle, TestNativeCandidateMountPins.*"
       ],
       "coverage": [
         "The portable adapter proves reviewed user, readonly rootfs, dropped capabilities, no-new-privileges, fixed seccomp, resource limits, network none, no host ports/devices/sockets and exactly three bind mounts.",
-        "Container observation rejects substituted native identity, mount, user, network, capability, limit, log and ownership policy before removal."
+        "Container observation rejects substituted native identity, mount, user, network, capability, limit, log and ownership policy before removal.",
+        "On the disposable Linux/Docker/XFS runner, an actual reference container passed the closed policy and its lifecycle passed against the real daemon."
       ],
       "limits": [
-        "An actual reference container with a live probe must execute on the disposable Linux/root runner. Local policy assertions do not prove kernel enforcement.",
-        "Exact-candidate runner-daemon and native lifecycle results remain required."
+        "This is development acceptance on a disposable GitHub-hosted rootful host. It is not production enrollment or a claim for every host profile.",
+        "The security package evidence records the same exact workflow."
       ]
     },
     "RUN-04": {
