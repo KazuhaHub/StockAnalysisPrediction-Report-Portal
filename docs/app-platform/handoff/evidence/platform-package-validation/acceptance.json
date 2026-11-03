@@ -3,8 +3,15 @@
   "captured_at": "2026-11-02T18:08:00-08:00",
   "status": "partial",
   "candidate": {
-    "portal": "3cdb06591b42ba65a6d07f5f57ecd9cdd31ffbae",
+    "portal_package_commit": "3cdb06591b42ba65a6d07f5f57ecd9cdd31ffbae",
+    "portal_pr_head": "b35b86bb5b788d39efec1f18dfa2267784442528",
     "apps": "baa9a66f2fa1a048e19bbd1f6294e9adcc5fbd23"
+  },
+  "ci": {
+    "general_and_race": "41563997090",
+    "quota_browser": "41563997097",
+    "runner_daemon": "41563997125",
+    "codeql": "41563992277"
   },
   "results": [
     {
