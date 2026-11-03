@@ -63,18 +63,22 @@
       ]
     },
     "RUN-06": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(Test(ResourceIdentityAndGenerationRefusal|CandidateAdmissionRejectsChangedLogicalResourceAndPendingWork|CandidatePreflightBindsBeforeEffectAndRejectsOpaqueForgery|CandidateNativeHandlesCannotBeForgedByJSON))$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity))$' -count=1",
+        "Disposable app-runner workflow 41636603183: TestDockerAcceptanceCandidateInventoryReconciliation"
       ],
       "coverage": [
         "Restart cannot reconstruct executable native handles or reclaim unknown work. Ownership, generation, writer fence and controller epoch must match the durable intent.",
-        "Inventory/removal refuses foreign labels, names, images, mounts, IDs and pending work rather than deleting by name."
+        "Inventory/removal refuses foreign labels, names, images, mounts, IDs and pending work rather than deleting by name.",
+        "On the disposable Docker daemon, a stale test-owned container referencing the exact private mount was discovered by native ID, then rejected because its complete policy and ownership did not match. A fresh daemon client observed the same result.",
+        "A second container referencing the same private mount made reference resolution ambiguous. Reconciliation refused to choose one resource, and a second daemon-client restart still found both test-owned resources unchanged.",
+        "The fixture deleted only its own two containers during teardown. Production reconciliation did not infer ownership, rewrite a resource or guess-delete the duplicate."
       ],
       "limits": [
-        "A runner restart with a deliberately orphaned, stale and duplicate real Docker resource set has not been run for this candidate.",
-        "Linux inventory reconciliation remains part of exact-candidate runner-daemon/native acceptance."
+        "This is development acceptance on a disposable GitHub-hosted rootful Docker worker, not a production daemon upgrade or foreign-resource cleanup claim.",
+        "The native case deliberately covers stale/orphan resources that reference the app's private mount. Resources with no reference are outside the app recovery inventory and must not be adopted or removed."
       ]
     },
     "RUN-07": {
@@ -94,18 +98,22 @@
       ]
     },
     "RUN-08": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformObjectsPluginQuotaIsTransactional|TestPlatformObjectQuotaContract|TestPlatformReleaseStagingDatabaseFullRollsBack|TestPlatformDataReservationCapacityBoundary)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestDataWriter.*|TestWritableRecovery.*)$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestDataWriter.*|TestWritableRecovery.*)$' -count=1",
+        "Disposable app-project-quota workflow 41636602878: TestNativeDataWriterContainer on the owned XFS project-quota loop"
       ],
       "coverage": [
         "Object limits are checked transactionally at account, plugin and global levels; release staging rolls back on a full SQLite database; data reservation has a bounded capacity boundary.",
+        "On the disposable Linux/XFS host, the real writable fixture exhausted its 8 MiB byte limit and 128 inode limit, observed ENOSPC, retained project identity and attributes, and left a separate healthy project writable. The fixture also survived remount and detected disabled quota enforcement.",
+        "A real 16 MiB tmpfs was filled until ENOSPC, the file was removed, and a fresh write succeeded. The measured file remained at or below the kernel tmpfs bound.",
+        "An 8 MiB stderr flood against the production json-file policy (max-size 1m, max-file 2) left between 1 MiB and 3 MiB on disk, proving rotation rather than uncontrolled host growth.",
         "Container policy fixes bounded logging and resource limits, and data writer recovery evidence is opaque and bound to the exact owner."
       ],
       "limits": [
-        "A real disk-full/log-volume/temp-volume drill on the supported Linux host has not measured cleanup and host-headroom behavior.",
-        "RUN-08 remains partial until native quota/disk/log failure evidence exists."
+        "This is a disposable GitHub-hosted Linux/Docker/XFS development drill. It is not a production volume-capacity, long-duration log soak or every-host-profile claim.",
+        "The global filesystem remained above the fixture's independent capacity floor; the evidence proves bounded refusal and cleanup, not guaranteed capacity under arbitrary host pressure."
       ]
     },
     "LIFE-01": {
@@ -164,6 +172,22 @@
         "This is server/API concurrency evidence on both drivers, not a two-browser manual review of every action pair."
       ]
     },
+    "LIFE-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_capability_update GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilityPostgres$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite$' -count=1"
+      ],
+      "coverage": [
+        "An update whose target adds storage.files as a newly required capability is refused during review construction, before an operation or privilege mutation is admitted.",
+        "The active A release, generation, policy revision and granted-capability count remain unchanged; A remains launchable after the refusal.",
+        "Routine updates are now restricted to a capability subset already granted to the installation. Adding host authority requires a separate reviewed permission change."
+      ],
+      "limits": [
+        "This covers the server-side update-review boundary on SQLite and fresh PostgreSQL 18.6. Browser presentation of a dedicated permission-expansion review remains part of the broader UX/manual matrix."
+      ]
+    },
     "LIFE-08": {
       "status": "partial",
       "commands": [
@@ -181,15 +205,18 @@
     "LIFE-14": {
       "status": "partial",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformInstallRemovedFence(SQLite|Postgres)|TestPlatformPluginStorageUsesOneTablePerApp|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres))$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformInstallRemovedFence(SQLite|Postgres)|TestPlatformPluginStorageUsesOneTablePerApp|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres)|TestPlatformReviewedReinstallStartsEmptySQLite)$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_reinstall GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformReviewedReinstallStartsEmptyPostgres$' -count=1"
       ],
       "coverage": [
         "Reinstall after a completed removal creates a new installation identity and preserves the old tombstone.",
+        "A reviewed management uninstall removed the selected installation's plugin table and object rows while preserving the other plugin, completed its operation, and left no old grant.",
+        "A reviewed reinstall of the same release created a distinct installation. Its plugin table and registry entry were absent until first fresh use, the old payload was not listed, and a fresh object write succeeded without reviving the old row.",
         "The deterministic plugin table is recreated empty after the last installation is removed; prior grants and payload do not carry into the new identity."
       ],
       "limits": [
-        "A full reviewed uninstall then reinstall/launch path with fresh managed namespace identity has not been assembled as one acceptance scenario.",
-        "LIFE-14 remains partial."
+        "The reviewed reinstall/launch scenario covers static plugin storage. The fixture removes its synthetic data namespace before the frontend uninstall, so a fresh managed backend namespace still requires the native clear-on-uninstall data drill.",
+        "LIFE-14 remains partial only for that managed backend namespace composition."
       ]
     },
     "DATA-01": {
@@ -340,7 +367,7 @@
   "open": [
     "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
     "DATA-04 and DATA-05 still require a coordinated writer-fenced backup set and isolated fresh-host restore with all external effects paused.",
-    "RUN-06 and RUN-08 retain explicit native gaps; LIFE-02/03/08/14 retain manual or implementation gaps.",
+    "LIFE-02/03/08/14 retain manual or implementation gaps; LIFE-14 still needs the managed backend namespace composition.",
     "OPS-03 has its first runner-unavailable availability drill but still requires the complete application failure matrix."
   ]
 }

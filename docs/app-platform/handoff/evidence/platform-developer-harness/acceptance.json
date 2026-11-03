@@ -25,20 +25,25 @@
       ]
     },
     "DEV-02": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
-        "npm test --workspace=@portal-app/sdk -- --run tests/network-hook.test.tsx tests/bridge-v2.test.ts tests/page-v2.test.ts",
+        "npm test --workspace=@portal-app/sdk -- --run tests/root-v2-integration.test.tsx",
+        "npm test --workspace=@portal-app/sdk",
+        "npm run typecheck --workspace=@portal-app/sdk",
         "AUTH-04 command set in evidence/platform-auth-matrix/acceptance.json",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$|^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$|^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "Apps checks 41636436561 and 41636430024"
       ],
       "coverage": [
+        "One SDK development harness test drives the AppRoot/useAppBackend path through a changed-OU permission failure and then a retired bridge, and verifies stable unavailable and not_ready codes without retrying a possibly executed request.",
+        "The same harness establishes a bridge without an execution transport and verifies a missing runtime fails closed as unsupported.",
         "The SDK harness rejects an ungranted network capability, stale channel/generation, malformed or uncertain response, timeout and a missing transport without retrying a possibly executed request.",
         "The production Portal actor tests re-check OU moves, demotions, account recreation and session expiry on the next request.",
         "Managed package staging without a compatible runner is refused before installation admission."
       ],
       "limits": [
-        "There is not yet one developer-facing simulator that exercises changed OU, expired bridge and missing runtime together from the generated app.",
-        "DEV-02 remains partial rather than borrowing separate production tests as a complete harness result."
+        "This is a development contract harness over the shared SDK and production refusal tests, not a hosted developer sandbox or a claim that every backend transport failure has the same cause.",
+        "The changed-OU case uses the stable unavailable result returned to an app; detailed OU identity remains server-side and is not exposed to the generated app."
       ]
     },
     "DEV-04": {
@@ -60,7 +65,6 @@
   },
   "open": [
     "DEV-01 needs the independent non-implementer walkthrough.",
-    "DEV-02 needs a cohesive developer harness result for changed OU, expired bridge and missing runtime.",
     "DEV-04 needs the final dependency/provenance security review and release-key approval."
   ]
 }
