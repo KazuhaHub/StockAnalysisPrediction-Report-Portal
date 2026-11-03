@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDockerAcceptanceCandidateContainer(t *testing.T) {
@@ -156,9 +157,57 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 		if _, err := startPinnedCandidateHTTP(context.Background(), client, nativeID, plan, pins); err != ErrContainerConflict {
 			t.Fatalf("exited candidate restarted without new authority: %v", err)
 		}
-		t.Log("owned candidate ran, refused removal while running, stopped and refused automatic restart")
+		// Restart only inside this disposable fixture so the same owned container
+		// can be killed repeatedly. The production start helper above remains
+		// refused after the first exit.
+		for cycle := 1; cycle <= 3; cycle++ {
+			disposableDockerAction(t, client, nativeID, "start")
+			state, err = inspectCandidateContainerHTTP(context.Background(), client, nativeID, plan)
+			if err != nil || state != "running" {
+				t.Fatalf("disposable restart %d observation: %s %v", cycle, state, err)
+			}
+			disposableDockerAction(t, client, nativeID, "kill")
+			state, err = inspectCandidateContainerHTTP(context.Background(), client, nativeID, plan)
+			if err != nil || state != "exited" {
+				t.Fatalf("disposable kill %d observation: %s %v", cycle, state, err)
+			}
+			if _, err := startPinnedCandidateHTTP(context.Background(), client, nativeID, plan, pins); err != ErrContainerConflict {
+				t.Fatalf("killed candidate %d restarted automatically: %v", cycle, err)
+			}
+		}
+		// A process with RestartPolicy=no must remain stopped after the final kill.
+		time.Sleep(300 * time.Millisecond)
+		state, err = inspectCandidateContainerHTTP(context.Background(), client, nativeID, plan)
+		if err != nil || state != "exited" {
+			t.Fatalf("killed candidate restarted without authority: %s %v", state, err)
+		}
+		t.Log("CANDIDATE_REPEATED_EXIT_NO_AUTO_RESTART_VERIFIED")
 	} else {
 		t.Log("created and inspected an owned, stopped candidate with the closed container policy")
+	}
+}
+
+func disposableDockerAction(t *testing.T, client *http.Client, nativeID, action string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(
+		ctx, http.MethodPost,
+		"http://app-runner-docker.invalid/v"+APIVersion+"/containers/"+nativeID+"/"+action,
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("disposable %s failed: %v", action, err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+	if response.StatusCode != http.StatusNoContent &&
+		!(action == "start" && response.StatusCode == http.StatusNotModified) {
+		t.Fatalf("disposable %s status: %d", action, response.StatusCode)
 	}
 }
 
