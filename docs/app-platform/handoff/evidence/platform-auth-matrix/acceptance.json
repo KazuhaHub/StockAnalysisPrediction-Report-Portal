@@ -1,0 +1,52 @@
+{
+  "format": "portal.auth-matrix-acceptance/1-dev.1",
+  "candidate": "136beda3",
+  "database_evidence": "SQLite plus temporary PostgreSQL 18.6",
+  "rows": {
+    "AUTH-01": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformManagementHTTPRefusals$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformManagementCommitRefusals$' -count=1"
+      ],
+      "coverage": [
+        "An ordinary authenticated user receives 403 from the management plan route before a review is created.",
+        "A demoted user receives 403 from the management commit route even with a previously valid plan and idempotency key.",
+        "Ordinary users also receive 403 from operation progress; anonymous access receives 401 and creates no operation.",
+        "The same typed install/update/action plan route is used for management review, so role enforcement does not depend on frontend controls."
+      ]
+    },
+    "AUTH-02": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformDirectoryOU(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformLaunchOUAccess(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformReportsTwoOUsAndOldBinding|TestPlatformReportsNoAccessAndAdminDemotion|TestPlatformLaunchAdministratorNeedsAudienceGrant)$' -count=1"
+      ],
+      "coverage": [
+        "An ungranted reader receives an empty directory; administrators receive no implicit audience bypass.",
+        "OU ancestry grants access only through the current group creation identity and current membership topology. Reparenting, stale creation identity, zero identity and cycles fail closed.",
+        "Two disjoint restricted OU readers each list exactly their own one report; direct IDs from the other OU return 404 without leaking content.",
+        "Launch inspection and directory routes deny ungranted, stale-generation and no-access readers without exposing hidden installation metadata."
+      ]
+    },
+    "AUTH-03": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformNetworkRequestRequiresGrant(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformInstallCapabilitySelection$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$' -count=1"
+      ],
+      "coverage": [
+        "A denied optional network capability cannot sign or dispatch a direct request, releases no response and does not mutate authority state.",
+        "Optional capabilities are not implicitly granted. An undeclared or invalid selection is refused.",
+        "An unsupported required capability is refused by package staging/capability selection before installation admission.",
+        "Missing or mismatched runtime profiles for a required provider are refused instead of being synthesized."
+      ]
+    }
+  },
+  "limits": [
+    "These are development server/API tests, not the complete H16 machine matrix, capacity benchmark or manual browser review.",
+    "AUTH-04 through AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
+  ]
+}
