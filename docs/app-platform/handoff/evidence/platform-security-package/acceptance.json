@@ -1,0 +1,57 @@
+{
+  "format": "portal.app-platform.security-package-acceptance/1-dev.1",
+  "captured_at": "2026-11-03T01:35:10-08:00",
+  "candidate": "03819d55",
+  "database_evidence": "SQLite plus a dedicated temporary PostgreSQL 18.6 database",
+  "rows": {
+    "SEC-01": {
+      "status": "partial",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_sec_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformMarketTransportBounds|TestPlatformMarketHTTPAuthorityAndInput|TestPlatformMarketFetchCancellation|TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)|TestPlatformStagedRelease(SQLite|Postgres)|TestPlatformStoredReleaseRefusal(SQLite|Postgres))$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker -run '^TestHTTP' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^(TestSharedPublisherSignatureVectors|TestPublisherSignatureSchema|TestPublisherTrustBounds|TestStoredPublisherNamespaces)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestBackendImageInspection.*|TestBackendImageDockerHubReferenceForms)$' -count=1"
+      ],
+      "coverage": [
+        "The shared publisher corpus rejects changed descriptor bytes, changed descriptor digests, wrong signature frames, wrong publisher/key/namespace, malformed envelopes, expired and revoked keys, disabled publishers, duplicate or aliased JSON fields and unsafe trust revisions.",
+        "Market staging compares the catalogue descriptor digest, verifies the exact descriptor and signature under current trust, refuses changed signatures and artifacts, and rechecks current trust and actor authority before downloading executable frontend bytes.",
+        "Stored-release admission rechecks the current trust revision and immutable descriptor, signature, version, frontend, managed flag and backend digest. Refusal occurs before the admission callback and does not mutate durable state.",
+        "The market URL policy permits only public HTTPS. Loopback, link-local and metadata addresses, CGNAT, private, multicast, documentation, benchmarking and non-public IPv6 destinations are refused at their address boundary.",
+        "Broker DNS tests provide a safe and an unsafe answer in the same result set. Every mixed set containing a non-public address is refused before dial. DNS lookup failure also never dials.",
+        "Redirects are bounded and the destination is revalidated. Market redirects deliberately drop all inherited headers and retain only identity encoding plus the validated Range/If-Range continuation fields. Tests prove catalogue/publisher requests carry no Portal Cookie, Authorization or Referer.",
+        "Credential-bearing broker requests use one fixed Authorization or X-API-Key shape. Arbitrary headers and Cookie are refused before DNS. Echoed credential values in response body or headers become uncertain and release no status or body.",
+        "Managed image admission requires an exact digest-pinned descriptor reference and matching local native image ID/platform. Tags, changed digests, other repositories and Docker Hub familiar-name substitutions do not match."
+      ],
+      "limits": [
+        "Portal currently has no registry-authentication client or registry token store. Managed image inspection reads an already-present local image through the checked Docker Unix socket and never reads registry credentials; a future controlled registry fetch must add its own auth-scope tests before that feature is admitted.",
+        "Mixed DNS is exercised through injected resolver results and the production dial-time address hook, not through a hostile public DNS service.",
+        "This is development security evidence, not a production network review or a complete deployed-host firewall assessment."
+      ]
+    },
+    "SEC-02": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestFrontendInspection' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestOfflineEnvelope' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./cmd/app-inspect -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestBackendImageInspection.*|TestInspectionIsRedactedAndNeverExecutionEvidence|TestInspectionRefusesIncompatibleDaemonClaims|TestAPIRangeCheckedBeforeVersionedRequests|TestMalformedAndOversizedResponsesRefused|TestDaemonRedirectDoesNotFollowLocation|TestCancellationAndUpstreamErrorsAreBounded)$' -count=1"
+      ],
+      "coverage": [
+        "Frontend inspection reads the exact bounded ZIP bytes in memory. A fixture whose application JavaScript would create a marker file is inspected successfully, and the marker is proven absent afterward.",
+        "Executable files, server programs, symlinks, devices, setuid entries, traversal, absolute paths, duplicate and case-colliding members and unsupported media are refused before any installation.",
+        "Offline envelope inspection returns descriptor, signature and frontend bytes only after the closed three-member structure, signature schema and exact digest relationships pass. Unsafe or mismatched members return no partial executable bytes.",
+        "The app inspector prints only bounded public metadata and never package contents or local paths. It rejects symlinked, oversized and invalid inputs, and emits no partial success output.",
+        "Image metadata inspection uses exactly one fixed read-only local daemon image request. A fixture image declaring a shell entrypoint that would create a marker file is inspected, and the marker is proven absent with exactly one daemon request.",
+        "Daemon metadata inspection issues only GET /version and the fixed supported-version GET /v1.47/info. It does not follow redirects, send cookies or authorization, return execution_ready=true, or expose daemon paths, proxy settings, labels, image environment or entrypoint."
+      ],
+      "limits": [
+        "This verifies the package, offline-envelope, inspector and image-metadata inspection surfaces. It does not claim that a later install/start operation executed no code; those lifecycle operations have separate acceptance rows.",
+        "The image entrypoint test is a portable metadata fixture. The native Docker image inspection result remains separately tied to Linux CI."
+      ]
+    }
+  },
+  "open": [
+    "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
+    "SEC-03 through SEC-10 still require their own matching evidence and have not been inferred from these package/transport tests."
+  ]
+}
