@@ -129,6 +129,32 @@ func testPlatformTrustQuarantineManaged(t *testing.T, pg bool) {
 	if _, err := s.inspectPlatformLaunchAccess(actor, lease.installationID); err == nil {
 		t.Fatal("quarantined managed app remained launchable")
 	}
+	selected, err := s.claimNextPlatformManagedUninstall(
+		context.Background(), platformFixtureID(996))
+	if err != nil || selected.lease.id == "" ||
+		selected.lease.snapshot.Action != appplatform.ActionDisable {
+		t.Fatal("managed quarantine was not claimable", selected, err)
+	}
+	if err := s.finishPlatformManagedUninstallForReview(
+		context.Background(), selected.lease); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `
+		SELECT stage||':'||error_code FROM app_platform_operations
+		WHERE id=?`, selected.lease.id) != "failed:managed_disable_unavailable" ||
+		scalar[string](t, s.st, `
+			SELECT desired_state||':'||phase
+			FROM app_platform_installations WHERE id=?`,
+			lease.installationID) != "disabled:disabled" ||
+		scalar[string](t, s.st, `
+			SELECT state FROM app_platform_data_namespaces
+			WHERE owner_installation_id=?`, lease.installationID) != "active" ||
+		scalar[int64](t, s.st, `
+			SELECT writer_fence FROM app_platform_data_namespaces
+			WHERE owner_installation_id=?`,
+			lease.installationID) != beforeWriterFence+1 {
+		t.Fatal("unavailable runner fabricated a stop or damaged data")
+	}
 }
 
 func TestPlatformTrustQuarantineManagedSQLite(t *testing.T) {
