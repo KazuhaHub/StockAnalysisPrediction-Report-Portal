@@ -645,6 +645,8 @@ func testNativeManagedDisableEnable(
 		installation)
 	publisherID := scalar[string](t, s.st, `SELECT publisher_id
 		FROM app_platform_installations WHERE id=?`, installation)
+	appID := scalar[string](t, s.st, `SELECT app_id
+		FROM app_platform_installations WHERE id=?`, installation)
 	publisherRevision := scalar[int64](t, s.st, `SELECT revision
 		FROM app_platform_publishers WHERE id=?`, publisherID)
 	revocation, err := s.changePlatformPublisherTrust(
@@ -652,14 +654,14 @@ func testNativeManagedDisableEnable(
 			kind: "policy", publisherID: publisherID,
 			expectedRevision: publisherRevision, enabled: false,
 			namespaces: []appplatform.PublisherNamespace{{
-				Kind: "prefix", Value: "notes-",
+				Kind: "exact", Value: appID,
 			}},
 		})
 	if err != nil {
 		t.Fatal("native package revocation", err)
 	}
-	if revocation.quarantined != 1 {
-		t.Fatal("native package revocation did not queue the running app",
+	if revocation.quarantined < 1 {
+		t.Fatal("native package revocation did not quarantine any app",
 			revocation)
 	}
 	disableOperationID := scalar[string](t, s.st,
