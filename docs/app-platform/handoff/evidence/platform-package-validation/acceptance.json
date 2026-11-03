@@ -184,6 +184,27 @@
       "limits": [
         "The public package format and protocol error vocabulary remain development contracts pending formal freeze."
       ]
+    },
+    {
+      "id": "DEV-05",
+      "status": "pass-development",
+      "commands": [
+        "gh release download v2026.43.2 -R KazuhaHub/StockAnalysisPrediction-Report-Portal --pattern SHA256SUMS.txt --pattern report-portal_v2026.43.2_darwin_arm64.tar.gz",
+        "gh release download status/v0.1.0-beta.2 -R KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps --pattern SHA256SUMS --pattern release.json --pattern status.zip --pattern status-v0.1.0-beta.2-darwin-arm64.tar.gz",
+        "gh release download status/v0.1.0-beta.3 -R KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps --pattern SHA256SUMS --pattern release.json --pattern status.zip --pattern status-v0.1.0-beta.3-darwin-arm64.tar.gz",
+        "python3 scripts/status-released-lifecycle.py --portal <verified-bin> --old-artifacts <beta2> --new-artifacts <beta3> --private-address <local-private-ipv4> --receipt <new-path>",
+        "python3 -m unittest discover -s scripts/tests -p 'test_status_released_lifecycle.py' -v"
+      ],
+      "coverage": [
+        "The official immutable Portal v2026.43.2 release installed released Status Beta.2, upgraded through the normal installer to released Beta.3, rolled back through the normal installer to Beta.2, and uninstalled it.",
+        "Every selected archive and ZIP matched its official published SHA-256. Installed assets matched each ZIP, and ZIP identity/permissions remained extension.read plus extension.manage.",
+        "Three replacement cycles produced distinct backend installation identities. Old tokens were denied, and deliberate re-pairing preserved the same independent database, configured component/monitor and sealed credential fingerprints.",
+        "Uninstall revoked host registration/assets while unrelated Portal routes remained healthy and the independent service remained ready."
+      ],
+      "limits": [
+        "The executed drill used the released legacy app installer and a disposable Darwin arm64 API fixture, not the unpublished App Platform v2 production installer.",
+        "No production deployment, browser, provider credential, notification destination or public projection was used."
+      ]
     }
   ],
   "uninstall_boundary": {
@@ -202,6 +223,6 @@
     "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
     "PKG-08: same-fetch HTTP Range resume and native managed staging restart recovery are implemented; persistent cache remains open.",
     "PKG-10 development acceptance now includes a native stop initiated by package revocation and explicit enable/repair after trust restoration. Production deployment remains in H16-H18.",
-    "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
+    "DEV-01 still requires a non-implementer walkthrough. DEV-05 now has an isolated official released-byte lifecycle drill, without claiming production mutation or the unpublished App Platform v2 installer."
   ]
 }
