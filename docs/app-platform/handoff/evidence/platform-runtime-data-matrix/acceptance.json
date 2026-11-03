@@ -262,7 +262,7 @@
       ]
     },
     "DATA-04": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(TestCheckpointPersistsOneExactUnknownIntent|TestCheckpointRejectsChangedSourceAndPendingWork|TestCheckpointReceiptReadMatchesAppliedIntent)$' -count=1",
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformCheckpoint.*|TestPlatformRestore.*)$' -count=1",
@@ -274,8 +274,8 @@
         "Checkpoint intent is persisted before native work and replay cannot replace its source, namespace, fence, checkpoint or effect identity. Prepared or unknown work cannot be checkpointed again."
       ],
       "limits": [
-        "This proves the consistency links around the data checkpoint, not yet one external recovery-set bundle that also captures the Portal database, runner journal database and protected key material under a single signed manifest.",
-        "The controlled update path stops the source before checkpointing. No online hot-copy claim is made for writes that race quiesce."
+        "This proves the coordinated data checkpoint and its cross-store identity links. It is not an online hot-copy claim for writes that race quiesce.",
+        "Restoring the complete Portal/runner/data/key set on a separate fresh host remains DATA-05/OPS-06 work."
       ]
     },
     "DATA-05": {
@@ -401,7 +401,7 @@
   },
   "open": [
     "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
-    "DATA-04 and DATA-05 still require a coordinated writer-fenced backup set and isolated fresh-host restore with all external effects paused.",
+    "DATA-05 still requires isolated fresh-host recovery with all external effects paused.",
     "LIFE-02/03/08 retain manual or implementation gaps.",
     "OPS-03 has its first runner-unavailable availability drill but still requires the complete application failure matrix."
   ]

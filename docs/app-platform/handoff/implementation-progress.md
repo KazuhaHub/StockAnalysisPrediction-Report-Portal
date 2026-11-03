@@ -84,11 +84,11 @@ document after registration and activation.
 The native checkpoint path now cross-checks one recovery set against the final
 update plan, source activation, namespace/schema, source and target releases,
 controller epoch, writer fence, runtime key fingerprint and applied journal
-receipt. `DATA-04` and `DATA-05` are stronger but remain partial until that
-coordinated set is exported as one Portal/runner/data/key bundle and restored
-on an isolated fresh host with external effects paused.
+receipt. `DATA-04` is therefore `pass-development` for a quiesced coordinated
+data checkpoint. `DATA-05` remains partial until the complete Portal/runner/
+data/key set is restored on an isolated fresh host with external effects paused.
 `RUN-03`, `RUN-04`, `RUN-05`, `RUN-06`, `RUN-07` and `RUN-08`, `LIFE-01`,
-`LIFE-05`, `LIFE-07`, `LIFE-14`, `DATA-01`, `DATA-02`, `DATA-03`, `DATA-07`, `JOB-07` and `JOB-08`
+`LIFE-05`, `LIFE-07`, `LIFE-14`, `DATA-01`, `DATA-02`, `DATA-03`, `DATA-04`, `DATA-07`, `JOB-07` and `JOB-08`
 are `pass-development` for their stated repository surfaces. `OPS-03` remains
 partial after its first runner-unavailable drill. Real crash loops,
 runner-newer epochs, coordinated live backup/fresh-host recovery, measured
