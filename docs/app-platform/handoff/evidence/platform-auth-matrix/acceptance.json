@@ -104,10 +104,36 @@
         "Disable, generation change, policy drift, grant removal and restored state invalidate the service assertion.",
         "A background probe cannot submit after revocation and cannot claim results under a stale service identity."
       ]
+    },
+    "AUTH-08": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformUpdateReviewQueuesTargetGenerationWithoutBreakingCurrent|TestPlatformUpdateReviewRefusesIncompatibleDataAndStaleSource|TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(SQLite|Postgres)|TestPlatformStaticUpdateActivatesCandidateAndRetiresSource|TestPlatformFrontendUpdateRetryExhaustionKeepsSourceGeneration|TestPlatformFrontendUpdateResumesAfterExpiredWorker(SQLite|Postgres)|TestPlatformPublisherTrust(SQLite|Postgres)|TestPlatformTrustReviewInvalidation(SQLite|Postgres)|TestPlatformSignedReleaseRestore(SQLite|Postgres)|TestPlatformManagedRestoreReview(SQLite|Postgres)|TestPlatformManagedRestoreReviewRefusals(SQLite|Postgres)|TestPlatformManagedRestoreReviewStaleTrust(SQLite|Postgres)|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres))$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175"
+      ],
+      "coverage": [
+        "Update admission preserves the current installation/live generation until reviewed target activation; success retires the source generation and failure keeps the source launchable.",
+        "Policy, package or trust drift while update review is open invalidates the review. Stale installation generations cannot be updated.",
+        "Publisher key add/rotation and revocation advance exact trust revisions; trust changes invalidate open reviews, and revoked keys cannot sign later stages.",
+        "Restore requires a verified recovery set, a recovered failed update, an unpaused control plane and exact current trust. Signed-release restore cannot resurrect revoked trust.",
+        "Uninstall clears only the selected installation; reinstall starts with an empty dedicated plugin table.",
+        "The native artifact records a real managed A-to-B update, failed-update restore, package revocation stop, enable/start/probe/backend request and clear-on-uninstall."
+      ],
+      "native_evidence": {
+        "candidate": "95e358fd",
+        "quota_probe_run": "41599541528",
+        "artifact_sha256": "7af3a921905973faed88f30f05f97ddfa57aa62bc4c73bddda848df90e8b8e37",
+        "native_managed_update_a_to_b": true,
+        "native_managed_restore_from_failed_update": true,
+        "native_package_revocation_managed_stop": true,
+        "native_managed_enable_start_probe_activated": true,
+        "native_managed_enable_backend_request": true,
+        "native_managed_uninstall_remove_data": true
+      }
     }
   },
   "limits": [
     "These are development server/API tests, not the complete H16 machine matrix, capacity benchmark or manual browser review.",
-    "AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
+    "The remaining SEC/RUN/LIFE rows are outside this evidence increment."
   ]
 }
