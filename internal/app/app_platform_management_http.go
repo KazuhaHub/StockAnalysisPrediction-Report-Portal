@@ -331,7 +331,8 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		staged, err := s.recheckPlatformStagedRelease(actor, release, n)
+		staged, err := s.recheckPlatformStagedReleaseContext(
+			r.Context(), actor, release, n)
 		if err != nil {
 			platformManagementError(w, err)
 			return

@@ -155,8 +155,18 @@ func (s *Server) withPlatformStagedReleaseContext(ctx context.Context, session p
 }
 
 func (s *Server) recheckPlatformStagedRelease(session platformActorSession, sha string, expectedTrustRevision int64) (platformStagedRelease, error) {
+	return s.recheckPlatformStagedReleaseContext(
+		context.Background(), session, sha, expectedTrustRevision)
+}
+
+func (s *Server) recheckPlatformStagedReleaseContext(
+	ctx context.Context,
+	session platformActorSession,
+	sha string,
+	expectedTrustRevision int64,
+) (platformStagedRelease, error) {
 	var result platformStagedRelease
-	err := s.withPlatformStagedRelease(session, sha, expectedTrustRevision, func(_ migExec, _ platformActorFacts, _ platformActorControl, verified platformStagedRelease) error {
+	err := s.withPlatformStagedReleaseContext(ctx, session, sha, expectedTrustRevision, func(_ migExec, _ platformActorFacts, _ platformActorControl, verified platformStagedRelease) error {
 		result = verified
 		return nil
 	})
