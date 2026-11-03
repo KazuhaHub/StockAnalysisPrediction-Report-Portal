@@ -133,6 +133,16 @@ same workflow later skipped the separate one-image UUID replacement check
 because the disposable loop remained externally held; that skip is recorded as
 an open identity-test gap, not as lifecycle evidence.
 
+Native-only run `41715252815` at `e3fb26f4` passed the reviewed repair
+start/probe/registration/activation path, served a current-viewer backend
+request on the repaired generation, then completed standalone `delete_data` for
+the retained namespace. The artifact requires
+`MANAGED_REPAIR_START_PROBE_ACTIVATED`,
+`MANAGED_REPAIR_BACKEND_REQUEST` and
+`STANDALONE_DELETE_DATA_NAMESPACE_ABSENT`, and records the namespace as
+`deleted` with no owner. Exact evidence is in
+[standalone delete evidence](handoff/evidence/platform-standalone-delete-data/acceptance.json).
+
 No row may be made safe by a UI-only check, a cached generation, a copied database
 or a successful database mutation that was not observed at the actual runtime.
 
