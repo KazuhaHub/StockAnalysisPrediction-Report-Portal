@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
 )
 
 // Re-enter only in a new network namespace. Keep the runtime and Docker daemon
@@ -55,7 +57,15 @@ exec "$PORTAL_NETWORK_BINARY" -test.v -test.run='^TestPlatformInstallDataEndpoin
 	if err != nil {
 		t.Fatalf("Portal isolated HTTPS lifecycle: %v\n%s", err, output)
 	}
-	for _, marker := range []string{"PORTAL_NETWORK_HTTPS_CURRENT_VIEWER", "PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED", "PORTAL_NETWORK_HTTPS_POST_IO_REVOKED"} {
+	for _, marker := range []string{
+		"PORTAL_NETWORK_HTTPS_CURRENT_VIEWER",
+		"PORTAL_NETWORK_HTTPS_PRE_IO_REVOKED",
+		"PORTAL_NETWORK_HTTPS_POST_IO_REVOKED",
+		"PORTAL_NETWORK_STREAM_CURRENT_VIEWER",
+		"PORTAL_NETWORK_STREAM_PRE_IO_REVOKED",
+		"PORTAL_NETWORK_STREAM_POST_FRAME_REVOKED",
+		"PORTAL_NETWORK_STREAM_SESSION_NDJSON",
+	} {
 		if !bytes.Contains(output, []byte(marker)) {
 			t.Fatalf("missing isolated HTTPS assertion %s\n%s", marker, output)
 		}
@@ -123,9 +133,35 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 2))
 		authorization := r.Header.Get("Authorization")
 		credentialPath := r.URL.Path == "/v1/credential"
-		if err != nil || len(body) != 0 || r.Method != "GET" || r.TLS == nil || r.Host != "api.example.com" || (!credentialPath && authorization != "") || (credentialPath && authorization != "Bearer disposable-upstream-value") || r.Header.Get("Cookie") != "" || r.Header.Get("Accept") != "application/json" {
+		streamPath := r.URL.Path == "/v1/stream" || r.URL.Path == "/v1/stream-revoke"
+		accept := "application/json"
+		contentType := "application/json"
+		if streamPath {
+			accept = "application/x-ndjson"
+			contentType = "application/x-ndjson"
+		}
+		if err != nil || len(body) != 0 || r.Method != "GET" || r.TLS == nil || r.Host != "api.example.com" || (!credentialPath && authorization != "") || (credentialPath && authorization != "Bearer disposable-upstream-value") || r.Header.Get("Cookie") != "" || r.Header.Get("Accept") != accept {
 			t.Error("invalid actual Portal HTTPS request")
 			w.WriteHeader(400)
+			return
+		}
+		if streamPath {
+			w.Header().Set("Content-Type", contentType)
+			w.WriteHeader(200)
+			flusher := w.(http.Flusher)
+			_, _ = w.Write([]byte("one\n"))
+			flusher.Flush()
+			if r.URL.Path == "/v1/stream-revoke" {
+				ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+				defer cancel()
+				if err := waitPlatformNetworkFixtureFile(ctx, filepath.Join(childData, "network-revoked")); err != nil {
+					t.Error("stream withdrawal acknowledgement", err)
+					return
+				}
+			} else {
+				time.Sleep(2 * time.Millisecond)
+			}
+			_, _ = w.Write([]byte("two\n"))
 			return
 		}
 		switch r.URL.Path {
@@ -149,7 +185,7 @@ func startPlatformNetworkHTTPSFixture(t *testing.T, dir, childData string) {
 			w.WriteHeader(404)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", contentType)
 		w.Header().Set("Set-Cookie", "fixture=must-not-be-forwarded")
 		w.WriteHeader(200)
 		_, _ = w.Write([]byte(`{"ok":true}`))
@@ -236,7 +272,7 @@ func platformNetworkFixtureCount(t *testing.T) int {
 		t.Fatal(err)
 	}
 	count, err := strconv.Atoi(string(raw))
-	if err != nil || count < 1 || count > 5 {
+	if err != nil || count < 1 || count > 10 {
 		t.Fatal("invalid HTTPS fixture count", err)
 	}
 	return count
@@ -284,7 +320,104 @@ func testNativePlatformNetworkRoundtrip(t *testing.T, s *Server, actor platformA
 		t.Fatal("actual Portal credential injection", credentialResponse.Status, string(credentialResponse.Body), err)
 	}
 	t.Log("PORTAL_NETWORK_CREDENTIAL_INJECTED")
+	testNativePlatformNetworkStream(t, s, actor, installation, binding, endpoint)
 	testNativePlatformNetworkHTTP(t, s, actor, installation, binding, endpoint)
+}
+
+func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActorSession, installation string, binding platformBackendRequestBinding, endpoint platformRuntimeEndpoint) {
+	t.Helper()
+	ctx := context.Background()
+	var chunks bytes.Buffer
+	var started bool
+	result, err := s.requestPlatformNetworkStream(
+		ctx, actor, installation, binding,
+		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil, &endpoint,
+		broker.HTTPStreamCallbacks{
+			Start: func(status int, contentType string) error {
+				started = status == 200 && contentType == "application/x-ndjson"
+				return nil
+			},
+			Chunk: func(data []byte) error {
+				chunks.Write(data)
+				return nil
+			},
+		},
+	)
+	if err != nil || !started || chunks.String() != "one\ntwo\n" || result.Bytes != 8 || platformNetworkFixtureCount(t) != 4 {
+		t.Fatal("actual Portal current-viewer stream", result, err, started, chunks.String())
+	}
+	t.Log("PORTAL_NETWORK_STREAM_CURRENT_VIEWER")
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.stream'`, installation)
+	_, err = s.requestPlatformNetworkStream(
+		ctx, actor, installation, binding,
+		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil, &endpoint,
+		broker.HTTPStreamCallbacks{Start: func(int, string) error { return nil }},
+	)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.stream'`, installation)
+	if !errors.Is(err, errAppPlatformNetworkUnavailable) || platformNetworkFixtureCount(t) != 4 {
+		t.Fatal("withdrawn stream grant reached HTTPS", err)
+	}
+	t.Log("PORTAL_NETWORK_STREAM_PRE_IO_REVOKED")
+
+	for _, name := range []string{"network-revoked", "network-stream-arrived"} {
+		if err := os.Remove(filepath.Join(os.Getenv("TMPDIR"), name)); err != nil && !os.IsNotExist(err) {
+			t.Fatal("reset stream fixture handshake", err)
+		}
+	}
+	type streamResult struct {
+		result broker.HTTPStreamResult
+		err    error
+	}
+	done := make(chan streamResult, 1)
+	var released bytes.Buffer
+	go func() {
+		value, runErr := s.requestPlatformNetworkStream(
+			ctx, actor, installation, binding,
+			"GET", "https://api.example.com/v1/stream-revoke", "application/x-ndjson", "", "", nil, &endpoint,
+			broker.HTTPStreamCallbacks{
+				Start: func(status int, contentType string) error {
+					if status != 200 || contentType != "application/x-ndjson" {
+						return errors.New("invalid stream start")
+					}
+					return nil
+				},
+				Chunk: func(data []byte) error {
+					released.Write(data)
+					if released.Len() != 0 && !strings.Contains(released.String(), "two\n") {
+						_ = writePlatformNetworkFixtureFile(filepath.Join(os.Getenv("TMPDIR"), "network-stream-arrived"), []byte("1"), 0600)
+					}
+					return nil
+				},
+			},
+		)
+		done <- streamResult{result: value, err: runErr}
+	}()
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	if err := waitPlatformNetworkFixtureFile(waitCtx, filepath.Join(os.Getenv("TMPDIR"), "network-stream-arrived")); err != nil {
+		cancel()
+		t.Fatal("stream first frame did not reach current viewer", err)
+	}
+	cancel()
+	changed, err := s.st.db.ExecContext(ctx, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.stream'`, installation)
+	if err == nil {
+		var affected int64
+		affected, err = changed.RowsAffected()
+		if err == nil && affected != 1 {
+			err = fmt.Errorf("stream withdrawal affected %d rows", affected)
+		}
+	}
+	if err != nil {
+		t.Fatal("withdraw stream grant", err)
+	}
+	if err := writePlatformNetworkFixtureFile(filepath.Join(os.Getenv("TMPDIR"), "network-revoked"), []byte("1"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	value := <-done
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.stream'`, installation)
+	if !errors.Is(value.err, errAppPlatformNetworkUncertain) || value.result.Status != 0 || released.String() != "one\n" || strings.Contains(released.String(), "two\n") || platformNetworkFixtureCount(t) != 5 {
+		t.Fatal("post-frame stream withdrawal released more data", value, released.String())
+	}
+	t.Log("PORTAL_NETWORK_STREAM_POST_FRAME_REVOKED")
 }
 
 // Namespace-local DNS answers only the fixed fixture name. Nameserver addresses

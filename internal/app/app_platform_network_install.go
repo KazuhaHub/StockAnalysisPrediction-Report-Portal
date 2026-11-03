@@ -44,6 +44,23 @@ func (s *Server) createPlatformNetworkWritableInstallReview(ctx context.Context,
 	return s.createPlatformInstallReviewWithRuntime(ctx, session, release, revision, targets, platformWritableInstallFormat, &facts, endpoint)
 }
 
+func (s *Server) createPlatformNetworkAndStreamWritableInstallReview(ctx context.Context, session platformActorSession, release string, revision int64, targets []platformAudienceTarget, endpoint platformRuntimeEndpoint, policy appplatform.HTTPPolicy, streamPolicy appplatform.HTTPStreamPolicy) (platformRemovalReview, error) {
+	raw, err := appplatform.CanonicalHTTPPolicy(policy)
+	if err != nil {
+		return platformRemovalReview{}, errAppPlatformInstallUnavailable
+	}
+	rawStream, err := appplatform.CanonicalHTTPStreamPolicy(streamPolicy)
+	if err != nil {
+		return platformRemovalReview{}, errAppPlatformInstallUnavailable
+	}
+	facts, err := s.observePlatformNetworkInstallRuntime(ctx, session, endpoint, string(raw))
+	if err != nil {
+		return platformRemovalReview{}, err
+	}
+	facts.streamPolicy = string(rawStream)
+	return s.createPlatformInstallReviewWithRuntime(ctx, session, release, revision, targets, platformWritableInstallFormat, &facts, endpoint)
+}
+
 func (s *Server) createPlatformNetworkStreamWritableInstallReview(ctx context.Context, session platformActorSession, release string, revision int64, targets []platformAudienceTarget, endpoint platformRuntimeEndpoint, policy appplatform.HTTPStreamPolicy) (platformRemovalReview, error) {
 	raw, err := appplatform.CanonicalHTTPStreamPolicy(policy)
 	if err != nil {

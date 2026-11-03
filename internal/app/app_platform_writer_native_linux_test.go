@@ -34,7 +34,7 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	}
 	manifest.ID = "notes-writer-notify-demo"
 	manifest.Version = "1.0.0-beta.4"
-	manifest.Capabilities.Required = []string{"network.http", "notifications.publish", "reports.read", "secrets.use", "storage.files"}
+	manifest.Capabilities.Required = []string{"network.http", "network.stream", "notifications.publish", "reports.read", "secrets.use", "storage.files"}
 	manifest.Capabilities.Optional = nil
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
@@ -72,7 +72,11 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := s.createPlatformNetworkWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint, policy.Policy)
+	streamPolicy, err := appplatform.ParseHTTPStreamPolicy([]byte(platformNetworkStreamPolicyFixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := s.createPlatformNetworkAndStreamWritableInstallReview(ctx, session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}}, endpoint, policy.Policy, streamPolicy.Policy)
 	if err != nil {
 		t.Fatal("writable review", err)
 	}
@@ -94,7 +98,14 @@ func testNativePortalWritableWriter(t *testing.T, s *Server, session platformAct
 	if err != nil || !replay.Replayed || replay.OperationID != admitted.OperationID {
 		t.Fatal("writable admission replay", err)
 	}
-	if p.Runtime.NetworkPolicy != platformNetworkPolicyFixture(t) || transport.ValidateNetworkRuntimeProfile(p.Runtime.NetworkProfile) != nil || !p.Runtime.NetworkProfile.WritableBackend || scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != 0 || scalar[string](t, s.st, `SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != p.Runtime.NetworkPolicy {
+	if p.Runtime.NetworkPolicy != platformNetworkPolicyFixture(t) ||
+		p.Runtime.NetworkStreamPolicy != platformNetworkStreamPolicyFixture(t) ||
+		transport.ValidateNetworkRuntimeProfile(p.Runtime.NetworkProfile) != nil ||
+		!p.Runtime.NetworkProfile.WritableBackend ||
+		scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != 0 ||
+		scalar[string](t, s.st, `SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, admitted.InstallationID) != p.Runtime.NetworkPolicy ||
+		scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.stream'`, admitted.InstallationID) != 0 ||
+		scalar[string](t, s.st, `SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.stream'`, admitted.InstallationID) != p.Runtime.NetworkStreamPolicy {
 		t.Fatal("actual selected network grant not bound to review")
 	}
 	t.Log("PORTAL_WRITABLE_NETWORK_REVIEW_CURRENT")

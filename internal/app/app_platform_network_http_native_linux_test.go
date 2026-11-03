@@ -3,7 +3,9 @@
 package app
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -64,4 +66,53 @@ func testNativePlatformNetworkHTTP(t *testing.T, s *Server, actor platformActorS
 		t.Fatal("session HTTP leaked/retried uncertain network result", withdrawalErr, w.Code, w.Body.String())
 	}
 	t.Log("PORTAL_NETWORK_SESSION_HTTP_UNCERTAIN")
+	streamRaw, err := json.Marshal(map[string]any{
+		"binding": binding, "method": "GET",
+		"url":    "https://api.example.com/v1/stream",
+		"accept": "application/x-ndjson", "contentType": "", "bodyBase64": "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream := platformBackendHTTPCall(mux, path+"/stream", cookie, string(streamRaw), map[string]string{"Sec-Fetch-Site": "same-origin"})
+	var streamed []byte
+	started, ended := false, false
+	sequence := 0
+	for _, line := range strings.Split(strings.TrimSpace(stream.Body.String()), "\n") {
+		var frame struct {
+			Type        string `json:"type"`
+			Status      int    `json:"status"`
+			ContentType string `json:"contentType"`
+			Sequence    int    `json:"sequence"`
+			Body        string `json:"bodyBase64"`
+			Bytes       int64  `json:"bytes"`
+			SHA         string `json:"sha256"`
+		}
+		if json.Unmarshal([]byte(line), &frame) != nil {
+			t.Fatal("invalid stream frame", line)
+		}
+		switch frame.Type {
+		case "start":
+			started = frame.Status == 200 && frame.ContentType == "application/x-ndjson"
+		case "chunk":
+			sequence++
+			if frame.Sequence != sequence {
+				t.Fatal("stream frame sequence changed")
+			}
+			chunk, err := base64.StdEncoding.DecodeString(frame.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			streamed = append(streamed, chunk...)
+		case "end":
+			sum := sha256.Sum256(streamed)
+			ended = frame.Sequence == sequence && frame.Bytes == int64(len(streamed)) && frame.SHA == hex.EncodeToString(sum[:])
+		default:
+			t.Fatal("unexpected stream frame", line)
+		}
+	}
+	if stream.Code != 200 || stream.Header().Get("Content-Type") != "application/x-ndjson; charset=utf-8" || !started || !ended || string(streamed) != "one\ntwo\n" || platformNetworkFixtureCount(t) != 8 {
+		t.Fatal("session stream did not reach current-viewer HTTPS", stream.Code, stream.Body.String())
+	}
+	t.Log("PORTAL_NETWORK_STREAM_SESSION_NDJSON")
 }
