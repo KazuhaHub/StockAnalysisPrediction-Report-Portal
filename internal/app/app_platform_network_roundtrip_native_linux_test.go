@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/broker"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 // Re-enter only in a new network namespace. Keep the runtime and Docker daemon
@@ -329,28 +330,35 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 	ctx := context.Background()
 	var chunks bytes.Buffer
 	var started bool
-	result, err := s.requestPlatformNetworkStream(
-		ctx, actor, installation, binding,
-		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil, &endpoint,
+	result, err, stage := testNativePlatformNetworkStreamRequest(
+		t, s, actor, installation, binding, endpoint,
+		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil,
 		broker.HTTPStreamCallbacks{
 			Start: func(status int, contentType string) error {
 				started = status == 200 && contentType == "application/x-ndjson"
+				t.Logf("stream start observed status=%d content_type=%s", status, contentType)
 				return nil
 			},
 			Chunk: func(data []byte) error {
 				chunks.Write(data)
+				t.Logf("stream chunk observed bytes=%d", len(data))
 				return nil
 			},
 		},
 	)
 	if err != nil || !started || chunks.String() != "one\ntwo\n" || result.Bytes != 8 || platformNetworkFixtureCount(t) != 4 {
+		t.Logf("stream stage=%s fixture count=%d grant=%d policy=%s",
+			stage,
+			platformNetworkFixtureCount(t),
+			scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.stream'`, installation),
+			scalar[string](t, s.st, `SELECT policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.stream'`, installation))
 		t.Fatal("actual Portal current-viewer stream", result, err, started, chunks.String())
 	}
 	t.Log("PORTAL_NETWORK_STREAM_CURRENT_VIEWER")
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.stream'`, installation)
-	_, err = s.requestPlatformNetworkStream(
-		ctx, actor, installation, binding,
-		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil, &endpoint,
+	_, err, _ = testNativePlatformNetworkStreamRequest(
+		t, s, actor, installation, binding, endpoint,
+		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil,
 		broker.HTTPStreamCallbacks{Start: func(int, string) error { return nil }},
 	)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.stream'`, installation)
@@ -367,13 +375,14 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 	type streamResult struct {
 		result broker.HTTPStreamResult
 		err    error
+		stage  string
 	}
 	done := make(chan streamResult, 1)
 	var released bytes.Buffer
 	go func() {
-		value, runErr := s.requestPlatformNetworkStream(
-			ctx, actor, installation, binding,
-			"GET", "https://api.example.com/v1/stream-revoke", "application/x-ndjson", "", "", nil, &endpoint,
+		value, runErr, stage := testNativePlatformNetworkStreamRequest(
+			t, s, actor, installation, binding, endpoint,
+			"GET", "https://api.example.com/v1/stream-revoke", "application/x-ndjson", "", "", nil,
 			broker.HTTPStreamCallbacks{
 				Start: func(status int, contentType string) error {
 					if status != 200 || contentType != "application/x-ndjson" {
@@ -390,7 +399,7 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 				},
 			},
 		)
-		done <- streamResult{result: value, err: runErr}
+		done <- streamResult{result: value, err: runErr, stage: stage}
 	}()
 	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	if err := waitPlatformNetworkFixtureFile(waitCtx, filepath.Join(os.Getenv("TMPDIR"), "network-stream-arrived")); err != nil {
@@ -418,6 +427,44 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 		t.Fatal("post-frame stream withdrawal released more data", value, released.String())
 	}
 	t.Log("PORTAL_NETWORK_STREAM_POST_FRAME_REVOKED")
+}
+
+func testNativePlatformNetworkStreamRequest(
+	t *testing.T,
+	s *Server,
+	actor platformActorSession,
+	installation string,
+	binding platformBackendRequestBinding,
+	endpoint platformRuntimeEndpoint,
+	method, target, accept, kind, credential string,
+	body []byte,
+	callbacks broker.HTTPStreamCallbacks,
+) (broker.HTTPStreamResult, error, string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), platformNetworkStreamExecutionTimeout)
+	defer cancel()
+	intent, err := s.preparePlatformNetworkStreamRequest(ctx, actor, installation, binding, method, target, accept, kind, credential, body)
+	if err != nil {
+		return broker.HTTPStreamResult{}, err, "prepare"
+	}
+	defer intent.Close()
+	observed, err := platformReadNetworkRuntime(ctx, endpoint)
+	if err != nil || !validPlatformNetworkRuntimeObservation(observed, intent.access.intent.start.writer.runtime, endpoint) || observed.Profile() != intent.grant.profile {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable, "runtime"
+	}
+	proof, err := platformRequestNetworkStream(ctx, endpoint, intent.raw, intent.signature, body, intent.access.intent.start.writer.authority, func(checkCtx context.Context, c control.NetworkHTTPRequestCommand, nonce string) ([]byte, []byte, error) {
+		return s.approvePlatformNetworkRequest(checkCtx, actor, installation, intent, c, nonce)
+	}, callbacks)
+	if err != nil {
+		return broker.HTTPStreamResult{}, err, "transport"
+	}
+	if !validPlatformNetworkStreamResult(proof, intent, endpoint) {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "observation"
+	}
+	if err := s.withPlatformNetworkRequestCurrent(ctx, actor, installation, intent, nil); err != nil {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "current"
+	}
+	return proof.Result(), nil, "complete"
 }
 
 // Namespace-local DNS answers only the fixed fixture name. Nameserver addresses
