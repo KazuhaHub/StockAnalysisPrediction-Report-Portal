@@ -133,13 +133,14 @@
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformReleaseStagingDatabaseFullRollsBack$' -count=1"
       ],
       "coverage": [
-        "A truncated artifact transfer returns an error and leaves no staged release.",
-        "A later complete request starts from a new bounded download, validates the exact descriptor, signature and frontend digest, then stages once.",
+        "A truncated artifact response retains its bounded in-memory prefix for the same fetch. The retry sends Range and If-Range; a valid 206 continues at the exact offset, while a 200 safely restarts from zero. Redirects retain the range headers and final descriptor, signature and frontend digest checks still decide admission.",
+        "Exhausting the bounded retry budget leaves no staged release.",
+        "Replaying an already staged immutable package reuses the existing release without creating another operation.",
         "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission.",
         "A file-backed SQLite database with the freelist exhausted and no page-growth allowance refuses a roughly 1 MiB package; release, frontend and staging-audit rows all roll back."
       ],
       "limits": [
-        "There is no HTTP Range resume or persistent market cache in this path.",
+        "The received prefix exists only in memory for one bounded fetch. There is no persistent market cache, so request termination or process restart starts the next fetch at offset zero.",
         "Real managed-runner staging interruption and restart recovery remain unverified."
       ]
     },
@@ -195,7 +196,7 @@
   },
   "open": [
     "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
-    "PKG-08: HTTP Range resume, persistent cache, and managed-runner staging interruption/restart recovery remain open.",
+    "PKG-08: same-fetch HTTP Range resume is implemented; persistent cache and managed-runner staging interruption/restart recovery remain open.",
     "PKG-10: logical quarantine and managed stop scheduling are implemented; a native stop drill initiated by package revocation remains open.",
     "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
   ]
