@@ -330,7 +330,7 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 	ctx := context.Background()
 	var chunks bytes.Buffer
 	var started bool
-	result, err, stage := testNativePlatformNetworkStreamRequest(
+	result, stage, err := testNativePlatformNetworkStreamRequest(
 		t, s, actor, installation, binding, endpoint,
 		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil,
 		broker.HTTPStreamCallbacks{
@@ -356,7 +356,7 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 	}
 	t.Log("PORTAL_NETWORK_STREAM_CURRENT_VIEWER")
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.stream'`, installation)
-	_, err, _ = testNativePlatformNetworkStreamRequest(
+	_, _, err = testNativePlatformNetworkStreamRequest(
 		t, s, actor, installation, binding, endpoint,
 		"GET", "https://api.example.com/v1/stream", "application/x-ndjson", "", "", nil,
 		broker.HTTPStreamCallbacks{Start: func(int, string) error { return nil }},
@@ -380,7 +380,7 @@ func testNativePlatformNetworkStream(t *testing.T, s *Server, actor platformActo
 	done := make(chan streamResult, 1)
 	var released bytes.Buffer
 	go func() {
-		value, runErr, stage := testNativePlatformNetworkStreamRequest(
+		value, stage, runErr := testNativePlatformNetworkStreamRequest(
 			t, s, actor, installation, binding, endpoint,
 			"GET", "https://api.example.com/v1/stream-revoke", "application/x-ndjson", "", "", nil,
 			broker.HTTPStreamCallbacks{
@@ -439,35 +439,35 @@ func testNativePlatformNetworkStreamRequest(
 	method, target, accept, kind, credential string,
 	body []byte,
 	callbacks broker.HTTPStreamCallbacks,
-) (broker.HTTPStreamResult, error, string) {
+) (broker.HTTPStreamResult, string, error) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), platformNetworkStreamExecutionTimeout)
 	defer cancel()
 	intent, err := s.preparePlatformNetworkStreamRequest(ctx, actor, installation, binding, method, target, accept, kind, credential, body)
 	if err != nil {
-		return broker.HTTPStreamResult{}, err, "prepare"
+		return broker.HTTPStreamResult{}, "prepare", err
 	}
 	defer intent.Close()
 	observed, err := platformReadNetworkRuntime(ctx, endpoint)
 	if err != nil || !validPlatformNetworkRuntimeObservation(observed, intent.access.intent.start.writer.runtime, endpoint) || observed.Profile() != intent.grant.profile {
-		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable, "runtime"
+		return broker.HTTPStreamResult{}, "runtime", errAppPlatformNetworkUnavailable
 	}
 	proof, err := platformRequestNetworkStream(ctx, endpoint, intent.raw, intent.signature, body, intent.access.intent.start.writer.authority, func(checkCtx context.Context, c control.NetworkHTTPRequestCommand, nonce string) ([]byte, []byte, error) {
 		return s.approvePlatformNetworkRequest(checkCtx, actor, installation, intent, c, nonce)
 	}, callbacks)
 	if err != nil {
 		if errors.Is(err, broker.ErrUncertain) {
-			return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "transport"
+			return broker.HTTPStreamResult{}, "transport", errAppPlatformNetworkUncertain
 		}
-		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable, "transport"
+		return broker.HTTPStreamResult{}, "transport", errAppPlatformNetworkUnavailable
 	}
 	if !validPlatformNetworkStreamResult(proof, intent, endpoint) {
-		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "observation"
+		return broker.HTTPStreamResult{}, "observation", errAppPlatformNetworkUncertain
 	}
 	if err := s.withPlatformNetworkRequestCurrent(ctx, actor, installation, intent, nil); err != nil {
-		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "current"
+		return broker.HTTPStreamResult{}, "current", errAppPlatformNetworkUncertain
 	}
-	return proof.Result(), nil, "complete"
+	return proof.Result(), "complete", nil
 }
 
 // Namespace-local DNS answers only the fixed fixture name. Nameserver addresses
