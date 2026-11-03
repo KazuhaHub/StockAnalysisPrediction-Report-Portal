@@ -824,6 +824,108 @@ func TestPlatformPluginUninstallClearsOnlyItsOwnDataPostgres(t *testing.T) {
 	testPlatformPluginUninstallClearsOnlyItsOwnData(t, true)
 }
 
+func TestPlatformLastPluginUninstallRacesFreshInstallPostgres(t *testing.T) {
+	st := platformTestStore(t, true)
+	e := st.poolExec()
+	platformSeedPublisher(t, e, "plugins")
+	oldInstallation := platformFixtureID(931)
+	freshInstallation := platformFixtureID(932)
+	if err := platformSeedInstallation(t, e, oldInstallation, "plugins", "notebook"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertUser(User{Username: "race-reader", PasswordHash: "fixture", Role: "user", Active: true}); err != nil {
+		t.Fatal(err)
+	}
+	account := platformActorAccount{
+		username: "race-reader", created: "2026-11-01", generation: 1,
+	}
+	request := func(id, body string) platformObjectRequest {
+		return platformObjectRequest{
+			action: "create", collection: "note", requestID: id,
+			label: id, mediaType: "application/json", content: []byte(body),
+		}
+	}
+	if _, err := createPlatformObject(
+		e, oldInstallation, "notebook", account,
+		request("old-before-remove", "old payload"),
+	); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, st, `UPDATE app_platform_installations
+		SET desired_state='removed' WHERE id=?`, oldInstallation)
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		tx, err := st.db.Begin()
+		if err != nil {
+			results <- err
+			return
+		}
+		defer tx.Rollback()
+		<-start
+		err = cleanupPlatformInstallationObjects(
+			migExec{s: st, ex: tx}, oldInstallation, now)
+		if err == nil {
+			err = tx.Commit()
+		}
+		results <- err
+	}()
+	go func() {
+		defer wg.Done()
+		tx, err := st.db.Begin()
+		if err != nil {
+			results <- err
+			return
+		}
+		defer tx.Rollback()
+		<-start
+		e := migExec{s: st, ex: tx}
+		if err = lockPlatformPluginStorage(e, "notebook"); err == nil {
+			err = platformSeedInstallation(
+				t, e, freshInstallation, "plugins", "notebook",
+			)
+		}
+		if err == nil {
+			_, err = createPlatformObject(
+				e, freshInstallation, "notebook", account,
+				request("fresh-during-remove", "fresh payload"),
+			)
+		}
+		if err == nil {
+			err = tx.Commit()
+		}
+		results <- err
+	}()
+	close(start)
+	wg.Wait()
+	close(results)
+	for err := range results {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	table := platformPluginDataTableName("notebook")
+	if !st.tableExists(table) ||
+		scalar[int](t, st, `SELECT COUNT(*) FROM `+table+` WHERE installation_id=?`, oldInstallation) != 0 ||
+		scalar[int](t, st, `SELECT COUNT(*) FROM `+table+` WHERE installation_id=? AND label='fresh-during-remove'`, freshInstallation) != 1 {
+		t.Fatal("concurrent reinstall lost its object or revived old data")
+	}
+	if scalar[int64](t, st, `SELECT used_objects FROM app_platform_object_storage WHERE id=1`) != 1 ||
+		scalar[int64](t, st, `SELECT used_bytes FROM app_platform_object_storage WHERE id=1`) != int64(len("fresh payload")) {
+		t.Fatal("concurrent reinstall counters retain removed data")
+	}
+	if err := verifyPlatformObjectStorage(e); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlatformObjectBackupAndOlderDumpRestore(t *testing.T) {
 	s, _, reader, installation := platformObjectsFixture(t)
 	binding := platformObjectBindingMap(t, s, reader, installation)

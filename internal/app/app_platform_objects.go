@@ -89,6 +89,27 @@ func lockPlatformObjectStorage(e migExec) (int64, int64, error) {
 	return usedBytes, usedObjects, err
 }
 
+func lockPlatformPluginStorage(e migExec, appID string) error {
+	if !platformDirectoryAppID.MatchString(appID) {
+		return errPlatformObjectNotFound
+	}
+	if e.s.driver != "postgres" {
+		return nil
+	}
+	var ignored any
+	var ok int
+	if err := e.queryRow(
+		`SELECT pg_advisory_xact_lock(hashtextextended(?,0)),1`,
+		"portal-app-plugin-storage:"+appID,
+	).Scan(&ignored, &ok); err != nil || ok != 1 {
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("plugin storage lock was not acquired")
+	}
+	return nil
+}
+
 func readPlatformPluginTable(e migExec, appID string, lock bool) (platformPluginTableRow, error) {
 	var row platformPluginTableRow
 	query := `SELECT id,app_id,table_name,data_format,used_bytes,used_objects,revision,created_ms,updated_ms FROM app_platform_plugin_tables WHERE app_id=?`
@@ -461,11 +482,20 @@ func refreshPlatformObjectStorage(e migExec, now int64) error {
 }
 
 func cleanupPlatformInstallationObjects(e migExec, installation string, now int64) error {
-	if _, _, err := lockPlatformObjectStorage(e); err != nil {
+	var appID string
+	lock := ""
+	if e.s.driver == "postgres" {
+		lock = " FOR UPDATE"
+	}
+	if err := e.queryRow(`SELECT app_id FROM app_platform_installations WHERE id=?`+lock, installation).Scan(&appID); err != nil {
 		return err
 	}
-	var appID string
-	if err := e.queryRow(`SELECT app_id FROM app_platform_installations WHERE id=?`, installation).Scan(&appID); err != nil {
+	if err := lockPlatformPluginStorage(e, appID); err != nil {
+		return err
+	}
+	// Keep the same lock order as install/object writers: installation, then the
+	// per-app admission lock, global storage row and plugin registry.
+	if _, _, err := lockPlatformObjectStorage(e); err != nil {
 		return err
 	}
 	plugin, err := readPlatformPluginTable(e, appID, true)

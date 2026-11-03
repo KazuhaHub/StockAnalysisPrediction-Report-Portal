@@ -344,6 +344,9 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if raw != string(current) || appID != verified.appID || publisher != verified.publisherID {
 			return errAppPlatformPlanChanged
 		}
+		if err := lockPlatformPluginStorage(e, appID); err != nil {
+			return err
+		}
 		installationID, err := platformNewUUID()
 		if err != nil {
 			return err
