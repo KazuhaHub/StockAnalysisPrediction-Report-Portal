@@ -488,14 +488,34 @@ func verifyNativeCheckpointRecoveryAssociations(
 		framework != epoch {
 		t.Fatal("recovery set did not bind the reviewed operation", err)
 	}
-	var projection platformUpdateProjection
-	if json.Unmarshal([]byte(planRaw), &projection) != nil ||
-		projection.Target.Runtime == nil ||
-		projection.InstallationID != installation ||
-		projection.SourceReleaseSHA256 != release ||
-		projection.Target.ReleaseSHA256 == "" ||
-		projection.Target.Runtime.ControllerEpoch != epoch {
-		t.Fatal("recovery set plan lost code/runtime identity")
+	var plan platformManagedUpdatePlan
+	runtimeEpoch := ""
+	if err := json.Unmarshal([]byte(planRaw), &plan); err == nil &&
+		plan.TargetRuntime != nil {
+		runtimeEpoch = plan.TargetRuntime.ControllerEpoch
+	}
+	if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+		plan.TargetRuntime == nil ||
+		plan.InstallationID != installation ||
+		plan.SourceReleaseSHA256 != release ||
+		plan.TargetReleaseSHA256 == "" ||
+		plan.ControllerEpoch != epoch ||
+		plan.TargetRuntime.ControllerEpoch != epoch ||
+		plan.DataNamespaceID != namespace ||
+		plan.DataFormat != format ||
+		plan.SourceWriterFence != writerFence ||
+		plan.RecoverySetID != recoveryID ||
+		plan.CheckpointOperationID != operationID ||
+		plan.CheckpointID != checkpointID ||
+		plan.CheckpointManifestSHA256 != manifest ||
+		plan.CheckpointArchiveBytes != bytes {
+		t.Fatalf("recovery set plan lost code/runtime identity: "+
+			"installation=%s/%s source=%s/%s target-empty=%t epoch=%s/%s runtime=%v",
+			plan.InstallationID, installation,
+			plan.SourceReleaseSHA256, release,
+			plan.TargetReleaseSHA256 == "",
+			runtimeEpoch, epoch,
+			plan.TargetRuntime != nil)
 	}
 	var runtimeID, fingerprint string
 	if err := s.st.queryRow(`
@@ -504,7 +524,7 @@ func verifyNativeCheckpointRecoveryAssociations(
 		JOIN app_platform_runtime_bindings r ON r.id=i.runtime_id
 		WHERE i.id=?`, installation).Scan(
 		&runtimeID, &fingerprint, &framework,
-	); err != nil || runtimeID != projection.Target.Runtime.RuntimeID ||
+	); err != nil || runtimeID != plan.TargetRuntime.RuntimeID ||
 		!platformValidSHA(fingerprint) || framework != epoch {
 		t.Fatal("recovery set lost runtime key association", err)
 	}
@@ -517,7 +537,7 @@ func verifyNativeCheckpointRecoveryAssociations(
 		installation).Scan(
 		&sourceRelease, &sourceGeneration, &sourceFormat, &sourceState,
 	); err != nil || sourceRelease != release || sourceState != "active" ||
-		sourceFormat != format || sourceGeneration != projection.SourceGeneration {
+		sourceFormat != format || sourceGeneration != plan.SourceGeneration {
 		t.Fatal("recovery set lost source code/data identity", err)
 	}
 	var effectID, receiptRaw string
@@ -529,7 +549,8 @@ func verifyNativeCheckpointRecoveryAssociations(
 		t.Fatal("checkpoint receipt association", err)
 	}
 	receipt, err := journal.ParseCheckpointReceipt([]byte(receiptRaw))
-	if err != nil || receipt.EffectID != effectID ||
+	if err != nil || plan.CheckpointEffectID != effectID ||
+		receipt.EffectID != effectID ||
 		receipt.OperationID != operationID ||
 		receipt.InstallationID != installation ||
 		receipt.NamespaceID != namespace ||
