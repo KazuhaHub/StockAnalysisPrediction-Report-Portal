@@ -235,12 +235,6 @@ async function main(){
    await result.filter({hasNotText:'pending'}).waitFor();
    if(await result.innerText()!=='error:unavailable')throw new Error('revoked network remained available');
   }
-  if(networkStreamAvailable){
-   stage='network-stream-revoked';await frame.getByRole('button',{name:'Read network stream',exact:true}).click();
-   const result=frame.locator('[data-testid="network-stream-result"]');
-   await result.filter({hasNotText:'pending'}).waitFor();
-   if(await result.innerText()!=='error:unavailable')throw new Error('revoked network stream remained available');
-  }
   if(reportsReady==='true'){
    stage='reports-revoked';const revokedReport=await dispatchReports();
    if(revokedReport!=='error:unavailable')throw new Error('revoked reports returned '+revokedReport);

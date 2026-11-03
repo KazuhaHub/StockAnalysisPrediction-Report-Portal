@@ -171,9 +171,12 @@ export function createAppNetworkStreamTransport(binding: BridgeBinding) {
       throw new AppNetworkError("uncertain");
     }
     if (response.status !== 200) {
+      const text = await response.text();
+      if (response.status === 404 && text === "application unavailable\n")
+        throw new AppNetworkError("unavailable");
       let data: unknown;
       try {
-        data = JSON.parse(await response.text());
+        data = JSON.parse(text);
       } catch {
         throw new AppNetworkError("uncertain");
       }

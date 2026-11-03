@@ -323,3 +323,19 @@ test("stream transport refuses missing termination, duplicate frames and digest 
     ).rejects.toMatchObject({ code: "uncertain", retryable: false });
   }
 });
+
+test("stream transport maps the closed unavailable document without JSON", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response("application unavailable\n", { status: 404 }),
+    ),
+  );
+  await expect(
+    createAppNetworkStreamTransport(binding)(
+      { ...request, accept: "text/event-stream" },
+      new AbortController().signal,
+      async () => {},
+    ),
+  ).rejects.toMatchObject({ code: "unavailable", retryable: false });
+});
