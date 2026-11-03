@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -324,4 +326,73 @@ func testPlatformSignedReleaseRestore(t *testing.T, pg bool) {
 func TestPlatformSignedReleaseRestoreSQLite(t *testing.T) { testPlatformSignedReleaseRestore(t, false) }
 func TestPlatformSignedReleaseRestorePostgres(t *testing.T) {
 	testPlatformSignedReleaseRestore(t, true)
+}
+
+func TestPlatformReleaseStagingDatabaseFullRollsBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "release-full.db")
+	st, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	s, session := platformActorTestServerWithStore(t, st)
+	if err := s.initializeAppPlatformControl(session); err != nil {
+		t.Fatal(err)
+	}
+	platformRegisterTestPublisher(t, s, session)
+	var pages int
+	if err := st.queryRow(`PRAGMA page_count`).Scan(&pages); err != nil || pages < 1 {
+		t.Fatal("SQLite page count", pages, err)
+	}
+	mustExec(t, st, `CREATE TABLE fixture_release_full(fill BLOB)`)
+	mustExec(t, st, `PRAGMA max_page_count=`+strconv.Itoa(pages))
+	filled := false
+	filler := bytes.Repeat([]byte{'x'}, 4096)
+	for range 10000 {
+		if _, err := st.exec(
+			`INSERT INTO fixture_release_full(fill) VALUES(?)`,
+			filler); err != nil {
+			filled = true
+			break
+		}
+	}
+	if !filled {
+		t.Fatal("SQLite freelist was not exhausted")
+	}
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	header := &zip.FileHeader{Name: "index.html", Method: zip.Store}
+	file, err := writer.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(bytes.Repeat(
+		[]byte("<!doctype html><p>capacity</p>"), 48<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _ := platformSignedReleaseFixture(t, "1.0.0-beta.1")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Frontend.SHA256 = platformDigest(archive.Bytes())
+	raw, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := platformSignTestDescriptor(t, raw)
+	if _, err := s.stagePlatformRelease(
+		session, raw, signature, archive.Bytes()); err == nil {
+		t.Fatal("database full accepted a staged release")
+	}
+	if scalar[int](t, st, `SELECT
+		(SELECT COUNT(*) FROM app_platform_releases)+
+		(SELECT COUNT(*) FROM app_platform_frontend_artifacts)+
+		(SELECT COUNT(*) FROM audit_log
+		 WHERE action='app_platform.release_staged')`) != 0 {
+		t.Fatal("database full left release, artifact or audit residue")
+	}
 }

@@ -17,7 +17,7 @@ var errAppPlatformReleaseConflict = errors.New("application release bytes or tru
 type platformStagedRelease struct {
 	sha256, publisherID, appID, verificationKeyID string
 	trustRevision, keyRevision                    int64
-	reused                                        bool
+	reused, managed                               bool
 }
 
 // This stages immutable declaration/frontend bytes, not an admitted installation
@@ -53,6 +53,7 @@ func (s *Server) stagePlatformReleaseContext(ctx context.Context, session platfo
 			return errAppPlatformReleaseConflict
 		}
 		result = platformStagedIdentity(verified)
+		result.managed = parsed.Manifest.Backend != nil
 		var existingSHA string
 		err = e.queryRow(`SELECT sha256 FROM app_platform_releases WHERE publisher_id=? AND app_id=? AND version=?`, parsed.Manifest.Publisher, parsed.Manifest.ID, parsed.Manifest.Version).Scan(&existingSHA)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -190,6 +191,7 @@ func platformVerifyStoredRelease(e migExec, sha string, expectedTrustRevision in
 	if result.sha256 != sha || m.ID != appID || m.Publisher != publisher || m.Version != version || verified.KeyID != keyID || m.Frontend.SHA256 != frontendSHA || boolInt(m.Backend != nil) != managed || result.trustRevision != expectedTrustRevision {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
+	result.managed = m.Backend != nil
 	inspected, err := appplatform.InspectFrontend(m, archive)
 	if err != nil || inspected.ArchiveBytes != archiveBytes {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict

@@ -93,6 +93,63 @@ func TestPlatformManagementInstallHTTPPostgres(t *testing.T) {
 	testPlatformManagementInstallHTTP(t, true)
 }
 
+func TestPlatformManagementManagedInstallCommitRequiresRuntime(t *testing.T) {
+	s, actor := platformTrustTestServer(t, false)
+	platformRegisterTestPublisher(t, s, actor)
+	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
+	release, err := s.stagePlatformRelease(
+		actor, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := scalar[int64](t, s.st, `SELECT CAST(strftime('%s','now') AS INTEGER)*1000`)
+	var facts platformActorFacts
+	if err := s.withPlatformTrustActorContext(
+		t.Context(), actor,
+		func(_ migExec, current platformActorFacts,
+			_ platformActorControl, _ appplatform.PublisherTrust) error {
+			facts = current
+			return nil
+		}); err != nil {
+		t.Fatal(err)
+	}
+	planID := platformFixtureID(990)
+	platformTestInsert(t, s.st.poolExec(), "review_plans", map[string]any{
+		"id": planID, "installation_id": nil,
+		"app_id": release.appID, "publisher_id": release.publisherID,
+		"action": "install", "source_release_sha256": nil,
+		"target_release_sha256": release.sha256,
+		"installation_revision": 0, "policy_revision": 0,
+		"trust_revision": 1, "controller_epoch": s.st.GetSetting(
+			"app_platform_controller_epoch", ""),
+		"actor_scope":           facts.scope,
+		"username":              actor.username,
+		"account_created":       actor.created,
+		"account_generation":    actor.generation,
+		"authority_fingerprint": facts.authorityFingerprint,
+		"plan_sha256":           platformDigest([]byte("managed-routing-plan")),
+		"plan_json":             `{"format":"` + platformManagedInstallFormat + `"}`,
+		"expires_ms":            now + 60000, "consumed_ms": nil,
+		"created_ms": now, "updated_ms": now,
+	})
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(
+		*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	body := fmt.Sprintf(`{"plan_id":%q,"plan_sha256":%q,"idempotency_key":%q}`,
+		planID, platformDigest([]byte("managed-routing-plan")),
+		platformFixtureID(991))
+	got := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/operations", cookie, body)
+	if got.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(got.Body.String(), "app_platform_runtime_unavailable") ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE consumed_ms IS NOT NULL`) != 0 {
+		t.Fatal("managed commit fell through to the static consumer",
+			got.Code, got.Body.String())
+	}
+}
+
 func TestPlatformManagementUpdateHTTP(t *testing.T) {
 	s, actor, installation, target := platformUpdateFixture(t, []int{1})
 	source := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)

@@ -137,7 +137,7 @@ func (s *Server) apiPlatformStagedReleases(w http.ResponseWriter, r *http.Reques
 				resources := manifest.Backend.Resources
 				item.Resources = &resources
 			}
-			if platformInstallRequirements(verified.Descriptor.Manifest) != nil || verified.Descriptor.Manifest.Backend != nil || verified.Descriptor.Manifest.Data.WritesOnStartup {
+			if platformPackageRequirements(verified.Descriptor.Manifest) != nil {
 				item.Installable = false
 				item.Reason = "requirements_unavailable"
 			}

@@ -46,6 +46,24 @@ func platformInstallRequirements(manifest appplatform.Manifest) error {
 	return nil
 }
 
+// Package staging binds signed bytes independently of a runner observation.
+// Managed packages retain runner compatibility for the exact managed review.
+func platformPackageRequirements(manifest appplatform.Manifest) error {
+	if manifest.Backend == nil {
+		return platformInstallRequirements(manifest)
+	}
+	compatibility, err := appplatform.EvaluateCompatibility(manifest, appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI})
+	if err != nil || !platformSupportedRequiredCapabilities(manifest) {
+		return errAppPlatformInstallUnavailable
+	}
+	for _, issue := range compatibility.Issues {
+		if issue != appplatform.RunnerRequired {
+			return errAppPlatformInstallUnavailable
+		}
+	}
+	return nil
+}
+
 func platformFrontendRequiredCapabilities(manifest appplatform.Manifest) bool {
 	required := manifest.Capabilities.Required
 	seen := make(map[string]bool, len(required))

@@ -186,7 +186,7 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 	if manifest.ID != entry.AppID || manifest.Publisher != entry.PublisherID || manifest.Version != entry.Version {
 		return zero, errAppPlatformReleaseConflict
 	}
-	if platformInstallRequirements(manifest) != nil || manifest.Backend != nil || manifest.Data.WritesOnStartup {
+	if platformPackageRequirements(manifest) != nil {
 		return zero, errAppPlatformInstallUnavailable
 	}
 	// Resolve only the signed relative artifact path against the descriptor's

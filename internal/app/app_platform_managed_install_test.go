@@ -175,3 +175,33 @@ func TestManagedInstallSignedRelease(t *testing.T) {
 		t.Fatal("release staging granted installation")
 	}
 }
+
+func TestManagedPackageStagingDefersOnlyRunnerCompatibility(t *testing.T) {
+	raw, _ := platformManagedReleaseFixture(t, "linux/amd64")
+	parsed, err := appplatform.ParseDescriptor(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platformPackageRequirements(parsed.Manifest); err != nil {
+		t.Fatal("runner availability was required before staging", err)
+	}
+	for name, mutate := range map[string]func(*appplatform.Manifest){
+		"platform api": func(m *appplatform.Manifest) {
+			m.Compatibility.PlatformAPI = ">=3.0.0"
+		},
+		"required capability": func(m *appplatform.Manifest) {
+			m.Capabilities.Required = []string{"secrets.read"}
+		},
+		"duplicate capability": func(m *appplatform.Manifest) {
+			m.Capabilities.Required = []string{"storage.files", "storage.files"}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifest := parsed.Manifest
+			mutate(&manifest)
+			if err := platformPackageRequirements(manifest); err == nil {
+				t.Fatal("invalid package metadata passed staging requirements")
+			}
+		})
+	}
+}

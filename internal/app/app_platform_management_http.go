@@ -331,7 +331,25 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		review, err := s.createPlatformInstallReviewForFormatContext(r.Context(), actor, release, n, targets, platformFrontendInstallFormat)
+		staged, err := s.recheckPlatformStagedRelease(actor, release, n)
+		if err != nil {
+			platformManagementError(w, err)
+			return
+		}
+		var review platformRemovalReview
+		if staged.managed {
+			endpoint, ok := s.platformRuntimeEndpoint()
+			if !ok {
+				platformManagementError(w, errAppPlatformRuntimeConflict)
+				return
+			}
+			review, err = s.createPlatformManagedInstallReview(
+				r.Context(), actor, release, n, targets, endpoint)
+		} else {
+			review, err = s.createPlatformInstallReviewForFormatContext(
+				r.Context(), actor, release, n, targets,
+				platformFrontendInstallFormat)
+		}
 		if err != nil {
 			platformManagementError(w, err)
 			return
@@ -351,7 +369,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			}
 			audience = append(audience, item)
 		}
-		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": "0", "audience": audience}})
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "audience": audience}})
 	case "update":
 		if len(fields) != 4 || fields["installation_id"] == nil || fields["audience"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
@@ -581,15 +599,32 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer releaseSlot()
-	var action string
-	if err := s.st.db.QueryRowContext(r.Context(), s.st.bind(`SELECT action FROM app_platform_review_plans WHERE id=? AND username=? AND account_created=? AND account_generation=?`), id, actor.username, actor.created, actor.generation).Scan(&action); err != nil {
+	var action, planRaw string
+	if err := s.st.db.QueryRowContext(r.Context(), s.st.bind(`SELECT action,plan_json FROM app_platform_review_plans WHERE id=? AND username=? AND account_created=? AND account_generation=?`), id, actor.username, actor.created, actor.generation).Scan(&action, &planRaw); err != nil {
 		platformManagementError(w, errAppPlatformPlanChanged)
 		return
 	}
 	var result platformRemovalCommit
 	switch action {
 	case "install":
-		result, err = s.consumePlatformInstallReviewForFormatContext(r.Context(), actor, id, sha, key, platformFrontendInstallFormat)
+		format, formatErr := platformParseInstallProfile(planRaw)
+		if formatErr != nil {
+			err = formatErr
+			break
+		}
+		if platformManagedFormat(format) {
+			endpoint, ok := s.platformRuntimeEndpoint()
+			if !ok {
+				err = errAppPlatformRuntimeConflict
+				break
+			}
+			result, err = s.consumePlatformManagedInstallReview(
+				r.Context(), actor, id, sha, key, endpoint)
+		} else {
+			result, err = s.consumePlatformInstallReviewForFormatContext(
+				r.Context(), actor, id, sha, key,
+				platformFrontendInstallFormat)
+		}
 	case "update":
 		result, err = s.consumePlatformUpdateReviewContext(
 			r.Context(), actor, id, sha, key)

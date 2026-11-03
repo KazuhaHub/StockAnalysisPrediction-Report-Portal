@@ -187,3 +187,78 @@ func TestPlatformMarketVerifiedRemoteStagingSQLite(t *testing.T) {
 func TestPlatformMarketVerifiedRemoteStagingPostgres(t *testing.T) {
 	testPlatformMarketVerifiedRemoteStaging(t, true)
 }
+
+func testPlatformManagedMarketStaging(t *testing.T, pg bool) {
+	s, actor := platformTrustTestServer(t, pg)
+	platformRegisterTestPublisher(t, s, actor)
+	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
+	signature := platformSignTestDescriptor(t, raw)
+	digest := platformDigest(raw)
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var base string
+	remote := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/index.json":
+			json.NewEncoder(w).Encode(map[string]any{"format": "portal.catalogue/2-dev.1", "releases": []appplatform.CatalogueRelease{{
+				AppID: manifest.ID, PublisherID: manifest.Publisher,
+				Version: manifest.Version, DescriptorSHA256: digest,
+				DescriptorURL: base + "/app.json", SignatureURL: base + "/app.sig",
+			}}})
+		case "/app.json":
+			w.Write(raw)
+		case "/app.sig":
+			w.Write(signature)
+		case "/" + manifest.Frontend.Artifact:
+			w.Write(archive)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer remote.Close()
+	base = "https://127.0.0.1"
+	client := newPlatformMarketClient()
+	client.safe.allowInsecureForTest = true
+	platformMarketTestTLS(t, client, remote)
+	result, err := s.fetchAndStagePlatformMarketRelease(
+		t.Context(), actor, base+"/index.json", digest, client)
+	if err != nil || result.sha256 != digest || !result.managed {
+		t.Fatal("managed market release was not staged", result, err)
+	}
+
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(
+		*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	got := sessionTestRequest(
+		mux, "GET", "/api/admin/app-platform/releases", cookie, "")
+	var page struct {
+		Items []platformStagedSummary `json:"items"`
+	}
+	if got.Code != 200 || json.Unmarshal(got.Body.Bytes(), &page) != nil ||
+		len(page.Items) != 1 || !page.Items[0].Backend ||
+		!page.Items[0].Installable || page.Items[0].Reason != "" {
+		t.Fatal("managed market release missing from catalogue",
+			got.Code, got.Body.String())
+	}
+	plan := sessionTestRequest(
+		mux, "POST", "/api/admin/app-platform/plans", cookie,
+		platformManagementPlanBody(digest, actor.username))
+	if plan.Code != http.StatusServiceUnavailable ||
+		!strings.Contains(plan.Body.String(), "app_platform_runtime_unavailable") ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 {
+		t.Fatal("managed market install did not fail at runtime authority",
+			plan.Code, plan.Body.String())
+	}
+}
+
+func TestPlatformManagedMarketStagingSQLite(t *testing.T) {
+	testPlatformManagedMarketStaging(t, false)
+}
+
+func TestPlatformManagedMarketStagingPostgres(t *testing.T) {
+	testPlatformManagedMarketStaging(t, true)
+}
