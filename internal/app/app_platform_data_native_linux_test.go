@@ -431,7 +431,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			sockets = serviceFixture.ipcRoot
 			observerStore = nil
 		}
-		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, registrationReader, readyWriter, sockets, authority, observerStore)
+		checkRegistrationRPC = observeNativeRegistrationRPCFixture(t, ctx, publicReader, readyWriter, sockets, authority, observerStore)
 	}
 	readyWriter.Close()
 	waitErr := child.Wait()
@@ -864,7 +864,6 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if err := json.NewEncoder(public).Encode(struct{ Raw, Signature []byte }{intent.raw, intent.signature}); err != nil {
 		t.Fatal(err)
 	}
-	public.Close()
 	var signal [1]byte
 	if _, err := io.ReadFull(ready, signal[:]); err != nil || signal[0] != 1 {
 		t.Fatal("runner endpoint not ready")

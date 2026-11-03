@@ -109,12 +109,11 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id) != 3 {
 		t.Fatal("Portal did not persist the single delivery intent")
 	}
-	public := os.NewFile(5, "public-registration-coordination")
+	public := os.NewFile(3, "public-registration-coordination")
 	ready := os.NewFile(4, "registration-ready")
 	if public == nil || ready == nil {
 		t.Fatal("public coordination pipe unavailable")
 	}
-	defer public.Close()
 	if err := json.NewEncoder(public).Encode(registrationRPCFixtureEnvelope{Raw: intent.raw, Signature: intent.signature}); err != nil {
 		t.Fatal(err)
 	}
