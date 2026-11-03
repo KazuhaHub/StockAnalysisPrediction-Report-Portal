@@ -69,6 +69,30 @@
         "Writable and managed request tests fence policy/account drift before response consumption."
       ]
     },
+    "AUTH-06": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformInstallStaging(SQLite|Postgres)|TestPlatformInstallCapabilityRows(SQLite|Postgres)|TestPlatformSecretBindingLifecycle(SQLite|Postgres)|TestPlatformSecretBindingReviewRefusesDrift|TestPlatformNetworkRequestPayloadBoundary|TestPlatformManagedRequestPayloadBoundary|TestPlatformWritableRequestBindingBoundary|TestPlatformWritableRequestBinding(SQLite|Postgres))$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175"
+      ],
+      "coverage": [
+        "Changing a capability grant while install staging is pending refuses the stage and leaves durable state unchanged.",
+        "A pending required grant cannot become active; exact capability row/policy/review changes are refused at commit.",
+        "Credential rotation revokes the old binding until explicit reapproval, and credential revocation invalidates the current use immediately. Stale binding review after network-policy drift writes no row.",
+        "Writable request binding rejects generation, policy and release drift before dispatch.",
+        "Missing or malformed native provenance is classified as uncertain, releases no response and is not automatically retried.",
+        "The native artifact records revocation before and after an actual external IO boundary, post-IO OU revocation, uncertain no-retry and owned cleanup."
+      ],
+      "native_evidence": {
+        "candidate": "95e358fd",
+        "quota_probe_run": "41599541528",
+        "artifact_sha256": "7af3a921905973faed88f30f05f97ddfa57aa62bc4c73bddda848df90e8b8e37",
+        "native_portal_network_https_pre_io_revoked": true,
+        "native_portal_network_https_post_io_revoked": true,
+        "native_portal_writable_post_io_ou_revoked": true,
+        "native_writable_backend_request_uncertain_no_retry": true
+      }
+    },
     "AUTH-07": {
       "status": "pass-development",
       "commands": [
@@ -84,6 +108,6 @@
   },
   "limits": [
     "These are development server/API tests, not the complete H16 machine matrix, capacity benchmark or manual browser review.",
-    "AUTH-06 and AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
+    "AUTH-08 and the remaining SEC/RUN/LIFE rows are outside this evidence increment."
   ]
 }
