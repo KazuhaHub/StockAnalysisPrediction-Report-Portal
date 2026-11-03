@@ -38,7 +38,8 @@ and activation](113-writable-install-worker.md) and
 [reviewed network installation](140-reviewed-network-installation.md), and
 [current-viewer network request authority](141-current-viewer-network-request.md), and
 [isolated Portal HTTPS acceptance](142-portal-https-native-acceptance.md), and
-[the session-only network gateway](143-network-session-http-gateway.md).
+[the session-only network gateway](143-network-session-http-gateway.md), and
+[the development static offline envelope](157-offline-envelope.md).
 The D2 [credential/binding storage extension](131-secret-binding-storage-proposal.md)
 is now owner-approved for development/isolated implementation; production and
 later job/event products remain separate decisions.

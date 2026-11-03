@@ -1,19 +1,19 @@
 {
   "format": "portal.app-platform.package-validation/1",
-  "captured_at": "2026-11-02T20:07:00-08:00",
+  "captured_at": "2026-11-02T21:40:58-08:00",
   "status": "partial",
   "candidate": {
-    "portal_package_commit": "bdbe1155089345e66797cefb625b87e3839664cb",
-    "apps": "c972817ee2d617fc8063a09ceeacd7d87ec2e57a"
+    "portal_package_commit": "563e8b556e0f09d197744b51af8685ad3a4c2a65",
+    "apps": "4c53f102e42ffb95377f21207d0c04e7173908b7"
   },
   "ci": {
-    "portal_general_and_race": "41573046728",
-    "portal_quota_browser": "41573046555",
-    "portal_runner_daemon": "41573046790",
-    "portal_codeql": "41573043269",
+    "portal_general_and_race": "41582763189",
+    "portal_quota_browser": "41582763073",
+    "portal_runner_daemon": "41582763413",
+    "portal_codeql": "41582758211",
     "apps_check": [
-      "41575758389",
-      "41575753650"
+      "41581446614",
+      "41581440281"
     ]
   },
   "results": [
@@ -22,15 +22,22 @@
       "status": "partial",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagedMarketStaging(SQLite|Postgres)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestOfflineEnvelope' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformOfflineMarketHTTP' -count=1",
+        "python3 -m unittest scripts.tests.test_offline_envelope -v"
       ],
       "coverage": [
         "A signed managed descriptor is now accepted by the market staging path and appears in the release catalogue as backend, installable metadata.",
         "The management install plan and commit select the managed review/consumer from canonical plan bytes instead of falling through to the static path.",
-        "Without a configured or compatible runner, managed install admission fails with a bounded runtime-unavailable response and creates no installation or operation."
+        "Without a configured or compatible runner, managed install admission fails with a bounded runtime-unavailable response and creates no installation or operation.",
+        "The development static .portalapp envelope has an exact three-member format, bounded ZIP parser, closed detached-signature syntax, exact descriptor/frontend binding and inspector output.",
+        "The Apps packer emits deterministic envelopes from already signed bytes and never reads a private key.",
+        "The administrator offline upload stages through existing trust/signature/immutable-release checks, then completes the normal review, commit, activation and launch path on SQLite and PostgreSQL.",
+        "Unknown, duplicate, traversal, symlink, executable, changed-frontend, wrong-digest, malformed and frontend-only managed envelopes are refused without state."
       ],
       "limits": [
-        "The signed .portalapp offline-envelope install path, including managed image content, is not implemented yet."
+        "The static offline envelope is implemented, but managed OCI image layout/platform payloads and public envelope-format freeze remain open."
       ]
     },
     {
@@ -187,7 +194,7 @@
     ]
   },
   "open": [
-    "PKG-01: managed market staging and plan/commit routing are implemented; the signed offline envelope and managed image payload remain open.",
+    "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
     "PKG-08: HTTP Range resume, persistent cache, and managed-runner staging interruption/restart recovery remain open.",
     "PKG-10: logical quarantine and managed stop scheduling are implemented; a native stop drill initiated by package revocation remains open.",
     "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
