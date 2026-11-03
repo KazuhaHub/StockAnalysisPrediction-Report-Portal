@@ -129,29 +129,29 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	child := func(uid, gid uint32, action, path string, signature []byte) *exec.Cmd {
+	child := func(uid, gid uint32, action, path string, command, signature []byte) *exec.Cmd {
 		cmd := exec.Command(binary, "-test.run=^TestControllerIdentityChild$", "-test.timeout=15s")
-		cmd.Env = []string{"GOMAXPROCS=2", "PORTAL_APP_RUNNER_IDENTITY_CHILD=" + action, "IDENTITY_SOCKET=" + path, "IDENTITY_COMMAND=" + base64.RawStdEncoding.EncodeToString(raw), "IDENTITY_SIGNATURE=" + base64.RawStdEncoding.EncodeToString(signature)}
+		cmd.Env = []string{"GOMAXPROCS=2", "PORTAL_APP_RUNNER_IDENTITY_CHILD=" + action, "IDENTITY_SOCKET=" + path, "IDENTITY_COMMAND=" + base64.RawStdEncoding.EncodeToString(command), "IDENTITY_SIGNATURE=" + base64.RawStdEncoding.EncodeToString(signature)}
 		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: gid, Groups: []uint32{gid}}}
 		return cmd
 	}
-	run := func(uid, gid uint32, action string, signature []byte) {
+	run := func(uid, gid uint32, action string, command, signature []byte) {
 		t.Helper()
-		cmd := child(uid, gid, action, path, signature)
+		cmd := child(uid, gid, action, path, command, signature)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("identity child %s (%d:%d): %v\n%s", action, uid, gid, err, out)
 		}
 	}
-	run(controllerTestUID, controllerTestGID, "probe", sig)
-	run(41002, controllerTestGID, "probe-refused", sig)
+	run(controllerTestUID, controllerTestGID, "probe", raw, sig)
+	run(41002, controllerTestGID, "probe-refused", raw, sig)
 	// A group member holding a real signed request still cannot admit it as Portal.
-	run(41002, controllerTestGID, "peer-refused", sig)
+	run(41002, controllerTestGID, "peer-refused", raw, sig)
 	// Both an unrelated user and the right UID without the endpoint group must be
 	// denied by filesystem permissions before any stream can be opened.
-	run(41003, 41003, "dac-refused", sig)
-	run(controllerTestUID, 41003, "dac-refused", sig)
-	run(controllerTestUID, controllerTestGID, "signature-refused", make([]byte, 64))
-	run(controllerTestUID, controllerTestGID, "accepted", sig)
+	run(41003, 41003, "dac-refused", raw, sig)
+	run(controllerTestUID, 41003, "dac-refused", raw, sig)
+	run(controllerTestUID, controllerTestGID, "signature-refused", raw, make([]byte, 64))
+	run(controllerTestUID, controllerTestGID, "accepted", raw, sig)
 	result, err := store.AdmitControlCommand(context.Background(), raw, sig)
 	if err != nil || !result.Replayed || result.State != "prepared" {
 		t.Fatalf("cross-UID intent not persisted: %+v %v", result, err)
@@ -180,16 +180,7 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ExchangeController(
-		context.Background(),
-		path,
-		controllerTestUID,
-		controllerTestGID,
-		successorRaw,
-		successorSig,
-	); !errors.Is(err, ErrRefused) {
-		t.Fatalf("successor controller epoch admitted: %v", err)
-	}
+	run(controllerTestUID, controllerTestGID, "successor-refused", successorRaw, successorSig)
 	replayed, err := store.AdmitControlCommand(context.Background(), raw, sig)
 	if err != nil || !replayed.Replayed ||
 		replayed.EffectID != result.EffectID ||
@@ -208,7 +199,7 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldPath := filepath.Join(impostorDir, "impostor.sock")
-	impostor := child(41002, 41002, "impostor", oldPath, sig)
+	impostor := child(41002, 41002, "impostor", oldPath, raw, sig)
 	ready, err := impostor.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +229,7 @@ func TestControllerIdentityAcceptance(t *testing.T) {
 	if err := os.Chmod(fakePath, 0660); err != nil {
 		t.Fatal(err)
 	}
-	cmd := child(controllerTestUID, controllerTestGID, "runner-refused", fakePath, sig)
+	cmd := child(controllerTestUID, controllerTestGID, "runner-refused", fakePath, raw, sig)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("controller accepted impostor: %v\n%s", err, out)
 	}
@@ -318,7 +309,7 @@ func TestControllerIdentityChild(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case "peer-refused", "signature-refused", "dac-refused", "runner-refused":
+	case "peer-refused", "signature-refused", "dac-refused", "runner-refused", "successor-refused":
 		if err == nil {
 			t.Fatal("unauthorized request accepted")
 		}
