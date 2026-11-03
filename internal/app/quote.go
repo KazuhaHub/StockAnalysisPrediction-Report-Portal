@@ -712,27 +712,39 @@ func quoteSinaTime(m *quoteMarket, date, clock string) (string, error) {
 // on a market that is open. The Beijing exchange has no segment of its own and keeps Shenzhen's
 // hours, so bj follows SZ_ (see quoteMarket.session).
 func quoteMarketSession(m *quoteMarket, raw string) string {
-	if m == nil || m.session == "" {
+	state, _, ok := quoteMarketSegment(m, raw)
+	if !ok {
 		return quoteSessionUnknown
+	}
+	switch state {
+	case quoteSessionOpen:
+		return quoteSessionOpen
+	case quoteSessionClose:
+		return quoteSessionClose
+	}
+	return quoteSessionUnknown
+}
+
+// quoteMarketSegment finds this market's segment in the session string and splits it into the
+// coarse state ("open" / "close") and the vendor's own state word that follows it. It is the one
+// place the prefix rule documented on quoteMarketSession lives, so the session and the phase can
+// never read two different segments of one line.
+func quoteMarketSegment(m *quoteMarket, raw string) (state, word string, ok bool) {
+	if m == nil || m.session == "" {
+		return "", "", false
 	}
 	want := m.session
 	for _, seg := range strings.Split(raw, "|") {
 		if !strings.HasPrefix(seg, want) {
 			continue
 		}
-		state := seg[len(want):]
+		state = seg[len(want):]
 		if i := strings.IndexByte(state, '_'); i >= 0 {
-			state = state[:i]
+			state, word = state[:i], state[i+1:]
 		}
-		switch state {
-		case quoteSessionOpen:
-			return quoteSessionOpen
-		case quoteSessionClose:
-			return quoteSessionClose
-		}
-		return quoteSessionUnknown
+		return state, word, true
 	}
-	return quoteSessionUnknown
+	return "", "", false
 }
 
 // ---------- the drift gate ----------

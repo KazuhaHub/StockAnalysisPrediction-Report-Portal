@@ -7,11 +7,12 @@ import type { FavoriteItem } from '../api/types'
 import FavoritesGrid, { moveFavoriteItems } from './FavoritesGrid'
 
 const quoteCalls: string[][] = []
+const quoteMap = vi.hoisted(() => ({ value: new Map<string, unknown>() }))
 
 vi.mock('../lib/useHomeQuotes', () => ({
   useHomeQuotes: (symbols: string[]) => {
     quoteCalls.push([...symbols])
-    return new Map()
+    return quoteMap.value
   },
 }))
 vi.mock('./FavoriteButton', () => ({
@@ -38,6 +39,7 @@ function Location() {
 describe('FavoritesGrid', () => {
   beforeEach(() => {
     quoteCalls.length = 0
+    quoteMap.value = new Map()
     accessState.closed.clear()
   })
 
@@ -105,5 +107,46 @@ describe('FavoritesGrid', () => {
       items[1].key,
       items[2].key,
     ])
+  })
+
+  // Same fields, same rule as the report cards: the previous-close suffix only while change is 0.
+  it.each([
+    [0, 'quote.phase.pre_open_prev_close'],
+    [94, 'quote.phase.pre_open'],
+  ])('labels a pre-open favorite with change %d', (change, label) => {
+    const fav: FavoriteItem = { market: 'sh', symbol: '603289', key: 'sh603289', ord: 0 }
+    quoteMap.value = new Map([
+      ['sh603289', { symbol: '603289', market: 'sh', name: 'N', currency: 'CNY', kind: 'stock', last: 1037, change, changePct: '0.00', phase: 'pre_open' }],
+    ])
+    render(
+      <AntdApp>
+        <MemoryRouter>
+          <FavoritesGrid items={[fav]} onReorder={vi.fn()} />
+        </MemoryRouter>
+      </AntdApp>,
+    )
+    const phase = screen.getByTestId('card-quote-phase')
+    expect(phase.textContent).toBe(label)
+    // Only the label may give way on a narrow card: every price span beside it must not shrink.
+    expect(phase.style.textOverflow).toBe('ellipsis')
+    const row = phase.parentElement as HTMLElement
+    const siblings = Array.from(row.children).filter((el) => el !== phase) as HTMLElement[]
+    expect(siblings.length).toBeGreaterThanOrEqual(3)
+    for (const el of siblings) expect(el.style.flexShrink).toBe('0')
+  })
+
+  it('prints no label for an unknown phase', () => {
+    const fav: FavoriteItem = { market: 'sh', symbol: '603289', key: 'sh603289', ord: 0 }
+    quoteMap.value = new Map([
+      ['sh603289', { symbol: '603289', market: 'sh', name: 'N', currency: 'CNY', kind: 'stock', last: 943, change: 0, changePct: '0.00', phase: 'unknown' }],
+    ])
+    render(
+      <AntdApp>
+        <MemoryRouter>
+          <FavoritesGrid items={[fav]} onReorder={vi.fn()} />
+        </MemoryRouter>
+      </AntdApp>,
+    )
+    expect(screen.queryByTestId('card-quote-phase')).toBeNull()
   })
 })
