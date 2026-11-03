@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -55,6 +56,32 @@ func TestBackendImageInspectionBindsDescriptorDigestAndNativeImage(t *testing.T)
 		t.Fatal("inspection leaked daemon/image configuration")
 	}
 }
+
+func TestBackendImageInspectionNeverRunsImageEntrypoint(t *testing.T) {
+	raw, digest, reference := managedImageFixture(t)
+	marker := filepath.Join(t.TempDir(), "image-entrypoint-ran")
+	response := imageResponseFixture(reference)
+	response["Config"].(map[string]any)["Entrypoint"] = []string{
+		"/bin/sh", "-c", "touch " + marker,
+	}
+	calls := 0
+	if _, err := inspectBackendImageHTTP(
+		context.Background(),
+		imageFixtureClient(t, response, reference, &calls),
+		raw,
+		digest,
+		"amd64",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("image inspection made %d daemon requests", calls)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("image inspection executed the entrypoint: %v", err)
+	}
+}
+
 func TestBackendImageInspectionRefusesUnsafeMetadata(t *testing.T) {
 	raw, digest, reference := managedImageFixture(t)
 	cases := map[string]func(map[string]any){

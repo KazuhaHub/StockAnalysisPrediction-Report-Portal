@@ -7,9 +7,11 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,6 +93,28 @@ func TestFrontendInspectionBindsBytesAndUsesDeterministicAssetMetadata(t *testin
 	failed, err := InspectFrontend(m, changed)
 	if !errors.Is(err, ErrFrontendDigestMismatch) || failed.SHA256 != "" || len(failed.Files) != 0 {
 		t.Fatalf("changed artifact accepted or partial result: %+v %v", failed, err)
+	}
+}
+
+func TestFrontendInspectionNeverExecutesApplicationCode(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "application-code-ran")
+	raw := frontendTestArchive(t,
+		frontendTestEntry{
+			name: "index.html",
+			body: `<!doctype html><script src="main.js"></script>`,
+		},
+		frontendTestEntry{
+			name: "main.js",
+			body: fmt.Sprintf(
+				`require("fs").writeFileSync(%q, "ran")`, marker),
+			method: zip.Deflate,
+		},
+	)
+	if _, err := InspectFrontend(frontendManifest(t, raw), raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("frontend inspection executed application code: %v", err)
 	}
 }
 
