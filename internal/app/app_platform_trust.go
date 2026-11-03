@@ -25,6 +25,7 @@ type platformPublisherChange struct {
 type platformPublisherTrustRevision struct {
 	publisherID, keyID    string
 	revision, keyRevision int64
+	quarantined           int
 }
 
 // Private administration repository. The HTTP surface must supply current
@@ -179,12 +180,22 @@ func (s *Server) changePlatformPublisherTrustContext(ctx context.Context, sessio
 		if _, err := e.exec(`UPDATE app_platform_review_plans SET expires_ms=CASE WHEN expires_ms>? THEN ? ELSE expires_ms END,updated_ms=? WHERE publisher_id=? AND consumed_ms IS NULL`, control.nowMS, control.nowMS, control.nowMS, publisher.ID); err != nil {
 			return err
 		}
+		quarantined := 0
+		if change.kind == "policy" || change.kind == "revoke_key" {
+			quarantined, err = platformQuarantinePublisherInstallations(
+				e, actor, control, publisher.ID, trust)
+			if err != nil {
+				return err
+			}
+		}
+		result.quarantined = quarantined
 		detail, _ := json.Marshal(struct {
 			Kind        string `json:"kind"`
 			Revision    int64  `json:"revision"`
 			KeyID       string `json:"key_id,omitempty"`
 			KeyRevision int64  `json:"key_revision,omitempty"`
-		}{change.kind, revision, result.keyID, result.keyRevision})
+			Quarantined int    `json:"quarantined,omitempty"`
+		}{change.kind, revision, result.keyID, result.keyRevision, quarantined})
 		_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.publisher_trust_changed','app_platform_publisher',?,?,'')`, time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, publisher.ID, string(detail))
 		if err != nil {
 			return err
@@ -196,6 +207,179 @@ func (s *Server) changePlatformPublisherTrustContext(ctx context.Context, sessio
 		return platformPublisherTrustRevision{}, err
 	}
 	return result, nil
+}
+
+// Trust mutation first makes all existing reviews unusable. Any currently
+// running installation whose signed release no longer verifies is then moved
+// through the already-reviewed disable authority path in the same transaction:
+// launch/broker authority is denied immediately, code and data are retained,
+// and managed runtimes receive the existing stop scheduler work.
+func platformQuarantinePublisherInstallations(
+	e migExec,
+	actor platformActorFacts,
+	control platformActorControl,
+	publisherID string,
+	trust appplatform.PublisherTrust,
+) (int, error) {
+	type candidate struct {
+		installation, descriptor, signature string
+	}
+	rows, err := e.query(`SELECT i.id,r.descriptor,r.signature
+		FROM app_platform_installations i
+		JOIN app_platform_activations a
+		  ON a.installation_id=i.id AND a.state='active'
+		JOIN app_platform_releases r ON r.sha256=a.release_sha256
+		WHERE i.publisher_id=? AND i.desired_state='enabled'
+		  AND i.phase='ready'
+		ORDER BY i.id LIMIT 257`, publisherID)
+	if err != nil {
+		return 0, err
+	}
+	var candidates []candidate
+	for rows.Next() {
+		var value candidate
+		if err := rows.Scan(
+			&value.installation, &value.descriptor, &value.signature); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		candidates = append(candidates, value)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	if len(candidates) > 256 {
+		return 0, errAppPlatformTrustConflict
+	}
+	quarantined := 0
+	for _, candidate := range candidates {
+		if _, err := appplatform.VerifyPublisherDescriptor(
+			[]byte(candidate.descriptor), []byte(candidate.signature), trust,
+			strconv.FormatInt(control.nowMS, 10)); err == nil {
+			continue
+		}
+		p, err := platformLoadRemovalProjection(
+			e, candidate.installation, appplatform.ActionDisable,
+			actor, control)
+		if errors.Is(err, errAppPlatformOperationConflict) {
+			// An already-pending operation is fenced by current trust. Do not
+			// create a second active operation for the same installation.
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if err := admitPlatformTrustQuarantine(
+			e, actor, control, p); err != nil {
+			return 0, err
+		}
+		quarantined++
+	}
+	return quarantined, nil
+}
+
+func admitPlatformTrustQuarantine(
+	e migExec,
+	actor platformActorFacts,
+	control platformActorControl,
+	p platformRemovalProjection,
+) error {
+	raw, err := json.Marshal(p)
+	if err != nil || len(raw) > 65536 ||
+		control.nowMS > math.MaxInt64-900000 {
+		return errAppPlatformPlanChanged
+	}
+	planID, err := platformNewUUID()
+	if err != nil {
+		return err
+	}
+	operationID, err := platformNewUUID()
+	if err != nil {
+		return err
+	}
+	planSHA := platformDigest(raw)
+	expires := control.nowMS + 900000
+	idempotency := platformDigest(
+		[]byte("portal-app-trust-quarantine/v1:" + planID))
+	requestFrame, _ := json.Marshal(
+		[]string{"portal-operation-commit/v1", planID, planSHA})
+	request := platformDigest(requestFrame)
+	var source any
+	if p.SourceReleaseSHA256 != "" {
+		source = p.SourceReleaseSHA256
+	}
+	if _, err := e.exec(`INSERT INTO app_platform_review_plans(
+		id,installation_id,app_id,publisher_id,action,
+		source_release_sha256,target_release_sha256,installation_revision,
+		policy_revision,trust_revision,controller_epoch,actor_scope,username,
+		account_created,account_generation,authority_fingerprint,plan_sha256,
+		plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,'disable',?,NULL,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		planID, p.InstallationID, p.AppID, p.PublisherID, source,
+		p.InstallationRevision, p.PolicyRevision, p.TrustRevision,
+		p.ControllerEpoch, actor.scope, actor.username, actor.created,
+		actor.generation, actor.authorityFingerprint, planSHA, string(raw),
+		expires, control.nowMS, control.nowMS, control.nowMS); err != nil {
+		return err
+	}
+	updated, err := e.exec(`UPDATE app_platform_installations
+		SET desired_state='disabled',phase='disabled',generation=?,
+		revision=revision+1,control_fence=control_fence+1,updated_ms=?
+		WHERE id=? AND revision=? AND generation=? AND controller_epoch=?`,
+		p.TargetGeneration, control.nowMS, p.InstallationID,
+		p.InstallationRevision, p.Generation, control.epoch)
+	if err := platformLeaseCAS(updated, err); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_activations
+		SET state='retired',updated_ms=?
+		WHERE installation_id=? AND state='active'`,
+		control.nowMS, p.InstallationID); err != nil {
+		return err
+	}
+	if p.Data != nil {
+		updated, err := e.exec(`UPDATE app_platform_data_namespaces
+			SET writer_fence=writer_fence+1,revision=revision+1,updated_ms=?
+			WHERE id=? AND owner_installation_id=? AND revision=?
+			  AND writer_fence=?`,
+			control.nowMS, p.Data.ID, p.InstallationID,
+			p.Data.Revision, p.Data.WriterFence)
+		if err := platformLeaseCAS(updated, err); err != nil {
+			return err
+		}
+	}
+	if _, err := e.exec(`INSERT INTO app_platform_operations(
+		id,installation_id,review_plan_id,actor_scope,idempotency_sha256,
+		request_sha256,action,managed,source_generation,target_generation,
+		stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,
+		controller_epoch,error_code,completed_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,?,?,'disable',?,?,?,'queued',1,1,NULL,NULL,0,
+		?,NULL,NULL,?,?)`,
+		operationID, p.InstallationID, planID, actor.scope, idempotency,
+		request, boolInt(p.Managed), p.Generation, p.TargetGeneration,
+		control.epoch, control.nowMS, control.nowMS); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		Plan       string `json:"plan"`
+		Action     string `json:"action"`
+		Generation int64  `json:"generation"`
+		Trigger    string `json:"trigger"`
+	}{
+		Plan: planID, Action: "disable", Generation: p.TargetGeneration,
+		Trigger: "publisher_trust_quarantine",
+	})
+	if _, err := e.exec(`INSERT INTO audit_log(
+		at,actor,actor_ou,action,target_type,target_id,detail,ip)
+		VALUES(?,?,?,'app_platform.operation_admitted',
+		'app_platform_operation',?,?,'')`,
+		time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339),
+		actor.username, actor.ouID, operationID, string(detail)); err != nil {
+		return err
+	}
+	return nil
 }
 
 func lockPlatformPublisherTrust(e migExec) error {

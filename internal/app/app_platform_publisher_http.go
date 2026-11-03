@@ -162,6 +162,9 @@ func (s *Server) apiPlatformPublisherChange(w http.ResponseWriter, r *http.Reque
 	if result.keyID != "" {
 		out["key_id"], out["key_revision"] = result.keyID, strconv.FormatInt(result.keyRevision, 10)
 	}
+	if result.quarantined > 0 {
+		out["quarantined"] = strconv.Itoa(result.quarantined)
+	}
 	writeJSON(w, out)
 }
 
