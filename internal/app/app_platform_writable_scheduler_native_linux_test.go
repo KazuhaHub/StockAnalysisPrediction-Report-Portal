@@ -669,18 +669,33 @@ func testNativeManagedDisableEnable(
 		 WHERE installation_id=? AND action='disable' AND managed=1
 		   AND stage='queued'`,
 		installation)
-	disableClaim, err := s.claimNextPlatformManagedUninstall(
-		ctx, platformFixtureID(991))
-	if err != nil || disableOperationID == "" ||
-		disableClaim.lease.id != disableOperationID {
-		t.Fatal("native package revocation disable claim",
-			disableOperationID, disableClaim, err)
+	if disableOperationID == "" {
+		t.Fatal("native package revocation did not queue its installation")
 	}
-	disabled, err := s.runPlatformManagedUninstall(
-		ctx, disableClaim.lease, endpoint)
-	if err != nil || disabled.lease.snapshot.Stage !=
-		appplatform.StageComplete {
-		t.Fatal("native package revocation stop execution", disabled, err)
+	var disabled platformInstallRun
+	for attempt := 0; attempt < 16 && disabled.lease.id == ""; attempt++ {
+		disableClaim, err := s.claimNextPlatformManagedUninstall(
+			ctx, platformFixtureID(991+attempt))
+		if err != nil || disableClaim.lease.id == "" {
+			t.Fatal("native package revocation disable claim",
+				disableClaim, err)
+		}
+		run, err := s.runPlatformManagedUninstall(
+			ctx, disableClaim.lease, endpoint)
+		if err != nil || run.lease.snapshot.Stage !=
+			appplatform.StageComplete {
+			t.Fatal("native package revocation stop execution", run, err)
+		}
+		if disableClaim.lease.installationID == installation {
+			if disableClaim.lease.id != disableOperationID {
+				t.Fatal("native package revocation claimed the wrong operation",
+					disableOperationID, disableClaim.lease.id)
+			}
+			disabled = run
+		}
+	}
+	if disabled.lease.id == "" {
+		t.Fatal("native package revocation did not stop its installation")
 	}
 	assertNativePlatformUserGrant(
 		t, s, installation, reader.username, "disable")
