@@ -624,9 +624,10 @@ def main(args):
                             if marker not in result.stdout:
                                 raise RuntimeError("Native managed restore acceptance missing: " + marker)
                         report["native_managed_restore_from_failed_update"] = True
-                        for marker in ("MANAGED_DISABLE_STOP_VERIFIED", "MANAGED_ENABLE_START_PROBE_ACTIVATED", "MANAGED_ENABLE_BACKEND_REQUEST"):
+                        for marker in ("PACKAGE_REVOCATION_MANAGED_STOP_VERIFIED", "MANAGED_DISABLE_STOP_VERIFIED", "MANAGED_ENABLE_START_PROBE_ACTIVATED", "MANAGED_ENABLE_BACKEND_REQUEST"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Native managed disable/enable acceptance missing: " + marker)
+                        report["native_package_revocation_managed_stop"] = True
                         report["native_managed_disable_stop_verified"] = True
                         report["native_managed_enable_start_probe_activated"] = True
                         report["native_managed_enable_backend_request"] = True

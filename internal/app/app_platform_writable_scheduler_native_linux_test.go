@@ -643,51 +643,42 @@ func testNativeManagedDisableEnable(
 	capabilitiesBefore := scalar[int](t, s.st, `SELECT COUNT(*)
 		FROM app_platform_capability_grants WHERE installation_id=?`,
 		installation)
-	disableReview, err := s.createPlatformRemovalReview(
-		actor, installation, appplatform.ActionDisable)
+	publisherID := scalar[string](t, s.st, `SELECT publisher_id
+		FROM app_platform_installations WHERE id=?`, installation)
+	publisherRevision := scalar[int64](t, s.st, `SELECT revision
+		FROM app_platform_publishers WHERE id=?`, publisherID)
+	revocation, err := s.changePlatformPublisherTrust(
+		actor, platformPublisherChange{
+			kind: "policy", publisherID: publisherID,
+			expectedRevision: publisherRevision, enabled: false,
+			namespaces: []appplatform.PublisherNamespace{{
+				Kind: "prefix", Value: "notes-",
+			}},
+		})
 	if err != nil {
-		if errors.Is(err, errAppPlatformOperationConflict) {
-			rows, queryErr := s.st.query(`SELECT id,action,stage,
-				COALESCE(error_code,''),completed_ms,lease_owner
-				FROM app_platform_operations
-				WHERE installation_id=? ORDER BY created_ms,id`,
-				installation)
-			if queryErr != nil {
-				t.Log("native managed disable operation diagnostics", queryErr)
-			} else {
-				defer rows.Close()
-				for rows.Next() {
-					var id, action, stage, code string
-					var completed int64
-					var owner sql.NullString
-					if queryErr := rows.Scan(&id, &action, &stage, &code,
-						&completed, &owner); queryErr != nil {
-						t.Log("native managed disable operation scan", queryErr)
-						break
-					}
-					t.Logf("native managed disable operation id=%s action=%s stage=%s code=%s completed=%d owner=%v",
-						id, action, stage, code, completed, owner)
-				}
-			}
-		}
-		t.Fatal("native managed disable review", err)
+		t.Fatal("native package revocation", err)
 	}
-	disableCommit, err := s.consumePlatformRemovalReview(
-		actor, disableReview.ID, disableReview.SHA256,
-		platformFixtureID(990))
-	if err != nil {
-		t.Fatal("native managed disable admission", err)
+	if revocation.quarantined != 1 {
+		t.Fatal("native package revocation did not queue the running app",
+			revocation)
 	}
+	disableOperationID := scalar[string](t, s.st,
+		`SELECT id FROM app_platform_operations
+		 WHERE installation_id=? AND action='disable' AND managed=1
+		   AND stage='queued'`,
+		installation)
 	disableClaim, err := s.claimNextPlatformManagedUninstall(
 		ctx, platformFixtureID(991))
-	if err != nil || disableClaim.lease.id != disableCommit.OperationID {
-		t.Fatal("native managed disable claim", disableClaim, err)
+	if err != nil || disableOperationID == "" ||
+		disableClaim.lease.id != disableOperationID {
+		t.Fatal("native package revocation disable claim",
+			disableOperationID, disableClaim, err)
 	}
 	disabled, err := s.runPlatformManagedUninstall(
 		ctx, disableClaim.lease, endpoint)
 	if err != nil || disabled.lease.snapshot.Stage !=
 		appplatform.StageComplete {
-		t.Fatal("native managed disable execution", disabled, err)
+		t.Fatal("native package revocation stop execution", disabled, err)
 	}
 	assertNativePlatformUserGrant(
 		t, s, installation, reader.username, "disable")
@@ -708,10 +699,21 @@ func testNativeManagedDisableEnable(
 		scalar[int](t, s.st, `SELECT COUNT(*)
 			FROM app_platform_capability_grants WHERE installation_id=?`,
 			installation) != capabilitiesBefore {
-		t.Fatal("native managed disable lost data or access")
+		t.Fatal("native package revocation lost data or access")
 	}
+	t.Log("PACKAGE_REVOCATION_MANAGED_STOP_VERIFIED")
 	t.Log("MANAGED_DISABLE_STOP_VERIFIED")
 
+	if _, err := s.changePlatformPublisherTrust(
+		actor, platformPublisherChange{
+			kind: "policy", publisherID: publisherID,
+			expectedRevision: revocation.revision, enabled: true,
+			namespaces: []appplatform.PublisherNamespace{{
+				Kind: "prefix", Value: "notes-",
+			}},
+		}); err != nil {
+		t.Fatal("restore publisher trust after revocation drill", err)
+	}
 	facts, err := s.observePlatformManagedRuntime(ctx, actor, endpoint)
 	if err != nil {
 		t.Fatal("native managed enable runtime", err)
