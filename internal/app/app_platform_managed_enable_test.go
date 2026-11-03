@@ -1068,6 +1068,8 @@ func testPlatformManagedRepairEnableOperatorRace(t *testing.T, pg bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	secondActor := platformSecondAdminActor(
+		t, s, "managed-enable-admin-two")
 	repair, err := s.createPlatformManagedRepairReviewWithRuntimeContext(
 		context.Background(), actor, firstEnable.installationID,
 		previous.TargetRuntime, runtime)
@@ -1075,7 +1077,7 @@ func testPlatformManagedRepairEnableOperatorRace(t *testing.T, pg bool) {
 		t.Fatal("operator repair review", err)
 	}
 	enable, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
-		context.Background(), actor, firstEnable.installationID,
+		context.Background(), secondActor, firstEnable.installationID,
 		previous.TargetRuntime, runtime)
 	if err != nil {
 		t.Fatal("operator enable review", err)
@@ -1084,22 +1086,23 @@ func testPlatformManagedRepairEnableOperatorRace(t *testing.T, pg bool) {
 	results := make(chan error, 2)
 	for _, item := range []struct {
 		action appplatform.Action
+		actor  platformActorSession
 		review platformRemovalReview
 		key    string
 	}{
-		{appplatform.ActionRepair, repair, platformFixtureID(1346)},
-		{appplatform.ActionEnable, enable, platformFixtureID(1347)},
+		{appplatform.ActionRepair, actor, repair, platformFixtureID(1346)},
+		{appplatform.ActionEnable, secondActor, enable, platformFixtureID(1347)},
 	} {
 		wg.Go(func() {
 			var err error
 			if item.action == appplatform.ActionRepair {
 				_, err = s.consumePlatformManagedRepairReviewWithRuntimeContext(
-					context.Background(), actor, item.review.ID,
+					context.Background(), item.actor, item.review.ID,
 					item.review.SHA256, item.key,
 					previous.TargetRuntime, runtime)
 			} else {
 				_, err = s.consumePlatformManagedSameReleaseReviewWithRuntimeContext(
-					context.Background(), actor, item.review.ID,
+					context.Background(), item.actor, item.review.ID,
 					item.review.SHA256, item.key,
 					previous.TargetRuntime, runtime,
 					appplatform.ActionEnable)

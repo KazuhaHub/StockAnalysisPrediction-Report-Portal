@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -284,30 +283,8 @@ func TestPlatformDeleteDataOperatorConflictPostgres(t *testing.T) {
 func testPlatformConcurrentDeleteDataOperators(t *testing.T, pg bool) {
 	s, firstActor, installation, namespace :=
 		platformDeleteDataFixture(t, pg)
-	secondName := "delete-data-admin-two"
-	if err := s.st.UpsertUser(User{
-		Username: secondName, PasswordHash: "fixture", Role: "admin",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := s.st.DeleteUser(secondName); err != nil {
-			t.Error(err)
-		}
-	})
-	user := s.st.GetUser(secondName)
-	generation, err := notificationAccountGeneration(
-		s.st.poolExec(), secondName)
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondActor := platformActorSession{
-		username: secondName, created: user.CreatedAt,
-		sessionID:       platformDigest([]byte(t.Name() + secondName)),
-		sessionRevision: user.SessionRev, generation: generation,
-		expires: time.Unix(time.Now().Add(time.Hour).Unix(), 0),
-	}
-	platformSeedActorSession(t, s.st, secondActor)
+	secondActor := platformSecondAdminActor(
+		t, s, "delete-data-admin-two")
 	first, err := s.createPlatformDeleteDataReview(
 		context.Background(), firstActor, installation, namespace)
 	if err != nil {

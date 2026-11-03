@@ -60,6 +60,36 @@ func platformSeedActorSession(t *testing.T, st *Store, session platformActorSess
 	mustExec(t, st, `INSERT INTO user_sessions(id,username,revision,created_at,last_seen,expires_at,ip,client) VALUES(?,?,?,1,1,?,'','{}') ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,expires_at=excluded.expires_at,revoked=0`, session.sessionID, session.username, session.sessionRevision, session.expires.Unix())
 }
 
+func platformSecondAdminActor(
+	t *testing.T, s *Server, username string,
+) platformActorSession {
+	t.Helper()
+	if err := s.st.UpsertUser(User{
+		Username: username, PasswordHash: "fixture", Role: "admin",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := s.st.DeleteUser(username); err != nil {
+			t.Error(err)
+		}
+	})
+	user := s.st.GetUser(username)
+	generation, err := notificationAccountGeneration(
+		s.st.poolExec(), username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actor := platformActorSession{
+		username: username, created: user.CreatedAt,
+		sessionID:       platformDigest([]byte(t.Name() + username)),
+		sessionRevision: user.SessionRev, generation: generation,
+		expires: time.Unix(time.Now().Add(time.Hour).Unix(), 0),
+	}
+	platformSeedActorSession(t, s.st, actor)
+	return actor
+}
+
 func platformReadActorForTest(t *testing.T, s *Server, session platformActorSession) platformActorFacts {
 	t.Helper()
 	var actor platformActorFacts
