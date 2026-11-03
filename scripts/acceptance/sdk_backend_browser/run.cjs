@@ -10,6 +10,8 @@ async function main(){
  try{
   const context=await browser.newContext({acceptDownloads:false});
   const page=await context.newPage();page.setDefaultTimeout(8000);
+  page.on('console',message=>{if(message.type()==='error')console.error('SDK_NATIVE_BROWSER_CONSOLE '+message.text())});
+  page.on('pageerror',error=>console.error('SDK_NATIVE_BROWSER_PAGE_ERROR '+(error?.stack||error)));
   stage='load';await page.goto(origin,{waitUntil:'domcontentloaded'});
   const frame=page.frameLocator('iframe');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();

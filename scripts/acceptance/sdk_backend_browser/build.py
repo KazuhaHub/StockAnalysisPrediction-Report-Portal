@@ -27,7 +27,7 @@ function RunawayRender(){const [,setTick]=useState(0);useEffect(()=>{setTick(val
 function Fixture(){
  const navigation=useAppNavigation(),[retained,setRetained]=useState(0),[queryEffects,setQueryEffects]=useState(0);
  useLayoutEffect(()=>{setQueryEffects(n=>n+1)},[navigation.query]);
- const backend=useAppBackend(),network=useAppNetwork(),notifications=useAppNotifications(),reports=useAppReports(),objects=useAppObjects(),{presentation}=useAppPresentation();
+ const backend=useAppBackend(),network=useAppNetwork(),notifications=useAppNotifications(),reports=useAppReports(),objects=useAppObjects(),{presentation,context}=useAppPresentation();
  const [expanded,setExpanded]=useState(false),[dirty,setDirty]=useState(false);useAppDraft(dirty);
  const [longLabels,setLongLabels]=useState(false);
  const [pageCount,setPageCount]=useState(0),[pageCancelled,setPageCancelled]=useState(0);
@@ -49,8 +49,8 @@ function Fixture(){
   setNetworkResult({id,text:JSON.stringify({status:r.status,contentType:r.contentType,body:new TextDecoder().decode(r.body)})});
  }catch(error){setNetworkResult({id,text:'error:'+error.code})}finally{setNetworkBusy(false)}}
  const networkStreamSequence=useRef(0),[networkStreamResult,setNetworkStreamResult]=useState({id:0,text:'none'}),[networkStreamBusy,setNetworkStreamBusy]=useState(false);
- async function runNetworkStream(){const id=++networkStreamSequence.current;setNetworkStreamResult({id,text:'pending'});setNetworkStreamBusy(true);try{
-  const chunks:number[]=[];let frames=0,started=false;
+ async function runNetworkStream(){const id=++networkStreamSequence.current;setNetworkStreamResult({id,text:'pending'});setNetworkStreamBusy(true);
+  const chunks:number[]=[];let frames=0,started=false;try{
   const result=await network.stream({method:'GET',url:'https://api.example.com/v1/stream',accept:'application/x-ndjson',contentType:''},{onStart:(status,contentType)=>{started=status===200&&contentType==='application/x-ndjson'},onChunk:async(data,sequence)=>{if(sequence!==frames+1)throw Object.assign(new Error('stream sequence'),{code:'uncertain'});frames++;chunks.push(...data);await new Promise(resolve=>setTimeout(resolve,25))}});
   if(!started)throw Object.assign(new Error('stream start'),{code:'uncertain'});
   setNetworkStreamResult({id,text:JSON.stringify({status:result.status,contentType:result.contentType,bytes:result.bytes,frames:result.frames,body:new TextDecoder().decode(new Uint8Array(chunks))})});
@@ -85,7 +85,7 @@ function Fixture(){
  const editor=navigation.path==='/editor';
  return <div data-testid={editor?'viewport-editor':undefined} role={editor?'region':undefined} aria-label={editor?'Viewport editor':undefined} tabIndex={editor?0:undefined} style={editor?{height:'100%',overflowY:'auto',padding:8}:undefined}>
  <Space orientation="vertical"><Typography.Text data-testid="backend-ready">{String(backend.ready)}</Typography.Text>
- <Typography.Text data-testid="capabilities">{JSON.stringify(presentation.context.capabilities)}</Typography.Text>
+ <Typography.Text data-testid="capabilities">{JSON.stringify(context.capabilities)}</Typography.Text>
  <Typography.Text data-testid="network-ready">{String(network.ready)}</Typography.Text>
  <Typography.Text data-testid="network-stream-ready">{String(network.streamReady)}</Typography.Text>
  <Typography.Text data-testid="credential-ready">{String(network.credentialAvailable)}</Typography.Text>
