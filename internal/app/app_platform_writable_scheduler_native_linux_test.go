@@ -673,12 +673,17 @@ func testNativeManagedDisableEnable(
 		t.Fatal("native package revocation did not queue its installation")
 	}
 	var disabled platformInstallRun
-	for attempt := 0; attempt < 16 && disabled.lease.id == ""; attempt++ {
+	settled := false
+	for attempt := 0; attempt < 64; attempt++ {
 		disableClaim, err := s.claimNextPlatformManagedUninstall(
 			ctx, platformFixtureID(991+attempt))
-		if err != nil || disableClaim.lease.id == "" {
+		if err != nil {
 			t.Fatal("native package revocation disable claim",
 				disableClaim, err)
+		}
+		if disableClaim.lease.id == "" {
+			settled = true
+			break
 		}
 		run, err := s.runPlatformManagedUninstall(
 			ctx, disableClaim.lease, endpoint)
@@ -693,6 +698,9 @@ func testNativeManagedDisableEnable(
 			}
 			disabled = run
 		}
+	}
+	if !settled {
+		t.Fatal("native package revocation left too many queued stops")
 	}
 	if disabled.lease.id == "" {
 		t.Fatal("native package revocation did not stop its installation")
