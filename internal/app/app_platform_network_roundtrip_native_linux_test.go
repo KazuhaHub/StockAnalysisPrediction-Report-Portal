@@ -456,7 +456,10 @@ func testNativePlatformNetworkStreamRequest(
 		return s.approvePlatformNetworkRequest(checkCtx, actor, installation, intent, c, nonce)
 	}, callbacks)
 	if err != nil {
-		return broker.HTTPStreamResult{}, err, "transport"
+		if errors.Is(err, broker.ErrUncertain) {
+			return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "transport"
+		}
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable, "transport"
 	}
 	if !validPlatformNetworkStreamResult(proof, intent, endpoint) {
 		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain, "observation"
