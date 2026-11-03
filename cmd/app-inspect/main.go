@@ -19,14 +19,45 @@ func run(args []string, output, diagnostics io.Writer) int {
 	flags.SetOutput(diagnostics)
 	descriptorPath := flags.String("descriptor", "", "Path to the v2 descriptor JSON")
 	frontendPath := flags.String("frontend", "", "Path to the frontend ZIP artifact")
+	envelopePath := flags.String("envelope", "", "Path to a .portalapp offline envelope")
 	if err := flags.Parse(args); err != nil {
 		if err == flag.ErrHelp {
 			return 0
 		}
 		return 2
 	}
-	if *descriptorPath == "" || *frontendPath == "" || flags.NArg() != 0 {
-		fmt.Fprintln(diagnostics, "Both -descriptor and -frontend are required; positional arguments are not accepted.")
+	if flags.NArg() != 0 {
+		fmt.Fprintln(diagnostics, "Positional arguments are not accepted.")
+		return 2
+	}
+	if *envelopePath != "" {
+		if *descriptorPath != "" || *frontendPath != "" {
+			fmt.Fprintln(diagnostics, "-envelope cannot be combined with -descriptor or -frontend.")
+			return 2
+		}
+		raw, err := readRegularFile(
+			*envelopePath, appplatform.MaxOfflineEnvelopeBytes)
+		if err != nil {
+			fmt.Fprintln(diagnostics, "Offline envelope input is unavailable, non-regular or oversized.")
+			return 1
+		}
+		envelope, err := appplatform.InspectOfflineEnvelope(raw)
+		if err != nil {
+			fmt.Fprintln(diagnostics, "Offline envelope integrity inspection failed.")
+			return 1
+		}
+		result := struct {
+			Verification string `json:"verification"`
+			appplatform.OfflineEnvelopeInspection
+		}{"offline_envelope_frontend_integrity_only", envelope.Inspection}
+		if err := json.NewEncoder(output).Encode(result); err != nil {
+			fmt.Fprintln(diagnostics, "Inspection output could not be written.")
+			return 1
+		}
+		return 0
+	}
+	if *descriptorPath == "" || *frontendPath == "" {
+		fmt.Fprintln(diagnostics, "Supply -envelope, or both -descriptor and -frontend.")
 		return 2
 	}
 	raw, err := readRegularFile(*descriptorPath, appplatform.MaxDescriptorBytes)

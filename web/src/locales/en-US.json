@@ -3769,6 +3769,7 @@
   "err.app_platform_unavailable": "Application management is temporarily unavailable.",
   "err.app_platform_invalid_request": "The application request is invalid.",
   "err.app_platform_origin_denied": "This application request came from an untrusted origin.",
+  "err.app_platform_zip_required": "The offline package upload must use a ZIP archive.",
   "err.app_platform_json_required": "The application request must use JSON.",
   "err.invalid_content_type": "This request must use JSON.",
   "err.app_platform_permission_required": "Your current account cannot manage applications.",

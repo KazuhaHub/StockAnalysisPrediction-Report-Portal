@@ -44,8 +44,16 @@ func (s *Server) platformAdminRoute(mux *http.ServeMux, pattern string, h handle
 		}
 		if r.Method == http.MethodPost {
 			kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if err != nil || kind != "application/json" {
-				jsonErrorCode(w, 415, "app_platform_json_required", "application/json required")
+			required := "application/json"
+			if r.URL.Path == "/api/admin/app-platform/market/offline" {
+				required = "application/zip"
+			}
+			if err != nil || kind != required {
+				if required == "application/zip" {
+					jsonErrorCode(w, 415, "app_platform_zip_required", "application/zip required")
+				} else {
+					jsonErrorCode(w, 415, "app_platform_json_required", "application/json required")
+				}
 				return
 			}
 		}
@@ -175,6 +183,10 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_credential_unavailable"
 	case errors.Is(err, errAppPlatformReleaseConflict), errors.Is(err, errAppPlatformTrustConflict):
 		status, code = 409, "app_platform_package_untrusted"
+	case errors.Is(err, appplatform.ErrInvalidOfflineEnvelope):
+		status, code = 400, "app_platform_invalid_request"
+	case errors.Is(err, appplatform.ErrManagedOfflineNotReady):
+		status, code = 409, "app_platform_requirements_unavailable"
 	case errors.Is(err, errAppPlatformInstallUnavailable):
 		status, code = 409, "app_platform_requirements_unavailable"
 	case errors.Is(err, errAppPlatformRuntimeConflict):

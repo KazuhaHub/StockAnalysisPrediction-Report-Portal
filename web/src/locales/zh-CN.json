@@ -3769,6 +3769,7 @@
   "err.app_platform_unavailable": "应用管理暂时不可用。",
   "err.app_platform_invalid_request": "应用管理请求无效。",
   "err.app_platform_origin_denied": "该应用管理请求来自不受信任的来源。",
+  "err.app_platform_zip_required": "离线包上传必须使用 ZIP 归档。",
   "err.app_platform_json_required": "应用管理请求必须使用 JSON。",
   "err.invalid_content_type": "此请求必须使用 JSON。",
   "err.app_platform_permission_required": "当前账号没有应用管理权限。",

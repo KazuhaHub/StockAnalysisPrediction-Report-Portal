@@ -3769,6 +3769,7 @@
   "err.app_platform_unavailable": "應用管理暫時無法使用。",
   "err.app_platform_invalid_request": "應用管理請求無效。",
   "err.app_platform_origin_denied": "該應用管理請求來自不受信任的來源。",
+  "err.app_platform_zip_required": "離線包上傳必須使用 ZIP 封存檔。",
   "err.app_platform_json_required": "應用管理請求必須使用 JSON。",
   "err.invalid_content_type": "此請求必須使用 JSON。",
   "err.app_platform_permission_required": "目前帳號沒有應用管理權限。",

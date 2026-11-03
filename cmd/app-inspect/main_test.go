@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func inspectorFixture(t *testing.T) (string, string) {
@@ -67,6 +69,108 @@ func TestInspectorPrintsOnlyPublicMetadata(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "PRIVATE_ASSET_CONTENT") || strings.Contains(out.String(), descriptor) {
 		t.Fatal("contents or local paths leaked")
+	}
+}
+
+func offlineInspectorFixture(t *testing.T) string {
+	t.Helper()
+	descriptorPath, frontendPath := inspectorFixture(t)
+	descriptor, err := os.ReadFile(descriptorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frontend, err := os.ReadFile(frontendPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(descriptor, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	descriptorSum := sha256.Sum256(descriptor)
+	signature, err := json.Marshal(map[string]string{
+		"format":            "portal.app.signature/1-dev.1",
+		"algorithm":         "Ed25519",
+		"publisher":         "example-publisher",
+		"key_id":            "fixture-key",
+		"descriptor_sha256": hex.EncodeToString(descriptorSum[:]),
+		"signature":         strings.Repeat("A", 86),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw bytes.Buffer
+	writer := zip.NewWriter(&raw)
+	for name, body := range map[string][]byte{
+		"descriptor.json": descriptor,
+		"descriptor.sig":  signature,
+		"blobs/" + manifest.Frontend.SHA256 + "/ui.zip": frontend,
+	} {
+		header := &zip.FileHeader{Name: name}
+		header.SetMode(0644)
+		file, err := writer.CreateHeader(header)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := file.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "sample.portalapp")
+	if err := os.WriteFile(path, raw.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestOfflineInspectorPrintsOnlyEnvelopeMetadata(t *testing.T) {
+	path := offlineInspectorFixture(t)
+	var out, diagnostics bytes.Buffer
+	code := run([]string{"-envelope", path}, &out, &diagnostics)
+	if code != 0 || diagnostics.Len() != 0 {
+		t.Fatalf("%d: %s", code, &diagnostics)
+	}
+	var result struct {
+		Verification string `json:"verification"`
+		AppID        string `json:"app_id"`
+		Execution    string `json:"execution"`
+		Frontend     struct {
+			Files []json.RawMessage `json:"files"`
+		} `json:"frontend"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Verification != "offline_envelope_frontend_integrity_only" ||
+		result.AppID != "notes-sample" || result.Execution != "static" ||
+		len(result.Frontend.Files) != 1 {
+		t.Fatalf("wrong offline metadata: %s", &out)
+	}
+	if strings.Contains(out.String(), "PRIVATE_ASSET_CONTENT") ||
+		strings.Contains(out.String(), path) {
+		t.Fatal("offline output leaked contents or local paths")
+	}
+}
+
+func TestOfflineInspectorRejectsMixedAndInvalidInput(t *testing.T) {
+	path := offlineInspectorFixture(t)
+	descriptor, frontend := inspectorFixture(t)
+	for _, args := range [][]string{
+		{"-envelope", path, "-descriptor", descriptor},
+		{"-envelope", path, "-frontend", frontend},
+		{"-envelope", filepath.Join(filepath.Dir(path), "missing.portalapp")},
+		{"-envelope", descriptor},
+		{"-envelope", path, "extra"},
+	} {
+		var out, diagnostics bytes.Buffer
+		if code := run(args, &out, &diagnostics); code == 0 ||
+			out.Len() != 0 || diagnostics.Len() == 0 {
+			t.Fatalf("invalid offline input accepted: code=%d output=%s",
+				code, &out)
+		}
 	}
 }
 

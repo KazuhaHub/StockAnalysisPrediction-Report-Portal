@@ -14,7 +14,7 @@ GOWORK=off GOTOOLCHAIN=go1.26.10 go run ./cmd/app-inspect \
   -frontend /path/to/ui.zip
 ```
 
-Both inputs must be bounded regular local files; symbolic input paths and directories are refused. Relative paths are resolved from the caller's working directory. The command does not obtain files from the market; a future authenticated fetcher/offline-envelope inspector must supply the same bytes to this validation layer.
+Both inputs must be bounded regular local files; symbolic input paths and directories are refused. Relative paths are resolved from the caller's working directory. The command does not obtain files from the market. The development static [offline envelope](157-offline-envelope.md) can instead be checked with `-envelope` and supplies the same exact frontend bytes to this validation layer.
 
 Success exits 0 with JSON containing the application ID, release version, publisher declaration, exact descriptor digest, static/managed declaration and frontend metadata. Its `verification` field is deliberately `frontend_integrity_only`. Failure exits nonzero and reports a fixed safe diagnostic; validation failures do not print partial success JSON, local input paths or file bodies. Output-device failure also returns nonzero, even if a partial write occurred.
 
@@ -77,4 +77,4 @@ production throughput guarantee. The benchmark remains available for review:
 GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test ./internal/appplatform -run '^$' -bench BenchmarkFrontendManySmallFiles -benchtime=1x -count=1
 ```
 
-Remaining work includes the complete signed/offline envelope, OCI artifacts, publisher trust and revocation, generated schemas and packaging-tool parity, verified durable staging, compatibility/capability/data/resource admission, and real installer/runtime integration. The legacy ZIP parser and installed apps are unchanged. No server release/channel configuration changes are required to use this local tool.
+The bounded static offline envelope, Portal staging and full static install path are now implemented in [157](157-offline-envelope.md). Remaining work includes managed OCI image payloads, public envelope-format freeze, generated schemas and packaging-tool parity, and production release approval. The legacy ZIP parser and installed apps are unchanged. No server release/channel configuration changes are required to use this local tool.

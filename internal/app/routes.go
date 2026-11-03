@@ -487,6 +487,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/installations/{installation}/settings", s.apiPlatformInstallationSettings)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/catalogue", s.apiPlatformMarketCatalogue)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/stage", s.apiPlatformMarketStage)
+	s.platformAdminRoute(mux, "POST /api/admin/app-platform/market/offline", s.apiPlatformMarketOffline)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/publishers", s.apiPlatformPublishers)
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/publishers", s.apiPlatformPublisherChange)
 	s.platformAdminRoute(mux, "GET /api/admin/app-platform/credentials", s.apiPlatformCredentialList)
