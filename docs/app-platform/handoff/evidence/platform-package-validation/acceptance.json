@@ -130,18 +130,20 @@
       "status": "partial",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)$' -count=1",
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformReleaseStagingDatabaseFullRollsBack$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformReleaseStagingDatabaseFullRollsBack$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175 executes interrupted managed staging and restart recovery"
       ],
       "coverage": [
         "A truncated artifact response retains its bounded in-memory prefix for the same fetch. The retry sends Range and If-Range; a valid 206 continues at the exact offset, while a 200 safely restarts from zero. Redirects retain the range headers and final descriptor, signature and frontend digest checks still decide admission.",
         "Exhausting the bounded retry budget leaves no staged release.",
         "Replaying an already staged immutable package reuses the existing release without creating another operation.",
         "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission.",
+        "A real managed writable installation was interrupted after its side-effect-free stage boundary. A new scheduler reclaimed the same operation under a higher fence and completed real data, candidate start, readiness/registration and activation with one applied copy of every durable effect.",
         "A file-backed SQLite database with the freelist exhausted and no page-growth allowance refuses a roughly 1 MiB package; release, frontend and staging-audit rows all roll back."
       ],
       "limits": [
         "The received prefix exists only in memory for one bounded fetch. There is no persistent market cache, so request termination or process restart starts the next fetch at offset zero.",
-        "Real managed-runner staging interruption and restart recovery remain unverified."
+        "Persistent cache design and approval remain open; no cache table or unmanaged cache file has been added."
       ]
     },
     {
@@ -198,7 +200,7 @@
   },
   "open": [
     "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
-    "PKG-08: same-fetch HTTP Range resume is implemented; persistent cache and managed-runner staging interruption/restart recovery remain open.",
+    "PKG-08: same-fetch HTTP Range resume and native managed staging restart recovery are implemented; persistent cache remains open.",
     "PKG-10 development acceptance now includes a native stop initiated by package revocation and explicit enable/repair after trust restoration. Production deployment remains in H16-H18.",
     "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
   ]
