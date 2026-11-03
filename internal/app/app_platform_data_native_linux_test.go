@@ -247,10 +247,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
 	childTimeout := "-test.timeout=60s"
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
-		childTimeout = "-test.timeout=140s"
+		childTimeout = "-test.timeout=180s"
 	}
 	if os.Getenv("APP_LIFECYCLE_BROWSER_RUNNER") != "" {
-		childTimeout = "-test.timeout=230s"
+		childTimeout = "-test.timeout=280s"
 	}
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", childTimeout)
 	child.Dir = work

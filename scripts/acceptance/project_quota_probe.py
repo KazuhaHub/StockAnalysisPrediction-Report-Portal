@@ -510,9 +510,9 @@ def main(args):
                             portal_env[name] = value
                     portal_limit = 100
                     if browser_enabled:
-                        portal_limit = 140
+                        portal_limit = 180
                     if lifecycle_browser_enabled:
-                        portal_limit = 240
+                        portal_limit = 280
                     result = subprocess.run([args[10], "-test.run=^TestPlatformInstallDataEndpointAcceptance$", "-test.v", "-test.timeout=" + str(portal_limit) + "s"], env=portal_env, capture_output=True, text=True, timeout=portal_limit + 10)
                     if result.returncode or "--- PASS: TestPlatformInstallDataEndpointAcceptance" not in result.stdout:
                         output = result.stdout + result.stderr

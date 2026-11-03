@@ -277,9 +277,12 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if err != nil {
 			t.Fatal(err)
 		}
+		reinstallCtx, stopReinstall := context.WithTimeout(
+			ctx, 75*time.Second)
+		defer stopReinstall()
 		reinstallDeadline := time.Now().Add(90 * time.Second)
 		for {
-			_ = worker.tick(ctx)
+			tickErr := worker.tick(reinstallCtx)
 			stage := scalar[string](t, s.st,
 				`SELECT stage FROM app_platform_operations WHERE id=?`,
 				reinstalled.OperationID)
@@ -287,8 +290,13 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 				break
 			}
 			status := worker.currentStatus()
+			if tickErr != nil {
+				t.Logf("managed reinstall tick: stage=%s status=%+v err=%v",
+					stage, status, tickErr)
+			}
 			if status.code == "review_required" ||
-				!time.Now().Before(reinstallDeadline) {
+				!time.Now().Before(reinstallDeadline) ||
+				reinstallCtx.Err() != nil {
 				t.Fatalf("managed reinstall incomplete: stage=%s status=%+v",
 					stage, status)
 			}
