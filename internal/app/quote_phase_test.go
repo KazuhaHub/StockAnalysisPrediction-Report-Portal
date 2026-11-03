@@ -20,11 +20,17 @@ const (
 	phaseLineLaborDay = "2026-09-07 14:51:13|HK_open_交易中|SH_open_交易中|SZ_open_交易中|US_close_劳动节休市|NEWSH_open_交易中|NEWSZ_open_交易中|NEWHK_open_交易中|NEWUS_close_劳动节休市|USA_close_已收盘"
 	// A New York weekend as the vendor words it, with every other board before its open.
 	phaseLineWeekend = "2026-09-07 06:01:25|HK_close_未开盘|SH_close_未开盘|SZ_close_未开盘|US_close_已休市|SQ_close_未开盘|NEWSH_close_未开盘|NEWSZ_close_未开盘|NEWUS_close_已休市"
+	// 12:00, the mainland and Hong Kong lunch break.
+	phaseLineLunch = "2026-11-03 12:00:40|HK_close_午间休市|SH_close_午间休市|SZ_close_午间休市|US_close_已收盘|SQ_close_午间休市|DS_close_午间休市|ZS_close_午间休市"
+	// 15:05, the mainland closed for the day while Hong Kong still trades.
+	phaseLineAfterClose = "2026-11-03 15:05:49|HK_open_交易中|SH_close_已收盘|SZ_close_已收盘|US_close_未开盘|SQ_close_已休市|DS_close_已休市|ZS_close_已休市"
+	// 16:30, Hong Kong closed too; the stamp keeps following the clock after the close.
+	phaseLineEvening = "2026-11-03 16:30:52|HK_close_已收盘|SH_close_已收盘|SZ_close_已收盘|US_close_未开盘|SQ_close_已休市|DS_close_已休市|ZS_close_已休市"
 )
 
 // The inline lines in the table below are SYNTHETIC: hand-built from the recorded shapes above to
-// isolate one rule each (the festival names and the lunch-break words were not captured live).
-// phaseLineAuction, phaseLineLaborDay and phaseLineWeekend are the recorded ones.
+// isolate one rule each (the festival names were not captured live). The phaseLine constants
+// above are the recorded ones.
 
 func phaseAtStamp(t *testing.T, line string) time.Time {
 	t.Helper()
@@ -58,6 +64,13 @@ func TestQuoteMarketPhaseFromRecordedLines(t *testing.T) {
 		// 06:01 China clock on a Monday is a Sunday evening in New York; the vendor says market-closed.
 		{"us weekend word", "us", phaseLineWeekend, quotePhaseHoliday},
 		{"sh before the open on a weekday", "sh", phaseLineWeekend, quotePhasePreOpen},
+		{"sh recorded lunch break", "sh", phaseLineLunch, quotePhaseLunchBreak},
+		{"hk recorded lunch break", "hk", phaseLineLunch, quotePhaseLunchBreak},
+		{"sh after close", "sh", phaseLineAfterClose, quotePhaseClosed},
+		{"hk still trading after the mainland close", "hk", phaseLineAfterClose, quotePhaseTrading},
+		{"sh in the evening", "sh", phaseLineEvening, quotePhaseClosed},
+		{"hk in the evening", "hk", phaseLineEvening, quotePhaseClosed},
+		{"us before its open", "us", phaseLineEvening, quotePhasePreOpen},
 		// NEWSZ_ and NEWUS_ stand BEFORE the market's own segment here, and each contains its
 		// prefix. A Contains match reads the wrong board.
 		{"NEWSZ prefix trap", "sz", "2026-11-03 10:00:00|NEWSZ_close_已收盘|SZ_open_交易中", quotePhaseTrading},
