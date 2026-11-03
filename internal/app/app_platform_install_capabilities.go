@@ -43,27 +43,38 @@ type platformSelectedCapability struct {
 	policy     string
 }
 
-func platformNetworkTargetPolicy(target *platformManagedInstallTarget) (string, error) {
+func platformNetworkTargetPolicies(target *platformManagedInstallTarget) (string, string, error) {
 	if target == nil {
-		return "", nil
+		return "", "", nil
 	}
-	if target.NetworkPolicy == "" {
+	if target.NetworkPolicy == "" && target.NetworkStreamPolicy == "" {
 		if target.NetworkProfile != (transport.NetworkRuntimeProfile{}) {
-			return "", errAppPlatformInstallUnavailable
+			return "", "", errAppPlatformInstallUnavailable
 		}
-		return "", nil
+		return "", "", nil
 	}
-	if _, err := appplatform.ParseHTTPPolicy([]byte(target.NetworkPolicy)); err != nil || transport.ValidateNetworkRuntimeProfile(target.NetworkProfile) != nil || !target.NetworkProfile.WritableBackend {
-		return "", errAppPlatformInstallUnavailable
+	if transport.ValidateNetworkRuntimeProfile(target.NetworkProfile) != nil || !target.NetworkProfile.WritableBackend {
+		return "", "", errAppPlatformInstallUnavailable
 	}
-	return target.NetworkPolicy, nil
+	if target.NetworkPolicy != "" {
+		if _, err := appplatform.ParseHTTPPolicy([]byte(target.NetworkPolicy)); err != nil {
+			return "", "", errAppPlatformInstallUnavailable
+		}
+	}
+	if target.NetworkStreamPolicy != "" {
+		if _, err := appplatform.ParseHTTPStreamPolicy([]byte(target.NetworkStreamPolicy)); err != nil ||
+			target.NetworkProfile.StreamFormat != appplatform.HTTPStreamPolicyFormat {
+			return "", "", errAppPlatformInstallUnavailable
+		}
+	}
+	return target.NetworkPolicy, target.NetworkStreamPolicy, nil
 }
 
 // Derive the entire exact capability set from a parsed signed declaration and
 // explicit host-reviewed restrictions. Optional capabilities default off. This
 // function does not prove that target metadata came from a live OS observation.
 func platformInstallCapabilitySelection(m appplatform.Manifest, target *platformManagedInstallTarget) ([]platformSelectedCapability, error) {
-	policy, err := platformNetworkTargetPolicy(target)
+	policy, streamPolicy, err := platformNetworkTargetPolicies(target)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +93,9 @@ func platformInstallCapabilitySelection(m appplatform.Manifest, target *platform
 				return nil, errAppPlatformInstallUnavailable
 			}
 			seen[name] = true
-			grant := (name == "network.http" && policy != "") || (required && (name == "reports.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish"))
+			grant := (name == "network.http" && policy != "") ||
+				(name == "network.stream" && streamPolicy != "") ||
+				(required && (name == "reports.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish"))
 			if required && !grant {
 				return nil, errAppPlatformInstallUnavailable
 			}
@@ -90,10 +103,16 @@ func platformInstallCapabilitySelection(m appplatform.Manifest, target *platform
 			if grant && name == "network.http" {
 				restriction = policy
 			}
+			if grant && name == "network.stream" {
+				restriction = streamPolicy
+			}
 			result = append(result, platformSelectedCapability{capability: name, granted: grant, policy: restriction})
 		}
 	}
 	if policy != "" && !seen["network.http"] {
+		return nil, errAppPlatformInstallUnavailable
+	}
+	if streamPolicy != "" && !seen["network.stream"] {
 		return nil, errAppPlatformInstallUnavailable
 	}
 	slices.SortFunc(result, func(a, b platformSelectedCapability) int {
@@ -200,10 +219,10 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 	seen := make(map[string]bool, len(m.Capabilities.Required))
 	for _, capability := range m.Capabilities.Required {
-		if seen[capability] || (capability != "network.http" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish") {
+		if seen[capability] || (capability != "network.http" && capability != "network.stream" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish") {
 			return false
 		}
 		seen[capability] = true
 	}
-	return len(seen) <= 6
+	return len(seen) <= 7
 }

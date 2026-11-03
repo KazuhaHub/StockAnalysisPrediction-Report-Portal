@@ -20,17 +20,22 @@ var ErrNetworkRuntimeUnavailable = errors.New("network runtime observation unava
 var ErrNetworkRuntimeIncompatible = errors.New("network runtime profile incompatible")
 
 type NetworkRuntimeProfile struct {
-	Format             string `json:"format"`
-	RequestFormat      string `json:"request_format"`
-	ConfirmationFormat string `json:"confirmation_format"`
-	PolicyFormat       string `json:"policy_format"`
-	MaxRequestBytes    int64  `json:"max_request_bytes"`
-	MaxResponseBytes   int64  `json:"max_response_bytes"`
-	MaxDeadlineMS      int    `json:"max_deadline_ms"`
-	MaxConcurrency     int    `json:"max_concurrency"`
-	ActiveRequests     int    `json:"active_requests"`
-	CacheEntries       int    `json:"cache_entries"`
-	WritableBackend    bool   `json:"writable_backend"`
+	Format              string `json:"format"`
+	RequestFormat       string `json:"request_format"`
+	ConfirmationFormat  string `json:"confirmation_format"`
+	PolicyFormat        string `json:"policy_format"`
+	MaxRequestBytes     int64  `json:"max_request_bytes"`
+	MaxResponseBytes    int64  `json:"max_response_bytes"`
+	MaxDeadlineMS       int    `json:"max_deadline_ms"`
+	MaxConcurrency      int    `json:"max_concurrency"`
+	ActiveRequests      int    `json:"active_requests"`
+	CacheEntries        int    `json:"cache_entries"`
+	WritableBackend     bool   `json:"writable_backend"`
+	StreamFormat        string `json:"stream_format"`
+	MaxStreamBytes      int64  `json:"max_stream_bytes"`
+	MaxStreamFrameBytes int64  `json:"max_stream_frame_bytes"`
+	MaxStreamDurationMS int    `json:"max_stream_duration_ms"`
+	MaxStreamIdleMS     int    `json:"max_stream_idle_ms"`
 }
 type networkRuntimeWire struct {
 	Controller json.RawMessage       `json:"controller"`
@@ -78,7 +83,16 @@ func encodeNetworkRuntime(c journal.ControllerEnrollment, active, entries int, w
 	return raw, nil
 }
 func networkRuntimeProfile(active, entries int, writable bool) NetworkRuntimeProfile {
-	return NetworkRuntimeProfile{Format: NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat, ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat, MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes, MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency, ActiveRequests: active, CacheEntries: entries, WritableBackend: writable}
+	return NetworkRuntimeProfile{
+		Format: NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat,
+		ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat,
+		MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes,
+		MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency,
+		ActiveRequests: active, CacheEntries: entries, WritableBackend: writable,
+		StreamFormat: appplatform.HTTPStreamPolicyFormat, MaxStreamBytes: appplatform.MaxHTTPStreamBytes,
+		MaxStreamFrameBytes: appplatform.MaxHTTPStreamFrameBytes, MaxStreamDurationMS: appplatform.MaxHTTPStreamDurationMS,
+		MaxStreamIdleMS: appplatform.MaxHTTPStreamIdleMS,
+	}
 }
 
 // ValidateNetworkRuntimeProfile checks the exact currently supported limits and

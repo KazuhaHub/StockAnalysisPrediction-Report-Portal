@@ -8,8 +8,10 @@ import (
 )
 
 func (s *Server) observePlatformNetworkInstallRuntime(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, policy string) (platformManagedRuntimeFacts, error) {
-	if _, err := appplatform.ParseHTTPPolicy([]byte(policy)); err != nil {
-		return platformManagedRuntimeFacts{}, errAppPlatformInstallUnavailable
+	if policy != "" {
+		if _, err := appplatform.ParseHTTPPolicy([]byte(policy)); err != nil {
+			return platformManagedRuntimeFacts{}, errAppPlatformInstallUnavailable
+		}
 	}
 	facts, err := s.observePlatformManagedRuntime(ctx, session, endpoint)
 	if err != nil {
@@ -41,6 +43,19 @@ func (s *Server) createPlatformNetworkWritableInstallReview(ctx context.Context,
 	}
 	return s.createPlatformInstallReviewWithRuntime(ctx, session, release, revision, targets, platformWritableInstallFormat, &facts, endpoint)
 }
+
+func (s *Server) createPlatformNetworkStreamWritableInstallReview(ctx context.Context, session platformActorSession, release string, revision int64, targets []platformAudienceTarget, endpoint platformRuntimeEndpoint, policy appplatform.HTTPStreamPolicy) (platformRemovalReview, error) {
+	raw, err := appplatform.CanonicalHTTPStreamPolicy(policy)
+	if err != nil {
+		return platformRemovalReview{}, errAppPlatformInstallUnavailable
+	}
+	facts, err := s.observePlatformNetworkInstallRuntime(ctx, session, endpoint, "")
+	if err != nil {
+		return platformRemovalReview{}, err
+	}
+	facts.streamPolicy = string(raw)
+	return s.createPlatformInstallReviewWithRuntime(ctx, session, release, revision, targets, platformWritableInstallFormat, &facts, endpoint)
+}
 func (s *Server) consumePlatformNetworkWritableInstallReview(ctx context.Context, session platformActorSession, plan, sha, key string, endpoint platformRuntimeEndpoint) (platformRemovalCommit, error) {
 	if !platformValidUUID(plan) || !platformValidSHA(sha) || !platformValidUUID(key) {
 		return platformRemovalCommit{}, errAppPlatformPlanChanged
@@ -52,12 +67,21 @@ func (s *Server) consumePlatformNetworkWritableInstallReview(ctx context.Context
 		return platformRemovalCommit{}, errAppPlatformPlanChanged
 	}
 	var p platformInstallProjection
-	if json.Unmarshal([]byte(raw), &p) != nil || p.Format != platformWritableInstallFormat || p.Runtime == nil || p.Runtime.NetworkPolicy == "" {
+	if json.Unmarshal([]byte(raw), &p) != nil ||
+		p.Format != platformWritableInstallFormat ||
+		p.Runtime == nil ||
+		(p.Runtime.NetworkPolicy == "" && p.Runtime.NetworkStreamPolicy == "") {
 		return platformRemovalCommit{}, errAppPlatformPlanChanged
 	}
 	facts, err := s.observePlatformNetworkInstallRuntime(ctx, session, endpoint, p.Runtime.NetworkPolicy)
 	if err != nil {
 		return platformRemovalCommit{}, err
+	}
+	if p.Runtime.NetworkStreamPolicy != "" {
+		if _, err := appplatform.ParseHTTPStreamPolicy([]byte(p.Runtime.NetworkStreamPolicy)); err != nil {
+			return platformRemovalCommit{}, errAppPlatformPlanChanged
+		}
+		facts.streamPolicy = p.Runtime.NetworkStreamPolicy
 	}
 	return s.consumePlatformInstallReviewWithRuntime(ctx, session, plan, sha, key, platformWritableInstallFormat, &facts, endpoint)
 }

@@ -1,5 +1,26 @@
-import { AppNetworkError, parseNetworkRequest, parseNetworkResponse, type NetworkRequest, type NetworkResponse, type AppNetworkFailure } from "./network-v2";
-export { AppNetworkError, encodeNetworkBody, decodeNetworkBody, type NetworkRequest, type NetworkResponse } from "./network-v2";
+import {
+  AppNetworkError,
+  NETWORK_STREAM_MAX_BYTES,
+  NETWORK_STREAM_MAX_FRAMES,
+  decodeNetworkStreamFrame,
+  parseNetworkRequest,
+  parseNetworkResponse,
+  parseNetworkStreamChunk,
+  parseNetworkStreamEnd,
+  parseNetworkStreamError,
+  parseNetworkStreamStart,
+  type AppNetworkFailure,
+  type NetworkRequest,
+  type NetworkResponse,
+} from "./network-v2";
+export {
+  AppNetworkError,
+  encodeNetworkBody,
+  decodeNetworkBody,
+  type NetworkRequest,
+  type NetworkResponse,
+  type NetworkStreamEnd,
+} from "./network-v2";
 import {
   createPageActions,
   parseAppPage,
@@ -766,6 +787,40 @@ interface BaseOptions {
   localWindow: Window;
   onFailure?: (code: BridgeFailure) => void;
 }
+export type BridgeNetworkStreamEvent =
+  | {
+      readonly type: "start";
+      readonly status: number;
+      readonly contentType: string;
+    }
+  | {
+      readonly type: "chunk";
+      readonly sequence: number;
+      readonly bodyBase64: string;
+    }
+  | {
+      readonly type: "end";
+      readonly sequence: number;
+      readonly bytes: number;
+      readonly sha256: string;
+    };
+export interface BridgeNetworkStreamOptions {
+  readonly signal?: AbortSignal;
+  readonly onStart?: (
+    status: number,
+    contentType: string,
+  ) => void | Promise<void>;
+  readonly onChunk?: (
+    data: Uint8Array,
+    sequence: number,
+  ) => void | Promise<void>;
+}
+export interface BridgeNetworkStreamResult {
+  readonly status: number;
+  readonly contentType: string;
+  readonly bytes: number;
+  readonly frames: number;
+}
 export interface BridgeHostOptions extends BaseOptions {
   frameWindow: Window;
   binding: BridgeBinding;
@@ -777,6 +832,11 @@ export interface BridgeHostOptions extends BaseOptions {
     signal: AbortSignal,
   ) => Promise<BridgeBackendResponse>;
   onNetworkRequest?: (request: NetworkRequest, signal: AbortSignal) => Promise<NetworkResponse>;
+  onNetworkStreamRequest?: (
+    request: NetworkRequest,
+    signal: AbortSignal,
+    emit: (event: BridgeNetworkStreamEvent) => Promise<void>,
+  ) => Promise<void>;
   onReportRequest?: (
     request: BridgeReportRequest,
     signal: AbortSignal,
@@ -1077,6 +1137,7 @@ export function createBridgeHost(
     announced = false;
   let lastRequest = 0n;
   let lastNetworkRequest = 0n;
+  let lastNetworkStreamRequest = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
   let notificationIssued = 0n;
@@ -1101,6 +1162,16 @@ export function createBridgeHost(
   const networkRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const networkStreamRequests = new Map<
+    string,
+    {
+      abort: AbortController;
+      timer: ReturnType<typeof setTimeout>;
+      nextSequence: number;
+      ack?: () => void;
+      closed: boolean;
+    }
   >();
   const reportRequests = new Map<
     string,
@@ -1205,6 +1276,13 @@ export function createBridgeHost(
       request.abort.abort();
     }
     networkRequests.clear();
+    for (const request of networkStreamRequests.values()) {
+      clearTimeout(request.timer);
+      request.closed = true;
+      request.abort.abort();
+      request.ack?.();
+    }
+    networkStreamRequests.clear();
     for (const request of reportRequests.values()) {
       clearTimeout(request.timer);
       request.abort.abort();
@@ -1395,6 +1473,229 @@ export function createBridgeHost(
       if (pageScope !== data.scope || !parsed) pageActions.retire();
       pageScope = data.scope;
       if (parsed) pageActions.setPage(parsed);
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "network.stream.request" ||
+        data.type === "network.stream.cancel" ||
+        data.type === "network.stream.ack")
+    ) {
+      const cancel = data.type === "network.stream.cancel";
+      const ack = data.type === "network.stream.ack";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ack ? ["sequence"] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel || ack) {
+        if (BigInt(id) > lastNetworkStreamRequest) {
+          fail("protocol_error");
+          return;
+        }
+        const active = networkStreamRequests.get(id);
+        if (ack) {
+          if (
+            !decimal(data.sequence) ||
+            Number(data.sequence) !== active?.nextSequence
+          ) {
+            fail("protocol_error");
+            return;
+          }
+          if (active?.ack) {
+            const resolve = active.ack;
+            active.ack = undefined;
+            resolve();
+          }
+          return;
+        }
+        if (active) {
+          active.closed = true;
+          clearTimeout(active.timer);
+          networkStreamRequests.delete(id);
+          active.abort.abort();
+          active.ack?.();
+        }
+        return;
+      }
+      if (BigInt(id) <= lastNetworkStreamRequest) {
+        fail("protocol_error");
+        return;
+      }
+      lastNetworkStreamRequest = BigInt(id);
+      const request = parseNetworkRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "network.stream.error",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (
+        !options.onNetworkStreamRequest ||
+        !granted?.includes("network.stream") ||
+        (request.credential !== undefined && !granted.includes("secrets.use"))
+      ) {
+        result({ code: "unsupported", retryable: false });
+        return;
+      }
+      if (networkStreamRequests.size >= 2) {
+        result({ code: "busy", retryable: false });
+        return;
+      }
+      const controller = new AbortController();
+      const active = {
+        abort: controller,
+        timer: setTimeout(() => {}, 0),
+        nextSequence: 0,
+        ack: undefined as (() => void) | undefined,
+        closed: false,
+      };
+      const finish = (value: Record<string, unknown>) => {
+        if (active.closed) return;
+        active.closed = true;
+        clearTimeout(active.timer);
+        active.ack?.();
+        networkStreamRequests.delete(id);
+        result(value);
+      };
+      active.timer = setTimeout(() => {
+        finish({ code: "uncertain", retryable: false });
+        controller.abort();
+      }, 40_000);
+      networkStreamRequests.set(id, active);
+      let started = false;
+      let ended = false;
+      let bytes = 0;
+      const post = (message: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope || active.closed)
+          throw new AppNetworkError("uncertain");
+        port.postMessage({
+          type: message.type,
+          ...currentEnvelope,
+          requestId: id,
+          ...message,
+        });
+      };
+      const emit = async (event: BridgeNetworkStreamEvent) => {
+        if (active.closed) throw new AppNetworkError("uncertain");
+        if (!started) {
+          if (event.type === "start") {
+            const parsed = parseNetworkStreamStart({
+              type: event.type,
+              status: event.status,
+              contentType: event.contentType,
+            });
+            if (!parsed) throw new AppNetworkError("uncertain");
+            started = true;
+            post({
+              type: "network.stream.start",
+              status: parsed.status,
+              contentType: parsed.contentType,
+            });
+            return;
+          }
+          throw new AppNetworkError("uncertain");
+        }
+        if (ended || event.type === "start")
+          throw new AppNetworkError("uncertain");
+        if (event.type === "chunk") {
+          const parsed = parseNetworkStreamChunk({
+            type: event.type,
+            sequence: event.sequence,
+            bodyBase64: event.bodyBase64,
+          });
+          if (!parsed || parsed.sequence !== active.nextSequence + 1)
+            throw new AppNetworkError("uncertain");
+          active.nextSequence = parsed.sequence;
+          bytes += decodeNetworkStreamFrame(parsed.bodyBase64).byteLength;
+          if (
+            bytes > NETWORK_STREAM_MAX_BYTES ||
+            active.nextSequence > NETWORK_STREAM_MAX_FRAMES
+          )
+            throw new AppNetworkError("uncertain");
+          post({
+            type: "network.stream.chunk",
+            sequence: parsed.sequence,
+            bodyBase64: parsed.bodyBase64,
+          });
+          await new Promise<void>((resolve) => {
+            active.ack = resolve;
+          });
+          if (active.closed) throw new AppNetworkError("uncertain");
+          return;
+        }
+        const parsed = parseNetworkStreamEnd({
+          type: event.type,
+          sequence: event.sequence,
+          bytes: event.bytes,
+          sha256: event.sha256,
+        });
+        if (
+          !parsed ||
+          parsed.sequence !== active.nextSequence ||
+          parsed.bytes !== bytes
+        )
+          throw new AppNetworkError("uncertain");
+        ended = true;
+        post({
+          type: "network.stream.end",
+          sequence: parsed.sequence,
+          bytes: parsed.bytes,
+          sha256: parsed.sha256,
+        });
+        active.closed = true;
+        clearTimeout(active.timer);
+        networkStreamRequests.delete(id);
+      };
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new AppNetworkError("uncertain");
+          return options.onNetworkStreamRequest!(
+            request,
+            controller.signal,
+            emit,
+          );
+        })
+        .then(
+          () => {
+            if (!ended)
+              finish({ code: "uncertain", retryable: false });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof AppNetworkError &&
+                networkFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+              retryable: false,
+            }),
+        );
       return;
     }
     if (
@@ -2248,6 +2549,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     signal?: AbortSignal,
   ): Promise<BridgeBackendResponse>;
   requestNetwork(request: NetworkRequest, signal?: AbortSignal): Promise<NetworkResponse>;
+  requestNetworkStream(
+    request: NetworkRequest,
+    options?: BridgeNetworkStreamOptions,
+  ): Promise<BridgeNetworkStreamResult>;
   requestReports(
     request: BridgeReportRequest,
     signal?: AbortSignal,
@@ -2386,6 +2691,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   }
   let issued = 0n;
   let networkIssued = 0n;
+  let networkStreamIssued = 0n;
   let reportIssued = 0n;
   let objectIssued = 0n;
   let notificationIssued = 0n;
@@ -2403,6 +2709,23 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       resolve: (value: NetworkResponse) => void;
       reject: (error: AppNetworkError) => void;
       dispose: () => void;
+    }
+  >();
+  const networkStreamRequests = new Map<
+    string,
+    {
+      resolve: (value: BridgeNetworkStreamResult) => void;
+      reject: (error: AppNetworkError) => void;
+      dispose: () => void;
+      onStart?: BridgeNetworkStreamOptions["onStart"];
+      onChunk?: BridgeNetworkStreamOptions["onChunk"];
+      chain: Promise<void>;
+      status?: number;
+      contentType?: string;
+      started: boolean;
+      ended: boolean;
+      sequence: number;
+      bytes: number;
     }
   >();
   const reportRequests = new Map<
@@ -2429,6 +2752,31 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       dispose: () => void;
     }
   >();
+  function rejectNetworkStream(
+    pending: {
+      resolve: (value: BridgeNetworkStreamResult) => void;
+      reject: (error: AppNetworkError) => void;
+      dispose: () => void;
+      ended: boolean;
+    },
+    requestId: string,
+  ) {
+    if (pending.ended) return;
+    pending.ended = true;
+    networkStreamRequests.delete(requestId);
+    pending.dispose();
+    pending.reject(new AppNetworkError("uncertain"));
+    try {
+      if (port && envelope)
+        port.postMessage({
+          type: "network.stream.cancel",
+          ...envelope,
+          requestId,
+        });
+    } catch {
+      fail("transport_error");
+    }
+  }
   function retireRequests() {
     for (const request of requests.values()) {
       request.dispose();
@@ -2440,6 +2788,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new AppNetworkError("uncertain"));
     }
     networkRequests.clear();
+    for (const request of networkStreamRequests.values()) {
+      request.dispose();
+      request.reject(new AppNetworkError("uncertain"));
+    }
+    networkStreamRequests.clear();
     for (const request of reportRequests.values()) {
       request.dispose();
       request.reject(new BridgeReportError("uncertain"));
@@ -2858,6 +3211,167 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         );
       return;
     }
+    if (
+      data &&
+      typeof data === "object" &&
+      (data.type === "network.stream.start" ||
+        data.type === "network.stream.chunk" ||
+        data.type === "network.stream.end" ||
+        data.type === "network.stream.error")
+    ) {
+      const start = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "status",
+        "contentType",
+      ]);
+      const chunk = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "sequence",
+        "bodyBase64",
+      ]);
+      const end = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "sequence",
+        "bytes",
+        "sha256",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+        "retryable",
+      ]);
+      if (!start && !chunk && !end && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      const streamData = data as Record<string, unknown>;
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (
+        !decimal(data.requestId) ||
+        BigInt(data.requestId) > networkStreamIssued
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const requestId = data.requestId as string;
+      const pending = networkStreamRequests.get(requestId);
+      if (!pending) return;
+      if (start) {
+        const parsed = parseNetworkStreamStart({
+          type: "start",
+          status: streamData.status,
+          contentType: streamData.contentType,
+        });
+        if (!parsed || pending.started) {
+          fail("protocol_error");
+          return;
+        }
+        pending.chain = pending.chain
+          .then(async () => {
+            if (pending.ended) throw new AppNetworkError("uncertain");
+            pending.started = true;
+            pending.status = parsed.status;
+            pending.contentType = parsed.contentType;
+            await pending.onStart?.(parsed.status, parsed.contentType);
+          })
+          .catch(() => rejectNetworkStream(pending, requestId));
+        return;
+      }
+      if (chunk) {
+        const parsed = parseNetworkStreamChunk({
+          type: "chunk",
+          sequence: streamData.sequence,
+          bodyBase64: streamData.bodyBase64,
+        });
+        if (
+          !parsed ||
+          !pending.started ||
+          pending.ended ||
+          parsed.sequence !== pending.sequence + 1
+        ) {
+          fail("protocol_error");
+          return;
+        }
+        pending.sequence = parsed.sequence;
+        pending.chain = pending.chain
+          .then(async () => {
+            const bytes = decodeNetworkStreamFrame(parsed.bodyBase64);
+            pending.bytes += bytes.byteLength;
+            if (pending.bytes > NETWORK_STREAM_MAX_BYTES)
+              throw new AppNetworkError("uncertain");
+            await pending.onChunk?.(bytes, parsed.sequence);
+            if (pending.ended) return;
+            port!.postMessage({
+              type: "network.stream.ack",
+              ...envelope,
+              requestId,
+              sequence: parsed.sequence.toString(),
+            });
+          })
+          .catch(() => rejectNetworkStream(pending, requestId));
+        return;
+      }
+      if (end) {
+        const parsed = parseNetworkStreamEnd({
+          type: "end",
+          sequence: streamData.sequence,
+          bytes: streamData.bytes,
+          sha256: streamData.sha256,
+        });
+        if (
+          !parsed ||
+          !pending.started ||
+          pending.ended ||
+          parsed.sequence !== pending.sequence ||
+          parsed.bytes !== pending.bytes
+        ) {
+          fail("protocol_error");
+          return;
+        }
+        pending.chain = pending.chain
+          .then(() => {
+            if (pending.ended) throw new AppNetworkError("uncertain");
+            pending.ended = true;
+            networkStreamRequests.delete(requestId);
+            pending.dispose();
+            pending.resolve(Object.freeze({
+              status: pending.status!,
+              contentType: pending.contentType!,
+              bytes: parsed.bytes,
+              frames: parsed.sequence,
+            }));
+          })
+          .catch(() => rejectNetworkStream(pending, requestId));
+        return;
+      }
+      const code = parseNetworkStreamError({
+        type: "error",
+        code: streamData.code,
+        retryable: streamData.retryable,
+      });
+      if (!code) {
+        fail("protocol_error");
+        return;
+      }
+      pending.chain = pending.chain
+        .then(() => {
+          if (pending.ended) throw new AppNetworkError("uncertain");
+          pending.ended = true;
+          networkStreamRequests.delete(requestId);
+          pending.dispose();
+          pending.reject(new AppNetworkError(code));
+        })
+        .catch(() => rejectNetworkStream(pending, requestId));
+      return;
+    }
     if (data && typeof data === "object" && data.type === "network.result") {
       const response = exact(data, [
         "type",
@@ -3013,6 +3527,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         retireRequests();
         issued = 0n;
         networkIssued = 0n;
+        networkStreamIssued = 0n;
         reportIssued = 0n;
         objectIssued = 0n;
         notificationIssued = 0n;
@@ -3351,6 +3866,77 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "network.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestNetworkStream(
+      value: NetworkRequest,
+      options: BridgeNetworkStreamOptions = {},
+    ): Promise<BridgeNetworkStreamResult> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (!context.capabilities.includes("network.stream"))
+        return Promise.reject(new AppNetworkError("unsupported"));
+      const request = parseNetworkRequest(value);
+      if (!request)
+        return Promise.reject(new AppNetworkError("invalid_request"));
+      if (
+        request.credential !== undefined &&
+        !context.capabilities.includes("secrets.use")
+      )
+        return Promise.reject(new AppNetworkError("unsupported"));
+      if (options.signal?.aborted)
+        return Promise.reject(new AppNetworkError("not_ready"));
+      if (
+        networkStreamRequests.size >= 2 ||
+        networkStreamIssued === MAX_REVISION
+      )
+        return Promise.reject(new AppNetworkError("busy"));
+      const id = (++networkStreamIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = networkStreamRequests.get(id);
+          if (!active) return;
+          networkStreamRequests.delete(id);
+          active.dispose();
+          active.reject(new AppNetworkError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "network.stream.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 40_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          options.signal?.removeEventListener("abort", cancel);
+        };
+        networkStreamRequests.set(id, {
+          resolve,
+          reject,
+          dispose,
+          onStart: options.onStart,
+          onChunk: options.onChunk,
+          chain: Promise.resolve(),
+          started: false,
+          ended: false,
+          sequence: 0,
+          bytes: 0,
+        });
+        options.signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "network.stream.request",
             ...envelope,
             requestId: id,
             request,

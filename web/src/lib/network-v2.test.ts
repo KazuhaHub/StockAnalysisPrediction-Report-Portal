@@ -1,5 +1,17 @@
 import { expect, test } from "vitest";
-import { AppNetworkError, encodeNetworkBody, decodeNetworkBody, parseNetworkRequest, parseNetworkResponse } from "./network-v2";
+import {
+  AppNetworkError,
+  NETWORK_STREAM_FRAME_MAX_BYTES,
+  decodeNetworkBody,
+  decodeNetworkStreamFrame,
+  encodeNetworkBody,
+  parseNetworkRequest,
+  parseNetworkResponse,
+  parseNetworkStreamChunk,
+  parseNetworkStreamEnd,
+  parseNetworkStreamError,
+  parseNetworkStreamStart,
+} from "./network-v2";
 const request = () => ({method:"POST",url:"https://api.example.com/v1/check?q=%E4%B8%AD",accept:"application/json",contentType:"application/octet-stream",bodyBase64:"AP+A"});
 test("network bytes round trip exactly at both fixed limits",()=>{
  const body=new Uint8Array(65536);for(let i=0;i<body.length;i++)body[i]=i%256;
@@ -22,4 +34,35 @@ test("network results are copied, empty bodies allowed and failures never retry"
  expect(parseNetworkResponse({status:204,contentType:"",bodyBase64:""})).toEqual({status:204,contentType:"",bodyBase64:""});
  const one=decodeNetworkBody("AP+A");one[0]=42;expect(decodeNetworkBody("AP+A")).toEqual(new Uint8Array([0,255,128]));
  const error=new AppNetworkError("uncertain");expect(error.retryable).toBe(false);expect(error.message).not.toContain("api.example.com");
+});
+test("network stream frames are closed, ordered and bounded",()=>{
+ const bytes=new Uint8Array([0,255,128,10]);
+ const encoded=encodeNetworkBody(bytes);
+ expect(parseNetworkStreamStart({type:"start",status:200,contentType:"application/x-ndjson"})).toEqual({status:200,contentType:"application/x-ndjson"});
+ expect(parseNetworkStreamChunk({type:"chunk",sequence:1,bodyBase64:encoded})).toEqual({sequence:1,bodyBase64:encoded});
+ expect(decodeNetworkStreamFrame(encoded)).toEqual(bytes);
+ expect(parseNetworkStreamEnd({type:"end",sequence:1,bytes:4,sha256:"a".repeat(64)})).toEqual({sequence:1,bytes:4,sha256:"a".repeat(64)});
+ expect(parseNetworkStreamError({type:"error",code:"uncertain",retryable:false})).toBe("uncertain");
+ for(const bad of [
+  {type:"start",status:302,contentType:"text/event-stream"},
+  {type:"start",status:200,contentType:"x\n"},
+  {type:"start",status:200,contentType:"x",extra:true},
+ ]) expect(parseNetworkStreamStart(bad)).toBeNull();
+ for(const bad of [
+  {type:"chunk",sequence:0,bodyBase64:encoded},
+  {type:"chunk",sequence:161,bodyBase64:encoded},
+  {type:"chunk",sequence:1,bodyBase64:"YQ"},
+  {type:"chunk",sequence:1,bodyBase64:encodeNetworkBody(new Uint8Array(NETWORK_STREAM_FRAME_MAX_BYTES+1))},
+ ]) expect(parseNetworkStreamChunk(bad)).toBeNull();
+ for(const bad of [
+  {type:"end",sequence:0,bytes:1,sha256:"a".repeat(64)},
+  {type:"end",sequence:1,bytes:-1,sha256:"a".repeat(64)},
+  {type:"end",sequence:1,bytes:1,sha256:"A".repeat(64)},
+  {type:"end",sequence:1,bytes:1,sha256:"a".repeat(64),extra:true},
+ ]) expect(parseNetworkStreamEnd(bad)).toBeNull();
+ for(const bad of [
+  {type:"error",code:"uncertain",retryable:true},
+  {type:"error",code:"private",retryable:false},
+  {type:"error",code:"uncertain"},
+ ]) expect(parseNetworkStreamError(bad)).toBeNull();
 });

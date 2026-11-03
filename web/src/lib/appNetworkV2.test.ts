@@ -1,6 +1,9 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { onSessionLost } from "../api/client";
-import { createAppNetworkTransport } from "./appNetworkV2";
+import {
+  createAppNetworkStreamTransport,
+  createAppNetworkTransport,
+} from "./appNetworkV2";
 
 const binding = {
   installationId: "00000000-0000-0000-0000-000000000001",
@@ -193,4 +196,128 @@ test("pre-aborted or malformed requests never fetch", async () => {
     ),
   ).rejects.toMatchObject({ code: "invalid_request" });
   expect(fetch).not.toHaveBeenCalled();
+});
+
+function streamResponse(lines: unknown[]) {
+  const body = lines.map((line) => `${JSON.stringify(line)}\n`).join("");
+  return new Response(body);
+}
+
+async function digest(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const value = new Uint8Array(
+    await globalThis.crypto.subtle.digest("SHA-256", copy.buffer),
+  );
+  return Array.from(value, (part) => part.toString(16).padStart(2, "0")).join(
+    "",
+  );
+}
+
+test("stream transport forwards ordered chunks and verifies the end digest", async () => {
+  const bytes = new Uint8Array([0, 255, 128, 10]);
+  const bodyBase64 = btoa(String.fromCharCode(...bytes));
+  const response = streamResponse([
+    { type: "start", status: 206, contentType: "application/x-ndjson" },
+    { type: "chunk", sequence: 1, bodyBase64 },
+    {
+      type: "end",
+      sequence: 1,
+      bytes: bytes.byteLength,
+      sha256: await digest(bytes),
+    },
+  ]);
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  const events: string[] = [];
+  await expect(
+    createAppNetworkStreamTransport(binding)(
+      request,
+      new AbortController().signal,
+      async (event) => {
+        events.push(event.type);
+      },
+    ),
+  ).resolves.toEqual({
+    sequence: 1,
+    bytes: bytes.byteLength,
+    sha256: await digest(bytes),
+  });
+  expect(events).toEqual(["start", "chunk", "end"]);
+});
+
+test("stream transport waits for consumer backpressure before completing", async () => {
+  const bytes = new Uint8Array([1, 2, 3]);
+  const bodyBase64 = btoa(String.fromCharCode(...bytes));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      streamResponse([
+        { type: "start", status: 200, contentType: "text/event-stream" },
+        { type: "chunk", sequence: 1, bodyBase64 },
+        {
+          type: "end",
+          sequence: 1,
+          bytes: bytes.byteLength,
+          sha256: await digest(bytes),
+        },
+      ]),
+    ),
+  );
+  let release!: () => void;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let settled = false;
+  let chunkStarted = false;
+  const running = createAppNetworkStreamTransport(binding)(
+    { ...request, accept: "text/event-stream" },
+    new AbortController().signal,
+    async (event) => {
+      if (event.type === "chunk") {
+        chunkStarted = true;
+        await blocked;
+      }
+    },
+  ).finally(() => {
+    settled = true;
+  });
+  await vi.waitFor(() => expect(chunkStarted).toBe(true));
+  expect(settled).toBe(false);
+  release();
+  await expect(running).resolves.toMatchObject({ bytes: bytes.byteLength });
+});
+
+test("stream transport refuses missing termination, duplicate frames and digest drift", async () => {
+  const bytes = new Uint8Array([1]);
+  const bodyBase64 = btoa(String.fromCharCode(...bytes));
+  const good = await digest(bytes);
+  const cases = [
+    [
+      { type: "start", status: 200, contentType: "text/event-stream" },
+      { type: "chunk", sequence: 1, bodyBase64 },
+    ],
+    [
+      { type: "start", status: 200, contentType: "text/event-stream" },
+      { type: "chunk", sequence: 1, bodyBase64 },
+      { type: "chunk", sequence: 1, bodyBase64 },
+      { type: "end", sequence: 1, bytes: 1, sha256: good },
+    ],
+    [
+      { type: "start", status: 200, contentType: "text/event-stream" },
+      { type: "chunk", sequence: 1, bodyBase64 },
+      { type: "end", sequence: 1, bytes: 1, sha256: "0".repeat(64) },
+    ],
+  ];
+  const fetch = vi.fn();
+  for (const lines of cases) fetch.mockResolvedValueOnce(streamResponse(lines));
+  vi.stubGlobal("fetch", fetch);
+  for (const lines of cases) {
+    await expect(
+      createAppNetworkStreamTransport(binding)(
+        { ...request, accept: "text/event-stream" },
+        new AbortController().signal,
+        async () => {},
+      ),
+    ).rejects.toMatchObject({ code: "uncertain", retryable: false });
+  }
 });

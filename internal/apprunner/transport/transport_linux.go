@@ -258,6 +258,15 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		defer executionCancel()
 		s.network.serve(executionCtx, conn, true)
 		return
+	case networkStreamRequestMagic:
+		if s.network == nil || ctx.Err() != nil || !stop() {
+			return
+		}
+		cancel()
+		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(networkStreamSessionTimeout))
+		defer executionCancel()
+		s.network.serveStream(executionCtx, conn, true)
+		return
 	case backendRequestQueryMagic, writableBackendRequestQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return

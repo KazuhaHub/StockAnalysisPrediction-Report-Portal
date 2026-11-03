@@ -15,6 +15,7 @@ type platformManagedRuntimeFacts struct {
 	observation   transport.ManagedRuntimeObservation
 	network       *platformNetworkRuntimeFacts
 	networkPolicy string
+	streamPolicy  string
 }
 
 func platformRuntimeAuthority(r platformRuntimeRegistration) control.Authority {
@@ -90,7 +91,7 @@ func validPlatformInstallRuntimeFacts(f platformManagedRuntimeFacts, e platformR
 	if !validPlatformManagedRuntimeObservation(f.observation, f.runtime, e) {
 		return false
 	}
-	if f.networkPolicy == "" {
+	if f.networkPolicy == "" && f.streamPolicy == "" {
 		return f.network == nil
 	}
 	return f.network != nil && samePlatformManagedRuntime(f.network.runtime, f.runtime) && validPlatformNetworkRuntimeObservation(f.network.observation, f.runtime, e)

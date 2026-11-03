@@ -7,6 +7,7 @@ import {
   BRIDGE_PROTOCOL,
   BRIDGE_DEADLINE_MS,
   type BridgeBinding,
+  AppNetworkError,
   BridgeBackendError,
   BridgeObjectError,
   BridgeNotificationError,
@@ -1482,6 +1483,31 @@ async function networkPair(onNetworkRequest?: Parameters<typeof createBridgeHost
  await vi.waitFor(()=>expect(host.state()).toBe("ready"));
  return {...w,host,client};
 }
+async function networkStreamPair(
+ onNetworkStreamRequest?: Parameters<typeof createBridgeHost>[0]["onNetworkStreamRequest"],
+ granted=true,
+ extraCapabilities: readonly string[]=[],
+) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({
+  localWindow:w.host,
+  frameWindow:w.child,
+  binding,
+  presentation,
+  capabilities:granted?["network.stream",...extraCapabilities]:[],
+  onNetworkStreamRequest,
+ });
+ const client=createBridgeClient({
+  localWindow:w.child,
+  parentWindow:w.host,
+  parentOrigin:"https://portal.example.invalid",
+  onPresentation:()=>{},
+ });
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
 const reportSummary = {
  id:42,runId:"run-42",symbol:"600100",name:"Example",date:"2026-10-30",
  time:"09:30",kind:"research",subtype:"daily",title:"Current report",
@@ -1844,4 +1870,96 @@ test("network deadline reports uncertainty once and ignores a late response",asy
  resolve({status:200,contentType:"",bodyBase64:""});
  await vi.advanceTimersByTimeAsync(10_000);
  expect(dispatch).toHaveBeenCalledOnce();
+});
+test("network stream preserves order and waits for application backpressure",async()=>{
+ let emitChunk!: () => Promise<void>;
+ const chunkEntered = new Promise<void>((resolve) => {
+  emitChunk = async () => { resolve(); };
+ });
+ let release!: () => void;
+ const blocked = new Promise<void>((resolve) => { release = resolve; });
+ const hostRequest = vi.fn(async (
+  _request,
+  _signal,
+  emit: Parameters<NonNullable<Parameters<typeof createBridgeHost>[0]["onNetworkStreamRequest"]>>[2],
+ ) => {
+  await emit({type:"start",status:206,contentType:"application/x-ndjson"});
+  await emit({type:"chunk",sequence:1,bodyBase64:"AQID"});
+  await emit({type:"end",sequence:1,bytes:3,sha256:"a".repeat(64)});
+ });
+ const pair=await networkStreamPair(hostRequest);
+ const {client}=pair;
+ let chunkStarted = false;
+ const pending=client.requestNetworkStream(
+  {...networkRequest(),accept:"application/x-ndjson"},
+  {
+   onStart:(status,contentType)=>{
+    expect([status,contentType]).toEqual([206,"application/x-ndjson"]);
+   },
+   onChunk:async(data,sequence)=>{
+    chunkStarted=true;
+    expect([...data,sequence]).toEqual([1,2,3,1]);
+    await emitChunk();
+    await blocked;
+   },
+  },
+ );
+ await chunkEntered;
+ expect(chunkStarted).toBe(true);
+ release();
+ await expect(pending).resolves.toEqual({
+  status:206,contentType:"application/x-ndjson",bytes:3,frames:1,
+ });
+ expect(hostRequest).toHaveBeenCalledOnce();
+});
+test("network stream fails closed without grant, transport, or a terminating frame",async()=>{
+ const absent=await networkStreamPair(vi.fn(),false);
+ await expect(absent.client.requestNetworkStream(networkRequest())).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await networkStreamPair();
+ await expect(unsupported.client.requestNetworkStream(networkRequest())).rejects.toMatchObject({code:"unsupported"});
+ const missing=await networkStreamPair(async(_request,_signal,emit)=>{
+  await emit({type:"start",status:200,contentType:"text/event-stream"});
+ });
+ await expect(missing.client.requestNetworkStream({...networkRequest(),accept:"text/event-stream"})).rejects.toMatchObject({code:"uncertain",retryable:false});
+});
+test("network stream cancellation never retries a possibly executed stream",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn(async(
+  _request,
+  current:AbortSignal,
+  emit: Parameters<NonNullable<Parameters<typeof createBridgeHost>[0]["onNetworkStreamRequest"]>>[2],
+ )=>{
+  signal=current;
+  await emit({type:"start",status:200,contentType:"text/event-stream"});
+  await new Promise<void>((_resolve,reject)=>{
+   current.addEventListener("abort",()=>reject(new AppNetworkError("uncertain")),{once:true});
+  });
+ });
+ const {client}=await networkStreamPair(dispatch);
+ const abort=new AbortController();
+ const pending=client.requestNetworkStream(
+  {...networkRequest(),accept:"text/event-stream"},
+  {signal:abort.signal},
+ );
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ abort.abort();
+ await expect(pending).rejects.toMatchObject({code:"uncertain",retryable:false});
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ expect(dispatch).toHaveBeenCalledOnce();
+});
+test("network stream with secrets.use forwards only the binding name",async()=>{
+ const dispatch=vi.fn(async(
+  _request:unknown,
+  _signal:AbortSignal,
+  emit: Parameters<NonNullable<Parameters<typeof createBridgeHost>[0]["onNetworkStreamRequest"]>>[2],
+ )=>{
+  await emit({type:"start",status:200,contentType:"text/event-stream"});
+  await emit({type:"end",sequence:0,bytes:0,sha256:"a".repeat(64)});
+ });
+ const without=await networkStreamPair(dispatch);
+ await expect(without.client.requestNetworkStream({...networkRequest(),credential:"upstream-api"})).rejects.toMatchObject({code:"unsupported"});
+ const withUse=await networkStreamPair(dispatch,true,["secrets.use"]);
+ await expect(withUse.client.requestNetworkStream({...networkRequest(),credential:"upstream-api"})).resolves.toMatchObject({bytes:0,frames:0});
+ expect(dispatch.mock.calls[0][0]).toMatchObject({credential:"upstream-api"});
+ expect(JSON.stringify(dispatch.mock.calls[0][0])).not.toContain("credentialValue");
 });

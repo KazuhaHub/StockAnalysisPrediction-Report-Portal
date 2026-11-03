@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import { BRIDGE_DEADLINE_MS, createBridgeHost, parseBridgePresentation, type BridgeBinding, type BridgePresentation, type PageActionSnapshot } from '../../lib/bridge-v2'
 import './AppFrameV2.css'
 import { createAppBackendTransport } from '../../lib/appBackendV2'
-import { createAppNetworkTransport } from '../../lib/appNetworkV2'
+import { createAppNetworkStreamTransport, createAppNetworkTransport } from '../../lib/appNetworkV2'
 import { createAppReportsTransport } from '../../lib/appReportsV2'
 import { createAppObjectsTransport } from '../../lib/appObjectsV2'
 import { createAppNotificationsTransport } from '../../lib/appNotificationsV2'
@@ -98,6 +98,10 @@ function FrameDocument({ source, title, binding, presentation, capabilities, hei
       capabilities,
       onBackendRequest: backendAvailable ? createAppBackendTransport(binding) : undefined,
       onNetworkRequest: capabilities.includes('network.http') ? createAppNetworkTransport(binding) : undefined,
+      onNetworkStreamRequest: capabilities.includes('network.stream') ? (() => {
+        const streamTransport = createAppNetworkStreamTransport(binding)
+        return async (request, signal, emit) => { await streamTransport(request, signal, emit) }
+      })() : undefined,
       onReportRequest: capabilities.includes('reports.read') ? createAppReportsTransport(binding) : undefined,
       onObjectRequest: capabilities.includes('storage.files') ? createAppObjectsTransport(binding) : undefined,
       onNotificationRequest: capabilities.includes('notifications.publish') ? createAppNotificationsTransport(binding) : undefined,

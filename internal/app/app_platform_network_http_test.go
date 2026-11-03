@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -138,5 +140,69 @@ func TestPlatformNetworkHTTPEnrolment(t *testing.T) {
 	}
 	if w := platformBackendHTTPCall(mux, strings.TrimSuffix(backendPath, "/backend")+"/network", cookie, `{}`, nil); w.Code != http.StatusForbidden {
 		t.Fatal("network bypassed enrolment wall", w.Code)
+	}
+}
+
+func TestPlatformNetworkStreamWriterUsesClosedNDJSONFrames(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer, err := newPlatformNetworkStreamWriter(recorder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := []byte("first\n")
+	second := []byte("second\n")
+	if writer.Start(200, "application/x-ndjson") != nil ||
+		writer.Start(200, "application/x-ndjson") == nil ||
+		writer.Chunk(first) != nil ||
+		writer.Chunk(second) != nil ||
+		writer.End() != nil ||
+		writer.End() == nil {
+		t.Fatal("stream frame state machine")
+	}
+	lines := strings.Split(strings.TrimSpace(recorder.Body.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("frames=%d %q", len(lines), recorder.Body.String())
+	}
+	var start, chunkOne, chunkTwo, end map[string]any
+	for index, target := range []*map[string]any{&start, &chunkOne, &chunkTwo, &end} {
+		if json.Unmarshal([]byte(lines[index]), target) != nil {
+			t.Fatalf("frame %d is not JSON: %q", index, lines[index])
+		}
+	}
+	if start["type"] != "start" || start["status"] != float64(200) || start["contentType"] != "application/x-ndjson" ||
+		chunkOne["type"] != "chunk" || chunkOne["sequence"] != float64(1) || chunkOne["bodyBase64"] != base64.StdEncoding.EncodeToString(first) ||
+		chunkTwo["sequence"] != float64(2) || chunkTwo["bodyBase64"] != base64.StdEncoding.EncodeToString(second) {
+		t.Fatalf("stream frames changed: %q", recorder.Body.String())
+	}
+	sum := sha256.Sum256(append(bytes.Clone(first), second...))
+	if end["type"] != "end" || end["sequence"] != float64(2) || end["bytes"] != float64(len(first)+len(second)) || end["sha256"] != hex.EncodeToString(sum[:]) || recorder.Header().Get("Content-Type") != "application/x-ndjson; charset=utf-8" {
+		t.Fatalf("stream end binding changed: %#v %s", end, recorder.Header().Get("Content-Type"))
+	}
+}
+
+func TestPlatformNetworkStreamAdmissionUsesIndependentBudget(t *testing.T) {
+	s, mux, actor, backendPath, cookie, _ := platformBackendHTTPFixture(t, false)
+	installation := strings.Split(backendPath, "/")[4]
+	path := strings.TrimSuffix(backendPath, "/backend") + "/network/stream"
+	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=?`, installation)}
+	payload := platformNetworkHTTPPayload(t, binding, nil)
+	if w := platformBackendHTTPCall(mux, path, "", payload, nil); w.Code != 401 {
+		t.Fatal("anonymous stream execution", w.Code)
+	}
+	if w := platformBackendHTTPCall(mux, path, cookie, payload, nil); w.Code != 404 || strings.Contains(w.Body.String(), "runtime") {
+		t.Fatal("denied stream grant exposed runtime", w.Code, w.Body.String())
+	}
+	one, _ := s.platformNetworkStreams.acquire()
+	defer one()
+	two, _ := s.platformNetworkStreams.acquire()
+	defer two()
+	if w := platformBackendHTTPCall(mux, path, cookie, payload, nil); w.Code != 429 || w.Header().Get("Retry-After") != "1" {
+		t.Fatal("unbounded stream admission", w.Code)
+	}
+	one()
+	two()
+	mustExec(t, s.st, `UPDATE user_sessions SET revoked=1 WHERE id=?`, actor.sessionID)
+	if w := platformBackendHTTPCall(mux, path, cookie, payload, nil); w.Code != 401 {
+		t.Fatal("revoked session reached stream execution", w.Code)
 	}
 }

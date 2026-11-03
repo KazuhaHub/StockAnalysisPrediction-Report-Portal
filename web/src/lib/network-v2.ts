@@ -2,6 +2,9 @@
 // current host SQL and reviewed policy govern every actual request.
 export const NETWORK_REQUEST_MAX_BYTES = 65_536;
 export const NETWORK_RESPONSE_MAX_BYTES = 1_048_576;
+export const NETWORK_STREAM_MAX_BYTES = 4_194_304;
+export const NETWORK_STREAM_FRAME_MAX_BYTES = 32_768;
+export const NETWORK_STREAM_MAX_FRAMES = 160;
 export type AppNetworkFailure = "not_ready" | "unsupported" | "invalid_request" | "busy" | "unavailable" | "uncertain";
 export class AppNetworkError extends Error {
   readonly retryable = false;
@@ -22,6 +25,19 @@ export interface NetworkResponse {
   readonly status: number;
   readonly contentType: string;
   readonly bodyBase64: string;
+}
+export interface NetworkStreamStart {
+  readonly status: number;
+  readonly contentType: string;
+}
+export interface NetworkStreamChunk {
+  readonly sequence: number;
+  readonly bodyBase64: string;
+}
+export interface NetworkStreamEnd {
+  readonly sequence: number;
+  readonly bytes: number;
+  readonly sha256: string;
 }
 function exact(value: unknown, keys: readonly string[]): value is Record<string,unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value,key));
@@ -61,4 +77,27 @@ export function parseNetworkRequest(value: unknown): NetworkRequest | null {
 export function parseNetworkResponse(value: unknown): NetworkResponse | null {
   if (!exact(value,["status","contentType","bodyBase64"]) || typeof value.status!=="number" || !Number.isInteger(value.status) || value.status<200 || value.status>599 || value.status>=300 && value.status<400 || !header(value.contentType) || binary(value.bodyBase64,NETWORK_RESPONSE_MAX_BYTES) === null) return null;
   return Object.freeze({status:value.status,contentType:value.contentType,bodyBase64:value.bodyBase64 as string});
+}
+export function parseNetworkStreamStart(value: unknown): NetworkStreamStart | null {
+  if (!exact(value,["type","status","contentType"]) || value.type!=="start" || typeof value.status!=="number" || !Number.isInteger(value.status) || value.status<200 || value.status>=300 || !header(value.contentType)) return null;
+  return Object.freeze({status:value.status,contentType:value.contentType});
+}
+export function parseNetworkStreamChunk(value: unknown): NetworkStreamChunk | null {
+  if (!exact(value,["type","sequence","bodyBase64"]) || value.type!=="chunk" || typeof value.sequence!=="number" || !Number.isInteger(value.sequence) || value.sequence<1 || value.sequence>NETWORK_STREAM_MAX_FRAMES || binary(value.bodyBase64,NETWORK_STREAM_FRAME_MAX_BYTES)===null) return null;
+  return Object.freeze({sequence:value.sequence,bodyBase64:value.bodyBase64 as string});
+}
+export function parseNetworkStreamEnd(value: unknown): NetworkStreamEnd | null {
+  if (!exact(value,["type","sequence","bytes","sha256"]) || value.type!=="end" || typeof value.sequence!=="number" || !Number.isInteger(value.sequence) || value.sequence<0 || value.sequence>NETWORK_STREAM_MAX_FRAMES || typeof value.bytes!=="number" || !Number.isInteger(value.bytes) || value.bytes<0 || value.bytes>NETWORK_STREAM_MAX_BYTES || (value.sequence===0)!==(value.bytes===0) || typeof value.sha256!=="string" || !/^[a-f0-9]{64}$/.test(value.sha256)) return null;
+  return Object.freeze({sequence:value.sequence,bytes:value.bytes,sha256:value.sha256});
+}
+export function parseNetworkStreamError(value: unknown): AppNetworkFailure | null {
+  if (!exact(value,["type","code","retryable"]) || value.type!=="error" || value.retryable!==false || typeof value.code!=="string") return null;
+  return value.code==="uncertain" || value.code==="unavailable" || value.code==="busy" || value.code==="invalid_request" || value.code==="not_ready" || value.code==="unsupported" ? value.code : null;
+}
+export function decodeNetworkStreamFrame(value: string): Uint8Array {
+  const decoded = binary(value,NETWORK_STREAM_FRAME_MAX_BYTES);
+  if (decoded === null) throw new AppNetworkError("uncertain");
+  const bytes = new Uint8Array(decoded.length);
+  for (let i=0;i<decoded.length;i++) bytes[i]=decoded.charCodeAt(i);
+  return bytes;
 }

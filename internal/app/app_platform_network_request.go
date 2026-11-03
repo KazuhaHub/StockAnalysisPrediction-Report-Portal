@@ -16,6 +16,8 @@ import (
 )
 
 const platformNetworkRequestLifetime = 30 * time.Second
+const platformNetworkStreamRequestLifetime = 40 * time.Second
+const platformNetworkStreamExecutionTimeout = 35 * time.Second
 
 var errAppPlatformNetworkUnavailable = errors.New("application network request unavailable or denied")
 var errAppPlatformNetworkUncertain = errors.New("application network request outcome uncertain")
@@ -24,10 +26,12 @@ type platformNetworkGrant struct {
 	policy  string
 	review  string
 	profile transport.NetworkRuntimeProfile
+	stream  bool
 }
 type platformNetworkRequestIntent struct {
 	access         platformWritableBackendAccess
 	grant          platformNetworkGrant
+	stream         bool
 	secretBinding  platformSecretBindingUse
 	command        control.NetworkHTTPRequestCommand
 	raw, signature []byte
@@ -54,7 +58,7 @@ func (i platformNetworkRequestIntent) GoString() string { return i.String() }
 // The outer current-viewer transaction has verified complete signed execution
 // history and exact active grant coverage. This read adds the selected policy
 // and profile; an app cannot select a review, actor scope or runtime identity.
-func loadPlatformNetworkGrant(e migExec, installation string, a platformWritableBackendAccess) (platformNetworkGrant, error) {
+func loadPlatformNetworkGrant(e migExec, installation string, a platformWritableBackendAccess, capability string) (platformNetworkGrant, error) {
 	var g platformNetworkGrant
 	var raw, digest, action string
 	release := platformDigest(a.intent.start.writer.descriptor)
@@ -62,14 +66,14 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		FROM app_platform_capability_grants g
 		JOIN app_platform_review_plans p ON p.id=g.review_plan_id
 		JOIN app_platform_operations o ON o.review_plan_id=p.id
-		WHERE g.installation_id=? AND g.capability='network.http'
+		WHERE g.installation_id=? AND g.capability=?
 		AND g.granted=1 AND g.policy_revision=?
 		AND p.consumed_ms IS NOT NULL
 		AND p.target_release_sha256=?
 		AND o.installation_id=g.installation_id
 		AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.controller_epoch=p.controller_epoch`,
-		installation, a.policy, release).
+		installation, capability, a.policy, release).
 		Scan(&g.policy, &g.review, &raw, &digest, &action); err != nil {
 		return g, errAppPlatformNetworkUnavailable
 	}
@@ -108,8 +112,7 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 	default:
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	if target == nil || target.NetworkPolicy == "" ||
-		target.NetworkPolicy != g.policy ||
+	if target == nil ||
 		target.RuntimeID != a.intent.start.writer.runtime.id ||
 		target.DeploymentID != a.intent.start.writer.runtime.deploymentID ||
 		target.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch ||
@@ -117,7 +120,21 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		target.Fingerprint != a.intent.start.writer.runtime.fingerprint {
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
-	if _, err := platformNetworkTargetPolicy(target); err != nil {
+	httpPolicy, streamPolicy, err := platformNetworkTargetPolicies(target)
+	if err != nil {
+		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+	}
+	switch capability {
+	case "network.http":
+		if httpPolicy != g.policy {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+	case "network.stream":
+		if streamPolicy != g.policy || target.NetworkProfile.StreamFormat != appplatform.HTTPStreamPolicyFormat {
+			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
+		}
+		g.stream = true
+	default:
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
 	g.profile = target.NetworkProfile
@@ -125,6 +142,14 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 }
 
 func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte) (platformNetworkRequestIntent, error) {
+	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, body, false)
+}
+
+func (s *Server) preparePlatformNetworkStreamRequest(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte) (platformNetworkRequestIntent, error) {
+	return s.preparePlatformNetworkIntent(ctx, session, installation, binding, method, target, accept, kind, credential, body, true)
+}
+
+func (s *Server) preparePlatformNetworkIntent(ctx context.Context, session platformActorSession, installation string, binding platformBackendRequestBinding, method, target, accept, kind, credential string, body []byte, stream bool) (platformNetworkRequestIntent, error) {
 	var result platformNetworkRequestIntent
 	if !platformValidUUID(installation) || !binding.valid() || len(body) > appplatform.MaxHTTPRequestBytes || len(method) > 16 || len(target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(accept) || !appplatform.ValidHTTPPolicyHeaderValue(kind) || (credential != "" && !platformSecretBindingNamePattern.MatchString(credential)) {
 		return result, errAppPlatformNetworkUnavailable
@@ -135,13 +160,30 @@ func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session plat
 		if !binding.matches(a) || len(seed) != ed25519.SeedSize {
 			return errAppPlatformNetworkUnavailable
 		}
-		grant, err := loadPlatformNetworkGrant(e, installation, a)
+		capability := "network.http"
+		if stream {
+			capability = "network.stream"
+		}
+		grant, err := loadPlatformNetworkGrant(e, installation, a, capability)
 		if err != nil {
 			return err
 		}
-		policy, err := appplatform.ParseHTTPPolicy([]byte(grant.policy))
-		if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
-			return errAppPlatformNetworkUnavailable
+		var policySHA string
+		var duration time.Duration
+		if stream {
+			policy, err := appplatform.ParseHTTPStreamPolicy([]byte(grant.policy))
+			if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
+				return errAppPlatformNetworkUnavailable
+			}
+			policySHA = policy.SHA256
+			duration = policy.Policy.Duration
+		} else {
+			policy, err := appplatform.ParseHTTPPolicy([]byte(grant.policy))
+			if err != nil || int64(len(body)) > policy.Policy.RequestBytes {
+				return errAppPlatformNetworkUnavailable
+			}
+			policySHA = policy.SHA256
+			duration = policy.Policy.Deadline
 		}
 		var credentialHeader string
 		var credentialValue []byte
@@ -167,10 +209,24 @@ func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session plat
 		now := time.Now().UnixMilli()
 		r := a.intent.start.writer.runtime
 		result.grant = grant
-		result.command = control.NetworkHTTPRequestCommand{Format: control.NetworkHTTPRequestFormat, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policy.SHA256, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+platformNetworkRequestLifetime.Milliseconds(), 10)}
+		format := control.NetworkHTTPRequestFormat
+		lifetime := platformNetworkRequestLifetime
+		if stream {
+			format = control.NetworkHTTPStreamRequestFormat
+			lifetime = platformNetworkStreamRequestLifetime
+		}
+		if duration <= 0 || duration > lifetime {
+			return errAppPlatformNetworkUnavailable
+		}
+		result.stream = stream
+		result.command = control.NetworkHTTPRequestCommand{Format: format, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, ControlRevision: strconv.FormatInt(r.controlRevision, 10), RequestID: id, InstallationID: installation, ReviewPlanID: grant.review, Generation: strconv.FormatInt(a.intent.generation, 10), PolicyRevision: strconv.FormatInt(a.policy, 10), ReleaseSHA256: platformDigest(a.intent.start.writer.descriptor), ActorScope: platformDigest(append([]byte("portal-network-viewer/v1:"), viewer...)), PolicyRaw: []byte(grant.policy), PolicySHA256: policySHA, Method: method, URL: target, Accept: accept, ContentType: kind, BodyBytes: strconv.Itoa(len(body)), BodySHA256: platformDigest(body), CredentialName: credential, CredentialHeader: credentialHeader, CredentialValue: credentialValue, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+lifetime.Milliseconds(), 10)}
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
-		result.raw, result.signature, err = control.SignNetworkHTTPRequest(result.command, key, a.intent.start.writer.authority, now)
+		if stream {
+			result.raw, result.signature, err = control.SignNetworkHTTPStreamRequest(result.command, key, a.intent.start.writer.authority, now)
+		} else {
+			result.raw, result.signature, err = control.SignNetworkHTTPRequest(result.command, key, a.intent.start.writer.authority, now)
+		}
 		clear(credentialValue)
 		return err
 	})
@@ -181,11 +237,22 @@ func (s *Server) preparePlatformNetworkRequest(ctx context.Context, session plat
 		return platformNetworkRequestIntent{}, errAppPlatformNetworkUnavailable
 	}
 	result.access = access
-	if _, err := control.VerifyNetworkHTTPRequest(result.raw, result.signature, result.access.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
+	if err := verifyPlatformNetworkIntent(result, result.access.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
 		result.Close()
 		return platformNetworkRequestIntent{}, errAppPlatformNetworkUnavailable
 	}
 	return result, nil
+}
+
+func verifyPlatformNetworkIntent(i platformNetworkRequestIntent, a control.Authority, now int64) error {
+	if i.stream {
+		if _, err := control.VerifyNetworkHTTPStreamRequest(i.raw, i.signature, a, now); err != nil {
+			return err
+		}
+		return nil
+	}
+	_, err := control.VerifyNetworkHTTPRequest(i.raw, i.signature, a, now)
+	return err
 }
 
 // No cached permission or original administrator identity is used here. Every
@@ -194,11 +261,15 @@ func (s *Server) withPlatformNetworkRequestCurrent(ctx context.Context, session 
 	if installation != i.command.InstallationID {
 		return errAppPlatformNetworkUnavailable
 	}
-	if _, err := control.VerifyNetworkHTTPRequest(i.raw, i.signature, i.access.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
+	if err := verifyPlatformNetworkIntent(i, i.access.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
 		return errAppPlatformNetworkUnavailable
 	}
 	current, err := withPlatformBackendRead(s, ctx, session, installation, s.loadPlatformWritableBackendHistory, func(e migExec, a platformWritableBackendAccess, seed []byte) error {
-		grant, err := loadPlatformNetworkGrant(e, installation, a)
+		capability := "network.http"
+		if i.stream {
+			capability = "network.stream"
+		}
+		grant, err := loadPlatformNetworkGrant(e, installation, a, capability)
 		if err != nil || grant != i.grant || !samePlatformWritableBackendAccess(i.access, a) {
 			return errAppPlatformNetworkUnavailable
 		}
@@ -221,14 +292,20 @@ func (s *Server) withPlatformNetworkRequestCurrent(ctx context.Context, session 
 		return errAppPlatformNetworkUnavailable
 	}
 	defer current.Close()
-	if _, err := control.VerifyNetworkHTTPRequest(i.raw, i.signature, current.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
+	if err := verifyPlatformNetworkIntent(i, current.intent.start.writer.authority, time.Now().UnixMilli()); err != nil {
 		return errAppPlatformNetworkUnavailable
 	}
 	return nil
 }
 func (s *Server) approvePlatformNetworkRequest(ctx context.Context, session platformActorSession, installation string, i platformNetworkRequestIntent, command control.NetworkHTTPRequestCommand, challenge string) ([]byte, []byte, error) {
-	if control.ValidateNetworkHTTPRequestMetadata(command, i.access.intent.start.writer.authority, time.Now().UnixMilli()) != nil {
-		return nil, nil, errAppPlatformNetworkUnavailable
+	if i.stream {
+		if control.ValidateNetworkHTTPStreamRequestMetadata(command, i.access.intent.start.writer.authority, time.Now().UnixMilli()) != nil {
+			return nil, nil, errAppPlatformNetworkUnavailable
+		}
+	} else {
+		if control.ValidateNetworkHTTPRequestMetadata(command, i.access.intent.start.writer.authority, time.Now().UnixMilli()) != nil {
+			return nil, nil, errAppPlatformNetworkUnavailable
+		}
 	}
 	raw, err := json.Marshal(command)
 	if err != nil || !bytes.Equal(raw, i.raw) {
@@ -242,10 +319,22 @@ func (s *Server) approvePlatformNetworkRequest(ctx context.Context, session plat
 		key := ed25519.NewKeyFromSeed(seed)
 		defer clear(key)
 		var err error
-		proof, signature, err = control.SignNetworkHTTPCheck(command, challenge, key, a.intent.start.writer.authority, time.Now().UnixMilli())
+		if i.stream {
+			proof, signature, err = control.SignNetworkHTTPStreamCheck(command, challenge, key, a.intent.start.writer.authority, time.Now().UnixMilli())
+		} else {
+			proof, signature, err = control.SignNetworkHTTPCheck(command, challenge, key, a.intent.start.writer.authority, time.Now().UnixMilli())
+		}
 		return err
 	})
-	if err != nil || control.VerifyNetworkHTTPCheck(command, challenge, proof, signature, i.access.intent.start.writer.authority, time.Now().UnixMilli()) != nil {
+	if err != nil {
+		return nil, nil, errAppPlatformNetworkUnavailable
+	}
+	if i.stream {
+		err = control.VerifyNetworkHTTPStreamCheck(command, challenge, proof, signature, i.access.intent.start.writer.authority, time.Now().UnixMilli())
+	} else {
+		err = control.VerifyNetworkHTTPCheck(command, challenge, proof, signature, i.access.intent.start.writer.authority, time.Now().UnixMilli())
+	}
+	if err != nil {
 		return nil, nil, errAppPlatformNetworkUnavailable
 	}
 	return proof, signature, nil
@@ -297,4 +386,74 @@ func (s *Server) requestPlatformNetwork(ctx context.Context, session platformAct
 		return broker.HTTPResponse{}, errAppPlatformNetworkUnavailable
 	}
 	return s.completePlatformNetworkRequest(ctx, session, installation, i, proof, e)
+}
+
+func validPlatformNetworkStreamResult(o transport.NetworkStreamObservation, i platformNetworkRequestIntent, e platformRuntimeEndpoint) bool {
+	age := time.Since(o.ReceivedAt())
+	peer := o.Endpoint()
+	controller := o.Controller()
+	r := i.access.intent.start.writer.runtime
+	result := o.Result()
+	return !o.ReceivedAt().IsZero() && age >= 0 && age <= 3*time.Second &&
+		peer.RootController && peer.RunnerUID == 0 && peer.Path == e.path &&
+		e.controllerUID > 0 && e.controllerGID > 0 &&
+		peer.ControllerUID == e.controllerUID && peer.ControllerGID == e.controllerGID &&
+		controller.DeploymentID == r.deploymentID &&
+		controller.ControllerEpoch == r.controllerEpoch &&
+		controller.ControlRevision == r.controlRevision &&
+		controller.Fingerprint == r.fingerprint &&
+		bytes.Equal(controller.PublicKey, r.publicKey) &&
+		o.RequestSHA256() == platformDigest(i.raw) &&
+		result.Status >= 200 && result.Status < 300 &&
+		result.Bytes >= 0 && result.Bytes <= appplatform.MaxHTTPStreamBytes &&
+		result.Frames >= 0 && result.Frames <= appplatform.MaxHTTPStreamChecks
+}
+
+// Private foreground stream execution, one attempt only. Data callbacks may run
+// before this function returns; every one is preceded by a fresh current check.
+func (s *Server) requestPlatformNetworkStream(
+	ctx context.Context,
+	session platformActorSession,
+	installation string,
+	binding platformBackendRequestBinding,
+	method, target, accept, kind, credential string,
+	body []byte,
+	e *platformRuntimeEndpoint,
+	callbacks broker.HTTPStreamCallbacks,
+) (broker.HTTPStreamResult, error) {
+	if len(body) > appplatform.MaxHTTPRequestBytes || callbacks.Start == nil {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable
+	}
+	body = bytes.Clone(body)
+	defer clear(body)
+	ctx, cancel := context.WithTimeout(ctx, platformNetworkStreamExecutionTimeout)
+	defer cancel()
+	i, err := s.preparePlatformNetworkStreamRequest(ctx, session, installation, binding, method, target, accept, kind, credential, body)
+	if err != nil {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable
+	}
+	defer i.Close()
+	if e == nil {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable
+	}
+	observed, err := platformReadNetworkRuntime(ctx, *e)
+	if err != nil || !validPlatformNetworkRuntimeObservation(observed, i.access.intent.start.writer.runtime, *e) || observed.Profile() != i.grant.profile {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable
+	}
+	proof, err := platformRequestNetworkStream(ctx, *e, i.raw, i.signature, body, i.access.intent.start.writer.authority, func(checkCtx context.Context, c control.NetworkHTTPRequestCommand, nonce string) ([]byte, []byte, error) {
+		return s.approvePlatformNetworkRequest(checkCtx, session, installation, i, c, nonce)
+	}, callbacks)
+	if err != nil {
+		if errors.Is(err, broker.ErrUncertain) {
+			return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain
+		}
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUnavailable
+	}
+	if !validPlatformNetworkStreamResult(proof, i, *e) {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain
+	}
+	if err := s.withPlatformNetworkRequestCurrent(ctx, session, installation, i, nil); err != nil {
+		return broker.HTTPStreamResult{}, errAppPlatformNetworkUncertain
+	}
+	return proof.Result(), nil
 }

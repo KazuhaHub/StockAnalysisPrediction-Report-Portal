@@ -20,8 +20,35 @@ func platformNetworkPolicyFixture(t *testing.T) string {
 	}
 	return string(raw)
 }
+func platformNetworkStreamPolicyFixture(t *testing.T) string {
+	t.Helper()
+	raw, err := appplatform.CanonicalHTTPStreamPolicy(appplatform.HTTPStreamPolicy{
+		Origin: "https://stream.example.com", Paths: []string{"/v1"}, Methods: []string{"GET"},
+		RequestBytes: 1024, StreamBytes: 1 << 20, Duration: 10 * time.Second, IdleTimeout: time.Second,
+		Concurrency: 1, MediaTypes: []string{"text/event-stream"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+func platformNetworkRuntimeProfileFixture() transport.NetworkRuntimeProfile {
+	return transport.NetworkRuntimeProfile{
+		Format: transport.NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat,
+		ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat,
+		MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes,
+		MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency,
+		ActiveRequests: 2, CacheEntries: 3, WritableBackend: true,
+		StreamFormat: appplatform.HTTPStreamPolicyFormat, MaxStreamBytes: appplatform.MaxHTTPStreamBytes,
+		MaxStreamFrameBytes: appplatform.MaxHTTPStreamFrameBytes, MaxStreamDurationMS: appplatform.MaxHTTPStreamDurationMS,
+		MaxStreamIdleMS: appplatform.MaxHTTPStreamIdleMS,
+	}
+}
 func platformNetworkTargetFixture(t *testing.T) *platformManagedInstallTarget {
-	return &platformManagedInstallTarget{NetworkPolicy: platformNetworkPolicyFixture(t), NetworkProfile: transport.NetworkRuntimeProfile{Format: transport.NetworkRuntimeFormat, RequestFormat: control.NetworkHTTPRequestFormat, ConfirmationFormat: control.NetworkHTTPCheckFormat, PolicyFormat: appplatform.HTTPPolicyFormat, MaxRequestBytes: appplatform.MaxHTTPRequestBytes, MaxResponseBytes: appplatform.MaxHTTPResponseBytes, MaxDeadlineMS: appplatform.MaxHTTPDeadlineMS, MaxConcurrency: appplatform.MaxHTTPConcurrency, ActiveRequests: 2, CacheEntries: 3, WritableBackend: true}}
+	return &platformManagedInstallTarget{NetworkPolicy: platformNetworkPolicyFixture(t), NetworkProfile: platformNetworkRuntimeProfileFixture()}
+}
+func platformNetworkStreamTargetFixture(t *testing.T) *platformManagedInstallTarget {
+	return &platformManagedInstallTarget{NetworkStreamPolicy: platformNetworkStreamPolicyFixture(t), NetworkProfile: platformNetworkRuntimeProfileFixture()}
 }
 func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	raw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
@@ -85,6 +112,22 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if err != nil || len(secrets) != 2 || secrets[0].capability != "network.http" || !secrets[0].granted || secrets[1].capability != "secrets.use" || !secrets[1].granted || secrets[1].policy != "{}" || !platformSupportedRequiredCapabilities(m) {
 		t.Fatal("credential use provider was not selected exactly", secrets, err)
 	}
+	m.Capabilities.Required = []string{"network.stream"}
+	m.Capabilities.Optional = nil
+	streamTarget := platformNetworkStreamTargetFixture(t)
+	streamed, err := platformInstallCapabilitySelection(m, streamTarget)
+	if err != nil || len(streamed) != 1 || streamed[0].capability != "network.stream" || !streamed[0].granted || streamed[0].policy != streamTarget.NetworkStreamPolicy || !platformSupportedRequiredCapabilities(m) {
+		t.Fatal("stream provider was not selected exactly", streamed, err)
+	}
+	if _, err := platformInstallCapabilitySelection(m, target); err == nil {
+		t.Fatal("stream provider accepted a buffered-only policy")
+	}
+	m.Capabilities.Required = []string{"network.http", "network.stream"}
+	streamTarget.NetworkPolicy = target.NetworkPolicy
+	bothNetwork, err := platformInstallCapabilitySelection(m, streamTarget)
+	if err != nil || len(bothNetwork) != 2 || bothNetwork[0].capability != "network.http" || !bothNetwork[0].granted || bothNetwork[1].capability != "network.stream" || !bothNetwork[1].granted {
+		t.Fatal("independent buffered and stream policies were not retained", bothNetwork, err)
+	}
 	m.Capabilities.Required = []string{"background.run", "reports.read"}
 	background, err := platformInstallCapabilitySelection(m, nil)
 	if err != nil || len(background) != 2 || background[0].capability != "background.run" || !background[0].granted || background[1].capability != "reports.read" || !background[1].granted || !platformSupportedRequiredCapabilities(m) {
@@ -105,7 +148,7 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 	if err != nil || declined[0].granted || declined[0].policy != "{}" {
 		t.Fatal("optional implicitly granted", err)
 	}
-	for _, mode := range []string{"undeclared", "unsupported_required", "duplicate", "bad_policy", "profile", "missing_profile"} {
+	for _, mode := range []string{"undeclared", "unsupported_required", "duplicate", "bad_policy", "bad_stream_policy", "profile", "stream_profile", "missing_profile"} {
 		t.Run(mode, func(t *testing.T) {
 			copyM := m
 			copyTarget := *target
@@ -118,8 +161,12 @@ func TestPlatformInstallCapabilitySelection(t *testing.T) {
 				copyM.Capabilities.Required = []string{"network.http"}
 			case "bad_policy":
 				copyTarget.NetworkPolicy += " "
+			case "bad_stream_policy":
+				copyTarget.NetworkStreamPolicy += " "
 			case "profile":
 				copyTarget.NetworkProfile.MaxConcurrency++
+			case "stream_profile":
+				copyTarget.NetworkProfile.StreamFormat = ""
 			case "missing_profile":
 				copyTarget.NetworkProfile = transport.NetworkRuntimeProfile{}
 			}

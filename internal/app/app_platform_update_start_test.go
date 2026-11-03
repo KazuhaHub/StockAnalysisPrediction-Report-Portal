@@ -1733,7 +1733,7 @@ func testPlatformUpdatedNetworkGrant(t *testing.T, s *Server, lease platformOper
 		VALUES(?,'network.http',1,?,2,?,?,?)`,
 		lease.installationID, target.NetworkPolicy, review, now, now)
 	return loadPlatformNetworkGrant(
-		s.st.poolExec(), lease.installationID, access)
+		s.st.poolExec(), lease.installationID, access, "network.http")
 }
 
 func TestPlatformUpdateStartActivationRefusesChangedBootSQLite(t *testing.T) {

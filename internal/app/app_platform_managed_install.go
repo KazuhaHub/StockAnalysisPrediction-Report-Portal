@@ -19,15 +19,16 @@ func platformManagedFormat(format string) bool {
 }
 
 type platformManagedInstallTarget struct {
-	RuntimeID       string                          `json:"runtime_id"`
-	DeploymentID    string                          `json:"deployment_id"`
-	ControllerEpoch string                          `json:"controller_epoch"`
-	BindingRevision int64                           `json:"binding_revision"`
-	ControlRevision int64                           `json:"control_revision"`
-	Fingerprint     string                          `json:"fingerprint"`
-	Profile         transport.ManagedRuntimeProfile `json:"profile"`
-	NetworkPolicy   string                          `json:"network_policy,omitempty"`
-	NetworkProfile  transport.NetworkRuntimeProfile `json:"network_profile,omitzero"`
+	RuntimeID           string                          `json:"runtime_id"`
+	DeploymentID        string                          `json:"deployment_id"`
+	ControllerEpoch     string                          `json:"controller_epoch"`
+	BindingRevision     int64                           `json:"binding_revision"`
+	ControlRevision     int64                           `json:"control_revision"`
+	Fingerprint         string                          `json:"fingerprint"`
+	Profile             transport.ManagedRuntimeProfile `json:"profile"`
+	NetworkPolicy       string                          `json:"network_policy,omitempty"`
+	NetworkStreamPolicy string                          `json:"network_stream_policy,omitempty"`
+	NetworkProfile      transport.NetworkRuntimeProfile `json:"network_profile,omitzero"`
 }
 
 func managedInstallTarget(f platformManagedRuntimeFacts, e platformRuntimeEndpoint) (*platformManagedInstallTarget, error) {
@@ -36,16 +37,17 @@ func managedInstallTarget(f platformManagedRuntimeFacts, e platformRuntimeEndpoi
 	}
 	r := f.runtime
 	target := &platformManagedInstallTarget{RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision, ControlRevision: r.controlRevision, Fingerprint: r.fingerprint, Profile: f.observation.Profile()}
-	if f.networkPolicy != "" {
+	if f.networkPolicy != "" || f.streamPolicy != "" {
 		if f.network == nil || !samePlatformManagedRuntime(f.network.runtime, r) || !validPlatformNetworkRuntimeObservation(f.network.observation, r, e) {
 			return nil, errAppPlatformRuntimeConflict
 		}
 		target.NetworkPolicy = f.networkPolicy
+		target.NetworkStreamPolicy = f.streamPolicy
 		target.NetworkProfile = f.network.observation.Profile()
 	} else if f.network != nil {
 		return nil, errAppPlatformRuntimeConflict
 	}
-	if _, err := platformNetworkTargetPolicy(target); err != nil {
+	if _, _, err := platformNetworkTargetPolicies(target); err != nil {
 		return nil, err
 	}
 	return target, nil
@@ -54,7 +56,7 @@ func validateManagedInstallTarget(e migExec, p *platformManagedInstallTarget, ep
 	if p == nil || !platformValidUUID(p.RuntimeID) || !platformValidUUID(p.DeploymentID) || p.ControllerEpoch != epoch || !platformValidSHA(p.Fingerprint) || p.BindingRevision != 2 || p.ControlRevision < 1 || p.Profile.ExecutionReady || (p.Profile.WritableSandboxProfile != "" && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) || p.Profile.SandboxProfile != control.CandidateSandboxProfile || (p.Profile.Platform != "linux/amd64" && p.Profile.Platform != "linux/arm64") || p.Profile.Protocol != transport.ManagedRunnerProtocol || p.Profile.BackendProtocol != transport.ManagedBackendProtocol || !platformValidUUID(p.Profile.RootFilesystemUUID) {
 		return errAppPlatformRuntimeConflict
 	}
-	if _, err := platformNetworkTargetPolicy(p); err != nil {
+	if _, _, err := platformNetworkTargetPolicies(p); err != nil {
 		return err
 	}
 	inode, err := strconv.ParseUint(p.Profile.RootInode, 10, 64)
@@ -78,7 +80,7 @@ func installRequirementsForTarget(m appplatform.Manifest, format string, p *plat
 		}
 		return platformInstallRequirements(m)
 	}
-	if p == nil || m.Backend == nil || (p.NetworkPolicy != "" && format != platformWritableInstallFormat) || (format == platformWritableInstallFormat && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
+	if p == nil || m.Backend == nil || ((p.NetworkPolicy != "" || p.NetworkStreamPolicy != "") && format != platformWritableInstallFormat) || (format == platformWritableInstallFormat && p.Profile.WritableSandboxProfile != control.WritableCandidateSandboxProfile) {
 		return errAppPlatformInstallUnavailable
 	}
 	if _, err := platformInstallCapabilitySelection(m, p); err != nil {
@@ -237,13 +239,14 @@ func (s *Server) checkPlatformManagedOperationProfiles(ctx context.Context, oper
 		return err
 	}
 	facts := platformManagedRuntimeFacts{runtime: runtime, observation: observed}
-	if requireNetwork && target.NetworkPolicy != "" {
+	if requireNetwork && (target.NetworkPolicy != "" || target.NetworkStreamPolicy != "") {
 		network, err := platformReadNetworkRuntime(ctx, endpoint)
 		if err != nil {
 			return err
 		}
 		facts.network = &platformNetworkRuntimeFacts{runtime: runtime, observation: network}
 		facts.networkPolicy = target.NetworkPolicy
+		facts.streamPolicy = target.NetworkStreamPolicy
 	}
 	actual, err := managedInstallTarget(facts, endpoint)
 	if err != nil {
@@ -252,6 +255,7 @@ func (s *Server) checkPlatformManagedOperationProfiles(ctx context.Context, oper
 	expected := *target
 	if !requireNetwork {
 		expected.NetworkPolicy = ""
+		expected.NetworkStreamPolicy = ""
 		expected.NetworkProfile = transport.NetworkRuntimeProfile{}
 	}
 	if *actual != expected {
