@@ -309,6 +309,8 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+	verifyNativeCandidateResourceBounds(
+		t, ctx, client, nativeID, socket)
 	if state, err := stopCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil || state != "exited" {
 		t.Fatal("stop before host data inspection", state, err)
 	}
@@ -360,6 +362,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(rootPath, healthyID, "healthy"), []byte("independent quota remains writable"), 0600); err != nil {
 		t.Fatal("sibling project affected", err)
 	}
+	t.Log("NATIVE_DATA_PROJECT_QUOTA_FULL_AND_NEIGHBOR_HEALTHY")
 	checkGlobalSpace()
 	if err := native.cleanupWritableCandidate(ctx, writableLaunch, observed); err != nil {
 		t.Fatal("typed owned writable cleanup", err)

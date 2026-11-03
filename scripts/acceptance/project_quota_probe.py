@@ -321,6 +321,17 @@ def main(args):
                     report["native_writer_adapter_and_exclusion_verified"] = True
                     report["native_writer_recovery_partial_permission_refused"] = True
                     report["native_writable_candidate_driver_start_verified"] = True
+                    for marker in (
+                        "NATIVE_DATA_PROJECT_QUOTA_FULL_AND_NEIGHBOR_HEALTHY",
+                        "NATIVE_TMP_VOLUME_BOUNDED_AND_RECOVERED",
+                        "NATIVE_LOG_VOLUME_BOUNDED",
+                    ):
+                        if marker not in writer.stdout:
+                            raise RuntimeError(
+                                "native resource-bound assertion missing: " + marker)
+                    report["native_data_project_quota_full_and_neighbor_healthy"] = True
+                    report["native_tmp_volume_bounded_and_recovered"] = True
+                    report["native_log_volume_bounded"] = True
         journal_root = None
         if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"

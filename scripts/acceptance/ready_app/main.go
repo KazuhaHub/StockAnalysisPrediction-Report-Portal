@@ -2,9 +2,11 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -46,6 +49,14 @@ func main() {
 		os.Exit(4)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 65536, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/fixture/tmp-exhaust" && r.URL.RawQuery == "" {
+			fixtureExhaustTmp(w)
+			return
+		}
+		if r.Method == http.MethodPost && r.URL.Path == "/fixture/log-flood" && r.URL.RawQuery == "" {
+			fixtureFloodLog(w)
+			return
+		}
 		if r.URL.Path == "/v1/echo" && (r.Method == http.MethodGet || r.Method == http.MethodPost) && r.Header.Get("Cookie") == "" && r.Header.Get("Authorization") == "" {
 			state.answerRequest(w, r, bootID)
 			return
@@ -68,6 +79,83 @@ func main() {
 	if server.Serve(listener) != nil {
 		os.Exit(5)
 	}
+}
+
+func fixtureExhaustTmp(w http.ResponseWriter) {
+	const path = "/tmp/portal-fixture-tmp-exhaust"
+	const maximum = int64(32 << 20)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
+	if err != nil {
+		http.Error(w, "tmp fixture unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	chunk := bytes.Repeat([]byte{'x'}, 64<<10)
+	written := int64(0)
+	hitBound := false
+	for written < maximum {
+		n, err := f.Write(chunk)
+		written += int64(n)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, syscall.ENOSPC) {
+			f.Close()
+			os.Remove(path)
+			http.Error(w, "tmp fixture failed", http.StatusServiceUnavailable)
+			return
+		}
+		hitBound = true
+		break
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(path)
+		http.Error(w, "tmp fixture close failed", http.StatusServiceUnavailable)
+		return
+	}
+	if err := os.Remove(path); err != nil {
+		http.Error(w, "tmp fixture cleanup failed", http.StatusServiceUnavailable)
+		return
+	}
+	recovery := "/tmp/portal-fixture-tmp-recovered"
+	if err := os.WriteFile(recovery, []byte("ready"), 0600); err != nil {
+		http.Error(w, "tmp fixture recovery failed", http.StatusServiceUnavailable)
+		return
+	}
+	if err := os.Remove(recovery); err != nil {
+		http.Error(w, "tmp fixture recovery cleanup failed", http.StatusServiceUnavailable)
+		return
+	}
+	if !hitBound || written < 8<<20 {
+		http.Error(w, "tmp fixture did not reach its kernel bound", http.StatusInsufficientStorage)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"format":    "portal.fixture.tmp-bound/1-dev.1",
+		"bytes":     written,
+		"enospc":    hitBound,
+		"recovered": true,
+	})
+}
+
+func fixtureFloodLog(w http.ResponseWriter) {
+	const total = int64(8 << 20)
+	chunk := bytes.Repeat([]byte{'l'}, (64<<10)-1)
+	chunk = append(chunk, '\n')
+	written := int64(0)
+	for written < total {
+		n, err := os.Stderr.Write(chunk)
+		written += int64(n)
+		if err != nil {
+			http.Error(w, "log fixture failed", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"format": "portal.fixture.log-bound/1-dev.1",
+		"bytes":  written,
+	})
 }
 
 func answerFixtureChallenge(w http.ResponseWriter, r *http.Request, bootID string) {
