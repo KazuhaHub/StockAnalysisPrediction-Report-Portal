@@ -241,7 +241,18 @@ func TestNativeWritableHandshakeTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer source.Close()
-	binaryPath := filepath.Join(dir, "child.test")
+	// /run may be mounted noexec on a disposable worker even though the socket
+	// must remain below the reviewed runtime root. Keep the executable on the
+	// normal temporary filesystem and the endpoint on the pinned /run fixture.
+	binaryDir, err := os.MkdirTemp("/tmp", "portal-wht-bin-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(binaryDir)
+	if err := os.Chmod(binaryDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binaryPath := filepath.Join(binaryDir, "child.test")
 	target, err := os.OpenFile(binaryPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0555)
 	if err != nil {
 		t.Fatal(err)
