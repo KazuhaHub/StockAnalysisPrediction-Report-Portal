@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,8 @@ func testNativeWritableManagedUpdateVersion(
 	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
 		t.Fatal("managed update checkpoint", migrate.snapshot, err)
 	}
+	verifyNativeCheckpointRecoveryAssociations(
+		t, s, admitted.OperationID, installation)
 	start, err := s.executePlatformManagedUpdateMigrate(
 		ctx, migrate, endpoint)
 	if err != nil || start.snapshot.Stage != appplatform.StageStart {
@@ -447,6 +450,98 @@ func testNativeWritableManagedUpdateVersion(
 	}
 	t.Log("MANAGED_UPDATE_A_TO_B")
 	return admitted.OperationID, release.sha256
+}
+
+func verifyNativeCheckpointRecoveryAssociations(
+	t *testing.T, s *Server, operationID, installation string,
+) {
+	t.Helper()
+	var recoveryID, namespace, checkpointID, release, manifest, epoch string
+	var format, writerFence, bytes int64
+	var state string
+	if err := s.st.queryRow(`
+		SELECT id,data_namespace_id,checkpoint_id,release_sha256,data_format,
+		       writer_fence,manifest_sha256,bytes,state,controller_epoch
+		FROM app_platform_recovery_sets
+		WHERE operation_id=? AND installation_id=?`,
+		operationID, installation).Scan(
+		&recoveryID, &namespace, &checkpointID, &release, &format,
+		&writerFence, &manifest, &bytes, &state, &epoch,
+	); err != nil {
+		t.Fatal("coordinated recovery set", err)
+	}
+	if !platformValidUUID(recoveryID) || !platformValidUUID(namespace) ||
+		!platformValidUUID(checkpointID) || !platformValidSHA(release) ||
+		!platformValidSHA(manifest) || !platformValidUUID(epoch) ||
+		state != "verified" || format < 1 || writerFence < 1 || bytes <= 0 {
+		t.Fatal("coordinated recovery set is incomplete")
+	}
+	var framework, planRaw, planSHA string
+	if err := s.st.queryRow(`
+		SELECT p.plan_json,p.plan_sha256,o.controller_epoch
+		FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND o.installation_id=?`,
+		operationID, installation).Scan(
+		&planRaw, &planSHA, &framework,
+	); err != nil || platformDigest([]byte(planRaw)) != planSHA ||
+		framework != epoch {
+		t.Fatal("recovery set did not bind the reviewed operation", err)
+	}
+	var projection platformUpdateProjection
+	if json.Unmarshal([]byte(planRaw), &projection) != nil ||
+		projection.Target.Runtime == nil ||
+		projection.InstallationID != installation ||
+		projection.SourceReleaseSHA256 != release ||
+		projection.Target.ReleaseSHA256 == "" ||
+		projection.Target.Runtime.ControllerEpoch != epoch {
+		t.Fatal("recovery set plan lost code/runtime identity")
+	}
+	var runtimeID, fingerprint string
+	if err := s.st.queryRow(`
+		SELECT i.runtime_id,r.verification_key_fingerprint,r.controller_epoch
+		FROM app_platform_installations i
+		JOIN app_platform_runtime_bindings r ON r.id=i.runtime_id
+		WHERE i.id=?`, installation).Scan(
+		&runtimeID, &fingerprint, &framework,
+	); err != nil || runtimeID != projection.Target.Runtime.RuntimeID ||
+		!platformValidSHA(fingerprint) || framework != epoch {
+		t.Fatal("recovery set lost runtime key association", err)
+	}
+	var sourceRelease, sourceState string
+	var sourceGeneration, sourceFormat int64
+	if err := s.st.queryRow(`
+		SELECT release_sha256,generation,data_format,state
+		FROM app_platform_activations
+		WHERE installation_id=? AND state='active'`,
+		installation).Scan(
+		&sourceRelease, &sourceGeneration, &sourceFormat, &sourceState,
+	); err != nil || sourceRelease != release || sourceState != "active" ||
+		sourceFormat != format || sourceGeneration != projection.SourceGeneration {
+		t.Fatal("recovery set lost source code/data identity", err)
+	}
+	var effectID, receiptRaw string
+	if err := s.st.queryRow(`
+		SELECT effect_id,receipt_json
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='snapshot' AND state='applied'`,
+		operationID).Scan(&effectID, &receiptRaw); err != nil {
+		t.Fatal("checkpoint receipt association", err)
+	}
+	receipt, err := journal.ParseCheckpointReceipt([]byte(receiptRaw))
+	if err != nil || receipt.EffectID != effectID ||
+		receipt.OperationID != operationID ||
+		receipt.InstallationID != installation ||
+		receipt.NamespaceID != namespace ||
+		receipt.CheckpointID != checkpointID ||
+		receipt.ReleaseSHA256 != release ||
+		receipt.DataFormat != strconv.FormatInt(format, 10) ||
+		receipt.WriterFence != strconv.FormatInt(writerFence, 10) ||
+		receipt.ManifestSHA256 != manifest ||
+		receipt.ArchiveBytes != strconv.FormatInt(bytes, 10) {
+		t.Fatal("checkpoint receipt lost recovery-set association", err)
+	}
+	t.Log("NATIVE_COORDINATED_CHECKPOINT_ASSOCIATIONS_VERIFIED")
 }
 
 func testNativeWritableManagedRestore(
