@@ -1,19 +1,38 @@
 {
   "format": "portal.app-platform.package-validation/1",
-  "captured_at": "2026-11-02T18:08:00-08:00",
+  "captured_at": "2026-11-02T20:07:00-08:00",
   "status": "partial",
   "candidate": {
-    "portal_package_commit": "3cdb06591b42ba65a6d07f5f57ecd9cdd31ffbae",
-    "portal_pr_head": "b35b86bb5b788d39efec1f18dfa2267784442528",
-    "apps": "baa9a66f2fa1a048e19bbd1f6294e9adcc5fbd23"
+    "portal_package_commit": "bdbe1155089345e66797cefb625b87e3839664cb",
+    "apps": "c972817ee2d617fc8063a09ceeacd7d87ec2e57a"
   },
   "ci": {
-    "general_and_race": "41563997090",
-    "quota_browser": "41563997097",
-    "runner_daemon": "41563997125",
-    "codeql": "41563992277"
+    "portal_general_and_race": "41573046728",
+    "portal_quota_browser": "41573046555",
+    "portal_runner_daemon": "41573046790",
+    "portal_codeql": "41573043269",
+    "apps_check": [
+      "41575758389",
+      "41575753650"
+    ]
   },
   "results": [
+    {
+      "id": "PKG-01",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagedMarketStaging(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
+      ],
+      "coverage": [
+        "A signed managed descriptor is now accepted by the market staging path and appears in the release catalogue as backend, installable metadata.",
+        "The management install plan and commit select the managed review/consumer from canonical plan bytes instead of falling through to the static path.",
+        "Without a configured or compatible runner, managed install admission fails with a bounded runtime-unavailable response and creates no installation or operation."
+      ],
+      "limits": [
+        "The signed .portalapp offline-envelope install path, including managed image content, is not implemented yet."
+      ]
+    },
     {
       "id": "PKG-02",
       "status": "pass-development",
@@ -103,48 +122,55 @@
       "id": "PKG-08",
       "status": "partial",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformReleaseStagingDatabaseFullRollsBack$' -count=1"
       ],
       "coverage": [
         "A truncated artifact transfer returns an error and leaves no staged release.",
         "A later complete request starts from a new bounded download, validates the exact descriptor, signature and frontend digest, then stages once.",
-        "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission."
+        "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission.",
+        "A file-backed SQLite database with the freelist exhausted and no page-growth allowance refuses a roughly 1 MiB package; release, frontend and staging-audit rows all roll back."
       ],
       "limits": [
         "There is no HTTP Range resume or persistent market cache in this path.",
-        "Staging disk exhaustion and real managed-runner staging interruption remain unverified."
+        "Real managed-runner staging interruption and restart recovery remain unverified."
       ]
     },
     {
       "id": "PKG-10",
       "status": "partial",
       "commands": [
-        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformLaunchRefusals(SQLite|Postgres)$' -count=1"
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformTrustQuarantine(Frontend|Managed)(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
       ],
       "coverage": [
-        "A disabled publisher or revoked signing key prevents a new launch and clears signed display metadata.",
-        "Launch refusal reads no executable content and does not delete application data."
+        "Publisher disable or key revocation verifies active signed releases and atomically queues the existing reviewed disable path for affected ready installations.",
+        "Static quarantine immediately denies launch and the existing scheduler reaches complete without dropping the dedicated plugin table.",
+        "Managed quarantine preserves runtime identity, namespace and data, advances the writer fence and queues managed stop; an unavailable runner records managed_disable_unavailable rather than claiming a stop.",
+        "Repeated revocation does not duplicate quarantine operations, and launch refusal does not read executable content."
       ],
       "limits": [
-        "An already running managed process is not physically quarantined by this test.",
-        "An unreachable external trust source and emergency revocation workflow remain open."
+        "A native successful stop following this specific revocation trigger is not yet recorded, although the queued operation is the already-accepted managed disable path.",
+        "Trust is deployment-local. There is no external trust fetch to make unreachable; a failed local trust read must continue to fail closed."
       ]
     },
     {
       "id": "DEV-03",
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -count=1",
         "npm test --workspace=@portal-app/sdk -- --run tests/descriptor.test.ts tests/descriptor-schema.test.ts tests/publisher-v2.test.ts",
-        "python3 -m unittest discover -s scripts/tests -v"
+        "python3 -m unittest discover -s scripts/tests -v",
+        "node scripts/validate-descriptor-v2.mjs --corpus packages/app-sdk/tests/fixtures/descriptor-v2.json"
       ],
       "coverage": [
         "The descriptor corpus contains 56 exact shared cases and the publisher corpus contains 55 exact shared cases.",
         "Go and TypeScript consume the same bytes and expect the same acceptance or refusal for each shared descriptor and signature vector.",
-        "All 55 Python packaging and publication tests pass, including deterministic archives, path safety and signed-release provenance."
+        "The Python package builder now invokes the same TypeScript validator in a corpus mode pinned to the exact 56-case descriptor hash.",
+        "All 56 Python packaging and publication tests pass, including deterministic archives, path safety and signed-release provenance."
       ],
       "limits": [
-        "The Python package validator does not yet consume the same descriptor corpus and protocol error-code table as Go and TypeScript."
+        "The public package format and protocol error vocabulary remain development contracts pending formal freeze."
       ]
     }
   ],
@@ -161,9 +187,9 @@
     ]
   },
   "open": [
-    "PKG-01: static market and offline-envelope validation is implemented, but managed market staging still rejects a backend descriptor; the complete static plus managed install equivalence is not proven.",
-    "PKG-08: genuine resumable download, persistent-cache corruption recovery and staging filesystem exhaustion remain open.",
-    "PKG-10: running code is denied future launch on current trust revocation, but physical quarantine of an already running managed process and an unreachable external trust source have not been exercised.",
+    "PKG-01: managed market staging and plan/commit routing are implemented; the signed offline envelope and managed image payload remain open.",
+    "PKG-08: HTTP Range resume, persistent cache, and managed-runner staging interruption/restart recovery remain open.",
+    "PKG-10: logical quarantine and managed stop scheduling are implemented; a native stop drill initiated by package revocation remains open.",
     "DEV-01 and DEV-05 still require a non-implementer walkthrough and a public released-byte lifecycle drill."
   ]
 }
