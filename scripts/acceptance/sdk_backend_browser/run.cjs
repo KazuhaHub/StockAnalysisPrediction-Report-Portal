@@ -201,7 +201,14 @@ async function main(){
   if(await page.locator('iframe').count()!==1)throw new Error('oscillating height did not retain the app');
   if(await page.evaluate(()=>document.querySelector('iframe')?.getBoundingClientRect().height||0)>10000)throw new Error('oscillating height grew without a bound');
   await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
-  await failAndReload('Runaway render');
+  stage='runaway-render';await frame.getByRole('button',{name:'Runaway render',exact:true}).click();
+  await page.waitForTimeout(1200);
+  if(await page.locator('iframe').count()!==1)throw new Error('bounded rerender unexpectedly unmounted the host');
+  const responsiveStart=Date.now();await page.evaluate(()=>document.body.dataset.boundedRerender='host-responsive');
+  if(Date.now()-responsiveStart>1000)throw new Error('bounded rerender blocked the host');
+  if(await page.evaluate(()=>document.querySelector('iframe')?.getBoundingClientRect().height||0)>10000)throw new Error('bounded rerender grew the host without a limit');
+  await page.reload({waitUntil:'domcontentloaded'});
+  await frame.getByTestId('backend-ready').filter({hasText:'true'}).waitFor();
   stage='write';const write=JSON.parse(await dispatch('Write backend'));
   if(write.status!==200||write.count!==before.count+1||write.role!=='user'||write.subject!==before.subject||write.calls!==before.calls+1)throw new Error('write identity or call count changed');
   stage='uncertain';if(await dispatch('Disconnect write')!=='error:uncertain')throw new Error('missing uncertainty');
