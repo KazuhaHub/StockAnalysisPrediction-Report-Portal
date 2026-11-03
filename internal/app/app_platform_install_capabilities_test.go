@@ -23,7 +23,7 @@ func platformNetworkPolicyFixture(t *testing.T) string {
 func platformNetworkStreamPolicyFixture(t *testing.T) string {
 	t.Helper()
 	raw, err := appplatform.CanonicalHTTPStreamPolicy(appplatform.HTTPStreamPolicy{
-		Origin: "https://stream.example.com", Paths: []string{"/v1"}, Methods: []string{"GET"},
+		Origin: "https://api.example.com", Paths: []string{"/v1"}, Methods: []string{"GET"},
 		RequestBytes: 1024, StreamBytes: 1 << 20, Duration: 10 * time.Second, IdleTimeout: time.Second,
 		Concurrency: 1, MediaTypes: []string{"text/event-stream"},
 	})
