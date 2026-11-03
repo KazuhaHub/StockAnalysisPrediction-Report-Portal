@@ -65,10 +65,11 @@ func TestNativeCandidateMountPinsBoundedIPC(t *testing.T) {
 }
 
 // Keep the original root-only acceptance artifact unchanged. Publish only this
-// bounded, root-owned, unwritable execution copy for the explicit UID 65532 child.
+// bounded, root-owned, unwritable execution copy for the explicit UID 65532
+// child. Use the system temp root because /run is noexec on some runners.
 func candidateIPCProbeExecutable(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/run", "portal-ipc-child-")
+	dir, err := os.MkdirTemp("", "portal-ipc-child-")
 	if err != nil {
 		t.Fatal(err)
 	}
