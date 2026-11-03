@@ -506,6 +506,11 @@ async function main() {
     await narrowFrame
       .locator('.portal-v2-root[data-app-layout="viewport"]')
       .waitFor();
+    await narrowPage.waitForFunction(
+      () =>
+        (document.querySelector("iframe")?.getBoundingClientRect().height ||
+          0) >= 650,
+    );
     const iframeBox = await narrowPage.locator("iframe").boundingBox();
     const editorBox = await narrowFrame
       .getByRole("textbox", { name: /筆記/ })
