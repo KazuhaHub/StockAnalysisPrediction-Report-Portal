@@ -1,0 +1,29 @@
+{
+  "format": "portal.app-platform.plugin-storage/1-dev.1",
+  "captured_at": "2026-11-03T02:42:00-08:00",
+  "candidate": "58b07314",
+  "database_evidence": "SQLite plus a dedicated PostgreSQL 18.6 database",
+  "layout": {
+    "registry": "app_platform_plugin_tables has one counter/registry row per app_id",
+    "payload": "each app_id owns one deterministic app_platform_plugin_<sha256-prefix> table",
+    "isolation": "payload rows are scoped by installation_id and current account/session identity"
+  },
+  "commands": [
+    "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_concurrency_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformLastPluginUninstallRacesFreshInstallPostgres$' -count=5",
+    "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_concurrency_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestPlatformInstallReviewPostgres|TestPlatformPluginUninstallClearsOnlyItsOwnDataPostgres|TestPlatformManagementUninstallHTTPKeepsAnotherPluginTablePostgres|TestPlatformManagementInstallHTTPPostgres)$' -count=1",
+    "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformPluginStorageUsesOneTablePerApp|TestPlatformPluginUninstallClearsOnlyItsOwnDataSQLite|TestPlatformManagementUninstallHTTPKeepsAnotherPluginTableSQLite|TestPlatformInstallReviewSQLite)$' -count=1"
+  ],
+  "coverage": [
+    "Distinct plugins receive distinct deterministic payload tables; the registry has one row per plugin and global counters are the sum of plugin counters.",
+    "Uninstall clears only the selected installation's rows when another non-removed installation of the same plugin remains.",
+    "The last non-removed installation drops only its plugin payload table and registry row, recomputes counters, and leaves another plugin's table, rows and counters untouched.",
+    "Reinstall creates the same deterministic table name with zero rows and a new installation identity.",
+    "PostgreSQL install admission and last-installation cleanup take the same per-app advisory lock before storage mutation. The previous global-storage-first cleanup path produced a real deadlock against a concurrent fresh install; the fixed path passed 20 consecutive iterations, including five race-enabled iterations.",
+    "Concurrent cleanup plus fresh install ends in one of the two valid states: the old table is retained with only the fresh row, or the old table is dropped and the fresh transaction creates an empty table before writing its row. Old rows do not reappear and fresh bytes/counters are preserved."
+  ],
+  "limits": [
+    "The concurrency test is PostgreSQL-specific; SQLite is covered by its serialized write path and the sequential SQLite matrix.",
+    "This is repository concurrency evidence, not a production migration approval.",
+    "No cache table or unmanaged persistent cache file was introduced."
+  ]
+}
