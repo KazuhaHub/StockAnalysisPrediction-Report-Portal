@@ -76,7 +76,7 @@ async function main(){
    const text=await result.innerText();
    if(text.startsWith('error:'))throw new Error('network stream returned '+text);
    const value=JSON.parse(text);
-   if(value.status!==200||value.contentType!=='application/x-ndjson'||value.bytes!==8||value.frames<1||value.body!=='one\\ntwo\\n')throw new Error('network stream SDK result changed');
+   if(value.status!==200||value.contentType!=='application/x-ndjson'||value.bytes!==8||value.frames<1||value.body!=='one\ntwo\n')throw new Error('network stream SDK result changed');
   }
   const credentialAvailable=await frame.getByTestId('credential-ready').innerText()==='true';
   if(credentialAvailable){
