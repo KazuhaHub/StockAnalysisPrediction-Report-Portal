@@ -54,7 +54,7 @@ async function main(){
   stage='initial-read';const before=await read();
   if(before.role!=='user'||!/^[a-f0-9]{64}$/.test(before.subject))throw new Error('current normal viewer not observed');
   const networkAvailable=await frame.getByTestId('network-ready').innerText()==='true';
-  const networkStreamAvailable=await frame.getByTestId('network-stream-ready').innerText()==='true';
+  const networkStreamAvailable=await frame.getByTestId('network-stream-ready').filter({hasText:'true'}).waitFor({timeout:5000}).then(()=>true).catch(()=>false);
   let reportsIssued=0;
   async function dispatchReports(){
    await frame.getByRole('button',{name:'Read reports',exact:true}).click();

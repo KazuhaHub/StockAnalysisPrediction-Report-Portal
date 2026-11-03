@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -61,6 +62,19 @@ func testNativeSDKBackendBrowser(t *testing.T, s *Server, actor platformActorSes
 		}
 	}
 	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	if expectNetwork {
+		launch := "/api/app-platform/installations/" + installation + "/launch"
+		view := sessionTestRequest(mux, "GET", launch, cookie, "")
+		var metadata struct {
+			Capabilities []string `json:"capabilities"`
+		}
+		if view.Code != 200 || json.Unmarshal(view.Body.Bytes(), &metadata) != nil ||
+			!slices.Contains(metadata.Capabilities, "network.stream") {
+			t.Fatal("SDK browser launch omitted network.stream", view.Code,
+				view.Body.String())
+		}
+		t.Logf("SDK browser capabilities: %v", metadata.Capabilities)
+	}
 	if expectReports {
 		group := scalar[int64](t, s.st, `SELECT COALESCE(group_id,0) FROM users WHERE username=?`, actor.username)
 		if group == 0 {
