@@ -88,11 +88,20 @@ receipt. `DATA-04` is therefore `pass-development` for a quiesced coordinated
 data checkpoint. `DATA-05` remains partial until the complete Portal/runner/
 data/key set is restored on an isolated fresh host with external effects paused.
 `RUN-03`, `RUN-04`, `RUN-05`, `RUN-06`, `RUN-07` and `RUN-08`, `LIFE-01`,
-`LIFE-05`, `LIFE-07`, `LIFE-14`, `DATA-01`, `DATA-02`, `DATA-03`, `DATA-04`, `DATA-07`, `JOB-07` and `JOB-08`
+`LIFE-05`, `LIFE-07`, `LIFE-14`, `DATA-01`, `DATA-02`, `DATA-03`, `DATA-04`, `DATA-06`, `DATA-07`, `JOB-07` and `JOB-08`
 are `pass-development` for their stated repository surfaces. `OPS-03` remains
 partial after its first runner-unavailable drill. Real crash loops,
-runner-newer epochs, coordinated live backup/fresh-host recovery, measured
-capacity and the unapproved task/event persistence products remain open.
+coordinated live backup/fresh-host recovery, measured capacity and the
+unapproved task/event persistence products remain open.
+
+Latest DATA-06 evidence binds Portal `303bd8a8` and native runner daemon
+`41726689783`. A runner journal retained an admitted epoch-402 command and then
+refused the restored epoch-401 command both directly and over the real Unix
+control socket. The newer command replayed to its original effect and state; the
+stale command changed nothing. The same native run retained the opposite
+direction, where an old runner refused successor authority and kept prior
+replay inert. Task replay remains explicitly outside this evidence until H09 is
+approved.
 
 Latest H16 developer-harness evidence binds Portal `8911a9fc` and Apps
 `f87568b` in [developer harness](evidence/platform-developer-harness/acceptance.json).
@@ -140,6 +149,13 @@ Tests also prove that this standalone operation does not clear the dedicated
 plugin table; clear-on-uninstall remains a separate reviewed action.
 Candidate `602f91fe` passed Portal test `41341861685`, quota/browser
 `41341861749`, runner daemon `41341861650` and CodeQL.
+
+Latest H13 concurrency evidence: the enable/repair operator race now uses two
+distinct administrator users and sessions rather than one actor issuing both
+requests. SQLite, race-enabled SQLite and the complete Portal CI matrix pass.
+Exactly one review plan is consumed and one enable/repair operation remains
+pending; the other request is refused as stale or conflicting. Concurrent
+update paired with enable/repair remains the remaining H13 operator drill.
 
 Latest H13 repair evidence: the reviewed managed repair path now uses its own
 review format and `queued -> validate -> download -> stage -> quiesce -> start

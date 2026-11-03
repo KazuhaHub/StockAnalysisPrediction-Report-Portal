@@ -294,16 +294,21 @@
       ]
     },
     "DATA-06": {
-      "status": "partial",
+      "status": "pass-development",
       "commands": [
-        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_restore_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(Test(AppPlatformRestorePausesAuthority|PostgresAppPlatformRestorePausesAuthority|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1"
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_restore_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(Test(AppPlatformRestorePausesAuthority|PostgresAppPlatformRestorePausesAuthority|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1",
+        "app runner daemon probe 41726689783: TestControllerIdentityAcceptance"
       ],
       "coverage": [
         "Restore rotates the controller epoch, fences installation generation, disables runtime bindings and removes their signing key material.",
-        "Pending operations become recovery-required, leases are cleared, and a restored runtime cannot regenerate the prior signing identity."
+        "Pending operations become recovery-required, leases are cleared, and a restored runtime cannot regenerate the prior signing identity.",
+        "The native runner enrolled epoch 402, admitted and retained an epoch-402 command, then refused the restored epoch-401 command both directly in the journal and over the real Unix control socket.",
+        "Re-admitting the epoch-402 command after the stale attempt returned the original effect as an inert replay; the old command did not replace or mutate newer native state.",
+        "The same native run retained the opposite direction: an old runner refused a successor epoch and kept its previously admitted intent inert."
       ],
       "limits": [
-        "The test does not leave a real runner holding newer native state and then prove that its first stop/restore/snapshot command is refused. That native bidirectional epoch drill remains open."
+        "This is a development two-sided epoch/isolation drill, not an in-place production backup restoration or a production runner upgrade procedure.",
+        "Task replay remains outside this evidence until the separately unapproved H09 task persistence exists."
       ]
     },
     "DATA-07": {
