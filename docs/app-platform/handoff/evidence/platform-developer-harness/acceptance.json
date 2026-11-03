@@ -1,0 +1,66 @@
+{
+  "format": "portal.app-platform.developer-harness/1-dev.1",
+  "captured_at": "2026-11-03T01:58:00-08:00",
+  "portal_candidate": "4a374dc1",
+  "apps_candidate": "4c53f10",
+  "rows": {
+    "DEV-01": {
+      "status": "partial",
+      "commands": [
+        "python3 scripts/test-app-template.py",
+        "python3 scripts/plugin-standard.py",
+        "npm test --workspace=@portal-app/sdk -- --run tests/network-hook.test.tsx tests/bridge-v2.test.ts tests/page-v2.test.ts",
+        "npm run typecheck --workspace=@portal-app/sdk",
+        "python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v"
+      ],
+      "coverage": [
+        "A clean temporary directory generated both the legacy React and v2 React/Ant templates. Their typecheck, browser-unit test and production Vite build completed without hidden manual source edits.",
+        "The shared frontend-standard checker confirms every maintained application uses the common SDK shell foundation and refuses copied bridge/browser authority.",
+        "The selected SDK harness passed 101 tests with typecheck. The Apps packaging/publication/catalogue corpus passed 60 Python tests.",
+        "The v2 packer validated the same pinned 56-case descriptor corpus used by Portal."
+      ],
+      "limits": [
+        "The template and contract checks were run by an implementation participant. DEV-01 explicitly requires a developer who did not implement the work to complete the tutorial from a clean checkout and record missing steps.",
+        "This evidence remains partial until that independent walkthrough is available."
+      ]
+    },
+    "DEV-02": {
+      "status": "partial",
+      "commands": [
+        "npm test --workspace=@portal-app/sdk -- --run tests/network-hook.test.tsx tests/bridge-v2.test.ts tests/page-v2.test.ts",
+        "AUTH-04 command set in evidence/platform-auth-matrix/acceptance.json",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$|^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1"
+      ],
+      "coverage": [
+        "The SDK harness rejects an ungranted network capability, stale channel/generation, malformed or uncertain response, timeout and a missing transport without retrying a possibly executed request.",
+        "The production Portal actor tests re-check OU moves, demotions, account recreation and session expiry on the next request.",
+        "Managed package staging without a compatible runner is refused before installation admission."
+      ],
+      "limits": [
+        "There is not yet one developer-facing simulator that exercises changed OU, expired bridge and missing runtime together from the generated app.",
+        "DEV-02 remains partial rather than borrowing separate production tests as a complete harness result."
+      ]
+    },
+    "DEV-04": {
+      "status": "partial",
+      "commands": [
+        "python3 -m unittest discover -s scripts/tests -p 'test_*.py' -v",
+        "Apps release/protocol/catalogue/container checks on candidate 4c53f10"
+      ],
+      "coverage": [
+        "The publication tests bind source commit, clean workflow source, exact required CI jobs, target set, artifact checksums, descriptor/source relationships and final metadata.",
+        "Publication remains draft until every uploaded asset is verified. Redirect handling never forwards GitHub authorization outside the approved API host.",
+        "Status Beta.2/Beta.3 public bytes and checksums were independently verified in the released lifecycle evidence."
+      ],
+      "limits": [
+        "A complete declared dependency/license/SBOM/CVE review for the final release artifacts has not been recorded.",
+        "Signing remains isolated in release workflow configuration, but formal release-key/environment approval remains open."
+      ]
+    }
+  },
+  "open": [
+    "DEV-01 needs the independent non-implementer walkthrough.",
+    "DEV-02 needs a cohesive developer harness result for changed OU, expired bridge and missing runtime.",
+    "DEV-04 needs the final dependency/provenance security review and release-key approval."
+  ]
+}
