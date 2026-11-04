@@ -926,7 +926,7 @@ async function main() {
       throw new Error("reference-app narrow console errors: " + narrowErrors.join(" | "));
     }
     output.limitations = [
-      "The fixture preloads two successful installation projections so it isolates My Apps opening, switching, title and frame behavior; it does not replace the managed lifecycle install transaction.",
+    "The fixture preloads installation-state projections so it isolates My Apps setup, opening, switching, title and frame behavior; it does not replace the managed lifecycle install transaction.",
       "Scheduled Digest presentation runs against a contract-compatible fixture backend, not the exact service image.",
       "Automated axe and keyboard checks do not constitute the required human screen-reader audit.",
     ];
