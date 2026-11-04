@@ -204,7 +204,8 @@ func beginUpdateStartRegistration(ctx context.Context, s *Store, raw, signature 
 	now := time.Now().UTC().UnixMilli()
 	verified, err := control.VerifyUpdateStartRegistration(raw, signature, authority, now)
 	if err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"verify update-start registration: %w", err)
 	}
 	row, present, err := readUpdateStartRegistrationRow(ctx, tx, verified, now)
 	if err != nil || !present || row.stored.state != state {
@@ -219,7 +220,8 @@ func beginUpdateStartRegistration(ctx context.Context, s *Store, raw, signature 
 		verified: verified, source: source, row: row, raw: raw, signature: signature,
 	}
 	if err := checkUpdateStartRegistrationCurrent(ctx, facts); err != nil {
-		return nil, zero, err
+		return nil, zero, fmt.Errorf(
+			"current update-start registration: %w", err)
 	}
 	ok = true
 	return tx, facts, nil

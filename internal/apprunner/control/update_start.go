@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"strconv"
@@ -196,40 +197,48 @@ func parseUpdateStart(raw []byte) (UpdateStartCommand, error) {
 }
 
 func VerifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64) (VerifiedUpdateStartCommand, error) {
-	fail := func() (VerifiedUpdateStartCommand, error) {
-		return VerifiedUpdateStartCommand{}, ErrInvalidCommand
-	}
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 ||
 		nowMS < 0 || len(signature) != ed25519.SignatureSize {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start authority bounds: %w", ErrInvalidCommand)
 	}
 	keySHA := sha256.Sum256(authority.PublicKey)
 	if authority.Fingerprint != hex.EncodeToString(keySHA[:]) {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start authority fingerprint: %w", ErrInvalidCommand)
 	}
 	c, err := parseUpdateStart(raw)
 	if err != nil {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start command parse: %w", ErrInvalidCommand)
 	}
 	revision, ok := counter(c.ControlRevision, true)
 	if !ok || revision != authority.ControlRevision ||
 		c.DeploymentID != authority.DeploymentID || c.ControllerEpoch != authority.ControllerEpoch {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start authority tuple revision=%s/%d: %w",
+			c.ControlRevision, authority.ControlRevision,
+			ErrInvalidCommand)
 	}
 	issued, ok := counter(c.IssuedMS, false)
 	if !ok {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start issued time: %w", ErrInvalidCommand)
 	}
 	expires, ok := counter(c.ExpiresMS, false)
 	if !ok || expires <= issued || expires-issued > 30000 || issued > nowMS || nowMS >= expires {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start time window issued=%d expires=%d now=%d: %w",
+			issued, expires, nowMS, ErrInvalidCommand)
 	}
 	digest, err := UpdateStartLogicalDigest(c)
 	if err != nil || digest != c.PayloadSHA256 {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start payload digest: %w", ErrInvalidCommand)
 	}
 	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(updateStartSignaturePurpose, raw), signature) {
-		return fail()
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start signature: %w", ErrInvalidCommand)
 	}
 	return VerifiedUpdateStartCommand{command: c}, nil
 }

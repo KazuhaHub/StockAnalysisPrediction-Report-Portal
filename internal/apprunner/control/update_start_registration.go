@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strconv"
 	"unicode/utf8"
@@ -136,12 +137,20 @@ func VerifyUpdateStartRegistration(raw, signature []byte, a Authority, nowMS int
 	}
 	start, err := VerifyUpdateStart(c.StartRaw, c.StartSignature, a, nowMS)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update-start registration start: %w", err)
 	}
 	digest, err := UpdateStartRegistrationLogicalDigest(c)
-	if err != nil || digest != c.PayloadSHA256 ||
-		!ed25519.Verify(ed25519.PublicKey(a.PublicKey), frame(updateStartRegistrationSignaturePurpose, raw), signature) {
-		return zero, ErrInvalidCommand
+	if err != nil || digest != c.PayloadSHA256 {
+		return zero, fmt.Errorf(
+			"update-start registration digest: %w", ErrInvalidCommand)
+	}
+	if !ed25519.Verify(
+		ed25519.PublicKey(a.PublicKey),
+		frame(updateStartRegistrationSignaturePurpose, raw),
+		signature) {
+		return zero, fmt.Errorf(
+			"update-start registration signature: %w", ErrInvalidCommand)
 	}
 	return VerifiedUpdateStartRegistrationCommand{command: c, start: start}, nil
 }
