@@ -207,6 +207,8 @@ def verify_handshake_answer(challenge, raw, now=None):
         or value.get("app") != challenge_raw.get("app")
         or value.get("instance") != challenge_raw.get("instance")
         or value.get("kid") != challenge_raw.get("kid")
+        or value.get("iat") != challenge_raw.get("iat")
+        or value.get("exp") != challenge_raw.get("exp")
         or not re.fullmatch(r"[a-f0-9]{32}", boot)
     ):
         raise ValueError("scheduled digest handshake answer is invalid")
