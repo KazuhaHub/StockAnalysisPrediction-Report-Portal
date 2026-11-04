@@ -1,0 +1,24 @@
+{
+  "cap_drop": "ALL",
+  "changed_identity_refused": true,
+  "cpu": "0.25",
+  "first_outcome": "succeeded",
+  "format": "portal.scheduled-digest-exact-image/1-dev.1",
+  "health": {
+    "data_format": "1",
+    "protocol": "portal.backend/1",
+    "ready": true
+  },
+  "image": "localhost:32768/scheduled-digest-exact@sha256:0eb685f804d434aff31f31374897ee767ba98c62cb3bc21a42991d089ef9f5c7",
+  "image_id": "sha256:c2046ec48cfe159abf1116c9b13a53c99e24e0ee2539dee4eaa4e348ec3452a5",
+  "memory_mib": 128,
+  "network": "none",
+  "passed": true,
+  "persisted_state": true,
+  "pids": 32,
+  "read_only_rootfs": true,
+  "replay_duplicate": true,
+  "socket_mode": "0600",
+  "task_occurrence": "digest:exact-image:1",
+  "user": "65532:65532"
+}

@@ -2666,3 +2666,20 @@ daemon workflow 40455635317 passed on the functional source as well.
   release/OCI bytes, release-key/environment approval and formal license
   disposition remain open, so DEV-04 remains partial. See
   [dependency review](handoff/evidence/platform-dependency-review/review.md).
+
+- Exercised the exact Scheduled Digest service image at Portal `0353ce23` and
+  Apps `f274e06`. The workflow builds the Apps Dockerfile, pushes it to an
+  owned loopback registry, records the immutable digest, and runs it as UID
+  `65532:65532` with a read-only root filesystem, `network=none`, all
+  capabilities dropped, no-new-privileges, 128 MiB memory, 32 PIDs and 0.25
+  CPU. The container serves `GET /health/ready`, accepts the fixed
+  `POST /v1/tasks/digest`, replays the same task idempotently, refuses changed
+  payload identity, persists digest state and removes its Unix socket with mode
+  `0600`. Quota/browser `41857287298` and runner daemon `41857287240` pass;
+  general `41857287392` and CodeQL `41857281576` complete the same candidate.
+  This closes exact-image runtime evidence, not clean Portal market
+  installation: the native Portal matrix still installs through a
+  contract-compatible backend, and a neutral operator must eventually run the
+  exact image through market install, registration, task execution and
+  uninstall. See
+  [exact image evidence](handoff/evidence/platform-scheduled-digest-image/acceptance.json).
