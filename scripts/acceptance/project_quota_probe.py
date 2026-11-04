@@ -498,7 +498,9 @@ def main(args):
                     if ready_image:
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
-                    if os.environ.get("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1":
+                    event_only = (
+                        os.environ.get("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1")
+                    if event_only:
                         portal_env["PORTAL_EVENT_ACCEPTANCE_ONLY"] = "1"
                     browser_enabled = bool(os.environ.get("APP_SDK_BROWSER_DIR"))
                     lifecycle_browser_enabled = bool(os.environ.get("APP_LIFECYCLE_BROWSER_RUNNER"))
@@ -539,7 +541,7 @@ def main(args):
                     report["native_portal_signed_data_dispatch"] = True
                     report["native_portal_static_driver_queued_to_complete"] = True
                     report["native_portal_background_install_scheduler"] = True
-                    if candidate:
+                    if candidate and not event_only:
                         if "MANAGED_PROFILE_OBSERVED" not in result.stdout:
                             raise RuntimeError("Portal managed profile acceptance did not execute")
                         report["native_portal_authenticated_managed_profile"] = True
@@ -732,6 +734,34 @@ def main(args):
                             if "MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED" not in result.stdout:
                                 raise RuntimeError("current Portal viewer native request gating missing")
                             report["native_current_viewer_request_verified"] = True
+                    if candidate and event_only:
+                        for marker in (
+                            "MANAGED_INSTALL_DATA_READY",
+                            "MANAGED_INSTALL_CANDIDATE_PROBE",
+                            "MANAGED_INSTALL_READINESS",
+                            "MANAGED_BACKEND_REGISTRATION_MATERIAL",
+                            "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
+                            "NATIVE_EVENT_ACTIVATION_FIXTURE",
+                            "EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+                            "MANAGED_UNINSTALL_STOP_REMOVE_CODE",
+                            "MANAGED_UNINSTALL_REMOVE_DATA",
+                            "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
+                        ):
+                            if marker not in result.stdout:
+                                diagnostic = Path.cwd() / "portal-quota-failure.txt"
+                                diagnostic.write_text(
+                                    result.stdout[-262144:])
+                                raise RuntimeError(
+                                    "native event acceptance missing: " + marker)
+                        report["native_portal_managed_install_data_to_start"] = True
+                        report["native_portal_managed_candidate_start_to_probe"] = True
+                        report["native_portal_managed_backend_readiness"] = True
+                        report["native_portal_managed_registration_material"] = True
+                        report["native_backend_request_relay_verified"] = True
+                        report["native_event_activation_fixture"] = True
+                        report["native_event_duplicate_out_of_order_lost_ack"] = True
+                        report["native_managed_uninstall_remove_data"] = True
+                        report["native_managed_reinstall_fresh_namespace_and_launch"] = True
                 if candidate:
                     # Reuse the shared journal/provider after its restart tests.
                     # Its monotonic project allocator avoids earlier fixture IDs.
