@@ -498,6 +498,8 @@ def main(args):
                     if ready_image:
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
+                    if os.environ.get("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1":
+                        portal_env["PORTAL_EVENT_ACCEPTANCE_ONLY"] = "1"
                     browser_enabled = bool(os.environ.get("APP_SDK_BROWSER_DIR"))
                     lifecycle_browser_enabled = bool(os.environ.get("APP_LIFECYCLE_BROWSER_RUNNER"))
                     for name in ("APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH", "APP_LIFECYCLE_BROWSER_RUNNER", "APP_LIFECYCLE_BROWSER_EVIDENCE"):

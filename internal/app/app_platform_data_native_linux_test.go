@@ -1026,6 +1026,11 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("full driver retained lease or incomplete state")
 	}
 	t.Log("STATIC_DRIVER_COMPLETE")
+	if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" &&
+		os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
+		testNativePortalManagedInstallData(t, s, session, endpoint)
+		return
+	}
 	if os.Getenv("PORTAL_MANAGED_PROFILE") == "1" {
 		testNativePortalWritableWriter(t, s, session, endpoint)
 		testNativeWritableBackgroundCompletion(t, s, session, endpoint)
