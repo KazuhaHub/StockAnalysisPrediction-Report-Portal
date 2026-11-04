@@ -122,7 +122,9 @@ func (s *Server) listPlatformApps(ctx context.Context, session platformActorSess
 		switch {
 		case c.desired == "disabled":
 			item.State = "disabled"
-		case c.phase == "pending" || c.phase == "setup_required":
+		case c.phase == "setup_required":
+			item.State = "setup_required"
+		case c.phase == "pending":
 			item.State = "pending"
 		case c.desired == "enabled" && c.phase == "ready" && epoch.Valid && platformValidUUID(epoch.String) && c.epoch == epoch.String && paused.Valid && paused.String == "0":
 			eligible := !c.runtime.Valid

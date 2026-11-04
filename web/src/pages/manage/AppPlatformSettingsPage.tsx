@@ -188,8 +188,10 @@ export default function AppPlatformSettingsPage() {
   const capabilityLabel = (capability: string) => t(`appPlatform.capability.${capability}`, { defaultValue: capability })
   const gapLabel = (gap: string) => {
     if (gap.startsWith('capability:')) return t('appPlatform.settings.missingCapability', { capability: capabilityLabel(gap.slice('capability:'.length)) })
+    if (gap.startsWith('secret_binding:')) return t('appPlatform.settings.missingSecretBinding', { binding: gap.slice('secret_binding:'.length) })
     return t(`appPlatform.settings.gap.${gap}`, { defaultValue: t('appPlatform.settings.gap.unknown') })
   }
+  const setupRequired = settings.configuration_gaps.some((gap) => gap === 'setup_required' || gap.startsWith('secret_binding:'))
   const bytes = (value: string) => t('appPlatform.settings.bytes', {
     value: new Intl.NumberFormat(lang).format(BigInt(value)),
   })
@@ -349,7 +351,9 @@ export default function AppPlatformSettingsPage() {
       </div>
     </Card>
 
-    <Card title={t('appPlatform.settings.configuration')}>
+    <Card title={t('appPlatform.settings.configuration')} extra={setupRequired
+      ? <Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>
+      : undefined}>
       {settings.configuration_gaps.length
         ? <Alert type="warning" showIcon title={t('appPlatform.settings.configurationNeeded')} description={<ul style={{ margin: 0, paddingInlineStart: 20 }}>{settings.configuration_gaps.map((gap) => <li key={gap}>{gapLabel(gap)}</li>)}</ul>} />
         : <Alert type="success" showIcon title={t('appPlatform.settings.configurationReady')} />}

@@ -23,7 +23,7 @@ type AppStatus = {
   timeline: AppStatusEvent[]
 }
 
-const states = new Set(['installed', 'pending', 'disabled', 'attention'])
+const states = new Set(['installed', 'pending', 'setup_required', 'disabled', 'attention'])
 const actions = new Set(['install', 'update', 'disable', 'enable', 'repair', 'uninstall', 'delete_data', 'restore'])
 const stages = new Set([
   'queued', 'validate', 'download', 'stage', 'prepare_data', 'quiesce',

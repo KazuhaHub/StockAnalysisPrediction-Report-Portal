@@ -246,6 +246,12 @@ func (s *Server) consumePlatformCredentialReview(session platformActorSession, p
 				return errAppPlatformPlanChanged
 			}
 		}
+		for _, installation := range orderedInstallations {
+			if err := platformApplySetupPhase(
+				e, installation, control.nowMS); err != nil {
+				return err
+			}
+		}
 		changed, err := e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND plan_sha256=? AND expires_ms>?`, control.nowMS, control.nowMS, planID, planSHA, control.nowMS)
 		if err := platformObjectCAS(changed, err); err != nil {
 			return errAppPlatformPlanChanged

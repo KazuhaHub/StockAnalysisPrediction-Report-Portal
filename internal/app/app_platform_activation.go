@@ -251,7 +251,12 @@ func (s *Server) activatePlatformStaticInstall(ctx context.Context, expected pla
 	if err := activatePlatformInstallCapabilities(e, expected.installationID, expected.id, now); err != nil {
 		return zero, err
 	}
-	changed, err := e.exec(`UPDATE app_platform_installations SET phase='ready',revision=revision+1,updated_ms=? WHERE id=? AND desired_state='enabled' AND phase='pending' AND generation=1 AND policy_revision=1 AND revision=? AND control_fence=? AND controller_epoch=? AND runtime_id IS NULL`, now, expected.installationID, facts.installationRevision, expected.fence, expected.controllerEpoch)
+	phase, err := platformReadyPhaseForInstallation(
+		e, expected.installationID, 1)
+	if err != nil {
+		return zero, err
+	}
+	changed, err := e.exec(`UPDATE app_platform_installations SET phase=?,revision=revision+1,updated_ms=? WHERE id=? AND desired_state='enabled' AND phase='pending' AND generation=1 AND policy_revision=1 AND revision=? AND control_fence=? AND controller_epoch=? AND runtime_id IS NULL`, phase, now, expected.installationID, facts.installationRevision, expected.fence, expected.controllerEpoch)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}

@@ -296,7 +296,11 @@ export default function AppCredentialsPage() {
             credential_id: binding.credential_id,
             operation: binding.operation,
           }
-        : { name: '', credential_id: '', operation: 'http_bearer' },
+        : {
+            name: appKey === 'scheduled-digest' ? 'digest-feed' : '',
+            credential_id: '',
+            operation: 'http_bearer',
+          },
     )
     setBindingOpen(true)
   }

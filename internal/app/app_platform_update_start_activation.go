@@ -229,13 +229,18 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		currentPhase = "pending"
 		currentGeneration = plan.TargetGeneration
 	}
+	phase, err := platformReadyPhaseForInstallation(
+		e, lease.installationID, plan.TargetPolicyRevision)
+	if err != nil {
+		return zero, err
+	}
 	changed, err = e.exec(`UPDATE app_platform_installations
 		SET generation=?,policy_revision=?,revision=revision+1,
-		phase='ready',updated_ms=?
+		phase=?,updated_ms=?
 		WHERE id=? AND desired_state='enabled' AND phase=?
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=? AND runtime_id=?`,
-		lease.snapshot.Generation, plan.TargetPolicyRevision, now,
+		lease.snapshot.Generation, plan.TargetPolicyRevision, phase, now,
 		lease.installationID, currentPhase, currentGeneration,
 		plan.SourcePolicyRevision, facts.installationRevision,
 		lease.fence, lease.controllerEpoch, runtime.id)

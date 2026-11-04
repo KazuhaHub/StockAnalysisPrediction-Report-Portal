@@ -21,6 +21,12 @@ func testPlatformDirectory(t *testing.T, pg bool) {
 	if err != nil || len(result.Items) != 1 || result.Items[0].InstallationID != id || result.Items[0].ApplicationID != "notes-sample" || result.Items[0].State != "installed" || !result.Items[0].Openable {
 		t.Fatalf("current grant not listed: %+v %v", result, err)
 	}
+	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='setup_required' WHERE id=?`, id)
+	result, err = s.listPlatformApps(context.Background(), reader, "")
+	if err != nil || len(result.Items) != 1 || result.Items[0].State != "setup_required" || result.Items[0].Openable {
+		t.Fatal("setup-required state advertised an open action")
+	}
+	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='ready' WHERE id=?`, id)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, id)
 	result, err = s.listPlatformApps(context.Background(), reader, "")
 	if err != nil || len(result.Items) != 1 || result.Items[0].State != "disabled" || result.Items[0].Openable {

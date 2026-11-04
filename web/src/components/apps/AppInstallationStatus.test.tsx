@@ -80,6 +80,7 @@ describe('AppInstallationStatus', () => {
   it('refuses unknown states, stages and diagnostics at the browser boundary', () => {
     const valid = { state: 'attention', openable: false, control_paused: false, timeline: [] }
     expect(parseAppStatus(valid)).toEqual(valid)
+    expect(parseAppStatus({ ...valid, state: 'setup_required' })).toEqual({ ...valid, state: 'setup_required' })
     expect(parseAppStatus({ ...valid, state: 'ready' })).toBeNull()
     expect(parseAppStatus({ ...valid, stage: 'raw-shell' })).toBeNull()
     expect(parseAppStatus({ ...valid, error_code: 'private_sql_error' })).toBeNull()

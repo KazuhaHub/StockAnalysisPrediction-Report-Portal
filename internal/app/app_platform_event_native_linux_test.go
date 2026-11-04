@@ -222,10 +222,15 @@ func activateNativeInstallation(
 		e, lease.installationID, lease.id, now); err != nil {
 		t.Fatal(err)
 	}
+	readyPhase, err := platformReadyPhaseForInstallation(
+		e, lease.installationID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	changed, err = e.exec(`UPDATE app_platform_installations
-		SET phase='ready',revision=revision+1,updated_ms=?
+		SET phase=?,revision=revision+1,updated_ms=?
 		WHERE id=? AND desired_state='enabled' AND phase='pending'`,
-		now, lease.installationID)
+		readyPhase, now, lease.installationID)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		t.Fatal(err)
 	}

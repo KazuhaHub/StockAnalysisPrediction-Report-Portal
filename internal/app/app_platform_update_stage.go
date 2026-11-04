@@ -370,8 +370,13 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 		activationID, expected.installationID, admitted.verified.sha256, admitted.plan.TargetGeneration, admitted.plan.TargetPolicyRevision, namespace, dataFormat, string(evidence), now, now, now); err != nil {
 		return platformOperationLease{}, err
 	}
-	changed, err := e.exec(`UPDATE app_platform_installations SET generation=?,policy_revision=?,revision=revision+1,phase='ready',updated_ms=? WHERE id=? AND generation=? AND policy_revision=? AND revision=?`,
-		admitted.plan.TargetGeneration, admitted.plan.TargetPolicyRevision, now, expected.installationID, admitted.plan.SourceGeneration, admitted.plan.PolicyRevision, admitted.currentInstallationRevision)
+	phase, err := platformReadyPhaseForInstallation(
+		e, expected.installationID, admitted.plan.TargetPolicyRevision)
+	if err != nil {
+		return platformOperationLease{}, err
+	}
+	changed, err := e.exec(`UPDATE app_platform_installations SET generation=?,policy_revision=?,revision=revision+1,phase=?,updated_ms=? WHERE id=? AND generation=? AND policy_revision=? AND revision=?`,
+		admitted.plan.TargetGeneration, admitted.plan.TargetPolicyRevision, phase, now, expected.installationID, admitted.plan.SourceGeneration, admitted.plan.PolicyRevision, admitted.currentInstallationRevision)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return platformOperationLease{}, err
 	}

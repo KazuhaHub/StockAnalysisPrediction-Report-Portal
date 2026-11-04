@@ -66,8 +66,8 @@ func testPlatformInstallationStatusReaderProjection(t *testing.T, pg bool) {
 	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='setup_required' WHERE id=?`, installation)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='activate',state_revision=6,error_code='install_execution_review_required',completed_ms=NULL WHERE installation_id=?`, installation)
 	result, err = s.readPlatformInstallationStatus(context.Background(), reader, installation)
-	if err != nil || result.State != "pending" || result.Openable || result.Action != "install" || result.Stage != "activate" || result.ErrorCode != "install_execution_review_required" {
-		t.Fatalf("pending status: %+v %v", result, err)
+	if err != nil || result.State != "setup_required" || result.Openable || result.Action != "install" || result.Stage != "activate" || result.ErrorCode != "install_execution_review_required" {
+		t.Fatalf("setup-required status: %+v %v", result, err)
 	}
 
 	mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='disabled' WHERE id=?`, installation)

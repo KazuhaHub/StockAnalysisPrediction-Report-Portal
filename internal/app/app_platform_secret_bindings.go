@@ -116,11 +116,13 @@ func loadPlatformSecretBindingFacts(e migExec, installation string, lock bool) (
 		lockSQL = " FOR UPDATE"
 	}
 	var runtime sql.NullString
-	if err := e.queryRow(`SELECT app_id,publisher_id,generation,revision,policy_revision,controller_epoch,runtime_id FROM app_platform_installations WHERE id=? AND desired_state='enabled' AND phase='ready'`+lockSQL, installation).
-		Scan(&f.appID, &f.publisherID, &f.generation, &f.installationRevision, &f.policyRevision, &f.controllerEpoch, &runtime); err != nil {
+	var phase string
+	if err := e.queryRow(`SELECT app_id,publisher_id,generation,revision,policy_revision,controller_epoch,runtime_id,phase FROM app_platform_installations WHERE id=? AND desired_state='enabled' AND phase IN ('ready','setup_required')`+lockSQL, installation).
+		Scan(&f.appID, &f.publisherID, &f.generation, &f.installationRevision, &f.policyRevision, &f.controllerEpoch, &runtime, &phase); err != nil {
 		return f, errAppPlatformCredentialUnavailable
 	}
-	if !platformValidUUID(installation) || !platformDirectoryAppID.MatchString(f.appID) || !platformDirectoryAppID.MatchString(f.publisherID) || !platformValidUUID(f.controllerEpoch) || !runtime.Valid || f.generation < 1 || f.installationRevision < 1 || f.policyRevision < 1 {
+	if !platformValidUUID(installation) || !platformDirectoryAppID.MatchString(f.appID) || !platformDirectoryAppID.MatchString(f.publisherID) || !platformValidUUID(f.controllerEpoch) || !runtime.Valid || f.generation < 1 || f.installationRevision < 1 || f.policyRevision < 1 ||
+		(phase != "ready" && (phase != "setup_required" || len(platformRequiredSetupBindings(f.appID)) == 0)) {
 		return f, errAppPlatformCredentialUnavailable
 	}
 	if err := e.queryRow(`SELECT revision FROM app_platform_publishers WHERE id=?`, f.publisherID).Scan(&f.trustRevision); err != nil || f.trustRevision < 1 {
@@ -312,6 +314,10 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			}
 			result = platformSecretBindingMetadata{ID: plan.BindingID, Name: plan.Name, CredentialID: plan.CredentialID, CredentialLabel: label, CredentialValueRevision: plan.CredentialValueRevision, Operation: plan.Operation, State: "active", PolicyRevision: plan.PolicyRevision, Revision: plan.BindingRevision + 1, CreatedMS: now, UpdatedMS: now}
 		}
+		if err := platformApplySetupPhase(
+			e, plan.InstallationID, now); err != nil {
+			return err
+		}
 		changed, err := e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND plan_sha256=? AND expires_ms>?`, now, now, planID, planSHA, now)
 		if err := platformObjectCAS(changed, err); err != nil {
 			return errAppPlatformPlanChanged
@@ -370,9 +376,19 @@ func (s *Server) revokePlatformSecretBinding(session platformActorSession, id st
 		if err != nil {
 			return err
 		}
+		var installation string
+		if err := e.queryRow(`SELECT installation_id
+			FROM app_platform_secret_bindings WHERE id=?`, id).Scan(
+			&installation); err != nil {
+			return errAppPlatformOperationConflict
+		}
 		changed, err := e.exec(`UPDATE app_platform_secret_bindings SET state='revoked',revision=revision+1,updated_ms=?,revoked_ms=? WHERE id=? AND revision=? AND state<>'revoked'`, control.nowMS, control.nowMS, id, revision)
 		if err := platformObjectCAS(changed, err); err != nil {
 			return errAppPlatformOperationConflict
+		}
+		if err := platformApplySetupPhase(
+			e, installation, control.nowMS); err != nil {
+			return err
 		}
 		detail, _ := json.Marshal(struct {
 			Revision int64 `json:"revision"`

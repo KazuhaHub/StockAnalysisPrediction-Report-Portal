@@ -220,6 +220,15 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 		if result.Phase == "setup_required" {
 			result.ConfigurationGaps = append(result.ConfigurationGaps, "setup_required")
 		}
+		missingSetup, err := platformMissingSetupBindings(
+			e, installation, result.AppID, policyRevision)
+		if err != nil {
+			return err
+		}
+		for _, name := range missingSetup {
+			result.ConfigurationGaps = append(
+				result.ConfigurationGaps, "secret_binding:"+name)
+		}
 
 		rows, err = e.query(`SELECT g.principal_type,
 			COALESCE(g.username,''),

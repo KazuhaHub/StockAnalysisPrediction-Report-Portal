@@ -96,6 +96,25 @@ describe('application installation settings', () => {
     expect(apiMock.get).not.toHaveBeenCalled()
   })
 
+  it('shows the exact missing business binding and links to its reviewed setup', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url.endsWith('/settings')) return {
+        ...settings,
+        app_id: 'scheduled-digest',
+        phase: 'setup_required',
+        configuration_gaps: ['setup_required', 'secret_binding:digest-feed'],
+      }
+      return { bindings: [] }
+    })
+    mount()
+    expect(await screen.findByText(/appPlatform\.settings\.missingSecretBinding/)).toBeTruthy()
+    expect(screen.getByText(/digest-feed/)).toBeTruthy()
+    expect(screen.getAllByRole('link', { name: /appPlatform\.settings\.manageCredentials/ }).map((link) => link.getAttribute('href'))).toEqual([
+      '/manage/apps/scheduled-digest/credentials',
+      '/manage/apps/scheduled-digest/credentials',
+    ])
+  })
+
   it('reviews and confirms permanent deletion of the exact retained data namespace', async () => {
     const user = userEvent.setup()
     const namespace = '33333333-3333-4333-8333-333333333333'

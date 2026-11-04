@@ -91,9 +91,15 @@ func testNativeScheduledDigest(
 
 func testNativeExactScheduledDigest(
 	t *testing.T, s *Server, lease platformOperationLease,
+	admin platformActorSession,
 ) {
 	t.Helper()
 	ctx := context.Background()
+	if phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`,
+		lease.installationID); phase != "setup_required" {
+		t.Fatalf("exact digest activation phase = %q", phase)
+	}
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +111,34 @@ func testNativeExactScheduledDigest(
 		Handler:      appplatform.TaskHandlerDigest,
 		Payload:      payload,
 		ExpiresMS:    now + int64(time.Hour/time.Millisecond),
+	}
+	if _, _, err := s.admitPlatformTask(
+		ctx, lease.installationID, admission); !errors.Is(
+		err, errAppPlatformTaskUnavailable) {
+		t.Fatalf("unconfigured exact digest admission = %v", err)
+	}
+	credential, err := s.changePlatformCredential(
+		admin, platformCredentialChange{
+			kind: "create", label: "Digest feed fixture",
+			value: []byte("disposable-digest-feed"),
+		})
+	if err != nil {
+		t.Fatal("exact digest setup credential", err)
+	}
+	review, err := s.createPlatformSecretBindingReview(
+		admin, lease.installationID, platformDigestFeedBinding,
+		credential.ID, "http_bearer")
+	if err != nil {
+		t.Fatal("exact digest setup review", err)
+	}
+	if _, err := s.consumePlatformSecretBindingReview(
+		admin, review.ID, review.SHA256); err != nil {
+		t.Fatal("exact digest setup binding", err)
+	}
+	if phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`,
+		lease.installationID); phase != "ready" {
+		t.Fatalf("configured exact digest phase = %q", phase)
 	}
 	id, created, err := s.admitPlatformTask(
 		ctx, lease.installationID, admission)
@@ -172,4 +206,5 @@ func testNativeExactScheduledDigest(
 			nativeEventInstallationState(t, s, lease.installationID))
 	}
 	t.Log("SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED")
+	t.Log("SCHEDULED_DIGEST_SETUP_REQUIRED_AND_CONFIGURED")
 }

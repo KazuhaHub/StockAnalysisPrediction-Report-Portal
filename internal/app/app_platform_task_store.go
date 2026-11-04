@@ -145,6 +145,21 @@ func (s *Store) admitPlatformTaskTx(e migExec, installation string, in platformT
 		return "", false, fmt.Errorf("%w: admission shape", errAppPlatformTaskUnavailable)
 	}
 	in = validated
+	var setupAppID string
+	var setupPolicyRevision int64
+	if err := e.queryRow(`SELECT app_id,policy_revision
+		FROM app_platform_installations
+		WHERE id=? AND desired_state='enabled' AND phase='ready'`,
+		installation).Scan(&setupAppID, &setupPolicyRevision); err != nil {
+		return "", false, fmt.Errorf(
+			"%w: installation phase", errAppPlatformTaskUnavailable)
+	}
+	missingSetup, err := platformMissingSetupBindings(
+		e, installation, setupAppID, setupPolicyRevision)
+	if err != nil || len(missingSetup) > 0 {
+		return "", false, fmt.Errorf(
+			"%w: business setup", errAppPlatformTaskUnavailable)
+	}
 	resources := []string{"tasks.schedule"}
 	if in.Handler == appplatform.TaskHandlerEvent {
 		delivery, parseErr := appplatform.ParseEventDelivery(in.Payload)

@@ -14,7 +14,7 @@ const directoryState = vi.hoisted(() => ({
   items: [] as Array<{
     installationId: string
     applicationId: string
-    state: 'installed' | 'pending' | 'disabled' | 'attention'
+    state: 'installed' | 'pending' | 'setup_required' | 'disabled' | 'attention'
     openable: boolean
   }>,
 }))
@@ -98,13 +98,13 @@ describe('AppsHub', () => {
 
   it('shows truthful directory states and an admin recovery link without exposing internals', async () => {
     directoryState.items = [
-      { installationId: '11111111-1111-4111-8111-111111111111', applicationId: 'pending-app', state: 'pending', openable: false },
+      { installationId: '11111111-1111-4111-8111-111111111111', applicationId: 'setup-app', state: 'setup_required', openable: false },
       { installationId: '22222222-2222-4222-8222-222222222222', applicationId: 'disabled-app', state: 'disabled', openable: false },
       { installationId: '33333333-3333-4333-8333-333333333333', applicationId: 'broken-app', state: 'attention', openable: false },
     ]
     apiMock.get.mockResolvedValue({ apps: [], builtin_apps: [], order: [] })
     renderHub()
-    expect(await screen.findByText('apps.v2Hint.pending')).toBeTruthy()
+    expect(await screen.findByText('apps.v2Hint.setup_required')).toBeTruthy()
     expect(screen.getByText('apps.v2Hint.disabled')).toBeTruthy()
     expect(screen.getByText('apps.v2Hint.attention')).toBeTruthy()
     expect(screen.getAllByRole('link', { name: /apps\.v2Manage/ })).toHaveLength(3)

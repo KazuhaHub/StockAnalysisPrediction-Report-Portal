@@ -445,14 +445,19 @@ func (s *Server) commitPlatformRestoreStartActivation(ctx context.Context, lease
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	activationPhase, err := platformReadyPhaseForInstallation(
+		e, lease.installationID, current.start.plan.TargetPolicyRevision)
+	if err != nil {
+		return zero, err
+	}
 	changed, err = e.exec(`UPDATE app_platform_installations
 		SET generation=?,policy_revision=?,revision=revision+1,
-		phase='ready',updated_ms=?
+		phase=?,updated_ms=?
 		WHERE id=? AND desired_state='enabled' AND phase='recovery_required'
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=? AND runtime_id=?`,
 		lease.snapshot.Generation, current.start.plan.TargetPolicyRevision,
-		now, lease.installationID, current.start.plan.SourceGeneration,
+		activationPhase, now, lease.installationID, current.start.plan.SourceGeneration,
 		current.start.plan.SourcePolicyRevision, facts.installationRevision,
 		lease.fence, lease.controllerEpoch, runtime.id)
 	if err := platformLeaseCAS(changed, err); err != nil {

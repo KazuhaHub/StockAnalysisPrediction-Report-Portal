@@ -136,6 +136,11 @@ func loadPlatformServiceFacts(e migExec, installation string, resources []string
 			return facts, errAppPlatformServiceUnavailable
 		}
 	}
+	missing, err := platformMissingSetupBindings(
+		e, installation, facts.appID, policyRevision)
+	if err != nil || len(missing) > 0 {
+		return facts, errAppPlatformServiceUnavailable
+	}
 	return facts, nil
 }
 

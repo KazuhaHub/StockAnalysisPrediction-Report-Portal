@@ -661,12 +661,17 @@ func (s *Store) activatePlatformFrontendEnable(ctx context.Context, expected pla
 		now, now, now); err != nil {
 		return zero, err
 	}
+	phase, err := platformReadyPhaseForInstallation(
+		e, plan.InstallationID, plan.TargetPolicyRevision)
+	if err != nil {
+		return zero, err
+	}
 	changed, err := e.exec(`UPDATE app_platform_installations
-		SET phase='ready',revision=revision+1,updated_ms=?
+		SET phase=?,revision=revision+1,updated_ms=?
 		WHERE id=? AND desired_state='enabled' AND phase='pending'
 		AND generation=? AND revision=? AND policy_revision=?
 		AND control_fence=? AND controller_epoch=? AND runtime_id IS NULL`,
-		now, plan.InstallationID, plan.TargetGeneration,
+		phase, now, plan.InstallationID, plan.TargetGeneration,
 		facts.installationRevision, plan.TargetPolicyRevision,
 		expected.fence, plan.ControllerEpoch)
 	if err := platformLeaseCAS(changed, err); err != nil {

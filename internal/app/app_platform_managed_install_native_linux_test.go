@@ -213,7 +213,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			activateNativeInstallation(t, s, committed)
 			t.Log("SCHEDULED_DIGEST_EXACT_ACTIVATION_FIXTURE")
 			s.platformBackendEndpoint.Store(&endpoint)
-			testNativeExactScheduledDigest(t, s, committed)
+			testNativeExactScheduledDigest(t, s, committed, session)
 		} else {
 			testNativePortalEventDelivery(t, s, committed, endpoint)
 			testNativeScheduledDigest(t, s, committed)

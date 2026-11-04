@@ -5,7 +5,7 @@ import { parseAppDisplay } from './appDisplayV2'
 import type { AppDisplay } from './descriptor-contract.generated'
 import { DESCRIPTOR_PATTERNS } from './descriptor-contract.generated'
 
-export type AppDirectoryState = 'installed' | 'pending' | 'disabled' | 'attention'
+export type AppDirectoryState = 'installed' | 'pending' | 'setup_required' | 'disabled' | 'attention'
 export interface AppDirectoryItem {
   installationId: string
   applicationId: string
@@ -15,7 +15,7 @@ export interface AppDirectoryItem {
 }
 interface Page { items: AppDirectoryItem[]; nextCursor: string }
 const applicationId = new RegExp(DESCRIPTOR_PATTERNS.slug)
-const states: readonly unknown[] = ['installed', 'pending', 'disabled', 'attention']
+const states: readonly unknown[] = ['installed', 'pending', 'setup_required', 'disabled', 'attention']
 
 // Control-state hints for display; opening still requires fresh server checks.
 export function parseAppDirectory(value: unknown): Page | null {

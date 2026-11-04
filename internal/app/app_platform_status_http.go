@@ -145,7 +145,9 @@ func (s *Server) readPlatformInstallationStatus(ctx context.Context, session pla
 	switch {
 	case desired == "disabled":
 		result.State = "disabled"
-	case phase == "pending" || phase == "setup_required":
+	case phase == "setup_required":
+		result.State = "setup_required"
+	case phase == "pending":
 		result.State = "pending"
 	case desired == "enabled" && phase == "ready" && !result.ControlPaused:
 		eligible := !runtime.Valid

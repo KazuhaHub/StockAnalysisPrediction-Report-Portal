@@ -25,6 +25,34 @@ func platformServiceIdentityFixtureWithDatabase(t *testing.T, postgres bool) (*S
 
 func platformServiceIdentityFixtureWithStore(t *testing.T, st *Store) (*Server, string) {
 	t.Helper()
+	s, _, installation := platformServiceIdentityFixtureForAppWithStoreSession(
+		t, st, "notes-sample")
+	return s, installation
+}
+
+func platformServiceIdentityFixtureForApp(t *testing.T, appID string) (*Server, string) {
+	t.Helper()
+	s, _, installation := platformServiceIdentityFixtureForAppWithSession(
+		t, appID)
+	return s, installation
+}
+
+func platformServiceIdentityFixtureForAppWithSession(t *testing.T, appID string) (*Server, platformActorSession, string) {
+	t.Helper()
+	s, admin, installation := platformServiceIdentityFixtureForAppWithStoreSession(
+		t, platformTestStore(t, false), appID)
+	return s, admin, installation
+}
+
+func platformServiceIdentityFixtureForAppWithStore(t *testing.T, st *Store, appID string) (*Server, string) {
+	t.Helper()
+	s, _, installation := platformServiceIdentityFixtureForAppWithStoreSession(
+		t, st, appID)
+	return s, installation
+}
+
+func platformServiceIdentityFixtureForAppWithStoreSession(t *testing.T, st *Store, appID string) (*Server, platformActorSession, string) {
+	t.Helper()
 	s, admin := platformActorTestServerWithStore(t, st)
 	if err := s.initializeAppPlatformControl(admin); err != nil {
 		t.Fatal(err)
@@ -38,6 +66,7 @@ func platformServiceIdentityFixtureWithStore(t *testing.T, st *Store) (*Server, 
 	if json.Unmarshal(raw, &manifest) != nil {
 		t.Fatal("managed descriptor fixture")
 	}
+	manifest.ID = appID
 	manifest.Publisher = "fixture-publisher"
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{"background.run", "events.subscribe", "notifications.publish", "reports.read", "tasks.schedule"}
@@ -110,7 +139,7 @@ func platformServiceIdentityFixtureWithStore(t *testing.T, st *Store) (*Server, 
 		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,?,?,1,?,?,?)`,
 			installation, capability.capability, boolInt(granted), capability.policy, planID, now, now)
 	}
-	return s, installation
+	return s, admin, installation
 }
 
 func TestPlatformServiceIdentityUsesNoUserAndRechecksCurrentState(t *testing.T) {

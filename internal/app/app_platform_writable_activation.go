@@ -144,7 +144,12 @@ func (s *Server) commitPlatformWritableActivation(ctx context.Context, lease pla
 	if err := insertPlatformInitialAudience(e, lease.installationID, metadata.audience, now); err != nil {
 		return zero, err
 	}
-	changed, err = e.exec(`UPDATE app_platform_installations SET phase='ready',revision=revision+1,updated_ms=? WHERE id=? AND desired_state='enabled' AND phase='pending' AND generation=1 AND policy_revision=1 AND revision=? AND control_fence=? AND controller_epoch=? AND runtime_id=?`, now, lease.installationID, facts.installationRevision, lease.fence, lease.controllerEpoch, runtime.id)
+	phase, err := platformReadyPhaseForInstallation(
+		e, lease.installationID, 1)
+	if err != nil {
+		return zero, err
+	}
+	changed, err = e.exec(`UPDATE app_platform_installations SET phase=?,revision=revision+1,updated_ms=? WHERE id=? AND desired_state='enabled' AND phase='pending' AND generation=1 AND policy_revision=1 AND revision=? AND control_fence=? AND controller_epoch=? AND runtime_id=?`, phase, now, lease.installationID, facts.installationRevision, lease.fence, lease.controllerEpoch, runtime.id)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}

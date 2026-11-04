@@ -10,6 +10,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 test('directory parser refuses aliases, duplicate/backward IDs, impossible states and dangling cursors', () => {
   expect(parseAppDirectory({ items: [item()], nextCursor: first })?.items).toHaveLength(1)
+  expect(parseAppDirectory({ items: [{ ...item(), state: 'setup_required', openable: false }], nextCursor: '' })?.items[0]?.state).toBe('setup_required')
   for (const page of [
     { items: [item(), item()], nextCursor: '' },
     { items: [item(second), item()], nextCursor: '' },

@@ -46,11 +46,11 @@ const binding = {
   revision: 1,
 }
 
-function renderPage(algorithm = theme.defaultAlgorithm) {
+function renderPage(algorithm = theme.defaultAlgorithm, appKey = 'hello') {
   return render(
     <ConfigProvider theme={{ algorithm }}>
       <App>
-        <MemoryRouter initialEntries={['/manage/apps/hello/credentials']}>
+        <MemoryRouter initialEntries={[`/manage/apps/${appKey}/credentials`]}>
           <Routes>
             <Route path="/manage/apps/:key/credentials" element={<AppCredentialsPage />} />
           </Routes>
@@ -125,6 +125,23 @@ describe('application credential settings', () => {
         { plan_id: planID, plan_sha256: 'a'.repeat(64) },
       ),
     )
+  })
+
+  it('prefills the required Scheduled Digest binding name', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/scheduled-digest/secret-bindings')
+        return { bindings: [] }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage(theme.defaultAlgorithm, 'scheduled-digest')
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    expect((screen.getByLabelText('appCredentials.name') as HTMLInputElement).value).toBe('digest-feed')
   })
 
   it('opens the shared revoke confirmation from the keyboard and restores focus on Escape', async () => {
