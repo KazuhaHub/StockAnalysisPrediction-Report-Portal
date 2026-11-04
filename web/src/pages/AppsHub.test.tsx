@@ -113,6 +113,12 @@ describe('AppsHub', () => {
       '/manage/apps/installations/22222222-2222-4222-8222-222222222222',
       '/manage/apps/installations/33333333-3333-4333-8333-333333333333',
     ])
+    const statusButtons = screen.getAllByRole('button', { name: 'apps.status.openFor' })
+    expect(statusButtons).toHaveLength(3)
+    for (const button of statusButtons) {
+      expect((button as HTMLButtonElement).disabled).toBe(false)
+      expect(button.getAttribute('aria-disabled')).toBeNull()
+    }
     expect(screen.queryByText(/11111111-1111-4111-8111-111111111111/)).toBeNull()
     expect(screen.queryByText('apps.count')).toBeNull()
     const result = await axe.run(document.body, {

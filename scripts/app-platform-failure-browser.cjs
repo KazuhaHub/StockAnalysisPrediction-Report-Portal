@@ -74,6 +74,7 @@ function launchResponse(installationID, mode) {
 
 async function installFixtureRoutes(context, options) {
   let launches = 0;
+  let statusReads = 0;
   await context.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -111,6 +112,37 @@ async function installFixtureRoutes(context, options) {
         ] : [],
         nextCursor: "",
       });
+    }
+    const statusMatch = url.pathname.match(
+      /^\/api\/app-platform\/installations\/([0-9a-f-]{36})\/status$/,
+    );
+    if (statusMatch) {
+      statusReads += 1;
+      const statuses = {
+        [installationIDs[0]]: {
+          state: "pending",
+          openable: false,
+          action: "install",
+          stage: "prepare_data",
+          control_paused: false,
+        },
+        [installationIDs[1]]: {
+          state: "disabled",
+          openable: false,
+          action: "disable",
+          stage: "complete",
+          control_paused: false,
+        },
+        [installationIDs[2]]: {
+          state: "attention",
+          openable: false,
+          control_paused: true,
+        },
+      };
+      const status = statuses[statusMatch[1]];
+      return status
+        ? json(route, 200, status)
+        : json(route, 404, { error: "private status diagnostic" });
     }
     const launchMatch = url.pathname.match(
       /^\/api\/app-platform\/installations\/([0-9a-f-]{36})\/launch$/,
@@ -152,7 +184,7 @@ async function installFixtureRoutes(context, options) {
     }
     return route.continue();
   });
-  return () => launches;
+  return { launches: () => launches, statusReads: () => statusReads };
 }
 
 async function audit(page) {
@@ -244,7 +276,18 @@ async function main() {
   const address = server.address();
   const base = `http://127.0.0.1:${address.port}`;
   const browser = await chromium.launch({ headless: true });
-  const report = { accepted: false, browserErrors: [], scenarios: [] };
+  const report = {
+    accepted: false,
+    browserErrors: [],
+    assertions: {
+      nonopenableStatusActionsEnabled: false,
+      readerStatusBoundedProjection: false,
+      readerStatusRefresh: false,
+      readerInternalIdentityHidden: false,
+      mainContentAxeSeriousOrCriticalViolations: 0,
+    },
+    scenarios: [],
+  };
   try {
     {
       const admin = await contextFor(browser, {
@@ -283,17 +326,48 @@ async function main() {
       if ((await reader.page.getByRole("link", { name: /Review in management/ }).count()) !== 0) {
         throw new Error("reader directory exposed management recovery");
       }
+      const directoryViolations = await audit(reader.page);
+      if (directoryViolations.length) throw new Error(`reader directory axe: ${JSON.stringify(directoryViolations)}`);
+      await reader.page.screenshot({
+        path: path.join(evidenceDir, "directory-states-reader.png"),
+        fullPage: true,
+      });
+      report.scenarios.push({ name: "directory-states-reader", violations: directoryViolations });
+      await reader.page
+        .getByRole("button", { name: "View status for pending-fixture" })
+        .click();
+      const statusDialog = reader.page.getByRole("dialog");
+      await statusDialog
+        .getByText("Checking data policy", { exact: true })
+        .waitFor();
+      await statusDialog
+        .getByText("Not ready", { exact: true })
+        .waitFor();
+      await statusDialog
+        .getByRole("button", { name: "Refresh status" })
+        .click();
+      for (let attempt = 0; attempt < 20 && reader.launches.statusReads() < 2; attempt++) {
+        await reader.page.waitForTimeout(50);
+      }
+      if (reader.launches.statusReads() !== 2) {
+        throw new Error("reader status refresh did not repeat the bounded read");
+      }
       const text = await reader.page.locator("body").innerText();
       if (installationIDs.some((id) => text.includes(id)) || text.includes("count")) {
         throw new Error("reader directory leaked installation identity or count");
       }
       const violations = await audit(reader.page);
       if (violations.length) throw new Error(`reader directory axe: ${JSON.stringify(violations)}`);
+      report.assertions.nonopenableStatusActionsEnabled = true;
+      report.assertions.readerStatusBoundedProjection = true;
+      report.assertions.readerStatusRefresh = true;
+      report.assertions.readerInternalIdentityHidden = true;
+      await reader.page.waitForTimeout(400);
+      report.scenarios.push({ name: "directory-reader-status", violations });
       await reader.page.screenshot({
-        path: path.join(evidenceDir, "directory-states-reader.png"),
+        path: path.join(evidenceDir, "directory-reader-status.png"),
         fullPage: true,
       });
-      report.scenarios.push({ name: "directory-states-reader", violations });
       await closeScenario(reader.context, reader.errors, "directory reader");
     }
     for (const mode of ["denied", "backend-stopped"]) {
@@ -323,7 +397,7 @@ async function main() {
         "This app is unavailable. Check your access or contact an administrator.",
         { exact: true },
       ).waitFor();
-      if (scenario.launches() !== 2) {
+      if (scenario.launches.launches() !== 2) {
         throw new Error(`${mode} retry did not repeat the refused launch`);
       }
       const violations = await audit(scenario.page);

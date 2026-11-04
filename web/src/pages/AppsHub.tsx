@@ -14,6 +14,7 @@ import { useAppDirectory } from '../lib/appDirectoryV2'
 import { useLoadFailure } from '../lib/useOnReconnect'
 import { settleOnAnswer } from '../lib/loadFailure'
 import { LoadingPlaceholder } from '../components/LoadGate'
+import AppInstallationStatus from '../components/apps/AppInstallationStatus'
 
 // The apps hub: a grid of user-facing apps. Built-in apps are compiled-in cards (each gated by a
 // permission; the registry lives in lib/builtinApps so the entry-button picker and shortcut router
@@ -29,7 +30,7 @@ function AppCard({ icon, title, desc, tag, onClick, disabled = false, status, fo
   const { token } = theme.useToken()
   return (
     <Col xs={24} sm={12} lg={8}>
-      <Card hoverable={!disabled} {...(!disabled ? clickable(onClick, title) : { 'aria-disabled': true })} style={{ height: '100%', opacity: disabled ? 0.8 : 1 }}>
+      <Card hoverable={!disabled} {...(!disabled ? clickable(onClick, title) : {})} style={{ height: '100%' }}>
         <Space align="start" size={16}>
           <span style={{ fontSize: 28, color: token.colorPrimary, lineHeight: 1 }}>{icon}</span>
           <div>
@@ -152,8 +153,11 @@ export default function AppsHub() {
             <AppCard key={`v2:${a.installationId}`} icon={<AppDisplayIcon display={a.display} />} title={copy.name} desc={copy.description}
               tag={t(`apps.v2State.${a.state}`)} disabled={!a.openable}
               status={a.state === 'installed' ? undefined : t(`apps.v2Hint.${a.state}`)}
-              footer={admin && !a.openable
-                ? <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>
+              footer={!a.openable
+                ? <Space wrap>
+                    <AppInstallationStatus installationId={a.installationId} name={copy.name} />
+                    {admin && <Link to={`/manage/apps/installations/${encodeURIComponent(a.installationId)}`}><SettingOutlined aria-hidden="true" /> {t('apps.v2Manage')}</Link>}
+                  </Space>
                 : undefined}
               onClick={() => navigate(`/apps/v2/${a.installationId}`)} />
             )
