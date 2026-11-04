@@ -28,7 +28,13 @@ func testNativeWritableLaunchHTTP(t *testing.T, s *Server, actor platformActorSe
 		Binding      map[string]string `json:"binding"`
 		Capabilities []string          `json:"capabilities"`
 	}
-	if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &launch) != nil || launch.Source == "" || launch.Binding["installationId"] != installation || launch.Binding["releaseSha256"] != release || len(launch.Capabilities) != 0 {
+	if response.Code != 200 ||
+		json.Unmarshal(response.Body.Bytes(), &launch) != nil ||
+		launch.Source == "" ||
+		launch.Binding["installationId"] != installation ||
+		launch.Binding["releaseSha256"] != release ||
+		len(launch.Capabilities) != 1 ||
+		launch.Capabilities[0] != "reports.read" {
 		t.Fatal("native installed writable launch HTTP", response.Code, response.Body.String())
 	}
 	doc := sessionTestRequest(mux, "GET", launch.Source, cookie, "")
