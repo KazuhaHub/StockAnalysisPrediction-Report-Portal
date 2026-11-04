@@ -796,6 +796,7 @@ def main(args):
                             markers.extend((
                                 "SCHEDULED_DIGEST_EXACT_REGISTRATION_HANDSHAKE_VERIFIED",
                                 "SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED",
+                                "SCHEDULED_DIGEST_SETUP_REQUIRED_AND_CONFIGURED",
                             ))
                         else:
                             markers.extend((
@@ -822,6 +823,8 @@ def main(args):
                                 "native_scheduled_digest_exact_managed_image"] = True
                             report[
                                 "native_scheduled_digest_exact_registration_handshake"] = True
+                            report[
+                                "native_scheduled_digest_setup_required_and_configured"] = True
                             report[
                                 "scheduled_digest_exact_image"] = scheduled_digest_image
                         else:
