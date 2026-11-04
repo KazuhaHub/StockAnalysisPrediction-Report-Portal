@@ -40,6 +40,16 @@ shows an ordinary user cannot open the setup-required application and can open
 it after the configured projection. Evidence is in
 [business setup](evidence/platform-business-setup/acceptance.json).
 
+Latest LIFE-11 evidence binds Portal `3199cf82`. A reviewed disable immediately
+turns running/leased tasks and attempts into
+`uncertain/installation_disabled`, clears the worker lease, withholds late
+results, denies broker access, and prevents new claims. Runner-unavailable
+states remain `managed_disable_unavailable` or
+`disabled/recovery_required + managed_disable_stop_pending` without fabricating
+a stop receipt. General test `41931370312`, quota/browser `41931370229`, runner
+daemon `41931370293` and CodeQL pass. Evidence is in
+[disable active work](evidence/platform-disable-active-work/acceptance.json).
+
 Latest H16 package-security evidence binds Portal `bcb7081e` and
 [security package evidence](evidence/platform-security-package/acceptance.json).
 On SQLite and a dedicated PostgreSQL 18.6 database, altered descriptors,
