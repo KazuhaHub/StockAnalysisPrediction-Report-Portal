@@ -6,6 +6,10 @@ on:
         description: Skip browser fixtures for a native-only diagnostic run
         type: boolean
         default: false
+      event_only:
+        description: Limit a native-only diagnostic run to the event acceptance subset
+        type: boolean
+        default: true
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
@@ -335,7 +339,7 @@ jobs:
       - name: Enforce quotas only on the newly owned loopback image
         shell: bash
         env:
-          PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && '1' || '0' }}
+          PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && inputs.event_only && '1' || '0' }}
           APP_SCHEDULED_DIGEST_CANDIDATE: ${{ runner.temp }}/scheduled-digest-candidate
         run: |
           set -euo pipefail
