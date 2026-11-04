@@ -2599,3 +2599,20 @@ daemon workflow 40455635317 passed on the functional source as well.
   AdminOverview failure, passed when rerun alone locally, and passed on the
   failed-job rerun. See
   [application failure evidence](handoff/evidence/platform-failure/acceptance.json).
+
+- Closed the JOB-02 crash boundary at `b37df3ef`. An expired worker lease now
+  closes its attempt and task as `uncertain:task_lease_expired` during the next
+  claim sweep, revoking the worker/lease and never returning the task to the
+  automatic retry queue. Empty polls now commit authority-loss and expiry
+  mutations instead of rolling them back. A separate OS test process runs the
+  production scheduler claim/start/execute/completion path and kills itself
+  with SIGKILL both before an effect and after fsyncing one synthetic external
+  effect. Recovery leaves the effect count at exactly one, releases no result,
+  creates no second occurrence and never replays the handler. SQLite and a
+  fresh PostgreSQL database both pass, and the stale-lease/authority tests are
+  committed with the fix. The killed process is not yet the compiled
+  `app-task-worker` calling a container-backed application, so that remains a
+  release drill rather than being erased from the limits. General
+  `41822717633`, quota/browser `41822717553`, runner daemon `41822717599` and
+  CodeQL `41822711853` pass. See
+  [task crash evidence](handoff/evidence/platform-task-crash/acceptance.json).
