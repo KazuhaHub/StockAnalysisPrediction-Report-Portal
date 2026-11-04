@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strconv"
@@ -240,6 +241,7 @@ func (s *Server) handleServiceBackendTask(ctx context.Context, conn *net.UnixCon
 	result, err := provider.store.ForwardServiceBackendTask(
 		ctx, command[:count], command[count:], descriptor, body, provider.native)
 	if err != nil {
+		log.Printf("service backend task unavailable: %v", err)
 		return
 	}
 	encoded, err := json.Marshal(result)
