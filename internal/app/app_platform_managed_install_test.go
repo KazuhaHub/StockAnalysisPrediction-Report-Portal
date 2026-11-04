@@ -186,6 +186,8 @@ func platformScheduledDigestReleaseFixture(
 		t.Fatal("scheduled digest candidate identity")
 	}
 	m.Publisher = "fixture-publisher"
+	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
 	m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(m)
 	if err != nil {
@@ -236,6 +238,18 @@ func TestScheduledDigestCandidateRelease(t *testing.T) {
 	if _, err := s.stagePlatformRelease(
 		session, raw, platformSignTestDescriptor(t, raw), archive); err != nil {
 		t.Fatal(err)
+	}
+	if err := installRequirementsForTarget(
+		manifest, platformManagedInstallFormat,
+		&platformManagedInstallTarget{
+			Profile: transport.ManagedRuntimeProfile{
+				Protocol:        transport.ManagedRunnerProtocol,
+				Platform:        "linux/amd64",
+				BackendProtocol: transport.ManagedBackendProtocol,
+				SandboxProfile:  control.CandidateSandboxProfile,
+			},
+		}); err != nil {
+		t.Fatal("scheduled digest managed requirements", err)
 	}
 }
 
