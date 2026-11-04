@@ -333,6 +333,10 @@ func admitPlatformTrustQuarantine(
 	if err := platformLeaseCAS(updated, err); err != nil {
 		return err
 	}
+	if err := invalidatePlatformTasksForInstallation(
+		e, p.InstallationID, "publisher_revoked", control.nowMS); err != nil {
+		return err
+	}
 	if _, err := e.exec(`UPDATE app_platform_activations
 		SET state='retired',updated_ms=?
 		WHERE installation_id=? AND state='active'`,

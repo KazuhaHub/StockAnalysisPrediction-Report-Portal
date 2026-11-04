@@ -125,6 +125,7 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 		tables := append(migration0015().tables, migration0016().tables...)
 		tables = append(tables, migration0017().tables...)
 		tables = append(tables, migration0018().tables...)
+		tables = append(tables, migration0019().tables...)
 		sort.Strings(tables)
 		for _, name := range tables {
 			if name == platformPrefix+"object_storage" || name == platformPrefix+"storage_objects" || name == platformPrefix+"object_namespaces" || name == platformPrefix+"plugin_tables" {
@@ -134,6 +135,14 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 				t.Error(err)
 				return
 			}
+		}
+		if _, err := tx.Exec(`DELETE FROM app_platform_task_attempts`); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := tx.Exec(`DELETE FROM app_platform_tasks`); err != nil {
+			t.Error(err)
+			return
 		}
 		if _, err := tx.Exec(`DELETE FROM app_platform_object_storage`); err != nil {
 			t.Error(err)

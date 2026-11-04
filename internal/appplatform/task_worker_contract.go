@@ -1,7 +1,6 @@
 package appplatform
 
 import (
-	"encoding/json"
 	"regexp"
 	"time"
 )
@@ -94,10 +93,15 @@ func ClassifyTaskResult(result TaskExecutionResult, attempt, maxAttempts uint64,
 	if result.EvidenceSHA != "" && !digestPattern.MatchString(result.EvidenceSHA) {
 		return zero, ErrTaskTransition
 	}
-	if len(result.ResultJSON) > MaxTaskResultBytes || len(result.ResultJSON) > 0 && !json.Valid(result.ResultJSON) {
-		return zero, ErrTaskTransition
+	resultJSON := append([]byte(nil), result.ResultJSON...)
+	if len(resultJSON) > 0 {
+		canonical, _, err := ValidateTaskPayload(resultJSON)
+		if err != nil {
+			return zero, ErrTaskTransition
+		}
+		resultJSON = canonical
 	}
-	decision := TaskResultDecision{ErrorCode: result.ErrorCode, ResultJSON: append([]byte(nil), result.ResultJSON...), EvidenceSHA: result.EvidenceSHA}
+	decision := TaskResultDecision{ErrorCode: result.ErrorCode, ResultJSON: resultJSON, EvidenceSHA: result.EvidenceSHA}
 	switch result.Outcome {
 	case TaskResultSucceeded:
 		decision.State = TaskSucceeded

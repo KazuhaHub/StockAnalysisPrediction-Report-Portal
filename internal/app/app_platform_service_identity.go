@@ -65,24 +65,45 @@ func loadPlatformServiceFacts(e migExec, installation string, resources []string
 	if err != nil || parsed.Manifest.ID != facts.appID || parsed.Manifest.Publisher != facts.publisherID || parsed.Manifest.Backend == nil {
 		return facts, errAppPlatformServiceUnavailable
 	}
-	var planRaw, planDigest string
-	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256 FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='background.run' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL AND p.action='install'`, installation, policyRevision).
-		Scan(&planRaw, &planDigest); err != nil || platformDigest([]byte(planRaw)) != planDigest {
-		return facts, errAppPlatformServiceUnavailable
-	}
-	var plan platformInstallProjection
-	if json.Unmarshal([]byte(planRaw), &plan) != nil || !platformManagedFormat(plan.Format) || plan.Runtime == nil || plan.AppID != facts.appID || plan.PublisherID != facts.publisherID || plan.ReleaseSHA256 != facts.release || plan.ControllerEpoch != facts.epoch || plan.Runtime.RuntimeID != facts.runtimeID {
-		return facts, errAppPlatformServiceUnavailable
-	}
-	expected, err := platformInstallCapabilitySelection(parsed.Manifest, plan.Runtime)
-	if err != nil {
-		return facts, errAppPlatformServiceUnavailable
-	}
-	expectedGranted := map[string]bool{}
-	for _, capability := range expected {
-		expectedGranted[capability.capability] = capability.granted
-	}
-	if !expectedGranted["background.run"] {
+	if facts.generation == "1" {
+		var planRaw, planDigest string
+		if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256
+			FROM app_platform_capability_grants g
+			JOIN app_platform_review_plans p ON p.id=g.review_plan_id
+			WHERE g.installation_id=? AND g.capability='background.run'
+			  AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL
+			  AND p.action='install'`, installation, policyRevision).
+			Scan(&planRaw, &planDigest); err != nil ||
+			platformDigest([]byte(planRaw)) != planDigest {
+			return facts, errAppPlatformServiceUnavailable
+		}
+		var plan platformInstallProjection
+		if json.Unmarshal([]byte(planRaw), &plan) != nil ||
+			!platformManagedFormat(plan.Format) || plan.Runtime == nil ||
+			plan.AppID != facts.appID || plan.PublisherID != facts.publisherID ||
+			plan.ReleaseSHA256 != facts.release ||
+			plan.ControllerEpoch != facts.epoch ||
+			plan.Runtime.RuntimeID != facts.runtimeID {
+			return facts, errAppPlatformServiceUnavailable
+		}
+		expected, err := platformInstallCapabilitySelection(
+			parsed.Manifest, plan.Runtime)
+		if err != nil {
+			return facts, errAppPlatformServiceUnavailable
+		}
+		expectedGranted := map[string]bool{}
+		for _, capability := range expected {
+			expectedGranted[capability.capability] = capability.granted
+		}
+		for _, resource := range resources {
+			if !serviceResourceCapability(resource) ||
+				!expectedGranted[resource] {
+				return facts, errAppPlatformServiceUnavailable
+			}
+		}
+	} else if err := verifyPlatformLaunchCapabilitySnapshot(
+		e, installation, facts.release, facts.epoch, policyRevision,
+		parsed.Manifest); err != nil {
 		return facts, errAppPlatformServiceUnavailable
 	}
 	rows, err := e.query(`SELECT capability,granted,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
@@ -111,7 +132,7 @@ func loadPlatformServiceFacts(e migExec, installation string, resources []string
 		return facts, errAppPlatformServiceUnavailable
 	}
 	for _, resource := range resources {
-		if !serviceResourceCapability(resource) || !expectedGranted[resource] || !actual[resource] {
+		if !serviceResourceCapability(resource) || !actual[resource] {
 			return facts, errAppPlatformServiceUnavailable
 		}
 	}

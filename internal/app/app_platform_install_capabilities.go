@@ -95,7 +95,7 @@ func platformInstallCapabilitySelection(m appplatform.Manifest, target *platform
 			seen[name] = true
 			grant := (name == "network.http" && policy != "") ||
 				(name == "network.stream" && streamPolicy != "") ||
-				(required && (name == "reports.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish"))
+				(required && (name == "reports.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish" || name == "tasks.schedule"))
 			if required && !grant {
 				return nil, errAppPlatformInstallUnavailable
 			}
@@ -219,10 +219,10 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 	seen := make(map[string]bool, len(m.Capabilities.Required))
 	for _, capability := range m.Capabilities.Required {
-		if seen[capability] || (capability != "network.http" && capability != "network.stream" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish") {
+		if seen[capability] || (capability != "network.http" && capability != "network.stream" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish" && capability != "tasks.schedule") {
 			return false
 		}
 		seen[capability] = true
 	}
-	return len(seen) <= 7
+	return len(seen) <= 8
 }

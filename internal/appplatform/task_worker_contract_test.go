@@ -74,6 +74,7 @@ func TestTaskResultClassificationStopsUncertainRetry(t *testing.T) {
 		{Outcome: TaskResultSucceeded, ErrorCode: "Private Error"},
 		{Outcome: TaskResultSucceeded, EvidenceSHA: "bad"},
 		{Outcome: TaskResultSucceeded, ResultJSON: []byte(`{"value":`)},
+		{Outcome: TaskResultSucceeded, ResultJSON: []byte(`{"token":"private"}`)},
 		{Outcome: "invented"},
 	} {
 		if _, err := ClassifyTaskResult(bad, 1, 3, now); !errors.Is(err, ErrTaskTransition) {

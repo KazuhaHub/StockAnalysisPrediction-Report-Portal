@@ -395,6 +395,13 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 		if err := platformLeaseCAS(updated, err); err != nil {
 			return err
 		}
+		taskCode := "installation_disabled"
+		if action == appplatform.ActionUninstall {
+			taskCode = "installation_uninstalled"
+		}
+		if err := invalidatePlatformTasksForInstallation(e, p.InstallationID, taskCode, control.nowMS); err != nil {
+			return err
+		}
 
 		revokedBindings := 0
 		if action == appplatform.ActionUninstall {

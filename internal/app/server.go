@@ -28,6 +28,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -47,6 +48,7 @@ type Server struct {
 	platformNetworkRequests platformDocumentBudget
 	platformNetworkStreams  platformDocumentBudget
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
+	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

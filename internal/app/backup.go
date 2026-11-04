@@ -535,6 +535,9 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, 
 			return err
 		}
 	}
+	if err := reviewRestoredPlatformTasks(e, time.Now().UTC().UnixMilli()); err != nil {
+		return err
+	}
 	if err := resetRestoredExtensionConnections(e); err != nil {
 		return err
 	}
@@ -599,6 +602,21 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, 
 		if err := e.setSetting(migrationLedgerKey(m.id), time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func reviewRestoredPlatformTasks(e migExec, nowMS int64) error {
+	if _, err := e.exec(`UPDATE app_platform_task_attempts
+		SET state='uncertain',finished_ms=?,error_code='restored_attempt',updated_ms=?
+		WHERE state IN ('leased','running')`, nowMS, nowMS); err != nil {
+		return fmt.Errorf("classify restored task attempts: %w", err)
+	}
+	if _, err := e.exec(`UPDATE app_platform_tasks
+		SET state='review_required',worker_id=NULL,lease_id=NULL,lease_until_ms=NULL,
+		    revision=revision+1,updated_ms=?
+		WHERE state IN ('waiting','leased','running','uncertain')`, nowMS); err != nil {
+		return fmt.Errorf("pause restored application tasks: %w", err)
 	}
 	return nil
 }

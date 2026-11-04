@@ -12,6 +12,7 @@ import { AppIcon, ServiceStatus } from './appsAdminParts'
 import CardTable from '../../components/CardTable'
 import AppPlatformInstallPanel from './AppPlatformInstallPanel'
 import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
+import AppPlatformTasksPanel from './AppPlatformTasksPanel'
 
 // The Apps list: every built-in and installed app with where it is switched on, in the administrator's
 // order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
@@ -113,5 +114,6 @@ export default function AppsAdminPage() {
     },
     { key: 'platform', label: t('appPlatform.tab'), children: <AppPlatformInstallPanel /> },
     { key: 'publishers', label: t('appTrust.tab'), children: <AppPlatformPublishersPanel /> },
+    { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
   ]} />
 }

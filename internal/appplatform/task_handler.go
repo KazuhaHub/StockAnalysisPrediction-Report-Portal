@@ -17,6 +17,7 @@ const (
 	MaxTaskPayloadBytes = 8192
 	TaskHandlerBackend  = "app.backend.task"
 	TaskHandlerDigest   = "scheduled-digest.run"
+	TaskBackendPath     = "/v1/tasks/run"
 )
 
 type TaskHandlerSpec struct {

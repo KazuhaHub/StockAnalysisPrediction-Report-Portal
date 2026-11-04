@@ -8,6 +8,9 @@ import (
 )
 
 func TestTaskHandlerRegistryNarrowsAppAndCapabilities(t *testing.T) {
+	if !ValidBackendRequestRoute("POST", TaskBackendPath) {
+		t.Fatal("fixed backend task route is not a valid own-backend route")
+	}
 	granted := map[string]bool{"background.run": true, "tasks.schedule": true, "reports.read": true}
 	backend, err := ResolveTaskHandler("notes-sample", TaskHandlerBackend, granted)
 	if err != nil || backend.ID != TaskHandlerBackend {

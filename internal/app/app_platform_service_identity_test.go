@@ -14,8 +14,12 @@ import (
 )
 
 func platformServiceIdentityFixture(t *testing.T) (*Server, string) {
+	return platformServiceIdentityFixtureWithDatabase(t, false)
+}
+
+func platformServiceIdentityFixtureWithDatabase(t *testing.T, postgres bool) (*Server, string) {
 	t.Helper()
-	s, admin := platformActorTestServer(t, false)
+	s, admin := platformActorTestServer(t, postgres)
 	if err := s.initializeAppPlatformControl(admin); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +34,7 @@ func platformServiceIdentityFixture(t *testing.T) (*Server, string) {
 	}
 	manifest.Publisher = "fixture-publisher"
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
-	manifest.Capabilities.Required = []string{"background.run", "notifications.publish", "reports.read"}
+	manifest.Capabilities.Required = []string{"background.run", "notifications.publish", "reports.read", "tasks.schedule"}
 	manifest.Capabilities.Optional = nil
 	_, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.1")
 	manifest.Frontend.SHA256 = platformDigest(archive)

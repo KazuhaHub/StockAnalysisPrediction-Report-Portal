@@ -242,6 +242,9 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	if err := invalidatePlatformTasksForInstallation(e, lease.installationID, "release_updated", now); err != nil {
+		return zero, err
+	}
 	if lease.snapshot.Action == appplatform.ActionUpdate {
 		if _, err := e.exec(
 			`DELETE FROM app_platform_capability_grants WHERE installation_id=?`,

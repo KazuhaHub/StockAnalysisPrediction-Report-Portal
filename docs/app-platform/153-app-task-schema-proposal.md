@@ -1,6 +1,9 @@
 # D2 proposal: bounded application tasks
 
-Status: awaiting owner approval. No migration is applied.
+Status: owner approved on 2026-11-03. Migration `0019`, persistence, worker,
+service scheduling endpoint, restore handling and administrator controls are
+implemented. Native `app.backend.task` exchange acceptance remains a separate
+runtime integration gate.
 
 ## Decision
 
@@ -85,6 +88,8 @@ Resolution requires the app identity and current `tasks.schedule` plus
 `reports.read`. Payloads are canonical bounded JSON objects. URL, callback,
 command, path, method, headers, credential, recipient and SQL fields are refused
 recursively.
+`app.backend.task` has one fixed own-backend path, `/v1/tasks/run`; the payload
+cannot name a method, path, callback or destination.
 
 Admission, backoff, execution deadline and result classification are implemented
 in `task_worker_contract.go`: global/app/installation active-task ceilings,
@@ -109,3 +114,28 @@ Acceptance must cover concurrent claims, attempts/fence drift, quota fairness,
 browser-closed execution, restart/restore, disable/uninstall/revoke during run,
 external success with lost confirmation, no automatic replay, SQLite and
 PostgreSQL, and backup round trip.
+
+## Implementation status
+
+- `migration0019` creates exactly `app_platform_tasks` and
+  `app_platform_task_attempts`. The task row keeps publisher and release values
+  as immutable snapshots; neither is a foreign key. Only the current
+  installation is referenced, with deferred `NO ACTION`.
+- `POST /api/app-platform/installations/{installation}/tasks/background` accepts
+  one H07 service assertion with `tasks.schedule`. The closed body is
+  `occurrenceId`, `handler`, `payload`, and optional bounded `runAt`/`expiresAt`.
+  Occurrence replay is stable; changed bytes under the same occurrence return
+  `409`.
+- `cmd/app-task-worker` owns the separate polling process. A task claim, fence
+  increment, revision increment and attempt insert commit together. PostgreSQL
+  uses `FOR UPDATE SKIP LOCKED`; SQLite relies on its single-writer transaction.
+- Start and completion re-read the installation tuple, release, policy, epoch,
+  capability grants, handler registry, lease, fence and revision. Result bytes
+  use the same secret/command/destination refusal as payloads.
+- Disable, uninstall, publisher revocation and release activation invalidate
+  pending or in-flight work. Restore converts every nonterminal task to
+  `review_required` and closes in-flight attempts as `uncertain`.
+- The administrator API and Apps page expose state, due time, attempts, safe
+  error and result summary. Cancellation cannot edit identity. Uncertain or
+  review-required work is closed only by an explicit failed/cancelled review and
+  never replayed automatically.
