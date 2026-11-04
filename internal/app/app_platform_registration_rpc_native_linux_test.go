@@ -87,7 +87,7 @@ func observeNativeRegistrationRPCFixture(t *testing.T, ctx context.Context, read
 	}
 }
 
-func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint, expectedDigest string) {
+func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint, expectedDigest string) platformOperationLease {
 	t.Helper()
 	ctx := context.Background()
 	intent, err := s.preparePlatformBackendDelivery(ctx, lease)
@@ -228,4 +228,5 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 	}
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
 	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")
+	return committed
 }

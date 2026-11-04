@@ -199,8 +199,9 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			t.Fatal("registration preparation granted authority")
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
-		testNativeRegistrationRPC(t, s, activated, endpoint, platformDigest(document))
-		testNativePortalEventDelivery(t, s, activated, endpoint)
+		committed := testNativeRegistrationRPC(
+			t, s, activated, endpoint, platformDigest(document))
+		testNativePortalEventDelivery(t, s, committed, endpoint)
 		oldNamespace := scalar[string](t, s.st,
 			`SELECT id FROM app_platform_data_namespaces
 			 WHERE owner_installation_id=?`,
