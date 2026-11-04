@@ -258,3 +258,31 @@ func TestPlatformTaskLifecycleInvalidationSeparatesUnexecutedAndInFlight(t *test
 		t.Fatal("uninstall did not invalidate executable and in-flight task state distinctly")
 	}
 }
+
+func TestPlatformBackendTaskFailsClosedWithoutRunnerEndpoint(t *testing.T) {
+	s, _ := platformServiceIdentityFixture(t)
+	result := s.runPlatformBackendTask(
+		context.Background(),
+		platformTaskLease{Generation: 1, PolicyRevision: 1},
+		"identity")
+	if result.Outcome != appplatform.TaskResultFailed ||
+		result.ErrorCode != "backend_transport_unavailable" {
+		t.Fatalf("backend task result = %+v", result)
+	}
+}
+
+func TestPlatformBackendTaskRechecksServiceIdentityBeforeNativeDispatch(t *testing.T) {
+	s, _ := platformServiceIdentityFixture(t)
+	endpoint := platformRuntimeEndpoint{
+		path: "/tmp/not-reached.sock", controllerUID: 1000, controllerGID: 1001,
+	}
+	s.platformBackendEndpoint.Store(&endpoint)
+	result := s.runPlatformBackendTask(
+		context.Background(),
+		platformTaskLease{Generation: 1, PolicyRevision: 1},
+		"not-an-identity")
+	if result.Outcome != appplatform.TaskResultUncertain ||
+		result.ErrorCode != "task_authority_revoked" {
+		t.Fatalf("revoked backend task result = %+v", result)
+	}
+}

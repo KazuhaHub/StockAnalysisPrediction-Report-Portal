@@ -179,6 +179,7 @@ func RunPlatformTaskWorker(ctx context.Context, cfgPath string, options Platform
 	defer store.Close()
 	server := &Server{cfg: cfg, st: store}
 	configurePlatformRuntimeEndpoint(server)
+	server.platformTaskBackend = server.runPlatformBackendTask
 	scheduler, err := newPlatformTaskScheduler(server, worker, options.Interval)
 	if err != nil {
 		return err

@@ -129,6 +129,12 @@ PostgreSQL, and backup round trip.
 - `cmd/app-task-worker` owns the separate polling process. A task claim, fence
   increment, revision increment and attempt insert commit together. PostgreSQL
   uses `FOR UPDATE SKIP LOCKED`; SQLite relies on its single-writer transaction.
+- A separate signed service-task command binds the task, lease, installation,
+  generation, policy, controller epoch, release, service identity and body. The
+  runner validates the exact registration and forwards fixed
+  `POST /v1/tasks/run` to the current backend without manufacturing a viewer.
+  The initial native transport supports the initial managed generation; the
+  shared app response contract is `portal.app-task.response/1-dev.1`.
 - Start and completion re-read the installation tuple, release, policy, epoch,
   capability grants, handler registry, lease, fence and revision. Result bytes
   use the same secret/command/destination refusal as payloads.
@@ -139,3 +145,6 @@ PostgreSQL, and backup round trip.
   error and result summary. Cancellation cannot edit identity. Uncertain or
   review-required work is closed only by an explicit failed/cancelled review and
   never replayed automatically.
+
+The remaining native acceptance is the Scheduled Digest implementation of the
+fixed app route and update-generation service-task registration variants.

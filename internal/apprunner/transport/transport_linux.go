@@ -267,7 +267,7 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		defer executionCancel()
 		s.network.serveStream(executionCtx, conn, true)
 		return
-	case backendRequestQueryMagic, writableBackendRequestQueryMagic:
+	case backendRequestQueryMagic, writableBackendRequestQueryMagic, serviceBackendTaskQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
 			return
 		}
@@ -280,6 +280,8 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		defer executionStop()
 		if string(header[:8]) == writableBackendRequestQueryMagic {
 			s.handleWritableBackendRequest(executionCtx, conn)
+		} else if string(header[:8]) == serviceBackendTaskQueryMagic {
+			s.handleServiceBackendTask(executionCtx, conn)
 		} else {
 			s.handleBackendRequest(executionCtx, conn)
 		}
