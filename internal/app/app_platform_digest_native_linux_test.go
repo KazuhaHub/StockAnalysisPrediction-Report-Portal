@@ -29,9 +29,12 @@ func configureNativeScheduledDigestSetup(
 	}()
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`,
 		admin.username)
-	if phase := scalar[string](t, s.st, `SELECT phase
-		FROM app_platform_installations WHERE id=?`,
-		installation); phase != "setup_required" {
+	phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`, installation)
+	if phase == "ready" {
+		return
+	}
+	if phase != "setup_required" {
 		t.Fatalf("scheduled digest phase before setup = %q", phase)
 	}
 	credential, err := s.changePlatformCredential(
