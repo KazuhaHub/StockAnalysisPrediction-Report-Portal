@@ -306,6 +306,26 @@ jobs:
           GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/ready_app -run '^TestFixedFixtureQuotaProfiles$' -count=1
       - name: Build owned readiness backend through disposable local registry
         run: bash scripts/acceptance/ready_app/build-fixture.sh
+      - name: Build exact Scheduled Digest service image
+        env:
+          APP_SCHEDULED_DIGEST_APPS_ROOT: ${{ github.workspace }}/.sdk-browser-apps
+        run: bash scripts/acceptance/scheduled_digest/build-image.sh
+      - name: Verify exact Scheduled Digest image runtime
+        env:
+          APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE: ${{ runner.temp }}/scheduled-digest-exact-image.json
+        run: |
+          sudo --preserve-env=APP_CANDIDATE_DOCKER_SOCKET,APP_SCHEDULED_DIGEST_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE \
+            python3 scripts/acceptance/scheduled_digest_image.py \
+            --image "$APP_SCHEDULED_DIGEST_NATIVE_IMAGE" \
+            --docker-socket "$APP_CANDIDATE_DOCKER_SOCKET" \
+            --evidence "$APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE"
+      - name: Preserve exact Scheduled Digest image evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scheduled-digest-exact-image
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/scheduled-digest-exact-image.json
       - name: Enforce quotas only on the newly owned loopback image
         shell: bash
         env:
