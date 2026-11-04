@@ -25,6 +25,8 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 		t.Fatal("pending install entered managed viewer request")
 	}
 	activateNativeInstallation(t, s, lease)
+	configureNativeScheduledDigestSetup(
+		t, s, actor, lease.installationID)
 	platformGrantLaunchUser(t, s, actor, lease.installationID)
 	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, actor.username)
 	decode := func(r driver.BackendResponse) (int64, protocol.Viewer) {
