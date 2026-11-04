@@ -106,6 +106,10 @@ func testNativePortalEventDelivery(
 		installation, lostOccurrence); got != "uncertain:backend_response_uncertain" {
 		t.Fatalf("lost acknowledgement task = %q", got)
 	}
+	if worked, err := worker.tick(ctx); err != nil || worked {
+		t.Fatalf("uncertain event was retried automatically: worked=%v err=%v",
+			worked, err)
+	}
 	var taskID string
 	var payload []byte
 	if err := s.st.queryRow(`SELECT id,payload FROM app_platform_tasks

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import { PauseOutlined, PlusOutlined, ReloadOutlined, StopOutlined, SyncOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api, errText } from '../../api/client'
+import Confirm from '../../components/Confirm'
 
 type Subscription = {
   id: string
@@ -170,19 +171,18 @@ export default function AppPlatformEventSubscriptionsPanel() {
               icon={<SyncOutlined aria-hidden="true" />}
               loading={busy === `${sub.id}:rebind`} disabled={!!busy}
               onClick={() => void rebind(sub)}>{t('appPlatform.events.rebind')}</Button>}
-            {sub.state !== 'revoked' && <Popconfirm
+            {sub.state !== 'revoked' && <Confirm
               title={t('appPlatform.events.revokeConfirm')}
               description={t('appPlatform.events.revokeConfirmBody')}
               okText={t('appPlatform.events.revoke')}
-              cancelText={t('appPlatform.cancel')}
-              okButtonProps={{ danger: true }}
+              irreversible
               onConfirm={() => void changeState(sub, 'revoked')}>
               <Button size="small" danger
                 icon={<StopOutlined aria-hidden="true" />}
                 loading={busy === `${sub.id}:revoked`} disabled={!!busy}>
                 {t('appPlatform.events.revoke')}
               </Button>
-            </Popconfirm>}
+            </Confirm>}
           </Space>,
         },
       ]}
