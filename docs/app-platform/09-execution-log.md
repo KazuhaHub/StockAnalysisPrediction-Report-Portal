@@ -2552,3 +2552,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   ready backend; installing the exact service image and completing the neutral
   two-app clean-market walkthrough remain open. See
   [Scheduled Digest evidence](handoff/evidence/platform-scheduled-digest/acceptance.json).
+
+- Closed the remaining H13 operator-race drill at `fec227d3`. The native Linux
+  XFS/Docker matrix creates update reviews while the app is healthy, then races
+  the real update consume against enable and repair admissions using distinct
+  administrator sessions and the actual runtime observation. In both cases the
+  update contender is refused as stale/conflicting, exactly one review is
+  consumed and exactly one lifecycle operation remains pending; the winning
+  enable/repair then continues through the real runner. General test
+  `41804401246`, quota/native `41804401317` and runner daemon `41804401242` pass;
+  artifact fields `native_managed_update_enable_operator_race` and
+  `native_managed_update_repair_operator_race` are true. See
+  [lifecycle concurrency](handoff/evidence/platform-lifecycle-concurrency/acceptance.json).
