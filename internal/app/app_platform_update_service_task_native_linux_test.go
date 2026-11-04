@@ -52,6 +52,7 @@ func testNativeUpdatedBackendTask(
 		t.Fatal("updated task admission", taskID, created, err)
 	}
 	s.platformBackendEndpoint.Store(&endpoint)
+	s.platformTaskBackend = s.runPlatformBackendTask
 	worker, err := newPlatformTaskScheduler(
 		s, platformFixtureID(898), 50*time.Millisecond)
 	if err != nil {
