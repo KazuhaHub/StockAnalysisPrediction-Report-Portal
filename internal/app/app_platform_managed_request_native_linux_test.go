@@ -98,6 +98,11 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 		t.Fatal("native request fixture enabled public managed launch")
 	}
 	t.Log("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")
+	// Restore the initial capability tuple after exercising an audience-only
+	// policy edit so the following event fixture starts from policy revision 1.
+	mustExec(t, s.st, `UPDATE app_platform_installations SET policy_revision=1 WHERE id=?`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_activations SET policy_revision=1 WHERE installation_id=?`, lease.installationID)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=1 WHERE installation_id=?`, lease.installationID)
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
 }
 

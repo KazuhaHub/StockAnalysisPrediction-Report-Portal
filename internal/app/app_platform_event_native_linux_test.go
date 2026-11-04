@@ -272,7 +272,8 @@ func nativeTaskDecision(
 	}
 	if len(result) == 0 {
 		state := scalar[string](t, s.st, `SELECT state||':'||
-			COALESCE(error_code,'')||':'||COALESCE(result_json,'')
+			COALESCE(error_code,'')||':generation='||generation||
+			':policy='||policy_revision||':'||COALESCE(result_json,'')
 			FROM app_platform_tasks
 			WHERE installation_id=? AND occurrence_id=?`,
 			installation, occurrence)
