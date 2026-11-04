@@ -129,14 +129,16 @@ func testNativeExactScheduledDigest(
 	if err != nil {
 		t.Fatal(err)
 	}
-	var state, raw string
+	var state, raw, errorCode string
 	for attempt := 0; attempt < 32; attempt++ {
 		worked, err := worker.tick(ctx)
 		if err != nil {
 			t.Fatal("exact digest worker", err)
 		}
-		if err := s.st.queryRow(`SELECT state,COALESCE(result_json,'')
-			FROM app_platform_tasks WHERE id=?`, id).Scan(&state, &raw); err != nil {
+		if err := s.st.queryRow(`SELECT state,COALESCE(result_json,''),
+			COALESCE(error_code,'')
+			FROM app_platform_tasks WHERE id=?`, id).Scan(
+			&state, &raw, &errorCode); err != nil {
 			t.Fatal(err)
 		}
 		if state == "succeeded" || state == "failed" ||
@@ -155,7 +157,8 @@ func testNativeExactScheduledDigest(
 		Duplicate    bool   `json:"duplicate"`
 	}
 	if state != "succeeded" || json.Unmarshal([]byte(raw), &result) != nil {
-		t.Fatalf("exact digest execution = %s %s", state, raw)
+		t.Fatalf("exact digest execution = %s %s %s",
+			state, errorCode, raw)
 	}
 	generated, timeErr := time.Parse(time.RFC3339Nano, result.GeneratedAt)
 	if result.OccurrenceID != occurrence || result.ItemCount != 2 ||
