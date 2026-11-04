@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,7 +28,8 @@ func testNativePortalEventDelivery(
 			ResourceID: reportID, MaxInflight: 4,
 		})
 	if err != nil || !created || !platformValidUUID(subscriptionID) {
-		t.Fatal("native event subscription", subscriptionID, created, err)
+		t.Fatal("native event subscription", subscriptionID, created, err,
+			nativeEventInstallationState(t, s, installation))
 	}
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants
 		SET granted=0 WHERE installation_id=? AND capability='reports.read'`,
@@ -151,6 +153,31 @@ func testNativePortalEventDelivery(
 		t.Fatalf("deduplicated retry result = %s", result.ResultJSON)
 	}
 	t.Log("EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK")
+}
+
+func nativeEventInstallationState(
+	t *testing.T, s *Server, installation string,
+) string {
+	t.Helper()
+	state := scalar[string](t, s.st, `SELECT desired_state||':'||phase||':'||
+		generation||':'||policy_revision||':'||controller_epoch
+		FROM app_platform_installations WHERE id=?`, installation)
+	activation := scalar[string](t, s.st, `SELECT generation||':'||policy_revision||':'||
+		release_sha256||':'||data_format||':'||state
+		FROM app_platform_activations WHERE installation_id=?
+		ORDER BY generation DESC LIMIT 1`, installation)
+	events := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants
+		WHERE installation_id=? AND capability='events.subscribe' AND granted=1`,
+		installation)
+	reports := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants
+		WHERE installation_id=? AND capability='reports.read' AND granted=1`,
+		installation)
+	background := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants
+		WHERE installation_id=? AND capability='background.run' AND granted=1`,
+		installation)
+	return fmt.Sprintf(
+		"installation=%s activation=%s grants(events=%d,reports=%d,background=%d)",
+		state, activation, events, reports, background)
 }
 
 func nativeTaskDecision(
