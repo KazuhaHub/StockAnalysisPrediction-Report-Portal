@@ -1,9 +1,17 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Descriptions, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, Button, Descriptions, Modal, Space, Spin, Tag, Timeline, Typography } from 'antd'
 import { InfoCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { api } from '../../api/client'
 import type { AppDirectoryState } from '../../lib/appDirectoryV2'
+import { usePrefs } from '../../prefs'
+
+type AppStatusEvent = {
+  at: string
+  event: string
+  stage?: string
+  error_code?: string
+}
 
 type AppStatus = {
   state: AppDirectoryState
@@ -12,6 +20,7 @@ type AppStatus = {
   stage?: string
   error_code?: string
   control_paused: boolean
+  timeline: AppStatusEvent[]
 }
 
 const states = new Set(['installed', 'pending', 'disabled', 'attention'])
@@ -28,6 +37,10 @@ const errors = new Set([
   'install_authority_review_required',
   'install_execution_review_required',
 ])
+const events = new Set([
+  'admitted', 'stage', 'activated', 'restored', 'failed', 'pending',
+  'review_required', 'data_deleted', 'activity',
+])
 
 export function parseAppStatus(value: unknown): AppStatus | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
@@ -40,12 +53,34 @@ export function parseAppStatus(value: unknown): AppStatus | null {
     typeof raw.control_paused !== 'boolean' ||
     (raw.action != null && (typeof raw.action !== 'string' || !actions.has(raw.action))) ||
     (raw.stage != null && (typeof raw.stage !== 'string' || !stages.has(raw.stage))) ||
-    (raw.error_code != null && (typeof raw.error_code !== 'string' || !errors.has(raw.error_code)))
+    (raw.error_code != null && (typeof raw.error_code !== 'string' || !errors.has(raw.error_code))) ||
+    !Array.isArray(raw.timeline) ||
+    raw.timeline.length > 20
   ) return null
+  const timeline: AppStatusEvent[] = []
+  for (const value of raw.timeline) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const event = value as Record<string, unknown>
+    if (
+      typeof event.at !== 'string' ||
+      Number.isNaN(Date.parse(event.at)) ||
+      typeof event.event !== 'string' ||
+      !events.has(event.event) ||
+      (event.stage != null && (typeof event.stage !== 'string' || !stages.has(event.stage))) ||
+      (event.error_code != null && (typeof event.error_code !== 'string' || !errors.has(event.error_code)))
+    ) return null
+    timeline.push({
+      at: event.at,
+      event: event.event,
+      ...(typeof event.stage === 'string' ? { stage: event.stage } : {}),
+      ...(typeof event.error_code === 'string' ? { error_code: event.error_code } : {}),
+    })
+  }
   return {
     state: raw.state as AppDirectoryState,
     openable: raw.openable,
     control_paused: raw.control_paused,
+    timeline,
     ...(typeof raw.action === 'string' ? { action: raw.action } : {}),
     ...(typeof raw.stage === 'string' ? { stage: raw.stage } : {}),
     ...(typeof raw.error_code === 'string' ? { error_code: raw.error_code } : {}),
@@ -60,11 +95,15 @@ export default function AppInstallationStatus({
   name: string
 }) {
   const { t } = useTranslation()
+  const { lang } = usePrefs()
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [loading, setLoading] = useState(false)
   const [failed, setFailed] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const formatTime = (value: string) => new Intl.DateTimeFormat(lang, {
+    dateStyle: 'short', timeStyle: 'medium',
+  }).format(new Date(value))
 
   useEffect(() => {
     if (!open) return
@@ -155,6 +194,20 @@ export default function AppInstallationStatus({
               : status.error_code
               ? <Alert type="error" showIcon title={t(`err.${status.error_code}`)} />
               : <Alert type="info" showIcon title={t(`apps.v2Hint.${status.state}`)} />}
+            {status.timeline.length > 0 && <div>
+              <Typography.Title level={5}>{t('apps.status.history')}</Typography.Title>
+              <Timeline items={status.timeline.map((event, index) => ({
+                key: `${event.at}:${index}`,
+                content: <div>
+                  <Typography.Text strong>
+                    {t(`apps.status.event.${event.event}`, { defaultValue: event.event })}
+                  </Typography.Text>
+                  <div><Typography.Text type="secondary">{formatTime(event.at)}</Typography.Text></div>
+                  {event.stage && <div><Typography.Text>{t(`appPlatform.stage.${event.stage}`, { defaultValue: event.stage })}</Typography.Text></div>}
+                  {event.error_code && <div><Typography.Text type="danger">{t(`err.${event.error_code}`)}</Typography.Text></div>}
+                </div>,
+              }))} />
+            </div>}
           </Space>}
       </div>
     </Modal>

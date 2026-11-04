@@ -125,6 +125,13 @@ async function installFixtureRoutes(context, options) {
           action: "install",
           stage: "prepare_data",
           control_paused: false,
+          timeline: [{
+            at: "2026-11-04T12:00:00Z",
+            event: "stage",
+            stage: "prepare_data",
+            private_actor: "private-audit",
+            endpoint: "/run/private.sock",
+          }],
         },
         [installationIDs[1]]: {
           state: "disabled",
@@ -132,11 +139,13 @@ async function installFixtureRoutes(context, options) {
           action: "disable",
           stage: "complete",
           control_paused: false,
+          timeline: [],
         },
         [installationIDs[2]]: {
           state: "attention",
           openable: false,
           control_paused: true,
+          timeline: [],
         },
       };
       const status = statuses[statusMatch[1]];
@@ -284,6 +293,8 @@ async function main() {
       readerStatusBoundedProjection: false,
       readerStatusRefresh: false,
       readerInternalIdentityHidden: false,
+      readerStatusTimelineVisible: false,
+      readerStatusTimelineSanitized: false,
       mainContentAxeSeriousOrCriticalViolations: 0,
     },
     scenarios: [],
@@ -339,9 +350,13 @@ async function main() {
       const statusDialog = reader.page.getByRole("dialog");
       await statusDialog
         .getByText("Checking data policy", { exact: true })
+        .last()
         .waitFor();
       await statusDialog
         .getByText("Not ready", { exact: true })
+        .waitFor();
+      await statusDialog
+        .getByText("Stage changed", { exact: true })
         .waitFor();
       await statusDialog
         .getByRole("button", { name: "Refresh status" })
@@ -353,7 +368,10 @@ async function main() {
         throw new Error("reader status refresh did not repeat the bounded read");
       }
       const text = await reader.page.locator("body").innerText();
-      if (installationIDs.some((id) => text.includes(id)) || text.includes("count")) {
+      if (installationIDs.some((id) => text.includes(id)) ||
+          text.includes("count") ||
+          text.includes("private-audit") ||
+          text.includes("/run/private.sock")) {
         throw new Error("reader directory leaked installation identity or count");
       }
       const violations = await audit(reader.page);
@@ -362,6 +380,8 @@ async function main() {
       report.assertions.readerStatusBoundedProjection = true;
       report.assertions.readerStatusRefresh = true;
       report.assertions.readerInternalIdentityHidden = true;
+      report.assertions.readerStatusTimelineVisible = true;
+      report.assertions.readerStatusTimelineSanitized = true;
       await reader.page.waitForTimeout(400);
       report.scenarios.push({ name: "directory-reader-status", violations });
       await reader.page.screenshot({
