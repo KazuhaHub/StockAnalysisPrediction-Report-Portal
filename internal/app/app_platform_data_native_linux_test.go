@@ -41,7 +41,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || !filepath.IsAbs(fixture) {
 		t.Fatal("requires disposable Linux root")
 	}
-	if platformNetworkNamespaceFixture(t, fixture) {
+	if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") != "1" &&
+		platformNetworkNamespaceFixture(t, fixture) {
 		return
 	}
 	ctx := context.Background()
