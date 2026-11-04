@@ -2631,3 +2631,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   development measurement, not the multi-host OPS-08 envelope or a real SMTP
   flood. See
   [task isolation evidence](handoff/evidence/platform-task-isolation/acceptance.json).
+
+- Closed the OPS-04 development diagnostic gap at `7f397e47`. The reader
+  status modal now reads at most 20 operation events from the existing
+  `audit_log`; it exposes only a normalized timestamp, fixed event class,
+  accepted operation stage and restricted error code. Actor, IP, endpoint,
+  namespace, effect and arbitrary detail keys are discarded. SQLite and
+  PostgreSQL tests cover the 20-event cap, audit-retention deletion, anonymous
+  and revoked-audience refusal, malformed queries and absence of internal IDs.
+  Chromium renders the timeline, drops injected private fields and keeps the
+  existing failure matrix axe-clean. The evidence reuses the existing audit
+  cleanup target with a 365-day default and 30-day floor; cleanup still ships
+  disabled by default, so production default retention enablement remains an
+  explicit owner decision rather than being changed silently. General
+  `41839627687`, quota/browser `41839627798`, runner daemon `41839627672` and
+  CodeQL `41839618971` pass. See
+  [application failure evidence](handoff/evidence/platform-failure/acceptance.json).

@@ -6,6 +6,8 @@
     "readerStatusBoundedProjection": true,
     "readerStatusRefresh": true,
     "readerInternalIdentityHidden": true,
+    "readerStatusTimelineVisible": true,
+    "readerStatusTimelineSanitized": true,
     "mainContentAxeSeriousOrCriticalViolations": 0
   },
   "scenarios": [
