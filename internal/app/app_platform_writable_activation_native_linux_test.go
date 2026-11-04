@@ -40,9 +40,11 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 	if err != nil {
 		t.Fatal("actual writable activation", err)
 	}
-	if finished.lease != (platformOperationLease{}) || activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, lease.installationID) != "ready" || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 1 {
+	if finished.lease != (platformOperationLease{}) || activated.activationID != original.start.writer.resourceID || activated.snapshot.Stage != appplatform.StageComplete || scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, lease.installationID) != 1 {
 		t.Fatal("activation replaced resource or failed reviewed audience")
 	}
+	configureNativeScheduledDigestSetup(
+		t, s, actor, lease.installationID)
 	if _, err := s.st.heartbeatPlatformOperation(lease); err == nil {
 		t.Fatal("completed activation regained worker lease")
 	}

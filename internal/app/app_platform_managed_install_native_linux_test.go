@@ -215,7 +215,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			s.platformBackendEndpoint.Store(&endpoint)
 			testNativeExactScheduledDigest(t, s, committed, session)
 		} else {
-			testNativePortalEventDelivery(t, s, committed, endpoint)
+			testNativePortalEventDelivery(t, s, committed, endpoint, session)
 			testNativeScheduledDigest(t, s, committed)
 		}
 		oldNamespace := scalar[string](t, s.st,

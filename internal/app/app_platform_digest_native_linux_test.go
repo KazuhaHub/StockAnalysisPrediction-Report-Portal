@@ -12,6 +12,45 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
+func configureNativeScheduledDigestSetup(
+	t *testing.T, s *Server, admin platformActorSession, installation string,
+) {
+	t.Helper()
+	appID := scalar[string](t, s.st, `SELECT app_id
+		FROM app_platform_installations WHERE id=?`, installation)
+	if appID != "scheduled-digest" {
+		return
+	}
+	if phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`,
+		installation); phase != "setup_required" {
+		t.Fatalf("scheduled digest phase before setup = %q", phase)
+	}
+	credential, err := s.changePlatformCredential(
+		admin, platformCredentialChange{
+			kind: "create", label: "Digest feed fixture",
+			value: []byte("disposable-digest-feed"),
+		})
+	if err != nil {
+		t.Fatal("scheduled digest setup credential", err)
+	}
+	review, err := s.createPlatformSecretBindingReview(
+		admin, installation, platformDigestFeedBinding,
+		credential.ID, "http_bearer")
+	if err != nil {
+		t.Fatal("scheduled digest setup review", err)
+	}
+	if _, err := s.consumePlatformSecretBindingReview(
+		admin, review.ID, review.SHA256); err != nil {
+		t.Fatal("scheduled digest setup binding", err)
+	}
+	if phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`,
+		installation); phase != "ready" {
+		t.Fatalf("scheduled digest configured phase = %q", phase)
+	}
+}
+
 func testNativeScheduledDigest(
 	t *testing.T, s *Server, lease platformOperationLease,
 ) {
@@ -117,29 +156,8 @@ func testNativeExactScheduledDigest(
 		err, errAppPlatformTaskUnavailable) {
 		t.Fatalf("unconfigured exact digest admission = %v", err)
 	}
-	credential, err := s.changePlatformCredential(
-		admin, platformCredentialChange{
-			kind: "create", label: "Digest feed fixture",
-			value: []byte("disposable-digest-feed"),
-		})
-	if err != nil {
-		t.Fatal("exact digest setup credential", err)
-	}
-	review, err := s.createPlatformSecretBindingReview(
-		admin, lease.installationID, platformDigestFeedBinding,
-		credential.ID, "http_bearer")
-	if err != nil {
-		t.Fatal("exact digest setup review", err)
-	}
-	if _, err := s.consumePlatformSecretBindingReview(
-		admin, review.ID, review.SHA256); err != nil {
-		t.Fatal("exact digest setup binding", err)
-	}
-	if phase := scalar[string](t, s.st, `SELECT phase
-		FROM app_platform_installations WHERE id=?`,
-		lease.installationID); phase != "ready" {
-		t.Fatalf("configured exact digest phase = %q", phase)
-	}
+	configureNativeScheduledDigestSetup(
+		t, s, admin, lease.installationID)
 	id, created, err := s.admitPlatformTask(
 		ctx, lease.installationID, admission)
 	if err != nil || !created || !platformValidUUID(id) {

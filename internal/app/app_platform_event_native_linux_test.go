@@ -15,7 +15,7 @@ import (
 
 func testNativePortalEventDelivery(
 	t *testing.T, s *Server, activated platformOperationLease,
-	endpoint platformRuntimeEndpoint,
+	endpoint platformRuntimeEndpoint, admin platformActorSession,
 ) {
 	t.Helper()
 	ctx := context.Background()
@@ -23,6 +23,7 @@ func testNativePortalEventDelivery(
 	installation := activated.installationID
 	activateNativeInstallation(t, s, activated)
 	t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
+	configureNativeScheduledDigestSetup(t, s, admin, installation)
 	const reportID = "41"
 	subscriptionID, created, err := s.createPlatformEventSubscription(
 		ctx, installation, appplatform.EventSubscriptionSpec{
