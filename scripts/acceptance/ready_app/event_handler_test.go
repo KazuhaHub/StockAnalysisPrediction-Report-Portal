@@ -18,6 +18,13 @@ func fixtureDelivery(eventID string, occurred int64) appplatform.EventDelivery {
 	}
 }
 
+func TestFixtureEventHandlerDoesNotTouchDataBeforeDelivery(t *testing.T) {
+	root := t.TempDir()
+	if handler, err := newFixtureEventHandler(root, root); err != nil || handler == nil {
+		t.Fatal("constructor accessed the event state path", handler, err)
+	}
+}
+
 func TestFixtureEventHandlerDeduplicatesAndOrdersDurably(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "events.json")

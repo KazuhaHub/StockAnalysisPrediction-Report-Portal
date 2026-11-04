@@ -25,6 +25,7 @@ type fixtureEventHandler struct {
 	path    string
 	dataDir string
 	state   fixtureEventState
+	loaded  bool
 }
 
 type fixtureEventState struct {
@@ -56,12 +57,20 @@ func newFixtureEventHandler(path, dataDir string) (*fixtureEventHandler, error) 
 			Dropped:   map[string]bool{},
 		},
 	}
-	raw, err := os.ReadFile(path)
+	return h, nil
+}
+
+func (h *fixtureEventHandler) load() error {
+	if h.loaded {
+		return nil
+	}
+	raw, err := os.ReadFile(h.path)
 	if errors.Is(err, os.ErrNotExist) {
-		return h, nil
+		h.loaded = true
+		return nil
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var state fixtureEventState
 	if json.Unmarshal(raw, &state) != nil ||
@@ -69,7 +78,7 @@ func newFixtureEventHandler(path, dataDir string) (*fixtureEventHandler, error) 
 		len(state.Processed) > 512 ||
 		len(state.Resources) > 512 ||
 		len(state.Dropped) > 512 {
-		return nil, errFixtureEventIdentity
+		return errFixtureEventIdentity
 	}
 	if state.Processed == nil {
 		state.Processed = map[string]string{}
@@ -81,7 +90,8 @@ func newFixtureEventHandler(path, dataDir string) (*fixtureEventHandler, error) 
 		state.Dropped = map[string]bool{}
 	}
 	h.state = state
-	return h, nil
+	h.loaded = true
+	return nil
 }
 
 func (h *fixtureEventHandler) handle(w http.ResponseWriter, r *http.Request) {
@@ -144,6 +154,9 @@ func (h *fixtureEventHandler) apply(delivery appplatform.EventDelivery, body []b
 	payloadSHA := hex.EncodeToString(digest[:])
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if err := h.load(); err != nil {
+		return "", false, err
+	}
 	if previous, ok := h.state.Processed[delivery.EventID]; ok {
 		if previous != payloadSHA {
 			return "", false, errFixtureEventIdentity
