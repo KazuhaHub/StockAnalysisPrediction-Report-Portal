@@ -2564,3 +2564,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   artifact fields `native_managed_update_enable_operator_race` and
   `native_managed_update_repair_operator_race` are true. See
   [lifecycle concurrency](handoff/evidence/platform-lifecycle-concurrency/acceptance.json).
+
+- Closed the UX-01 development opening/switching path at `d30a64de`. The
+  reference-app fixture builds the exact Notes and Scheduled Digest frontend
+  archives, serves both successful installation projections in one My Apps
+  directory, and opens each through the real `AppViewV2` shell. The
+  Scheduled Digest page reaches its independent backend through the bridge;
+  switching apps in either direction unmounts the previous frame. Both pages
+  keep one platform navigation and application title with no version row or
+  outer frame. The 1440px light en-US and 320px dark zh-TW paths have no
+  page-wide overflow or serious/critical axe findings, while the Notes
+  save/reload and viewport-editor checks continue to pass. The fixture
+  preloads installation projections, so it does not replace the managed
+  install transaction. A neutral-operator clean-market walkthrough using the
+  exact Scheduled Digest service image and the human screen-reader audit remain
+  open. See
+  [reference-app evidence](handoff/evidence/platform-reference-apps/acceptance.json).
+  Quota/browser `41809487558`, general test `41809487536`, runner daemon
+  `41809487540` and CodeQL `41809483933` pass; the quota artifact records the
+  same exact frontend digests as the local run.

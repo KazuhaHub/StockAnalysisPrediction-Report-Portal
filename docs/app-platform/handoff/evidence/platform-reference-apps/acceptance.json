@@ -1,5 +1,15 @@
 {
   "format": "portal.reference-apps-shell-browser-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T02:02:00-08:00",
+  "candidate": "d30a64dee6fddb11f285f43171fc06d371419d1c",
+  "apps_candidate": "f274e064121d5d8377c2e22a1411309da9dc6c6e",
+  "hosted_ci": {
+    "app_project_quota_probe": "41809487558",
+    "app_runner_daemon_probe": "41809487540",
+    "codeql": "41809483933",
+    "general_test": "41809487536",
+    "result": "pass"
+  },
   "packageDigests": {
     "notes-sample": "1fff098f1702c56647d7893d5f9790eebc7cbb378aee44a65308cf57ce6318a3",
     "scheduled-digest": "31b64c0812f068d69ce1dbdf728149016a226332a181fb718313c609ae024cda"
