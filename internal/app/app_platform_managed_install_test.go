@@ -147,28 +147,6 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 
 func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
 	t.Helper()
-	if candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE"); candidate != "" {
-		raw, err := os.ReadFile(candidate + "/descriptor.json")
-		if err != nil {
-			t.Fatal(err)
-		}
-		archive, err := os.ReadFile(candidate + "/frontend.zip")
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m appplatform.Manifest
-		if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" ||
-			m.Backend == nil {
-			t.Fatal("scheduled digest candidate identity")
-		}
-		m.Publisher = "fixture-publisher"
-		m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
-		raw, err = json.Marshal(m)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return raw, archive
-	}
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
 	var m appplatform.Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -180,6 +158,36 @@ func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byt
 	m.Capabilities.Required = []string{}
 	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
 	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, archive
+}
+
+func platformScheduledDigestReleaseFixture(
+	t *testing.T, platform string,
+) ([]byte, []byte) {
+	t.Helper()
+	candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE")
+	if candidate == "" {
+		return platformManagedReleaseFixture(t, platform)
+	}
+	raw, err := os.ReadFile(candidate + "/descriptor.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := os.ReadFile(candidate + "/frontend.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m appplatform.Manifest
+	if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" ||
+		m.Backend == nil {
+		t.Fatal("scheduled digest candidate identity")
+	}
+	m.Publisher = "fixture-publisher"
+	m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	raw, err = json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}

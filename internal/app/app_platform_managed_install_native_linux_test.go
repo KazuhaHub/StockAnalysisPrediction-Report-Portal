@@ -23,7 +23,8 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, archive := platformManagedReleaseFixture(t, facts.observation.Profile().Platform)
+	raw, archive := platformScheduledDigestReleaseFixture(
+		t, facts.observation.Profile().Platform)
 	var manifest appplatform.Manifest
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
