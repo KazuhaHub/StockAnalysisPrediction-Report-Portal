@@ -212,6 +212,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		if exactImage {
 			activateNativeInstallation(t, s, committed)
 			t.Log("SCHEDULED_DIGEST_EXACT_ACTIVATION_FIXTURE")
+			s.platformBackendEndpoint.Store(&endpoint)
 			testNativeExactScheduledDigest(t, s, committed)
 		} else {
 			testNativePortalEventDelivery(t, s, committed, endpoint)
