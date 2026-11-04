@@ -158,5 +158,5 @@ and [managed exact image](handoff/evidence/platform-scheduled-digest-managed/acc
 The task acceptance fixture seeds the final activation rows after delivery and
 boot, so it is not a neutral-operator market walkthrough. Update-generation
 service tasks now use the signed update-start registration and execute only
-after A-to-B activation; the native proof is in
+after A-to-B activation for both backend and event handlers; the native proof is in
 [updated-generation service tasks](handoff/evidence/platform-update-service-tasks/acceptance.json).

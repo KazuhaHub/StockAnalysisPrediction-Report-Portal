@@ -2,16 +2,18 @@
   "format": "portal.updated-generation-service-task-acceptance/1-dev.1",
   "captured_at": "2026-11-04T11:31:00-08:00",
   "status": "pass-development",
-  "portal_candidate": "d29e74ad5ab5eaa258fa010589ba429831d87159",
+  "portal_candidate": "b3eec57d73c01db390e9c1f4d15833811ef418e4",
   "apps_candidate": "2c3a8e3d614a8ced2aa810ecd1ee1b30193ed920",
   "hosted_ci": {
-    "native_full": "41896929064",
+    "native_full": "41900699874",
     "native_full_result": "pass"
   },
   "assertions": {
     "managed_a_to_b_update_completed": true,
     "active_generation_is_two": true,
     "active_policy_revision_is_two": true,
+    "updated_generation_event_transport": true,
+    "updated_generation_event_authority": true,
     "service_task_used_update_start_registration": true,
     "target_descriptor_bound_to_updated_release": true,
     "runner_rechecked_current_update_registration": true,
@@ -20,10 +22,11 @@
   },
   "commands": [
     "gh workflow run app-project-quota-probe.yml --ref feat/app-platform-integration -f skip_browser=true -f event_only=false",
-    "gh run download 41896929064 -n project-quota-evidence"
+    "gh run download 41900699874 -n project-quota-evidence"
   ],
   "limits": [
     "The supporting asset is a contract-compatible readiness fixture, not production application bytes.",
+    "The updated event fixture verifies generation-two transport and current authority; persisted event ordering and duplicate handling remain covered by the generation-one fixture.",
     "The run intentionally skipped browser fixtures; browser coverage is bound by separate evidence.",
     "The disposable loop remained externally held during UUID replacement, so cleanup was deferred to worker teardown.",
     "Production deployment, update migration fault matrices and protocol freeze remain separate gates."

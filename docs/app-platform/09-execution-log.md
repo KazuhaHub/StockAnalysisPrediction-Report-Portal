@@ -2711,9 +2711,12 @@ daemon workflow 40455635317 passed on the functional source as well.
   Completed-update history reconstructs the current descriptor/runtime before
   the runner serves `POST /v1/tasks/run`; the runner rechecks the protected
   update registration and native container before and after the HTTP exchange.
-  Native-only run `41896929064` completed A-to-B activation and a
-  generation-two `app.backend.task`, logging
-  `MANAGED_UPDATE_SERVICE_TASK_VERIFIED` and reporting
-  `native_managed_update_service_task=true`. The run skipped Chromium by
-  design; browser coverage remains separately bound. See
+  Native-only run `41900699874` completed A-to-B activation plus
+  generation-two `app.backend.task` and event delivery, logging
+  `MANAGED_UPDATE_SERVICE_TASK_VERIFIED` and
+  `MANAGED_UPDATE_EVENT_TASK_VERIFIED`. Generation-one coverage retains the
+  persisted event ordering/duplicate/lost-ack matrix; the updated-generation
+  fixture isolates transport and current authority from the prior generation's
+  mutable state. The run skipped Chromium by design; browser coverage remains
+  separately bound. See
   [updated-generation service task evidence](handoff/evidence/platform-update-service-tasks/acceptance.json).
