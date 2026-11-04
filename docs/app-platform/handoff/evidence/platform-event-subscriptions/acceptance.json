@@ -22,12 +22,14 @@
     "app_project_quota_job": "126423037194",
     "app_runner_daemon_probe": "41784384403",
     "app_runner_daemon_job": "126423037572",
+    "update_generation_native": "41900699874",
     "result": "pass"
   },
   "observed": {
     "native_event_duplicate_out_of_order_lost_ack": true,
     "native_current_viewer_request_verified": true,
     "native_portal_managed_backend_readiness": true,
+    "native_managed_update_event_task": true,
     "native_managed_uninstall_remove_data": true,
     "native_managed_reinstall_fresh_namespace_and_launch": true,
     "older_event_decision": "ignored_older",
@@ -41,10 +43,11 @@
     "The native task worker delivered a newer event before an older event. The app applied the newer sequence and returned ignored_older for the older one.",
     "A lost acknowledgement became uncertain and was not retried automatically. Explicit replay reached the registered handler and returned duplicate without creating another business effect.",
     "Removing reports.read before subscription creation refused the subscription without exposing payloads or resource counts.",
-    "Reviewed uninstall deleted the installation's event subscriptions and task authority. A fresh reinstall started with a new namespace and no inherited subscription."
+    "Reviewed uninstall deleted the installation's event subscriptions and task authority. A fresh reinstall started with a new namespace and no inherited subscription.",
+    "Native run 41900699874 then delivered an event task after A-to-B activation using the current update-start registration, generation-two descriptor and service authority."
   ],
   "limits": [
-    "The native service-task transport in this evidence supports the initial managed generation and policy revision. Update-generation registration variants remain gated.",
+    "Persisted ordering, duplicate and lost-ack mutation remain covered on the initial generation. The updated-generation fixture isolates registration, transport and current-authority binding from prior mutable state.",
     "This is disposable development acceptance. It does not approve a production deployment or freeze the event subscription protocol."
   ]
 }
