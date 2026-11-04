@@ -21,6 +21,14 @@ func configureNativeScheduledDigestSetup(
 	if appID != "scheduled-digest" {
 		return
 	}
+	roleBefore := scalar[string](
+		t, s.st, `SELECT role FROM users WHERE username=?`, admin.username)
+	defer func() {
+		mustExec(t, s.st, `UPDATE users SET role=? WHERE username=?`,
+			roleBefore, admin.username)
+	}()
+	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`,
+		admin.username)
 	if phase := scalar[string](t, s.st, `SELECT phase
 		FROM app_platform_installations WHERE id=?`,
 		installation); phase != "setup_required" {
