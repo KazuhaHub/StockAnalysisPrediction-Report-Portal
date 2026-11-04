@@ -1,8 +1,13 @@
 {
   "format": "portal.app-platform.application-tasks/1-dev.1",
-  "captured_at": "2026-11-03T17:22:48-08:00",
-  "candidate": "46777425",
-  "implementation_commit": "ff9d2f4b",
+  "captured_at": "2026-11-03T18:43:05-08:00",
+  "candidate": "308a35a3",
+  "implementation_commits": [
+    "e09d103a",
+    "ff9d2f4b",
+    "3962be51",
+    "308a35a3"
+  ],
   "database_evidence": "SQLite plus a fresh PostgreSQL 18.6 database named platform_tasks_20261103",
   "history": [
     {
@@ -13,11 +18,11 @@
     }
   ],
   "hosted_ci": {
-    "commit": "46777425202f75e19ca36192018b8126ad06bb3b",
-    "test": "41750635833",
-    "app_project_quota_probe": "41750635992",
-    "app_runner_daemon_probe": "41750636055",
-    "codeql": "41750629713",
+    "commit": "308a35a350e0851b98cf7b9d6070941198e40726",
+    "test": "41760001967",
+    "app_project_quota_probe": "41760001701",
+    "app_runner_daemon_probe": "41760001776",
+    "codeql": "41759996027",
     "result": "pass"
   },
   "tests": {
@@ -36,6 +41,14 @@
     "task_schedule_replay_race": {
       "command": "GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformTaskSchedulingAPIUsesServiceIdentityAndOccurrenceIdentity$' -count=20",
       "result": "pass"
+    },
+    "linux_service_task_compile": {
+      "commands": [
+        "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/app-service-task.test ./internal/app",
+        "GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test -c -o /tmp/transport-service-task.test ./internal/apprunner/transport"
+      ],
+      "result": "pass",
+      "hosted_test_run": "41760001967"
     },
     "postgres_tasks": {
       "command": "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_tasks_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestPlatformTask|TestPlatformAdminTask|TestAppPlatformTask|TestPostgresAppPlatformTask)' -count=1",
@@ -57,10 +70,11 @@
       "status": "partial",
       "coverage": [
         "A durable task is admitted through a service assertion, claimed by a separate worker process without a browser session, transitioned to running, executed by the fixed handler registry and committed.",
-        "The administrator page shows state, due time, attempts, safe errors and result summaries without exposing task payloads or editing the immutable execution tuple."
+        "The administrator page shows state, due time, attempts, safe errors and result summaries without exposing task payloads or editing the immutable execution tuple.",
+        "A separate signed service-task command binds task, lease, installation, generation, policy, controller epoch, release, service identity and body; the runner validates registration and forwards fixed POST /v1/tasks/run without manufacturing a viewer."
       ],
       "limits": [
-        "The scheduled-digest app and native app.backend.task exchange are not yet implemented; this evidence uses the fixed adapter test seam for the backend task family."
+        "The scheduled-digest app route and update-generation service-task registration variants are not yet implemented. The native transport currently covers the initial managed generation."
       ]
     },
     "JOB-02": {
