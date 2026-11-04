@@ -43,7 +43,7 @@ func readPlatformTaskAdmission(raw []byte, now int64) (platformTaskAdmission, er
 	if len(result.Payload) == 0 || bytes.Equal(bytes.TrimSpace(result.Payload), []byte("null")) {
 		return result, errPlatformManagementInput
 	}
-	result.RunAtMS = now
+	result.RunAtMS = 0
 	if rawRun, ok := fields["runAt"]; ok {
 		var value string
 		if json.Unmarshal(rawRun, &value) != nil {
@@ -55,7 +55,7 @@ func readPlatformTaskAdmission(raw []byte, now int64) (platformTaskAdmission, er
 		}
 		result.RunAtMS = parsed.UTC().UnixMilli()
 	}
-	result.ExpiresMS = result.RunAtMS + (24 * time.Hour).Milliseconds()
+	result.ExpiresMS = 0
 	if rawExpiry, ok := fields["expiresAt"]; ok {
 		var value string
 		if json.Unmarshal(rawExpiry, &value) != nil {
@@ -67,8 +67,8 @@ func readPlatformTaskAdmission(raw []byte, now int64) (platformTaskAdmission, er
 		}
 		result.ExpiresMS = parsed.UTC().UnixMilli()
 	}
-	if result.ExpiresMS <= result.RunAtMS ||
-		result.ExpiresMS-result.RunAtMS > platformTaskMaxLifetime.Milliseconds() {
+	if result.RunAtMS != 0 && result.RunAtMS < now ||
+		result.ExpiresMS != 0 && result.ExpiresMS <= now {
 		return result, errPlatformManagementInput
 	}
 	return result, nil
