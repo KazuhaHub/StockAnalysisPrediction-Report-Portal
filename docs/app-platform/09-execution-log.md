@@ -2525,3 +2525,15 @@ daemon workflow 40455635317 passed on the functional source as well.
   Apps handler/browser acceptance remains required before JOB-05/06/08 can be
   claimed. See
   [event subscription schema](159-event-subscription-schema-proposal.md).
+
+- Native event acceptance passed at `2bceb9f4`. Hosted run `41784384423` and
+  runner daemon `41784384403` passed; quota/native run `41784384409` delivered
+  newer and older report events into the managed app, recorded the newer decision
+  as `applied` and the older as `ignored_older`, converted a lost acknowledgement
+  to `uncertain:backend_response_uncertain` without automatic retry, and
+  deduplicated an explicit replay. The same run passed current-viewer gating,
+  reviewed uninstall clearing the event subscriptions, and fresh reinstall with
+  no inherited subscription. JOB-05/06/08 now have development evidence.
+  Update-generation service-task registration variants and production remain
+  gated. See
+  [event subscription evidence](handoff/evidence/platform-event-subscriptions/acceptance.json).

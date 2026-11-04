@@ -1,0 +1,50 @@
+{
+  "format": "portal.app-platform.event-subscriptions/1-dev.1",
+  "captured_at": "2026-11-03T22:47:17-08:00",
+  "status": "pass-development",
+  "candidate": "2bceb9f42007f13c89ac9d017046d190a48b9eb4",
+  "implementation_commits": [
+    "9aa82230",
+    "ce4e5a18",
+    "3ce0c419",
+    "2a1ecba2",
+    "2bcb8426",
+    "28149f84",
+    "ab16a28c",
+    "2bceb9f4"
+  ],
+  "database_evidence": "SQLite and focused PostgreSQL 18.6 schema, authority, delivery, lifecycle and restore tests",
+  "hosted_ci": {
+    "commit": "2bceb9f42007f13c89ac9d017046d190a48b9eb4",
+    "test": "41784384423",
+    "test_job": "126423314947",
+    "app_project_quota_probe": "41784384409",
+    "app_project_quota_job": "126423037194",
+    "app_runner_daemon_probe": "41784384403",
+    "app_runner_daemon_job": "126423037572",
+    "result": "pass"
+  },
+  "observed": {
+    "native_event_duplicate_out_of_order_lost_ack": true,
+    "native_current_viewer_request_verified": true,
+    "native_portal_managed_backend_readiness": true,
+    "native_managed_uninstall_remove_data": true,
+    "native_managed_reinstall_fresh_namespace_and_launch": true,
+    "older_event_decision": "ignored_older",
+    "lost_acknowledgement_state": "uncertain:backend_response_uncertain",
+    "automatic_retry_after_lost_ack": false,
+    "clear_event_subscriptions_on_uninstall": true,
+    "fresh_reinstall_event_subscriptions": 0
+  },
+  "coverage": [
+    "A managed app subscribed to the exact report.ingested resource after current reports.read authority was checked.",
+    "The native task worker delivered a newer event before an older event. The app applied the newer sequence and returned ignored_older for the older one.",
+    "A lost acknowledgement became uncertain and was not retried automatically. Explicit replay reached the registered handler and returned duplicate without creating another business effect.",
+    "Removing reports.read before subscription creation refused the subscription without exposing payloads or resource counts.",
+    "Reviewed uninstall deleted the installation's event subscriptions and task authority. A fresh reinstall started with a new namespace and no inherited subscription."
+  ],
+  "limits": [
+    "The native service-task transport in this evidence supports the initial managed generation and policy revision. Update-generation registration variants remain gated.",
+    "This is disposable development acceptance. It does not approve a production deployment or freeze the event subscription protocol."
+  ]
+}

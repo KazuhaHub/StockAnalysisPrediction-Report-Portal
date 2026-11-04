@@ -1,8 +1,8 @@
 # D2 proposal: authorized application event subscriptions
 
-Status: owner approved `0020` on 2026-11-03. Implemented in the development
-branch; this is not approval for production deployment or a public protocol
-freeze.
+Status: owner approved `0020` on 2026-11-03. Development acceptance now includes
+the native managed handler and lifecycle matrix. This is not approval for
+production deployment or a public protocol freeze.
 
 ## Decision
 
@@ -96,3 +96,11 @@ rollback, duplicate source replay, per-subscription inflight isolation,
 expired-source refusal, monotonic revocation, removal cleanup, restore review,
 older-dump creation and logical backup round trip. PostgreSQL cases run when
 `TEST_POSTGRES_DSN` is available.
+
+Native acceptance is recorded in
+[event subscription evidence](handoff/evidence/platform-event-subscriptions/acceptance.json).
+The managed app applied a newer event, ignored an older sequence, represented a
+lost acknowledgement as uncertain without automatic retry, deduplicated an
+explicit replay, and passed reviewed uninstall plus fresh reinstall. The native
+service-task path still covers the initial managed generation and policy
+revision; update-generation variants and production remain gated.
