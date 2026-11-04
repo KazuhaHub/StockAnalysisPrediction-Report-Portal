@@ -51,7 +51,10 @@ func testNativeUpdatedBackendTask(
 	if err != nil || !created {
 		t.Fatal("updated task admission", taskID, created, err)
 	}
-	s.platformBackendEndpoint.Store(&endpoint)
+	previousEndpoint := s.platformBackendEndpoint.Swap(&endpoint)
+	defer s.platformBackendEndpoint.Store(previousEndpoint)
+	previousTaskBackend := s.platformTaskBackend
+	defer func() { s.platformTaskBackend = previousTaskBackend }()
 	s.platformTaskBackend = s.runPlatformBackendTask
 	worker, err := newPlatformTaskScheduler(
 		s, platformFixtureID(898), 50*time.Millisecond)
