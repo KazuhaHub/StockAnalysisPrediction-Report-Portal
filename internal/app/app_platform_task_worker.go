@@ -147,6 +147,8 @@ func (s *Server) executePlatformTask(ctx context.Context, task platformTaskLease
 			}
 		}
 		return s.platformTaskBackend(ctx, task, identity)
+	case appplatform.TaskHandlerEvent:
+		return s.runPlatformEventDelivery(ctx, task, identity)
 	default:
 		return appplatform.TaskExecutionResult{
 			Outcome: appplatform.TaskResultFailed, ErrorCode: "handler_unavailable",

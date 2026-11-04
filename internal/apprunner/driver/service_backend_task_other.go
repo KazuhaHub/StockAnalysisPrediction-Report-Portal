@@ -24,6 +24,7 @@ func (*CandidateRuntime) ForwardServiceTask(
 	BackendRegistrationSnapshot,
 	[]byte,
 	[]byte,
+	string,
 ) (ServiceTaskObservation, error) {
 	return ServiceTaskObservation{}, ErrUnsupported
 }

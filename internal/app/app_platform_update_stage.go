@@ -378,6 +378,10 @@ func (s *Store) activatePlatformStaticUpdate(ctx context.Context, expected platf
 	if err := invalidatePlatformTasksForInstallation(e, expected.installationID, "release_updated", now); err != nil {
 		return platformOperationLease{}, err
 	}
+	if err := cancelPlatformEventSubscriptionsForInstallation(
+		e, expected.installationID, "review_required", now); err != nil {
+		return platformOperationLease{}, err
+	}
 	if _, err := e.exec(`DELETE FROM app_platform_capability_grants WHERE installation_id=?`, expected.installationID); err != nil {
 		return platformOperationLease{}, err
 	}

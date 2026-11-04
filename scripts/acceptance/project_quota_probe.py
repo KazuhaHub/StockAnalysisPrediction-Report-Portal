@@ -723,6 +723,10 @@ def main(args):
                             if "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED" not in result.stdout:
                                 raise RuntimeError("signed backend request relay missing")
                             report["native_backend_request_relay_verified"] = True
+                            if "EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK" not in result.stdout:
+                                raise RuntimeError(
+                                    "native event duplicate/order/lost-ack acceptance missing")
+                            report["native_event_duplicate_out_of_order_lost_ack"] = True
                             if "MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED" not in result.stdout:
                                 raise RuntimeError("current Portal viewer native request gating missing")
                             report["native_current_viewer_request_verified"] = True

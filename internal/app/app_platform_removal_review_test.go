@@ -80,6 +80,10 @@ func testPlatformRemovalReviewFlow(t *testing.T, postgres bool) {
 		for _, action := range []appplatform.Action{appplatform.ActionDisable, appplatform.ActionUninstall} {
 			t.Run(fmt.Sprintf("%s/managed=%t", action, managed), func(t *testing.T) {
 				s, session := platformRemovalFixture(t, postgres, managed)
+				eventSubscription := appPlatformEventSubscriptionFixture(
+					t, s, platformFixtureID(1))
+				insertAppPlatformEventSubscription(
+					t, s.st.poolExec(), eventSubscription)
 				plan, err := s.createPlatformRemovalReview(session, platformFixtureID(1), action)
 				if err != nil {
 					t.Fatal(err)
@@ -103,6 +107,15 @@ func testPlatformRemovalReviewFlow(t *testing.T, postgres bool) {
 				}
 				if scalar[int](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces`) != 1 {
 					t.Fatal("data authority not fenced")
+				}
+				if action == appplatform.ActionUninstall {
+					if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_event_subscriptions`) != 0 {
+						t.Fatal("uninstall retained event subscriptions")
+					}
+				} else if got := scalar[string](t, s.st,
+					`SELECT state FROM app_platform_event_subscriptions WHERE id=?`,
+					eventSubscription.ID); got != "paused" {
+					t.Fatalf("disable event subscription state = %q", got)
 				}
 				want := "disabled"
 				if action == appplatform.ActionUninstall {

@@ -2509,3 +2509,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   run `41693464881` also passed. Public format freeze and production enablement
   remain. See
   [reviewed network streams](158-reviewed-network-stream.md).
+
+- Owner approved migration `0020` on 2026-11-03. The resulting subscription
+  table is limited to the closed report-ingest and owner-scoped job-completion
+  catalogue. Source notification capture creates one task occurrence per exact
+  event and subscription revision in the same transaction; current service
+  identity, resource authority and subscription state are rechecked at claim and
+  completion. Subscriptions saturate independently, expired sources create no
+  delivery, revoked rows cannot reopen, and disable/update/trust/restore paths
+  fence or pause subscriptions while uninstall deletes them. SQLite and
+  PostgreSQL 18.6 focused schema, replay, delivery, lifecycle and restore tests
+  pass. The complete Go suite, `go vet`, build and focused race suites pass; the
+  complete Web suite passed 272 files / 2857 tests, with current typecheck, lint,
+  production build and event-page tests passing after the final UI change. Native
+  Apps handler/browser acceptance remains required before JOB-05/06/08 can be
+  claimed. See
+  [event subscription schema](159-event-subscription-schema-proposal.md).

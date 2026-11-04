@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -115,6 +116,17 @@ func (s *Server) admitPlatformTask(ctx context.Context, installation string, in 
 	}
 	defer tx.Rollback()
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	id, created, err := s.st.admitPlatformTaskTx(e, installation, in)
+	if err != nil {
+		return "", false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	return id, created, nil
+}
+
+func (s *Store) admitPlatformTaskTx(e migExec, installation string, in platformTaskAdmission) (string, bool, error) {
 	if err := lockPlatformTaskAdmission(e); err != nil {
 		return "", false, err
 	}
@@ -128,11 +140,23 @@ func (s *Server) admitPlatformTask(ctx context.Context, installation string, in 
 	if in.ExpiresMS == 0 {
 		in.ExpiresMS = now + (24 * time.Hour).Milliseconds()
 	}
-	in, digest, err := validatePlatformTaskAdmission(in, now)
+	validated, digest, err := validatePlatformTaskAdmission(in, now)
 	if err != nil {
 		return "", false, fmt.Errorf("%w: admission shape", errAppPlatformTaskUnavailable)
 	}
-	facts, err := loadPlatformServiceFacts(e, installation, []string{"tasks.schedule"}, true)
+	in = validated
+	resources := []string{"tasks.schedule"}
+	if in.Handler == appplatform.TaskHandlerEvent {
+		delivery, parseErr := appplatform.ParseEventDelivery(in.Payload)
+		if parseErr != nil {
+			return "", false, fmt.Errorf("%w: event delivery", errAppPlatformTaskUnavailable)
+		}
+		resources = append(resources, "events.subscribe")
+		if delivery.EventType == appplatform.EventReportIngested {
+			resources = append(resources, "reports.read")
+		}
+	}
+	facts, err := loadPlatformServiceFacts(e, installation, resources, true)
 	if err != nil {
 		return "", false, fmt.Errorf("%w: current authority", errAppPlatformTaskUnavailable)
 	}
@@ -149,9 +173,6 @@ func (s *Server) admitPlatformTask(ctx context.Context, installation string, in 
 	if err == nil {
 		if existingDigest != digest || existingHandler != in.Handler {
 			return "", false, errAppPlatformTaskConflict
-		}
-		if err := tx.Commit(); err != nil {
-			return "", false, err
 		}
 		return existingID, false, nil
 	}
@@ -207,9 +228,6 @@ func (s *Server) admitPlatformTask(ctx context.Context, installation string, in 
 	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,'system',0,'app_platform.task_admitted','app_platform_task',?,?,'')`,
 		timeUnixMilliUTC(now), id, string(detail)); err != nil {
-		return "", false, err
-	}
-	if err := tx.Commit(); err != nil {
 		return "", false, err
 	}
 	return id, true, nil
@@ -493,6 +511,16 @@ func (s *Server) startPlatformTask(ctx context.Context, task platformTaskLease) 
 		return zero, "", errAppPlatformTaskUnavailable
 	}
 	resources := taskServiceResources(handler)
+	if current.Handler == appplatform.TaskHandlerEvent {
+		delivery, err := appplatform.ParseEventDelivery(current.Payload)
+		if err != nil {
+			return zero, "", errAppPlatformTaskUnavailable
+		}
+		if delivery.EventType == appplatform.EventReportIngested {
+			resources = append(resources, "reports.read")
+		}
+		resources = signedTaskResourceUnion(resources)
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, "", err
 	}
@@ -596,6 +624,35 @@ func platformTaskCurrentAuthority(e migExec, task platformTaskLease) (map[string
 		return nil, errAppPlatformTaskUnavailable
 	}
 	required := taskServiceResources(handler)
+	if task.Handler == appplatform.TaskHandlerEvent {
+		delivery, err := appplatform.ParseEventDelivery(task.Payload)
+		if err != nil {
+			return nil, errAppPlatformTaskUnavailable
+		}
+		var subscription platformEventSubscription
+		if err := readPlatformEventSubscription(e,
+			`id=? AND installation_id=?`,
+			[]any{delivery.Subscription, task.InstallationID},
+			&subscription, true); err != nil ||
+			subscription.State != "active" ||
+			subscription.AppID != task.AppID ||
+			subscription.PublisherID != task.PublisherID ||
+			subscription.Generation != task.Generation ||
+			subscription.PolicyRevision != task.PolicyRevision ||
+			subscription.ReleaseSHA256 != task.ReleaseSHA256 ||
+			subscription.ControllerEpoch != task.ControllerEpoch ||
+			subscription.EventType != delivery.EventType ||
+			subscription.ResourceType != delivery.ResourceType ||
+			subscription.ResourceID != delivery.ResourceID ||
+			!strings.HasSuffix(task.OccurrenceID,
+				":"+strconv.FormatInt(subscription.Revision, 10)) {
+			return nil, errAppPlatformTaskUnavailable
+		}
+		if delivery.EventType == appplatform.EventReportIngested {
+			required = append(required, "reports.read")
+		}
+	}
+	required = signedTaskResourceUnion(required)
 	facts, err := loadPlatformServiceFacts(e, task.InstallationID, required, true)
 	if err != nil || facts.appID != task.AppID || facts.publisherID != task.PublisherID ||
 		facts.generation != strconv.FormatInt(task.Generation, 10) ||

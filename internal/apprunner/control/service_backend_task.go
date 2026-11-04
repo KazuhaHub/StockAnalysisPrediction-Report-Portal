@@ -20,6 +20,7 @@ type ServiceBackendTaskCommand struct {
 	RequestID             string `json:"request_id"`
 	TaskID                string `json:"task_id"`
 	LeaseID               string `json:"lease_id"`
+	Handler               string `json:"handler"`
 	InstallationID        string `json:"installation_id"`
 	Generation            string `json:"generation"`
 	PolicyRevision        string `json:"policy_revision"`
@@ -77,6 +78,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	if c.Format != ServiceBackendTaskFormat ||
 		!candidateUUID(c.RequestID) || !candidateUUID(c.TaskID) ||
 		!candidateUUID(c.LeaseID) ||
+		(c.Handler != appplatform.TaskHandlerBackend &&
+			c.Handler != appplatform.TaskHandlerEvent) ||
 		c.InstallationID != candidate.InstallationID ||
 		c.Generation != candidate.TargetGeneration || c.Generation != "1" ||
 		c.PolicyRevision != "1" ||
@@ -101,7 +104,9 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		grant.ControllerEpoch != c.ControllerEpoch ||
 		grant.ReleaseSHA256 != c.ReleaseSHA256 ||
 		len(grant.Mac) != 64 ||
-		!serviceTaskResource(grant.Resources, "tasks.schedule") {
+		!serviceTaskResource(grant.Resources, "tasks.schedule") ||
+		c.Handler == appplatform.TaskHandlerEvent &&
+			!serviceTaskResource(grant.Resources, "events.subscribe") {
 		return zero, ErrInvalidCommand
 	}
 	return VerifiedServiceBackendTask{command: c, registration: registration}, nil
@@ -141,9 +146,18 @@ func ValidateServiceBackendTaskData(v VerifiedServiceBackendTask, body []byte) e
 		!utf8.Valid(body) || !json.Valid(body) {
 		return ErrInvalidCommand
 	}
-	request, err := appplatform.DecodeTaskBackendRequest(body)
-	if err != nil || request.TaskID != v.command.TaskID ||
-		request.OccurrenceID == "" {
+	switch v.command.Handler {
+	case appplatform.TaskHandlerBackend:
+		request, err := appplatform.DecodeTaskBackendRequest(body)
+		if err != nil || request.TaskID != v.command.TaskID ||
+			request.OccurrenceID == "" {
+			return ErrInvalidCommand
+		}
+	case appplatform.TaskHandlerEvent:
+		if _, err := appplatform.ParseEventDelivery(body); err != nil {
+			return ErrInvalidCommand
+		}
+	default:
 		return ErrInvalidCommand
 	}
 	digest := serviceTaskBodyDigest(body)

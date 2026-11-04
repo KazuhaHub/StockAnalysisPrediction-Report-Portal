@@ -36,6 +36,11 @@ func main() {
 	}
 	bootID := hex.EncodeToString(bootNonce[:])
 	state := &fixtureRequestState{}
+	events, err := newFixtureEventHandler(fixtureEventStatePath, "/data")
+	if err != nil {
+		os.Stderr.WriteString("native fixture event state failed: " + err.Error() + "\n")
+		os.Exit(9)
+	}
 	path := os.Getenv("PORTAL_APP_HTTP_SOCKET")
 	if path != "/run/portal-app/http/app.sock" {
 		os.Exit(2)
@@ -49,6 +54,10 @@ func main() {
 		os.Exit(4)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 65536, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == appplatform.TaskEventPath {
+			events.handle(w, r)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/fixture/tmp-exhaust" && r.URL.RawQuery == "" {
 			fixtureExhaustTmp(w)
 			return

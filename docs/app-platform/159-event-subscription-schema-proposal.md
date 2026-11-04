@@ -1,6 +1,8 @@
 # D2 proposal: authorized application event subscriptions
 
-Status: awaiting owner approval. No migration is applied.
+Status: owner approved `0020` on 2026-11-03. Implemented in the development
+branch; this is not approval for production deployment or a public protocol
+freeze.
 
 ## Decision
 
@@ -12,8 +14,8 @@ webhook. The initial closed event catalogue is:
 
 - `report.ingested`, resource `report`, current report ID; requires current
   `reports.read` authority;
-- `batch.job.finished`, resource `job`, current owner-scoped job ID; requires
-  current `background.run`.
+- `batch.job.finished`, resource `job`, current owner-scoped job ID in canonical
+  `<job-id>@<owner-generation>` form; requires current `background.run`.
 
 No extension namespace, arbitrary event type, user field, payload filter or
 destination is accepted.
@@ -60,13 +62,20 @@ touches no second task. Out-of-order delivery carries the sequence; the app
 must de-duplicate by event ID and ignore older sequences. A lost response stays
 `uncertain` and is never retried automatically.
 
+Delivery capacity is isolated by subscription. Reaching that subscription's
+`max_inflight`, a task quota, or loss of current authority moves only that
+subscription to `review_required`; the source event remains durable for the
+central notification stack and other subscriptions.
+
 ## Lifecycle, quotas and restore
 
 - Global 10,000, per-app 1,000 and per-installation 256 active tasks include
   event deliveries.
 - At most 16 subscriptions per installation and 1,000 globally.
 - Disable/uninstall/publisher revocation fences new creation; uninstall deletes
-  this installation's subscriptions and cancels invalid tasks.
+  this installation's subscriptions and cancels invalid tasks. Revocation is
+  monotonic: disable, update, trust, or restore handling cannot move a revoked
+  subscription back to another state.
 - Update/repair/generation/policy changes require the subscription to rebind
   explicitly; stale subscriptions become `review_required`.
 - Restore pauses all subscriptions as `review_required`; task restore already
@@ -80,3 +89,10 @@ rollback creates neither event task nor delivery; duplicate occurrence one
 task; duplicate/out-of-order/lost acknowledgement; unauthorized resource and
 redacted count refusal; per-app flood; disable/uninstall/revoke/update race;
 restore review; logical backup round trip.
+
+Implemented coverage includes the closed catalogue and exact resource identity,
+canonical delivery parsing, owner-scoped job matching, source transaction
+rollback, duplicate source replay, per-subscription inflight isolation,
+expired-source refusal, monotonic revocation, removal cleanup, restore review,
+older-dump creation and logical backup round trip. PostgreSQL cases run when
+`TEST_POSTGRES_DSN` is available.

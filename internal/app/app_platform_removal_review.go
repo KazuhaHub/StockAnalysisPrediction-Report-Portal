@@ -402,6 +402,15 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 		if err := invalidatePlatformTasksForInstallation(e, p.InstallationID, taskCode, control.nowMS); err != nil {
 			return err
 		}
+		if action == appplatform.ActionUninstall {
+			if _, err := e.exec(`DELETE FROM app_platform_event_subscriptions
+				WHERE installation_id=?`, p.InstallationID); err != nil {
+				return err
+			}
+		} else if err := cancelPlatformEventSubscriptionsForInstallation(
+			e, p.InstallationID, "paused", control.nowMS); err != nil {
+			return err
+		}
 
 		revokedBindings := 0
 		if action == appplatform.ActionUninstall {

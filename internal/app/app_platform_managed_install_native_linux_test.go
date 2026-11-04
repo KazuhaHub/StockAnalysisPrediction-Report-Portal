@@ -28,6 +28,10 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
+	manifest.Capabilities.Required = []string{
+		"background.run", "events.subscribe", "reports.read",
+		"storage.files", "tasks.schedule",
+	}
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(manifest)
 	if err != nil {
@@ -196,6 +200,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		}
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 		testNativeRegistrationRPC(t, s, activated, endpoint, platformDigest(document))
+		testNativePortalEventDelivery(t, s, activated, endpoint)
 		oldNamespace := scalar[string](t, s.st,
 			`SELECT id FROM app_platform_data_namespaces
 			 WHERE owner_installation_id=?`,
@@ -252,6 +257,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND stage='complete' AND completed_ms IS NOT NULL`, removalCommit.OperationID) != 1 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, activated.installationID) != 0 ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, activated.installationID) != 0 ||
+			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_event_subscriptions WHERE installation_id=?`, activated.installationID) != 0 ||
 			s.st.tableExists(pluginTable) ||
 			scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_plugin_tables WHERE app_id=(SELECT app_id FROM app_platform_installations WHERE id=?)`, activated.installationID) != 0 {
 			t.Fatal("managed uninstall left authority or plugin data")

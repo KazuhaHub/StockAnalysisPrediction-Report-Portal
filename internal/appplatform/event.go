@@ -1,8 +1,10 @@
 package appplatform
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -25,7 +27,7 @@ type EventSubscriptionSpec struct {
 func ValidateEventSubscription(spec EventSubscriptionSpec) error {
 	if spec.MaxInflight < 1 || spec.MaxInflight > 16 ||
 		len(spec.ResourceID) < 1 || len(spec.ResourceID) > 256 ||
-		!eventResourceID(spec.ResourceID) {
+		!eventResourceID(spec.EventType, spec.ResourceID) {
 		return ErrEventContract
 	}
 	switch spec.EventType {
@@ -43,13 +45,22 @@ func ValidateEventSubscription(spec EventSubscriptionSpec) error {
 	return nil
 }
 
-func eventResourceID(value string) bool {
+func eventResourceID(eventType, value string) bool {
+	if eventType == EventBatchFinished {
+		jobID, generation, ok := strings.Cut(value, "@")
+		return ok && positiveResourceID(jobID) && positiveResourceID(generation)
+	}
+	return eventType == EventReportIngested && positiveResourceID(value)
+}
+
+func positiveResourceID(value string) bool {
 	id, err := strconv.ParseInt(value, 10, 64)
 	return err == nil && id > 0 && strconv.FormatInt(id, 10) == value
 }
 
 type EventDelivery struct {
 	Format       string          `json:"format"`
+	Subscription string          `json:"subscription_id"`
 	EventID      string          `json:"event_id"`
 	EventType    string          `json:"event_type"`
 	ResourceType string          `json:"resource_type"`
@@ -59,9 +70,10 @@ type EventDelivery struct {
 	Payload      json.RawMessage `json:"payload"`
 }
 
-func BuildEventDelivery(eventID, eventType, resourceType, resourceID string, occurredMS int64, payload []byte) ([]byte, string, error) {
+func BuildEventDelivery(subscriptionID, eventID, eventType, resourceType, resourceID string, occurredMS int64, payload []byte) ([]byte, string, error) {
 	canonical, _, err := ValidateTaskPayload(payload)
-	if err != nil || !backendUUID.MatchString(eventID) || occurredMS < 0 ||
+	if err != nil || !backendUUID.MatchString(subscriptionID) ||
+		!eventIDPattern(eventID) || occurredMS < 0 ||
 		ValidateEventSubscription(EventSubscriptionSpec{
 			EventType: eventType, ResourceType: resourceType,
 			ResourceID: resourceID, MaxInflight: 1,
@@ -69,7 +81,8 @@ func BuildEventDelivery(eventID, eventType, resourceType, resourceID string, occ
 		return nil, "", ErrEventContract
 	}
 	delivery := EventDelivery{
-		Format: EventDeliveryFormat, EventID: eventID, EventType: eventType,
+		Format: EventDeliveryFormat, Subscription: subscriptionID,
+		EventID: eventID, EventType: eventType,
 		ResourceType: resourceType, ResourceID: resourceID,
 		OccurredMS: strconv.FormatInt(occurredMS, 10),
 		Sequence:   strconv.FormatInt(occurredMS, 10) + "," + eventID,
@@ -79,15 +92,20 @@ func BuildEventDelivery(eventID, eventType, resourceType, resourceID string, occ
 	if err != nil || len(raw) > MaxTaskPayloadBytes {
 		return nil, "", ErrEventContract
 	}
-	return raw, delivery.Sequence, nil
+	canonical, _, err = ValidateTaskPayload(raw)
+	if err != nil {
+		return nil, "", ErrEventContract
+	}
+	return canonical, delivery.Sequence, nil
 }
 
 func ParseEventDelivery(raw []byte) (EventDelivery, error) {
 	var delivery EventDelivery
 	if len(raw) == 0 || len(raw) > MaxTaskPayloadBytes ||
-		strictTaskBackendJSON(raw, &delivery) != nil ||
+		eventStrictJSON(raw, &delivery) != nil ||
 		delivery.Format != EventDeliveryFormat ||
-		!backendUUID.MatchString(delivery.EventID) ||
+		!backendUUID.MatchString(delivery.Subscription) ||
+		!eventIDPattern(delivery.EventID) ||
 		delivery.OccurredMS == "" ||
 		ValidateEventSubscription(EventSubscriptionSpec{
 			EventType: delivery.EventType, ResourceType: delivery.ResourceType,
@@ -104,7 +122,23 @@ func ParseEventDelivery(raw []byte) (EventDelivery, error) {
 	if err != nil || string(canonical) != string(delivery.Payload) {
 		return delivery, ErrEventContract
 	}
+	canonicalDelivery, _, err := ValidateTaskPayload(raw)
+	if err != nil || !bytes.Equal(canonicalDelivery, raw) {
+		return delivery, ErrEventContract
+	}
 	return delivery, nil
+}
+
+func eventStrictJSON(raw []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(target) != nil {
+		return ErrEventContract
+	}
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return ErrEventContract
+	}
+	return nil
 }
 
 func EventDeliveryOrder(left, right EventDelivery) int {
@@ -120,7 +154,7 @@ func EventDeliveryOrder(left, right EventDelivery) int {
 }
 
 func EventOccurrence(eventID string, subscriptionRevision uint64) (string, error) {
-	if !backendUUID.MatchString(eventID) || subscriptionRevision < 1 {
+	if !eventIDPattern(eventID) || subscriptionRevision < 1 {
 		return "", ErrEventContract
 	}
 	value := "event:" + eventID + ":" +
@@ -129,4 +163,19 @@ func EventOccurrence(eventID string, subscriptionRevision uint64) (string, error
 		return "", ErrEventContract
 	}
 	return value, nil
+}
+
+func eventIDPattern(value string) bool {
+	if backendUUID.MatchString(value) {
+		return true
+	}
+	if len(value) != 48 {
+		return false
+	}
+	for _, c := range []byte(value) {
+		if !(c >= '0' && c <= '9') && !(c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }

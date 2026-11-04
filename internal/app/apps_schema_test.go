@@ -124,8 +124,9 @@ func TestMigration0014OlderDumpRestoresWithEmptyTables(t *testing.T) {
 	tables = append(tables, migration0017().tables...)
 	tables = append(tables, migration0018().tables...)
 	tables = append(tables, migration0019().tables...)
-	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0014", "0015", "0016", "0017", "0018", "0019"})
-	if bytes.Contains(dump, []byte("app_order")) || bytes.Contains(dump, []byte("app_ou_access")) || bytes.Contains(dump, []byte(`"0017"`)) || bytes.Contains(dump, []byte(`"0018"`)) || bytes.Contains(dump, []byte(`"0019"`)) {
+	tables = append(tables, migration0020().tables...)
+	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0014", "0015", "0016", "0017", "0018", "0019", "0020"})
+	if bytes.Contains(dump, []byte("app_order")) || bytes.Contains(dump, []byte("app_ou_access")) || bytes.Contains(dump, []byte(`"0017"`)) || bytes.Contains(dump, []byte(`"0018"`)) || bytes.Contains(dump, []byte(`"0019"`)) || bytes.Contains(dump, []byte(`"0020"`)) {
 		t.Fatal("the fixture still mentions later tables or steps")
 	}
 

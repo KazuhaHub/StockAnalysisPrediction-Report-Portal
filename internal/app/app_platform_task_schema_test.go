@@ -58,9 +58,10 @@ func TestAppPlatformTaskSnapshotsDoNotReferencePublisherOrReleaseRows(t *testing
 
 func TestAppPlatformTaskOlderDumpRestoresWithEmptyTables(t *testing.T) {
 	src := newTestStore(t)
-	dump := withoutSections(t, dumpOf(t, src), migration0019().tables, []string{"0019"})
-	if bytes.Contains(dump, []byte(`"0019"`)) || bytes.Contains(dump, []byte("app_platform_tasks")) {
-		t.Fatal("fixture still describes 0019")
+	tables := append(migration0019().tables, migration0020().tables...)
+	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0019", "0020"})
+	if bytes.Contains(dump, []byte(`"0019"`)) || bytes.Contains(dump, []byte(`"0020"`)) || bytes.Contains(dump, []byte("app_platform_tasks")) {
+		t.Fatal("fixture still describes 0019 or 0020")
 	}
 	dst := newTestStore(t)
 	if _, err := dst.restoreFrom(bytes.NewReader(dump), true); err != nil {
@@ -68,6 +69,9 @@ func TestAppPlatformTaskOlderDumpRestoresWithEmptyTables(t *testing.T) {
 	}
 	if !recorded(dst, "0019") {
 		t.Fatal("older dump did not acquire the task migration")
+	}
+	if !recorded(dst, "0020") {
+		t.Fatal("older dump did not acquire the event subscription migration")
 	}
 	if err := dst.verifyMigrationProducts(dst.poolExec(), dst.migrations()); err != nil {
 		t.Fatal(err)

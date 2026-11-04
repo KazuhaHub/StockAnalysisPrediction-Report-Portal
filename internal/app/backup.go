@@ -607,6 +607,12 @@ func (s *Store) finishRestore(tx *sql.Tx, steps []migration, declared []string, 
 }
 
 func reviewRestoredPlatformTasks(e migExec, nowMS int64) error {
+	if _, err := e.exec(`UPDATE app_platform_event_subscriptions
+		SET state='review_required',revision=revision+1,updated_ms=?
+		WHERE state<>'revoked'`,
+		nowMS); err != nil {
+		return fmt.Errorf("pause restored event subscriptions: %w", err)
+	}
 	if _, err := e.exec(`UPDATE app_platform_task_attempts
 		SET state='uncertain',finished_ms=?,error_code='restored_attempt',updated_ms=?
 		WHERE state IN ('leased','running')`, nowMS, nowMS); err != nil {

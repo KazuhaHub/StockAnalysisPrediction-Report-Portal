@@ -67,6 +67,7 @@ func serviceTaskFrameFixture(t *testing.T) (control.Authority, control.ServiceBa
 		RequestID:             "11111111-1111-4111-8111-111111119923",
 		TaskID:                "11111111-1111-4111-8111-111111119922",
 		LeaseID:               "11111111-1111-4111-8111-111111119921",
+		Handler:               appplatform.TaskHandlerBackend,
 		InstallationID:        candidate.InstallationID,
 		Generation:            "1",
 		PolicyRevision:        "1",

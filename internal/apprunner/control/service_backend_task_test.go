@@ -44,6 +44,7 @@ func serviceBackendTaskFixture(t *testing.T) (ServiceBackendTaskCommand, []byte,
 		RequestID:             "90000000-0000-4000-8000-000000000002",
 		TaskID:                "90000000-0000-4000-8000-000000000003",
 		LeaseID:               "10000000-0000-4000-8000-000000000001",
+		Handler:               appplatform.TaskHandlerBackend,
 		InstallationID:        candidate.InstallationID,
 		Generation:            candidate.TargetGeneration,
 		PolicyRevision:        "1",
@@ -104,5 +105,73 @@ func TestServiceBackendTaskBindsServiceIdentityAndFixedRoute(t *testing.T) {
 	}
 	if err := ValidateServiceBackendTaskData(verified, []byte(`{"changed":true}`)); err == nil {
 		t.Fatal("body change passed service task validation")
+	}
+}
+
+func TestServiceEventTaskRequiresEventSubscriptionAuthority(t *testing.T) {
+	base, key, authority, now, _, _ := backendRequestFixture(t)
+	registration, err := VerifyBackendRegistration(
+		base.RegistrationRaw, base.RegistrationSignature, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := registration.Candidate()
+	body, _, err := appplatform.BuildEventDelivery(
+		"10000000-0000-4000-8000-000000000010",
+		"10000000-0000-4000-8000-000000000011",
+		appplatform.EventReportIngested, "report", "41", now,
+		[]byte(`{"id":41}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := func(resources []string) []byte {
+		raw, err := appplatform.SignServiceIdentity(
+			[]byte(strings.Repeat("e", 32)),
+			appplatform.ServiceIdentityGrant{
+				Format:          appplatform.ServiceIdentityFormat,
+				LeaseID:         "10000000-0000-4000-8000-000000000012",
+				AppID:           "notes-sample",
+				InstallationID:  candidate.InstallationID,
+				ControllerEpoch: candidate.ControllerEpoch,
+				Generation:      candidate.TargetGeneration,
+				PolicyRevision:  "1",
+				ReleaseSHA256:   candidate.Payload.ReleaseSHA256,
+				Resources:       resources,
+				IssuedMS:        strconv.FormatInt(now, 10),
+				ExpiresMS:       strconv.FormatInt(now+60000, 10),
+			}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	command := ServiceBackendTaskCommand{
+		Format:                ServiceBackendTaskFormat,
+		RequestID:             "10000000-0000-4000-8000-000000000013",
+		TaskID:                "10000000-0000-4000-8000-000000000011",
+		LeaseID:               "10000000-0000-4000-8000-000000000012",
+		Handler:               appplatform.TaskHandlerEvent,
+		InstallationID:        candidate.InstallationID,
+		Generation:            candidate.TargetGeneration,
+		PolicyRevision:        "1",
+		ControllerEpoch:       candidate.ControllerEpoch,
+		ReleaseSHA256:         candidate.Payload.ReleaseSHA256,
+		BootID:                base.BootID,
+		RegistrationRaw:       base.RegistrationRaw,
+		RegistrationSignature: base.RegistrationSignature,
+		ServiceIdentity:       identity([]string{"events.subscribe", "tasks.schedule"}),
+		BodySHA256:            serviceTaskBodyDigest(body),
+	}
+	raw, signature, err := SignServiceBackendTask(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+	if err != nil || ValidateServiceBackendTaskData(verified, body) != nil {
+		t.Fatal("event task", verified, err)
+	}
+	command.ServiceIdentity = identity([]string{"tasks.schedule"})
+	if _, _, err := SignServiceBackendTask(command, key, authority, now); err == nil {
+		t.Fatal("event task without events.subscribe was signed")
 	}
 }

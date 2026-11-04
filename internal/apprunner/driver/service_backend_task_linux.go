@@ -41,9 +41,12 @@ func (r *CandidateRuntime) ForwardServiceTask(
 	launch CandidateLaunch,
 	binding BackendRegistrationSnapshot,
 	body, serviceIdentity []byte,
+	handler string,
 ) (ServiceTaskObservation, error) {
 	var zero ServiceTaskObservation
+	path, pathOK := appplatform.TaskHandlerPath(handler)
 	if r == nil || launch.state == nil || launch.state.owner != r ||
+		!pathOK ||
 		!containerSHA.MatchString(binding.NativeID) ||
 		!containerSHA.MatchString(binding.BindingSHA256) ||
 		!containerSHA.MatchString(binding.DocumentSHA256) ||
@@ -72,7 +75,8 @@ func (r *CandidateRuntime) ForwardServiceTask(
 		return zero, err
 	}
 	socket := filepath.Join(r.roots.Sockets, s.snapshot.Identity.InstallationID, s.snapshot.Identity.Generation, "http", "app.sock")
-	response, err := forwardServiceTask(ctx, socket, 65532, 65532, body, serviceIdentity)
+	response, err := forwardServiceTask(
+		ctx, socket, 65532, 65532, path, body, serviceIdentity)
 	if err != nil {
 		return zero, err
 	}
@@ -89,7 +93,7 @@ func (r *CandidateRuntime) ForwardServiceTask(
 	}, nil
 }
 
-func forwardServiceTask(ctx context.Context, socket string, uid, gid uint32, body, serviceIdentity []byte) (BackendResponse, error) {
+func forwardServiceTask(ctx context.Context, socket string, uid, gid uint32, path string, body, serviceIdentity []byte) (BackendResponse, error) {
 	var zero BackendResponse
 	transport := &http.Transport{
 		Proxy: nil, DisableCompression: true, DisableKeepAlives: true,
@@ -104,7 +108,7 @@ func forwardServiceTask(ctx context.Context, socket string, uid, gid uint32, bod
 		},
 	}
 	request, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, "http://portal-app.invalid"+appplatform.TaskBackendPath,
+		ctx, http.MethodPost, "http://portal-app.invalid"+path,
 		bytes.NewReader(body))
 	if err != nil {
 		return zero, ErrContainerUncertain

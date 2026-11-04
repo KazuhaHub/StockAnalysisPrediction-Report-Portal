@@ -17,7 +17,9 @@ const (
 	MaxTaskPayloadBytes = 8192
 	TaskHandlerBackend  = "app.backend.task"
 	TaskHandlerDigest   = "scheduled-digest.run"
+	TaskHandlerEvent    = "app.event.delivery"
 	TaskBackendPath     = "/v1/tasks/run"
+	TaskEventPath       = "/v1/events/deliver"
 )
 
 type TaskHandlerSpec struct {
@@ -29,6 +31,7 @@ type TaskHandlerSpec struct {
 var taskHandlers = []TaskHandlerSpec{
 	{ID: TaskHandlerBackend, RequiredCapabilities: []string{"background.run", "tasks.schedule"}},
 	{ID: TaskHandlerDigest, AllowedAppID: "scheduled-digest", RequiredCapabilities: []string{"background.run", "reports.read", "tasks.schedule"}},
+	{ID: TaskHandlerEvent, RequiredCapabilities: []string{"background.run", "events.subscribe"}},
 }
 
 func ResolveTaskHandler(appID, handler string, granted map[string]bool) (TaskHandlerSpec, error) {
@@ -47,6 +50,17 @@ func ResolveTaskHandler(appID, handler string, granted map[string]bool) (TaskHan
 		return spec, nil
 	}
 	return TaskHandlerSpec{}, ErrTaskHandler
+}
+
+func TaskHandlerPath(handler string) (string, bool) {
+	switch handler {
+	case TaskHandlerBackend:
+		return TaskBackendPath, true
+	case TaskHandlerEvent:
+		return TaskEventPath, true
+	default:
+		return "", false
+	}
 }
 
 var deniedTaskPayloadKeys = map[string]bool{

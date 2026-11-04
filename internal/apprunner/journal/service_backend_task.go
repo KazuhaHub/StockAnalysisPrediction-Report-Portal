@@ -141,7 +141,7 @@ func (s *Store) ForwardServiceBackendTask(
 		Device:         device, Inode: inode,
 	}
 	observation, err := native.ForwardServiceTask(
-		ctx, launch, binding, body, command.ServiceIdentity)
+		ctx, launch, binding, body, command.ServiceIdentity, command.Handler)
 	if err != nil {
 		return zero, err
 	}

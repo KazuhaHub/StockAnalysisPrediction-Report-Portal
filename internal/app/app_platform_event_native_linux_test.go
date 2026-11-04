@@ -1,0 +1,169 @@
+//go:build linux && (amd64 || arm64)
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+)
+
+func testNativePortalEventDelivery(
+	t *testing.T, s *Server, activated platformOperationLease,
+	endpoint platformRuntimeEndpoint,
+) {
+	t.Helper()
+	ctx := context.Background()
+	s.platformBackendEndpoint.Store(&endpoint)
+	installation := activated.installationID
+	const reportID = "41"
+	subscriptionID, created, err := s.createPlatformEventSubscription(
+		ctx, installation, appplatform.EventSubscriptionSpec{
+			EventType: appplatform.EventReportIngested, ResourceType: "report",
+			ResourceID: reportID, MaxInflight: 4,
+		})
+	if err != nil || !created || !platformValidUUID(subscriptionID) {
+		t.Fatal("native event subscription", subscriptionID, created, err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants
+		SET granted=0 WHERE installation_id=? AND capability='reports.read'`,
+		installation)
+	if _, _, err := s.createPlatformEventSubscription(
+		ctx, installation, appplatform.EventSubscriptionSpec{
+			EventType: appplatform.EventReportIngested, ResourceType: "report",
+			ResourceID: "42", MaxInflight: 1,
+		}); !errors.Is(err, errAppPlatformEventUnavailable) {
+		t.Fatal("event resource authority was not rechecked", err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants
+		SET granted=1 WHERE installation_id=? AND capability='reports.read'`,
+		installation)
+
+	now := time.Now().UTC().UnixMilli()
+	newer := NotificationEvent{
+		ID:        "10000000-0000-4000-8000-000000000201",
+		SourceKey: "report:41:native-newer", Type: appplatform.EventReportIngested,
+		Payload: `{"newer":true}`, ResourceType: "report", ResourceID: reportID,
+		CreatedAt: now + 1000,
+	}
+	older := NotificationEvent{
+		ID:        "10000000-0000-4000-8000-000000000202",
+		SourceKey: "report:41:native-older", Type: appplatform.EventReportIngested,
+		Payload: `{"older":true}`, ResourceType: "report", ResourceID: reportID,
+		CreatedAt: now,
+	}
+	for _, event := range []NotificationEvent{newer, older} {
+		if err := s.st.CaptureNotification(event, nil, nil); err != nil {
+			t.Fatal("capture native event", err)
+		}
+	}
+	newerOccurrence, _ := appplatform.EventOccurrence(newer.ID, 1)
+	olderOccurrence, _ := appplatform.EventOccurrence(older.ID, 1)
+	mustExec(t, s.st, `UPDATE app_platform_tasks
+		SET next_attempt_ms=1 WHERE installation_id=? AND occurrence_id=?`,
+		installation, newerOccurrence)
+	mustExec(t, s.st, `UPDATE app_platform_tasks
+		SET next_attempt_ms=2 WHERE installation_id=? AND occurrence_id=?`,
+		installation, olderOccurrence)
+	worker, err := newPlatformTaskScheduler(
+		s, platformFixtureID(891), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		worked, err := worker.tick(ctx)
+		if err != nil || !worked {
+			t.Fatalf("native event worker %d: worked=%v err=%v", i, worked, err)
+		}
+	}
+	if got := nativeTaskDecision(t, s, installation, newerOccurrence); got != "applied" {
+		t.Fatalf("newer event decision = %q", got)
+	}
+	if got := nativeTaskDecision(t, s, installation, olderOccurrence); got != "ignored_older" {
+		t.Fatalf("older event decision = %q", got)
+	}
+
+	lost := NotificationEvent{
+		ID:        "10000000-0000-4000-8000-000000000203",
+		SourceKey: "report:41:native-lost-ack", Type: appplatform.EventReportIngested,
+		Payload: `{"drop_once":true}`, ResourceType: "report", ResourceID: reportID,
+		CreatedAt: now + 2000,
+	}
+	if err := s.st.CaptureNotification(lost, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	lostOccurrence, _ := appplatform.EventOccurrence(lost.ID, 1)
+	if worked, err := worker.tick(ctx); err != nil || !worked {
+		t.Fatalf("lost acknowledgement tick: worked=%v err=%v", worked, err)
+	}
+	if got := scalar[string](t, s.st,
+		`SELECT state||':'||error_code FROM app_platform_tasks
+		 WHERE installation_id=? AND occurrence_id=?`,
+		installation, lostOccurrence); got != "uncertain:backend_response_uncertain" {
+		t.Fatalf("lost acknowledgement task = %q", got)
+	}
+	var taskID string
+	var payload []byte
+	if err := s.st.queryRow(`SELECT id,payload FROM app_platform_tasks
+		WHERE installation_id=? AND occurrence_id=?`,
+		installation, lostOccurrence).Scan(&taskID, &payload); err != nil {
+		t.Fatal(err)
+	}
+	var appID, publisherID, release, epoch string
+	if err := s.st.queryRow(`SELECT i.app_id,i.publisher_id,a.release_sha256,
+		i.controller_epoch FROM app_platform_installations i
+		JOIN app_platform_activations a
+		  ON a.installation_id=i.id AND a.state='active'
+		WHERE i.id=?`, installation).Scan(
+		&appID, &publisherID, &release, &epoch); err != nil {
+		t.Fatal(err)
+	}
+	retryLease := platformFixtureID(892)
+	identity, _, err := s.issuePlatformServiceIdentity(
+		ctx, installation, retryLease,
+		[]string{"events.subscribe", "reports.read", "tasks.schedule"},
+		time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := s.runPlatformEventDelivery(ctx, platformTaskLease{
+		ID: taskID, InstallationID: installation, AppID: appID,
+		PublisherID: publisherID, Handler: appplatform.TaskHandlerEvent,
+		Payload: payload, Generation: 1, PolicyRevision: 1,
+		ReleaseSHA256: release, ControllerEpoch: epoch, LeaseID: retryLease,
+	}, string(identity))
+	if result.Outcome != appplatform.TaskResultSucceeded {
+		t.Fatalf("deduplicated retry = %+v", result)
+	}
+	var retryResult struct {
+		Decision string `json:"decision"`
+	}
+	if json.Unmarshal(result.ResultJSON, &retryResult) != nil ||
+		retryResult.Decision != "duplicate" {
+		t.Fatalf("deduplicated retry result = %s", result.ResultJSON)
+	}
+	t.Log("EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK")
+}
+
+func nativeTaskDecision(
+	t *testing.T, s *Server, installation, occurrence string,
+) string {
+	t.Helper()
+	var result []byte
+	if err := s.st.queryRow(`SELECT result_json FROM app_platform_tasks
+		WHERE installation_id=? AND occurrence_id=?`,
+		installation, occurrence).Scan(&result); err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Decision string `json:"decision"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	return decoded.Decision
+}

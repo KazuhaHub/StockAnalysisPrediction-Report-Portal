@@ -34,7 +34,7 @@ func platformServiceIdentityFixtureWithDatabase(t *testing.T, postgres bool) (*S
 	}
 	manifest.Publisher = "fixture-publisher"
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
-	manifest.Capabilities.Required = []string{"background.run", "notifications.publish", "reports.read", "tasks.schedule"}
+	manifest.Capabilities.Required = []string{"background.run", "events.subscribe", "notifications.publish", "reports.read", "tasks.schedule"}
 	manifest.Capabilities.Optional = nil
 	_, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.1")
 	manifest.Frontend.SHA256 = platformDigest(archive)

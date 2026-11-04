@@ -9,7 +9,7 @@ import (
 func TestEventSubscriptionCatalogueIsClosed(t *testing.T) {
 	for _, spec := range []EventSubscriptionSpec{
 		{EventReportIngested, "report", "42", 4},
-		{EventBatchFinished, "job", "7", 1},
+		{EventBatchFinished, "job", "7@3", 1},
 	} {
 		if ValidateEventSubscription(spec) != nil {
 			t.Fatal("valid subscription refused", spec)
@@ -18,9 +18,13 @@ func TestEventSubscriptionCatalogueIsClosed(t *testing.T) {
 	for _, spec := range []EventSubscriptionSpec{
 		{"extension.arbitrary.notice", "extension", "42", 1},
 		{EventReportIngested, "job", "42", 1},
-		{EventBatchFinished, "job", "0", 1},
+		{EventBatchFinished, "job", "7", 1},
+		{EventBatchFinished, "job", "0@1", 1},
+		{EventBatchFinished, "job", "7@0", 1},
+		{EventBatchFinished, "job", "07@1", 1},
+		{EventBatchFinished, "job", "7@01", 1},
 		{EventReportIngested, "report", "042", 1},
-		{EventBatchFinished, "job", "7", 17},
+		{EventBatchFinished, "job", "7@1", 17},
 	} {
 		if !errors.Is(ValidateEventSubscription(spec), ErrEventContract) {
 			t.Fatal("invalid subscription accepted", spec)
@@ -30,8 +34,9 @@ func TestEventSubscriptionCatalogueIsClosed(t *testing.T) {
 
 func TestEventDeliveryIsBoundedCanonicalAndOrdered(t *testing.T) {
 	eventID := "10000000-0000-4000-8000-000000000001"
+	subscriptionID := "20000000-0000-4000-8000-000000000001"
 	raw, sequence, err := BuildEventDelivery(
-		eventID, EventReportIngested, "report", "42", 1000,
+		subscriptionID, eventID, EventReportIngested, "report", "42", 1000,
 		[]byte(`{"title":"Changed","id":42}`))
 	if err != nil {
 		t.Fatal(err)
@@ -42,6 +47,7 @@ func TestEventDeliveryIsBoundedCanonicalAndOrdered(t *testing.T) {
 		t.Fatal("delivery", delivery, err)
 	}
 	later, _, err := BuildEventDelivery(
+		subscriptionID,
 		"10000000-0000-4000-8000-000000000002",
 		EventReportIngested, "report", "42", 1000, []byte(`{"id":42}`))
 	laterDelivery, laterErr := ParseEventDelivery(later)

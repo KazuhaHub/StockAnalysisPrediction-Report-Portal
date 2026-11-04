@@ -122,8 +122,42 @@ func (s *Server) preparePlatformServiceTask(
 func (s *Server) runPlatformBackendTask(
 	ctx context.Context, task platformTaskLease, identity string,
 ) appplatform.TaskExecutionResult {
+	return s.runPlatformServiceTask(
+		ctx, task, identity, appplatform.TaskHandlerBackend,
+		func() ([]byte, string, error) {
+			body, err := appplatform.EncodeTaskBackendRequest(
+				task.ID, task.OccurrenceID, task.Payload)
+			if err != nil {
+				return nil, "backend_request_invalid", err
+			}
+			return body, "", nil
+		})
+}
+
+func (s *Server) runPlatformEventDelivery(
+	ctx context.Context, task platformTaskLease, identity string,
+) appplatform.TaskExecutionResult {
+	return s.runPlatformServiceTask(
+		ctx, task, identity, appplatform.TaskHandlerEvent,
+		func() ([]byte, string, error) {
+			if _, err := appplatform.ParseEventDelivery(task.Payload); err != nil {
+				return nil, "event_delivery_invalid", err
+			}
+			return bytes.Clone(task.Payload), "", nil
+		})
+}
+
+type platformTaskBodyBuilder func() ([]byte, string, error)
+
+func (s *Server) runPlatformServiceTask(
+	ctx context.Context,
+	task platformTaskLease,
+	identity, handler string,
+	buildBody platformTaskBodyBuilder,
+) appplatform.TaskExecutionResult {
 	endpoint := s.platformBackendEndpoint.Load()
-	if endpoint == nil || endpoint.path == "" {
+	_, handlerPath := appplatform.TaskHandlerPath(handler)
+	if endpoint == nil || endpoint.path == "" || !handlerPath {
 		return appplatform.TaskExecutionResult{
 			Outcome:   appplatform.TaskResultFailed,
 			ErrorCode: "backend_transport_unavailable",
@@ -142,6 +176,14 @@ func (s *Server) runPlatformBackendTask(
 			ErrorCode: "task_authority_revoked",
 		}
 	}
+	body, errorCode, err := buildBody()
+	if err != nil {
+		return appplatform.TaskExecutionResult{
+			Outcome:   appplatform.TaskResultFailed,
+			ErrorCode: errorCode,
+		}
+	}
+	defer clear(body)
 	intent, err := s.preparePlatformServiceTask(ctx, task, []byte(identity))
 	if err != nil {
 		return appplatform.TaskExecutionResult{
@@ -151,15 +193,6 @@ func (s *Server) runPlatformBackendTask(
 	}
 	defer intent.delivery.registration.Close()
 	defer clear(intent.controlSeed)
-	body, err := appplatform.EncodeTaskBackendRequest(
-		task.ID, task.OccurrenceID, task.Payload)
-	if err != nil {
-		return appplatform.TaskExecutionResult{
-			Outcome:   appplatform.TaskResultFailed,
-			ErrorCode: "backend_request_invalid",
-		}
-	}
-	defer clear(body)
 	candidate := intent.delivery.candidate
 	authority := control.Authority{
 		DeploymentID:    intent.runtime.deploymentID,
@@ -217,6 +250,7 @@ func (s *Server) runPlatformBackendTask(
 	command := control.ServiceBackendTaskCommand{
 		Format:    control.ServiceBackendTaskFormat,
 		RequestID: requestID, TaskID: task.ID, LeaseID: task.LeaseID,
+		Handler:               handler,
 		InstallationID:        task.InstallationID,
 		Generation:            strconv.FormatInt(task.Generation, 10),
 		PolicyRevision:        strconv.FormatInt(task.PolicyRevision, 10),

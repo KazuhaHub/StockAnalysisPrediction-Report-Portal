@@ -121,10 +121,10 @@ func preCredentialMigrationDump(t *testing.T) []byte {
 	header.Tables = slices.DeleteFunc(header.Tables, func(name string) bool {
 		return name == platformPrefix+"credentials" || name == platformPrefix+"secret_bindings" ||
 			slices.Contains(migration0017().tables, name) || slices.Contains(migration0018().tables, name) ||
-			slices.Contains(migration0019().tables, name)
+			slices.Contains(migration0019().tables, name) || slices.Contains(migration0020().tables, name)
 	})
 	header.Migrations = slices.DeleteFunc(header.Migrations, func(id string) bool {
-		return id == "0016" || id == "0017" || id == "0018" || id == "0019"
+		return id == "0016" || id == "0017" || id == "0018" || id == "0019" || id == "0020"
 	})
 	tx, err := source.db.Begin()
 	if err != nil {
@@ -134,7 +134,7 @@ func preCredentialMigrationDump(t *testing.T) []byte {
 	if _, err := tx.Exec(`DELETE FROM meta WHERE k='mig:0013'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tx.Exec(`DELETE FROM meta WHERE k IN ('mig:0016','mig:0017','mig:0018','mig:0019')`); err != nil {
+	if _, err := tx.Exec(`DELETE FROM meta WHERE k IN ('mig:0016','mig:0017','mig:0018','mig:0019','mig:0020')`); err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
