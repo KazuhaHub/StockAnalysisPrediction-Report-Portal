@@ -258,7 +258,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData, "HOME=" + childData}
 	if candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE"); candidate != "" {
-		child.Env = append(child.Env, "APP_SCHEDULED_DIGEST_CANDIDATE="+candidate)
+		child.Env = append(child.Env,
+			"APP_SCHEDULED_DIGEST_CANDIDATE="+
+				copyPlatformCandidateFixture(t, childData, candidate))
 	}
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
 		child.Env = append(child.Env, "PORTAL_NETWORK_NAMESPACE=1", "GODEBUG=netdns=go")
@@ -679,6 +681,29 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if err != nil || strconv.FormatUint(observed.Inode, 10) != receipt.NamespaceInode || observed.ByteLimit != 256<<20 || observed.InodeLimit != 65536 {
 		t.Fatal("Portal stage lost native resource", err)
 	}
+}
+
+func copyPlatformCandidateFixture(
+	t *testing.T, childRoot, source string,
+) string {
+	t.Helper()
+	destination := filepath.Join(childRoot, "scheduled-digest-candidate")
+	if err := os.Mkdir(destination, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"descriptor.json", "frontend.zip"} {
+		raw, err := os.ReadFile(filepath.Join(source, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(destination, name), raw, 0444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Join(destination, name), 0444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return destination
 }
 
 func removePlatformServiceFixtureRoot(t *testing.T, root string) {
