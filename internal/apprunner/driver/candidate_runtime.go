@@ -115,13 +115,43 @@ func validCandidateLaunchSnapshot(s CandidateLaunchSnapshot) bool {
 }
 func candidateOwner(i CandidateIdentity) containerOwner { return containerOwner(i) }
 
-func candidateRequestValid(request CandidateLaunchRequest) bool {
+func candidateRequestFailure(request CandidateLaunchRequest) string {
 	d := request.Data
 	parsed, err := appplatform.ParseDescriptor(request.Descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != request.Identity.ReleaseSHA256 {
-		return false
+		return "descriptor"
 	}
-	return validContainerOwner(candidateOwner(request.Identity)) && (request.Platform == "linux/amd64" || request.Platform == "linux/arm64") && d.ProjectID > 0 && d.NamespaceInode > 0 && d.QuotaBytes > 0 && d.QuotaInodes > 0 && d.QuotaBytes%512 == 0 && d.Root.Inode > 0 && containerUUID.MatchString(d.Root.FilesystemUUID) && d.Root.FilesystemUUID != "00000000-0000-0000-0000-000000000000"
+	if !validContainerOwner(candidateOwner(request.Identity)) {
+		return "owner"
+	}
+	if request.Platform != "linux/amd64" &&
+		request.Platform != "linux/arm64" {
+		return "platform"
+	}
+	if d.ProjectID == 0 {
+		return "project"
+	}
+	if d.NamespaceInode == 0 {
+		return "namespace_inode"
+	}
+	if d.QuotaBytes <= 0 || d.QuotaBytes%512 != 0 {
+		return "quota_bytes"
+	}
+	if d.QuotaInodes <= 0 {
+		return "quota_inodes"
+	}
+	if d.Root.Inode == 0 {
+		return "root_inode"
+	}
+	if !containerUUID.MatchString(d.Root.FilesystemUUID) ||
+		d.Root.FilesystemUUID == "00000000-0000-0000-0000-000000000000" {
+		return "root_uuid"
+	}
+	return ""
+}
+
+func candidateRequestValid(request CandidateLaunchRequest) bool {
+	return candidateRequestFailure(request) == ""
 }
 func candidateSnapshotHash(value any) string {
 	raw, _ := json.Marshal(value)

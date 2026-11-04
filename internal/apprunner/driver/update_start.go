@@ -143,8 +143,9 @@ func updateStartRequestFailure(r UpdateStartLaunchRequest) string {
 	switch {
 	case !validSource:
 		return "source"
-	case !candidateRequestValid(r.CandidateLaunchRequest):
-		return "candidate"
+	case candidateRequestFailure(r.CandidateLaunchRequest) != "":
+		return "candidate:" +
+			candidateRequestFailure(r.CandidateLaunchRequest)
 	case !validUpdateStartBinding(r.Binding):
 		return "binding"
 	case !positiveContainerCounter(r.Identity.Generation) ||
