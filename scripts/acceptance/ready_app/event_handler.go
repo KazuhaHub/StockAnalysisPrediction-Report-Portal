@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -135,6 +136,7 @@ func (h *fixtureEventHandler) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		log.Printf("fixture event state unavailable: %v", err)
 		fixtureTaskFailure(w, "event_state_unavailable")
 		return
 	}
