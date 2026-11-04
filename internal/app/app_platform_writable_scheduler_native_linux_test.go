@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -785,6 +786,8 @@ func testNativeManagedDisableEnable(
 		FROM app_platform_installations WHERE id=?`, installation)
 	publisherRevision := scalar[int64](t, s.st, `SELECT revision
 		FROM app_platform_publishers WHERE id=?`, publisherID)
+	updateReview := createNativeManagedUpdateReview(
+		t, s, actor, installation, "1.0.0-beta.90", endpoint)
 	revocation, err := s.changePlatformPublisherTrust(
 		actor, platformPublisherChange{
 			kind: "policy", publisherID: publisherID,
@@ -884,17 +887,17 @@ func testNativeManagedDisableEnable(
 	if err != nil {
 		t.Fatal("native managed enable target", err)
 	}
+	enableActor := platformSecondAdminActor(
+		t, s, "managed-enable-admin-two")
 	enableReview, err := s.createPlatformManagedEnableReviewWithRuntimeContext(
-		ctx, actor, installation, target, facts.runtime)
+		ctx, enableActor, installation, target, facts.runtime)
 	if err != nil {
 		t.Fatal("native managed enable review", err)
 	}
-	enableCommit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
-		ctx, actor, enableReview.ID, enableReview.SHA256,
-		platformFixtureID(992), target, facts.runtime)
-	if err != nil {
-		t.Fatal("native managed enable admission", err)
-	}
+	enableCommit := raceNativeUpdateAndEnable(
+		t, s, actor, enableActor, installation, updateReview,
+		enableReview, target, facts.runtime, endpoint)
+	t.Log("MANAGED_UPDATE_ENABLE_OPERATOR_RACE")
 	enableClaim, err := s.claimNextPlatformManagedEnable(
 		ctx, platformFixtureID(993))
 	if err != nil || enableClaim.lease.id != enableCommit.OperationID {
@@ -938,6 +941,11 @@ func testNativeManagedDisableEnable(
 	}
 	t.Log("MANAGED_ENABLE_BACKEND_REQUEST")
 
+	repairUpdateActor := platformSecondAdminActor(
+		t, s, "managed-repair-update-admin")
+	repairUpdateReview := createNativeManagedUpdateReview(
+		t, s, repairUpdateActor, installation,
+		"1.0.0-beta.91", endpoint)
 	repairDisableReview, err := s.createPlatformRemovalReview(
 		actor, installation, appplatform.ActionDisable)
 	if err != nil {
@@ -971,26 +979,28 @@ func testNativeManagedDisableEnable(
 		t.Fatal("native repair target", err)
 	}
 	var repairBrowserHost *platformLifecycleBrowserHost
-	var repairOperationID string
-	var expectedRepairGeneration int64
-	if platformLifecycleBrowserConfigured() {
-		repairBrowserHost = startPlatformLifecycleBrowserHost(
-			t, s, actor, endpoint)
-		confirmed := runPlatformLifecycleBrowser(
-			t, repairBrowserHost, installation, "repair", "confirm", "")
-		repairOperationID = confirmed.OperationID
-		expectedRepairGeneration = scalar[int64](t, s.st, `SELECT target_generation
-			FROM app_platform_operations WHERE id=?`, repairOperationID)
-		if scalar[string](t, s.st, `SELECT action
-			FROM app_platform_operations WHERE id=?`,
-			repairOperationID) != "repair" ||
-			scalar[int64](t, s.st, `SELECT COALESCE(completed_ms,0)
+	admitRepair := func() platformRemovalCommit {
+		if platformLifecycleBrowserConfigured() {
+			repairBrowserHost = startPlatformLifecycleBrowserHost(
+				t, s, actor, endpoint)
+			confirmed := runPlatformLifecycleBrowser(
+				t, repairBrowserHost, installation, "repair", "confirm", "")
+			if scalar[string](t, s.st, `SELECT action
 				FROM app_platform_operations WHERE id=?`,
-				repairOperationID) != 0 {
-			t.Fatal("browser repair confirmation was not durable")
+				confirmed.OperationID) != "repair" ||
+				scalar[int64](t, s.st, `SELECT COALESCE(completed_ms,0)
+					FROM app_platform_operations WHERE id=?`,
+					confirmed.OperationID) != 0 {
+				t.Fatal("browser repair confirmation was not durable")
+			}
+			t.Log("NATIVE_REPAIR_BROWSER_CONFIRMED")
+			return platformRemovalCommit{
+				OperationID: confirmed.OperationID,
+				Generation: scalar[int64](t, s.st, `SELECT target_generation
+					FROM app_platform_operations WHERE id=?`,
+					confirmed.OperationID),
+			}
 		}
-		t.Log("NATIVE_REPAIR_BROWSER_CONFIRMED")
-	} else {
 		repairReview, err :=
 			s.createPlatformManagedRepairReviewWithRuntimeContext(
 				ctx, actor, installation, repairTarget, repairFacts.runtime)
@@ -1004,9 +1014,14 @@ func testNativeManagedDisableEnable(
 		if err != nil {
 			t.Fatal("native repair admission", err)
 		}
-		repairOperationID = repairCommit.OperationID
-		expectedRepairGeneration = repairCommit.Generation
+		return repairCommit
 	}
+	repairCommit := raceNativeUpdateAndRepair(
+		t, s, repairUpdateActor, repairUpdateReview, installation,
+		admitRepair, endpoint)
+	repairOperationID := repairCommit.OperationID
+	expectedRepairGeneration := repairCommit.Generation
+	t.Log("MANAGED_UPDATE_REPAIR_OPERATOR_RACE")
 	repairClaim, err := s.claimNextPlatformManagedRepair(
 		ctx, platformFixtureID(997))
 	if err != nil || repairClaim.lease.id != repairOperationID {
@@ -1113,6 +1128,140 @@ func testNativeManagedDisableEnable(
 			actualNamespace, actualDeleteStage)
 	}
 	t.Log("STANDALONE_DELETE_DATA_NAMESPACE_ABSENT")
+}
+
+func createNativeManagedUpdateReview(
+	t *testing.T, s *Server, actor platformActorSession,
+	installation, version string, endpoint platformRuntimeEndpoint,
+) platformRemovalReview {
+	t.Helper()
+	var descriptor, frontend []byte
+	if err := s.st.queryRow(`SELECT r.descriptor,f.content
+		FROM app_platform_activations a
+		JOIN app_platform_releases r ON r.sha256=a.release_sha256
+		JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256
+		WHERE a.installation_id=? AND a.state='active'`,
+		installation).Scan(&descriptor, &frontend); err != nil {
+		t.Fatal("native update source release", err)
+	}
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(descriptor, &manifest); err != nil ||
+		manifest.Backend == nil {
+		t.Fatal("native update descriptor", err)
+	}
+	manifest.Version = version
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.stagePlatformRelease(
+		actor, raw, platformSignTestDescriptor(t, raw), frontend)
+	if err != nil {
+		t.Fatal("native update target release", err)
+	}
+	review, err := s.createPlatformManagedUpdateReview(
+		context.Background(), actor, installation,
+		release.sha256, release.trustRevision, endpoint)
+	if err != nil {
+		t.Fatal("native managed update review", err)
+	}
+	return review
+}
+
+func raceNativeUpdateAndEnable(
+	t *testing.T, s *Server,
+	updateActor, enableActor platformActorSession,
+	installation string,
+	updateReview, enableReview platformRemovalReview,
+	target *platformManagedInstallTarget,
+	runtime platformRuntimeRegistration,
+	endpoint platformRuntimeEndpoint,
+) platformRemovalCommit {
+	t.Helper()
+	type outcome struct {
+		enable bool
+		err    error
+		commit platformRemovalCommit
+	}
+	results := make(chan outcome, 2)
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		_, err := s.consumePlatformManagedUpdateReview(
+			context.Background(), updateActor, updateReview.ID,
+			updateReview.SHA256, platformFixtureID(992), endpoint)
+		results <- outcome{err: err}
+	})
+	wg.Go(func() {
+		commit, err := s.consumePlatformManagedEnableReviewWithRuntimeContext(
+			context.Background(), enableActor, enableReview.ID,
+			enableReview.SHA256, platformFixtureID(993),
+			target, runtime)
+		results <- outcome{enable: true, err: err, commit: commit}
+	})
+	wg.Wait()
+	close(results)
+	var enableCommit platformRemovalCommit
+	for result := range results {
+		if result.enable {
+			if result.err != nil || result.commit.OperationID == "" {
+				t.Fatal("native update/enable winner", result.err)
+			}
+			enableCommit = result.commit
+		} else if !errors.Is(result.err, errAppPlatformPlanChanged) &&
+			!errors.Is(result.err, errAppPlatformOperationConflict) {
+			t.Fatal("native update contender", result.err)
+		}
+	}
+	pending := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_operations WHERE installation_id=?
+		AND action IN ('update','enable') AND completed_ms IS NULL`,
+		installation)
+	consumed := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_review_plans WHERE id IN (?,?)
+		AND consumed_ms IS NOT NULL`, updateReview.ID, enableReview.ID)
+	if pending != 1 || consumed != 1 {
+		t.Fatal("native update/enable race", pending, consumed)
+	}
+	return enableCommit
+}
+
+func raceNativeUpdateAndRepair(
+	t *testing.T, s *Server, updateActor platformActorSession,
+	updateReview platformRemovalReview, installation string,
+	admitRepair func() platformRemovalCommit,
+	endpoint platformRuntimeEndpoint,
+) platformRemovalCommit {
+	t.Helper()
+	updateResult := make(chan error, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		_, err := s.consumePlatformManagedUpdateReview(
+			context.Background(), updateActor, updateReview.ID,
+			updateReview.SHA256, platformFixtureID(996), endpoint)
+		updateResult <- err
+	}()
+	<-started
+	repairCommit := admitRepair()
+	if repairCommit.OperationID == "" {
+		t.Fatal("native repair contender had no operation")
+	}
+	updateErr := <-updateResult
+	if !errors.Is(updateErr, errAppPlatformPlanChanged) &&
+		!errors.Is(updateErr, errAppPlatformOperationConflict) {
+		t.Fatal("native repair winner update contender", updateErr)
+	}
+	pending := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_operations WHERE installation_id=?
+		AND action IN ('update','repair') AND completed_ms IS NULL`,
+		installation)
+	consumed := scalar[int](t, s.st, `SELECT COUNT(*) FROM
+		app_platform_review_plans WHERE id=? AND consumed_ms IS NOT NULL`,
+		updateReview.ID)
+	if pending != 1 || consumed != 0 {
+		t.Fatal("native update/repair race", pending, consumed)
+	}
+	return repairCommit
 }
 
 func logManagedUpdateState(t *testing.T, s *Server, operationID, installationID string) {

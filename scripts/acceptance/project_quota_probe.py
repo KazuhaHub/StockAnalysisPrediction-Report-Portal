@@ -663,6 +663,10 @@ def main(args):
                         report["native_managed_disable_stop_verified"] = True
                         report["native_managed_enable_start_probe_activated"] = True
                         report["native_managed_enable_backend_request"] = True
+                        if "MANAGED_UPDATE_ENABLE_OPERATOR_RACE" not in result.stdout:
+                            raise RuntimeError(
+                                "Native update/enable operator race missing")
+                        report["native_managed_update_enable_operator_race"] = True
                         if "MANAGED_UNINSTALL_STOP_REMOVE_CODE" not in result.stdout or "MANAGED_UNINSTALL_REMOVE_DATA" not in result.stdout or "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH" not in result.stdout:
                             diagnostic = Path.cwd() / "portal-quota-failure.txt"
                             diagnostic.write_text(result.stdout[-262144:])
@@ -689,6 +693,10 @@ def main(args):
                                     "acceptance missing: " + marker)
                         report["native_managed_repair_start_probe_activated"] = True
                         report["native_managed_repair_backend_request"] = True
+                        if "MANAGED_UPDATE_REPAIR_OPERATOR_RACE" not in result.stdout:
+                            raise RuntimeError(
+                                "Native update/repair operator race missing")
+                        report["native_managed_update_repair_operator_race"] = True
                         report["native_standalone_delete_data_namespace_absent"] = True
                         if "PORTAL_WRITABLE_SCHEDULER_CLAIMED_PROGRESS" not in result.stdout:
                             raise RuntimeError("Writable background scheduler acceptance did not execute")
