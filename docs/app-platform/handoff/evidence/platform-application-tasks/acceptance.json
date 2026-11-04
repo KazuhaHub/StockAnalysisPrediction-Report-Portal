@@ -1,8 +1,16 @@
 {
   "format": "portal.app-platform.application-tasks/1-dev.1",
-  "captured_at": "2026-11-03T16:42:10-08:00",
-  "candidate": "e09d103a",
+  "captured_at": "2026-11-03T16:57:05-08:00",
+  "candidate": "ff9d2f4b",
   "database_evidence": "SQLite plus a fresh PostgreSQL 18.6 database named platform_tasks_20261103",
+  "history": [
+    {
+      "candidate": "e09d103a",
+      "result": "failed",
+      "failure": "Hosted race shard 3 observed a replay 404 when an omitted runAt default crossed one database millisecond between request parsing and admission.",
+      "fix": "ff9d2f4b leaves omitted runAt/expiresAt unset through parsing and lets the admission transaction choose one clock value. The focused test then passed 20 repeated race runs."
+    }
+  ],
   "tests": {
     "go_full": {
       "command": "GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./...",
@@ -14,6 +22,10 @@
     },
     "task_race": {
       "command": "GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^(TestPlatformTask|TestPlatformAdminTask|TestPlatformServiceIdentity)' -count=1",
+      "result": "pass"
+    },
+    "task_schedule_replay_race": {
+      "command": "GOWORK=off GOTOOLCHAIN=local GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformTaskSchedulingAPIUsesServiceIdentityAndOccurrenceIdentity$' -count=20",
       "result": "pass"
     },
     "postgres_tasks": {
