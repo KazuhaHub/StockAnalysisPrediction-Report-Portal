@@ -44,12 +44,24 @@ session while that state is effective.
 ## Verification
 
 Focused SQLite tests cover binding-driven `setup_required`, approval to `ready`,
-credential rotation back to `setup_required`, reapproval, binding revocation, and
-refusal to persist an unconfigured task. Portal web tests cover the directory
-state, settings gap, exact `digest-feed` guidance, credential-page prefill, and
-the administrator link. The Linux exact-image path is being extended to require
-the same setup before executing the real digest task.
+credential rotation back to `setup_required`, reapproval, binding revocation,
+setup-only binding without network authority, and refusal to persist an
+unconfigured task. Portal web tests cover the directory state, settings gap,
+exact `digest-feed` guidance, credential-page prefill, and the administrator
+link.
 
-The remaining acceptance evidence is a fresh hosted run with the updated
-descriptor and browser coverage for the setup-required user state and the
-administrator setup transition.
+The exact native run `41918062142` at Portal `dc2e7e8e` and Apps `fa4acc03`
+starts the Scheduled Digest image, observes `setup_required`, approves the
+setup-only binding, then completes registration, boot, the fixed task,
+uninstall and fresh reinstall. Its artifact reports
+`native_scheduled_digest_setup_required_and_configured=true` and image
+`localhost:32768/scheduled-digest-exact@sha256:bbc3da22...`.
+
+The full native matrix `41915897527` and quota/browser run `41920808163`
+also pass. Chromium proves an ordinary user sees the localized setup-required
+state, cannot open the application, and can open it after the fixture advances
+to a configured projection. Evidence is in
+[business setup](handoff/evidence/platform-business-setup/acceptance.json) and
+[reference apps](handoff/evidence/platform-reference-apps/acceptance.json).
+Production setup, real external credentials and the human screen-reader audit
+remain outside this development acceptance.
