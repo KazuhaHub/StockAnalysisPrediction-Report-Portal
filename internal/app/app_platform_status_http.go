@@ -149,11 +149,11 @@ func (s *Server) apiPlatformInstallationStatus(w http.ResponseWriter, r *http.Re
 		platformDocumentFailure(w)
 		return
 	}
-	session, err := s.platformHTTPReader(r, user)
-	if err != nil {
-		platformDocumentFailure(w)
+	session, release, ok := s.platformHTTPAdmission(w, r, user)
+	if !ok {
 		return
 	}
+	defer release()
 	ctx, cancel := context.WithTimeout(r.Context(), platformDocumentTimeout)
 	defer cancel()
 	result, err := s.readPlatformInstallationStatus(ctx, session, installation)
