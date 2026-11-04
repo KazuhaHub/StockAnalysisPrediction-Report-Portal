@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 	"unicode/utf8"
@@ -223,7 +224,8 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 	before, err := s.prepareUpdateStartBackendExchange(
 		ctx, raw, signature)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update service registration exchange: %w", err)
 	}
 	if _, err := control.VerifyServiceBackendTask(
 		raw, signature, before.facts.source.start.authority,
@@ -232,18 +234,22 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 	}
 	launch, err := native.PrepareUpdateStart(ctx, before.request)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update service native prepare: %w", err)
 	}
 	defer launch.Close()
 	snapshot, err := launch.Snapshot()
 	if err != nil || snapshot != before.binding.Launch {
-		return zero, ErrFenceReconciliation
+		return zero, fmt.Errorf(
+			"update service native snapshot: %w",
+			ErrFenceReconciliation)
 	}
 	observation, err := native.ForwardUpdateStartServiceTask(
 		ctx, launch, before.binding, body,
 		command.ServiceIdentity, command.Handler)
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update service native exchange: %w", err)
 	}
 	physical, err := observation.Snapshot()
 	bodySHA := sha256.Sum256(body)
@@ -265,7 +271,8 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 	tx, after, err := beginUpdateStartRegistration(
 		ctx, s, raw, signature, "applied")
 	if err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update service registration recheck: %w", err)
 	}
 	defer tx.Rollback()
 	if !sameUpdateStartRegistrationSource(before.facts, after) ||
@@ -273,7 +280,8 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 		return zero, ErrFenceReconciliation
 	}
 	if err := tx.Commit(); err != nil {
-		return zero, err
+		return zero, fmt.Errorf(
+			"update service registration commit: %w", err)
 	}
 	if _, err := control.VerifyServiceBackendTask(
 		raw, signature, after.source.start.authority,
