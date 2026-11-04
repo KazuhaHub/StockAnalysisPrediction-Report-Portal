@@ -67,7 +67,8 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 			ErrInvalidResponse)
 	case !validUpdateStartRequest(request):
 		return zero, fmt.Errorf(
-			"update-start readiness request: %w",
+			"update-start readiness request %s: %w",
+			updateStartRequestFailure(request),
 			ErrInvalidResponse)
 	case !validUpdateStartSnapshot(expected):
 		return zero, fmt.Errorf(

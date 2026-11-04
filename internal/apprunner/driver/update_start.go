@@ -136,18 +136,36 @@ func updateStartSnapshotFailure(s UpdateStartLaunchSnapshot) string {
 	}
 }
 
-func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {
+func updateStartRequestFailure(r UpdateStartLaunchRequest) string {
 	validSource := !r.ReplaceSource && r.Source == nil ||
 		r.ReplaceSource && r.Source != nil &&
 			validUpdateStartSource(*r.Source, r)
-	return validSource &&
-		candidateRequestValid(r.CandidateLaunchRequest) &&
-		validUpdateStartBinding(r.Binding) &&
-		positiveContainerCounter(r.Identity.Generation) && r.Identity.Generation != "1" &&
-		positiveContainerCounter(r.Identity.WriterFence) && r.Identity.WriterFence != "1" &&
-		(r.SandboxProfile == UpdateStartReadOnlySandboxProfile ||
-			r.SandboxProfile == UpdateStartWritableSandboxProfile) &&
-		r.Binding.EffectID != r.Identity.ResourceID && r.Binding.EffectID != r.Identity.NamespaceID
+	switch {
+	case !validSource:
+		return "source"
+	case !candidateRequestValid(r.CandidateLaunchRequest):
+		return "candidate"
+	case !validUpdateStartBinding(r.Binding):
+		return "binding"
+	case !positiveContainerCounter(r.Identity.Generation) ||
+		r.Identity.Generation == "1":
+		return "generation"
+	case !positiveContainerCounter(r.Identity.WriterFence) ||
+		r.Identity.WriterFence == "1":
+		return "writer_fence"
+	case r.SandboxProfile != UpdateStartReadOnlySandboxProfile &&
+		r.SandboxProfile != UpdateStartWritableSandboxProfile:
+		return "sandbox_profile"
+	case r.Binding.EffectID == r.Identity.ResourceID ||
+		r.Binding.EffectID == r.Identity.NamespaceID:
+		return "effect_identity"
+	default:
+		return ""
+	}
+}
+
+func validUpdateStartRequest(r UpdateStartLaunchRequest) bool {
+	return updateStartRequestFailure(r) == ""
 }
 
 func validUpdateStartSource(s UpdateStartSource, r UpdateStartLaunchRequest) bool {
