@@ -213,6 +213,32 @@ func TestManagedInstallSignedRelease(t *testing.T) {
 	}
 }
 
+func TestScheduledDigestCandidateRelease(t *testing.T) {
+	if os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE") == "" {
+		t.Skip("scheduled digest candidate not supplied")
+	}
+	s, session := platformTrustTestServer(t, false)
+	platformRegisterTestPublisher(t, s, session)
+	raw, archive := platformScheduledDigestReleaseFixture(t, "linux/amd64")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Capabilities.Required = []string{
+		"background.run", "events.subscribe", "reports.read",
+		"secrets.use", "storage.files", "tasks.schedule",
+	}
+	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.stagePlatformRelease(
+		session, raw, platformSignTestDescriptor(t, raw), archive); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestManagedPackageStagingDefersOnlyRunnerCompatibility(t *testing.T) {
 	raw, _ := platformManagedReleaseFixture(t, "linux/amd64")
 	parsed, err := appplatform.ParseDescriptor(raw)

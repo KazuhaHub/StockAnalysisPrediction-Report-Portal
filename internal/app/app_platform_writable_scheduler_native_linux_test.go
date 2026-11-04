@@ -869,9 +869,10 @@ func testNativeManagedDisableEnable(
 		actor, platformPublisherChange{
 			kind: "policy", publisherID: publisherID,
 			expectedRevision: revocation.revision, enabled: true,
-			namespaces: []appplatform.PublisherNamespace{{
-				Kind: "prefix", Value: "notes-",
-			}},
+			namespaces: []appplatform.PublisherNamespace{
+				{Kind: "prefix", Value: "notes-"},
+				{Kind: "exact", Value: "scheduled-digest"},
+			},
 		}); err != nil {
 		t.Fatal("restore publisher trust after revocation drill", err)
 	}
