@@ -71,6 +71,10 @@ func (h *fixtureEventHandler) load() error {
 		return nil
 	}
 	if err != nil {
+		if fixtureStateCanStayInMemory(err) {
+			h.loaded = true
+			return nil
+		}
 		return err
 	}
 	var state fixtureEventState
