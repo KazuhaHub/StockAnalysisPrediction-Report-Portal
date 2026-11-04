@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -190,9 +191,17 @@ func (h *fixtureEventHandler) apply(delivery appplatform.EventDelivery, body []b
 		h.state.Dropped[delivery.EventID] = true
 	}
 	if err := h.persist(); err != nil {
-		return "", false, err
+		if !fixtureStateCanStayInMemory(err) {
+			return "", false, err
+		}
 	}
 	return decision, drop, nil
+}
+
+func fixtureStateCanStayInMemory(err error) bool {
+	return errors.Is(err, os.ErrPermission) ||
+		errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, syscall.EROFS)
 }
 
 func (h *fixtureEventHandler) persist() error {
