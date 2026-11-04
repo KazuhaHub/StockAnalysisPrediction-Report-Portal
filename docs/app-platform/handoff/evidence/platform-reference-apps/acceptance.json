@@ -1,0 +1,41 @@
+{
+  "format": "portal.reference-apps-shell-browser-acceptance/1-dev.1",
+  "packageDigests": {
+    "notes-sample": "1fff098f1702c56647d7893d5f9790eebc7cbb378aee44a65308cf57ce6318a3",
+    "scheduled-digest": "31b64c0812f068d69ce1dbdf728149016a226332a181fb718313c609ae024cda"
+  },
+  "assertions": {
+    "myAppsListsBothReferenceApps": true,
+    "installedDirectoryEntriesOpenable": true,
+    "notesSinglePlatformTitle": true,
+    "noDuplicateVersionRow": true,
+    "noOuterApplicationFrame": true,
+    "viewportEditorInternalScroll": true,
+    "keyboardScrollableEditor": true,
+    "savedObjectSurvivesReload": true,
+    "shellContrastAA": true,
+    "desktopAxeSeriousCritical": 0,
+    "digestSinglePlatformTitle": true,
+    "singlePlatformNavigation": true,
+    "digestNoDuplicateVersionRow": true,
+    "digestNoOuterApplicationFrame": true,
+    "digestIndependentBackendBridge": true,
+    "appSwitchUnmountsPreviousFrame": true,
+    "appSwitchBackMountedExactNotesDocument": true,
+    "narrowDarkTraditionalChineseDigest": true,
+    "viewportEditorUsesHostHeight": true,
+    "narrowDarkTraditionalChineseNotes": true
+  },
+  "screenshots": [
+    "reference-apps-1440-en-light-notes.png",
+    "reference-apps-1440-en-light-scheduled-digest.png",
+    "reference-apps-320-zh-tw-dark-scheduled-digest.png",
+    "reference-apps-320-zh-tw-dark-notes-editor.png"
+  ],
+  "limitations": [
+    "The fixture preloads two successful installation projections so it isolates My Apps opening, switching, title and frame behavior; it does not replace the managed lifecycle install transaction.",
+    "Scheduled Digest presentation runs against a contract-compatible fixture backend, not the exact service image.",
+    "Automated axe and keyboard checks do not constitute the required human screen-reader audit."
+  ],
+  "passed": true
+}
