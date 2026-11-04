@@ -95,30 +95,73 @@ func (r *CandidateRuntime) ForwardServiceTask(
 
 func (r *CandidateRuntime) ForwardUpdateStartServiceTask(
 	ctx context.Context,
-	launch UpdateStartLaunch,
+	request UpdateStartLaunchRequest,
+	expected UpdateStartLaunchSnapshot,
 	registration UpdateStartRegistrationSnapshot,
 	body, serviceIdentity []byte,
 	handler string,
 ) (ServiceTaskObservation, error) {
-	snapshot, err := launch.Snapshot()
-	if err != nil || snapshot != registration.Launch ||
+	var zero ServiceTaskObservation
+	path, ok := appplatform.TaskHandlerPath(handler)
+	if r == nil || !ok || expected != registration.Launch ||
 		!containerSHA.MatchString(registration.NativeID) ||
 		!containerSHA.MatchString(registration.BindingSHA256) ||
 		!containerSHA.MatchString(registration.DocumentSHA256) ||
-		registration.Inode == 0 {
-		return ServiceTaskObservation{}, ErrContainerUncertain
+		registration.Inode == 0 || len(body) == 0 ||
+		len(body) > appplatform.MaxTaskBackendBody ||
+		len(serviceIdentity) == 0 || len(serviceIdentity) > 8192 {
+		return zero, ErrContainerUncertain
 	}
-	return r.ForwardServiceTask(
-		ctx, launch.launch,
-		BackendRegistrationSnapshot{
-			Launch:         snapshot.Launch,
-			NativeID:       registration.NativeID,
-			BindingSHA256:  registration.BindingSHA256,
-			DocumentSHA256: registration.DocumentSHA256,
-			Device:         registration.Device,
-			Inode:          registration.Inode,
+	body = bytes.Clone(body)
+	serviceIdentity = bytes.Clone(serviceIdentity)
+	defer clear(body)
+	defer clear(serviceIdentity)
+	var response BackendResponse
+	actual, err := r.withVerifiedUpdateStartCandidate(
+		ctx, request, expected, registration.NativeID,
+		func(ctx context.Context, pins *candidateMountPins) error {
+			if err := checkUpdateStartBackendFile(
+				ctx, r, pins, registration); err != nil {
+				return err
+			}
+			socket := filepath.Join(
+				r.roots.Sockets, request.Identity.InstallationID,
+				request.Identity.Generation, "http", "app.sock")
+			var err error
+			response, err = forwardServiceTask(
+				ctx, socket, 65532, 65532, path, body, serviceIdentity)
+			if err != nil {
+				return err
+			}
+			return checkUpdateStartBackendFile(
+				ctx, r, pins, registration)
+		})
+	if err != nil {
+		clear(response.Body)
+		return zero, err
+	}
+	observation := ServiceTaskObservation{
+		valid: true,
+		snapshot: ServiceTaskSnapshot{
+			Binding: BackendRegistrationSnapshot{
+				Launch:         expected.Launch,
+				NativeID:       registration.NativeID,
+				BindingSHA256:  registration.BindingSHA256,
+				DocumentSHA256: registration.DocumentSHA256,
+				Device:         registration.Device,
+				Inode:          registration.Inode,
+			},
+			BodySHA256:            containerHash(body),
+			ServiceIdentitySHA256: containerHash(serviceIdentity),
+			Response:              response,
+			ObservedMS:            actual.ObservedMS,
 		},
-		body, serviceIdentity, handler)
+	}
+	if _, err := observation.Snapshot(); err != nil {
+		clear(response.Body)
+		return zero, err
+	}
+	return observation, nil
 }
 
 func forwardServiceTask(ctx context.Context, socket string, uid, gid uint32, path string, body, serviceIdentity []byte) (BackendResponse, error) {

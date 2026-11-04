@@ -31,7 +31,8 @@ func (*CandidateRuntime) ForwardServiceTask(
 
 func (*CandidateRuntime) ForwardUpdateStartServiceTask(
 	context.Context,
-	UpdateStartLaunch,
+	UpdateStartLaunchRequest,
+	UpdateStartLaunchSnapshot,
 	UpdateStartRegistrationSnapshot,
 	[]byte,
 	[]byte,

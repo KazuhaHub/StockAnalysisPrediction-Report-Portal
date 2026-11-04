@@ -234,20 +234,8 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 		time.Now().UnixMilli()); err != nil {
 		return zero, err
 	}
-	launch, err := native.PrepareUpdateStart(ctx, before.request)
-	if err != nil {
-		return zero, fmt.Errorf(
-			"update service native prepare: %w", err)
-	}
-	defer launch.Close()
-	snapshot, err := launch.Snapshot()
-	if err != nil || snapshot != before.binding.Launch {
-		return zero, fmt.Errorf(
-			"update service native snapshot: %w",
-			ErrFenceReconciliation)
-	}
 	observation, err := native.ForwardUpdateStartServiceTask(
-		ctx, launch, before.binding, body,
+		ctx, before.request, before.binding.Launch, before.binding, body,
 		command.ServiceIdentity, command.Handler)
 	if err != nil {
 		return zero, fmt.Errorf(
