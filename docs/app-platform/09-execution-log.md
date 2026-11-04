@@ -2537,3 +2537,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   Update-generation service-task registration variants and production remain
   gated. See
   [event subscription evidence](handoff/evidence/platform-event-subscriptions/acceptance.json).
+
+- Added the H12 Scheduled Digest reference app at Apps `f274e06` with a shared
+  React/Ant frontend and independent Go backend. The backend persists bounded
+  digest runs, replays the same task as duplicate, refuses changed task identity,
+  serves current-viewer state and accepts the fixed authenticated
+  `POST /v1/tasks/digest` handler. Portal `998dcd0a` maps only the app-bound
+  `scheduled-digest.run` handler to that route and carries the exact service
+  identity through the real runner. Apps check `41794178889` passed the dedicated
+  frontend, service race/vet, v2 package and Docker job; Portal general
+  `41801011351`, native quota `41801011370` and daemon `41801011480` passed, with
+  the native artifact recording `native_scheduled_digest_handler=true`. The
+  native matrix uses the exact Apps frontend candidate and a contract-compatible
+  ready backend; installing the exact service image and completing the neutral
+  two-app clean-market walkthrough remain open. See
+  [Scheduled Digest evidence](handoff/evidence/platform-scheduled-digest/acceptance.json).

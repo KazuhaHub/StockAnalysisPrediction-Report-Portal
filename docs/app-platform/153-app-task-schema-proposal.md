@@ -146,5 +146,12 @@ PostgreSQL, and backup round trip.
   review-required work is closed only by an explicit failed/cancelled review and
   never replayed automatically.
 
-The remaining native acceptance is the Scheduled Digest implementation of the
-fixed app route and update-generation service-task registration variants.
+The Scheduled Digest reference app now implements the independent backend and
+frontend for the fixed `scheduled-digest.run` handler. Portal maps that handler
+only to `POST /v1/tasks/digest`; the runner verifies the exact registration and
+service identity before forwarding it. Native acceptance is recorded in
+[Scheduled Digest evidence](handoff/evidence/platform-scheduled-digest/acceptance.json).
+The full native matrix uses a contract-compatible ready backend with the exact
+Apps frontend candidate; installing the exact service image through a neutral
+clean-market flow remains required. Update-generation service-task registration
+variants also remain gated.
