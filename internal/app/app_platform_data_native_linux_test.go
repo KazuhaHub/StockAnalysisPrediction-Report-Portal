@@ -468,6 +468,31 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 	}
 	if managed {
+		if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" {
+			for _, marker := range []string{
+				"MANAGED_PROFILE_OBSERVED",
+				"MANAGED_INSTALL_DATA_READY",
+				"MANAGED_INSTALL_CANDIDATE_PROBE",
+				"CANDIDATE_SECCOMP_ENTRYPOINT_VERIFIED",
+				"MANAGED_INSTALL_READINESS",
+				"MANAGED_BACKEND_REGISTRATION_MATERIAL",
+				"MANAGED_BACKEND_DELIVERY_COMMITTED",
+				"MANAGED_BACKEND_BOOT_VERIFIED",
+				"MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
+				"NATIVE_EVENT_ACTIVATION_FIXTURE",
+				"EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+				"MANAGED_UNINSTALL_STOP_REMOVE_CODE",
+				"MANAGED_UNINSTALL_REMOVE_DATA",
+				"MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
+			} {
+				if !bytes.Contains(output.Bytes(), []byte(marker)) {
+					t.Fatal("event acceptance marker missing", marker,
+						output.String())
+				}
+				t.Log(marker)
+			}
+			return
+		}
 		if !bytes.Contains(output.Bytes(), []byte("MANAGED_PROFILE_OBSERVED")) {
 			t.Fatal("Portal did not validate managed profile", output.String())
 		}
