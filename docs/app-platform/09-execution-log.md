@@ -2702,3 +2702,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   walkthrough, update-generation variants and human screen-reader audit remain
   open. See
   [managed exact image evidence](handoff/evidence/platform-scheduled-digest-managed/acceptance.json).
+
+- Extended application service tasks beyond initial generation at Portal
+  `d29e74ad`. `ServiceBackendTaskCommand` now accepts either the initial-install
+  registration command or the signed `update-start` registration for the
+  current generation, while still binding app, installation, generation,
+  policy revision, controller epoch, release, lease, identity and body.
+  Completed-update history reconstructs the current descriptor/runtime before
+  the runner serves `POST /v1/tasks/run`; the runner rechecks the protected
+  update registration and native container before and after the HTTP exchange.
+  Native-only run `41896929064` completed A-to-B activation and a
+  generation-two `app.backend.task`, logging
+  `MANAGED_UPDATE_SERVICE_TASK_VERIFIED` and reporting
+  `native_managed_update_service_task=true`. The run skipped Chromium by
+  design; browser coverage remains separately bound. See
+  [updated-generation service task evidence](handoff/evidence/platform-update-service-tasks/acceptance.json).
