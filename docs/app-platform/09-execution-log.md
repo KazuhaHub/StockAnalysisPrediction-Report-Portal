@@ -2583,3 +2583,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   Quota/browser `41809487558`, general test `41809487536`, runner daemon
   `41809487540` and CodeQL `41809483933` pass; the quota artifact records the
   same exact frontend digests as the local run.
+
+- Advanced OPS-04 at `a8947caa`. Non-openable My Apps cards now expose a reader
+  status action backed by a current-session, current-audience installation
+  projection. It returns only pending/disabled/attention state, the current
+  operation action and stage, a fixed error category and control pause; it
+  omits operation, generation, revision, lease, actor, endpoint and raw server
+  diagnostics. Anonymous and revoked-audience reads return no installation
+  state, malformed queries are refused, and the route shares the existing
+  bounded application-document admission. Chromium proves the status control
+  is enabled, refresh performs a second bounded read, the modal exposes no
+  internal identity, and the directory remains axe-clean. General
+  `41813973252`, quota/browser `41813973327`, runner daemon `41813973229` and
+  CodeQL `41813964925` pass; the first Web shard hit an unrelated existing
+  AdminOverview failure, passed when rerun alone locally, and passed on the
+  failed-job rerun. See
+  [application failure evidence](handoff/evidence/platform-failure/acceptance.json).

@@ -1,10 +1,14 @@
 {
-  "format": "portal.application-failure-browser-acceptance/1-dev.1",
-  "candidate": "14a1a3748c322896e08cdf88afdc0efb75ddf366",
-  "quotaBrowserRun": "41555201862",
-  "generalTestRun": "41555201842",
-  "runnerDaemonRun": "41555201826",
-  "codeQLRun": "41555197449",
+  "format": "portal.application-failure-browser-acceptance/1-dev.2",
+  "captured_at": "2026-11-04T03:03:00-08:00",
+  "candidate": "a8947caad552c94bc107cbb9f2b663bcd1e56333",
+  "hosted_ci": {
+    "general_test": "41813973252",
+    "quota_browser": "41813973327",
+    "runner_daemon": "41813973229",
+    "codeql": "41813964925",
+    "result": "pass"
+  },
   "physicalViewport": {
     "width": 1440,
     "height": 900
@@ -12,6 +16,7 @@
   "scenarios": [
     "directory-states-admin",
     "directory-states-reader",
+    "directory-reader-status",
     "denied",
     "backend-stopped",
     "ready-timeout",
@@ -21,6 +26,10 @@
     "pendingDisabledAttentionDistinct": true,
     "adminRecoveryLinks": true,
     "readerManagementLinksHidden": true,
+    "nonopenableStatusActionsEnabled": true,
+    "readerStatusBoundedProjection": true,
+    "readerStatusRefresh": true,
+    "readerInternalIdentityHidden": true,
     "installationIdentityHidden": true,
     "countsHidden": true,
     "serverDiagnosticsHidden": true,
@@ -34,9 +43,15 @@
   "evidence": [
     "directory-states-admin.png",
     "directory-states-reader.png",
+    "directory-reader-status.png",
     "denied.png",
     "backend-stopped.png",
     "ready-timeout.png",
-    "protocol-incompatible.png"
+    "protocol-incompatible.png",
+    "browser-report.json"
+  ],
+  "limits": [
+    "The reader status projection exposes only the directory state, operation action and stage, a fixed error category and control pause. It does not expose operation, generation, revision, lease, actor, endpoint or raw server diagnostics.",
+    "The administrator progress page remains the stronger operational surface. Reader log retrieval and a documented diagnostic retention period are still not implemented."
   ]
 }
