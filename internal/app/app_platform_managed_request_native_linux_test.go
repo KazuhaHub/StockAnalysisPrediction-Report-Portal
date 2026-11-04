@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	protocol "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol"
@@ -45,7 +46,8 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 	}
 	response, err := s.requestPlatformManagedBackend(ctx, actor, lease.installationID, "POST", "/v1/echo", []byte(`{"role":"admin","subject":"forged"}`), endpoint)
 	if err != nil {
-		t.Fatal("current viewer request over actual root transport", err)
+		t.Fatal("current viewer request over actual root transport", err,
+			nativeManagedViewerState(t, s, lease.installationID, actor))
 	}
 	count, viewer := decode(response)
 	if count != 2 {
@@ -103,4 +105,24 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 	}
 	t.Log("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")
 	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
+}
+
+func nativeManagedViewerState(
+	t *testing.T, s *Server, installation string,
+	actor platformActorSession,
+) string {
+	t.Helper()
+	state := scalar[string](t, s.st, `SELECT desired_state||':'||phase||':'||
+		generation||':'||policy_revision||':'||COALESCE(runtime_id,'')
+		FROM app_platform_installations WHERE id=?`, installation)
+	activation := scalar[string](t, s.st, `SELECT state||':'||generation||':'||
+		policy_revision FROM app_platform_activations
+		WHERE installation_id=? ORDER BY generation DESC LIMIT 1`, installation)
+	grants := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants
+		WHERE installation_id=? AND principal_type='user' AND username=?
+		AND account_created=? AND account_generation=?`,
+		installation, actor.username, actor.created, actor.generation)
+	return fmt.Sprintf(
+		"installation=%s activation=%s user=%s grants=%d",
+		state, activation, actor.username, grants)
 }
