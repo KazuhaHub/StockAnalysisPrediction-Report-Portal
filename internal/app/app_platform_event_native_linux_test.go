@@ -168,6 +168,17 @@ func activateNativeEventInstallation(
 	t *testing.T, s *Server, lease platformOperationLease,
 ) {
 	t.Helper()
+	stage := scalar[string](t, s.st, `SELECT stage
+		FROM app_platform_operations WHERE id=?`, lease.id)
+	activation := scalar[string](t, s.st, `SELECT state
+		FROM app_platform_activations WHERE installation_id=?
+		ORDER BY generation DESC LIMIT 1`, lease.installationID)
+	phase := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`, lease.installationID)
+	if stage == "complete" && activation == "active" && phase == "ready" {
+		t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
+		return
+	}
 	tx, err := s.st.db.Begin()
 	if err != nil {
 		t.Fatal(err)

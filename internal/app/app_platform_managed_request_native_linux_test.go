@@ -24,13 +24,7 @@ func testNativeManagedViewerRequest(t *testing.T, s *Server, lease platformOpera
 	if r, err := s.requestPlatformManagedBackend(ctx, actor, lease.installationID, "POST", "/v1/echo", []byte(`{}`), endpoint); err == nil || len(r.Body) != 0 || errors.Is(err, errAppPlatformBackendRequestUncertain) {
 		t.Fatal("pending install entered managed viewer request")
 	}
-	now, err := platformDatabaseNow(s.st.poolExec())
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='complete',state_revision=state_revision+1,row_revision=row_revision+1,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL WHERE id=?`, now, now, lease.id)
-	mustExec(t, s.st, `UPDATE app_platform_activations SET state='active' WHERE installation_id=?`, lease.installationID)
-	mustExec(t, s.st, `UPDATE app_platform_installations SET phase='ready' WHERE id=?`, lease.installationID)
+	activateNativeEventInstallation(t, s, lease)
 	platformGrantLaunchUser(t, s, actor, lease.installationID)
 	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, actor.username)
 	decode := func(r driver.BackendResponse) (int64, protocol.Viewer) {
