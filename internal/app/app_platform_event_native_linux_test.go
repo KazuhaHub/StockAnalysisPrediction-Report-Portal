@@ -32,6 +32,7 @@ func testNativePortalEventDelivery(
 		t.Fatal("native event subscription", subscriptionID, created, err,
 			nativeEventInstallationState(t, s, installation))
 	}
+	t.Log("EVENT_SUBSCRIPTION_CREATED")
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants
 		SET granted=0 WHERE installation_id=? AND capability='reports.read'`,
 		installation)
@@ -64,6 +65,7 @@ func testNativePortalEventDelivery(
 			t.Fatal("capture native event", err)
 		}
 	}
+	t.Log("EVENT_SOURCE_TASKS_CREATED")
 	newerOccurrence, _ := appplatform.EventOccurrence(newer.ID, 1)
 	olderOccurrence, _ := appplatform.EventOccurrence(older.ID, 1)
 	mustExec(t, s.st, `UPDATE app_platform_tasks
@@ -83,6 +85,7 @@ func testNativePortalEventDelivery(
 			t.Fatalf("native event worker %d: worked=%v err=%v", i, worked, err)
 		}
 	}
+	t.Log("EVENT_ORDERED_DELIVERIES_COMPLETE")
 	if got := nativeTaskDecision(t, s, installation, newerOccurrence); got != "applied" {
 		t.Fatalf("newer event decision = %q", got)
 	}
@@ -113,6 +116,7 @@ func testNativePortalEventDelivery(
 		t.Fatalf("uncertain event was retried automatically: worked=%v err=%v",
 			worked, err)
 	}
+	t.Log("EVENT_LOST_ACK_UNCERTAIN")
 	var taskID string
 	var payload []byte
 	if err := s.st.queryRow(`SELECT id,payload FROM app_platform_tasks
@@ -146,6 +150,7 @@ func testNativePortalEventDelivery(
 	if result.Outcome != appplatform.TaskResultSucceeded {
 		t.Fatalf("deduplicated retry = %+v", result)
 	}
+	t.Log("EVENT_MANUAL_REPLAY_COMPLETE")
 	var retryResult struct {
 		Decision string `json:"decision"`
 	}
@@ -253,6 +258,14 @@ func nativeTaskDecision(
 		WHERE installation_id=? AND occurrence_id=?`,
 		installation, occurrence).Scan(&result); err != nil {
 		t.Fatal(err)
+	}
+	if len(result) == 0 {
+		state := scalar[string](t, s.st, `SELECT state||':'||
+			COALESCE(error_code,'')||':'||COALESCE(result_json,'')
+			FROM app_platform_tasks
+			WHERE installation_id=? AND occurrence_id=?`,
+			installation, occurrence)
+		t.Fatalf("event task has no result: %s", state)
 	}
 	var decoded struct {
 		Decision string `json:"decision"`
