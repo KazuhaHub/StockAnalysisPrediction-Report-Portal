@@ -44,13 +44,6 @@ func platformServiceIdentityFixtureForAppWithSession(t *testing.T, appID string)
 	return s, admin, installation
 }
 
-func platformServiceIdentityFixtureForAppWithStore(t *testing.T, st *Store, appID string) (*Server, string) {
-	t.Helper()
-	s, _, installation := platformServiceIdentityFixtureForAppWithStoreSession(
-		t, st, appID)
-	return s, installation
-}
-
 func platformServiceIdentityFixtureForAppWithStoreSession(t *testing.T, st *Store, appID string) (*Server, platformActorSession, string) {
 	t.Helper()
 	s, admin := platformActorTestServerWithStore(t, st)
