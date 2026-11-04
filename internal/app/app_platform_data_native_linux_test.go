@@ -600,6 +600,10 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				t.Fatal("native backend request relay missing")
 			}
 			t.Log("MANAGED_BACKEND_REQUEST_RELAY_VERIFIED")
+			if !bytes.Contains(output.Bytes(), []byte("EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK")) {
+				t.Fatal("native duplicate/out-of-order/lost-ack event delivery missing")
+			}
+			t.Log("EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK")
 			if !bytes.Contains(output.Bytes(), []byte("MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED")) {
 				t.Fatalf("current viewer request verification missing from controller child: %s", output.String())
 			}
