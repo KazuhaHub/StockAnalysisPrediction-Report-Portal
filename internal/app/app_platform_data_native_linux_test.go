@@ -500,7 +500,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			if exactScheduledDigest {
 				markers = append(markers,
 					"SCHEDULED_DIGEST_EXACT_REGISTRATION_HANDSHAKE_VERIFIED",
-					"SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED")
+					"SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED",
+					"SCHEDULED_DIGEST_SETUP_REQUIRED_AND_CONFIGURED")
 			} else {
 				markers = append(markers,
 					"MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
