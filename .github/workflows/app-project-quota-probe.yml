@@ -216,7 +216,6 @@ jobs:
             echo "APP_SDK_BROWSER_RUNNER=$sdk_public/run.cjs"
             echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
             echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
-            echo "APP_SCHEDULED_DIGEST_CANDIDATE=$RUNNER_TEMP/scheduled-digest-candidate"
           } >> "$GITHUB_ENV"
       - name: Exercise the generated template in the actual Portal shell
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
@@ -311,6 +310,7 @@ jobs:
         shell: bash
         env:
           PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && '1' || '0' }}
+          APP_SCHEDULED_DIGEST_CANDIDATE: ${{ runner.temp }}/scheduled-digest-candidate
         run: |
           set -euo pipefail
           sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_CANDIDATE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
