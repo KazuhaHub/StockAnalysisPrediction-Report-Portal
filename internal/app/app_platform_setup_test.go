@@ -7,6 +7,41 @@ import (
 	"time"
 )
 
+func activatePlatformTestSetupBinding(
+	t *testing.T, s *Server, admin platformActorSession,
+	installation string,
+) {
+	t.Helper()
+	appID := scalar[string](t, s.st, `SELECT app_id
+		FROM app_platform_installations WHERE id=?`, installation)
+	policyRevision := scalar[int64](t, s.st, `SELECT policy_revision
+		FROM app_platform_installations WHERE id=?`, installation)
+	missing, err := platformMissingSetupBindings(
+		s.st.poolExec(), installation, appID, policyRevision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range missing {
+		credential, err := s.changePlatformCredential(
+			admin, platformCredentialChange{
+				kind: "create", label: "Setup fixture " + name,
+				value: []byte("disposable-setup-" + name),
+			})
+		if err != nil {
+			t.Fatal(err)
+		}
+		plan, err := s.createPlatformSecretBindingReview(
+			admin, installation, name, credential.ID, "raw_read")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.consumePlatformSecretBindingReview(
+			admin, plan.ID, plan.SHA256); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestPlatformRequiredSetupBindingControlsRunnablePhase(t *testing.T) {
 	s, admin, installation, credential := platformSecretBindingFixture(t, false)
 	mustExec(t, s.st, `UPDATE app_platform_installations

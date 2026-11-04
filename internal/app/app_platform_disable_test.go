@@ -137,6 +137,14 @@ func TestPlatformFrontendDisableSchedulerPreservesPluginData(t *testing.T) {
 
 func testPlatformManagedDisableSchedulerRequiresRecovery(t *testing.T, pg bool) {
 	s, actor, installed := platformManagedAccessFixture(t, pg)
+	activatePlatformTestSetupBinding(
+		t, s, actor, installed.installationID)
+	beforeDisable, err := s.preparePlatformManagedBackendAccess(
+		context.Background(), actor, installed.installationID)
+	if err != nil {
+		t.Fatalf("broker access before disable: %v", err)
+	}
+	beforeDisable.Close()
 	plan, err := s.createPlatformRemovalReview(actor, installed.installationID, appplatform.ActionDisable)
 	if err != nil {
 		t.Fatal(err)
@@ -144,6 +152,11 @@ func testPlatformManagedDisableSchedulerRequiresRecovery(t *testing.T, pg bool) 
 	commit, err := s.consumePlatformRemovalReview(actor, plan.ID, plan.SHA256, platformFixtureID(1212))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if denied, err := s.preparePlatformManagedBackendAccess(
+		context.Background(), actor, installed.installationID); err == nil {
+		denied.Close()
+		t.Fatal("disabled installation retained broker access")
 	}
 	scheduler := platformSchedulerFixture(t, s)
 	for attempt := 0; attempt < platformInstallAttemptLimit; attempt++ {
