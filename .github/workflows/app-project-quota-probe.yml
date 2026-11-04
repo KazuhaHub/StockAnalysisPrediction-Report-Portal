@@ -189,6 +189,12 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: Build exact Scheduled Digest package candidate for native-only probe
+        if: github.event_name == 'workflow_dispatch' && inputs.skip_browser == true
+        run: |
+          npm ci --prefix .sdk-browser-apps
+          python3 .sdk-browser-apps/scripts/build-app-v2.py scheduled-digest \
+            --output "$RUNNER_TEMP/scheduled-digest-candidate"
       - name: Build the exact shared SDK and Portal browser fixtures
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
         env:
