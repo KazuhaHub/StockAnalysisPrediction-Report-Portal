@@ -1,6 +1,9 @@
 import importlib.util
 import json
 from pathlib import Path
+import socket
+import tempfile
+import threading
 import unittest
 
 
@@ -74,6 +77,34 @@ class ScheduledDigestImageTest(unittest.TestCase):
             "localhost:5000/scheduled-digest-exact@sha256:short",
         ):
             self.assertIsNone(SUBJECT.IMAGE.fullmatch(invalid))
+
+    def test_request_accepts_pathlib_unix_socket(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "app.sock"
+            listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            listener.bind(str(path))
+            listener.listen(1)
+
+            def serve():
+                connection, _ = listener.accept()
+                try:
+                    connection.recv(4096)
+                    connection.sendall(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n"
+                        b"Connection: close\r\n\r\n{}"
+                    )
+                finally:
+                    connection.close()
+
+            worker = threading.Thread(target=serve)
+            worker.start()
+            try:
+                status, raw = SUBJECT.request(path, "GET", "/health/ready")
+            finally:
+                worker.join(timeout=5)
+                listener.close()
+            self.assertEqual(status, 200)
+            self.assertEqual(raw, b"{}")
 
 
 if __name__ == "__main__":

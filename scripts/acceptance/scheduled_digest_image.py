@@ -26,7 +26,7 @@ class UnixHTTPConnection(http.client.HTTPConnection):
     def connect(self):
         connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         connection.settimeout(self.timeout)
-        connection.connect(self.path)
+        connection.connect(str(self.path))
         self.sock = connection
 
 
