@@ -204,6 +204,8 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 		return zero, ErrFenceReconciliation
 	}
 	command := verified.Command()
+	registrationRaw := bytes.Clone(command.RegistrationRaw)
+	registrationSignature := bytes.Clone(command.RegistrationSignature)
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil ||
 		parsed.SHA256 != update.Start().Command().Payload.TargetReleaseSHA256 ||
@@ -222,7 +224,7 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 	}
 	defer s.releaseDataExecution()
 	before, err := s.prepareUpdateStartBackendExchange(
-		ctx, raw, signature)
+		ctx, registrationRaw, registrationSignature)
 	if err != nil {
 		return zero, fmt.Errorf(
 			"update service registration exchange: %w", err)
@@ -269,7 +271,7 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 		return zero, ErrFenceReconciliation
 	}
 	tx, after, err := beginUpdateStartRegistration(
-		ctx, s, raw, signature, "applied")
+		ctx, s, registrationRaw, registrationSignature, "applied")
 	if err != nil {
 		return zero, fmt.Errorf(
 			"update service registration recheck: %w", err)

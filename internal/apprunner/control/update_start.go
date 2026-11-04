@@ -213,12 +213,19 @@ func VerifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64) 
 			"update-start command parse: %w", ErrInvalidCommand)
 	}
 	revision, ok := counter(c.ControlRevision, true)
-	if !ok || revision != authority.ControlRevision ||
-		c.DeploymentID != authority.DeploymentID || c.ControllerEpoch != authority.ControllerEpoch {
+	if !ok || revision != authority.ControlRevision {
 		return VerifiedUpdateStartCommand{}, fmt.Errorf(
 			"update-start authority tuple revision=%s/%d: %w",
 			c.ControlRevision, authority.ControlRevision,
 			ErrInvalidCommand)
+	}
+	if c.DeploymentID != authority.DeploymentID {
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start deployment tuple: %w", ErrInvalidCommand)
+	}
+	if c.ControllerEpoch != authority.ControllerEpoch {
+		return VerifiedUpdateStartCommand{}, fmt.Errorf(
+			"update-start controller epoch tuple: %w", ErrInvalidCommand)
 	}
 	issued, ok := counter(c.IssuedMS, false)
 	if !ok {
