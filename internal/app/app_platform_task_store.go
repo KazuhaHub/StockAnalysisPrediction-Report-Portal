@@ -370,6 +370,9 @@ func (s *Server) claimNextPlatformTask(ctx context.Context, worker string) (plat
 		}
 		return task, nil
 	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
 	return zero, nil
 }
 
@@ -427,6 +430,25 @@ func validPlatformTaskState(state appplatform.TaskState) bool {
 }
 
 func expirePlatformTasks(e migExec, now int64) error {
+	// A dead worker cannot prove whether its external effect committed. Close the
+	// stale attempt as uncertain and revoke its lease; never put it back in the
+	// automatic retry queue.
+	if _, err := e.exec(`UPDATE app_platform_task_attempts
+		SET state='uncertain',finished_ms=?,error_code='task_lease_expired',updated_ms=?
+		WHERE state IN ('leased','running') AND task_id IN (
+			SELECT id FROM app_platform_tasks
+			WHERE state IN ('leased','running') AND lease_until_ms<=?)`,
+		now, now, now); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_tasks
+		SET state='uncertain',worker_id=NULL,lease_id=NULL,lease_until_ms=NULL,
+		    error_code='task_lease_expired',result_json=NULL,
+		    revision=revision+1,updated_ms=?
+		WHERE state IN ('leased','running') AND lease_until_ms<=?`,
+		now, now); err != nil {
+		return err
+	}
 	if _, err := e.exec(`UPDATE app_platform_task_attempts
 		SET state='uncertain',finished_ms=?,error_code='task_expired',updated_ms=?
 		WHERE state IN ('leased','running') AND task_id IN (

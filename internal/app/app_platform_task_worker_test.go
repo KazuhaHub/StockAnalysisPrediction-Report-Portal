@@ -215,6 +215,87 @@ func TestPlatformTaskUncertaintyNeverReleasesResultOrRetries(t *testing.T) {
 	}
 }
 
+func testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t *testing.T, postgres bool) {
+	s, installation := platformServiceIdentityFixtureWithDatabase(t, postgres)
+	admitTaskFixture(t, s, installation, "worker-killed",
+		appplatform.TaskHandlerBackend, []byte(`{"fixture":"killed"}`))
+	claimed, err := s.claimNextPlatformTask(context.Background(), platformFixtureID(6045))
+	if err != nil || claimed.ID == "" {
+		t.Fatal("claim", err)
+	}
+	started, _, err := s.startPlatformTask(context.Background(), claimed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_tasks
+		SET state='running',created_ms=1,updated_ms=1,
+		    lease_until_ms=60000 WHERE id=?`, started.ID)
+	mustExec(t, s.st, `UPDATE app_platform_task_attempts
+		SET state='running',created_ms=1,started_ms=1,
+		    lease_until_ms=60000,updated_ms=1
+		WHERE task_id=? AND attempt=?`,
+		started.ID, started.Attempts)
+
+	executed := 0
+	s.platformTaskBackend = func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult {
+		executed++
+		return appplatform.TaskExecutionResult{Outcome: appplatform.TaskResultSucceeded}
+	}
+	next, err := s.claimNextPlatformTask(context.Background(), platformFixtureID(6046))
+	if err != nil || next.ID != "" {
+		t.Fatalf("expired lease was reclaimed: next=%+v err=%v", next, err)
+	}
+	if executed != 0 {
+		t.Fatal("expired lease automatically replayed the handler")
+	}
+	if got := scalar[string](t, s.st, `SELECT state||':'||error_code FROM app_platform_tasks WHERE id=?`, started.ID); got != "uncertain:task_lease_expired" {
+		t.Fatalf("task state = %q", got)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_tasks WHERE id=? AND worker_id IS NULL AND lease_id IS NULL AND lease_until_ms IS NULL AND result_json IS NULL AND completed_ms IS NULL`, started.ID) != 1 {
+		t.Fatal("expired task retained executable authority or a result")
+	}
+	if got := scalar[string](t, s.st, `SELECT state||':'||error_code FROM app_platform_task_attempts WHERE task_id=? AND attempt=?`, started.ID, started.Attempts); got != "uncertain:task_lease_expired" {
+		t.Fatalf("attempt state = %q", got)
+	}
+	again, err := s.claimNextPlatformTask(context.Background(), platformFixtureID(6047))
+	if err != nil || again.ID != "" || executed != 0 {
+		t.Fatal("uncertain expired task retried")
+	}
+}
+
+func TestPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetriesSQLite(t *testing.T) {
+	testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t, false)
+}
+
+func TestPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetriesPostgres(t *testing.T) {
+	testPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(t, true)
+}
+
+func testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t *testing.T, postgres bool) {
+	s, installation := platformServiceIdentityFixtureWithDatabase(t, postgres)
+	admitTaskFixture(t, s, installation, "authority-loss-persisted",
+		appplatform.TaskHandlerBackend, []byte(`{"fixture":true}`))
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants
+		SET granted=0 WHERE installation_id=? AND capability='background.run'`,
+		installation)
+	claimed, err := s.claimNextPlatformTask(
+		context.Background(), platformFixtureID(6048))
+	if err != nil || claimed.ID != "" {
+		t.Fatalf("unauthorized task claimed: %+v %v", claimed, err)
+	}
+	if got := scalar[string](t, s.st, `SELECT state||':'||error_code FROM app_platform_tasks`); got != "review_required:task_authority_lost" {
+		t.Fatalf("authority loss was rolled back: %q", got)
+	}
+}
+
+func TestPlatformTaskClaimCommitsAuthorityLossWithoutWorkSQLite(t *testing.T) {
+	testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t, false)
+}
+
+func TestPlatformTaskClaimCommitsAuthorityLossWithoutWorkPostgres(t *testing.T) {
+	testPlatformTaskClaimCommitsAuthorityLossWithoutWork(t, true)
+}
+
 func TestPlatformTaskAdmissionIsIdempotentAndImmutable(t *testing.T) {
 	s, installation := platformServiceIdentityFixture(t)
 	now, err := platformDatabaseNow(s.st.poolExec())

@@ -19,7 +19,13 @@ func platformServiceIdentityFixture(t *testing.T) (*Server, string) {
 
 func platformServiceIdentityFixtureWithDatabase(t *testing.T, postgres bool) (*Server, string) {
 	t.Helper()
-	s, admin := platformActorTestServer(t, postgres)
+	return platformServiceIdentityFixtureWithStore(
+		t, platformTestStore(t, postgres))
+}
+
+func platformServiceIdentityFixtureWithStore(t *testing.T, st *Store) (*Server, string) {
+	t.Helper()
+	s, admin := platformActorTestServerWithStore(t, st)
 	if err := s.initializeAppPlatformControl(admin); err != nil {
 		t.Fatal(err)
 	}
