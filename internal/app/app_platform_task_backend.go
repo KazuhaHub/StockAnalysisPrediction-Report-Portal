@@ -14,12 +14,10 @@ import (
 )
 
 type platformServiceTaskIntent struct {
-	delivery       platformBackendDeliveryIntent
-	description    []byte
-	runtime        platformRuntimeRegistration
-	controlSeed    []byte
-	command        control.ServiceBackendTaskCommand
-	raw, signature []byte
+	delivery    platformBackendDeliveryIntent
+	description []byte
+	runtime     platformRuntimeRegistration
+	controlSeed []byte
 }
 
 func (s *Server) preparePlatformServiceTask(
