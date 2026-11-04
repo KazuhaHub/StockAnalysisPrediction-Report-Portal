@@ -3567,6 +3567,7 @@
   "appCredentials.operation": "Operation",
   "appCredentials.operation.http_bearer": "Authorization: Bearer",
   "appCredentials.operation.http_api_key": "X-API-Key",
+  "appCredentials.operation.raw_read": "Setup-only credential",
   "appCredentials.state.active": "Active",
   "appCredentials.state.review_required": "Review required",
   "appCredentials.state.revoked": "Revoked",

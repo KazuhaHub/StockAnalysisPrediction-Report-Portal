@@ -40,7 +40,7 @@ interface Binding {
   credential_id: string
   credential_label: string
   credential_value_revision: number
-  operation: 'http_bearer' | 'http_api_key'
+  operation: 'http_bearer' | 'http_api_key' | 'raw_read'
   state: 'active' | 'revoked' | 'review_required'
   policy_revision: number
   revision: number
@@ -299,7 +299,7 @@ export default function AppCredentialsPage() {
         : {
             name: appKey === 'scheduled-digest' ? 'digest-feed' : '',
             credential_id: '',
-            operation: 'http_bearer',
+            operation: appKey === 'scheduled-digest' ? 'raw_read' : 'http_bearer',
           },
     )
     setBindingOpen(true)
@@ -464,6 +464,9 @@ export default function AppCredentialsPage() {
             <Select
               disabled={!!bindingSeed}
               options={[
+                ...(appKey === 'scheduled-digest'
+                  ? [{ value: 'raw_read', label: t('appCredentials.operation.raw_read') }]
+                  : []),
                 { value: 'http_bearer', label: t('appCredentials.operation.http_bearer') },
                 { value: 'http_api_key', label: t('appCredentials.operation.http_api_key') },
               ]}

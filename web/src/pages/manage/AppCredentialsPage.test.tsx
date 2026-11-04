@@ -142,6 +142,7 @@ describe('application credential settings', () => {
     await screen.findAllByText('Upstream API')
     await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
     expect((screen.getByLabelText('appCredentials.name') as HTMLInputElement).value).toBe('digest-feed')
+    expect(screen.getByText('appCredentials.operation.raw_read')).toBeTruthy()
   })
 
   it('opens the shared revoke confirmation from the keyboard and restores focus on Escape', async () => {

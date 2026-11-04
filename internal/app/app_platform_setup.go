@@ -16,6 +16,15 @@ func platformRequiredSetupBindings(appID string) []string {
 	}
 }
 
+func platformRequiredSetupBinding(appID, name string) bool {
+	for _, required := range platformRequiredSetupBindings(appID) {
+		if required == name {
+			return true
+		}
+	}
+	return false
+}
+
 func platformMissingSetupBindings(e migExec, installation, appID string, policyRevision int64) ([]string, error) {
 	var missing []string
 	for _, name := range platformRequiredSetupBindings(appID) {

@@ -6,16 +6,18 @@ external provider credentials, or a neutral-operator walkthrough.
 ## Product
 
 Scheduled Digest is the first reference application with a required business
-configuration. Its signed descriptor now requires `network.http`, and the
-installation-scoped binding named `digest-feed` is the setup boundary. The
-binding uses the existing reviewed credential and reviewed-network custody path;
-no new Portal schema or global configuration table was added.
+configuration. The installation-scoped binding named `digest-feed` is the setup
+boundary. A setup-only (`raw_read`) binding completes the gate without granting
+network use; when optional `network.http` is later approved, the same binding
+name can be reapproved as a reviewed HTTP binding. The binding uses the existing
+reviewed credential and reviewed-network custody path; no new Portal schema or
+global configuration table was added.
 
 After initial activation, a Scheduled Digest installation whose binding is not
 active is persisted as `setup_required`. It is not openable and its backend is
 not launchable. The settings projection reports both the phase gap and the exact
 missing binding. The administrator can open the existing credential page, create
-the credential, and approve the `digest-feed` binding. Approval atomically
+the credential, and approve the `digest-feed` setup binding. Approval atomically
 advances the same installation to `ready`; it does not grant a new capability or
 change the install audience.
 

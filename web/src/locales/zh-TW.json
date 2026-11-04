@@ -3567,6 +3567,7 @@
   "appCredentials.operation": "用途",
   "appCredentials.operation.http_bearer": "Authorization: Bearer",
   "appCredentials.operation.http_api_key": "X-API-Key",
+  "appCredentials.operation.raw_read": "僅用於完成的設定憑證",
   "appCredentials.state.active": "有效",
   "appCredentials.state.review_required": "需要重新稽核",
   "appCredentials.state.revoked": "已撤銷",

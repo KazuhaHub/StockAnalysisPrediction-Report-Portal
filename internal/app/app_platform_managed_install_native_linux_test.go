@@ -52,23 +52,8 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if _, err := s.createPlatformNativeInstallReview(session, release.sha256, 1); err == nil {
 		t.Fatal("legacy review accepted backend")
 	}
-	networkWritable := false
-	var plan platformRemovalReview
-	if exactImage {
-		policy, parseErr := appplatform.ParseHTTPPolicy(
-			[]byte(platformNetworkPolicyFixture(t)))
-		if parseErr != nil {
-			t.Fatal("scheduled digest network policy", parseErr)
-		}
-		plan, err = s.createPlatformNetworkWritableInstallReview(
-			ctx, session, release.sha256, release.trustRevision,
-			nil, endpoint, policy.Policy)
-		networkWritable = err == nil
-	} else {
-		plan, err = s.createPlatformManagedInstallReview(
-			ctx, session, release.sha256, release.trustRevision,
-			nil, endpoint)
-	}
+	plan, err := s.createPlatformManagedInstallReview(
+		ctx, session, release.sha256, release.trustRevision, nil, endpoint)
 	if err != nil {
 		t.Fatal("managed review", err)
 	}
@@ -79,28 +64,26 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if _, err := s.consumePlatformInstallReview(session, plan.ID, plan.SHA256, platformFixtureID(880)); err == nil {
 		t.Fatal("legacy consumption promoted managed review")
 	}
-	consume := func(key string) (platformRemovalCommit, error) {
-		if networkWritable {
-			return s.consumePlatformNetworkWritableInstallReview(
-				ctx, session, plan.ID, plan.SHA256, key, endpoint)
-		}
-		return s.consumePlatformManagedInstallReview(
-			ctx, session, plan.ID, plan.SHA256, key, endpoint)
-	}
 	before := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`)
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0 WHERE id=?`, facts.runtime.id)
-	if _, err := consume(platformFixtureID(880)); err == nil {
+	if _, err := s.consumePlatformManagedInstallReview(
+		ctx, session, plan.ID, plan.SHA256,
+		platformFixtureID(880), endpoint); err == nil {
 		t.Fatal("disabled runtime consumed review")
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != before {
 		t.Fatal("failed consumption partially installed app")
 	}
 	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1 WHERE id=?`, facts.runtime.id)
-	admitted, err := consume(platformFixtureID(880))
+	admitted, err := s.consumePlatformManagedInstallReview(
+		ctx, session, plan.ID, plan.SHA256,
+		platformFixtureID(880), endpoint)
 	if err != nil {
 		t.Fatal("managed admission", err)
 	}
-	replay, err := consume(platformFixtureID(880))
+	replay, err := s.consumePlatformManagedInstallReview(
+		ctx, session, plan.ID, plan.SHA256,
+		platformFixtureID(880), endpoint)
 	if err != nil || !replay.Replayed || replay.OperationID != admitted.OperationID {
 		t.Fatal("managed admission replay", err)
 	}

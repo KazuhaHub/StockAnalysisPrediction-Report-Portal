@@ -185,7 +185,7 @@ func (s *Server) apiPlatformSecretBindingPlan(w http.ResponseWriter, r *http.Req
 	name, nameErr := platformManagementString(fields, "name")
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
-	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key") {
+	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -320,7 +320,7 @@ func (s *Server) apiPlatformAppSecretBindingPlan(w http.ResponseWriter, r *http.
 	name, nameErr := platformManagementString(fields, "name")
 	credential, credentialErr := platformManagementString(fields, "credential_id")
 	operation, operationErr := platformManagementString(fields, "operation")
-	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key") {
+	if nameErr != nil || credentialErr != nil || operationErr != nil || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credential) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}

@@ -86,6 +86,31 @@ func TestPlatformRequiredSetupBindingControlsRunnablePhase(t *testing.T) {
 	}
 }
 
+func TestPlatformSetupOnlyBindingDoesNotRequireNetworkAuthority(t *testing.T) {
+	s, admin, installation, credential := platformSecretBindingFixture(t, false)
+	mustExec(t, s.st, `UPDATE app_platform_installations
+		SET app_id='scheduled-digest',phase='setup_required'
+		WHERE id=?`, installation)
+	mustExec(t, s.st, `DELETE FROM app_platform_capability_grants
+		WHERE installation_id=? AND capability='network.http'`, installation)
+	plan, err := s.createPlatformSecretBindingReview(
+		admin, installation, platformDigestFeedBinding,
+		credential.ID, "raw_read")
+	if err != nil {
+		t.Fatal("setup-only binding review", err)
+	}
+	binding, err := s.consumePlatformSecretBindingReview(
+		admin, plan.ID, plan.SHA256)
+	if err != nil || binding.Operation != "raw_read" {
+		t.Fatal("setup-only binding activation", binding, err)
+	}
+	if got := scalar[string](t, s.st, `SELECT phase
+		FROM app_platform_installations WHERE id=?`,
+		installation); got != "ready" {
+		t.Fatalf("setup-only configured phase = %q", got)
+	}
+}
+
 func TestPlatformTaskAdmissionRefusesMissingBusinessSetup(t *testing.T) {
 	s, installation := platformServiceIdentityFixtureForApp(
 		t, "scheduled-digest")

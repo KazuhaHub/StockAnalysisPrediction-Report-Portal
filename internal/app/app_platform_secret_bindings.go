@@ -110,6 +110,10 @@ type platformSecretBindingUse struct {
 }
 
 func loadPlatformSecretBindingFacts(e migExec, installation string, lock bool) (platformSecretBindingFacts, error) {
+	return loadPlatformSecretBindingFactsMode(e, installation, lock, false)
+}
+
+func loadPlatformSecretBindingFactsMode(e migExec, installation string, lock, allowNoNetwork bool) (platformSecretBindingFacts, error) {
 	var f platformSecretBindingFacts
 	lockSQL := ""
 	if lock && e.s.driver == "postgres" {
@@ -132,15 +136,20 @@ func loadPlatformSecretBindingFacts(e migExec, installation string, lock bool) (
 		return f, errAppPlatformCredentialUnavailable
 	}
 	var networkRaw, networkReview string
-	if err := e.queryRow(`SELECT g.policy_json,g.review_plan_id FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='network.http' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL`, installation, f.policyRevision).
-		Scan(&networkRaw, &networkReview); err != nil {
+	err := e.queryRow(`SELECT g.policy_json,g.review_plan_id FROM app_platform_capability_grants g JOIN app_platform_review_plans p ON p.id=g.review_plan_id WHERE g.installation_id=? AND g.capability='network.http' AND g.granted=1 AND g.policy_revision=? AND p.consumed_ms IS NOT NULL`, installation, f.policyRevision).
+		Scan(&networkRaw, &networkReview)
+	switch {
+	case err == nil:
+		network, parseErr := appplatform.ParseHTTPPolicy([]byte(networkRaw))
+		if parseErr != nil || !platformValidUUID(networkReview) {
+			return f, errAppPlatformCredentialUnavailable
+		}
+		f.networkPolicySHA = network.SHA256
+	case errors.Is(err, sql.ErrNoRows) && allowNoNetwork:
+		f.networkPolicySHA = ""
+	default:
 		return f, errAppPlatformCredentialUnavailable
 	}
-	network, err := appplatform.ParseHTTPPolicy([]byte(networkRaw))
-	if err != nil || !platformValidUUID(networkReview) {
-		return f, errAppPlatformCredentialUnavailable
-	}
-	f.networkPolicySHA = network.SHA256
 	var secretsGrant, currentEpoch, restorePaused string
 	if err := e.queryRow(`SELECT COALESCE((SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='secrets.use' AND granted=1 AND policy_revision=?),0),
 		COALESCE((SELECT v FROM meta WHERE k='app_platform_controller_epoch'),''),
@@ -159,16 +168,22 @@ func platformSecretBindingPolicyFor(operation, networkPolicySHA string) ([]byte,
 
 func (s *Server) createPlatformSecretBindingReview(session platformActorSession, installation, name, credentialID, operation string) (platformSecretBindingReviewResult, error) {
 	var result platformSecretBindingReviewResult
-	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key") {
+	if !platformValidUUID(installation) || !platformSecretBindingNamePattern.MatchString(name) || !platformValidUUID(credentialID) || (operation != "http_bearer" && operation != "http_api_key" && operation != "raw_read") {
 		return result, errPlatformManagementInput
 	}
 	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if err := lockPlatformPublisherTrust(e); err != nil {
 			return err
 		}
-		facts, err := loadPlatformSecretBindingFacts(e, installation, true)
+		allowNoNetwork := operation == "raw_read"
+		facts, err := loadPlatformSecretBindingFactsMode(
+			e, installation, true, allowNoNetwork)
 		if err != nil {
 			return err
+		}
+		if allowNoNetwork &&
+			!platformRequiredSetupBinding(facts.appID, name) {
+			return errPlatformManagementInput
 		}
 		var label, credentialState string
 		var credentialRevision, valueRevision int64
@@ -236,7 +251,7 @@ func parsePlatformSecretBindingReview(raw string) (platformSecretBindingReview, 
 		return plan, errAppPlatformCredentialUnavailable
 	}
 	canonical, err := json.Marshal(plan)
-	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key") || !platformValidSHA(plan.NetworkPolicySHA256) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
+	if err != nil || !bytes.Equal(canonical, []byte(raw)) || plan.Format != platformSecretBindingReviewFormat || !platformValidUUID(plan.InstallationID) || !platformDirectoryAppID.MatchString(plan.AppID) || !platformDirectoryAppID.MatchString(plan.PublisherID) || !platformValidUUID(plan.ControllerEpoch) || !platformValidSHA(plan.ReleaseSHA256) || !platformValidUUID(plan.BindingID) || plan.BindingRevision < 0 || !platformSecretBindingNamePattern.MatchString(plan.Name) || !platformValidUUID(plan.CredentialID) || !validPlatformCredentialLabel(plan.CredentialLabel) || (plan.Operation != "http_bearer" && plan.Operation != "http_api_key" && plan.Operation != "raw_read") || (plan.Operation == "raw_read" && (!platformRequiredSetupBinding(plan.AppID, plan.Name) || plan.NetworkPolicySHA256 != "")) || (plan.Operation != "raw_read" && !platformValidSHA(plan.NetworkPolicySHA256)) || !platformValidSHA(plan.ActorAuthority) || plan.Generation < 1 || plan.InstallationRevision < 1 || plan.PolicyRevision < 1 || plan.TrustRevision < 1 || plan.CredentialRevision < 1 || plan.CredentialValueRevision < 1 {
 		return platformSecretBindingReview{}, errAppPlatformCredentialUnavailable
 	}
 	return plan, nil
@@ -284,7 +299,8 @@ func (s *Server) consumePlatformSecretBindingReview(session platformActorSession
 			return errAppPlatformPlanChanged
 		}
 		planFacts := platformSecretBindingFacts{appID: plan.AppID, publisherID: plan.PublisherID, generation: plan.Generation, installationRevision: plan.InstallationRevision, policyRevision: plan.PolicyRevision, trustRevision: plan.TrustRevision, controllerEpoch: plan.ControllerEpoch, releaseSHA: plan.ReleaseSHA256, networkPolicySHA: plan.NetworkPolicySHA256}
-		current, err := loadPlatformSecretBindingFacts(e, plan.InstallationID, true)
+		current, err := loadPlatformSecretBindingFactsMode(
+			e, plan.InstallationID, true, plan.Operation == "raw_read")
 		if err != nil || current != planFacts {
 			return errAppPlatformPlanChanged
 		}

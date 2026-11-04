@@ -36,7 +36,7 @@ func configureNativeScheduledDigestSetup(
 	}
 	review, err := s.createPlatformSecretBindingReview(
 		admin, installation, platformDigestFeedBinding,
-		credential.ID, "http_bearer")
+		credential.ID, "raw_read")
 	if err != nil {
 		t.Fatal("scheduled digest setup review", err)
 	}
