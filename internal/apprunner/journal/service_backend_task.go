@@ -229,6 +229,15 @@ func (s *Store) forwardUpdateStartServiceBackendTask(
 		return zero, fmt.Errorf(
 			"update service registration exchange: %w", err)
 	}
+	request, expected, err := updateStartExpectedSnapshot(
+		before.facts.source.start,
+		before.facts.source.running.Claim, descriptor)
+	if err != nil {
+		return zero, fmt.Errorf(
+			"update service descriptor snapshot: %w", err)
+	}
+	before.request = request
+	before.binding.Launch = expected
 	if _, err := control.VerifyServiceBackendTask(
 		raw, signature, before.facts.source.start.authority,
 		time.Now().UnixMilli()); err != nil {
