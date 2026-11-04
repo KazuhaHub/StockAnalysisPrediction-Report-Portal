@@ -366,6 +366,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 					t.Error("managed service candidate IPC cleanup", err)
 				}
 			}
+			if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" {
+				return
+			}
 			witnessName := "writable-auto-start.json"
 			if _, err := os.Stat(
 				filepath.Join(childData,
