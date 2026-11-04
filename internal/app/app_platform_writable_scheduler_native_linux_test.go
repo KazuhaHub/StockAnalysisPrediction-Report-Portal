@@ -453,8 +453,7 @@ func testNativeWritableManagedUpdateVersion(
 		logManagedUpdateState(t, s, admitted.OperationID, installation)
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
-	testNativePortalEventDelivery(t, s, lease, endpoint)
-	t.Log("MANAGED_UPDATE_EVENT_TASK_VERIFIED")
+	testNativeUpdatedEventTask(t, s, installation, endpoint)
 	testNativeUpdatedBackendTask(t, s, installation, endpoint)
 	t.Log("MANAGED_UPDATE_A_TO_B")
 	return admitted.OperationID, release.sha256

@@ -130,6 +130,16 @@ func (h *fixtureEventHandler) handle(w http.ResponseWriter, r *http.Request) {
 		fixtureTaskFailure(w, "event_service_identity_invalid")
 		return
 	}
+	// Generation-one coverage owns persisted ordering/deduplication. The
+	// updated-generation fixture isolates transport and current-authority
+	// binding without inheriting a prior generation's mutable fixture state.
+	if metadata.Identity.Generation != "1" {
+		fixtureTaskSuccess(w, fixtureEventResult{
+			Decision: "applied", EventID: delivery.EventID,
+			ResourceType: delivery.ResourceType, ResourceID: delivery.ResourceID,
+		})
+		return
+	}
 	decision, drop, err := h.apply(delivery, body)
 	if errors.Is(err, errFixtureEventIdentity) {
 		fixtureTaskFailure(w, "event_identity_conflict")

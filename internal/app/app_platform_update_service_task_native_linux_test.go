@@ -11,6 +11,61 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
+func testNativeUpdatedEventTask(
+	t *testing.T, s *Server, installation string,
+	endpoint platformRuntimeEndpoint,
+) {
+	t.Helper()
+	ctx := context.Background()
+	subscription, created, err := s.createPlatformEventSubscription(
+		ctx, installation, appplatform.EventSubscriptionSpec{
+			EventType: appplatform.EventReportIngested, ResourceType: "report",
+			ResourceID: "41", MaxInflight: 4,
+		})
+	if err != nil || !created || !platformValidUUID(subscription) {
+		t.Fatal("updated event subscription", subscription, created, err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	event := NotificationEvent{
+		ID:        "10000000-0000-4000-8000-000000000231",
+		SourceKey: "report:41:updated-generation", Type: appplatform.EventReportIngested,
+		Payload: `{"updated":true}`, ResourceType: "report", ResourceID: "41",
+		CreatedAt: now,
+	}
+	if err := s.st.CaptureNotification(event, nil, nil); err != nil {
+		t.Fatal("updated event capture", err)
+	}
+	occurrence, _ := appplatform.EventOccurrence(event.ID, 1)
+	mustExec(t, s.st, `UPDATE app_platform_tasks
+		SET next_attempt_ms=1 WHERE installation_id=? AND occurrence_id=?`,
+		installation, occurrence)
+	previousEndpoint := s.platformBackendEndpoint.Swap(&endpoint)
+	defer s.platformBackendEndpoint.Store(previousEndpoint)
+	worker, err := newPlatformTaskScheduler(
+		s, platformFixtureID(899), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := worker.tick(ctx); err != nil || !worked {
+		t.Fatal("updated event worker", worked, err)
+	}
+	var state, raw string
+	if err := s.st.queryRow(`SELECT state,COALESCE(result_json,'')
+		FROM app_platform_tasks WHERE installation_id=? AND occurrence_id=?`,
+		installation, occurrence).Scan(&state, &raw); err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Decision string `json:"decision"`
+		EventID  string `json:"event_id"`
+	}
+	if state != "succeeded" || json.Unmarshal([]byte(raw), &result) != nil ||
+		result.Decision != "applied" || result.EventID != event.ID {
+		t.Fatal("updated event task", state, raw)
+	}
+	t.Log("MANAGED_UPDATE_EVENT_TASK_VERIFIED")
+}
+
 func testNativeUpdatedBackendTask(
 	t *testing.T, s *Server, installation string,
 	endpoint platformRuntimeEndpoint,
