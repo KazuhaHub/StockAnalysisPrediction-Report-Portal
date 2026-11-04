@@ -2647,3 +2647,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   `41839627687`, quota/browser `41839627798`, runner daemon `41839627672` and
   CodeQL `41839618971` pass. See
   [application failure evidence](handoff/evidence/platform-failure/acceptance.json).
+
+- Advanced DEV-04 at Portal `d5b6537e` and Apps `917651d`. Standard CycloneDX
+  1.6 SBOMs now cover 50 Portal Go components, 313 Portal Web production
+  components and 73 Apps production components, with exact input, compressed
+  and expanded hashes recorded. Production vulnerability gates pass:
+  `govulncheck`, Portal `npm audit --omit=dev --audit-level=high` with five
+  low and no higher findings, and Apps audit with no findings. The license
+  inventory flags the repository-owned extension protocol package as
+  AGPL-3.0-only and transitive `golang/freetype` as GPL-2.0-or-later; no formal
+  dependency/license policy or owner/legal approval exists yet.
+  A clean Apps `917651d` passes `npm ci` under the repository CI toolchain
+  (Node 24.15 / npm 11.6). Local Node 26.9 / npm 11.19.1 is stricter about
+  versionless workspace metadata, and built-in `npm sbom` rejects it with
+  `EINVALIDPURLTYPE`; the Apps SBOM therefore uses standard CycloneDX
+  lockfile-only mode with `--ignore-npm-errors`. The uncommitted package-version
+  edits in the Apps worktree were deliberately excluded. Final public
+  release/OCI bytes, release-key/environment approval and formal license
+  disposition remain open, so DEV-04 remains partial. See
+  [dependency review](handoff/evidence/platform-dependency-review/review.md).
