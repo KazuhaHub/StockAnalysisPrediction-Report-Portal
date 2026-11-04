@@ -57,15 +57,15 @@ func testNativeUpdatedBackendTask(
 	if err != nil {
 		t.Fatal(err)
 	}
-	var state, raw string
+	var state, raw, errorCode string
 	for attempt := 0; attempt < 32; attempt++ {
 		worked, err := worker.tick(ctx)
 		if err != nil {
 			t.Fatal("updated task worker", err)
 		}
-		if err := s.st.queryRow(`SELECT state,COALESCE(result_json,'')
-			FROM app_platform_tasks WHERE id=?`, taskID).
-			Scan(&state, &raw); err != nil {
+		if err := s.st.queryRow(`SELECT state,COALESCE(result_json,''),
+			COALESCE(error_code,'') FROM app_platform_tasks WHERE id=?`,
+			taskID).Scan(&state, &raw, &errorCode); err != nil {
 			t.Fatal(err)
 		}
 		if state == "succeeded" || state == "failed" ||
@@ -87,7 +87,7 @@ func testNativeUpdatedBackendTask(
 		result.OccurrenceID != "updated-backend:generation-2" ||
 		result.AppID != appID || result.Generation != "2" ||
 		result.PolicyRevision != "2" {
-		t.Fatal("updated generation service task", state, raw)
+		t.Fatal("updated generation service task", state, errorCode, raw)
 	}
 	t.Log("MANAGED_UPDATE_SERVICE_TASK_VERIFIED")
 }
