@@ -126,8 +126,8 @@ const directory = {
     {
       installationId: digestInstallation,
       applicationId: "scheduled-digest",
-      state: "installed",
-      openable: true,
+      state: "setup_required",
+      openable: false,
       display: digestDisplay,
     },
   ],
@@ -594,6 +594,31 @@ async function main() {
     currentPage = page;
     currentErrors = desktop.errors;
     await page.getByRole("button", { name: "Notes", exact: true }).waitFor();
+    await page.getByText("Setup required", { exact: true }).waitFor();
+    await page
+      .getByText(
+        "An administrator must finish the application setup before it can be opened.",
+        { exact: true },
+      )
+      .waitFor();
+    if (
+      (await page
+        .getByRole("button", { name: "Scheduled Digest", exact: true })
+        .count()) !== 0
+    ) {
+      throw new Error("setup-required application exposed an open action");
+    }
+    assertions.ordinaryUserSeesTruthfulSetupRequired = true;
+    assertions.setupRequiredApplicationNotOpenable = true;
+    const setupShot = path.join(
+      evidenceDir,
+      "reference-apps-1440-en-light-setup-required.png",
+    );
+    await page.screenshot({ path: setupShot, fullPage: true });
+    screenshots.push(path.basename(setupShot));
+    directory.items[1].state = "installed";
+    directory.items[1].openable = true;
+    await page.reload({ waitUntil: "domcontentloaded" });
     await page
       .getByRole("button", { name: "Scheduled Digest", exact: true })
       .waitFor();
