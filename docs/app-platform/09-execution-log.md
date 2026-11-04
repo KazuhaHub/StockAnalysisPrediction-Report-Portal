@@ -2616,3 +2616,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   `41822717633`, quota/browser `41822717553`, runner daemon `41822717599` and
   CodeQL `41822711853` pass. See
   [task crash evidence](handoff/evidence/platform-task-crash/acceptance.json).
+
+- Closed the JOB-03 capacity-isolation gap at `d467b1c6`. One managed
+  installation reaches its event `max_inflight` ceiling and then fills all 256
+  active task slots; two source events remain durable, only one delivery task
+  is admitted, and the subscription becomes `review_required`. During 64
+  concurrent quota refusals, an existing analysis job remains queued, the
+  analysis queue's SQLite p95 is 1.89ms (max 2.03ms), authentication account
+  lookup max is 0.254ms, and health max is 0.024ms on an Apple M5 with Go
+  1.26.10. Fresh PostgreSQL 18.6 measures queue p95/max 0.492/0.739ms,
+  authentication 0.170ms and health 0.047ms. Refusals insert no task rows.
+  General `41831586307`, quota/browser `41831586437`, runner daemon
+  `41831586506` and CodeQL `41831581692` pass. This is a controlled
+  development measurement, not the multi-host OPS-08 envelope or a real SMTP
+  flood. See
+  [task isolation evidence](handoff/evidence/platform-task-isolation/acceptance.json).
