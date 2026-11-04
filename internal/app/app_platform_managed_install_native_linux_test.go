@@ -346,6 +346,8 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 				plugin.AppID) != 0 {
 			t.Fatal("managed reinstall inherited old namespace or plugin data")
 		}
+		configureNativeScheduledDigestSetup(
+			t, s, session, reinstalled.InstallationID)
 		binding, err := s.inspectPlatformLaunchAccess(
 			session, reinstalled.InstallationID)
 		if err != nil || binding.generation == "" {
