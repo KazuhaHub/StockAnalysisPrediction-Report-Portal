@@ -21,6 +21,7 @@ func testNativePortalEventDelivery(
 	ctx := context.Background()
 	s.platformBackendEndpoint.Store(&endpoint)
 	installation := activated.installationID
+	activateNativeEventInstallation(t, s, activated)
 	const reportID = "41"
 	subscriptionID, created, err := s.createPlatformEventSubscription(
 		ctx, installation, appplatform.EventSubscriptionSpec{
@@ -153,6 +154,69 @@ func testNativePortalEventDelivery(
 		t.Fatalf("deduplicated retry result = %s", result.ResultJSON)
 	}
 	t.Log("EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK")
+}
+
+// The existing managed-install native fixture stops after verified delivery and
+// boot. Event acceptance needs the same test-only final rows used by the viewer
+// fixture before it can exercise an active task subscription.
+func activateNativeEventInstallation(
+	t *testing.T, s *Server, lease platformOperationLease,
+) {
+	t.Helper()
+	tx, err := s.st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: tx}
+	now, err := platformDatabaseNow(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete, err := model.Advance(
+		lease.snapshot.Revision, appplatform.StageComplete)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations
+		SET stage='complete',state_revision=?,row_revision=row_revision+1,
+		    completed_ms=?,lease_owner=NULL,lease_until_ms=NULL,updated_ms=?
+		WHERE id=? AND installation_id=? AND stage='activate'
+		  AND state_revision=? AND row_revision=? AND fence=?
+		  AND completed_ms IS NULL`,
+		int64(complete.Snapshot().Revision), now, now, lease.id,
+		lease.installationID, int64(lease.snapshot.Revision),
+		lease.rowRevision, lease.fence)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = e.exec(`UPDATE app_platform_activations
+		SET state='active',updated_ms=?
+		WHERE installation_id=? AND generation=? AND policy_revision=1
+		  AND state='candidate'`,
+		now, lease.installationID, lease.snapshot.Generation)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		t.Fatal(err)
+	}
+	if err := activatePlatformInstallCapabilities(
+		e, lease.installationID, lease.id, now); err != nil {
+		t.Fatal(err)
+	}
+	changed, err = e.exec(`UPDATE app_platform_installations
+		SET phase='ready',revision=revision+1,updated_ms=?
+		WHERE id=? AND desired_state='enabled' AND phase='pending'`,
+		now, lease.installationID)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
 }
 
 func nativeEventInstallationState(
