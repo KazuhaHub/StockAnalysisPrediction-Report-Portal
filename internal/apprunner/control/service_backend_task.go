@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"unicode/utf8"
 
@@ -100,7 +101,7 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		Format string `json:"format"`
 	}
 	if json.Unmarshal(c.RegistrationRaw, &format) != nil {
-		return zero, ErrInvalidCommand
+		return zero, fmt.Errorf("registration format: %w", ErrInvalidCommand)
 	}
 	var registration ServiceBackendTaskRegistrationIdentity
 	var initial *VerifiedBackendRegistrationCommand
@@ -110,7 +111,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		verified, err := VerifyBackendRegistration(
 			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
 		if err != nil {
-			return zero, ErrInvalidCommand
+			return zero, fmt.Errorf(
+				"initial registration: %w", ErrInvalidCommand)
 		}
 		candidate := verified.Candidate()
 		initial = &verified
@@ -126,7 +128,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		verified, err := VerifyUpdateStartRegistration(
 			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
 		if err != nil {
-			return zero, ErrInvalidCommand
+			return zero, fmt.Errorf(
+				"update registration: %w", ErrInvalidCommand)
 		}
 		start := verified.Start().Command()
 		update = &verified
@@ -140,7 +143,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 			ExpiresMS:       start.ExpiresMS,
 		}
 	default:
-		return zero, ErrInvalidCommand
+		return zero, fmt.Errorf(
+			"registration kind: %w", ErrInvalidCommand)
 	}
 	if c.Format != ServiceBackendTaskFormat ||
 		!candidateUUID(c.RequestID) || !candidateUUID(c.TaskID) ||
@@ -156,9 +160,15 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		len(c.BootID) < 1 || len(c.BootID) > 128 || !utf8.ValidString(c.BootID) ||
 		len(c.ServiceIdentity) < 1 || len(c.ServiceIdentity) > 8192 ||
 		!utf8.Valid(c.ServiceIdentity) || !json.Valid(c.ServiceIdentity) ||
-		!shaPattern.MatchString(c.BodySHA256) ||
-		!ed25519.Verify(ed25519.PublicKey(a.PublicKey), frame(serviceBackendTaskSignaturePurpose, raw), signature) {
-		return zero, ErrInvalidCommand
+		!shaPattern.MatchString(c.BodySHA256) {
+		return zero, fmt.Errorf(
+			"task tuple: %w", ErrInvalidCommand)
+	}
+	if !ed25519.Verify(
+		ed25519.PublicKey(a.PublicKey),
+		frame(serviceBackendTaskSignaturePurpose, raw), signature) {
+		return zero, fmt.Errorf(
+			"task signature: %w", ErrInvalidCommand)
 	}
 	var grant appplatform.ServiceIdentityGrant
 	identityDecoder := json.NewDecoder(bytes.NewReader(c.ServiceIdentity))
@@ -177,7 +187,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 			!serviceTaskResource(grant.Resources, "reports.read") ||
 		c.Handler == appplatform.TaskHandlerEvent &&
 			!serviceTaskResource(grant.Resources, "events.subscribe") {
-		return zero, ErrInvalidCommand
+		return zero, fmt.Errorf(
+			"service identity: %w", ErrInvalidCommand)
 	}
 	return VerifiedServiceBackendTask{
 		command: c, registration: registration,
