@@ -556,6 +556,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 		t.Log("MANAGED_UPDATE_A_TO_B")
 		if !bytes.Contains(output.Bytes(),
+			[]byte("MANAGED_UPDATE_EVENT_TASK_VERIFIED")) {
+			t.Fatal("managed update event task acceptance missing",
+				output.String())
+		}
+		t.Log("MANAGED_UPDATE_EVENT_TASK_VERIFIED")
+		if !bytes.Contains(output.Bytes(),
 			[]byte("MANAGED_UPDATE_SERVICE_TASK_VERIFIED")) {
 			t.Fatal("managed update service task acceptance missing",
 				output.String())

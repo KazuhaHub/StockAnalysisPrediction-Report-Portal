@@ -670,6 +670,10 @@ def main(args):
                         if "MANAGED_UPDATE_A_TO_B" not in result.stdout:
                             raise RuntimeError("Managed update A-to-B acceptance missing")
                         report["native_managed_update_a_to_b"] = True
+                        if "MANAGED_UPDATE_EVENT_TASK_VERIFIED" not in result.stdout:
+                            raise RuntimeError(
+                                "Managed update event-task acceptance missing")
+                        report["native_managed_update_event_task"] = True
                         if "MANAGED_UPDATE_SERVICE_TASK_VERIFIED" not in result.stdout:
                             raise RuntimeError(
                                 "Managed update service-task acceptance missing")

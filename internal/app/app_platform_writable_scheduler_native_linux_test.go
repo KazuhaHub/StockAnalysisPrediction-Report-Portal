@@ -272,7 +272,8 @@ func testNativeWritableManagedUpdateVersion(
 	manifest.Version = version
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	manifest.Capabilities.Required = []string{
-		"background.run", "tasks.schedule",
+		"background.run", "events.subscribe", "reports.read",
+		"tasks.schedule",
 	}
 	archive = platformSDKBrowserArchive(t, archive)
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
@@ -452,6 +453,8 @@ func testNativeWritableManagedUpdateVersion(
 		logManagedUpdateState(t, s, admitted.OperationID, installation)
 		t.Fatal("updated managed app did not launch", binding, err)
 	}
+	testNativePortalEventDelivery(t, s, lease, endpoint)
+	t.Log("MANAGED_UPDATE_EVENT_TASK_VERIFIED")
 	testNativeUpdatedBackendTask(t, s, installation, endpoint)
 	t.Log("MANAGED_UPDATE_A_TO_B")
 	return admitted.OperationID, release.sha256
