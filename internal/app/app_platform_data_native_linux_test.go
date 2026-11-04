@@ -274,6 +274,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	if managed {
 		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1", "PORTAL_MANAGED_IMAGE="+os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"))
+		if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" {
+			child.Env = append(child.Env, "PORTAL_EVENT_ACCEPTANCE_ONLY=1")
+		}
 		if os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
 			child.Env = append(child.Env, "PORTAL_MANAGED_READY=1")
 		}
