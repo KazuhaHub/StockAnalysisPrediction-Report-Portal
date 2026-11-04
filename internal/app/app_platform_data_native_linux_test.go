@@ -143,7 +143,8 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		lifecycleRunner, lifecycleEvidence =
 			preparePlatformLifecycleBrowserChild(t, childData)
 	}
-	if os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != "" {
+	if os.Getenv("APP_CANDIDATE_DOCKER_SOCKET") != "" &&
+		os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") != "1" {
 		startPlatformNetworkHTTPSFixture(t, dir, childData)
 	}
 	// Copy the public descriptor into a traversable fixture tree. The synthetic
