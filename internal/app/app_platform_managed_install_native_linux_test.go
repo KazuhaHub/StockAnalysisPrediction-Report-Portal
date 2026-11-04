@@ -30,7 +30,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	}
 	manifest.Capabilities.Required = []string{
 		"background.run", "events.subscribe", "reports.read",
-		"storage.files", "tasks.schedule",
+		"secrets.use", "storage.files", "tasks.schedule",
 	}
 	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
 	raw, err = json.Marshal(manifest)
@@ -202,6 +202,7 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		committed := testNativeRegistrationRPC(
 			t, s, activated, endpoint, platformDigest(document))
 		testNativePortalEventDelivery(t, s, committed, endpoint)
+		testNativeScheduledDigest(t, s, committed)
 		oldNamespace := scalar[string](t, s.st,
 			`SELECT id FROM app_platform_data_namespaces
 			 WHERE owner_installation_id=?`,

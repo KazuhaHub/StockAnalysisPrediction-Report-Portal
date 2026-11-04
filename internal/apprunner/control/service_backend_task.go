@@ -79,6 +79,7 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		!candidateUUID(c.RequestID) || !candidateUUID(c.TaskID) ||
 		!candidateUUID(c.LeaseID) ||
 		(c.Handler != appplatform.TaskHandlerBackend &&
+			c.Handler != appplatform.TaskHandlerDigest &&
 			c.Handler != appplatform.TaskHandlerEvent) ||
 		c.InstallationID != candidate.InstallationID ||
 		c.Generation != candidate.TargetGeneration || c.Generation != "1" ||
@@ -105,6 +106,8 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		grant.ReleaseSHA256 != c.ReleaseSHA256 ||
 		len(grant.Mac) != 64 ||
 		!serviceTaskResource(grant.Resources, "tasks.schedule") ||
+		c.Handler == appplatform.TaskHandlerDigest &&
+			!serviceTaskResource(grant.Resources, "reports.read") ||
 		c.Handler == appplatform.TaskHandlerEvent &&
 			!serviceTaskResource(grant.Resources, "events.subscribe") {
 		return zero, ErrInvalidCommand
@@ -151,6 +154,13 @@ func ValidateServiceBackendTaskData(v VerifiedServiceBackendTask, body []byte) e
 		request, err := appplatform.DecodeTaskBackendRequest(body)
 		if err != nil || request.TaskID != v.command.TaskID ||
 			request.OccurrenceID == "" {
+			return ErrInvalidCommand
+		}
+	case appplatform.TaskHandlerDigest:
+		request, err := appplatform.DecodeTaskBackendRequest(body)
+		if err != nil || request.TaskID != v.command.TaskID ||
+			request.OccurrenceID == "" ||
+			v.registration.Candidate().TargetGeneration != "1" {
 			return ErrInvalidCommand
 		}
 	case appplatform.TaskHandlerEvent:

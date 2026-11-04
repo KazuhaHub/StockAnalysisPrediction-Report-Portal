@@ -19,6 +19,7 @@ const (
 	TaskHandlerDigest   = "scheduled-digest.run"
 	TaskHandlerEvent    = "app.event.delivery"
 	TaskBackendPath     = "/v1/tasks/run"
+	TaskDigestPath      = "/v1/tasks/digest"
 	TaskEventPath       = "/v1/events/deliver"
 )
 
@@ -56,11 +57,25 @@ func TaskHandlerPath(handler string) (string, bool) {
 	switch handler {
 	case TaskHandlerBackend:
 		return TaskBackendPath, true
+	case TaskHandlerDigest:
+		return TaskDigestPath, true
 	case TaskHandlerEvent:
 		return TaskEventPath, true
 	default:
 		return "", false
 	}
+}
+
+func TaskHandlerAllowsApp(appID, handler string) bool {
+	if !slugPattern.MatchString(appID) {
+		return false
+	}
+	for _, spec := range taskHandlers {
+		if spec.ID == handler {
+			return spec.AllowedAppID == "" || spec.AllowedAppID == appID
+		}
+	}
+	return false
 }
 
 var deniedTaskPayloadKeys = map[string]bool{

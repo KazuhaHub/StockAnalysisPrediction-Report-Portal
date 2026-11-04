@@ -147,12 +147,34 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 
 func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
 	t.Helper()
+	if candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE"); candidate != "" {
+		raw, err := os.ReadFile(candidate + "/descriptor.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		archive, err := os.ReadFile(candidate + "/frontend.zip")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m appplatform.Manifest
+		if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" ||
+			m.Backend == nil {
+			t.Fatal("scheduled digest candidate identity")
+		}
+		m.Publisher = "fixture-publisher"
+		m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+		raw, err = json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw, archive
+	}
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
 	var m appplatform.Manifest
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.ID = "notes-managed-data"
+	m.ID = "scheduled-digest"
 	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
 	m.Capabilities.Required = []string{}
@@ -172,7 +194,7 @@ func TestManagedInstallSignedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal("managed signed release", err)
 	}
-	if release.appID != "notes-managed-data" {
+	if release.appID != "scheduled-digest" {
 		t.Fatal("wrong managed fixture identity")
 	}
 	if _, err := s.createPlatformNativeInstallReview(session, release.sha256, 1); err == nil {

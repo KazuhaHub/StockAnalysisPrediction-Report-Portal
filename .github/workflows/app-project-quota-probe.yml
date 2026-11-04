@@ -183,7 +183,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: b3a5d1ba2768c3974b53472111821f238db61ac2
+          ref: f274e064121d5d8377c2e22a1411309da9dc6c6e
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -206,6 +206,7 @@ jobs:
           python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
           APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
           python3 scripts/acceptance/notes_shell/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/notes-shell-fixture"
+          python3 .sdk-browser-apps/scripts/build-app-v2.py scheduled-digest --output "$RUNNER_TEMP/scheduled-digest-candidate"
           python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
           sdk_public=$(python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --build "$RUNNER_TEMP/sdk-browser-fixture" --packages "$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/node_modules" --browsers "$RUNNER_TEMP/sdk-browser-browsers" --runner "$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs")
           {
@@ -215,6 +216,7 @@ jobs:
             echo "APP_SDK_BROWSER_RUNNER=$sdk_public/run.cjs"
             echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
             echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
+            echo "APP_SCHEDULED_DIGEST_CANDIDATE=$RUNNER_TEMP/scheduled-digest-candidate"
           } >> "$GITHUB_ENV"
       - name: Exercise the generated template in the actual Portal shell
         if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
@@ -311,7 +313,7 @@ jobs:
           PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && '1' || '0' }}
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_CANDIDATE,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
       - name: Remove only the owned readiness registry
         if: always()
         run: bash scripts/acceptance/ready_app/cleanup-fixture.sh

@@ -124,14 +124,26 @@ func (s *Server) runPlatformBackendTask(
 ) appplatform.TaskExecutionResult {
 	return s.runPlatformServiceTask(
 		ctx, task, identity, appplatform.TaskHandlerBackend,
-		func() ([]byte, string, error) {
-			body, err := appplatform.EncodeTaskBackendRequest(
-				task.ID, task.OccurrenceID, task.Payload)
-			if err != nil {
-				return nil, "backend_request_invalid", err
-			}
-			return body, "", nil
-		})
+		platformTaskBackendBody(task))
+}
+
+func (s *Server) runPlatformDigestTask(
+	ctx context.Context, task platformTaskLease, identity string,
+) appplatform.TaskExecutionResult {
+	return s.runPlatformServiceTask(
+		ctx, task, identity, appplatform.TaskHandlerDigest,
+		platformTaskBackendBody(task))
+}
+
+func platformTaskBackendBody(task platformTaskLease) platformTaskBodyBuilder {
+	return func() ([]byte, string, error) {
+		body, err := appplatform.EncodeTaskBackendRequest(
+			task.ID, task.OccurrenceID, task.Payload)
+		if err != nil {
+			return nil, "backend_request_invalid", err
+		}
+		return body, "", nil
+	}
 }
 
 func (s *Server) runPlatformEventDelivery(

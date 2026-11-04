@@ -175,3 +175,76 @@ func TestServiceEventTaskRequiresEventSubscriptionAuthority(t *testing.T) {
 		t.Fatal("event task without events.subscribe was signed")
 	}
 }
+
+func TestServiceDigestTaskUsesFixedTaskBodyAndReportAuthority(t *testing.T) {
+	base, key, authority, now, _, _ := backendRequestFixture(t)
+	registration, err := VerifyBackendRegistration(
+		base.RegistrationRaw, base.RegistrationSignature, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := registration.Candidate()
+	taskID := "10000000-0000-4000-8000-000000000021"
+	body, err := appplatform.EncodeTaskBackendRequest(
+		taskID, "digest:2026-11-03",
+		[]byte(`{"scheduleId":"daily","count":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := func(resources []string) []byte {
+		raw, err := appplatform.SignServiceIdentity(
+			[]byte(strings.Repeat("d", 32)),
+			appplatform.ServiceIdentityGrant{
+				Format:          appplatform.ServiceIdentityFormat,
+				LeaseID:         "10000000-0000-4000-8000-000000000022",
+				AppID:           "scheduled-digest",
+				InstallationID:  candidate.InstallationID,
+				ControllerEpoch: candidate.ControllerEpoch,
+				Generation:      candidate.TargetGeneration,
+				PolicyRevision:  "1",
+				ReleaseSHA256:   candidate.Payload.ReleaseSHA256,
+				Resources:       resources,
+				IssuedMS:        strconv.FormatInt(now, 10),
+				ExpiresMS:       strconv.FormatInt(now+60000, 10),
+			}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	command := ServiceBackendTaskCommand{
+		Format:                ServiceBackendTaskFormat,
+		RequestID:             "10000000-0000-4000-8000-000000000023",
+		TaskID:                taskID,
+		LeaseID:               "10000000-0000-4000-8000-000000000022",
+		Handler:               appplatform.TaskHandlerDigest,
+		InstallationID:        candidate.InstallationID,
+		Generation:            candidate.TargetGeneration,
+		PolicyRevision:        "1",
+		ControllerEpoch:       candidate.ControllerEpoch,
+		ReleaseSHA256:         candidate.Payload.ReleaseSHA256,
+		BootID:                base.BootID,
+		RegistrationRaw:       base.RegistrationRaw,
+		RegistrationSignature: base.RegistrationSignature,
+		ServiceIdentity: identity(
+			[]string{"reports.read", "tasks.schedule"}),
+		BodySHA256: serviceTaskBodyDigest(body),
+	}
+	raw, signature, err := SignServiceBackendTask(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+	if err != nil || ValidateServiceBackendTaskData(verified, body) != nil {
+		t.Fatal("digest task", verified, err)
+	}
+	if path, ok := appplatform.TaskHandlerPath(
+		appplatform.TaskHandlerDigest); !ok ||
+		path != appplatform.TaskDigestPath {
+		t.Fatal("digest route", path, ok)
+	}
+	command.ServiceIdentity = identity([]string{"tasks.schedule"})
+	if _, _, err := SignServiceBackendTask(command, key, authority, now); err == nil {
+		t.Fatal("digest task without reports.read was signed")
+	}
+}

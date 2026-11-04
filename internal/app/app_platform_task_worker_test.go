@@ -29,7 +29,7 @@ func admitTaskFixture(t *testing.T, s *Server, installation, occurrence, handler
 	return in
 }
 
-func TestPlatformTaskWorkerExecutesDigestAfterBrowserIndependentClaim(t *testing.T) {
+func TestPlatformTaskWorkerExecutesAfterBrowserIndependentClaim(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
 		name := "sqlite"
 		if postgres {
@@ -40,7 +40,7 @@ func TestPlatformTaskWorkerExecutesDigestAfterBrowserIndependentClaim(t *testing
 			admitTaskFixture(t, s, installation, "digest:2026-11-03",
 				appplatform.TaskHandlerBackend, []byte(`{"scheduleId":"daily","count":2}`))
 			s.platformTaskBackend = func(_ context.Context, task platformTaskLease, _ string) appplatform.TaskExecutionResult {
-				result, err := platformTaskDigestResult(task)
+				result, err := testPlatformTaskDigestResult(task)
 				if err != nil {
 					return appplatform.TaskExecutionResult{Outcome: appplatform.TaskResultFailed, ErrorCode: "result_unavailable"}
 				}
@@ -75,6 +75,21 @@ func TestPlatformTaskWorkerExecutesDigestAfterBrowserIndependentClaim(t *testing
 			}
 		})
 	}
+}
+
+func testPlatformTaskDigestResult(task platformTaskLease) ([]byte, error) {
+	raw, err := json.Marshal(struct {
+		OccurrenceID  string `json:"occurrenceId"`
+		PayloadSHA256 string `json:"payloadSha256"`
+		Digest        string `json:"digest"`
+	}{
+		OccurrenceID: task.OccurrenceID, PayloadSHA256: task.PayloadSHA256,
+		Digest: platformDigest(append([]byte(task.OccurrenceID+"\x00"), task.Payload...)),
+	})
+	if err != nil || len(raw) > appplatform.MaxTaskResultBytes {
+		return nil, errAppPlatformTaskUnavailable
+	}
+	return raw, nil
 }
 
 func TestPlatformTaskConditionalClaimHasOneWinner(t *testing.T) {

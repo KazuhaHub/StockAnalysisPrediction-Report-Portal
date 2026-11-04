@@ -132,14 +132,7 @@ func (s *Server) executePlatformTask(ctx context.Context, task platformTaskLease
 	}()
 	switch task.Handler {
 	case appplatform.TaskHandlerDigest:
-		result, err := platformTaskDigestResult(task)
-		if err != nil {
-			return appplatform.TaskExecutionResult{Outcome: appplatform.TaskResultFailed, ErrorCode: "result_unavailable"}
-		}
-		return appplatform.TaskExecutionResult{
-			Outcome: appplatform.TaskResultSucceeded, ResultJSON: result,
-			EvidenceSHA: platformDigest(result),
-		}
+		return s.runPlatformDigestTask(ctx, task, identity)
 	case appplatform.TaskHandlerBackend:
 		if s.platformTaskBackend == nil {
 			return appplatform.TaskExecutionResult{

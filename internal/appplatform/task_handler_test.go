@@ -14,11 +14,22 @@ func TestTaskHandlerRegistryNarrowsAppAndCapabilities(t *testing.T) {
 	if !ValidBackendRequestRoute("POST", TaskEventPath) {
 		t.Fatal("fixed event task route is not a valid own-backend route")
 	}
+	if !ValidBackendRequestRoute("POST", TaskDigestPath) {
+		t.Fatal("fixed digest task route is not a valid own-backend route")
+	}
 	if path, ok := TaskHandlerPath(TaskHandlerEvent); !ok || path != TaskEventPath {
 		t.Fatal("event task route resolution", path, ok)
 	}
 	if path, ok := TaskHandlerPath(TaskHandlerBackend); !ok || path != TaskBackendPath {
 		t.Fatal("backend task route resolution", path, ok)
+	}
+	if path, ok := TaskHandlerPath(TaskHandlerDigest); !ok || path != TaskDigestPath {
+		t.Fatal("digest task route resolution", path, ok)
+	}
+	if TaskHandlerAllowsApp("notes-sample", TaskHandlerDigest) ||
+		!TaskHandlerAllowsApp("scheduled-digest", TaskHandlerDigest) ||
+		!TaskHandlerAllowsApp("notes-sample", TaskHandlerBackend) {
+		t.Fatal("task handler app binding")
 	}
 	granted := map[string]bool{"background.run": true, "tasks.schedule": true, "reports.read": true, "events.subscribe": true}
 	backend, err := ResolveTaskHandler("notes-sample", TaskHandlerBackend, granted)

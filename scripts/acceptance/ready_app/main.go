@@ -54,6 +54,10 @@ func main() {
 		os.Exit(4)
 	}
 	server := &http.Server{ReadHeaderTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second, IdleTimeout: time.Second, MaxHeaderBytes: 65536, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == appplatform.TaskDigestPath {
+			fixtureDigestHandler(w, r)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == appplatform.TaskEventPath {
 			events.handle(w, r)
 			return

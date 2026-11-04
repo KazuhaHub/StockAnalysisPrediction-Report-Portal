@@ -498,6 +498,14 @@ def main(args):
                     if ready_image:
                         portal_env["APP_CANDIDATE_NATIVE_IMAGE"] = ready_image
                         portal_env["APP_READY_NATIVE_IMAGE"] = ready_image
+                    scheduled_candidate = os.environ.get(
+                        "APP_SCHEDULED_DIGEST_CANDIDATE", "")
+                    if scheduled_candidate:
+                        if not Path(scheduled_candidate).is_absolute():
+                            raise RuntimeError(
+                                "scheduled digest candidate path is not absolute")
+                        portal_env["APP_SCHEDULED_DIGEST_CANDIDATE"] = (
+                            scheduled_candidate)
                     event_only = (
                         os.environ.get("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1")
                     if event_only:
@@ -731,6 +739,10 @@ def main(args):
                                 raise RuntimeError(
                                     "native event duplicate/order/lost-ack acceptance missing")
                             report["native_event_duplicate_out_of_order_lost_ack"] = True
+                            if "SCHEDULED_DIGEST_HANDLER_VERIFIED" not in result.stdout:
+                                raise RuntimeError(
+                                    "native scheduled digest handler acceptance missing")
+                            report["native_scheduled_digest_handler"] = True
                             if "MANAGED_CURRENT_VIEWER_REQUEST_VERIFIED" not in result.stdout:
                                 raise RuntimeError("current Portal viewer native request gating missing")
                             report["native_current_viewer_request_verified"] = True
@@ -743,6 +755,7 @@ def main(args):
                             "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
                             "NATIVE_EVENT_ACTIVATION_FIXTURE",
                             "EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+                            "SCHEDULED_DIGEST_HANDLER_VERIFIED",
                             "MANAGED_UNINSTALL_STOP_REMOVE_CODE",
                             "MANAGED_UNINSTALL_REMOVE_DATA",
                             "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
@@ -760,6 +773,7 @@ def main(args):
                         report["native_backend_request_relay_verified"] = True
                         report["native_event_activation_fixture"] = True
                         report["native_event_duplicate_out_of_order_lost_ack"] = True
+                        report["native_scheduled_digest_handler"] = True
                         report["native_managed_uninstall_remove_data"] = True
                         report["native_managed_reinstall_fresh_namespace_and_launch"] = True
                 if candidate:

@@ -866,18 +866,3 @@ func platformTaskDuration(attempt uint64) time.Duration {
 	}
 	return delay
 }
-
-func platformTaskDigestResult(task platformTaskLease) ([]byte, error) {
-	raw, err := json.Marshal(struct {
-		OccurrenceID  string `json:"occurrenceId"`
-		PayloadSHA256 string `json:"payloadSha256"`
-		Digest        string `json:"digest"`
-	}{
-		OccurrenceID: task.OccurrenceID, PayloadSHA256: task.PayloadSHA256,
-		Digest: platformDigest(append([]byte(task.OccurrenceID+"\x00"), task.Payload...)),
-	})
-	if err != nil || len(raw) > appplatform.MaxTaskResultBytes {
-		return nil, fmt.Errorf("digest result: %w", errAppPlatformTaskUnavailable)
-	}
-	return raw, nil
-}

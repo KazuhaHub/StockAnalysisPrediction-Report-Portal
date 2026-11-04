@@ -257,6 +257,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformInstallDataEndpointChild$", "-test.v", childTimeout)
 	child.Dir = work
 	child.Env = []string{"GOMAXPROCS=2", "PORTAL_DATA_CHILD=1", "PORTAL_DATA_SOCKET=" + path, "PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment), "TMPDIR=" + childData, "HOME=" + childData}
+	if candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE"); candidate != "" {
+		child.Env = append(child.Env, "APP_SCHEDULED_DIGEST_CANDIDATE="+candidate)
+	}
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
 		child.Env = append(child.Env, "PORTAL_NETWORK_NAMESPACE=1", "GODEBUG=netdns=go")
 	}
@@ -483,6 +486,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				"MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
 				"NATIVE_EVENT_ACTIVATION_FIXTURE",
 				"EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+				"SCHEDULED_DIGEST_HANDLER_VERIFIED",
 				"MANAGED_UNINSTALL_STOP_REMOVE_CODE",
 				"MANAGED_UNINSTALL_REMOVE_DATA",
 				"MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
@@ -639,6 +643,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			"MANAGED_DISABLE_STOP_VERIFIED",
 			"MANAGED_ENABLE_START_PROBE_ACTIVATED",
 			"MANAGED_ENABLE_BACKEND_REQUEST",
+			"SCHEDULED_DIGEST_HANDLER_VERIFIED",
 			"MANAGED_REPAIR_START_PROBE_ACTIVATED",
 			"MANAGED_REPAIR_BACKEND_REQUEST",
 			"STANDALONE_DELETE_DATA_NAMESPACE_ABSENT",
