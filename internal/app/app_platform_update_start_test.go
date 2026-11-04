@@ -1666,6 +1666,55 @@ func testPlatformUpdateStartActivationMode(t *testing.T, pg, writable bool) {
 		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id) != "complete" {
 		t.Fatal("active generation tuple not committed atomically")
 	}
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(dek)
+	tx, err := s.st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: tx}
+	runtime, seed, err := s.platformDataRuntime(
+		e, lease.controllerEpoch, dek)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(seed)
+	nowMS, err := platformDatabaseNow(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readinessRaw, err := json.Marshal(applied.start.readiness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := s.loadPlatformWritableUpdateBackendHistory(
+		e, platformBackendHistoryBinding{
+			installation: lease.installationID,
+			activation:   applied.start.resourceID,
+			release:      applied.start.plan.TargetReleaseSHA256,
+			namespace:    applied.start.plan.DataNamespaceID,
+			epoch:        applied.start.plan.ControllerEpoch,
+			readiness:    string(readinessRaw),
+			format:       applied.start.plan.DataFormat,
+			fence:        lease.fence,
+			observed:     applied.start.activationObserved,
+			generation:   2,
+		}, runtime, seed, dek, nowMS)
+	if err != nil {
+		t.Fatal("generation-2 service task history", err)
+	}
+	metadata, metadataErr := history.registration.Metadata()
+	history.registration.Close()
+	_ = tx.Rollback()
+	if history.generation != 2 || history.update == nil ||
+		metadataErr != nil || metadata.Identity.Generation != "2" ||
+		metadata.Identity.PolicyRevision != "2" {
+		t.Fatal("generation-2 service task selected initial registration")
+	}
 	if !writable {
 		return
 	}

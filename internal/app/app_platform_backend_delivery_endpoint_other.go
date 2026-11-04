@@ -18,3 +18,7 @@ func platformHandshakeBackend(context.Context, platformRuntimeEndpoint, platform
 func platformRequestBackend(context.Context, platformRuntimeEndpoint, platformBackendDeliveryIntent, []byte, []byte, []byte, string) (transport.BackendRequestObservation, error) {
 	return transport.BackendRequestObservation{}, errAppPlatformRuntimeConflict
 }
+
+func platformHandshakeServiceBackend(context.Context, platformRuntimeEndpoint, *platformServiceBackendHistory, string) (string, error) {
+	return "", errAppPlatformRuntimeConflict
+}

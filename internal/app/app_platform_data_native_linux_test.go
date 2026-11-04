@@ -555,6 +555,12 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal("managed A-to-B update acceptance missing", output.String())
 		}
 		t.Log("MANAGED_UPDATE_A_TO_B")
+		if !bytes.Contains(output.Bytes(),
+			[]byte("MANAGED_UPDATE_SERVICE_TASK_VERIFIED")) {
+			t.Fatal("managed update service task acceptance missing",
+				output.String())
+		}
+		t.Log("MANAGED_UPDATE_SERVICE_TASK_VERIFIED")
 		for _, marker := range []string{"PORTAL_WRITABLE_BACKGROUND_COMPLETE", "PORTAL_WRITABLE_BACKGROUND_CURRENT_VIEWER", "PORTAL_WRITABLE_CURRENT_DOCUMENT_HTTP", "PORTAL_WRITABLE_CURRENT_DIRECTORY_HTTP", "PORTAL_WRITABLE_DOCUMENT_HTTP_REVOKED", "PORTAL_WRITABLE_PAGE_BINDING_NATIVE", "PORTAL_WRITABLE_BACKEND_SESSION_HTTP", "PORTAL_WRITABLE_BACKEND_HTTP_NO_RETRY"} {
 			if !bytes.Contains(output.Bytes(), []byte(marker)) {
 				t.Fatal("background completion acceptance missing", marker, output.String())

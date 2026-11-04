@@ -93,6 +93,34 @@ func (r *CandidateRuntime) ForwardServiceTask(
 	}, nil
 }
 
+func (r *CandidateRuntime) ForwardUpdateStartServiceTask(
+	ctx context.Context,
+	launch UpdateStartLaunch,
+	registration UpdateStartRegistrationSnapshot,
+	body, serviceIdentity []byte,
+	handler string,
+) (ServiceTaskObservation, error) {
+	snapshot, err := launch.Snapshot()
+	if err != nil || snapshot != registration.Launch ||
+		!containerSHA.MatchString(registration.NativeID) ||
+		!containerSHA.MatchString(registration.BindingSHA256) ||
+		!containerSHA.MatchString(registration.DocumentSHA256) ||
+		registration.Inode == 0 {
+		return ServiceTaskObservation{}, ErrContainerUncertain
+	}
+	return r.ForwardServiceTask(
+		ctx, launch.launch,
+		BackendRegistrationSnapshot{
+			Launch:         snapshot.Launch,
+			NativeID:       registration.NativeID,
+			BindingSHA256:  registration.BindingSHA256,
+			DocumentSHA256: registration.DocumentSHA256,
+			Device:         registration.Device,
+			Inode:          registration.Inode,
+		},
+		body, serviceIdentity, handler)
+}
+
 func forwardServiceTask(ctx context.Context, socket string, uid, gid uint32, path string, body, serviceIdentity []byte) (BackendResponse, error) {
 	var zero BackendResponse
 	transport := &http.Transport{

@@ -28,3 +28,14 @@ func (*CandidateRuntime) ForwardServiceTask(
 ) (ServiceTaskObservation, error) {
 	return ServiceTaskObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) ForwardUpdateStartServiceTask(
+	context.Context,
+	UpdateStartLaunch,
+	UpdateStartRegistrationSnapshot,
+	[]byte,
+	[]byte,
+	string,
+) (ServiceTaskObservation, error) {
+	return ServiceTaskObservation{}, ErrUnsupported
+}

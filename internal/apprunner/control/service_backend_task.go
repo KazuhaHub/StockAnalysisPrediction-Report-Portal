@@ -33,9 +33,21 @@ type ServiceBackendTaskCommand struct {
 	BodySHA256            string `json:"body_sha256"`
 }
 
+type ServiceBackendTaskRegistrationIdentity struct {
+	Format          string
+	InstallationID  string
+	Generation      string
+	PolicyRevision  string
+	ControllerEpoch string
+	ReleaseSHA256   string
+	ExpiresMS       string
+}
+
 type VerifiedServiceBackendTask struct {
-	command      ServiceBackendTaskCommand
-	registration VerifiedBackendRegistrationCommand
+	command             ServiceBackendTaskCommand
+	registration        ServiceBackendTaskRegistrationIdentity
+	initialRegistration *VerifiedBackendRegistrationCommand
+	updateRegistration  *VerifiedUpdateStartRegistrationCommand
 }
 
 func (v VerifiedServiceBackendTask) Command() ServiceBackendTaskCommand {
@@ -46,8 +58,22 @@ func (v VerifiedServiceBackendTask) Command() ServiceBackendTaskCommand {
 	return c
 }
 
-func (v VerifiedServiceBackendTask) Registration() VerifiedBackendRegistrationCommand {
+func (v VerifiedServiceBackendTask) RegistrationIdentity() ServiceBackendTaskRegistrationIdentity {
 	return v.registration
+}
+
+func (v VerifiedServiceBackendTask) InitialRegistration() (VerifiedBackendRegistrationCommand, bool) {
+	if v.initialRegistration == nil {
+		return VerifiedBackendRegistrationCommand{}, false
+	}
+	return *v.initialRegistration, true
+}
+
+func (v VerifiedServiceBackendTask) UpdateStartRegistration() (VerifiedUpdateStartRegistrationCommand, bool) {
+	if v.updateRegistration == nil {
+		return VerifiedUpdateStartRegistrationCommand{}, false
+	}
+	return *v.updateRegistration, true
 }
 
 func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (VerifiedServiceBackendTask, error) {
@@ -70,22 +96,63 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	if decoder.Decode(&c) != nil {
 		return zero, ErrInvalidCommand
 	}
-	registration, err := VerifyBackendRegistration(c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
-	if err != nil {
+	var format struct {
+		Format string `json:"format"`
+	}
+	if json.Unmarshal(c.RegistrationRaw, &format) != nil {
 		return zero, ErrInvalidCommand
 	}
-	candidate := registration.Candidate()
+	var registration ServiceBackendTaskRegistrationIdentity
+	var initial *VerifiedBackendRegistrationCommand
+	var update *VerifiedUpdateStartRegistrationCommand
+	switch format.Format {
+	case BackendRegistrationFormat:
+		verified, err := VerifyBackendRegistration(
+			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
+		if err != nil {
+			return zero, ErrInvalidCommand
+		}
+		candidate := verified.Candidate()
+		initial = &verified
+		registration = ServiceBackendTaskRegistrationIdentity{
+			Format:         BackendRegistrationFormat,
+			InstallationID: candidate.InstallationID,
+			Generation:     candidate.TargetGeneration, PolicyRevision: "1",
+			ControllerEpoch: candidate.ControllerEpoch,
+			ReleaseSHA256:   candidate.Payload.ReleaseSHA256,
+			ExpiresMS:       candidate.ExpiresMS,
+		}
+	case UpdateStartRegistrationFormat:
+		verified, err := VerifyUpdateStartRegistration(
+			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
+		if err != nil {
+			return zero, ErrInvalidCommand
+		}
+		start := verified.Start().Command()
+		update = &verified
+		registration = ServiceBackendTaskRegistrationIdentity{
+			Format:          UpdateStartRegistrationFormat,
+			InstallationID:  start.InstallationID,
+			Generation:      start.TargetGeneration,
+			PolicyRevision:  start.Payload.TargetPolicyRevision,
+			ControllerEpoch: start.ControllerEpoch,
+			ReleaseSHA256:   start.Payload.TargetReleaseSHA256,
+			ExpiresMS:       start.ExpiresMS,
+		}
+	default:
+		return zero, ErrInvalidCommand
+	}
 	if c.Format != ServiceBackendTaskFormat ||
 		!candidateUUID(c.RequestID) || !candidateUUID(c.TaskID) ||
 		!candidateUUID(c.LeaseID) ||
 		(c.Handler != appplatform.TaskHandlerBackend &&
 			c.Handler != appplatform.TaskHandlerDigest &&
 			c.Handler != appplatform.TaskHandlerEvent) ||
-		c.InstallationID != candidate.InstallationID ||
-		c.Generation != candidate.TargetGeneration || c.Generation != "1" ||
-		c.PolicyRevision != "1" ||
-		c.ControllerEpoch != candidate.ControllerEpoch ||
-		c.ReleaseSHA256 != candidate.Payload.ReleaseSHA256 ||
+		c.InstallationID != registration.InstallationID ||
+		c.Generation != registration.Generation ||
+		c.PolicyRevision != registration.PolicyRevision ||
+		c.ControllerEpoch != registration.ControllerEpoch ||
+		c.ReleaseSHA256 != registration.ReleaseSHA256 ||
 		len(c.BootID) < 1 || len(c.BootID) > 128 || !utf8.ValidString(c.BootID) ||
 		len(c.ServiceIdentity) < 1 || len(c.ServiceIdentity) > 8192 ||
 		!utf8.Valid(c.ServiceIdentity) || !json.Valid(c.ServiceIdentity) ||
@@ -112,7 +179,10 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 			!serviceTaskResource(grant.Resources, "events.subscribe") {
 		return zero, ErrInvalidCommand
 	}
-	return VerifiedServiceBackendTask{command: c, registration: registration}, nil
+	return VerifiedServiceBackendTask{
+		command: c, registration: registration,
+		initialRegistration: initial, updateRegistration: update,
+	}, nil
 }
 
 func serviceTaskResource(resources []string, required string) bool {
@@ -159,8 +229,7 @@ func ValidateServiceBackendTaskData(v VerifiedServiceBackendTask, body []byte) e
 	case appplatform.TaskHandlerDigest:
 		request, err := appplatform.DecodeTaskBackendRequest(body)
 		if err != nil || request.TaskID != v.command.TaskID ||
-			request.OccurrenceID == "" ||
-			v.registration.Candidate().TargetGeneration != "1" {
+			request.OccurrenceID == "" {
 			return ErrInvalidCommand
 		}
 	case appplatform.TaskHandlerEvent:

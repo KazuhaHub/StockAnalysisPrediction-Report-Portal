@@ -101,7 +101,7 @@ func requestServiceTaskFrame(
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil ||
-		parsed.SHA256 != verified.Registration().Candidate().Payload.ReleaseSHA256 ||
+		parsed.SHA256 != verified.RegistrationIdentity().ReleaseSHA256 ||
 		!appplatform.TaskHandlerAllowsApp(
 			parsed.Manifest.ID, verified.Command().Handler) {
 		return zero, driver.ErrContainerUncertain

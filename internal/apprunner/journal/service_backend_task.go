@@ -80,16 +80,25 @@ func (s *Store) ForwardServiceBackendTask(
 	if err := control.ValidateServiceBackendTaskData(verified, body); err != nil {
 		return zero, ErrFenceReconciliation
 	}
+	identity := verified.RegistrationIdentity()
+	if identity.Format == control.UpdateStartRegistrationFormat {
+		return s.forwardUpdateStartServiceBackendTask(
+			ctx, verified, raw, signature, descriptor, body, native)
+	}
+	initial, ok := verified.InitialRegistration()
+	if !ok || identity.Format != control.BackendRegistrationFormat {
+		return zero, ErrFenceReconciliation
+	}
 	command := verified.Command()
-	reg := verified.Registration().Command()
-	candidate := verified.Registration().Candidate()
+	reg := initial.Command()
+	candidate := initial.Candidate()
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.SHA256 != candidate.Payload.ReleaseSHA256 ||
 		parsed.Manifest.Backend == nil ||
 		parsed.Manifest.ID != serviceTaskAppID(command.ServiceIdentity) {
 		return zero, ErrFenceReconciliation
 	}
-	expires, _ := strconv.ParseInt(verified.Registration().Candidate().ExpiresMS, 10, 64)
+	expires, _ := strconv.ParseInt(identity.ExpiresMS, 10, 64)
 	bounded, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
 	defer cancel()
 	ctx = bounded
@@ -167,6 +176,117 @@ func (s *Store) ForwardServiceBackendTask(
 		LeaseID:               command.LeaseID,
 		RequestSHA256:         candidateHash(raw),
 		DeliveryReceiptSHA256: candidateHash(stored),
+		NativeID:              physical.Binding.NativeID, BootID: command.BootID,
+		Response:   physical.Response,
+		ObservedMS: strconv.FormatInt(physical.ObservedMS, 10),
+	}
+	encoded, _ := json.Marshal(result)
+	return ParseServiceBackendTaskResult(encoded)
+}
+
+func (s *Store) forwardUpdateStartServiceBackendTask(
+	ctx context.Context,
+	verified control.VerifiedServiceBackendTask,
+	raw, signature, descriptor, body []byte,
+	native *driver.CandidateRuntime,
+) (ServiceBackendTaskResult, error) {
+	var zero ServiceBackendTaskResult
+	if native == nil || s.closing.Load() ||
+		len(raw) == 0 || len(raw) > control.MaxCommandBytes ||
+		len(signature) != 64 || len(descriptor) == 0 ||
+		len(descriptor) > appplatform.MaxDescriptorBytes ||
+		len(body) == 0 || len(body) > appplatform.MaxTaskBackendBody {
+		return zero, ErrFenceReconciliation
+	}
+	update, ok := verified.UpdateStartRegistration()
+	if !ok {
+		return zero, ErrFenceReconciliation
+	}
+	command := verified.Command()
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.Manifest.Backend == nil ||
+		parsed.SHA256 != update.Start().Command().Payload.TargetReleaseSHA256 ||
+		parsed.Manifest.ID != serviceTaskAppID(command.ServiceIdentity) {
+		return zero, ErrFenceReconciliation
+	}
+	expires, err := strconv.ParseInt(
+		verified.RegistrationIdentity().ExpiresMS, 10, 64)
+	if err != nil || expires <= time.Now().UnixMilli() {
+		return zero, ErrFenceReconciliation
+	}
+	ctx, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
+	defer cancel()
+	if err := s.acquireDataExecution(ctx); err != nil {
+		return zero, err
+	}
+	defer s.releaseDataExecution()
+	before, err := s.prepareUpdateStartBackendExchange(
+		ctx, raw, signature)
+	if err != nil {
+		return zero, err
+	}
+	if _, err := control.VerifyServiceBackendTask(
+		raw, signature, before.facts.source.start.authority,
+		time.Now().UnixMilli()); err != nil {
+		return zero, err
+	}
+	launch, err := native.PrepareUpdateStart(ctx, before.request)
+	if err != nil {
+		return zero, err
+	}
+	defer launch.Close()
+	snapshot, err := launch.Snapshot()
+	if err != nil || snapshot != before.binding.Launch {
+		return zero, ErrFenceReconciliation
+	}
+	observation, err := native.ForwardUpdateStartServiceTask(
+		ctx, launch, before.binding, body,
+		command.ServiceIdentity, command.Handler)
+	if err != nil {
+		return zero, err
+	}
+	physical, err := observation.Snapshot()
+	bodySHA := sha256.Sum256(body)
+	identitySHA := sha256.Sum256(command.ServiceIdentity)
+	expectedBinding := driver.BackendRegistrationSnapshot{
+		Launch:         before.binding.Launch.Launch,
+		NativeID:       before.binding.NativeID,
+		BindingSHA256:  before.binding.BindingSHA256,
+		DocumentSHA256: before.binding.DocumentSHA256,
+		Device:         before.binding.Device,
+		Inode:          before.binding.Inode,
+	}
+	if err != nil || physical.Binding != expectedBinding ||
+		physical.BodySHA256 != hex.EncodeToString(bodySHA[:]) ||
+		physical.ServiceIdentitySHA256 != hex.EncodeToString(identitySHA[:]) ||
+		physical.ObservedMS < before.facts.source.start.now {
+		return zero, ErrFenceReconciliation
+	}
+	tx, after, err := beginUpdateStartRegistration(
+		ctx, s, raw, signature, "applied")
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if !sameUpdateStartRegistrationSource(before.facts, after) ||
+		checkUpdateStartRegistrationCurrent(ctx, after) != nil {
+		return zero, ErrFenceReconciliation
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	if _, err := control.VerifyServiceBackendTask(
+		raw, signature, after.source.start.authority,
+		time.Now().UnixMilli()); err != nil {
+		return zero, err
+	}
+	stored := after.row.receipt
+	result := ServiceBackendTaskResult{
+		Format:    ServiceBackendTaskResultFormat,
+		RequestID: command.RequestID, TaskID: command.TaskID,
+		LeaseID:               command.LeaseID,
+		RequestSHA256:         candidateHash(raw),
+		DeliveryReceiptSHA256: candidateHash([]byte(stored)),
 		NativeID:              physical.Binding.NativeID, BootID: command.BootID,
 		Response:   physical.Response,
 		ObservedMS: strconv.FormatInt(physical.ObservedMS, 10),

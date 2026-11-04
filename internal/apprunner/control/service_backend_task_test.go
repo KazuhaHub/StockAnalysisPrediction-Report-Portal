@@ -108,6 +108,100 @@ func TestServiceBackendTaskBindsServiceIdentityAndFixedRoute(t *testing.T) {
 	}
 }
 
+func TestServiceBackendTaskAcceptsUpdateGenerationRegistration(t *testing.T) {
+	registrationCommand, key, authority, now, descriptor, document :=
+		updateStartRegistrationFixture(t)
+	defer clear(document)
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationRaw, registrationSignature, err :=
+		SignUpdateStartRegistration(registrationCommand, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := VerifyUpdateStartRegistration(
+		registrationRaw, registrationSignature, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := registration.Start().Command()
+	taskID := "10000000-0000-4000-8000-000000000031"
+	body, err := appplatform.EncodeTaskBackendRequest(
+		taskID, "digest:generation-2",
+		[]byte(`{"scheduleId":"daily","reportIds":[41]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseID := "10000000-0000-4000-8000-000000000032"
+	identity, err := appplatform.SignServiceIdentity(
+		[]byte(strings.Repeat("u", 32)),
+		appplatform.ServiceIdentityGrant{
+			Format:          appplatform.ServiceIdentityFormat,
+			LeaseID:         leaseID,
+			AppID:           parsed.Manifest.ID,
+			InstallationID:  start.InstallationID,
+			ControllerEpoch: start.ControllerEpoch,
+			Generation:      start.TargetGeneration,
+			PolicyRevision:  start.Payload.TargetPolicyRevision,
+			ReleaseSHA256:   start.Payload.TargetReleaseSHA256,
+			Resources:       []string{"reports.read", "tasks.schedule"},
+			IssuedMS:        strconv.FormatInt(now, 10),
+			ExpiresMS:       strconv.FormatInt(now+60000, 10),
+		}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := ServiceBackendTaskCommand{
+		Format:                ServiceBackendTaskFormat,
+		RequestID:             "10000000-0000-4000-8000-000000000033",
+		TaskID:                taskID,
+		LeaseID:               leaseID,
+		Handler:               appplatform.TaskHandlerDigest,
+		InstallationID:        start.InstallationID,
+		Generation:            start.TargetGeneration,
+		PolicyRevision:        start.Payload.TargetPolicyRevision,
+		ControllerEpoch:       start.ControllerEpoch,
+		ReleaseSHA256:         start.Payload.TargetReleaseSHA256,
+		BootID:                "generation-2-boot",
+		RegistrationRaw:       registrationRaw,
+		RegistrationSignature: registrationSignature,
+		ServiceIdentity:       identity,
+		BodySHA256:            serviceTaskBodyDigest(body),
+	}
+	raw, signature, err := SignServiceBackendTask(
+		command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+	if err != nil ||
+		verified.RegistrationIdentity().Generation != "2" ||
+		verified.RegistrationIdentity().PolicyRevision != "2" ||
+		ValidateServiceBackendTaskData(verified, body) != nil {
+		t.Fatal("generation-2 service task", verified, err)
+	}
+	for name, mutate := range map[string]func(*ServiceBackendTaskCommand){
+		"generation": func(c *ServiceBackendTaskCommand) {
+			c.Generation = "1"
+		},
+		"policy": func(c *ServiceBackendTaskCommand) {
+			c.PolicyRevision = "1"
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := command
+			mutate(&changed)
+			if raw, signature, err := SignServiceBackendTask(
+				changed, key, authority, now); err == nil ||
+				len(raw) != 0 || len(signature) != 0 {
+				t.Fatal("changed generation-2 service task signed")
+			}
+		})
+	}
+}
+
 func TestServiceEventTaskRequiresEventSubscriptionAuthority(t *testing.T) {
 	base, key, authority, now, _, _ := backendRequestFixture(t)
 	registration, err := VerifyBackendRegistration(

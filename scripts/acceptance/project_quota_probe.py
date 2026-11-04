@@ -670,6 +670,10 @@ def main(args):
                         if "MANAGED_UPDATE_A_TO_B" not in result.stdout:
                             raise RuntimeError("Managed update A-to-B acceptance missing")
                         report["native_managed_update_a_to_b"] = True
+                        if "MANAGED_UPDATE_SERVICE_TASK_VERIFIED" not in result.stdout:
+                            raise RuntimeError(
+                                "Managed update service-task acceptance missing")
+                        report["native_managed_update_service_task"] = True
                         for marker in ("MANAGED_UPDATE_FAILED_FOR_RESTORE", "MANAGED_RESTORE_STOP_REMOVE_TARGET", "MANAGED_RESTORE_DATA_VERIFIED", "MANAGED_RESTORE_START_ACTIVATED"):
                             if marker not in result.stdout:
                                 raise RuntimeError("Native managed restore acceptance missing: " + marker)
