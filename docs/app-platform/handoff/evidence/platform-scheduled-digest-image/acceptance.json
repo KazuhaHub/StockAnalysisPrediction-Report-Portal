@@ -15,6 +15,10 @@
     "runtime_digest": "localhost:32768/scheduled-digest-exact@sha256:0eb685f804d434aff31f31374897ee767ba98c62cb3bc21a42991d089ef9f5c7",
     "runtime_image_id": "sha256:c2046ec48cfe159abf1116c9b13a53c99e24e0ee2539dee4eaa4e348ec3452a5"
   },
+  "managed_exact_image": {
+    "run": "41872400475",
+    "evidence": "platform-scheduled-digest-managed/acceptance.json"
+  },
   "runtime": {
     "entrypoint": "/scheduled-digest",
     "user": "65532:65532",
@@ -42,7 +46,7 @@
     "python3 scripts/acceptance/scheduled_digest_image.py --image <immutable-image-digest> --docker-socket /run/docker.sock --evidence <absolute-path>"
   ],
   "limits": [
-    "This verifies the exact Apps service image through its fixed Unix API. It does not install that image through a clean Portal market transaction.",
+    "This runtime smoke alone verifies the exact Apps service image through its fixed Unix API; the separate managed-exact run covers Portal-managed registration and task execution.",
     "The smoke supplies a syntactically exact service identity because the reference service validates the runner-enforced identity envelope shape; the signed HMAC service-task command is covered by the separate native Scheduled Digest acceptance.",
     "The localhost registry digest is disposable runtime evidence, not a public or production-publishable image reference."
   ]

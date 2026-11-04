@@ -101,18 +101,36 @@ class ScheduledDigestImageTest(unittest.TestCase):
         self.assertEqual(set(value), {"format", "task_id", "occurrence_id", "payload"})
 
     def test_response_requires_exact_protocol(self):
-        valid = {
-            "format": "portal.app-task.response/1-dev.1",
-            "outcome": "succeeded",
-        }
-        self.assertEqual(SUBJECT.decode_response(json.dumps(valid).encode()), valid)
+        valid = (
+            b'{"format":"portal.app-task.response/1-dev.1",'
+            b'"outcome":"succeeded","result":{"count":2},'
+            b'"evidence_sha256":"' + b"a" * 64 + b'"}'
+        )
+        self.assertEqual(SUBJECT.decode_response(valid)["result"], {"count": 2})
+        failed = (
+            b'{"format":"portal.app-task.response/1-dev.1",'
+            b'"outcome":"failed","error_code":"digest_request_invalid"}'
+        )
+        self.assertEqual(
+            SUBJECT.decode_response(failed)["error_code"],
+            "digest_request_invalid",
+        )
         for invalid in (
-            {},
-            {"format": "portal.app-task.response/2"},
-            [],
+            b"{}",
+            b'{"format":"portal.app-task.response/2","outcome":"failed",'
+            b'"error_code":"digest_request_invalid"}',
+            b'{"outcome":"failed","format":"portal.app-task.response/1-dev.1",'
+            b'"error_code":"digest_request_invalid"}',
+            b'{"format":"portal.app-task.response/1-dev.1",'
+            b'"outcome":"succeeded","evidence_sha256":"' + b"a" * 64
+            + b'","result":{"count":2}}',
+            b'{"format":"portal.app-task.response/1-dev.1",'
+            b'"outcome":"failed","outcome":"failed",'
+            b'"error_code":"digest_request_invalid"}',
+            b"[]",
         ):
             with self.assertRaises(ValueError):
-                SUBJECT.decode_response(json.dumps(invalid).encode())
+                SUBJECT.decode_response(invalid)
 
     def test_image_reference_requires_immutable_local_digest(self):
         valid = "localhost:5000/scheduled-digest-exact@sha256:" + "a" * 64

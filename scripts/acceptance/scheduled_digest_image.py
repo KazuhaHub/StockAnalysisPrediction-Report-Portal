@@ -234,12 +234,29 @@ def task_body(task_id, occurrence, report_ids):
 
 
 def decode_response(raw):
-    value = json.loads(raw)
+    def no_duplicates(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate response field")
+            value[key] = item
+        return value
+
+    value = json.loads(raw, object_pairs_hook=no_duplicates)
     if (
         not isinstance(value, dict)
         or value.get("format") != "portal.app-task.response/1-dev.1"
+        or json.dumps(value, separators=(",", ":"), sort_keys=False).encode()
+        != raw
     ):
         raise ValueError("invalid scheduled digest response")
+    outcome = value.get("outcome")
+    expected = {
+        "succeeded": ["format", "outcome", "result", "evidence_sha256"],
+        "failed": ["format", "outcome", "error_code"],
+    }.get(outcome)
+    if expected is None or list(value) != expected:
+        raise ValueError("scheduled digest response outcome changed")
     return value
 
 

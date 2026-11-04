@@ -2683,3 +2683,22 @@ daemon workflow 40455635317 passed on the functional source as well.
   exact image through market install, registration, task execution and
   uninstall. See
   [exact image evidence](handoff/evidence/platform-scheduled-digest-image/acceptance.json).
+
+- Closed the Portal-managed exact Scheduled Digest service path at Portal
+  `0e1cc6f4` and Apps `2c3a8e3`. The native-only workflow built the exact Apps
+  candidate and OCI image, installed it through the managed candidate state
+  machine, observed readiness, delivered the protected registration through
+  the production RPC, verified the boot challenge with the process boot ID,
+  executed the fixed digest task through the signed service-task command,
+  cleared installation data on uninstall and reinstalled into a fresh
+  namespace. The service now consumes the real registration record and emits
+  canonical success/failure responses; the latter bug was found by this
+  end-to-end run rather than the independent API smoke. Exact image runtime was
+  `localhost:32768/scheduled-digest-exact@sha256:6cc21ef...`; native run
+  `41872400475` passed and its artifact records both
+  `native_scheduled_digest_exact_managed_image=true` and
+  `native_scheduled_digest_exact_registration_handshake=true`. The task fixture
+  seeds final activation rows, so the neutral-operator clean-market
+  walkthrough, update-generation variants and human screen-reader audit remain
+  open. See
+  [managed exact image evidence](handoff/evidence/platform-scheduled-digest-managed/acceptance.json).

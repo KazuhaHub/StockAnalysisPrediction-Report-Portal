@@ -149,9 +149,12 @@ PostgreSQL, and backup round trip.
 The Scheduled Digest reference app now implements the independent backend and
 frontend for the fixed `scheduled-digest.run` handler. Portal maps that handler
 only to `POST /v1/tasks/digest`; the runner verifies the exact registration and
-service identity before forwarding it. Native acceptance is recorded in
-[Scheduled Digest evidence](handoff/evidence/platform-scheduled-digest/acceptance.json).
-The full native matrix uses a contract-compatible ready backend with the exact
-Apps frontend candidate; installing the exact service image through a neutral
-clean-market flow remains required. Update-generation service-task registration
-variants also remain gated.
+service identity before forwarding it. Native acceptance now starts the exact
+service image under the Portal-managed candidate, delivers the protected
+registration, verifies the boot handshake and executes the fixed digest task.
+Evidence is in
+[Scheduled Digest evidence](handoff/evidence/platform-scheduled-digest/acceptance.json)
+and [managed exact image](handoff/evidence/platform-scheduled-digest-managed/acceptance.json).
+The task acceptance fixture seeds the final activation rows after delivery and
+boot, so it is not a neutral-operator market walkthrough. Update-generation
+service-task registration variants also remain gated.
