@@ -21,7 +21,8 @@ func testNativePortalEventDelivery(
 	ctx := context.Background()
 	s.platformBackendEndpoint.Store(&endpoint)
 	installation := activated.installationID
-	activateNativeEventInstallation(t, s, activated)
+	activateNativeInstallation(t, s, activated)
+	t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
 	const reportID = "41"
 	subscriptionID, created, err := s.createPlatformEventSubscription(
 		ctx, installation, appplatform.EventSubscriptionSpec{
@@ -162,9 +163,9 @@ func testNativePortalEventDelivery(
 }
 
 // The existing managed-install native fixture stops after verified delivery and
-// boot. Event acceptance needs the same test-only final rows used by the viewer
-// fixture before it can exercise an active task subscription.
-func activateNativeEventInstallation(
+// boot. Task acceptance needs the same test-only final rows used by the viewer
+// fixture before it can exercise active task authority.
+func activateNativeInstallation(
 	t *testing.T, s *Server, lease platformOperationLease,
 ) {
 	t.Helper()
@@ -176,7 +177,6 @@ func activateNativeEventInstallation(
 	phase := scalar[string](t, s.st, `SELECT phase
 		FROM app_platform_installations WHERE id=?`, lease.installationID)
 	if stage == "complete" && activation == "active" && phase == "ready" {
-		t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
 		return
 	}
 	tx, err := s.st.db.Begin()
@@ -232,7 +232,6 @@ func activateNativeEventInstallation(
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("NATIVE_EVENT_ACTIVATION_FIXTURE")
 }
 
 func nativeEventInstallationState(

@@ -210,6 +210,8 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		committed := testNativeRegistrationRPC(
 			t, s, activated, endpoint, platformDigest(document))
 		if exactImage {
+			activateNativeInstallation(t, s, committed)
+			t.Log("SCHEDULED_DIGEST_EXACT_ACTIVATION_FIXTURE")
 			testNativeExactScheduledDigest(t, s, committed)
 		} else {
 			testNativePortalEventDelivery(t, s, committed, endpoint)
