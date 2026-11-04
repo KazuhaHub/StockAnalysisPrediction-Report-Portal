@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -21,6 +23,22 @@ class ScheduledDigestImageTest(unittest.TestCase):
             registration["format"],
             "portal.managed-backend-registration/1-dev.1",
         )
+        self.assertEqual(
+            registration["metadata"]["identity"]["deployment_id"],
+            SUBJECT.DEPLOYMENT_ID,
+        )
+        self.assertEqual(
+            registration["metadata"]["identity"]["controller_epoch"],
+            SUBJECT.CONTROLLER_EPOCH,
+        )
+        self.assertEqual(
+            registration["metadata"]["instance_id"], SUBJECT.INSTANCE_ID
+        )
+        key = base64.b64decode(registration["signing_key"], validate=True)
+        self.assertEqual(len(key), 32)
+        self.assertEqual(
+            registration["metadata"]["key_id"], hashlib.sha256(key).hexdigest()
+        )
         self.assertEqual(identity["app_id"], "scheduled-digest")
         self.assertEqual(
             identity["installation_id"],
@@ -39,6 +57,35 @@ class ScheduledDigestImageTest(unittest.TestCase):
             registration["metadata"]["identity"]["release_sha256"],
         )
         self.assertEqual(identity["resources"], ["reports.read", "tasks.schedule"])
+
+    def test_handshake_answer_binds_challenge_and_boot(self):
+        now = 1_800_000_000
+        challenge = SUBJECT.handshake_challenge(now=now)
+        raw = json.loads(SUBJECT._decode_token_part(challenge.split(".", 1)[0]))
+        raw.update(
+            {
+                "kind": "answer",
+                "boot": "a" * 32,
+                "challenge_sha256": hashlib.sha256(
+                    challenge.encode("ascii")
+                ).hexdigest(),
+            }
+        )
+        answer = SUBJECT.encode_handshake(raw)
+        self.assertEqual(
+            SUBJECT.verify_handshake_answer(
+                challenge, {"answer": answer}, now=now + 1
+            ),
+            "a" * 32,
+        )
+        for changed in (
+            {"answer": answer, "redirect": "private"},
+            {"answer": answer.replace(".", "..", 1)},
+        ):
+            with self.assertRaises(ValueError):
+                SUBJECT.verify_handshake_answer(challenge, changed, now=now + 1)
+        with self.assertRaises(ValueError):
+            SUBJECT.verify_handshake_answer(challenge, {"answer": answer}, now=now + 30)
 
     def test_task_body_is_canonical_and_closed(self):
         raw = SUBJECT.task_body(

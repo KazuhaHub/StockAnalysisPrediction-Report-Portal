@@ -222,9 +222,13 @@ func testNativeRegistrationRPC(t *testing.T, s *Server, lease platformOperationL
 		t.Fatal("live boot proof serialized")
 	}
 	t.Log("MANAGED_BACKEND_BOOT_VERIFIED")
-	testNativeBackendRequestRelay(t, endpoint, observed, boot)
-	if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") != "1" {
-		testNativeManagedViewerRequest(t, s, committed, endpoint, boot)
+	if scheduledDigestExactManaged() {
+		t.Log("SCHEDULED_DIGEST_EXACT_REGISTRATION_HANDSHAKE_VERIFIED")
+	} else {
+		testNativeBackendRequestRelay(t, endpoint, observed, boot)
+		if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") != "1" {
+			testNativeManagedViewerRequest(t, s, committed, endpoint, boot)
+		}
 	}
 	t.Log("MANAGED_BACKEND_REGISTRATION_RPC")
 	t.Log("MANAGED_BACKEND_DELIVERY_COMMITTED")

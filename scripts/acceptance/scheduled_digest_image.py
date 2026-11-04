@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Run the exact Scheduled Digest image through its fixed Unix API."""
 import argparse
+import base64
 import hashlib
+import hmac
 import http.client
 import json
 import os
@@ -16,6 +18,11 @@ import time
 IMAGE = re.compile(
     r"^localhost:[0-9]+/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$"
 )
+DEPLOYMENT_ID = "10000000-0000-4000-8000-000000000005"
+INSTALLATION_ID = "10000000-0000-4000-8000-000000000001"
+CONTROLLER_EPOCH = "10000000-0000-4000-8000-000000000003"
+INSTANCE_ID = "d" * 64
+SIGNING_KEY = bytes(range(32))
 
 
 class UnixHTTPConnection(http.client.HTTPConnection):
@@ -77,17 +84,23 @@ def image_identity(image):
 
 
 def registration():
+    key_id = hashlib.sha256(SIGNING_KEY).hexdigest()
     return {
         "format": "portal.managed-backend-registration/1-dev.1",
         "metadata": {
             "identity": {
                 "app_id": "scheduled-digest",
-                "installation_id": "10000000-0000-4000-8000-000000000001",
+                "deployment_id": DEPLOYMENT_ID,
+                "controller_epoch": CONTROLLER_EPOCH,
+                "installation_id": INSTALLATION_ID,
                 "generation": "1",
                 "policy_revision": "1",
                 "release_sha256": "a" * 64,
-            }
+            },
+            "instance_id": INSTANCE_ID,
+            "key_id": key_id,
         },
+        "signing_key": base64.b64encode(SIGNING_KEY).decode("ascii"),
     }
 
 
@@ -97,8 +110,8 @@ def service_identity():
         "format": "portal.app.service-identity/1-dev.1",
         "lease_id": "10000000-0000-4000-8000-000000000002",
         "app_id": "scheduled-digest",
-        "installation_id": "10000000-0000-4000-8000-000000000001",
-        "controller_epoch": "10000000-0000-4000-8000-000000000003",
+        "installation_id": INSTALLATION_ID,
+        "controller_epoch": CONTROLLER_EPOCH,
         "generation": "1",
         "policy_revision": "1",
         "release_sha256": "a" * 64,
@@ -107,6 +120,99 @@ def service_identity():
         "expires_ms": str(now + 300000),
         "mac": "b" * 64,
     }
+
+
+def handshake_challenge(now=None):
+    issued = int(time.time()) if now is None else now
+    return encode_handshake(
+        {
+            "kind": "challenge",
+            "iss": "portal.app/" + DEPLOYMENT_ID,
+            "aud": "portal.app/" + INSTALLATION_ID,
+            "app": "scheduled-digest",
+            "instance": INSTANCE_ID,
+            "kid": hashlib.sha256(SIGNING_KEY).hexdigest(),
+            "nonce": base64.urlsafe_b64encode(os.urandom(24))
+            .rstrip(b"=")
+            .decode("ascii"),
+            "iat": issued,
+            "exp": issued + 30,
+        }
+    )
+
+
+def encode_handshake(value):
+    raw = json.dumps(value, separators=(",", ":")).encode()
+    encoded = base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+    signature = hmac.new(
+        SIGNING_KEY,
+        b"rp-extension-v1\nhandshake:" + encoded.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    return encoded + "." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode(
+        "ascii"
+    )
+
+
+def _decode_token_part(value):
+    return base64.b64decode(
+        value + "=" * (-len(value) % 4),
+        altchars=b"-_",
+        validate=True,
+    )
+
+
+def verify_handshake_answer(challenge, raw, now=None):
+    if not isinstance(raw, dict) or set(raw) != {"answer"}:
+        raise ValueError("scheduled digest handshake response changed")
+    answer = raw["answer"]
+    if not isinstance(answer, str) or answer.count(".") != 1:
+        raise ValueError("scheduled digest handshake answer is invalid")
+    encoded, supplied = answer.split(".", 1)
+    expected = hmac.new(
+        SIGNING_KEY,
+        b"rp-extension-v1\nhandshake:" + encoded.encode("ascii"),
+        hashlib.sha256,
+    ).digest()
+    try:
+        supplied_raw = _decode_token_part(supplied)
+        challenge_raw = json.loads(_decode_token_part(challenge.split(".", 1)[0]))
+        value = json.loads(_decode_token_part(encoded))
+    except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValueError("scheduled digest handshake answer is invalid") from error
+    instant = int(time.time()) if now is None else now
+    boot = value.get("boot", "")
+    if (
+        not hmac.compare_digest(supplied_raw, expected)
+        or set(value)
+        != {
+            "kind",
+            "iss",
+            "aud",
+            "app",
+            "instance",
+            "kid",
+            "nonce",
+            "iat",
+            "exp",
+            "boot",
+            "challenge_sha256",
+        }
+        or value.get("kind") != "answer"
+        or value.get("challenge_sha256")
+        != hashlib.sha256(challenge.encode("ascii")).hexdigest()
+        or value.get("nonce") != challenge_raw.get("nonce")
+        or value.get("iss") != challenge_raw.get("iss")
+        or value.get("aud") != challenge_raw.get("aud")
+        or value.get("app") != challenge_raw.get("app")
+        or value.get("instance") != challenge_raw.get("instance")
+        or value.get("kid") != challenge_raw.get("kid")
+        or not re.fullmatch(r"[a-f0-9]{32}", boot)
+    ):
+        raise ValueError("scheduled digest handshake answer is invalid")
+    if value.get("exp", 0) <= instant or value.get("exp", 0) <= value.get("iat", 0):
+        raise ValueError("scheduled digest handshake answer expired")
+    return boot
 
 
 def task_body(task_id, occurrence, report_ids):
@@ -218,6 +324,19 @@ def main():
             "data_format": "1",
         }:
             raise ValueError("exact image readiness failed")
+        challenge = handshake_challenge()
+        handshake_status, handshake_raw = request(
+            socket_path,
+            "POST",
+            "/v1/handshake",
+            json.dumps({"challenge": challenge}, separators=(",", ":")).encode(),
+            {"Content-Type": "application/json"},
+        )
+        if handshake_status != 200:
+            raise ValueError("exact image registration handshake failed")
+        boot_id = verify_handshake_answer(
+            challenge, json.loads(handshake_raw), now=int(time.time())
+        )
         identity = json.dumps(service_identity(), separators=(",", ":"))
         headers = {
             "Content-Type": "application/json",
@@ -276,6 +395,9 @@ def main():
             {
                 "passed": True,
                 "health": health,
+                "handshake_boot_sha256": hashlib.sha256(
+                    boot_id.encode("ascii")
+                ).hexdigest(),
                 "task_occurrence": occurrence,
                 "first_outcome": first.get("outcome"),
                 "replay_duplicate": replay.get("result", {}).get("duplicate"),

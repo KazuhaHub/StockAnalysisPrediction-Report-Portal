@@ -234,10 +234,24 @@ def readiness_image_configuration():
     return image
 
 
+def scheduled_digest_image_configuration():
+    image = os.environ.get("APP_SCHEDULED_DIGEST_NATIVE_IMAGE", "")
+    if not image:
+        return None
+    match = re.fullmatch(
+        r"localhost:([0-9]{1,5})/scheduled-digest-exact@sha256:[a-f0-9]{64}",
+        image,
+    )
+    if not match or not 1 <= int(match.group(1)) <= 65535:
+        raise RuntimeError("invalid exact Scheduled Digest image")
+    return image
+
+
 def main(args):
     require_disposable(args)
     candidate = candidate_configuration()
     ready_image = readiness_image_configuration()
+    scheduled_digest_image = scheduled_digest_image_configuration()
     if ready_image and (not candidate or len(args) != 11):
         raise RuntimeError("readiness fixture requires managed Portal acceptance")
     if candidate and len(args) not in (5, 7, 9, 11):
@@ -510,6 +524,10 @@ def main(args):
                         os.environ.get("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1")
                     if event_only:
                         portal_env["PORTAL_EVENT_ACCEPTANCE_ONLY"] = "1"
+                        if scheduled_digest_image:
+                            portal_env[
+                                "APP_SCHEDULED_DIGEST_NATIVE_IMAGE"] = (
+                                    scheduled_digest_image)
                     browser_enabled = bool(os.environ.get("APP_SDK_BROWSER_DIR"))
                     lifecycle_browser_enabled = bool(os.environ.get("APP_LIFECYCLE_BROWSER_RUNNER"))
                     for name in ("APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH", "APP_LIFECYCLE_BROWSER_RUNNER", "APP_LIFECYCLE_BROWSER_EVIDENCE"):
@@ -755,19 +773,30 @@ def main(args):
                                 raise RuntimeError("current Portal viewer native request gating missing")
                             report["native_current_viewer_request_verified"] = True
                     if candidate and event_only:
-                        for marker in (
+                        markers = [
                             "MANAGED_INSTALL_DATA_READY",
                             "MANAGED_INSTALL_CANDIDATE_PROBE",
                             "MANAGED_INSTALL_READINESS",
                             "MANAGED_BACKEND_REGISTRATION_MATERIAL",
-                            "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
-                            "NATIVE_EVENT_ACTIVATION_FIXTURE",
-                            "EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
-                            "SCHEDULED_DIGEST_HANDLER_VERIFIED",
+                            "MANAGED_BACKEND_BOOT_VERIFIED",
+                            "MANAGED_BACKEND_REGISTRATION_RPC",
                             "MANAGED_UNINSTALL_STOP_REMOVE_CODE",
                             "MANAGED_UNINSTALL_REMOVE_DATA",
                             "MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
-                        ):
+                        ]
+                        if scheduled_digest_image:
+                            markers.extend((
+                                "SCHEDULED_DIGEST_EXACT_REGISTRATION_HANDSHAKE_VERIFIED",
+                                "SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED",
+                            ))
+                        else:
+                            markers.extend((
+                                "MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
+                                "NATIVE_EVENT_ACTIVATION_FIXTURE",
+                                "EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+                                "SCHEDULED_DIGEST_HANDLER_VERIFIED",
+                            ))
+                        for marker in markers:
                             if marker not in result.stdout:
                                 diagnostic = Path.cwd() / "portal-quota-failure.txt"
                                 diagnostic.write_text(
@@ -778,10 +807,20 @@ def main(args):
                         report["native_portal_managed_candidate_start_to_probe"] = True
                         report["native_portal_managed_backend_readiness"] = True
                         report["native_portal_managed_registration_material"] = True
-                        report["native_backend_request_relay_verified"] = True
-                        report["native_event_activation_fixture"] = True
-                        report["native_event_duplicate_out_of_order_lost_ack"] = True
-                        report["native_scheduled_digest_handler"] = True
+                        report["native_portal_backend_boot_verified"] = True
+                        report["native_backend_registration_rpc"] = True
+                        if scheduled_digest_image:
+                            report[
+                                "native_scheduled_digest_exact_managed_image"] = True
+                            report[
+                                "native_scheduled_digest_exact_registration_handshake"] = True
+                            report[
+                                "scheduled_digest_exact_image"] = scheduled_digest_image
+                        else:
+                            report["native_backend_request_relay_verified"] = True
+                            report["native_event_activation_fixture"] = True
+                            report["native_event_duplicate_out_of_order_lost_ack"] = True
+                            report["native_scheduled_digest_handler"] = True
                         report["native_managed_uninstall_remove_data"] = True
                         report["native_managed_reinstall_fresh_namespace_and_launch"] = True
                 if candidate:

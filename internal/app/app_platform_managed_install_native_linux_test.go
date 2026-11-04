@@ -29,11 +29,18 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		t.Fatal(err)
 	}
-	manifest.Capabilities.Required = []string{
-		"background.run", "events.subscribe", "reports.read",
-		"secrets.use", "storage.files", "tasks.schedule",
+	exactImage := scheduledDigestExactManaged()
+	if exactImage {
+		if os.Getenv("APP_SCHEDULED_DIGEST_NATIVE_IMAGE") == "" {
+			t.Fatal("exact Scheduled Digest image is missing")
+		}
+	} else {
+		manifest.Capabilities.Required = []string{
+			"background.run", "events.subscribe", "reports.read",
+			"secrets.use", "storage.files", "tasks.schedule",
+		}
 	}
-	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	manifest.Backend.Image = scheduledDigestManagedImage()
 	raw, err = json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -202,8 +209,12 @@ func testNativePortalManagedInstallData(t *testing.T, s *Server, session platfor
 		t.Log("MANAGED_BACKEND_REGISTRATION_MATERIAL")
 		committed := testNativeRegistrationRPC(
 			t, s, activated, endpoint, platformDigest(document))
-		testNativePortalEventDelivery(t, s, committed, endpoint)
-		testNativeScheduledDigest(t, s, committed)
+		if exactImage {
+			testNativeExactScheduledDigest(t, s, committed)
+		} else {
+			testNativePortalEventDelivery(t, s, committed, endpoint)
+			testNativeScheduledDigest(t, s, committed)
+		}
 		oldNamespace := scalar[string](t, s.st,
 			`SELECT id FROM app_platform_data_namespaces
 			 WHERE owner_installation_id=?`,

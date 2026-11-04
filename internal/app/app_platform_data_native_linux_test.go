@@ -283,6 +283,11 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		child.Env = append(child.Env, "PORTAL_MANAGED_PROFILE=1", "PORTAL_MANAGED_IMAGE="+os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"))
 		if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" {
 			child.Env = append(child.Env, "PORTAL_EVENT_ACCEPTANCE_ONLY=1")
+			if image := os.Getenv("APP_SCHEDULED_DIGEST_NATIVE_IMAGE"); image != "" {
+				child.Env = append(child.Env,
+					"APP_SCHEDULED_DIGEST_NATIVE_IMAGE="+image,
+					"PORTAL_SCHEDULED_DIGEST_EXACT=1")
+			}
 		}
 		if os.Getenv("APP_READY_NATIVE_IMAGE") != "" {
 			child.Env = append(child.Env, "PORTAL_MANAGED_READY=1")
@@ -476,7 +481,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	if managed {
 		if os.Getenv("PORTAL_EVENT_ACCEPTANCE_ONLY") == "1" {
-			for _, marker := range []string{
+			exactScheduledDigest :=
+				os.Getenv("APP_SCHEDULED_DIGEST_NATIVE_IMAGE") != ""
+			markers := []string{
 				"MANAGED_PROFILE_OBSERVED",
 				"MANAGED_INSTALL_DATA_READY",
 				"MANAGED_INSTALL_CANDIDATE_PROBE",
@@ -485,14 +492,23 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				"MANAGED_BACKEND_REGISTRATION_MATERIAL",
 				"MANAGED_BACKEND_DELIVERY_COMMITTED",
 				"MANAGED_BACKEND_BOOT_VERIFIED",
-				"MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
-				"NATIVE_EVENT_ACTIVATION_FIXTURE",
-				"EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
-				"SCHEDULED_DIGEST_HANDLER_VERIFIED",
+				"MANAGED_BACKEND_REGISTRATION_RPC",
 				"MANAGED_UNINSTALL_STOP_REMOVE_CODE",
 				"MANAGED_UNINSTALL_REMOVE_DATA",
 				"MANAGED_REINSTALL_FRESH_NAMESPACE_AND_LAUNCH",
-			} {
+			}
+			if exactScheduledDigest {
+				markers = append(markers,
+					"SCHEDULED_DIGEST_EXACT_REGISTRATION_HANDSHAKE_VERIFIED",
+					"SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED")
+			} else {
+				markers = append(markers,
+					"MANAGED_BACKEND_REQUEST_RELAY_VERIFIED",
+					"NATIVE_EVENT_ACTIVATION_FIXTURE",
+					"EVENT_DUPLICATE_OUT_OF_ORDER_LOST_ACK",
+					"SCHEDULED_DIGEST_HANDLER_VERIFIED")
+			}
+			for _, marker := range markers {
 				if !bytes.Contains(output.Bytes(), []byte(marker)) {
 					t.Fatal("event acceptance marker missing", marker,
 						output.String())

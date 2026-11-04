@@ -188,12 +188,25 @@ func platformScheduledDigestReleaseFixture(
 	m.Publisher = "fixture-publisher"
 	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
-	m.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	if image := scheduledDigestManagedImage(); image != "" {
+		m.Backend.Image = image
+	}
 	raw, err = json.Marshal(m)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return raw, archive
+}
+
+func scheduledDigestExactManaged() bool {
+	return os.Getenv("PORTAL_SCHEDULED_DIGEST_EXACT") == "1"
+}
+
+func scheduledDigestManagedImage() string {
+	if scheduledDigestExactManaged() {
+		return os.Getenv("APP_SCHEDULED_DIGEST_NATIVE_IMAGE")
+	}
+	return os.Getenv("PORTAL_MANAGED_IMAGE")
 }
 
 func TestManagedInstallSignedRelease(t *testing.T) {

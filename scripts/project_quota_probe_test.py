@@ -33,6 +33,30 @@ class ProjectQuotaProbeTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     probe.readiness_image_configuration()
 
+    def test_scheduled_digest_image_requires_owned_exact_digest(self):
+        valid = "localhost:53001/scheduled-digest-exact@sha256:" + "a" * 64
+        with patch.dict(
+            probe.os.environ,
+            {"APP_SCHEDULED_DIGEST_NATIVE_IMAGE": valid},
+            clear=True,
+        ):
+            self.assertEqual(
+                probe.scheduled_digest_image_configuration(), valid)
+        for image in (
+            "registry.example/scheduled-digest-exact@sha256:" + "a" * 64,
+            "localhost:0/scheduled-digest-exact@sha256:" + "a" * 64,
+            "localhost:65536/scheduled-digest-exact@sha256:" + "a" * 64,
+            "localhost:53001/other@sha256:" + "a" * 64,
+            "localhost:53001/scheduled-digest-exact:latest",
+        ):
+            with patch.dict(
+                probe.os.environ,
+                {"APP_SCHEDULED_DIGEST_NATIVE_IMAGE": image},
+                clear=True,
+            ):
+                with self.assertRaises(RuntimeError):
+                    probe.scheduled_digest_image_configuration()
+
     def test_only_native_denials_with_real_filesystem_capacity_count(self):
         ample = SimpleNamespace(f_bavail=100000, f_frsize=4096, f_favail=10000)
         with patch.object(workload.os, "statvfs", return_value=ample):
