@@ -2720,3 +2720,20 @@ daemon workflow 40455635317 passed on the functional source as well.
   mutable state. The run skipped Chromium by design; browser coverage remains
   separately bound. See
   [updated-generation service task evidence](handoff/evidence/platform-update-service-tasks/acceptance.json).
+
+- Closed the development acceptance for OPS-01 at Portal `8c5a4b12`. A
+  file-backed SQLite restart and a second PostgreSQL connection cover all
+  sixteen nonterminal durable lifecycle stages. Each takeover preserves the
+  exact operation and stage, advances ownership by one fence, refuses the stale
+  owner's heartbeat and effect commit, and lets only the replacement renew.
+  The ten effect-capable stages keep one ambiguous effect with its original
+  admitted fence and insert no duplicate. The runner journal separately closes
+  and reopens the owner-only store for every closed stage, retaining unknown
+  commands without automatic replay or fabricated applied receipts and
+  refusing duplicate effect identity. Local `internal/app` (149.895s), runner
+  journal (53.555s), focused Race and `go vet` pass. General `41972143589`,
+  project quota/native `41972143744`, runner daemon `41972143587` and CodeQL
+  `41972137793` pass. Process-wide SIGKILL at every stage, exactly-once physical
+  effects and production rollout remain explicitly open. See
+  [lifecycle restart evidence](handoff/evidence/platform-lifecycle-restart/acceptance.json)
+  and [restart matrix](164-lifecycle-restart-matrix.md).

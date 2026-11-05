@@ -80,6 +80,9 @@ The PostgreSQL test uses a second connection to the same database while the
 pre-restart store remains open. Evidence is recorded in
 [lifecycle restart](handoff/evidence/platform-lifecycle-restart/acceptance.json).
 
+Portal `8c5a4b12` passed general test `41972143589`, project quota/native
+`41972143744`, runner daemon `41972143587` and CodeQL `41972137793`.
+
 ## Limits
 
 The Portal restart is a real close/reopen of the durable store and ownership
