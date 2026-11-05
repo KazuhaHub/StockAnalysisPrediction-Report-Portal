@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -213,4 +215,113 @@ func TestPlatformInstallStageAuditSQLite(t *testing.T) {
 }
 func TestPlatformInstallStageAuditPostgres(t *testing.T) {
 	testPlatformInstallStageAuditRollback(t, true)
+}
+
+func platformInstallStageFailureTrigger(
+	t *testing.T, s *Server, pg bool, stage appplatform.Stage,
+) func() {
+	t.Helper()
+	name := "fixture_failed_" + string(stage)
+	if pg {
+		mustExec(t, s.st, `CREATE FUNCTION `+name+`() RETURNS trigger
+			LANGUAGE plpgsql AS $$ BEGIN
+			  IF NEW.action='app_platform.operation_stage'
+			    AND NEW.detail::jsonb->>'stage'='`+string(stage)+`' THEN
+			    RAISE EXCEPTION 'fixture failed stage';
+			  END IF;
+			  RETURN NEW;
+			END $$`)
+		mustExec(t, s.st, `CREATE TRIGGER `+name+`
+			BEFORE INSERT ON audit_log FOR EACH ROW
+			EXECUTE FUNCTION `+name+`()`)
+		return func() {
+			mustExec(t, s.st, `DROP TRIGGER IF EXISTS `+name+` ON audit_log`)
+			mustExec(t, s.st, `DROP FUNCTION IF EXISTS `+name+`()`)
+		}
+	}
+	mustExec(t, s.st, `CREATE TRIGGER `+name+`
+		BEFORE INSERT ON audit_log
+		WHEN NEW.action='app_platform.operation_stage'
+		  AND json_extract(NEW.detail,'$.stage')='`+string(stage)+`'
+		BEGIN SELECT RAISE(ABORT,'fixture failed stage'); END`)
+	return func() {
+		mustExec(t, s.st, `DROP TRIGGER IF EXISTS `+name)
+	}
+}
+
+func testPlatformFailedInstallStageNeverExposesCandidate(
+	t *testing.T, pg bool,
+) {
+	for _, stage := range []appplatform.Stage{
+		appplatform.StageValidate,
+		appplatform.StageDownload,
+		appplatform.StageStage,
+	} {
+		t.Run(string(stage), func(t *testing.T) {
+			s, actor, operation := platformFrontendQueuedFixture(t, pg)
+			installation := scalar[string](t, s.st, `SELECT installation_id
+				FROM app_platform_operations WHERE id=?`, operation)
+			dropFailure := platformInstallStageFailureTrigger(
+				t, s, pg, stage)
+			defer dropFailure()
+			scheduler, err := newPlatformInstallScheduler(
+				s, platformRuntimeEndpoint{},
+				platformFixtureID(975), 50*time.Millisecond)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := scheduler.tick(context.Background()); err == nil {
+				t.Fatalf("%s failure was ignored", stage)
+			}
+			dropFailure()
+
+			if phase := scalar[string](t, s.st, `SELECT phase
+				FROM app_platform_installations WHERE id=?`,
+				installation); phase == "ready" {
+				t.Fatalf("%s failure exposed ready phase", stage)
+			}
+			if scalar[int](t, s.st, `SELECT COUNT(*)
+				FROM app_platform_activations
+				WHERE installation_id=? AND state='active'`,
+				installation) != 0 ||
+				scalar[int](t, s.st, `SELECT COUNT(*)
+					FROM app_platform_access_grants
+					WHERE installation_id=?`, installation) != 0 {
+				t.Fatalf("%s failure exposed activation or access", stage)
+			}
+			if scalar[int](t, s.st, `SELECT COUNT(*)
+				FROM app_platform_releases`) > 1 ||
+				scalar[int](t, s.st, `SELECT COUNT(*)
+					FROM app_platform_frontend_artifacts`) > 1 {
+				t.Fatalf("%s failure left unbounded staging residue", stage)
+			}
+
+			mux := http.NewServeMux()
+			s.wireRoutes(mux)
+			cookie := s.managedCookie(
+				*s.st.GetUser(actor.username), actor.sessionID,
+				actor.expires.Unix())
+			launch := sessionTestRequest(
+				mux, http.MethodGet,
+				"/api/app-platform/installations/"+
+					installation+"/launch",
+				cookie, "")
+			if launch.Code != http.StatusNotFound {
+				t.Fatalf("%s failure exposed launch traffic: %d %s",
+					stage, launch.Code, launch.Body.String())
+			}
+		})
+	}
+}
+
+func TestPlatformFailedInstallStageNeverExposesCandidateSQLite(
+	t *testing.T,
+) {
+	testPlatformFailedInstallStageNeverExposesCandidate(t, false)
+}
+
+func TestPlatformFailedInstallStageNeverExposesCandidatePostgres(
+	t *testing.T,
+) {
+	testPlatformFailedInstallStageNeverExposesCandidate(t, true)
 }
