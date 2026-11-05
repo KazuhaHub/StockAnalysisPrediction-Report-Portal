@@ -2752,3 +2752,19 @@ daemon workflow 40455635317 passed on the functional source as well.
   needs an explicit reviewed migration and rollback plan. See
   [legacy adoption evidence](handoff/evidence/platform-legacy-adoption/acceptance.json)
   and [legacy adoption boundary](165-legacy-adoption-boundary.md).
+
+- Advanced DATA-05 at Portal `b1225e6d` with a cross-process Portal/key
+  recovery bundle. A parent fixture writes the exact installation/recovery
+  identity, a keyring-sealed fixture credential, a waiting task, an active event
+  subscription, data digest and logical Portal dump. A separate OS test process
+  creates a new SQLite database, restores that dump, clears runtime execution
+  authority, pauses notification dispatch, moves the task/subscription/
+  installation/recovery set to `review_required`, decrypts the fixture secret,
+  verifies the copied data digest and serves `/healthz` 200. Focused Race passes.
+  General `41984691217`, project quota/native `41984691142`, runner daemon
+  `41984691139` and CodeQL `41984688175` pass. DATA-05 remains partial: the
+  child is on the same host and native XFS checkpoint, runner journal/data-root
+  and post-restore native app recovery on a newly provisioned host are still
+  missing. See
+  [recovery bundle evidence](handoff/evidence/platform-recovery-bundle/acceptance.json)
+  and [cross-process recovery](166-recovery-bundle-cross-process.md).

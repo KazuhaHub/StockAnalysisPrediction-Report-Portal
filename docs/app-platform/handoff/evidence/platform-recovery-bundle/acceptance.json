@@ -1,0 +1,43 @@
+{
+  "format": "portal.recovery-bundle-cross-process/1-dev.1",
+  "captured_at": "2026-11-04T23:41:00-0800",
+  "status": "partial-development",
+  "candidate": "b1225e6d",
+  "requirements": {
+    "DATA-05": {
+      "cross_process_portal_restore": true,
+      "fresh_linux_host": false,
+      "native_xfs_checkpoint_restore": false,
+      "runner_journal_restore": false,
+      "status": "partial"
+    }
+  },
+  "observed": {
+    "separate_os_process": true,
+    "new_sqlite_database": true,
+    "logical_portal_dump_restored": true,
+    "restore_pause_enabled": true,
+    "notification_dispatch_paused": true,
+    "runtime_execution_authority_cleared": true,
+    "pending_task_state": "review_required",
+    "active_event_subscription_state": "review_required",
+    "installation_state": "review_required",
+    "recovery_set_state": "review_required",
+    "fixture_secret_decrypted": true,
+    "data_digest_matched": true,
+    "health_status": 200
+  },
+  "hosted_ci": {
+    "commit": "b1225e6d",
+    "general_test": "41984691217",
+    "app_project_quota_probe": "41984691142",
+    "app_runner_daemon_probe": "41984691139",
+    "codeql": "41984688175",
+    "result": "pass"
+  },
+  "limits": [
+    "The child process runs on the same GitHub-hosted Linux runner, not a newly provisioned fresh host.",
+    "The bundle includes a small copied data fixture, not the native XFS checkpoint tree restored into a new project-quota namespace.",
+    "Runner journal/data-root identities and a post-restore native app with all external effects paused remain missing."
+  ]
+}
