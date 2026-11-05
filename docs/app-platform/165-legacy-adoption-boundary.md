@@ -24,9 +24,10 @@ The SQLite and PostgreSQL fixtures exercise the same boundary.
 ## No container takeover
 
 Managed lifecycle code verifies the exact installation, resource, release,
-control fence and ownership labels before start or stop. A test-owned external
-container with a foreign installation label is inspected once and then refused.
-No managed POST is issued and the container remains running.
+control fence and ownership labels before start or stop. A deterministic
+external-container fixture with a foreign installation label is inspected once
+and then refused. No managed POST is issued and the observed fixture state
+remains running.
 
 Existing disposable Docker evidence covers the native case: a restart discovers
 a stale container that references the app's exact private mount, but the

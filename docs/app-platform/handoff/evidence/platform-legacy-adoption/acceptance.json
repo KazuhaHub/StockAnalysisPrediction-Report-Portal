@@ -20,7 +20,7 @@
     "foreign_installation_label": true,
     "managed_stop_admitted": false,
     "managed_post_count": 0,
-    "native_state_after_refusal": "running",
+    "observed_state_after_refusal": "running",
     "reason": "container-conflict"
   },
   "existing_native_evidence": {
