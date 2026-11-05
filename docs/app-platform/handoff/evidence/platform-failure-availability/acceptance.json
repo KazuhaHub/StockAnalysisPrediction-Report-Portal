@@ -1,6 +1,6 @@
 {
   "format": "portal.failure-availability-acceptance/1-dev.1",
-  "candidate": "cbe3734685baa6d99b2735026fbbf3952797cfc4",
+  "candidate": "b2301ce1e62b349d0fead12a668d37f651dd1b51",
   "business_routes": [
     "/healthz",
     "/api/site",
@@ -23,13 +23,15 @@
     "readiness_zero_or_unstarted": true,
     "readiness_state_malformed": true,
     "protocol_mismatch": true,
+    "explicit_migration_stage_failed": true,
+    "migration_recovery_required": true,
     "runner_unavailable": true,
     "portal_route_stack_restart": true
   },
   "hosted_ci": {
-    "general_test": "41948502214",
-    "app_project_quota_probe": "41948502082",
-    "app_runner_daemon_probe": "41948502128",
+    "general_test": "41956907211",
+    "app_project_quota_probe": "41956907159",
+    "app_runner_daemon_probe": "41956907257",
     "codeql": "pass",
     "result": "pass"
   },
@@ -39,7 +41,6 @@
     "rerun_same_job": "pass"
   },
   "remaining": [
-    "Explicit migration failure mid-stage still needs the same real-Portal business-route wrapper.",
     "This does not claim production availability or an SLO."
   ]
 }

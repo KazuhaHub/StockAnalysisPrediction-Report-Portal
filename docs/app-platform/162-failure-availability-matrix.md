@@ -1,7 +1,8 @@
 # Application failure availability matrix
 
-Status: expanded development coverage. Explicit migration failure still needs
-the same real-host availability wrapper before OPS-03 can be closed completely.
+Status: development acceptance complete for the declared repository failure
+matrix. Production availability, deployed multi-process behavior and SLO
+measurement remain separate approvals.
 
 ## Shared business check
 
@@ -48,14 +49,23 @@ Readiness and protocol:
 
 Each readiness/protocol refusal repeats the same Portal business-route check.
 
+Migration/source removal:
+
+- an absent migration/source-removal endpoint fails during `migrate`;
+- retry exhaustion moves the managed update to
+  `recovery_required:update_recovery_required`;
+- the active source generation is not replaced by the failed target; and
+- the same Portal business routes remain available afterward.
+
 ## Evidence
 
-Portal `cbe37346` passed general test `41948502214`, quota/browser
-`41948502082`, runner daemon `41948502128` and CodeQL. The first race attempt
+Portal `b2301ce1` passed general test `41956907211`, quota/browser
+`41956907159`, runner daemon `41956907257` and CodeQL. The first race attempt
 failed in the pre-existing forecast SQLite diagnostics test with `SQLITE_BUSY`;
 the unchanged job passed on rerun, and that initial failure remains part of the
 run history. Evidence is in
 [failure availability](handoff/evidence/platform-failure-availability/acceptance.json).
 
-Explicit migration failure remains outside this wrapper. Browser launcher
-refusal and readiness UX remain covered by the browser failure matrix.
+This closes the development OPS-03 matrix. It does not claim production
+availability or an SLO. Browser launcher refusal and readiness UX remain
+covered by the browser failure matrix.

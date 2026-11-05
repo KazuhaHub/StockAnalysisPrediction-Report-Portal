@@ -50,17 +50,17 @@ a stop receipt. General test `41931370312`, quota/browser `41931370229`, runner
 daemon `41931370293` and CodeQL pass. Evidence is in
 [disable active work](evidence/platform-disable-active-work/acceptance.json).
 
-Latest OPS-03 evidence binds Portal `cbe37346`. The authenticated route stack
+Latest OPS-03 evidence binds Portal `b2301ce1`. The authenticated route stack
 now remains available through descriptor/signature/archive/trust failures,
 readiness/protocol refusal, canceled fetch, task handler failure, notification
-delivery failure, invalid operator input, runner outage and Portal route-stack
-restart. General test `41948502214`, quota/browser `41948502082`, runner daemon
-`41948502128` and
+delivery failure, explicit migration/source-removal failure, invalid operator
+input, runner outage and Portal route-stack restart. General test `41956907211`,
+quota/browser `41956907159`, runner daemon `41956907257` and
 CodeQL pass after rerunning one pre-existing forecast SQLite `SQLITE_BUSY`
 race failure. Evidence is in
 [failure availability](evidence/platform-failure-availability/acceptance.json).
-Explicit migration failure still needs the same real-Portal availability
-wrapper.
+The development OPS-03 matrix is complete; production multi-host availability
+and capacity/SLO measurements remain separate.
 
 Latest H16 package-security evidence binds Portal `bcb7081e` and
 [security package evidence](evidence/platform-security-package/acceptance.json).
