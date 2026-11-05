@@ -26,6 +26,7 @@ type platformRecoveryBundleMetadata struct {
 	CredentialID          string `json:"credential_id"`
 	CredentialValue       int64  `json:"credential_value_revision"`
 	SourceTaskID          string `json:"source_task_id"`
+	EventSubscriptionID   string `json:"event_subscription_id"`
 	ExpectedSecret        string `json:"expected_secret"`
 	ExpectedDataSHA256    string `json:"expected_data_sha256"`
 	SourceControllerEpoch string `json:"source_controller_epoch"`
@@ -77,6 +78,7 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 	}
 	credentialID, checkpointID := platformFixtureID(7001), platformFixtureID(7002)
 	taskID, recoveryID := platformFixtureID(7003), platformFixtureID(7004)
+	eventSubscriptionID := platformFixtureID(7005)
 	secret := "fresh-host-fixture-secret"
 	sealed, err := s.sealPlatformCredentialValue(
 		credentialID, 1, []byte(secret))
@@ -105,6 +107,17 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 		"error_code": nil, "result_json": nil, "completed_ms": nil,
 		"created_ms": now, "updated_ms": now,
 	})
+	platformTestInsert(t, s.st.poolExec(), "event_subscriptions", map[string]any{
+		"id": eventSubscriptionID, "installation_id": installation,
+		"app_id": appID, "publisher_id": publisherID,
+		"event_type":    appplatform.EventReportIngested,
+		"resource_type": "report", "resource_id": "42",
+		"state": "active", "generation": generation,
+		"policy_revision": policyRevision,
+		"release_sha256":  releaseSHA, "controller_epoch": epoch,
+		"max_inflight": 1, "revision": 1,
+		"created_ms": now, "updated_ms": now,
+	})
 	platformTestInsert(t, s.st.poolExec(), "recovery_sets", map[string]any{
 		"id": recoveryID, "installation_id": installation,
 		"data_namespace_id": namespace, "operation_id": operation,
@@ -127,7 +140,8 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 		CheckpointID: checkpointID, DataNamespaceID: namespace,
 		ReleaseSHA256: releaseSHA, DataManifestSHA256: dataSHA,
 		CredentialID: credentialID, CredentialValue: 1,
-		SourceTaskID: taskID, ExpectedSecret: secret,
+		SourceTaskID: taskID, EventSubscriptionID: eventSubscriptionID,
+		ExpectedSecret:        secret,
 		ExpectedDataSHA256:    platformDigest(data),
 		SourceControllerEpoch: epoch,
 	}
@@ -228,6 +242,11 @@ func TestFreshHostPortalRecoveryBundleChild(t *testing.T) {
 		FROM app_platform_tasks WHERE id=?`,
 		metadata.SourceTaskID) != "review_required" {
 		t.Fatal("restored pending task became executable")
+	}
+	if scalar[string](t, store, `SELECT state
+		FROM app_platform_event_subscriptions WHERE id=?`,
+		metadata.EventSubscriptionID) != "review_required" {
+		t.Fatal("restored event subscription became executable")
 	}
 	if scalar[string](t, store, `SELECT state
 		FROM app_platform_recovery_sets WHERE id=?`,
