@@ -134,6 +134,10 @@ func testPlatformWritableReadinessSource(t *testing.T, pg bool) {
 	if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
 		t.Fatal("zero probe changed state")
 	}
+	actor := platformManagedFixtureSession(t, s)
+	mux, cookie := platformPortalAvailabilityHTTPFixture(t, s, actor)
+	platformRunnerUnavailableBusinessCheck(
+		t, mux, cookie, actor.username)
 	activated, r := seedPlatformStoredWritableReadiness(t, s, lease, i)
 	current, err := s.preparePlatformWritableProbe(context.Background(), activated)
 	if err != nil || !validStoredPlatformWritableReadiness(current, time.Now().UnixMilli()) {
@@ -162,7 +166,7 @@ func TestPlatformWritableReadinessSourcePostgres(t *testing.T) {
 	testPlatformWritableReadinessSource(t, true)
 }
 func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
-	for _, mode := range []string{"native", "payload", "source", "schema", "observed", "timestamp", "unknown", "candidate_time", "writer", "start", "namespace", "runtime", "publisher", "pause", "lease", "extra"} {
+	for _, mode := range []string{"native", "payload", "source", "schema", "protocol", "observed", "timestamp", "unknown", "candidate_time", "writer", "start", "namespace", "runtime", "publisher", "pause", "lease", "extra"} {
 		t.Run(mode, func(t *testing.T) {
 			s, lease, i := platformWritableProbeFixture(t, pg)
 			lease, r := seedPlatformStoredWritableReadiness(t, s, lease, i)
@@ -175,6 +179,8 @@ func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
 				r.RunningReceiptSHA256 = strings.Repeat("c", 64)
 			case "schema":
 				r.DataFormat = "2"
+			case "protocol":
+				r.Protocol = "portal.backend/2"
 			case "timestamp":
 				r.ObservedMS = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
 			case "observed":
@@ -198,7 +204,7 @@ func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
 			case "extra":
 				mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms) SELECT operation_id,'activate',1,?,'activate',payload_sha256,runtime_id,controller_epoch,admitted_fence,0,'prepared','{}',created_ms,updated_ms FROM app_platform_operation_effects WHERE stage='start'`, platformFixtureID(906))
 			}
-			if mode == "native" || mode == "payload" || mode == "source" || mode == "schema" || mode == "timestamp" || mode == "unknown" {
+			if mode == "native" || mode == "payload" || mode == "source" || mode == "schema" || mode == "protocol" || mode == "timestamp" || mode == "unknown" {
 				raw, _ := json.Marshal(r)
 				if mode == "unknown" {
 					raw = append(raw[:len(raw)-1], []byte(`,"extra":true}`)...)
@@ -212,6 +218,11 @@ func testPlatformWritableReadinessRefusals(t *testing.T, pg bool) {
 			if !bytes.Equal(stripHeader(before), stripHeader(dumpOf(t, s.st))) {
 				t.Fatal("readiness refusal mutated state", mode)
 			}
+			actor := platformManagedFixtureSession(t, s)
+			mux, cookie := platformPortalAvailabilityHTTPFixture(
+				t, s, actor)
+			platformRunnerUnavailableBusinessCheck(
+				t, mux, cookie, actor.username)
 		})
 	}
 }
