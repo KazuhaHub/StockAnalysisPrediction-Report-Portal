@@ -50,6 +50,19 @@ a stop receipt. General test `41931370312`, quota/browser `41931370229`, runner
 daemon `41931370293` and CodeQL pass. Evidence is in
 [disable active work](evidence/platform-disable-active-work/acceptance.json).
 
+Latest LIFE-03 evidence binds Portal `5ae75b4f`. Validate, download and stage
+each fail through the production scheduler and stage-audit path; the
+installation cannot become ready, has no active activation or access grant and
+returns launch HTTP 404, with bounded release/artifact residue. The market
+matrix separately refuses changed descriptor, signature and archive bytes,
+interrupted archive transfer, trust revocation and canceled fetch. Readiness
+zero/malformed state and protocol mismatch remain refused without durable
+mutation. General test `41964920990`, quota/browser `41964921034`, runner daemon
+`41964921405` and CodeQL pass. Evidence is in
+[install failure](evidence/platform-install-failure/acceptance.json) and
+[failure availability](evidence/platform-failure-availability/acceptance.json).
+These are separate stage fixtures, not one continuous native run.
+
 Latest OPS-03 evidence binds Portal `b2301ce1`. The authenticated route stack
 now remains available through descriptor/signature/archive/trust failures,
 readiness/protocol refusal, canceled fetch, task handler failure, notification
