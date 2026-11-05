@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func platformRunnerUnavailableBusinessCheck(
@@ -276,4 +278,59 @@ func TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres(
 	t *testing.T,
 ) {
 	testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(t, true)
+}
+
+func testPlatformMigrationFailureLeavesPortalBusinessAvailable(
+	t *testing.T, pg bool,
+) {
+	s, lease, quiesce, _ := platformManagedUpdateQuiesceFixture(t, pg)
+	snapshot, err := s.commitPlatformManagedUpdateQuiesce(
+		context.Background(), lease, quiesce,
+		platformManagedUpdateQuiesceReceipt(quiesce))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpointEndpoint := platformCheckpointEndpointFixture()
+	checkpoint, err := s.preparePlatformCheckpoint(
+		context.Background(), snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrate, err := s.commitPlatformCheckpoint(
+		context.Background(), snapshot, checkpoint,
+		checkpointEndpoint,
+		platformCheckpointObservationFixture(
+			checkpoint, checkpointEndpoint))
+	if err != nil || migrate.snapshot.Stage != appplatform.StageMigrate {
+		t.Fatal("managed migration stage", migrate.snapshot, err)
+	}
+	if _, err := s.executePlatformManagedUpdateMigrate(
+		context.Background(), migrate, platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("absent migration endpoint accepted")
+	}
+	if err := s.finishPlatformManagedUpdateForReview(
+		context.Background(), migrate); err != nil {
+		t.Fatal("migration failure recovery", err)
+	}
+	if got := scalar[string](t, s.st, `SELECT stage||':'||error_code
+		FROM app_platform_operations WHERE id=?`, migrate.id); got !=
+		"recovery_required:update_recovery_required" {
+		t.Fatalf("migration failure state = %q", got)
+	}
+	actor := platformManagedFixtureSession(t, s)
+	mux, cookie := platformPortalAvailabilityHTTPFixture(t, s, actor)
+	platformRunnerUnavailableBusinessCheck(
+		t, mux, cookie, actor.username)
+}
+
+func TestPlatformMigrationFailureLeavesPortalBusinessAvailableSQLite(
+	t *testing.T,
+) {
+	testPlatformMigrationFailureLeavesPortalBusinessAvailable(t, false)
+}
+
+func TestPlatformMigrationFailureLeavesPortalBusinessAvailablePostgres(
+	t *testing.T,
+) {
+	testPlatformMigrationFailureLeavesPortalBusinessAvailable(t, true)
 }
