@@ -1,8 +1,7 @@
 # Application failure availability matrix
 
-Status: expanded development coverage. Readiness and explicit migration
-failures still need the same real-host availability wrapper before OPS-03 can
-be closed completely.
+Status: expanded development coverage. Explicit migration failure still needs
+the same real-host availability wrapper before OPS-03 can be closed completely.
 
 ## Shared business check
 
@@ -41,16 +40,22 @@ Workers and operators:
   health, session, home, report and notification queue remain available before
   and after a Portal route-stack restart.
 
+Readiness and protocol:
+
+- a zero/unstarted candidate cannot become ready; and
+- malformed native/payload/source/schema/protocol/timestamp/candidate state is
+  refused without changing durable readiness.
+
+Each readiness/protocol refusal repeats the same Portal business-route check.
+
 ## Evidence
 
-Portal `65c64046` passed general test `41940458932`, quota/browser
-`41940458874`, runner daemon `41940458859` and CodeQL. The first race attempt
+Portal `cbe37346` passed general test `41948502214`, quota/browser
+`41948502082`, runner daemon `41948502128` and CodeQL. The first race attempt
 failed in the pre-existing forecast SQLite diagnostics test with `SQLITE_BUSY`;
 the unchanged job passed on rerun, and that initial failure remains part of the
 run history. Evidence is in
 [failure availability](handoff/evidence/platform-failure-availability/acceptance.json).
 
-Readiness timeout, protocol mismatch and launcher refusal remain covered by the
-existing browser failure matrix. They are not yet combined with the real Portal
-business-route availability check. Explicit migration failure is also still
-outside this wrapper.
+Explicit migration failure remains outside this wrapper. Browser launcher
+refusal and readiness UX remain covered by the browser failure matrix.

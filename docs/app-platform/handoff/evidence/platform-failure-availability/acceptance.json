@@ -1,6 +1,6 @@
 {
   "format": "portal.failure-availability-acceptance/1-dev.1",
-  "candidate": "65c64046edd42132797ba7b523f8fdaeb75d4711",
+  "candidate": "cbe3734685baa6d99b2735026fbbf3952797cfc4",
   "business_routes": [
     "/healthz",
     "/api/site",
@@ -20,13 +20,16 @@
     "task_handler_failed": true,
     "notification_delivery_failed": true,
     "invalid_operator_request": true,
+    "readiness_zero_or_unstarted": true,
+    "readiness_state_malformed": true,
+    "protocol_mismatch": true,
     "runner_unavailable": true,
     "portal_route_stack_restart": true
   },
   "hosted_ci": {
-    "general_test": "41940458932",
-    "app_project_quota_probe": "41940458874",
-    "app_runner_daemon_probe": "41940458859",
+    "general_test": "41948502214",
+    "app_project_quota_probe": "41948502082",
+    "app_runner_daemon_probe": "41948502128",
     "codeql": "pass",
     "result": "pass"
   },
@@ -36,7 +39,6 @@
     "rerun_same_job": "pass"
   },
   "remaining": [
-    "Readiness timeout and protocol mismatch still need the same real-Portal business-route wrapper.",
     "Explicit migration failure mid-stage still needs the same real-Portal business-route wrapper.",
     "This does not claim production availability or an SLO."
   ]
