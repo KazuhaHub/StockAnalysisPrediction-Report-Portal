@@ -64,11 +64,10 @@ func platformRunnerUnavailableBusinessCheck(
 	}
 }
 
-func testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(
-	t *testing.T, pg bool,
-) {
+func platformPortalAvailabilityHTTPFixture(
+	t *testing.T, s *Server, actor platformActorSession,
+) (*http.ServeMux, string) {
 	t.Helper()
-	s, actor, lease := platformManagedAccessFixture(t, pg)
 	s.names = LoadNames(t.TempDir(), s.st)
 	mustExec(t, s.st, `INSERT INTO meta(k,v) VALUES('site_title','Availability drill')
 		ON CONFLICT(k) DO UPDATE SET v=excluded.v`)
@@ -86,26 +85,40 @@ func testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(
 	const password = "availability-drill-password"
 	mustExec(t, s.st, `UPDATE users SET password_hash=? WHERE username=?`,
 		mustHash(password), actor.username)
-
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	login := sessionTestRequest(
 		mux, http.MethodPost, "/api/login", "",
-		fmt.Sprintf(`{"username":%q,"password":%q}`, actor.username, password))
+		fmt.Sprintf(`{"username":%q,"password":%q}`,
+			actor.username, password))
 	if login.Code != http.StatusOK ||
 		!strings.Contains(login.Body.String(), `"user":"`+actor.username+`"`) {
-		t.Fatalf("login failed before the runner outage drill: %d %s",
+		t.Fatalf("availability login failed: %d %s",
 			login.Code, login.Body.String())
 	}
-	var cookie string
-	for _, current := range login.Result().Cookies() {
-		if current.Name == cookieName {
-			cookie = current.Value
-			break
+	for _, cookie := range login.Result().Cookies() {
+		if cookie.Name == cookieName {
+			return mux, cookie.Value
 		}
 	}
-	if cookie == "" {
-		t.Fatal("login did not issue the managed session cookie")
+	t.Fatal("availability login did not issue a managed session")
+	return nil, ""
+}
+
+func testPlatformRunnerUnavailableLeavesPortalBusinessAvailable(
+	t *testing.T, pg bool,
+) {
+	t.Helper()
+	s, actor, lease := platformManagedAccessFixture(t, pg)
+	mux, cookie := platformPortalAvailabilityHTTPFixture(t, s, actor)
+	platformRunnerUnavailableBusinessCheck(t, mux, cookie, actor.username)
+
+	invalidPlan := sessionTestRequest(
+		mux, http.MethodPost, "/api/admin/app-platform/plans", cookie,
+		`{"action":"disable","installation_id":"not-a-uuid"}`)
+	if invalidPlan.Code != http.StatusBadRequest {
+		t.Fatalf("invalid operator request: %d %s",
+			invalidPlan.Code, invalidPlan.Body.String())
 	}
 	platformRunnerUnavailableBusinessCheck(t, mux, cookie, actor.username)
 

@@ -77,6 +77,40 @@ func TestPlatformTaskWorkerExecutesAfterBrowserIndependentClaim(t *testing.T) {
 	}
 }
 
+func TestPlatformTaskFailureLeavesPortalBusinessAvailableSQLite(
+	t *testing.T,
+) {
+	s, installation := platformServiceIdentityFixture(t)
+	admitTaskFixture(t, s, installation, "task-failure-availability",
+		appplatform.TaskHandlerBackend, []byte(`{"fixture":"failure"}`))
+	s.platformTaskBackend = func(
+		context.Context, platformTaskLease, string,
+	) appplatform.TaskExecutionResult {
+		return appplatform.TaskExecutionResult{
+			Outcome:   appplatform.TaskResultFailed,
+			ErrorCode: "backend_handler_unavailable",
+		}
+	}
+	scheduler, err := newPlatformTaskScheduler(
+		s, platformFixtureID(6091), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := scheduler.tick(context.Background()); err != nil ||
+		!worked {
+		t.Fatalf("task failure tick: worked=%v err=%v", worked, err)
+	}
+	if got := scalar[string](t, s.st, `SELECT state||':'||error_code
+		FROM app_platform_tasks WHERE installation_id=?`,
+		installation); got != "failed:backend_handler_unavailable" {
+		t.Fatalf("task failure state = %q", got)
+	}
+	actor := platformManagedFixtureSession(t, s)
+	mux, cookie := platformPortalAvailabilityHTTPFixture(t, s, actor)
+	platformRunnerUnavailableBusinessCheck(
+		t, mux, cookie, actor.username)
+}
+
 func testPlatformTaskDigestResult(task platformTaskLease) ([]byte, error) {
 	raw, err := json.Marshal(struct {
 		OccurrenceID  string `json:"occurrenceId"`

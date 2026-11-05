@@ -142,6 +142,10 @@ func testPlatformMarketVerifiedRemoteStaging(t *testing.T, pg bool) {
 				if kind == "archive_interrupted" && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_releases`) != 0 {
 					t.Fatal("interrupted artifact left a staged release")
 				}
+				mux, cookie := platformPortalAvailabilityHTTPFixture(
+					t, s, actor)
+				platformRunnerUnavailableBusinessCheck(
+					t, mux, cookie, actor.username)
 			}
 		})
 	}
