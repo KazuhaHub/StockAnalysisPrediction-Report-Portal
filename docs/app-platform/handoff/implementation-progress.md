@@ -50,6 +50,17 @@ a stop receipt. General test `41931370312`, quota/browser `41931370229`, runner
 daemon `41931370293` and CodeQL pass. Evidence is in
 [disable active work](evidence/platform-disable-active-work/acceptance.json).
 
+Latest OPS-03 evidence binds Portal `65c64046`. The authenticated route stack
+now remains available through descriptor/signature/archive/trust failures,
+canceled fetch, task handler failure, notification delivery failure, invalid
+operator input, runner outage and Portal route-stack restart. General test
+`41940458932`, quota/browser `41940458874`, runner daemon `41940458859` and
+CodeQL pass after rerunning one pre-existing forecast SQLite `SQLITE_BUSY`
+race failure. Evidence is in
+[failure availability](evidence/platform-failure-availability/acceptance.json).
+Readiness, protocol mismatch and explicit migration failure still need the same
+real-Portal availability wrapper.
+
 Latest H16 package-security evidence binds Portal `bcb7081e` and
 [security package evidence](evidence/platform-security-package/acceptance.json).
 On SQLite and a dedicated PostgreSQL 18.6 database, altered descriptors,
