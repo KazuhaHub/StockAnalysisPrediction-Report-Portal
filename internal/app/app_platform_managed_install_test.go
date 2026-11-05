@@ -1,11 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -225,6 +229,62 @@ func TestManagedInstallSignedRelease(t *testing.T) {
 	}
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 {
 		t.Fatal("release staging granted installation")
+	}
+}
+
+func TestLegacyAppContinuesWhenManagedReleaseIsRejected(t *testing.T) {
+	s, session := platformTrustTestServer(t, false)
+	platformRegisterTestPublisher(t, s, session)
+	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("<h1>legacy application remains</h1>")
+	if err := s.st.InstallApp(App{
+		ID: manifest.ID, Name: "Legacy fixture", Version: "legacy-1",
+		Entry: "index.html",
+	}, map[string]AppFile{
+		"index.html": {
+			Ctype: "text/html", Content: content,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.stagePlatformRelease(
+		session, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformNativeInstallReview(
+		session, release.sha256, 1,
+	); err == nil {
+		t.Fatal("managed release was admitted through the legacy consumer")
+	}
+	legacy, ok := s.st.GetApp(manifest.ID)
+	if !ok || legacy.Name != "Legacy fixture" ||
+		legacy.Version != "legacy-1" ||
+		legacy.Entry != "index.html" {
+		t.Fatalf("legacy manifest changed: %+v %v", legacy, ok)
+	}
+	ctype, stored, ok := s.st.AppFile(manifest.ID, "index.html")
+	if !ok || ctype != "text/html" || !bytes.Equal(stored, content) {
+		t.Fatalf("legacy file changed: %q %q %v",
+			ctype, stored, ok)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != 0 {
+		t.Fatal("rejected managed admission created platform work")
+	}
+	s.appTok = newAppTokens(time.Hour)
+	request := httptest.NewRequest(
+		"POST", "/api/apps/"+manifest.ID+"/token", nil)
+	request.SetPathValue("id", manifest.ID)
+	response := httptest.NewRecorder()
+	s.apiAppToken(response, request, session.username)
+	if response.Code != http.StatusOK {
+		t.Fatalf("legacy app token path failed: %d %s",
+			response.Code, response.Body.String())
 	}
 }
 

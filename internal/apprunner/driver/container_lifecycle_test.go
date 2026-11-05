@@ -110,6 +110,52 @@ func TestCandidateLifecycleRefusesForeignPolicyBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestLegacyContainerContinuesAfterManagedLifecycleRefusal(t *testing.T) {
+	plan := containerFixture(t)
+	state := "running"
+	posts := 0
+	client := daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Path != "/v1.47/containers/"+
+				strings.Repeat("c", 64)+"/json" {
+				t.Fatal("unexpected inspect request", r.URL.Path)
+			}
+			v := containerInspectFixture(t, plan)
+			v["State"].(map[string]any)["Status"] = state
+			v["Config"].(map[string]any)["Labels"].(map[string]any)[containerLabelPrefix+"installation"] = "legacy-external"
+			raw, err := json.Marshal(v)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK, Header: make(http.Header),
+				Body: io.NopCloser(strings.NewReader(string(raw))),
+			}, nil
+		case http.MethodPost:
+			posts++
+			state = "managed-mutated"
+			return &http.Response{
+				StatusCode: http.StatusNoContent,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("")),
+			}, nil
+		default:
+			t.Fatal("unexpected daemon method", r.Method)
+			return nil, nil
+		}
+	}))
+	if _, err := stopCandidateContainerHTTP(
+		context.Background(), client, strings.Repeat("c", 64), plan,
+	); !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("legacy container admission = %v", err)
+	}
+	if posts != 0 || state != "running" {
+		t.Fatalf("legacy container mutated: posts=%d state=%s",
+			posts, state)
+	}
+}
+
 func TestCandidateLifecyclePostEffectAuthorityChangeIsUncertain(t *testing.T) {
 	for _, action := range []string{"start", "stop"} {
 		t.Run(action, func(t *testing.T) {
