@@ -2737,3 +2737,18 @@ daemon workflow 40455635317 passed on the functional source as well.
   effects and production rollout remain explicitly open. See
   [lifecycle restart evidence](handoff/evidence/platform-lifecycle-restart/acceptance.json)
   and [restart matrix](164-lifecycle-restart-matrix.md).
+
+- Closed the development acceptance for OPS-07 at Portal `965214ee`.
+  Name-only legacy adoption is refused across the two storage domains: a
+  legacy ZIP app and a managed package with the same application ID remain
+  distinct, the legacy consumer refuses the managed package, and the legacy
+  manifest, asset bytes and token path continue unchanged with no platform
+  installation or operation created. A foreign-labelled legacy container is
+  inspected and refused before managed start/stop, leaving its native state
+  running and issuing no managed POST. SQLite/PostgreSQL 18.6 and focused Race
+  checks pass. General `41977522768`, project quota/native `41977522875`, runner
+  daemon `41977522785` and CodeQL `41977518689` pass. This is a refusal and
+  continuity boundary only; app-specific P14 package/data/key adoption still
+  needs an explicit reviewed migration and rollback plan. See
+  [legacy adoption evidence](handoff/evidence/platform-legacy-adoption/acceptance.json)
+  and [legacy adoption boundary](165-legacy-adoption-boundary.md).
