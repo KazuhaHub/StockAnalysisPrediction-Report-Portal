@@ -232,8 +232,11 @@ func TestManagedInstallSignedRelease(t *testing.T) {
 	}
 }
 
-func TestLegacyAppContinuesWhenManagedReleaseIsRejected(t *testing.T) {
-	s, session := platformTrustTestServer(t, false)
+func testLegacyAppContinuesWhenManagedReleaseIsRejected(
+	t *testing.T, postgres bool,
+) {
+	t.Helper()
+	s, session := platformTrustTestServer(t, postgres)
 	platformRegisterTestPublisher(t, s, session)
 	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
 	var manifest appplatform.Manifest
@@ -286,6 +289,14 @@ func TestLegacyAppContinuesWhenManagedReleaseIsRejected(t *testing.T) {
 		t.Fatalf("legacy app token path failed: %d %s",
 			response.Code, response.Body.String())
 	}
+}
+
+func TestLegacyAppContinuesWhenManagedReleaseIsRejectedSQLite(t *testing.T) {
+	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, false)
+}
+
+func TestLegacyAppContinuesWhenManagedReleaseIsRejectedPostgres(t *testing.T) {
+	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, true)
 }
 
 func TestScheduledDigestCandidateRelease(t *testing.T) {
