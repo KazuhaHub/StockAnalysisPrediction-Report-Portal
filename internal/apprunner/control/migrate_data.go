@@ -26,6 +26,14 @@ const discardMigrationEffectPurpose = "portal.app/runner-data-discard-migration-
 const MigrateDataEffectNumber = "2"
 const DiscardMigrationEffectNumber = "3"
 
+// MigrationEntrypointSHA256 is the digest a migrate-data payload carries for the descriptor's entrypoint:
+// the SHA-256 of its JSON array encoding.
+func MigrationEntrypointSHA256(argv []string) string {
+	raw, _ := json.Marshal(argv)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 // MaxMigrationWallClockSeconds bounds a migration job; it equals the descriptor limit.
 const MaxMigrationWallClockSeconds = 600
 
