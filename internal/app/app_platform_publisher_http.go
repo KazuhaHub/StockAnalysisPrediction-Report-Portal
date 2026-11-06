@@ -222,7 +222,7 @@ func (s *Server) apiPlatformEndRecovery(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	if err := s.endPlatformRecoveryContext(r.Context(), actor); err != nil {
-		platformManagementError(w, err)
+		platformRecoveryError(w, err)
 		return
 	}
 	writeJSON(w, map[string]bool{"ended": true})

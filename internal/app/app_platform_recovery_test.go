@@ -249,3 +249,17 @@ func testEndRecoveryHTTP(t *testing.T, pg bool) {
 
 func TestEndRecoveryHTTP(t *testing.T)         { testEndRecoveryHTTP(t, false) }
 func TestEndRecoveryHTTPPostgres(t *testing.T) { testEndRecoveryHTTP(t, true) }
+
+// Ending recovery on a Portal that is not in recovery is not a transient pause: it names the inactive
+// recovery, as the other recovery routes do.
+func TestEndRecoveryWhenNotPausedIsInactive(t *testing.T) {
+	f := platformResumeFixture(t, false)
+	mux := http.NewServeMux()
+	f.s.wireRoutes(mux)
+	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	mustExec(t, f.s.st, `UPDATE meta SET v='0' WHERE k='app_platform_restore_paused'`)
+	got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/control/end-recovery", cookie, `{"action":"end_recovery"}`)
+	if got.Code != 409 || !strings.Contains(got.Body.String(), "app_platform_recovery_inactive") {
+		t.Fatalf("ending recovery when not paused answered %d %s", got.Code, got.Body.String())
+	}
+}
