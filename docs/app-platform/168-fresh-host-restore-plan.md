@@ -194,9 +194,8 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   whose effect is still unknown is read back from the runner under its own identity and fence: an
   applied receipt consumes the grant and completes the operation, a definite absence (after every
   command signed for the effect has expired) reverts the effect and revokes the grant, anything else is
-  kept. A resume left with an unsettled start is not reconciled: its start is bound to the lease fence
-  it ran under, which a finished operation cannot reach, and the runner has no typed absence for it.
-  That case is settled by the owner decision below.
+  kept. A resume left with an unsettled start is reconciled the same way (third-round follow-ups below),
+  or settled by the owner decision below.
 - **Abandon replacement runtime.** A recovery-mode action on its own route (`control/abandon-runtime`,
   a prepare that lists the affected work with a digest and a confirm that names the digest) retires the
   enrolled replacement binding, revokes its issued grants, marks its unsettled import and resume effects
@@ -222,3 +221,27 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   recovery sets recorded as deleted).
 - **Pre-restore trust.** The trusted-publisher record is built from the restored dump's own publisher
   rows; a dump taken during recovery keeps the record it carries.
+
+## Third-round review follow-ups
+
+- **Operations out of `recovery_required`.** The operation model has two more transitions, both from
+  `recovery_required` only: `Settle` (to `failed`, once every effect is reverted or never applied),
+  `Recover` (to `complete`, one revision after the failure) and `Reopen` (to the stage after the one that
+  failed, at the revision `Advance` would have given it). A reverted import and an operation an abandon
+  settled now end `failed`, so neither blocks launch for ever. The resolved-recovery predicate accepts a
+  resume whose source generation is at or beyond the failed operation's, because an abandon advances the
+  installation's generation; the review plan's checkpoint reference is what binds the resume.
+- **Unknown resume start.** The runner answers a `restore-start` read-receipt (and only that) with a typed
+  absence reply when its journal holds no command row for the effect, taken under the data execution
+  gate. While paused and idle the scheduler re-reads the original start effect at its stored fence. An
+  applied receipt settles the effect and reopens the operation at the probe stage on a lease at that
+  fence, which the unchanged stage code runs to ready (only while the installation's fence is still that
+  fence). A definite absence, after every command signed for the effect has expired (the original ones
+  are bounded by the end of the operation, the recovery read's expiry is recorded in the effect's receipt
+  column), reverts the effect and returns the installation to review for a new resume. A reserved start the
+  runner holds in state prepared or unknown stays unknown until the runtime is abandoned.
+- **Abandon.** The idempotency record is keyed by runtime and controller epoch. An installation the
+  administrator already disabled in recovery is left alone and listed apart. The data roots that imports
+  on the runtime were applied to are recorded in meta and a replacement whose import lands on one is
+  refused. A runtime abandoned before any import was applied has no root to record. A consumed grant on a
+  retired runtime no longer blocks a new import review.
