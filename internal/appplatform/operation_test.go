@@ -146,3 +146,23 @@ func TestInvalidOperationInputsDoNotCreateWork(t *testing.T) {
 		t.Fatal("unknown effect outcome admitted")
 	}
 }
+
+// A recovery action whose whole effect is one reviewed database transition is recorded as an operation
+// that was admitted already complete; its snapshot must be one the model itself accepts.
+func TestCompletedOperationIsAModelState(t *testing.T) {
+	for _, action := range []Action{ActionDisable, ActionEnable} {
+		snapshot, err := CompletedOperation(action, false, 5)
+		if err != nil || snapshot.Stage != StageComplete || snapshot.Generation != 5 {
+			t.Fatalf("%s: %+v %v", action, snapshot, err)
+		}
+		if _, err := OperationFromSnapshot(snapshot); err != nil {
+			t.Fatalf("%s: the completed snapshot is not a model state: %v", action, err)
+		}
+	}
+	if _, err := CompletedOperation(Action("invented"), false, 5); err == nil {
+		t.Fatal("an unknown action produced a completed operation")
+	}
+	if _, err := CompletedOperation(ActionDisable, false, 0); err == nil {
+		t.Fatal("generation zero produced a completed operation")
+	}
+}

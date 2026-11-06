@@ -177,6 +177,17 @@ func testRecoveryThroughHTTP(t *testing.T, pg bool) {
 		t.Fatal("the installation is not ready")
 	}
 
+	// A second managed installation never had a recovery set to import. It is the last thing between this
+	// Portal and the end of recovery, and only a reviewed disable settles it.
+	spare := platformFixtureID(5850)
+	if err := platformSeedInstallation(t, s.st.poolExec(), spare, scalar[string](t, s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, installation), "spare-app"); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_installations SET runtime_id=?,desired_state='disabled',phase='review_required',generation=2,controller_epoch=? WHERE id=?`,
+		scalar[string](t, s.st, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, installation), epoch, spare)
+	h.endRecovery(409)
+	h.reviewAndCommit("recovery_disable", spare, platformFixtureID(5851))
+
 	end := sessionTestRequest(mux, "POST", "/api/admin/app-platform/control/end-recovery", h.cookie, `{"action":"end_recovery"}`)
 	if end.Code != 200 || scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`) != "0" {
 		t.Fatalf("recovery did not end: %d %s", end.Code, end.Body.String())

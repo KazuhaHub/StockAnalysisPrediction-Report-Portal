@@ -335,7 +335,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	defer releaseSlot()
 	n, _ := strconv.ParseInt(revision, 10, 64)
 	switch action {
-	case "restore_import", "resume":
+	case "restore_import", "resume", "recovery_disable", "frontend_resume":
 		installation, installationErr := platformManagementString(fields, "installation_id")
 		recoverySetID, recoveryErr := platformManagementString(fields, "recovery_set_id")
 		want := 2
@@ -660,11 +660,21 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		result, err = s.consumePlatformUpdateReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "disable", "uninstall":
+		if platformPlanIsRecoveryDisable(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRecoveryReview(r.Context(), actor, platformRecoveryDisableKind, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
 	case "delete_data":
 		result, err = s.consumePlatformDeleteDataReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "enable":
+		if platformPlanIsFrontendResume(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRecoveryReview(r.Context(), actor, platformFrontendResumeKind, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformFrontendEnableReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "repair":

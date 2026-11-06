@@ -138,7 +138,39 @@ func platformPlanIsResume(planRaw string) bool {
 
 // platformRecoveryAction reports whether a plan action belongs to the recovery surface.
 func platformRecoveryAction(action string) bool {
-	return action == "restore_import" || action == "resume"
+	return action == "restore_import" || action == "resume" || action == "recovery_disable" || action == "frontend_resume"
+}
+
+func platformRecoveryActionResponse(action string, review platformRemovalReview) (map[string]any, error) {
+	var plan struct {
+		Format              string `json:"format"`
+		InstallationID      string `json:"installation_id"`
+		RuntimeID           string `json:"runtime_id"`
+		SourceReleaseSHA256 string `json:"source_release_sha256"`
+		SourceGeneration    int64  `json:"source_generation"`
+		TargetGeneration    int64  `json:"target_generation"`
+		DataEffect          string `json:"data_effect"`
+	}
+	want := platformRecoveryDisableFormat
+	if action == "frontend_resume" {
+		want = platformFrontendResumeFormat
+	}
+	if err := json.Unmarshal([]byte(review.JSON), &plan); err != nil || plan.Format != want {
+		return nil, errAppPlatformPlanChanged
+	}
+	reviewed := map[string]any{
+		"action": action, "installation_id": plan.InstallationID,
+		"source_generation": strconv.FormatInt(plan.SourceGeneration, 10), "target_generation": strconv.FormatInt(plan.TargetGeneration, 10),
+		"data_effect": plan.DataEffect,
+	}
+	if action == "frontend_resume" {
+		reviewed["release_sha256"] = plan.SourceReleaseSHA256
+	} else {
+		reviewed["runtime_id"] = plan.RuntimeID
+	}
+	return map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": reviewed,
+	}, nil
 }
 
 func (s *Server) apiPlatformRecoveryPlan(w http.ResponseWriter, r *http.Request, actor platformActorSession, action string, fields map[string]string) {
@@ -152,6 +184,15 @@ func (s *Server) apiPlatformRecoveryPlan(w http.ResponseWriter, r *http.Request,
 		review, err = s.createPlatformRestoreImportReview(r.Context(), actor, fields["installation_id"], fields["recovery_set_id"])
 		if err == nil {
 			response, err = platformRestoreImportResponse(review)
+		}
+	case "recovery_disable", "frontend_resume":
+		kind := platformRecoveryDisableKind
+		if action == "frontend_resume" {
+			kind = platformFrontendResumeKind
+		}
+		review, err = s.createPlatformRecoveryReview(r.Context(), actor, kind, fields["installation_id"])
+		if err == nil {
+			response, err = platformRecoveryActionResponse(action, review)
 		}
 	case "resume":
 		endpoint, ok := s.platformRuntimeEndpoint()

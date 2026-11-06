@@ -206,3 +206,14 @@ func operationStages(action Action, managed bool) []Stage {
 	}
 	return append(stages, StageComplete)
 }
+
+// CompletedOperation is the snapshot of an operation that has been through every stage of its action.
+// It exists for actions whose whole effect is one reviewed transition, which are recorded as admitted
+// complete rather than driven through stages that carry no work.
+func CompletedOperation(action Action, managed bool, generation uint64) (OperationSnapshot, error) {
+	stages := operationStages(action, managed)
+	if generation == 0 || len(stages) == 0 {
+		return OperationSnapshot{}, ErrInvalidTransition
+	}
+	return OperationSnapshot{Action: action, Managed: managed, Generation: generation, Revision: uint64(len(stages)), Stage: StageComplete}, nil
+}

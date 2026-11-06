@@ -121,7 +121,7 @@ func testEndRecoveryRequiresSettledInstallations(t *testing.T, pg bool) {
 	platformSeedActionFixtures(t, st)
 	platformSetPause(t, st, "1")
 	mustExec(t, st, `INSERT INTO meta(k,v) VALUES('app_platform_restore_trusted_publishers','[]')`)
-	mustExec(t, st, `UPDATE app_platform_installations SET phase='review_required',desired_state='disabled'`)
+	mustExec(t, st, `UPDATE app_platform_installations SET phase='review_required',desired_state='disabled',controller_epoch=?`, st.GetSetting("app_platform_controller_epoch", ""))
 	refused := func(why string) {
 		t.Helper()
 		if err := s.endPlatformRecovery(session); !errors.Is(err, errAppPlatformRecoveryUnsettled) {
@@ -131,17 +131,27 @@ func testEndRecoveryRequiresSettledInstallations(t *testing.T, pg bool) {
 			t.Fatalf("%s: the pause was cleared", why)
 		}
 	}
+	h := platformRecoveryActionHTTP(t, s, session)
+	// An installation is settled only by a reviewed recovery action, never by rewriting its phase.
+	settle := func(installation string, key int) {
+		t.Helper()
+		committed := h.reviewAndCommit("recovery_disable", installation, platformFixtureID(key))
+		if committed["stage"] != "complete" || scalar[string](t, st, `SELECT phase FROM app_platform_installations WHERE id=?`, installation) != "disabled" {
+			t.Fatalf("recovery disable did not settle %s: %v", installation, committed)
+		}
+	}
 	refused("an installation is still awaiting review")
-	mustExec(t, st, `UPDATE app_platform_installations SET phase='disabled'`)
+	settle(platformFixtureID(1), 7100)
 	if err := platformSeedInstallation(t, st.poolExec(), platformFixtureID(7), "fixture-publisher", "second-app"); err != nil {
 		t.Fatal(err)
 	}
+	mustExec(t, st, `UPDATE app_platform_installations SET phase='review_required',desired_state='disabled',controller_epoch=? WHERE id=?`,
+		st.GetSetting("app_platform_controller_epoch", ""), platformFixtureID(7))
 	refused("a second installation is unsettled")
-	mustExec(t, st, `UPDATE app_platform_installations SET desired_state='removed',phase='removed' WHERE id=?`, platformFixtureID(7))
+	settle(platformFixtureID(7), 7101)
 	op := platformSeedQueuedOperation(t, st, 1, "restore_import")
 	refused("a restore import is in flight")
 	mustExec(t, st, `UPDATE app_platform_operations SET stage='failed',state_revision=2,completed_ms=2 WHERE id=?`, op)
-	mustExec(t, st, `UPDATE app_platform_installations SET phase='ready',desired_state='enabled' WHERE id=?`, platformFixtureID(1))
 	if err := s.endPlatformRecovery(session); err != nil {
 		t.Fatalf("a settled Portal could not end recovery: %v", err)
 	}
