@@ -151,7 +151,7 @@ func (s *Server) advancePlatformRestoreImportStage(ctx context.Context, expected
 	return result, nil
 }
 
-func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID, checkpointUUID, checkpointInode string) (control.ImportCheckpointCommand, error) {
+func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID string) (control.ImportCheckpointCommand, error) {
 	cp := ev.source.checkpoint
 	command := control.ImportCheckpointCommand{
 		Format: control.ImportCheckpointFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
@@ -165,7 +165,6 @@ func platformImportCommand(expected platformOperationLease, runtime platformRunt
 			QuotaBytes: strconv.FormatInt(ev.source.quotaBytes, 10), QuotaInodes: platformImportQuotaInodes,
 			SourceProjectID: cp.ProjectID, SourceNamespaceInode: cp.NamespaceInode, SourceDevice: cp.Device,
 			SourceFilesystemUUID: ev.source.sourceFilesystemUUID, SourceRootInode: ev.source.sourceRootInode,
-			CheckpointFilesystemUUID: checkpointUUID, CheckpointRootInode: checkpointInode,
 		},
 	}
 	digest, err := control.ImportCheckpointLogicalDigest(command)
@@ -187,10 +186,6 @@ func platformImportAuthority(runtime platformRuntimeRegistration) control.Author
 // one. It never repairs a partial row and never mints a second effect for a lease takeover.
 func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, now int64, create bool) (platformImportIntent, bool, error) {
 	var zero platformImportIntent
-	checkpointUUID, checkpointInode, err := s.loadPlatformImportProvenance(e, ev.plan.RecoverySetID)
-	if err != nil {
-		return zero, false, err
-	}
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
@@ -208,6 +203,7 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		if !create {
 			return zero, false, errAppPlatformStageEvidence
 		}
+		var err error
 		if effectID, err = platformNewUUID(); err != nil {
 			return zero, false, err
 		}
@@ -215,7 +211,7 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		state != "prepared" || receipt != "{}" {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	command, err := platformImportCommand(expected, runtime, ev, effectID, checkpointUUID, checkpointInode)
+	command, err := platformImportCommand(expected, runtime, ev, effectID)
 	if err != nil {
 		return zero, false, err
 	}

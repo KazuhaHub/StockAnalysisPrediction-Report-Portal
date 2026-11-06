@@ -118,7 +118,6 @@ func platformRestoreImportFixture(t *testing.T, pg bool) *platformImportFixtureS
 	}
 	f.executor = &platformImportTestExecutor{}
 	s.platformImportCheckpoint = f.executor
-	s.platformImportRoots = func(migExec, string) (string, string, error) { return platformFixtureID(88), "4242", nil }
 	return f
 }
 
@@ -349,8 +348,7 @@ func testRestoreImportCommandCarriesProvenance(t *testing.T, pg bool) {
 		p.CheckpointID != old.CheckpointID || p.ManifestSHA256 != old.ManifestSHA256 || p.NamespaceID != old.NamespaceID ||
 		p.ReleaseSHA256 != old.ReleaseSHA256 || p.ArchiveBytes != old.ArchiveBytes || p.DataFormat != old.DataFormat || p.WriterFence != old.WriterFence ||
 		p.SourceProjectID != old.ProjectID || p.SourceNamespaceInode != old.NamespaceInode || p.SourceDevice != old.Device ||
-		!platformValidUUID(p.SourceFilesystemUUID) || p.SourceRootInode == "" || p.CheckpointFilesystemUUID != platformFixtureID(88) ||
-		p.CheckpointRootInode != "4242" || p.QuotaBytes == "" || p.QuotaInodes != "65536" {
+		!platformValidUUID(p.SourceFilesystemUUID) || p.SourceRootInode == "" || p.QuotaBytes == "" || p.QuotaInodes != "65536" {
 		t.Fatalf("command payload does not carry the recovery set and the old root's provenance: %+v", p)
 	}
 	if len(intent.raw) == 0 || len(intent.signature) != ed25519.SignatureSize ||
@@ -572,18 +570,4 @@ func TestRestoreRevokesIssuedImportGrantsSQLite(t *testing.T) {
 }
 func TestRestoreRevokesIssuedImportGrantsPostgres(t *testing.T) {
 	testRestoreRevokesIssuedImportGrants(t, true)
-}
-
-// The old host's checkpoint-root identity is recorded nowhere in the restored database today, so an
-// import without an explicit source for it must stop before an effect exists.
-func TestRestoreImportRefusesWithoutCheckpointRootProvenance(t *testing.T) {
-	f := platformRestoreImportFixture(t, false)
-	f.s.platformImportRoots = nil
-	commit := f.reviewAndConsume(t)
-	if _, err := f.drive(t, commit.OperationID); !errors.Is(err, errAppPlatformImportProvenance) {
-		t.Fatalf("an import ran without the old host's checkpoint root identity: %v", err)
-	}
-	if f.executor.calls != 0 || scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, commit.OperationID) != 0 {
-		t.Fatal("a refused import left an effect or reached the runner")
-	}
 }

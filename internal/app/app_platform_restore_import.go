@@ -17,8 +17,6 @@ import (
 
 const platformRestoreImportFormat = "portal.restore-import-review/1-dev.1"
 
-var errAppPlatformImportProvenance = errors.New("the old host's checkpoint root identity is not recorded")
-
 type platformRestoreImportPlan struct {
 	Format                string `json:"format"`
 	InstallationID        string `json:"installation_id"`
@@ -99,27 +97,6 @@ func loadPlatformImportSource(e migExec, s *Server, installation, recoverySetID 
 		return r, errAppPlatformStageEvidence
 	}
 	return r, nil
-}
-
-// loadPlatformImportProvenance returns the old host's checkpoint-root identity. No stored receipt
-// records it today (the checkpoint receipt names the data namespace, not the root the archive was
-// written to), so it comes only from the injected source; without one every import is refused rather
-// than carry an invented value.
-func (s *Server) loadPlatformImportProvenance(e migExec, recoverySetID string) (string, string, error) {
-	if s.platformImportRoots == nil {
-		return "", "", errAppPlatformImportProvenance
-	}
-	uuid, inode, err := s.platformImportRoots(e, recoverySetID)
-	if err != nil {
-		return "", "", err
-	}
-	if !platformValidUUID(uuid) {
-		return "", "", errAppPlatformImportProvenance
-	}
-	if _, ok := platformDecimal(inode, true); !ok {
-		return "", "", errAppPlatformImportProvenance
-	}
-	return uuid, inode, nil
 }
 
 type platformRestoreImportCandidate struct {
