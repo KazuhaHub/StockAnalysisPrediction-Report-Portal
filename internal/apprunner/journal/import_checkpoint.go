@@ -438,3 +438,70 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 		quotaBytes: quotaBytes, quotaInodes: quotaInodes, marker: marker, markerRaw: string(markerRaw),
 	}, false, nil
 }
+
+// ErrNoSuchEffect is returned by a read only when the journal proves it holds no
+// command row for the effect identity. It is the one definite "never claimed"
+// answer; any other read failure leaves the effect unknown.
+var ErrNoSuchEffect = errors.New("runner holds no such import effect")
+
+const importAbsenceFormat = "portal.runner.import-checkpoint-absence/1-dev.1"
+
+// ImportCheckpointAbsence is the runner's reply to a read-receipt for an effect it
+// never claimed. It binds the effect identity of the signed command it answers.
+type ImportCheckpointAbsence struct {
+	Format           string `json:"format"`
+	DeploymentID     string `json:"deployment_id"`
+	ControllerEpoch  string `json:"controller_epoch"`
+	InstallationID   string `json:"installation_id"`
+	OperationID      string `json:"operation_id"`
+	TargetGeneration string `json:"target_generation"`
+	Stage            string `json:"stage"`
+	EffectNumber     string `json:"effect_number"`
+	EffectID         string `json:"effect_id"`
+	PayloadSHA256    string `json:"payload_sha256"`
+	State            string `json:"state"`
+	ObservedMS       string `json:"observed_ms"`
+}
+
+func importAbsenceFor(c control.ImportCheckpointCommand, now int64) ImportCheckpointAbsence {
+	return ImportCheckpointAbsence{
+		Format: importAbsenceFormat, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
+		InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration,
+		Stage: c.Stage, EffectNumber: c.EffectNumber, EffectID: c.EffectID, PayloadSHA256: c.PayloadSHA256,
+		State: "absent", ObservedMS: strconv.FormatInt(now, 10),
+	}
+}
+
+func validImportAbsence(a ImportCheckpointAbsence) bool {
+	if a.Format != importAbsenceFormat || a.Stage != "restore_data" || a.State != "absent" || !dataSHA(a.PayloadSHA256) ||
+		!dataNumber(a.TargetGeneration, true) || !dataNumber(a.EffectNumber, true) || !dataNumber(a.ObservedMS, true) {
+		return false
+	}
+	for _, id := range []string{a.DeploymentID, a.ControllerEpoch, a.InstallationID, a.OperationID, a.EffectID} {
+		if !importID(id) {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseImportCheckpointAbsence accepts only the canonical encoding of a valid absence reply.
+func ParseImportCheckpointAbsence(raw []byte) (ImportCheckpointAbsence, error) {
+	var absence ImportCheckpointAbsence
+	if len(raw) == 0 || len(raw) > 4096 || !canonicalDataJSON(string(raw), &absence) || !validImportAbsence(absence) {
+		return ImportCheckpointAbsence{}, ErrFenceReconciliation
+	}
+	return absence, nil
+}
+
+// ImportAbsenceMatchesCommand reports whether the reply answers exactly this signed command.
+func ImportAbsenceMatchesCommand(a ImportCheckpointAbsence, c control.ImportCheckpointCommand) bool {
+	return importAbsenceMatchesCommand(a, c)
+}
+
+func importAbsenceMatchesCommand(a ImportCheckpointAbsence, c control.ImportCheckpointCommand) bool {
+	return a.DeploymentID == c.DeploymentID && a.ControllerEpoch == c.ControllerEpoch &&
+		a.InstallationID == c.InstallationID && a.OperationID == c.OperationID &&
+		a.TargetGeneration == c.TargetGeneration && a.Stage == c.Stage && a.EffectNumber == c.EffectNumber &&
+		a.EffectID == c.EffectID && a.PayloadSHA256 == c.PayloadSHA256
+}

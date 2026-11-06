@@ -203,51 +203,96 @@ func (s *Store) settleImportCheckpoint(ctx context.Context, intent importIntent,
 // ReadImportCheckpointReceipt returns the applied receipt after rechecking the
 // current signed authority and that the namespace resource still agrees with it.
 // Expiry governs dispatch, so a replay after the signed window still reads.
+// ErrNoSuchEffect is returned only when the journal proves the effect was never
+// claimed; every other failure leaves the effect's fate unknown.
 func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	if err != nil {
+		return ImportCheckpointReceipt{}, err
+	}
+	if absence != nil {
+		return ImportCheckpointReceipt{}, ErrNoSuchEffect
+	}
+	return receipt, nil
+}
+
+// ReadImportCheckpointOrAbsence is the runner's read-receipt answer: the applied
+// receipt, or an ImportCheckpointAbsence when the journal holds no command row for
+// the effect identity.
+func (s *Store) ReadImportCheckpointOrAbsence(ctx context.Context, raw, signature []byte) (any, error) {
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	if err != nil {
+		return nil, err
+	}
+	if absence != nil {
+		return *absence, nil
+	}
+	return receipt, nil
+}
+
+func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
 	var zero ImportCheckpointReceipt
 	if s.closing.Load() {
-		return zero, ErrImportCheckpointUnavailable
+		return zero, nil, ErrImportCheckpointUnavailable
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	deployment, err := readControllerDeployment(ctx, tx)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
-	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
+	now := time.Now().UTC().UnixMilli()
+	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), now)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	c := verified.Command()
 	row, err := loadImportRow(ctx, tx, c.EffectID)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
-	if row == nil || !row.sameCommand(c) || row.state != "applied" {
-		return zero, ErrImportCheckpointUnavailable
+	if row == nil {
+		// Absent means no row under the effect id and none holding the same operation, stage and
+		// effect number under another id; a sibling row is a conflict, not an absence.
+		var siblings int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE effect_id=? OR (operation_id=? AND stage=? AND effect_number=?)`,
+			c.EffectID, c.OperationID, c.Stage, mustDataInt(c.EffectNumber)).Scan(&siblings); err != nil {
+			return zero, nil, err
+		}
+		if siblings != 0 {
+			return zero, nil, ErrCommandConflict
+		}
+		if err := tx.Commit(); err != nil {
+			return zero, nil, err
+		}
+		absence := importAbsenceFor(c, now)
+		return zero, &absence, nil
+	}
+	if !row.sameCommand(c) || row.state != "applied" {
+		return zero, nil, ErrImportCheckpointUnavailable
 	}
 	receipt, err := ParseImportCheckpointReceipt([]byte(row.receipt))
 	if err != nil || !importReceiptMatchesCommand(receipt, c) || receipt.Claim.AdmittedFence != c.InstallationFence {
-		return zero, ErrFenceReconciliation
+		return zero, nil, ErrFenceReconciliation
 	}
 	settled, _ := strconv.ParseInt(receipt.SettledMS, 10, 64)
 	observedAt, err := importResourceMatches(ctx, tx, c, receipt.Claim, true)
 	if err != nil || observedAt != settled {
-		return zero, ErrFenceReconciliation
+		return zero, nil, ErrFenceReconciliation
 	}
 	if err := requireDataRootHistory(ctx, tx, markerImportRoot(receipt.Claim)); err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return zero, err
+		return zero, nil, err
 	}
-	return receipt, nil
+	return receipt, nil, nil
 }
 
 func importNativeRequest(intent importIntent) (data.ImportRequest, error) {
