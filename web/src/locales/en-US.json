@@ -3852,6 +3852,7 @@
   "err.app_platform_control_paused": "Application control is paused pending recovery review.",
   "err.app_platform_recovery_unsettled": "Application recovery is not finished: an installation still needs to be resumed or disabled, or a restore import or resume is still running.",
   "err.app_platform_recovery_inactive": "The Portal is not in recovery, so this recovery action is not available.",
+  "err.app_platform_abandon_unavailable": "No replacement runtime is enrolled, so there is nothing to abandon. Abandoning is possible only during recovery, and only for the runtime that is currently enrolled.",
   "err.app_platform_replacement_unavailable": "The replacement runtime cannot be enrolled or confirmed. Check that every earlier runtime is retired and that the new runner reports the expected enrollment.",
   "err.app_platform_operation_missing": "This application operation was not found.",
   "err.app_platform_operation_failed": "The application operation failed. Administrator review is required.",

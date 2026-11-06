@@ -31,6 +31,8 @@ func platformRecoveryError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errAppPlatformControlPaused):
 		jsonErrorCode(w, 409, "app_platform_recovery_inactive", "application recovery is not active")
+	case errors.Is(err, errAppPlatformAbandonUnavailable):
+		jsonErrorCode(w, 409, "app_platform_abandon_unavailable", "application recovery has no replacement runtime to abandon")
 	default:
 		platformManagementError(w, err)
 	}
@@ -138,7 +140,7 @@ func platformPlanIsResume(planRaw string) bool {
 
 // platformRecoveryAction reports whether a plan action belongs to the recovery surface.
 func platformRecoveryAction(action string) bool {
-	return action == "restore_import" || action == "resume" || action == "recovery_disable" || action == "frontend_resume"
+	return action == "restore_import" || action == "resume" || action == "recovery_disable" || action == "frontend_resume" || action == "abandon_runtime"
 }
 
 func platformRecoveryActionResponse(action string, review platformRemovalReview) (map[string]any, error) {
@@ -213,4 +215,43 @@ func (s *Server) apiPlatformRecoveryPlan(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	writeJSON(w, response)
+}
+
+// apiPlatformAbandonRuntimePlan reviews abandoning the replacement runtime: it lists what the commit
+// will settle, and nothing is changed by asking.
+func (s *Server) apiPlatformAbandonRuntimePlan(w http.ResponseWriter, r *http.Request, actor platformActorSession, runtimeID string) {
+	review, err := s.createPlatformAbandonRuntimeReview(r.Context(), actor, runtimeID)
+	if err != nil {
+		platformRecoveryError(w, err)
+		return
+	}
+	var plan platformAbandonRuntimePlan
+	if err := json.Unmarshal([]byte(review.JSON), &plan); err != nil || plan.Format != platformAbandonRuntimeFormat {
+		platformRecoveryError(w, errAppPlatformPlanChanged)
+		return
+	}
+	writeJSON(w, map[string]any{
+		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
+		"review": map[string]any{
+			"action": "abandon_runtime", "runtime_id": plan.RuntimeID, "deployment_id": plan.DeploymentID,
+			"installations": plan.Installations, "grants": plan.Grants, "effects": plan.Effects, "operations": plan.Operations,
+			"reason": plan.Reason, "data_effect": "none",
+		},
+	})
+}
+
+// apiPlatformAbandonRuntimeCommit spends the reviewed abandon. It admits no operation: the one
+// transition is recorded in the audit log, and a plan can be spent once.
+func (s *Server) apiPlatformAbandonRuntimeCommit(w http.ResponseWriter, r *http.Request, actor platformActorSession, planID, planSHA string) {
+	result, err := s.consumePlatformAbandonRuntimeReview(r.Context(), actor, planID, planSHA)
+	if err != nil {
+		platformRecoveryError(w, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusAccepted)
+	json.NewEncoder(w).Encode(map[string]any{
+		"abandoned": true, "runtime_id": result.RuntimeID, "installations": result.Installations,
+		"grants": result.Grants, "effects": result.Effects, "operations": result.Operations,
+	})
 }

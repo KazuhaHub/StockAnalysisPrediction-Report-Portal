@@ -300,7 +300,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	fields, err := platformManagementObject(raw, "action",
 		"release_sha256", "trust_revision", "audience",
-		"installation_id", "data_namespace_id", "recovery_set_id")
+		"installation_id", "data_namespace_id", "recovery_set_id", "runtime_id")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -335,6 +335,13 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	defer releaseSlot()
 	n, _ := strconv.ParseInt(revision, 10, 64)
 	switch action {
+	case "abandon_runtime":
+		runtimeID, runtimeErr := platformManagementString(fields, "runtime_id")
+		if len(fields) != 2 || runtimeErr != nil || !platformValidUUID(runtimeID) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		s.apiPlatformAbandonRuntimePlan(w, r, actor, runtimeID)
 	case "restore_import", "resume", "recovery_disable", "frontend_resume":
 		installation, installationErr := platformManagementString(fields, "installation_id")
 		recoverySetID, recoveryErr := platformManagementString(fields, "recovery_set_id")
@@ -660,6 +667,10 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		result, err = s.consumePlatformUpdateReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "disable", "uninstall":
+		if platformPlanIsAbandonRuntime(planRaw) {
+			s.apiPlatformAbandonRuntimeCommit(w, r, actor, id, sha)
+			return
+		}
 		if platformPlanIsRecoveryDisable(planRaw) {
 			recovery = true
 			result, err = s.consumePlatformRecoveryReview(r.Context(), actor, platformRecoveryDisableKind, id, sha, key)

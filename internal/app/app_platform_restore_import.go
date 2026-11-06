@@ -153,11 +153,16 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 	if pending != 0 {
 		return result, errAppPlatformOperationConflict
 	}
-	// An installation is imported at most once per controller epoch, whichever recovery set it used.
+	// An installation is imported at most once per controller epoch, whichever recovery set it used. An
+	// import that landed on a runtime since retired (abandoned) no longer counts: its data is gone with
+	// the host, and the installation is imported again onto the runtime that replaces it.
 	var imported int
 	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_import_grants g JOIN app_platform_recovery_sets r ON r.id=g.recovery_set_id
+			JOIN app_platform_runtime_bindings b ON b.id=g.runtime_id AND b.enabled=1
 			WHERE r.installation_id=? AND g.state='consumed' AND g.controller_epoch=?)
-		+ (SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND action='restore_import' AND stage='complete' AND controller_epoch=?)`,
+		+ (SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='restore_data' AND f.effect_number=1
+			JOIN app_platform_runtime_bindings b ON b.id=f.runtime_id AND b.enabled=1
+			WHERE o.installation_id=? AND o.action='restore_import' AND o.stage='complete' AND o.controller_epoch=?)`,
 		installation, runtime.controllerEpoch, installation, runtime.controllerEpoch).Scan(&imported); err != nil {
 		return result, err
 	}
