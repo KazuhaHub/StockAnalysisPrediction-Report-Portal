@@ -81,6 +81,7 @@ type platformImportIntent struct {
 	// priorSignedUntil the latest expiry of any command signed for the effect before this one.
 	pendingReceipt   string
 	priorSignedUntil int64
+	effectState      string
 }
 
 type platformImportObservation interface {

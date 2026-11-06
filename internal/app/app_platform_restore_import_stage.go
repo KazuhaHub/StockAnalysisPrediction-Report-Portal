@@ -237,11 +237,16 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		if effectID, err = platformNewUUID(); err != nil {
 			return zero, false, err
 		}
-		admitted, receipt = expected.fence, "{}"
+		admitted, receipt, state = expected.fence, "{}", "prepared"
 	} else {
 		until, ok := platformImportSignedUntil(receipt)
+		// A finished operation (recovery_required) has had its prepared effect marked unknown.
+		wantState := "prepared"
+		if expected.snapshot.Stage == appplatform.StageRecoveryRequired {
+			wantState = "unknown"
+		}
 		if kind != "import-checkpoint" || effectEpoch != expected.controllerEpoch || admitted <= 0 || admitted > expected.fence || observed != 0 ||
-			state != "prepared" || !ok {
+			state != wantState || !ok {
 			return zero, false, errAppPlatformStageEvidence
 		}
 		priorSignedUntil = until
@@ -264,7 +269,7 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		return zero, false, fmt.Errorf("%w: release descriptor", errAppPlatformStageEvidence)
 	}
 	return platformImportIntent{effectID: effectID, admittedFence: admitted, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor,
-		pendingReceipt: receipt, priorSignedUntil: priorSignedUntil}, fresh, nil
+		pendingReceipt: receipt, priorSignedUntil: priorSignedUntil, effectState: state}, fresh, nil
 }
 
 func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected platformOperationLease) (platformImportIntent, error) {

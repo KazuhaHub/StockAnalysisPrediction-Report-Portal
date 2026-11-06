@@ -56,6 +56,8 @@ type platformInstallScheduler struct {
 	attempts int
 	waits    int
 	writable bool
+	// reconciledAt is when recovery-mode reconciliation last ran.
+	reconciledAt time.Time
 }
 
 func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
@@ -112,6 +114,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			selected, err = w.server.claimNextPlatformRestoreImport(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformRestoreResume(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" && time.Since(w.reconciledAt) >= platformRecoveryReconcileInterval {
+				// Idle: read back any import left unsettled by an earlier attempt.
+				w.reconciledAt = time.Now()
+				if _, reconcileErr := w.server.reconcilePlatformRecoveryImports(ctx, w.endpoint); reconcileErr != nil {
+					log.Printf("app-platform recovery reconcile: %v", reconcileErr)
+				}
 			}
 		} else if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
