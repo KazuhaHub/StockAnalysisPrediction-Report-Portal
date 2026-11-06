@@ -514,10 +514,6 @@ const (
 // holds no row for the effect: the command was refused before it was claimed.
 var errPlatformImportAbsent = errors.New("runner holds no import effect")
 
-// errPlatformImportBusy is what an executor returns when the runner reports that it is still working
-// on the import or holds its data gate for another action. It is not a failed attempt.
-var errPlatformImportBusy = errors.New("runner is busy with the import")
-
 // errPlatformImportEnded reports an import operation that this attempt ended as failed with its grant
 // revoked; the scheduler has nothing left to retry or finish.
 var errPlatformImportEnded = errors.New("restore import ended without an effect")

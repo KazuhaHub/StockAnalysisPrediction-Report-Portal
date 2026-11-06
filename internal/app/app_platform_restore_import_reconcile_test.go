@@ -151,29 +151,32 @@ func TestRestoreImportAttemptOutlivesTheRunnerBound(t *testing.T) {
 	_ = commit
 }
 
-// A runner that is still busy with the import has not failed the attempt.
-func TestRestoreImportBusyRunnerIsNotAFailedAttempt(t *testing.T) {
+// An attempt whose wait ran out while the runner was still working on the import has not failed.
+func TestRestoreImportAttemptThatRunsOutOfTimeIsNotAFailedAttempt(t *testing.T) {
+	previous := platformImportAttemptTimeout
+	platformImportAttemptTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { platformImportAttemptTimeout = previous })
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5303), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.executor.err, f.executor.readErr = errPlatformImportBusy, errPlatformImportBusy
+	f.executor.block, f.executor.readErr = true, errors.New("import still running")
 	for i := 0; i < platformInstallAttemptLimit*3; i++ {
 		_ = worker.tick(context.Background())
 	}
 	if worker.attempts != 0 || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "restore_data" {
-		t.Fatalf("a busy runner counted as a failed attempt: attempts=%d stage=%s", worker.attempts, scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID))
+		t.Fatalf("a runner still working counted as a failed attempt: attempts=%d stage=%s", worker.attempts, scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID))
 	}
-	f.executor.err, f.executor.readErr = nil, nil
+	f.executor.block, f.executor.readErr = false, nil
 	for i := 0; i < 4 && scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete"; i++ {
 		if err := worker.tick(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete" {
-		t.Fatal("the import did not complete once the runner was free")
+		t.Fatal("the import did not complete once the runner was done")
 	}
 }
 

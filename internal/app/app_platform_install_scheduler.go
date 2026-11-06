@@ -23,7 +23,7 @@ const platformInstallAttemptTimeout = 20 * time.Second
 // lease, and the Portal polls: an attempt that ends because the runner is still working is not a
 // failure, and the next one reads the receipt of the same effect (platformBusyWaitLimit of them cover
 // the longest bound).
-const platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
+var platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
 
 // platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy
 // with the same effect before they count as failures.
@@ -259,9 +259,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		return parent.Err()
 	}
 	if w.active.snapshot.Action == appplatform.ActionRestoreImport &&
-		(errors.Is(err, errPlatformImportBusy) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)) &&
+		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil &&
 		w.waits < platformBusyWaitLimit {
-		// The runner is still working on the import, or the wait for it ran out: it has not failed.
+		// The wait for the runner ran out while it was still working on the import: it has not failed.
 		// The same effect is read again on the next attempt; nothing is sent under a new identity.
 		w.waits++
 		w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
