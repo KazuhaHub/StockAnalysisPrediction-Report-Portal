@@ -440,9 +440,10 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 }
 
 // ErrNoSuchEffect is returned by a read only when the journal proves it holds no
-// command row for the effect identity. It is the one definite "never claimed"
-// answer; any other read failure leaves the effect unknown.
-var ErrNoSuchEffect = errors.New("runner holds no such import effect")
+// command row for the effect identity (an import-checkpoint or a restore-start).
+// It is the one definite "never claimed" answer; any other read failure leaves
+// the effect unknown.
+var ErrNoSuchEffect = errors.New("runner holds no such effect")
 
 const importAbsenceFormat = "portal.runner.import-checkpoint-absence/1-dev.1"
 

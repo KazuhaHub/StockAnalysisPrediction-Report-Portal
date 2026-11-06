@@ -160,7 +160,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
-	if importAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -292,7 +292,7 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 	case UpdateStartExecute:
 		result, err = provider.store.DispatchUpdateStart(ctx, raw, sig, descriptor, provider.native)
 	case UpdateStartReceipt:
-		result, err = provider.store.ReadUpdateStartRunningReceipt(ctx, raw, sig)
+		result, err = provider.store.ReadUpdateStartRunningOrAbsence(ctx, raw, sig)
 	case UpdateStartProbe:
 		result, err = provider.store.ObserveUpdateStartReadiness(ctx, raw, sig, provider.native, descriptor)
 	case UpdateStartRegistrationDeliver:

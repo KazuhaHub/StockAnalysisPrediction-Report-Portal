@@ -461,6 +461,13 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 		}
 		return true
 	case action >= UpdateStartExecute && action <= UpdateStartReceipt:
+		if startAbsenceReply(action, body) {
+			absence, _ := journal.ParseUpdateStartAbsence(body)
+			observed, observedErr := strconv.ParseInt(absence.ObservedMS, 10, 64)
+			issued, issuedErr := strconv.ParseInt(r.updateStart.IssuedMS, 10, 64)
+			return journal.UpdateStartAbsenceMatchesCommand(absence, r.updateStart) &&
+				observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+		}
 		v, e := journal.ParseUpdateStartRunningReceipt(body)
 		c := r.updateStart
 		if e != nil || v.Claim.Preflight == nil ||
@@ -580,6 +587,16 @@ func importAbsenceReply(action WritableLifecycleAction, body []byte) bool {
 		return false
 	}
 	_, err := journal.ParseImportCheckpointAbsence(body)
+	return err == nil
+}
+
+// startAbsenceReply reports whether body is the runner's definite "never admitted" answer to a start
+// read-receipt. Only that read can be answered so; an execute that found no row would claim one instead.
+func startAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	if action != UpdateStartReceipt {
+		return false
+	}
+	_, err := journal.ParseUpdateStartAbsence(body)
 	return err == nil
 }
 

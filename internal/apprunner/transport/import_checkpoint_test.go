@@ -167,7 +167,8 @@ func importAbsenceFor(command control.ImportCheckpointCommand) journal.ImportChe
 func TestWritableLifecycleImportAbsenceReply(t *testing.T) {
 	a, command, raw, sig, descriptor, _ := importTransportFixture(t)
 	now := time.Now().UnixMilli()
-	started, received := time.Now().Add(-time.Second), time.Now()
+	// The reply is built after this, so its observation time must not be ahead of the receive time.
+	started, received := time.Now().Add(-time.Second), time.Now().Add(time.Second)
 	read, err := verifyWritableLifecycle(ImportCheckpointRead, raw, sig, descriptor, a, now)
 	if err != nil {
 		t.Fatal(err)
