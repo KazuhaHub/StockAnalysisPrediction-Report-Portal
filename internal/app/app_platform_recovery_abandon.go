@@ -185,16 +185,17 @@ func (s *Server) recordPlatformReplacementRoot(session platformActorSession, run
 	return nil
 }
 
-// refusePlatformReplacementOnAbandonedRoot refuses to work with a runtime whose recorded data root is an
-// abandoned one. A runtime with no recorded root is not refused here: its import receipt is still checked
-// against the abandoned roots when it lands.
+// refusePlatformReplacementOnAbandonedRoot refuses to work with a runtime whose data root is not recorded
+// or is an abandoned one. A runtime with no recorded root has not completed its confirm (the profile call
+// failed after the binding was enabled), so nothing is known about where an import would land; repeating
+// the confirm records the root.
 func refusePlatformReplacementOnAbandonedRoot(e migExec, runtimeID string) error {
 	root, found, err := loadPlatformReplacementRoot(e)
 	if err != nil {
 		return err
 	}
 	if !found || root.RuntimeID != runtimeID {
-		return nil
+		return errAppPlatformRuntimeConflict
 	}
 	abandoned, err := platformRootAbandoned(e, root.Filesystem, root.RootInode)
 	if err != nil {

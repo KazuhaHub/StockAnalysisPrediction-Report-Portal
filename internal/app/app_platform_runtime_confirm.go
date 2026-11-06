@@ -57,17 +57,59 @@ func (s *Server) confirmPlatformReplacementRuntime(ctx context.Context, session 
 	if err != nil {
 		return confirmed, err
 	}
-	target, err := s.platformRecoveryResumeTarget(ctx, session, endpoint)
-	if err != nil {
-		return platformRuntimeRegistration{}, err
-	}
-	if target == nil || target.RuntimeID != confirmed.id {
-		return platformRuntimeRegistration{}, errAppPlatformRuntimeConflict
-	}
-	if err := s.recordPlatformReplacementRoot(session, confirmed.id, target.Profile.RootFilesystemUUID, target.Profile.RootInode); err != nil {
+	if err := s.completePlatformReplacementRoot(ctx, session, confirmed.id, endpoint); err != nil {
 		return platformRuntimeRegistration{}, err
 	}
 	return confirmed, nil
+}
+
+// completePlatformReplacementRoot asks the enabled replacement runner for its profile and records the data
+// root it reports.
+func (s *Server) completePlatformReplacementRoot(ctx context.Context, session platformActorSession, runtimeID string, endpoint platformRuntimeEndpoint) error {
+	target, err := s.platformRecoveryResumeTarget(ctx, session, endpoint)
+	if err != nil {
+		return err
+	}
+	if target == nil || target.RuntimeID != runtimeID {
+		return errAppPlatformRuntimeConflict
+	}
+	return s.recordPlatformReplacementRoot(session, runtimeID, target.Profile.RootFilesystemUUID, target.Profile.RootInode)
+}
+
+// platformReplacementAwaitingRoot finds a replacement for the deployment that was enabled but whose root
+// was never recorded, because the profile call of its confirm failed. A repeated confirm completes it.
+func (s *Server) platformReplacementAwaitingRoot(session platformActorSession, deployment string) (platformRuntimeRegistration, bool, error) {
+	var result platformRuntimeRegistration
+	found := false
+	err := s.withPlatformRecoveryTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+		row, ok, retired, err := platformActiveRuntime(e, true)
+		if err != nil {
+			return err
+		}
+		if !ok || len(retired) == 0 || row.enabled != 1 || row.revision != 2 || row.deploymentID != deployment {
+			return nil
+		}
+		dek, err := s.dek()
+		if err != nil {
+			return err
+		}
+		current, seed, err := s.platformDataRuntime(e, control.epoch, dek)
+		clear(seed)
+		if err != nil {
+			return err
+		}
+		root, recorded, err := loadPlatformReplacementRoot(e)
+		if err != nil {
+			return err
+		}
+		if recorded && root.RuntimeID == current.id {
+			return nil
+		}
+		result, found = current, true
+		_, err = platformRefreshActor(e, session, actor, control)
+		return err
+	})
+	return result, found, err
 }
 
 func (s *Server) platformRuntimeTransaction(recovery bool) func(platformActorSession, func(migExec, platformActorFacts, platformActorControl) error) error {

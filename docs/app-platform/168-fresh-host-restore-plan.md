@@ -236,7 +236,7 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   gate. While paused and idle the scheduler re-reads the original start effect at its stored fence. An
   applied receipt settles the effect and reopens the operation at the probe stage on a lease at that
   fence, which the unchanged stage code runs to ready (only while the installation's fence is still that
-  fence). A reserved start the runner holds in state prepared or unknown stays unknown until the runtime
+  fence). A start the runner holds in state prepared or unknown stays unknown until the runtime
   is abandoned. (The fourth round changed what an absence reply means; see below.)
 - **Abandon.** The idempotency record is keyed by runtime and controller epoch. An installation the
   administrator already disabled in recovery is left alone and listed apart. The data roots that imports
@@ -254,13 +254,17 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   the runner, so an absence reply for it means the runner's journal lost the row. The reconcile audits
   that once and reverts nothing: the effect stays unknown, the operation `recovery_required`, and only an
   abandon settles it. This replaces the earlier revert-on-absence rule. A start without a reservation is
-  never read here: ending the resume returns the installation to review at once, reverts the effect rows and
-  settles the operation to `failed`, so it does not block launch after a later resume succeeds.
+  read too, because the runner may have accepted the reserve and the reply been lost: ending the resume
+  keeps it `recovery_required`, and only the runner's typed absence, after every signed command has
+  expired, reverts the effect, settles the operation to `failed` and returns the installation to review.
+  Any other answer keeps it unknown until the runtime is abandoned.
 - **Replacement data root.** Confirming a replacement observes the runner's profile and records the data
   root it reports in meta (`app_platform_replacement_root`, one record, no DDL). Abandoning the runtime
   carries that root into the abandoned roots beside the roots of applied imports, so an unknown or lost
   import still leaves its root recorded. A replacement whose reported root is an abandoned one is refused at
-  confirm (the binding stays enabled so it can be abandoned in turn) and its import review is refused.
+  confirm (the binding stays enabled so it can be abandoned in turn). Import review is refused for a runtime
+  with no recorded root or an abandoned one; a confirm whose profile call failed is completed by repeating
+  the confirm.
 - **Recovery-only operation states.** The revision one past an ordinary operation's last stage (a failure
   settled out of `recovery_required`, a completion recovered out of it) is restored by the snapshot loader,
   and offered by `Settle`, `Recover` and `Reopen`, only for the restore import and restore actions whose

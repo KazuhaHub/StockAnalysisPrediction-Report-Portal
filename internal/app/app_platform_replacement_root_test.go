@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
@@ -88,4 +89,47 @@ func TestReplacementOnAnAbandonedRootIsRefusedAtConfirm(t *testing.T) {
 	if _, err := f.s.confirmPlatformReplacementRuntime(context.Background(), f.actor, reg, platformUpdateStartEndpointFixture()); err != nil {
 		t.Fatal("a replacement on a different root was refused:", err)
 	}
+}
+
+// A confirm whose profile call fails has already enabled the binding but recorded no root. Repeating the
+// confirm through the route completes the missing record instead of conflicting, and until the root is
+// recorded no import is reviewed for the runtime.
+func TestReplacementConfirmIsRetryableAfterAFailedProfileCall(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	mustExec(t, f.s.st, `DELETE FROM meta WHERE k=?`, platformReplacementRootKey)
+	endpoint := platformUpdateStartEndpointFixture()
+	f.s.platformBackendEndpoint.Store(&endpoint)
+	registered := f.replacement
+	pending := f.replacement
+	pending.revision = 1
+	platformReplacementRootSeams(f.s, &registered, platformFixtureID(77))
+	target := f.s.platformRecoveryTarget
+	f.s.platformRecoveryTarget = func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error) {
+		return nil, errors.New("runner unreachable")
+	}
+	if _, err := f.s.confirmPlatformReplacementRuntime(context.Background(), f.actor, pending, endpoint); err == nil {
+		t.Fatal("a failed profile call confirmed the replacement")
+	}
+	if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+		t.Fatal("an import was reviewed for a runtime with no recorded root")
+	}
+	f.s.platformRecoveryTarget = target
+	mux := http.NewServeMux()
+	f.s.wireRoutes(mux)
+	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	body := `{"action":"confirm","deployment_id":"` + f.replacement.deploymentID + `"}`
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/control/replacement-runtime", cookie, body); got.Code != 200 {
+		t.Fatalf("a repeated confirm did not complete the missing root: %d %s", got.Code, got.Body.String())
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM meta WHERE k=?`, platformReplacementRootKey) != 1 {
+		t.Fatal("the repeated confirm recorded no root")
+	}
+	if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err != nil {
+		t.Fatal("the import could not be reviewed once the root was recorded:", err)
+	}
+}
+
+// recordRoot records the data root the fixture's replacement runner reports, as a completed confirm does.
+func (f *platformImportFixtureState) recordRoot(filesystem string) error {
+	return f.s.recordPlatformReplacementRoot(f.actor, f.replacement.id, filesystem, "555")
 }

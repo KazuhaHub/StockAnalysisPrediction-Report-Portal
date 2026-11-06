@@ -153,6 +153,9 @@ func platformRestoreImportFixture(t *testing.T, pg bool) *platformImportFixtureS
 	if f.replacement, err = s.confirmPlatformObservedReplacementRuntime(actor, reg, runtimeObservationFixture(reg)); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.recordRoot(platformFixtureID(77)); err != nil {
+		t.Fatal(err)
+	}
 	f.executor = &platformImportTestExecutor{}
 	s.platformImportCheckpoint = f.executor
 	return f

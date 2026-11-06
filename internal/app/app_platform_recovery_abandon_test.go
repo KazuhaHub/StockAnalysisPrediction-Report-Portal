@@ -55,6 +55,11 @@ func TestAbandonReplacementRuntimeFreesGrantsAndInstallations(t *testing.T) {
 	if f.replacement, err = f.s.confirmPlatformObservedReplacementRuntime(f.actor, reg, runtimeObservationFixture(reg)); err != nil {
 		t.Fatal(err)
 	}
+	// The abandoned runtime's root is remembered, so the new host is on another one.
+	f.executor.mutate = func(r *journal.ImportCheckpointReceipt) { r.Claim.RootFilesystemUUID = platformFixtureID(78) }
+	if err := f.recordRoot(platformFixtureID(78)); err != nil {
+		t.Fatal(err)
+	}
 	review, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet)
 	if err != nil {
 		t.Fatal("the import could not be reviewed again after the abandon:", err)
@@ -395,6 +400,14 @@ func (f *platformImportFixtureState) reenrollAndImport(t *testing.T, deployment,
 	if f.replacement, err = f.s.confirmPlatformObservedReplacementRuntime(f.actor, reg, runtimeObservationFixture(reg)); err != nil {
 		t.Fatal(err)
 	}
+	// The runner reports the root its import will land on: the mutated one, or the fixture's default.
+	filesystem := platformFixtureID(77)
+	if f.executor.mutate != nil {
+		filesystem = platformFixtureID(78)
+	}
+	if err := f.recordRoot(filesystem); err != nil {
+		return "", err
+	}
 	review, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet)
 	if err != nil {
 		t.Fatal("the import could not be reviewed again after the abandon:", err)
@@ -425,11 +438,11 @@ func TestAbandonedRuntimeDataRootIsRefusedForTheReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	operation, err := f.reenrollAndImport(t, platformFixtureID(5102), platformFixtureID(5621))
-	if err == nil || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) == "complete" {
+	if err == nil || (operation != "" && scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) == "complete") {
 		t.Fatal("a replacement whose import landed on the abandoned data root was accepted")
 	}
-	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, operation) != 0 ||
-		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants WHERE runtime_id=?`, f.replacement.id) == "consumed" {
+	if operation != "" && scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, operation) != 0 ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE runtime_id=? AND state='consumed'`, f.replacement.id) != 0 {
 		t.Fatal("the refused import was settled as applied")
 	}
 }

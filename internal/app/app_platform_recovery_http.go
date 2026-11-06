@@ -70,6 +70,27 @@ func (s *Server) apiPlatformReplacementRuntime(w http.ResponseWriter, r *http.Re
 		platformManagementError(w, err)
 		return
 	}
+	if action == "confirm" {
+		// A confirm whose profile call failed left the binding enabled without a recorded root.
+		awaiting, found, err := s.platformReplacementAwaitingRoot(actor, deployment)
+		if err != nil {
+			s.platformReplacementError(w, err)
+			return
+		}
+		if found {
+			endpoint, ok := s.platformRuntimeEndpoint()
+			if !ok {
+				platformManagementError(w, errAppPlatformRuntimeConflict)
+				return
+			}
+			if err := s.completePlatformReplacementRoot(r.Context(), actor, awaiting.id, endpoint); err != nil {
+				s.platformReplacementError(w, err)
+				return
+			}
+			writeJSON(w, platformReplacementResponse(awaiting, true))
+			return
+		}
+	}
 	registration, err := s.preparePlatformReplacementRuntime(actor, deployment)
 	if err != nil {
 		s.platformReplacementError(w, err)
