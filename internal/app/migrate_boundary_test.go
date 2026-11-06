@@ -327,6 +327,10 @@ func TestTheV0310ShapeIsRejected(t *testing.T) {
 // all, turns it back into a refusal.
 func TestInterruptedFreshInitializationIsResumed(t *testing.T) {
 	db := rawStoreDB(t)
+	// Match connectStore initialization while retaining this deliberately raw fixture.
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		t.Fatal(err)
+	}
 	st := &Store{db: db, driver: "sqlite"}
 	// A genuine prefix of the create path — every table, before the indexes and before the stamp —
 	// which is where a first run that dies leaves the database. Built from the declarations
