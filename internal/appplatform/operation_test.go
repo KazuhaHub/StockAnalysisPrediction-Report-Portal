@@ -304,3 +304,40 @@ func TestReopenContinuesAfterTheFailedStage(t *testing.T) {
 		t.Fatal("an operation was reopened into complete")
 	}
 }
+
+// The states that exist only because an operation was recovered or settled out of recovery_required (a
+// failure one revision later, a completion one revision later) belong to the restore actions whose
+// recovery paths write them. An ordinary action's loader refuses them, and so do the transitions.
+func TestRecoveryStatesAreRestoredOnlyForTheActionsThatWriteThem(t *testing.T) {
+	recovery := map[Action]bool{ActionRestoreImport: true, ActionRestore: true}
+	for _, action := range []Action{ActionInstall, ActionUpdate, ActionDisable, ActionEnable, ActionRepair, ActionUninstall, ActionDeleteData, ActionRestore, ActionRestoreImport} {
+		for _, managed := range []bool{false, true} {
+			stages := operationStages(action, managed)
+			if len(stages) == 0 {
+				continue
+			}
+			beyond := uint64(len(stages)) + 1
+			for _, stage := range []Stage{StageFailed, StageComplete} {
+				_, err := OperationFromSnapshot(OperationSnapshot{Action: action, Managed: managed, Generation: 3, Revision: beyond, Stage: stage})
+				if (err == nil) != recovery[action] {
+					t.Fatalf("%s managed=%v: %s one revision past the last stage restored=%v, want %v", action, managed, stage, err == nil, recovery[action])
+				}
+			}
+			// The model's own transitions cannot reach those states for an ordinary action.
+			op, err := NewOperation(action, managed, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if op, err = op.Advance(op.Snapshot().Revision, stages[1]); err != nil {
+				t.Fatal(err)
+			}
+			unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := unsettled.Settle(unsettled.Snapshot().Revision); (err == nil) != recovery[action] {
+				t.Fatalf("%s managed=%v: settle accepted=%v, want %v", action, managed, err == nil, recovery[action])
+			}
+		}
+	}
+}

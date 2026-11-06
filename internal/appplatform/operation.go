@@ -91,7 +91,7 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 		// follow complete. State revisions do not include lease heartbeats. A
 		// failure settled out of recovery_required is one transition later.
 		limit := uint64(len(stages))
-		if snapshot.Stage == StageFailed {
+		if snapshot.Stage == StageFailed && recoverableAction(snapshot.Action) {
 			limit++
 		}
 		valid = snapshot.Revision >= 2 && snapshot.Revision <= limit
@@ -103,7 +103,7 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 			}
 		}
 		// An operation recovered out of recovery_required completes one revision after the failure.
-		if snapshot.Stage == StageComplete && snapshot.Revision == uint64(len(stages))+1 {
+		if snapshot.Stage == StageComplete && snapshot.Revision == uint64(len(stages))+1 && recoverableAction(snapshot.Action) {
 			valid = true
 		}
 	}
@@ -111,6 +111,13 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 		return Operation{}, ErrInvalidTransition
 	}
 	return Operation{action: snapshot.Action, managed: snapshot.Managed, generation: snapshot.Generation, revision: snapshot.Revision, stage: snapshot.Stage}, nil
+}
+
+// recoverableAction names the actions whose operations are settled, recovered or reopened out of
+// recovery_required: the restore import and the restore, whose recovery paths are the only writers of the
+// states one revision past an ordinary one. Every other action ends recovery_required for good.
+func recoverableAction(action Action) bool {
+	return action == ActionRestoreImport || action == ActionRestore
 }
 
 func (o Operation) Snapshot() OperationSnapshot {
@@ -161,6 +168,9 @@ func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
 	if err := o.checkRevision(expectedRevision); err != nil {
 		return Operation{}, err
 	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
+	}
 	if o.stage != StageRecoveryRequired {
 		return Operation{}, ErrInvalidTransition
 	}
@@ -174,6 +184,9 @@ func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
 func (o Operation) Recover(expectedRevision uint64) (Operation, error) {
 	if err := o.checkRevision(expectedRevision); err != nil {
 		return Operation{}, err
+	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
 	}
 	stages := operationStages(o.action, o.managed)
 	if o.stage != StageRecoveryRequired || o.revision+1 < uint64(len(stages)) || o.revision+1 > uint64(len(stages))+1 {
@@ -190,6 +203,9 @@ func (o Operation) Recover(expectedRevision uint64) (Operation, error) {
 func (o Operation) Reopen(expectedRevision uint64) (Operation, error) {
 	if err := o.checkRevision(expectedRevision); err != nil {
 		return Operation{}, err
+	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
 	}
 	stages := operationStages(o.action, o.managed)
 	if o.stage != StageRecoveryRequired || o.revision < 2 || o.revision >= uint64(len(stages)) {
