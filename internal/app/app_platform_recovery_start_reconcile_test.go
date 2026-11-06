@@ -111,46 +111,64 @@ func TestRecoveryReconcileKeepsAnUnknownStartAnswer(t *testing.T) {
 	}
 }
 
-// A definite absence settles the start only once every command signed for the effect has expired: the
-// original commands (none later than the end of the operation) and the one signed for this read. Then
-// the resume is returned to review and a new resume can be admitted.
-func TestRecoveryReconcileRevertsAnAbsentStartAfterExpiryAndAllowsARetry(t *testing.T) {
+// A reserved start is one the runner itself acknowledged, so an absence reply for it means the runner's
+// journal lost the row. That is a journal-integrity failure: the effect stays unknown, the operation stays
+// recovery_required, the installation is not returned to review and no new resume is admitted, however
+// long ago every signed command expired. It is audited once and settled only by abandoning the runtime.
+func TestRecoveryReconcileTreatsAnAbsentReservedStartAsALostJournal(t *testing.T) {
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.absent = true
 	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
-	if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
-		t.Fatalf("an absence inside the signed window was taken as final: %+v %v", selected, err)
-	}
-	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "unknown" {
-		t.Fatal("an unexpired absence reverted the effect")
-	}
-	// Both windows are past: the operation ended long ago and the read's own command has expired.
+	// Every window is past: the operation ended long ago and the recorded read expired.
 	mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=1 WHERE id=?`, operation)
-	raw := scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation)
-	reservation, _, ok := platformStartRecoveryReceipt(raw)
-	if !ok {
-		t.Fatalf("the signed read was not recorded on the effect: %s", raw)
+	for i := 0; i < 2; i++ {
+		raw := scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation)
+		if reservation, _, ok := platformStartRecoveryReceipt(raw); ok {
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='start'`, platformStartPendingReceipt(reservation, 1), operation)
+		}
+		if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
+			t.Fatalf("reconcile: %+v %v", selected, err)
+		}
 	}
-	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='start'`, platformStartPendingReceipt(reservation, 1), operation)
-	if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
-		t.Fatalf("reconcile: %+v %v", selected, err)
-	}
-	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "reverted" ||
-		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" ||
-		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" ||
-		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate'`, f.installation) != 0 ||
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "unknown" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" ||
+		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "enabled:recovery_required" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='candidate'`, f.installation) != 1 ||
 		scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation) != generation {
-		t.Fatal("a definite absence did not revert the effect and return the installation to review")
+		t.Fatal("an absent reserved start was reverted")
 	}
-	if platformOperationBlocksLaunch(t, f.s, operation) {
-		t.Fatal("a reverted resume still blocks launch")
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.restore_start_journal_lost' AND target_id=?`, operation) != 1 {
+		t.Fatal("the lost journal row was not audited exactly once")
 	}
-	// A new resume is admitted and reaches ready.
-	review, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target())
+	if !platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("a lost start no longer blocks launch")
+	}
+	if _, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err == nil {
+		t.Fatal("a new resume was admitted over a start whose journal row is lost")
+	}
+}
+
+// A start that never recorded a reservation was never admitted by the runner, so there is nothing to
+// read: ending the resume returns the installation to review at once, and a new resume can be admitted.
+func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetry(t *testing.T) {
+	ctx := context.Background()
+	f := platformResumeFixture(t, false)
+	commit := f.reviewAndConsumeResume(t)
+	lease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
+	if _, err := f.s.preparePlatformRestoreStart(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.finishPlatformRestoreResumeForReview(ctx, lease); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" {
+		t.Fatal("a start without a reservation was not returned to review")
+	}
+	review, err := f.s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target())
 	if err != nil {
-		t.Fatal("a new resume review was refused after the absence settled:", err)
+		t.Fatal("a new resume review was refused:", err)
 	}
-	retry, err := f.s.consumePlatformRestoreResumeReview(context.Background(), f.actor, review.ID, review.SHA256, platformFixtureID(5641))
+	retry, err := f.s.consumePlatformRestoreResumeReview(ctx, f.actor, review.ID, review.SHA256, platformFixtureID(5641))
 	if err != nil {
 		t.Fatal(err)
 	}

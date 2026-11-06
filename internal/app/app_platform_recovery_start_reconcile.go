@@ -29,8 +29,9 @@ import (
 //   - an applied running receipt settles the effect and returns the operation to the probe stage, on a
 //     lease at the effect's own fence, so the unchanged probe, registration and activation stages take
 //     the installation to ready;
-//   - a definite absence, once every command signed for the effect has expired, reverts the effect and
-//     returns the installation to review, so a new resume can be admitted;
+//   - a definite absence is a journal-integrity failure, because the effect carries the runner's own
+//     reservation: it is audited and nothing is reverted, so the resume stays recovery_required until the
+//     runtime is abandoned;
 //   - anything else changes nothing and is read again later.
 //
 // It never sends the start: only a read-receipt leaves the Portal.
@@ -319,7 +320,7 @@ func (s *Server) reconcilePlatformRecoveryResume(ctx context.Context, c platform
 	}
 	observation, err := s.platformStartReceiptRead()(ctx, endpoint, facts.intent)
 	if errors.Is(err, errPlatformStartAbsent) {
-		return zero, s.revertPlatformRecoveryStart(ctx, c, facts)
+		return zero, s.recordPlatformRecoveryStartJournalLoss(ctx, c, facts)
 	}
 	if err != nil {
 		return zero, nil
@@ -380,34 +381,33 @@ func (s *Server) platformRecoveryStartTransaction(ctx context.Context, c platfor
 	return tx, e, runtime, current, now, nil
 }
 
-// revertPlatformRecoveryStart settles a definite absence. It is final only after every command signed for
-// the effect before this read has expired: the original commands, none of which was signed after the
-// operation ended, and every earlier recovery read. Until then it changes nothing.
-func (s *Server) revertPlatformRecoveryStart(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts) error {
+// recordPlatformRecoveryStartJournalLoss handles the runner's statement that it holds no row for a start
+// effect the Portal has a reservation for. A reservation is the runner's own receipt that it admitted the
+// command, so its journal cannot truthfully lack the row: the runner journal lost it, and the start may
+// have run on a host nobody can now ask. That is a journal-integrity failure, not an absence. Nothing is
+// reverted and no new resume is admitted: the effect stays unknown and the operation recovery_required,
+// which only abandoning the runtime settles. The finding is audited once per effect.
+//
+// A start that never recorded a reservation is not read here: it is returned to review when its resume
+// ends, because the runner never admitted it.
+func (s *Server) recordPlatformRecoveryStartJournalLoss(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts) error {
 	tx, e, _, current, now, err := s.platformRecoveryStartTransaction(ctx, c, signed)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	if now <= max(signed.signedUntil, c.completedMS+platformStartCommandWindowMS)+platformImportAbsenceMarginMS {
+	var recorded int
+	if err := e.queryRow(`SELECT COUNT(*) FROM audit_log WHERE action='app_platform.restore_start_journal_lost' AND target_type='app_platform_operation' AND target_id=? AND detail LIKE ?`,
+		c.lease.id, "%"+current.intent.effectID+"%").Scan(&recorded); err != nil {
+		return err
+	}
+	if recorded != 0 {
 		return nil
-	}
-	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',updated_ms=?
-		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state='unknown' AND receipt_json=?`,
-		now, c.lease.id, current.intent.effectID, current.receipt)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return err
-	}
-	if err := returnPlatformResumeToReview(e, c.lease.installationID, c.lease.controllerEpoch, current.plan, now); err != nil {
-		return err
-	}
-	if err := settlePlatformRecoveryOperation(e, c.lease.id, "", now); err != nil {
-		return err
 	}
 	detail, _ := json.Marshal(struct {
 		EffectID string `json:"effect_id"`
 	}{current.intent.effectID})
-	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.restore_start_reverted','app_platform_operation',?,?,'')`,
+	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.restore_start_journal_lost','app_platform_operation',?,?,'')`,
 		time.UnixMilli(now).UTC().Format(time.RFC3339), c.lease.id, string(detail)); err != nil {
 		return err
 	}
