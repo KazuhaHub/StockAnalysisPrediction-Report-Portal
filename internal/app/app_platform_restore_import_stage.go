@@ -70,7 +70,7 @@ func loadPlatformRestoreImportEvidence(e migExec, s *Server, lease platformOpera
 		lock = " FOR UPDATE"
 	}
 	var state, grantEpoch string
-	if err := e.queryRow(`SELECT id,state,controller_epoch FROM app_platform_import_grants WHERE recovery_set_id=? AND runtime_id=?`+lock,
+	if err := e.queryRow(`SELECT id,state,controller_epoch FROM app_platform_import_grants WHERE recovery_set_id=? AND runtime_id=? AND state<>'revoked'`+lock,
 		plan.RecoverySetID, plan.RuntimeID).Scan(&ev.grantID, &state, &grantEpoch); err != nil ||
 		state != "issued" || grantEpoch != lease.controllerEpoch {
 		return ev, fmt.Errorf("%w: import grant is not issued to this runtime", errAppPlatformStageEvidence)

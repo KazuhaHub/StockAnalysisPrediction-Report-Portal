@@ -204,7 +204,7 @@ func TestMigration0021ImportGrantConstraints(t *testing.T) {
 	}
 	for name, err := range map[string]error{
 		"second issued grant for one recovery set": insert(platformFixtureID(32), set1, rt2, "issued", nil),
-		"same recovery set and runtime twice":      insert(platformFixtureID(33), set1, rt1, "revoked", nil),
+		"same recovery set and runtime twice":      insert(platformFixtureID(33), set1, rt1, "consumed", 5),
 		"consumed without a timestamp":             insert(platformFixtureID(34), set2, rt1, "consumed", nil),
 		"issued with a timestamp":                  insert(platformFixtureID(35), set2, rt1, "issued", 5),
 		"revoked with a timestamp":                 insert(platformFixtureID(36), set2, rt1, "revoked", 5),
@@ -219,6 +219,10 @@ func TestMigration0021ImportGrantConstraints(t *testing.T) {
 	}
 	if err := insert(platformFixtureID(39), set1, rt2, "revoked", nil); err != nil {
 		t.Fatal("a revoked grant must not block another runtime:", err)
+	}
+	// A revoked grant is history: it coexists with the live one for the same recovery set and runtime.
+	if err := insert(platformFixtureID(40), set1, rt1, "revoked", nil); err != nil {
+		t.Fatal("a revoked grant must not block a retry on the same runtime:", err)
 	}
 }
 

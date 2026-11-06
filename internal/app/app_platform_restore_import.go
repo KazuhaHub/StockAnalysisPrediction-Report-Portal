@@ -148,7 +148,7 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 	if pending != 0 {
 		return result, errAppPlatformOperationConflict
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_import_grants WHERE recovery_set_id=?`, recoverySetID).Scan(&grants); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_import_grants WHERE recovery_set_id=? AND state<>'revoked'`, recoverySetID).Scan(&grants); err != nil {
 		return result, err
 	}
 	if grants != 0 {

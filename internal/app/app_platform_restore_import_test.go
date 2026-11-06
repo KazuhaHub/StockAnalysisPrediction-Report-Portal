@@ -239,7 +239,9 @@ func testRestoreImportReviewRefusals(t *testing.T, pg bool) {
 			case "checkpoint_receipt_mismatch":
 				mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json=REPLACE(receipt_json,'"manifest_sha256":"','"manifest_sha256":"0') WHERE operation_id=? AND stage='snapshot'`, f.checkpointOperation)
 			case "prior_grant":
-				mustExec(t, s.st, `INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'revoked',NULL,1,1)`,
+				// A live grant for the recovery set blocks a second one; a revoked grant does not (see
+				// TestRevokedImportGrantAllowsRetry).
+				mustExec(t, s.st, `INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'issued',NULL,1,1)`,
 					platformFixtureID(5400), f.recoverySet, f.replacement.id, s.st.GetSetting("app_platform_controller_epoch", ""))
 			case "work_in_flight":
 				mustExec(t, s.st, `UPDATE app_platform_operations SET stage='quiesce',completed_ms=NULL,error_code=NULL,state_revision=4 WHERE id=?`, f.checkpointOperation)
@@ -577,4 +579,38 @@ func TestRestoreRevokesIssuedImportGrantsSQLite(t *testing.T) {
 }
 func TestRestoreRevokesIssuedImportGrantsPostgres(t *testing.T) {
 	testRestoreRevokesIssuedImportGrants(t, true)
+}
+
+// A revoked grant is history, not a reservation: it neither blocks a new review for the same recovery
+// set and runtime nor is ever mistaken for the live grant, and the new grant is still single-use.
+func testRevokedImportGrantAllowsRetry(t *testing.T, pg bool) {
+	f := platformRestoreImportFixture(t, pg)
+	epoch := f.s.st.GetSetting("app_platform_controller_epoch", "")
+	revoked := platformFixtureID(5400)
+	mustExec(t, f.s.st, `INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'revoked',NULL,1,1)`,
+		revoked, f.recoverySet, f.replacement.id, epoch)
+	commit := f.reviewAndConsume(t)
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE recovery_set_id=? AND runtime_id=?`, f.recoverySet, f.replacement.id) != 2 ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE state='issued'`) != 1 {
+		t.Fatal("the retry did not issue exactly one new grant beside the revoked one")
+	}
+	lease, err := f.drive(t, commit.OperationID)
+	if err != nil || lease.snapshot.Stage != appplatform.StageComplete || f.executor.calls != 1 {
+		t.Fatalf("the retried import did not complete: %v calls=%d", err, f.executor.calls)
+	}
+	if f.executor.last.command.Payload.GrantID == revoked ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants WHERE id=?`, revoked) != "revoked" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE state='consumed'`) != 1 {
+		t.Fatal("the revoked grant was used or altered, or the new grant was not consumed")
+	}
+	// The live grant remains unique: a second issued grant for the same recovery set is refused.
+	if _, err := f.s.st.db.Exec(f.s.st.bind(`INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'issued',NULL,1,1)`),
+		platformFixtureID(5401), f.recoverySet, f.replacement.id, epoch); err == nil {
+		t.Fatal("two live grants coexisted for one recovery set and runtime")
+	}
+}
+
+func TestRevokedImportGrantAllowsRetry(t *testing.T) { testRevokedImportGrantAllowsRetry(t, false) }
+func TestRevokedImportGrantAllowsRetryPostgres(t *testing.T) {
+	testRevokedImportGrantAllowsRetry(t, true)
 }

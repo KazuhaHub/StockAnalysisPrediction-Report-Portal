@@ -56,7 +56,9 @@ func platformImportGrantSchemaTables() []platformTable {
 
 func platformImportGrantSchemaIndexes() []platformIndex {
 	return []platformIndex{
-		{"uq_ap_import_grant_runtime", "import_grants", "recovery_set_id,runtime_id", "", true},
+		// A revoked grant is history: it must not stop the same recovery set being imported again
+		// onto the same runtime.
+		{"uq_ap_import_grant_runtime", "import_grants", "recovery_set_id,runtime_id", "state<>'revoked'", true},
 		{"uq_ap_import_grant_issued", "import_grants", "recovery_set_id", "state='issued'", true},
 		{"idx_ap_import_grant_state", "import_grants", "runtime_id,state", "", false},
 	}
