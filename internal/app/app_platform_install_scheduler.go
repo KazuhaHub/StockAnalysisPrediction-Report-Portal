@@ -83,7 +83,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	if w.active.id == "" {
 		var selected platformInstallSelection
 		var err error
-		if w.writable {
+		if w.endpoint.path != "" && w.server.platformRecoveryPaused(ctx) {
+			// A Portal in recovery runs restore imports and nothing else; every other selector
+			// would refuse on the pause and mask the import behind its error. The frontend-only
+			// service has no runner endpoint, so it keeps refusing on the pause as before.
+			selected, err = w.server.claimNextPlatformRestoreImport(ctx, w.worker)
+		} else if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {
 				selected, err = w.server.claimNextPlatformManagedUpdate(ctx, w.worker)
@@ -158,7 +163,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	w.active = renewed
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
-	if w.active.snapshot.Action == appplatform.ActionRestore &&
+	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
+		result.lease, err = w.server.runPlatformRestoreImport(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
 		w.active.snapshot.Managed {
 		result.lease, err = w.server.runPlatformManagedRestore(
 			ctx, w.active, w.endpoint)
@@ -227,7 +235,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	operation, stage := w.active.id, w.active.snapshot.Stage
 	finish := w.server.finishPlatformInstallForReview
-	if w.active.snapshot.Action == appplatform.ActionUpdate {
+	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
+		finish = w.server.finishPlatformRestoreImportForReview
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
 		finish = w.server.finishPlatformUpdateForReview
 	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
 		w.active.snapshot.Managed {
