@@ -978,10 +978,6 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, expected.id).Scan(&effects); err != nil {
 		return err
 	}
-	var unsettled int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown') AND receipt_json<>'{}'`, expected.id).Scan(&unsettled); err != nil {
-		return err
-	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
 		return errAppPlatformStageEvidence
@@ -1012,11 +1008,12 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 			return err
 		}
 	}
-	// A start that was reserved may have been executed, and the Portal holds no record that it was not.
-	// Until the runner settles that effect the activation, the namespace and the installation stay
-	// exactly as the start left them: returning them to review would admit a second start over a
-	// candidate that may already be running.
-	if unsettled > 0 {
+	// A start effect may have been executed, and the Portal holds no record that it was not: even one with
+	// no recorded reservation may be a reserve the runner accepted whose reply was lost. Until the runner
+	// settles that effect (the paused scheduler reads it back, or the runtime is abandoned) the
+	// activation, the namespace and the installation stay exactly as the start left them: returning them
+	// to review would admit a second start over a candidate that may already be running.
+	if effects != 0 {
 		detail, _ := json.Marshal(struct {
 			Stage appplatform.Stage `json:"stage"`
 			Code  string            `json:"code"`
@@ -1032,17 +1029,6 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	}
 	if err := returnPlatformResumeToReview(e, expected.installationID, expected.controllerEpoch, plan, now); err != nil {
 		return err
-	}
-	// No effect carries a reservation, so the runner never admitted any of them: they are reverted and the
-	// operation, which ended recovery_required only because it left effect rows, is settled to failed.
-	// Otherwise it would block launch for ever, even after a later resume succeeds.
-	if effects != 0 {
-		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',updated_ms=? WHERE operation_id=? AND state IN ('prepared','unknown')`, now, expected.id); err != nil {
-			return err
-		}
-		if err := settlePlatformRecoveryOperation(e, expected.id, "", now); err != nil {
-			return err
-		}
 	}
 	detail, _ := json.Marshal(struct {
 		Stage appplatform.Stage `json:"stage"`

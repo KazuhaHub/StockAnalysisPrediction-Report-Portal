@@ -29,9 +29,11 @@ import (
 //   - an applied running receipt settles the effect and returns the operation to the probe stage, on a
 //     lease at the effect's own fence, so the unchanged probe, registration and activation stages take
 //     the installation to ready;
-//   - a definite absence is a journal-integrity failure, because the effect carries the runner's own
-//     reservation: it is audited and nothing is reverted, so the resume stays recovery_required until the
-//     runtime is abandoned;
+//   - a definite absence for a start with a recorded reservation is a journal-integrity failure, because
+//     the reservation is the runner's own receipt: it is audited and nothing is reverted, so the resume
+//     stays recovery_required until the runtime is abandoned;
+//   - a definite absence for a start with no recorded reservation, once every command signed for the
+//     effect has expired, reverts the effect, settles the operation and returns the installation to review;
 //   - anything else changes nothing and is read again later.
 //
 // It never sends the start: only a read-receipt leaves the Portal.
@@ -56,16 +58,27 @@ func (s *Server) platformStartReceiptRead() platformStartReceiptReader {
 // reservation as it was committed, and the latest expiry of any command the recovery read has signed for
 // the effect. It is the effect row's own column; no schema is involved.
 func platformStartPendingReceipt(reservation string, until int64) string {
-	raw, _ := json.Marshal(struct {
-		Reservation json.RawMessage `json:"reservation"`
-		SignedUntil int64           `json:"signed_until_ms"`
-	}{json.RawMessage(reservation), until})
+	var raw []byte
+	if reservation == "" {
+		raw, _ = json.Marshal(struct {
+			SignedUntil int64 `json:"signed_until_ms"`
+		}{until})
+	} else {
+		raw, _ = json.Marshal(struct {
+			Reservation json.RawMessage `json:"reservation"`
+			SignedUntil int64           `json:"signed_until_ms"`
+		}{json.RawMessage(reservation), until})
+	}
 	return string(raw)
 }
 
 // platformStartRecoveryReceipt reads the receipt of an unknown start: the reservation, and the latest
 // signed expiry (zero before the first recovery read). It accepts only the two forms it writes.
 func platformStartRecoveryReceipt(receipt string) (string, int64, bool) {
+	// An effect with no recorded reservation carries "{}", or only the signed expiry once read.
+	if receipt == "{}" {
+		return "", 0, true
+	}
 	if _, err := journal.ParseUpdateStartReservation([]byte(receipt)); err == nil {
 		return receipt, 0, true
 	}
@@ -73,8 +86,13 @@ func platformStartRecoveryReceipt(receipt string) (string, int64, bool) {
 		Reservation json.RawMessage `json:"reservation"`
 		SignedUntil int64           `json:"signed_until_ms"`
 	}
-	if json.Unmarshal([]byte(receipt), &probe) != nil || probe.SignedUntil <= 0 || len(probe.Reservation) == 0 ||
-		platformStartPendingReceipt(string(probe.Reservation), probe.SignedUntil) != receipt {
+	if json.Unmarshal([]byte(receipt), &probe) != nil || probe.SignedUntil <= 0 {
+		return "", 0, false
+	}
+	if len(probe.Reservation) == 0 {
+		return "", probe.SignedUntil, platformStartPendingReceipt("", probe.SignedUntil) == receipt
+	}
+	if platformStartPendingReceipt(string(probe.Reservation), probe.SignedUntil) != receipt {
 		return "", 0, false
 	}
 	if _, err := journal.ParseUpdateStartReservation(probe.Reservation); err != nil {
@@ -94,7 +112,7 @@ func (s *Server) platformRecoveryStartCandidates(ctx context.Context) ([]platfor
 		FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.action='restore' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
-		AND f.kind='restore-start' AND f.state='unknown' AND f.receipt_json<>'{}' AND p.plan_json LIKE ?
+		AND f.kind='restore-start' AND f.state='unknown' AND p.plan_json LIKE ?
 		ORDER BY o.completed_ms,o.id LIMIT 8`), platformResumePlanPrefix())
 	if err != nil {
 		return nil, err
@@ -154,12 +172,16 @@ func (s *Server) loadPlatformRecoveryStartFacts(e migExec, c platformRecoverySta
 	}
 	reservationRaw, signedUntil, ok := platformStartRecoveryReceipt(receipt)
 	if kind != "restore-start" || state != "unknown" || epoch != lease.controllerEpoch || effectRuntime != runtime.id ||
-		admitted < 1 || admitted > lease.fence || observed != admitted || !ok {
+		admitted < 1 || admitted > lease.fence || !ok || (reservationRaw != "" && observed != admitted) || (reservationRaw == "" && observed != 0) {
 		return fail("effect row")
 	}
-	reservation, err := journal.ParseUpdateStartReservation([]byte(reservationRaw))
-	if err != nil {
-		return fail("reservation")
+	var reservation *journal.UpdateStartReservation
+	if reservationRaw != "" {
+		parsed, err := journal.ParseUpdateStartReservation([]byte(reservationRaw))
+		if err != nil {
+			return fail("reservation")
+		}
+		reservation = &parsed
 	}
 	readLease := lease
 	readLease.fence = admitted
@@ -195,7 +217,7 @@ func (s *Server) loadPlatformRecoveryStartFacts(e migExec, c platformRecoverySta
 		return fail("installation")
 	}
 	command, err := platformRestoreStartCommand(readLease, runtime, source, checkpoint, checkpointRaw, activation, effectID, policy)
-	if err != nil || command.PayloadSHA256 != digest || !platformUpdateStartReservationMatches(reservation, command, activation, effectID) {
+	if err != nil || command.PayloadSHA256 != digest || (reservation != nil && !platformUpdateStartReservationMatches(*reservation, command, activation, effectID)) {
 		return fail("command")
 	}
 	var planRaw string
@@ -215,7 +237,7 @@ func (s *Server) loadPlatformRecoveryStartFacts(e migExec, c platformRecoverySta
 				ControlRevision: runtime.controlRevision, PublicKey: bytes.Clone(runtime.publicKey), Fingerprint: runtime.fingerprint},
 			command: command, checkpoint: checkpoint, checkpointRaw: checkpointRaw, source: source,
 			plan:             platformRestoreStartPlan(readLease, checkpoint, recoverySetID, policy, source),
-			targetDescriptor: source.descriptor, reservation: &reservation,
+			targetDescriptor: source.descriptor, reservation: reservation,
 		},
 		effectState: state, receipt: receipt, reservation: reservationRaw, signedUntil: signedUntil,
 		admittedFence: admitted, controlFence: controlFence, plan: plan,
@@ -323,6 +345,9 @@ func (s *Server) reconcilePlatformRecoveryResume(ctx context.Context, c platform
 	}
 	observation, err := s.platformStartReceiptRead()(ctx, endpoint, facts.intent)
 	if errors.Is(err, errPlatformStartAbsent) {
+		if facts.reservation == "" {
+			return zero, s.revertPlatformRecoveryStart(ctx, c, facts)
+		}
 		return zero, s.recordPlatformRecoveryStartJournalLoss(ctx, c, facts)
 	}
 	if err != nil {
@@ -391,8 +416,8 @@ func (s *Server) platformRecoveryStartTransaction(ctx context.Context, c platfor
 // reverted and no new resume is admitted: the effect stays unknown and the operation recovery_required,
 // which only abandoning the runtime settles. The finding is audited once per effect.
 //
-// A start that never recorded a reservation is not read here: it is returned to review when its resume
-// ends, because the runner never admitted it.
+// A start that never recorded a reservation is read too, because the runner may have accepted the reserve
+// and the reply been lost; only its typed absence, after every signed command has expired, reverts it.
 func (s *Server) recordPlatformRecoveryStartJournalLoss(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts) error {
 	tx, e, _, current, now, err := s.platformRecoveryStartTransaction(ctx, c, signed)
 	if err != nil {
@@ -417,11 +442,51 @@ func (s *Server) recordPlatformRecoveryStartJournalLoss(ctx context.Context, c p
 	return tx.Commit()
 }
 
+// revertPlatformRecoveryStart settles a definite absence for a start with no recorded reservation, which the
+// runner may have accepted before a lost reply. It is final only after every command signed for
+// the effect before this read has expired: the original commands, none of which was signed after the
+// operation ended, and every earlier recovery read. Until then it changes nothing.
+func (s *Server) revertPlatformRecoveryStart(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts) error {
+	tx, e, _, current, now, err := s.platformRecoveryStartTransaction(ctx, c, signed)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if now <= max(signed.signedUntil, c.completedMS+platformStartCommandWindowMS)+platformImportAbsenceMarginMS {
+		return nil
+	}
+	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',updated_ms=?
+		WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state='unknown' AND receipt_json=?`,
+		now, c.lease.id, current.intent.effectID, current.receipt)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	if err := returnPlatformResumeToReview(e, c.lease.installationID, c.lease.controllerEpoch, current.plan, now); err != nil {
+		return err
+	}
+	if err := settlePlatformRecoveryOperation(e, c.lease.id, "", now); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		EffectID string `json:"effect_id"`
+	}{current.intent.effectID})
+	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.restore_start_reverted','app_platform_operation',?,?,'')`,
+		time.UnixMilli(now).UTC().Format(time.RFC3339), c.lease.id, string(detail)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // commitPlatformRecoveryStartApplied settles an applied running receipt: the effect, and the operation, which
 // returns to the probe stage on a lease at the fence the effect was admitted under. It continues only when
 // that fence is still the installation's own: a fence that moved belongs to someone else's work.
 func (s *Server) commitPlatformRecoveryStartApplied(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts, endpoint platformRuntimeEndpoint, observation platformUpdateStartRunningObservation, worker string) (platformInstallSelection, error) {
 	var zero platformInstallSelection
+	if signed.intent.reservation == nil {
+		// An applied answer for a start the Portal holds no reservation for cannot be validated against
+		// one; the effect stays unknown until the runtime is abandoned.
+		return zero, nil
+	}
 	running, ok := validPlatformUpdateStartRunningObservation(observation, signed.intent, endpoint)
 	if !ok {
 		return zero, errAppPlatformStageEvidence

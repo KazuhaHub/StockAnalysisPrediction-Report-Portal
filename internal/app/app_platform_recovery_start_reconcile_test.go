@@ -160,17 +160,11 @@ func TestRecoveryReconcileTreatsAnAbsentReservedStartAsALostJournal(t *testing.T
 	}
 }
 
-// A start that never recorded a reservation was never admitted by the runner, so there is nothing to
-// read: ending the resume returns the installation to review at once, and a new resume can be admitted.
-func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetry(t *testing.T) {
-	testResumeEndWithoutReservation(t, false)
-}
-
-func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetryPostgres(t *testing.T) {
-	testResumeEndWithoutReservation(t, true)
-}
-
-func testResumeEndWithoutReservation(t *testing.T, pg bool) {
+// An unreserved start (no reservation recorded) is not necessarily one the runner never saw: the runner
+// may have accepted the reserve and the reply been lost. Ending the resume therefore keeps it
+// recovery_required with its effect unknown, and the paused scheduler reads the effect back.
+func unreservedResumeStartFixture(t *testing.T, pg bool) (*platformResumeFixtureState, string, *platformStartReadFake) {
+	t.Helper()
 	ctx := context.Background()
 	f := platformResumeFixture(t, pg)
 	commit := f.reviewAndConsumeResume(t)
@@ -181,24 +175,71 @@ func testResumeEndWithoutReservation(t *testing.T, pg bool) {
 	if err := f.s.finishPlatformRestoreResumeForReview(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
-	if scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" {
-		t.Fatal("a start without a reservation was not returned to review")
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "recovery_required" ||
+		scalar[string](t, f.s.st, `SELECT state||receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, commit.OperationID) != "unknown{}" ||
+		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "enabled:recovery_required" {
+		t.Fatal("fixture: an unreserved start was not kept recovery_required with an unknown effect")
 	}
-	review, err := f.s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target())
+	fake := &platformStartReadFake{}
+	f.s.platformReadStartReceipt = fake.read
+	return f, commit.OperationID, fake
+}
+
+func TestRecoveryReconcileDoesNotRevertAnUnreservedStartTheRunnerMayHold(t *testing.T) {
+	f, operation, fake := unreservedResumeStartFixture(t, false)
+	// The reserve was accepted and its reply lost: the runner answers prepared/unknown, or not at all.
+	fake.err = errors.New("runner has not settled the start")
+	if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
+		t.Fatalf("reconcile: %+v %v", selected, err)
+	}
+	if fake.calls != 1 || scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "unknown" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" ||
+		scalar[string](t, f.s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.installation) != "recovery_required" {
+		t.Fatal("a start the runner may hold was reverted")
+	}
+}
+
+func TestRecoveryReconcileUnreservedAbsenceBeforeExpiryWaits(t *testing.T) {
+	f, operation, fake := unreservedResumeStartFixture(t, false)
+	fake.absent = true
+	if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
+		t.Fatalf("reconcile: %+v %v", selected, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "unknown" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" {
+		t.Fatal("an absence inside the signed window was taken as final")
+	}
+}
+
+func testRecoveryReconcileUnreservedAbsenceAfterExpiry(t *testing.T, pg bool) {
+	f, operation, fake := unreservedResumeStartFixture(t, pg)
+	fake.absent = true
+	if _, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil {
+		t.Fatal(err)
+	}
+	// Every window is past: the operation ended long ago and the recorded read expired.
+	mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=1 WHERE id=?`, operation)
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='start'`, platformStartPendingReceipt("", 1), operation)
+	if _, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation) != "reverted" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" ||
+		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" ||
+		platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("a definite absence after expiry did not revert the start and return the installation to review")
+	}
+	review, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target())
 	if err != nil {
 		t.Fatal("a new resume review was refused:", err)
 	}
-	retry, err := f.s.consumePlatformRestoreResumeReview(ctx, f.actor, review.ID, review.SHA256, platformFixtureID(5641))
+	retry, err := f.s.consumePlatformRestoreResumeReview(context.Background(), f.actor, review.ID, review.SHA256, platformFixtureID(5641))
 	if err != nil {
 		t.Fatal(err)
 	}
 	start := f.driveResume(t, retry.OperationID, appplatform.StageStart)
 	if done := platformResumeStartToReady(t, f.s, start, f.endpoint); done.snapshot.Stage != appplatform.StageComplete {
 		t.Fatal("the retried resume did not complete")
-	}
-	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed" ||
-		platformOperationBlocksLaunch(t, f.s, commit.OperationID) {
-		t.Fatal("the resume that never reserved its start was not settled to failed")
 	}
 	platformRecoveryActionHTTP(t, f.s, f.actor).endRecovery(200)
 	mux := http.NewServeMux()
@@ -211,6 +252,13 @@ func testResumeEndWithoutReservation(t *testing.T, pg bool) {
 	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
 		t.Fatalf("the retried resume did not launch: %d %s", got.Code, got.Body.String())
 	}
+}
+
+func TestRecoveryReconcileUnreservedAbsenceAfterExpiryRevertsAndAllowsARetry(t *testing.T) {
+	testRecoveryReconcileUnreservedAbsenceAfterExpiry(t, false)
+}
+func TestRecoveryReconcileUnreservedAbsenceAfterExpiryRevertsAndAllowsARetryPostgres(t *testing.T) {
+	testRecoveryReconcileUnreservedAbsenceAfterExpiry(t, true)
 }
 
 // The scheduler settles such a start by itself while the Portal is paused and it has nothing else to run.
