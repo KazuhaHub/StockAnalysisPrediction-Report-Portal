@@ -176,8 +176,11 @@ func testEndRecoveryHTTP(t *testing.T, pg bool) {
 	paused := func() string {
 		return scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`)
 	}
+	// The audit row is keyed by this Portal's controller epoch, so a shared database's older rows
+	// do not count.
+	epoch := s.st.GetSetting("app_platform_controller_epoch", "")
 	audits := func() int {
-		return scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_ended'`)
+		return scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_ended' AND target_id=?`, epoch)
 	}
 	refused := func(why string) {
 		t.Helper()
@@ -231,7 +234,7 @@ func testEndRecoveryHTTP(t *testing.T, pg bool) {
 	if paused() != "0" || audits() != 1 {
 		t.Fatalf("recovery ended without clearing the pause or leaving an audit row (paused=%s audits=%d)", paused(), audits())
 	}
-	if scalar[string](t, s.st, `SELECT actor FROM audit_log WHERE action='app_platform.recovery_ended'`) != f.actor.username {
+	if scalar[string](t, s.st, `SELECT actor FROM audit_log WHERE action='app_platform.recovery_ended' AND target_id=?`, epoch) != f.actor.username {
 		t.Fatal("the audit row does not name the administrator")
 	}
 	// Notifications stay paused until their own review: ending recovery does not resume them.
