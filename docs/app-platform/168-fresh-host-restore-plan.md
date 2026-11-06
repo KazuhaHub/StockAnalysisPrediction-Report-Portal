@@ -187,3 +187,31 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   pool is a single connection, so there is no second connection to reparse the rewritten schema,
   and the rewound-store test already builds the legacy shape. The native import test on a second
   XFS root is compile-only on this host.
+
+## Second-round review follow-ups
+
+- **Unknown wedge.** While the Portal is paused and the scheduler is idle, a finished restore import
+  whose effect is still unknown is read back from the runner under its own identity and fence: an
+  applied receipt consumes the grant and completes the operation, a definite absence (after every
+  command signed for the effect has expired) reverts the effect and revokes the grant, anything else is
+  kept. A resume left with an unsettled start is not reconciled: its start is bound to the lease fence
+  it ran under, which a finished operation cannot reach, and the runner has no typed absence for it.
+  That case is settled by the owner decision below.
+- **Abandon replacement runtime.** A reviewed recovery-mode action (`abandon_runtime` on the plans
+  route, spent once on the operations route) retires the enrolled replacement binding, revokes its issued
+  grants, marks its unsettled import and resume effects reverted ("runtime abandoned", no native
+  action), ends its in-flight operations and returns its installations to review. A new replacement with
+  a fresh journal and deployment is then enrolled and the imports redone. An import that landed on a
+  retired runtime no longer counts against the one-import-per-epoch rule.
+- **Claimed import.** A claimed native import runs detached from the connection to a definite end, bounded
+  by five minutes plus two seconds per MiB of archive. The Portal polls by read-receipt.
+- **Absence.** The runner takes the data execution gate before it reports an import absent. The Portal
+  records the latest expiry of any command it signed for an effect in the effect's own receipt column
+  (no schema change) and treats an absence as definite only after that expiry plus a margin.
+- **Frontend resume.** A resumed static frontend carries its capability rows to the resumed policy
+  revision, so it launches and can take a frontend update.
+- **Recovery disable.** A managed installation disabled in recovery is recorded as managed. Once recovery
+  has ended it is uninstalled by a removal that changes Portal rows only (no runner call, its data and
+  recovery sets recorded as deleted).
+- **Pre-restore trust.** The trusted-publisher record is built from the restored dump's own publisher
+  rows; a dump taken during recovery keeps the record it carries.
