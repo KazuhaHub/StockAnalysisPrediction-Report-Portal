@@ -254,8 +254,8 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   the runner, so an absence reply for it means the runner's journal lost the row. The reconcile audits
   that once and reverts nothing: the effect stays unknown, the operation `recovery_required`, and only an
   abandon settles it. This replaces the earlier revert-on-absence rule. A start without a reservation is
-  never read here: ending the resume returns the installation to review at once. (Such an effect row stays
-  unknown on a `recovery_required` operation; settling it is not done.)
+  never read here: ending the resume returns the installation to review at once, reverts the effect rows and
+  settles the operation to `failed`, so it does not block launch after a later resume succeeds.
 - **Replacement data root.** Confirming a replacement observes the runner's profile and records the data
   root it reports in meta (`app_platform_replacement_root`, one record, no DDL). Abandoning the runtime
   carries that root into the abandoned roots beside the roots of applied imports, so an unknown or lost

@@ -1033,6 +1033,17 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	if err := returnPlatformResumeToReview(e, expected.installationID, expected.controllerEpoch, plan, now); err != nil {
 		return err
 	}
+	// No effect carries a reservation, so the runner never admitted any of them: they are reverted and the
+	// operation, which ended recovery_required only because it left effect rows, is settled to failed.
+	// Otherwise it would block launch for ever, even after a later resume succeeds.
+	if effects != 0 {
+		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',updated_ms=? WHERE operation_id=? AND state IN ('prepared','unknown')`, now, expected.id); err != nil {
+			return err
+		}
+		if err := settlePlatformRecoveryOperation(e, expected.id, "", now); err != nil {
+			return err
+		}
+	}
 	detail, _ := json.Marshal(struct {
 		Stage appplatform.Stage `json:"stage"`
 		Code  string            `json:"code"`

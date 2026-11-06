@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -162,8 +163,16 @@ func TestRecoveryReconcileTreatsAnAbsentReservedStartAsALostJournal(t *testing.T
 // A start that never recorded a reservation was never admitted by the runner, so there is nothing to
 // read: ending the resume returns the installation to review at once, and a new resume can be admitted.
 func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetry(t *testing.T) {
+	testResumeEndWithoutReservation(t, false)
+}
+
+func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetryPostgres(t *testing.T) {
+	testResumeEndWithoutReservation(t, true)
+}
+
+func testResumeEndWithoutReservation(t *testing.T, pg bool) {
 	ctx := context.Background()
-	f := platformResumeFixture(t, false)
+	f := platformResumeFixture(t, pg)
 	commit := f.reviewAndConsumeResume(t)
 	lease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
 	if _, err := f.s.preparePlatformRestoreStart(ctx, lease); err != nil {
@@ -186,6 +195,21 @@ func TestResumeEndWithoutReservationReturnsToReviewAndAllowsARetry(t *testing.T)
 	start := f.driveResume(t, retry.OperationID, appplatform.StageStart)
 	if done := platformResumeStartToReady(t, f.s, start, f.endpoint); done.snapshot.Stage != appplatform.StageComplete {
 		t.Fatal("the retried resume did not complete")
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed" ||
+		platformOperationBlocksLaunch(t, f.s, commit.OperationID) {
+		t.Fatal("the resume that never reserved its start was not settled to failed")
+	}
+	platformRecoveryActionHTTP(t, f.s, f.actor).endRecovery(200)
+	mux := http.NewServeMux()
+	f.s.wireRoutes(mux)
+	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	publisher := scalar[string](t, f.s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, f.installation)
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/publishers", cookie, platformReenablePublisherRequest(t, f.s, publisher)); got.Code != 200 {
+		t.Fatalf("trust review: %d %s", got.Code, got.Body.String())
+	}
+	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
+		t.Fatalf("the retried resume did not launch: %d %s", got.Code, got.Body.String())
 	}
 }
 
