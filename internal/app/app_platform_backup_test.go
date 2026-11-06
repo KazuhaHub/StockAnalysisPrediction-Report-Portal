@@ -242,3 +242,20 @@ func TestAppPlatformRestoreReleaseIntegrity(t *testing.T) {
 func TestPostgresAppPlatformRestoreReleaseIntegrity(t *testing.T) {
 	testPlatformRestoreReleaseIntegrity(t, true)
 }
+
+// A dump taken while the source Portal was itself in recovery has every publisher disabled; the
+// publishers it trusted are in the record it carries, and a second restore must keep that record.
+func TestRepeatedRestoreCarriesTheDumpsTrustedPublisherRecord(t *testing.T) {
+	s, _, _, _ := platformObjectsFixturePG(t, false)
+	publisher := scalar[string](t, s.st, `SELECT id FROM app_platform_publishers`)
+	platformSimulateRestore(t, s)
+	want := `["` + publisher + `"]`
+	if got := s.st.GetSetting(platformRestoreTrustedPublishersKey, ""); got != want {
+		t.Fatalf("first restore recorded %q, want %q", got, want)
+	}
+	// The same database restored again, as a dump taken during recovery would be.
+	platformSimulateRestore(t, s)
+	if got := s.st.GetSetting(platformRestoreTrustedPublishersKey, ""); got != want {
+		t.Fatalf("a restore of a dump taken during recovery lost the trusted publishers: %q, want %q", got, want)
+	}
+}

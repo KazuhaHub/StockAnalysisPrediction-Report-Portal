@@ -7,7 +7,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -146,18 +148,32 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 			disabledBefore[p.id] = true
 		}
 	}
+	// The publisher rows are the dump's own. A dump taken while its Portal was itself in recovery has
+	// every publisher disabled and carries the record of who was trusted: that record is carried over,
+	// never replaced by the empty set the disabled rows would give.
 	trusted := []string{}
-	rows, err := e.query(`SELECT id FROM app_platform_publishers WHERE enabled=1 ORDER BY id`)
+	seen := map[string]bool{}
+	var carried []string
+	var carriedRaw sql.NullString
+	if err := e.queryRow(`SELECT v FROM meta WHERE k=?`, platformRestoreTrustedPublishersKey).Scan(&carriedRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if carriedRaw.Valid && json.Unmarshal([]byte(carriedRaw.String), &carried) != nil {
+		carried = nil
+	}
+	rows, err := e.query(`SELECT id,enabled FROM app_platform_publishers ORDER BY id`)
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var enabled int
+		if err := rows.Scan(&id, &enabled); err != nil {
 			rows.Close()
 			return err
 		}
-		if !disabledBefore[id] {
+		if (enabled == 1 || slices.Contains(carried, id)) && !disabledBefore[id] && !seen[id] {
+			seen[id] = true
 			trusted = append(trusted, id)
 		}
 	}
