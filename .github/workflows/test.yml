@@ -95,6 +95,8 @@ jobs:
           test -z "$unformatted" || { printf '::error::gofmt -w would change:\n%s\n' "$unformatted"; exit 1; }
       - run: go build ./... # compile every package (fails fast on a build break)
       - run: go vet ./...
+      - name: Signed application descriptor and query contracts
+        run: GOMAXPROCS=2 go test -p 2 -count=1 -v ./internal/appplatform
       - name: Published application market
         run: go test ./internal/app -run '^TestCanonicalAppMarketPublishedInstall$' -count=1
         env:
@@ -378,6 +380,8 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Publisher signature fixture reproducibility
+        run: node scripts/generate_publisher_signature_vectors.mjs --check
       - name: Install deps
         working-directory: web
         run: npm ci
