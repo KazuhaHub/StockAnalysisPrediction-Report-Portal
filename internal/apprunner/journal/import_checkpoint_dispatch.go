@@ -398,3 +398,82 @@ func (s *Store) importState(ctx context.Context, raw, signature []byte) (string,
 	}
 	return row.state, nil
 }
+
+// loadImportedStartSource admits restore-start from an applied import receipt.
+// The receipt is the only evidence: it binds the namespace, checkpoint, release,
+// data format, writer fence, project, inode, device, quota and data root of this
+// host, and every one of them must equal the signed start payload. Lineage
+// fields that name the old host's start and data receipts are opaque here; no
+// row in this journal can corroborate them.
+func loadImportedStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, registrationEffect string) (updateStartSource, error) {
+	var zero updateStartSource
+	p := c.Payload
+	fail := func(reason string) (updateStartSource, error) {
+		return zero, fmt.Errorf("%w: imported start source %s", ErrFenceReconciliation, reason)
+	}
+	if c.Kind != "restore-start" {
+		return fail("kind")
+	}
+	row, err := loadImportRow(ctx, tx, p.SourceCheckpointEffectID)
+	if err != nil || row == nil {
+		return fail("effect")
+	}
+	if row.state != "applied" || row.installation != c.InstallationID || row.operation != p.SourceCheckpointOperationID ||
+		row.operation == c.OperationID || row.kind != "import-checkpoint" ||
+		candidateHash([]byte(row.receipt)) != p.SourceCheckpointReceiptSHA256 {
+		return fail("command")
+	}
+	receipt, err := ParseImportCheckpointReceipt([]byte(row.receipt))
+	if err != nil || receipt.EffectID != p.SourceCheckpointEffectID || receipt.PayloadSHA256 != row.payload ||
+		receipt.InstallationID != c.InstallationID || receipt.DeploymentID != c.DeploymentID ||
+		receipt.ControllerEpoch != c.ControllerEpoch || receipt.OperationID != row.operation ||
+		receipt.TargetGeneration != strconv.FormatInt(row.generation, 10) ||
+		receipt.Claim.AdmittedFence != strconv.FormatInt(row.fence, 10) {
+		return fail("receipt")
+	}
+	checkpointWriter := p.SourceWriterFence
+	if p.CheckpointWriterFence != "" {
+		checkpointWriter = p.CheckpointWriterFence
+	}
+	root := markerImportRoot(receipt.Claim)
+	if receipt.CheckpointID != p.CheckpointID || receipt.NamespaceID != p.NamespaceID ||
+		receipt.ReleaseSHA256 != p.SourceReleaseSHA256 || receipt.ManifestSHA256 != p.CheckpointManifestSHA256 ||
+		receipt.ArchiveBytes != p.CheckpointArchiveBytes || receipt.DataFormat != p.DataFormat ||
+		receipt.WriterFence != checkpointWriter || receipt.ProjectID != p.ProjectID ||
+		receipt.NamespaceInode != p.NamespaceInode || receipt.Device != p.Device ||
+		receipt.QuotaBytes != p.QuotaBytes || receipt.QuotaInodes != p.QuotaInodes {
+		return fail("provenance")
+	}
+	if root.FilesystemUUID != p.RootFilesystemUUID || strconv.FormatUint(root.Inode, 10) != p.RootInode {
+		return fail("root")
+	}
+	resource := control.ImportCheckpointCommand{
+		InstallationID: receipt.InstallationID, ControllerEpoch: receipt.ControllerEpoch,
+		TargetGeneration: receipt.TargetGeneration, InstallationFence: receipt.Claim.AdmittedFence,
+		Payload: control.ImportCheckpointPayload{
+			NamespaceID: receipt.NamespaceID, ReleaseSHA256: receipt.ReleaseSHA256, WriterFence: receipt.WriterFence,
+		},
+	}
+	settled, _ := strconv.ParseInt(receipt.SettledMS, 10, 64)
+	if observed, err := importResourceMatches(ctx, tx, resource, receipt.Claim, true); err != nil || observed != settled {
+		return fail("namespace resource")
+	}
+	if err := requireDataRootHistory(ctx, tx, root); err != nil {
+		return zero, err
+	}
+	var pending, running int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>?
+		AND (?='' OR effect_id<>?) AND state IN ('prepared','unknown')`,
+		c.InstallationID, c.EffectID, registrationEffect, registrationEffect).Scan(&pending); err != nil || pending != 0 {
+		return fail("pending command")
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources
+		WHERE data_namespace_id=? AND kind='container' AND id<>? AND observed_state NOT IN ('stopped','absent')`,
+		p.NamespaceID, p.ResourceID).Scan(&running); err != nil || running != 0 {
+		return fail("running container")
+	}
+	return updateStartSource{
+		imported: &receipt, checkpointRaw: []byte(row.receipt),
+		checkpointSHA: p.SourceCheckpointReceiptSHA256, checkpointData: mustDataInt(receipt.ArchiveBytes),
+	}, nil
+}

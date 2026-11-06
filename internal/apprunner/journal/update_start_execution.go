@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -408,31 +409,46 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 	rootInode, rootInodeErr := strconv.ParseUint(c.Payload.RootInode, 10, 64)
 	quotaBytes, quotaBytesErr := strconv.ParseInt(c.Payload.QuotaBytes, 10, 64)
 	quotaInodes, quotaInodesErr := strconv.ParseInt(c.Payload.QuotaInodes, 10, 64)
-	data := f.source.source.data
 	if projectErr != nil || deviceErr != nil || inodeErr != nil ||
 		rootInodeErr != nil || quotaBytesErr != nil || quotaInodesErr != nil {
 		return zero, fmt.Errorf("%w: update-start data integers",
 			ErrFenceReconciliation)
 	}
-	if c.Payload.RootFilesystemUUID != data.Claim.RootFilesystemUUID ||
-		markerRoot(data.Claim).Inode != rootInode {
+	// The data evidence comes from the source's data receipt, or, for a
+	// restore-start resting on an import, from the import receipt of this host.
+	var dataRoot data.RootIdentity
+	dataNamespaceInode, dataDevice, dataProject := "", "", ""
+	dataQuotaBytes, dataQuotaInodes := "", ""
+	if imported := f.source.imported; imported != nil {
+		dataRoot = markerImportRoot(imported.Claim)
+		dataNamespaceInode, dataDevice, dataProject = imported.NamespaceInode, imported.Device, imported.ProjectID
+		dataQuotaBytes, dataQuotaInodes = imported.QuotaBytes, imported.QuotaInodes
+	} else {
+		receipt := f.source.source.data
+		dataRoot = markerRoot(receipt.Claim)
+		dataNamespaceInode, dataDevice, dataProject = receipt.NamespaceInode, receipt.Device, receipt.ProjectID
+		dataQuotaBytes, dataQuotaInodes = receipt.QuotaBytes, receipt.QuotaInodes
+	}
+	if c.Payload.RootFilesystemUUID != dataRoot.FilesystemUUID || dataRoot.Inode != rootInode {
 		return zero, fmt.Errorf("%w: update-start data root",
 			ErrFenceReconciliation)
 	}
-	if c.Payload.NamespaceInode != data.NamespaceInode ||
-		c.Payload.Device != data.Device || c.Payload.ProjectID != data.ProjectID ||
-		c.Payload.QuotaBytes != data.QuotaBytes ||
-		c.Payload.QuotaInodes != data.QuotaInodes {
+	if c.Payload.NamespaceInode != dataNamespaceInode ||
+		c.Payload.Device != dataDevice || c.Payload.ProjectID != dataProject ||
+		c.Payload.QuotaBytes != dataQuotaBytes ||
+		c.Payload.QuotaInodes != dataQuotaInodes {
 		return zero, fmt.Errorf("%w: update-start data identity",
 			ErrFenceReconciliation)
 	}
-	sourceRootUUID, sourceRootInode, hasSourceRoot :=
-		checkpointSourceRoot(f.source.source)
-	if !hasSourceRoot ||
-		sourceRootUUID != c.Payload.RootFilesystemUUID ||
-		sourceRootInode != c.Payload.RootInode {
-		return zero, fmt.Errorf("%w: update-start source profile",
-			ErrFenceReconciliation)
+	if f.source.imported == nil {
+		sourceRootUUID, sourceRootInode, hasSourceRoot :=
+			checkpointSourceRoot(f.source.source)
+		if !hasSourceRoot ||
+			sourceRootUUID != c.Payload.RootFilesystemUUID ||
+			sourceRootInode != c.Payload.RootInode {
+			return zero, fmt.Errorf("%w: update-start source profile",
+				ErrFenceReconciliation)
+		}
 	}
 	request := driver.UpdateStartLaunchRequest{
 		CandidateLaunchRequest: driver.CandidateLaunchRequest{
@@ -447,7 +463,7 @@ func updateStartNativeRequest(f updateStartFacts, marker UpdateStartClaimMarker,
 			Descriptor: bytes.Clone(descriptor),
 			Platform:   c.Payload.Platform,
 			Data: driver.CandidateDataEvidence{
-				Root: markerRoot(data.Claim), ProjectID: uint32(project),
+				Root: dataRoot, ProjectID: uint32(project),
 				Device: device, NamespaceInode: inode,
 				QuotaBytes: quotaBytes, QuotaInodes: quotaInodes,
 			},
