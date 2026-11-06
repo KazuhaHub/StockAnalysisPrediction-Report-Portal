@@ -313,8 +313,12 @@ type QuoteCard struct {
 
 	AsOf    string `json:"asOf"`
 	Session string `json:"session"`
-	Source  string `json:"source"`
-	Cached  bool   `json:"cached"`
+	// Phase says what the number is: pre_open | trading | lunch_break | closed | holiday | unknown.
+	// It is finer than Session, derived per request from the vendor's market line (quote_phase.go)
+	// and never stored with the cached quote. Unknown means the card shows no label.
+	Phase  string `json:"phase"`
+	Source string `json:"source"`
+	Cached bool   `json:"cached"`
 }
 
 // apiQuotes answers many symbols at once. GET /api/quotes?symbols=601899,000001,00700
@@ -400,6 +404,9 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 	cfg := s.quoteConfigLoad()
 	now := s.quotes.clockNow()
 	autoRefresh := s.quoteAutoRefresh()
+	// The label never waits on a vendor: marketLine answers from its cache at once and refreshes in
+	// the background, so a cold or slow anchor costs this response its label and nothing else.
+	marketLine := s.quotes.marketLine(cfg)
 	answered := s.quotes.fetchBatchUnder(r.Context(), cfg, targets)
 	advices := make([]quoteRefreshAdvice, 0, len(targets))
 	for _, target := range targets {
@@ -417,7 +424,9 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 		// markets: 000001 is 平安银行 on Shenzhen and 上证指数 on Shanghai, and a map keyed by six
 		// digits would keep whichever of the two came second. The `symbol` field inside carries the
 		// code, which is what the feed looks a card up by.
-		quotes[target.Symbol] = quoteCardOf(entry)
+		card := quoteCardOf(entry)
+		card.Phase = s.quotes.phaseFor(target.Market, marketLine)
+		quotes[target.Symbol] = card
 		advices = append(advices, quoteRefreshAdviceFor(now, autoRefresh, cfg, target, quoteIntervalSnapshot, entry.ttl, entry.resp))
 	}
 	out["quotes"] = quotes
@@ -447,6 +456,7 @@ func quoteCardOf(entry quoteBatchEntry) QuoteCard {
 		ChangePct: resp.Snapshot.ChangePct,
 		AsOf:      resp.Snapshot.AsOf,
 		Session:   resp.Snapshot.Session,
+		Phase:     quotePhaseUnknown,
 		Source:    resp.Source,
 		Cached:    entry.cached,
 	}
