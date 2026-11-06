@@ -106,6 +106,12 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 			return zero, false, err
 		} else if resume {
 			baseEffects = 1
+			// A resume that followed an applied start also stopped and removed that earlier container.
+			var quiesce int
+			if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id).Scan(&quiesce); err != nil {
+				return zero, false, err
+			}
+			baseEffects += quiesce
 		}
 	}
 	if fresh {

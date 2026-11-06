@@ -274,3 +274,9 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   The runner verifies the purpose per action, so a captured read cannot be submitted as an execute and an
   execute signature is not a read. The Portal signs both signatures with the command, so the read after a
   lost execute reply uses the read one. Ordinary update-start and reservation reads are unchanged.
+- **Resume after an applied start.** A resume that follows an earlier resume of the installation whose
+  start was applied (and whose container no later operation removed) quiesces first: it issues the
+  ordinary restore stop and remove effects for that earlier container, rebuilt from the earlier start's
+  evidence and running receipt, and only then starts. The runner refuses a start while another container
+  of the namespace is not stopped or absent, so without this a retry could never complete. The first
+  resume stays evidence-only.

@@ -351,6 +351,12 @@ func testResumeFailsAfterAppliedStart(t *testing.T, pg bool) {
 	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
 		t.Fatalf("the retried resume did not launch: %d %s", got.Code, got.Body.String())
 	}
+	// The backend gateway re-proves the resumed history, quiesce effects included.
+	access, err := f.s.preparePlatformWritableBackendAccess(ctx, f.actor, f.installation)
+	if err != nil {
+		t.Fatal("the resumed backend history was refused:", err)
+	}
+	access.Close()
 }
 
 func TestResumeFailsAfterAppliedStartAllowsARetry(t *testing.T) {
@@ -358,4 +364,51 @@ func TestResumeFailsAfterAppliedStartAllowsARetry(t *testing.T) {
 }
 func TestResumeFailsAfterAppliedStartAllowsARetryPostgres(t *testing.T) {
 	testResumeFailsAfterAppliedStart(t, true)
+}
+
+// A resume that follows an applied start cannot skip the quiesce: leaving the stage without the stop and
+// remove effects is refused, and so is quiescing when no earlier container exists.
+func TestResumeAfterAppliedStartCannotSkipItsQuiesce(t *testing.T) {
+	ctx := context.Background()
+	f := platformResumeFixture(t, false)
+	commit := f.reviewAndConsumeResume(t)
+	lease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
+	intent, err := f.s.preparePlatformRestoreStart(ctx, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := platformUpdateStartReservationFixture(intent, f.endpoint).reservation
+	reserved, err := f.s.commitPlatformRestoreStartReservation(ctx, lease, intent, f.endpoint, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeLease, err := f.s.commitPlatformRestoreStartRunning(ctx, reserved.lease, reserved.intent, f.endpoint, platformUpdateStartRunningFixture(reserved.intent, reservation, f.endpoint))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.finishPlatformRestoreResumeForReview(ctx, probeLease); err != nil {
+		t.Fatal(err)
+	}
+	review, err := f.s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := f.s.consumePlatformRestoreResumeReview(ctx, f.actor, review.ID, review.SHA256, platformFixtureID(5641))
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiesce := f.driveResume(t, retry.OperationID, appplatform.StageQuiesce)
+	if _, err := f.s.advancePlatformRestoreStage(ctx, quiesce, appplatform.StageSnapshot); err == nil {
+		t.Fatal("a resume left its quiesce stage without stopping the earlier container")
+	}
+	if _, required, err := platformResumeContainerSource(f.s.st.poolExec(), quiesce, f.replacement.id); err != nil || !required {
+		t.Fatalf("the earlier container was not found: %v", err)
+	}
+	// A first resume has nothing to quiesce.
+	g := platformResumeFixture(t, false)
+	first := g.reviewAndConsumeResume(t)
+	firstLease := g.driveResume(t, first.OperationID, appplatform.StageQuiesce)
+	if _, required, err := platformResumeContainerSource(g.s.st.poolExec(), firstLease, g.replacement.id); err != nil || required {
+		t.Fatalf("a first resume found a container to quiesce: %v", err)
+	}
 }

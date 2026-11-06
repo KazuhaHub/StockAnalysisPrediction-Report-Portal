@@ -641,6 +641,9 @@ func (s *Server) advancePlatformResumeStage(ctx context.Context, expected platfo
 	if err := requirePlatformResumeStaged(e, expected); err != nil {
 		return zero, err
 	}
+	if err := requirePlatformResumeQuiesced(e, expected); err != nil {
+		return zero, err
+	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
 		return zero, errAppPlatformStageEvidence
@@ -665,6 +668,43 @@ func (s *Server) advancePlatformResumeStage(ctx context.Context, expected platfo
 		return zero, err
 	}
 	return result, nil
+}
+
+// platformResumeNeedsQuiesce reports whether the resume has an earlier resume's container to stop and remove.
+func (s *Server) platformResumeNeedsQuiesce(lease platformOperationLease) (bool, error) {
+	e := s.st.poolExec()
+	ev, err := loadPlatformResumeEvidence(e, lease)
+	if err != nil {
+		return false, err
+	}
+	_, required, err := platformResumeContainerSource(e, lease, ev.plan.RuntimeID)
+	return required, err
+}
+
+// requirePlatformResumeQuiesced proves the quiesce effects match what the resume needs: both removal
+// effects applied when an earlier container has to go, none otherwise. It applies once the resume leaves
+// its quiesce stage.
+func requirePlatformResumeQuiesced(e migExec, lease platformOperationLease) error {
+	if lease.snapshot.Stage != appplatform.StageQuiesce {
+		return nil
+	}
+	ev, err := loadPlatformResumeEvidence(e, lease)
+	if err != nil {
+		return err
+	}
+	_, required, err := platformResumeContainerSource(e, lease, ev.plan.RuntimeID)
+	if err != nil {
+		return err
+	}
+	var applied, all int
+	if err := e.queryRow(`SELECT COALESCE(SUM(CASE WHEN state='applied' AND effect_number IN (1,2) THEN 1 ELSE 0 END),0),COUNT(*)
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage='quiesce'`, lease.id).Scan(&applied, &all); err != nil {
+		return err
+	}
+	if (required && (applied != 2 || all != 2)) || (!required && all != 0) {
+		return fmt.Errorf("%w: resume quiesce effects", errAppPlatformStageEvidence)
+	}
+	return nil
 }
 
 // requirePlatformResumeStaged proves, for the stages before restore-data, that the installation is
@@ -800,7 +840,9 @@ func requirePlatformResumeStagedForData(e migExec, lease platformOperationLease,
 		lease.installationID).Scan(&activations); err != nil || activations != 0 {
 		return fmt.Errorf("%w: an activation exists during resume", errAppPlatformStageEvidence)
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil || effects != 0 {
+	// The quiesce stage's stop and remove effects of an earlier container are the only native work a resume
+	// may carry before restore-data.
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'quiesce'`, lease.id).Scan(&effects); err != nil || effects != 0 {
 		return fmt.Errorf("%w: resume stage carries native work", errAppPlatformStageEvidence)
 	}
 	if err := e.queryRow(`SELECT state,owner_installation_id FROM app_platform_data_namespaces WHERE id=?`, ev.plan.NamespaceID).Scan(&namespaceState, &owner); err != nil ||
@@ -818,6 +860,14 @@ func (s *Server) runPlatformRestoreResumeStage(ctx context.Context, expected pla
 		lease, err := s.advancePlatformResumeStage(ctx, expected, appplatform.StageQuiesce)
 		return lease, true, err
 	case appplatform.StageQuiesce:
+		// An earlier resume's container is stopped and removed by the ordinary restore effects.
+		required, err := s.platformResumeNeedsQuiesce(expected)
+		if err != nil {
+			return platformOperationLease{}, true, err
+		}
+		if required {
+			return platformOperationLease{}, false, nil
+		}
 		lease, err := s.advancePlatformResumeStage(ctx, expected, appplatform.StageSnapshot)
 		return lease, true, err
 	case appplatform.StageSnapshot:

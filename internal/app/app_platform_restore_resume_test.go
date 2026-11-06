@@ -74,6 +74,14 @@ func (f *platformResumeFixtureState) driveResume(t *testing.T, operation string,
 		t.Fatal("claim resume:", err)
 	}
 	for lease.snapshot.Stage != until {
+		if lease.snapshot.Stage == appplatform.StageQuiesce {
+			if _, required, err := platformResumeContainerSource(f.s.st.poolExec(), lease, f.replacement.id); err != nil {
+				t.Fatal(err)
+			} else if required {
+				lease = f.quiesceEarlierContainer(t, lease)
+				continue
+			}
+		}
 		next, err := f.s.runPlatformManagedRestore(context.Background(), lease, f.endpoint)
 		if err != nil {
 			t.Fatalf("resume stage %s: %v", lease.snapshot.Stage, err)
@@ -289,6 +297,13 @@ func TestResumeStagesSkipNativeDataEffectsPostgres(t *testing.T) {
 func platformResumeStartToReady(t *testing.T, s *Server, startLease platformOperationLease, endpoint platformRuntimeEndpoint) platformOperationLease {
 	t.Helper()
 	ctx := context.Background()
+	// The runner refuses a start on a namespace whose earlier container is not stopped or removed.
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
+		WHERE o.installation_id=? AND o.id<>? AND f.stage='start' AND f.kind='restore-start' AND f.state='applied'
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects q WHERE q.operation_id=? AND q.stage='quiesce' AND q.kind='remove_code' AND q.state='applied')`,
+		startLease.installationID, startLease.id, startLease.id) != 0 {
+		t.Fatal("the runner refuses a restore-start over an earlier container that was not stopped and removed")
+	}
 	startIntent, err := s.preparePlatformRestoreStart(ctx, startLease)
 	if err != nil {
 		t.Fatal("resume start intent:", err)
@@ -587,4 +602,33 @@ func TestResumeRefusesAPublisherDisabledBeforeTheRestore(t *testing.T) {
 	if _, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err == nil {
 		t.Fatal("a resume was reviewed with no record of which publishers were trusted")
 	}
+}
+
+// quiesceEarlierContainer stops and removes the container an earlier resume's applied start left, through
+// the ordinary restore stop and remove effects, and advances the resume out of its quiesce stage. The
+// runner is a fixture at the observation seam.
+func (f *platformResumeFixtureState) quiesceEarlierContainer(t *testing.T, lease platformOperationLease) platformOperationLease {
+	t.Helper()
+	ctx := context.Background()
+	stop, err := f.s.preparePlatformUpdateTargetRemoval(ctx, lease, "stop", 1)
+	if err != nil {
+		t.Fatal("resume stop intent:", err)
+	}
+	next, err := f.s.commitPlatformUpdateTargetRemoval(ctx, lease, stop, f.endpoint, platformUpdateTargetRemovalObservationFixture(stop, f.endpoint, "stopped"))
+	if err != nil {
+		t.Fatal("resume stop:", err)
+	}
+	remove, err := f.s.preparePlatformUpdateTargetRemoval(ctx, next, "remove_code", 2)
+	if err != nil {
+		t.Fatal("resume remove intent:", err)
+	}
+	removed, err := f.s.commitPlatformUpdateTargetRemoval(ctx, next, remove, f.endpoint, platformUpdateTargetRemovalObservationFixture(remove, f.endpoint, "absent"))
+	if err != nil {
+		t.Fatal("resume remove:", err)
+	}
+	advanced, err := f.s.advancePlatformRestoreStage(ctx, removed, appplatform.StageSnapshot)
+	if err != nil {
+		t.Fatal("resume quiesce advance:", err)
+	}
+	return advanced
 }

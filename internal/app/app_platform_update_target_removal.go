@@ -37,6 +37,20 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 	var zero platformUpdateStartIntent
 	var zeroPlan platformManagedUpdatePlan
 	var zeroSource platformCheckpointSource
+	// A resume that follows an applied start removes that earlier resume's container, not a failed update's.
+	if resume, err := platformOperationIsResume(e, lease.id); err != nil {
+		return zero, zeroPlan, zeroSource, nil, err
+	} else if resume {
+		container, found, err := platformResumeContainerSource(e, lease, runtime.id)
+		if err != nil || !found || lease.snapshot.Stage != appplatform.StageQuiesce {
+			return zero, zeroPlan, zeroSource, nil, fmt.Errorf("resume removal: %w", errors.Join(errAppPlatformStageEvidence, err))
+		}
+		start, source, descriptor, err := loadPlatformResumeRemovalSource(e, lease, runtime, container, now)
+		if err != nil {
+			return zero, zeroPlan, zeroSource, nil, err
+		}
+		return start, start.plan, source, descriptor, nil
+	}
 	if lease.snapshot.Action != appplatform.ActionRestore ||
 		!lease.snapshot.Managed ||
 		!((lease.snapshot.Stage == appplatform.StageQuiesce &&
@@ -221,8 +235,12 @@ func (s *Server) preparePlatformUpdateTargetRemoval(ctx context.Context, lease p
 	}
 	// Removal targets the failed update release, not the checkpoint source
 	// release. The recovery plan must therefore point at the failed operation.
-	if checkpoint.OperationID != start.command.OperationID ||
-		checkpoint.ReleaseSHA256 != source.releaseSHA256 {
+	resume, err := platformOperationIsResume(e, lease.id)
+	if err != nil {
+		return zero, err
+	}
+	if !resume && (checkpoint.OperationID != start.command.OperationID ||
+		checkpoint.ReleaseSHA256 != source.releaseSHA256) {
 		return zero, fmt.Errorf("target removal checkpoint binding: %w", errAppPlatformStageEvidence)
 	}
 	issue := time.Now().UnixMilli()

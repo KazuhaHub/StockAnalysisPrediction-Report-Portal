@@ -196,8 +196,16 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 	if err != nil {
 		return zero, err
 	}
-	// A restore first stops and removes the failed update's target. A resume has none: the import
-	// started nothing on the new host.
+	// A restore first stops and removes the failed update's target. A first resume has none: the import
+	// started nothing on the new host. A resume that follows an applied start stops and removes that
+	// earlier container first.
+	containerRequired := false
+	if resume {
+		_, containerRequired, err = platformResumeContainerSource(e, lease, runtime.id)
+		if err != nil {
+			return zero, err
+		}
+	}
 	var stopState, removeState string
 	if err := e.queryRow(`SELECT
 		COALESCE(MAX(CASE WHEN effect_number=1 THEN state END),''),
@@ -206,7 +214,8 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 		WHERE operation_id=? AND stage='quiesce'`,
 		lease.id).Scan(&stopState, &removeState); err != nil ||
 		(!resume && (stopState != "applied" || removeState != "applied")) ||
-		(resume && (stopState != "" || removeState != "")) {
+		(resume && containerRequired && (stopState != "applied" || removeState != "applied")) ||
+		(resume && !containerRequired && (stopState != "" || removeState != "")) {
 		return zero, errAppPlatformStageEvidence
 	}
 	var activation, namespace, activationState, readinessRaw string
