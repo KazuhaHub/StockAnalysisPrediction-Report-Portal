@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, ApiError, onSessionLost } from './api/client'
 import { forgetTags } from './lib/conditionalGet'
 import { closeJobDetail } from './lib/jobDetailStore'
@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // and 304 means "keep what you have" to a freshly-mounted component that has nothing. One effect
   // here rather than a call in each of the four login/logout paths, so a fifth cannot forget.
   const identity = me?.user ?? ''
-  useEffect(() => {
+  useLayoutEffect(() => {
     forgetTags()
     // Pop-ups belong to the person who raised them; another reader must not inherit a security card.
     resetNotifications()
