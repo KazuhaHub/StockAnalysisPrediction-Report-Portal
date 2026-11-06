@@ -20,13 +20,16 @@ import (
 )
 
 func TestWritableLifecycleServerTimeoutMatchesRestoreWork(t *testing.T) {
-	if got := writableLifecycleServerTimeout(RestoreExecute); got != 2*time.Minute {
-		t.Fatalf("restore execution window = %s", got)
+	for _, action := range []WritableLifecycleAction{RestoreExecute, ImportCheckpointExecute} {
+		if got := writableLifecycleServerTimeout(action); got != 2*time.Minute {
+			t.Fatalf("action %d execution window = %s", action, got)
+		}
 	}
 	for _, action := range []WritableLifecycleAction{
 		ManagedRemovalStop,
 		CheckpointCreate,
 		RestoreRead,
+		ImportCheckpointRead,
 		UpdateStartExecute,
 	} {
 		if got := writableLifecycleServerTimeout(action); got != candidateExecutionTimeout {
@@ -71,6 +74,13 @@ func TestReadonlyEndpointRefusesAllWritableLifecycleActions(t *testing.T) {
 		proof, err := writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, restoreRaw, restoreSig, restoreAuthority, restoreDescriptor, nil)
 		if err == nil || !proof.ReceivedAt().IsZero() || backend.calls.Load() != 0 {
 			t.Fatal("readonly minted restore lifecycle", action, err)
+		}
+	}
+	importAuthority, _, importRaw, importSig, importDescriptor, _ := importTransportFixture(t)
+	for _, action := range []WritableLifecycleAction{ImportCheckpointExecute, ImportCheckpointRead} {
+		proof, err := writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, importRaw, importSig, importAuthority, importDescriptor, nil)
+		if err == nil || !proof.ReceivedAt().IsZero() || backend.calls.Load() != 0 {
+			t.Fatal("readonly minted import lifecycle", action, err)
 		}
 	}
 	updateAuthority, _, updateRaw, updateSig, updateDescriptor, _ := updateStartTransportFixture(t)

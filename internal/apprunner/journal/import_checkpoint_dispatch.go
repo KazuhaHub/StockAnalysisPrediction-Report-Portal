@@ -1,0 +1,400 @@
+package journal
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
+)
+
+// importResourceMatches checks the reserved namespace row against the claim. A
+// settled row is present at revision two; a claimed one is unknown at revision one.
+func importResourceMatches(ctx context.Context, tx *sql.Tx, c control.ImportCheckpointCommand, marker importClaimMarker, settled bool) (observedMS int64, err error) {
+	var installation, kind, native, epoch, desired, observed, ownership string
+	var namespace, release sql.NullString
+	var generation, fence, writer, revision, created, updated int64
+	var observedAt sql.NullInt64
+	if err := tx.QueryRowContext(ctx, `SELECT installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms FROM runner_resources WHERE id=?`,
+		marker.ResourceID).Scan(&installation, &namespace, &kind, &native, &release, &generation, &epoch, &fence, &writer, &desired, &observed, &ownership, &revision, &observedAt, &created, &updated); err != nil {
+		return 0, ErrFenceReconciliation
+	}
+	targetGeneration, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	admitted, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+	writerFence, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+	if installation != c.InstallationID || !namespace.Valid || namespace.String != c.Payload.NamespaceID || kind != "volume" ||
+		native != dataProjectPrefix+marker.ProjectID || !release.Valid || release.String != c.Payload.ReleaseSHA256 ||
+		generation != targetGeneration || epoch != c.ControllerEpoch || fence != admitted || writer != writerFence ||
+		desired != "present" || ownership != marker.OwnershipSHA256 || created < 0 {
+		return 0, ErrFenceReconciliation
+	}
+	if settled {
+		if observed != "present" || revision != 2 || !observedAt.Valid || updated != observedAt.Int64 {
+			return 0, ErrFenceReconciliation
+		}
+		return observedAt.Int64, nil
+	}
+	if observed != "unknown" || revision != 1 || observedAt.Valid || updated != created {
+		return 0, ErrFenceReconciliation
+	}
+	return 0, nil
+}
+
+func importIntentFrom(c control.ImportCheckpointCommand, raw, signature []byte, marker importClaimMarker, markerRaw string) (importIntent, error) {
+	project, err := strconv.ParseUint(marker.ProjectID, 10, 32)
+	if err != nil {
+		return importIntent{}, ErrFenceReconciliation
+	}
+	quotaBytes, _ := strconv.ParseInt(c.Payload.QuotaBytes, 10, 64)
+	quotaInodes, _ := strconv.ParseInt(c.Payload.QuotaInodes, 10, 64)
+	return importIntent{
+		command: c.Payload, full: c, raw: bytes.Clone(raw), signature: bytes.Clone(signature),
+		pin: markerImportRoot(marker), project: uint32(project), quotaBytes: quotaBytes, quotaInodes: quotaInodes,
+		marker: marker, markerRaw: markerRaw,
+	}, nil
+}
+
+// loadUnknownImport rebuilds the intent of an import left unknown, from the
+// journal alone, for read-only reconciliation. Expiry governs dispatch, not
+// settlement, so the settlement variant of verification is used. It writes
+// nothing and never produces a second claim.
+func (s *Store) loadUnknownImport(ctx context.Context, raw, signature []byte, pin data.RootIdentity) (importIntent, error) {
+	var zero importIntent
+	if s.closing.Load() || !validDataRoot(pin) {
+		return zero, ErrImportCheckpointUnavailable
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return zero, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
+	if err != nil {
+		return zero, err
+	}
+	c := verified.Command()
+	row, err := loadImportRow(ctx, tx, c.EffectID)
+	if err != nil {
+		return zero, err
+	}
+	if row == nil || !row.sameCommand(c) || row.state != "unknown" {
+		return zero, ErrFenceReconciliation
+	}
+	var marker importClaimMarker
+	if !canonicalDataJSON(row.receipt, &marker) || !validImportMarker(marker) || marker.EffectID != c.EffectID ||
+		marker.AdmittedFence != c.InstallationFence || marker.GrantID != c.Payload.GrantID ||
+		marker.RecoverySetID != c.Payload.RecoverySetID || marker.CheckpointID != c.Payload.CheckpointID ||
+		marker.NamespaceID != c.Payload.NamespaceID || markerImportRoot(marker) != pin {
+		return zero, ErrFenceReconciliation
+	}
+	if _, err := importResourceMatches(ctx, tx, c, marker, false); err != nil {
+		return zero, err
+	}
+	if err := requireDataRootHistory(ctx, tx, pin); err != nil {
+		return zero, err
+	}
+	return importIntentFrom(c, raw, signature, marker, row.receipt)
+}
+
+// settleImportCheckpoint records a native observation as the applied receipt and
+// the present resource in one transaction. The observation must bind exactly the
+// claimed grant, checkpoint, namespace, project and quota; anything else leaves
+// the effect unknown. The caller holds the data execution gate.
+func (s *Store) settleImportCheckpoint(ctx context.Context, intent importIntent, snapshot data.ImportSnapshot) (ImportCheckpointReceipt, error) {
+	var zero ImportCheckpointReceipt
+	p := intent.command
+	if snapshot.NamespaceID != p.NamespaceID || snapshot.ReleaseSHA256 != p.ReleaseSHA256 ||
+		snapshot.ManifestSHA256 != p.ManifestSHA256 || snapshot.ProjectID != intent.project ||
+		snapshot.DataFormat != mustDataInt(p.DataFormat) || snapshot.ByteLimit != intent.quotaBytes ||
+		snapshot.InodeLimit != intent.quotaInodes || snapshot.NamespaceDevice == 0 || snapshot.NamespaceInode == 0 ||
+		snapshot.Entries < 0 || snapshot.UsedBytes < 0 || snapshot.UsedInodes < 0 ||
+		snapshot.UsedBytes > snapshot.ByteLimit || snapshot.UsedInodes > snapshot.InodeLimit || snapshot.ObservedMS <= 0 {
+		return zero, fmt.Errorf("import observation binding: %w", ErrFenceReconciliation)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return zero, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	authority := importAuthorityFrom(deployment)
+	now := time.Now().UTC().UnixMilli()
+	verified, err := control.VerifyImportCheckpointSettlement(intent.raw, intent.signature, authority, now)
+	if err != nil {
+		return zero, fmt.Errorf("import settlement command: %w", ErrFenceReconciliation)
+	}
+	c := verified.Command()
+	if c != intent.full {
+		return zero, ErrFenceReconciliation
+	}
+	row, err := loadImportRow(ctx, tx, c.EffectID)
+	if err != nil {
+		return zero, err
+	}
+	if row == nil || !row.sameCommand(c) || row.state != "unknown" || row.receipt != intent.markerRaw {
+		return zero, fmt.Errorf("import settlement state: %w", ErrFenceReconciliation)
+	}
+	if _, err := importResourceMatches(ctx, tx, c, intent.marker, false); err != nil {
+		return zero, err
+	}
+	if err := requireDataRootHistory(ctx, tx, intent.pin); err != nil {
+		return zero, err
+	}
+	receipt := ImportCheckpointReceipt{
+		Format: importReceiptFormat, Claim: intent.marker, DeploymentID: c.DeploymentID,
+		ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID,
+		TargetGeneration: c.TargetGeneration, Stage: c.Stage, EffectID: c.EffectID, PayloadSHA256: c.PayloadSHA256,
+		RecoverySetID: p.RecoverySetID, GrantID: p.GrantID, CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID,
+		ReleaseSHA256: p.ReleaseSHA256, ManifestSHA256: p.ManifestSHA256, ArchiveBytes: p.ArchiveBytes,
+		DataFormat: p.DataFormat, WriterFence: p.WriterFence, ProjectID: intent.marker.ProjectID,
+		NamespaceInode: strconv.FormatUint(snapshot.NamespaceInode, 10), Device: strconv.FormatUint(snapshot.NamespaceDevice, 10),
+		QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
+		Entries: strconv.FormatInt(snapshot.Entries, 10), UsedBytes: strconv.FormatInt(snapshot.UsedBytes, 10),
+		UsedInodes: strconv.FormatInt(snapshot.UsedInodes, 10), State: "imported",
+		ObservedMS: strconv.FormatInt(snapshot.ObservedMS, 10), SettledMS: strconv.FormatInt(now, 10),
+	}
+	if !validImportReceipt(receipt) || !importReceiptMatchesCommand(receipt, c) {
+		return zero, fmt.Errorf("import settlement receipt: %w", ErrFenceReconciliation)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil || len(encoded) > 16384 {
+		return zero, ErrFenceReconciliation
+	}
+	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET observed_state='present',revision=2,observed_ms=?,updated_ms=? WHERE id=? AND observed_state='unknown' AND revision=1 AND observed_ms IS NULL AND ownership_sha256=?`,
+		now, now, intent.marker.ResourceID, intent.marker.OwnershipSHA256)
+	if err != nil {
+		return zero, err
+	}
+	if n, err := changed.RowsAffected(); err != nil || n != 1 {
+		return zero, fmt.Errorf("import settlement resource rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
+	}
+	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`,
+		string(encoded), now, c.EffectID, intent.markerRaw)
+	if err != nil {
+		return zero, err
+	}
+	if n, err := changed.RowsAffected(); err != nil || n != 1 {
+		return zero, fmt.Errorf("import settlement command rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return receipt, nil
+}
+
+// ReadImportCheckpointReceipt returns the applied receipt after rechecking the
+// current signed authority and that the namespace resource still agrees with it.
+// Expiry governs dispatch, so a replay after the signed window still reads.
+func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
+	var zero ImportCheckpointReceipt
+	if s.closing.Load() {
+		return zero, ErrImportCheckpointUnavailable
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return zero, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
+	if err != nil {
+		return zero, err
+	}
+	c := verified.Command()
+	row, err := loadImportRow(ctx, tx, c.EffectID)
+	if err != nil {
+		return zero, err
+	}
+	if row == nil || !row.sameCommand(c) || row.state != "applied" {
+		return zero, ErrImportCheckpointUnavailable
+	}
+	receipt, err := ParseImportCheckpointReceipt([]byte(row.receipt))
+	if err != nil || !importReceiptMatchesCommand(receipt, c) || receipt.Claim.AdmittedFence != c.InstallationFence {
+		return zero, ErrFenceReconciliation
+	}
+	settled, _ := strconv.ParseInt(receipt.SettledMS, 10, 64)
+	observedAt, err := importResourceMatches(ctx, tx, c, receipt.Claim, true)
+	if err != nil || observedAt != settled {
+		return zero, ErrFenceReconciliation
+	}
+	if err := requireDataRootHistory(ctx, tx, markerImportRoot(receipt.Claim)); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return receipt, nil
+}
+
+func importNativeRequest(intent importIntent) (data.ImportRequest, error) {
+	p := intent.command
+	sourceProject, err := strconv.ParseUint(p.SourceProjectID, 10, 32)
+	if err != nil {
+		return data.ImportRequest{}, ErrFenceReconciliation
+	}
+	return data.ImportRequest{
+		CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256,
+		ManifestSHA256: p.ManifestSHA256, ProjectID: intent.project, DataFormat: mustDataInt(p.DataFormat),
+		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: maxCheckpointArchiveBytes,
+		WriterFence: mustDataInt(p.WriterFence), QuotaBytes: intent.quotaBytes, QuotaInodes: intent.quotaInodes,
+		Provenance: data.ImportProvenance{
+			ProjectID: uint32(sourceProject), NamespaceInode: mustDataUint(p.SourceNamespaceInode),
+			Device:     mustDataUint(p.SourceDevice),
+			Source:     data.RootIdentity{FilesystemUUID: p.SourceFilesystemUUID, Inode: mustDataUint(p.SourceRootInode)},
+			Checkpoint: data.RootIdentity{FilesystemUUID: p.CheckpointFilesystemUUID, Inode: mustDataUint(p.CheckpointRootInode)},
+		},
+	}, nil
+}
+
+// DispatchImportCheckpoint is the trusted infrastructure orchestrator for one
+// signed import. The configured roots and pins never come from the command.
+// Applied work replays its receipt without touching a native root. Unknown work
+// is reconciled by read-only verification and is never imported a second time.
+// An error may follow durable or physical effects and never authorizes a retry
+// under another effect identity or namespace.
+func (s *Store) DispatchImportCheckpoint(ctx context.Context, raw, signature []byte, dataRoot *data.Root, dataPin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity) (ImportCheckpointReceipt, error) {
+	var zero ImportCheckpointReceipt
+	if dataRoot == nil || checkpointRoot == nil || s.closing.Load() ||
+		!validDataRoot(dataPin) || !validDataRoot(checkpointPin) || dataPin == checkpointPin ||
+		len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
+		return zero, ErrImportCheckpointUnavailable
+	}
+	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
+	if err := s.acquireDataExecution(ctx); err != nil {
+		return zero, err
+	}
+	defer s.releaseDataExecution()
+	state, err := s.importState(ctx, raw, signature)
+	if err != nil {
+		return zero, fmt.Errorf("import state: %w", err)
+	}
+	if state == "applied" {
+		receipt, err := s.ReadImportCheckpointReceipt(ctx, raw, signature)
+		if err != nil {
+			return zero, err
+		}
+		if markerImportRoot(receipt.Claim) != dataPin {
+			return zero, ErrFenceReconciliation
+		}
+		return receipt, nil
+	}
+	if err := requireNativeRoots(ctx, dataRoot, dataPin, checkpointRoot, checkpointPin); err != nil {
+		return zero, err
+	}
+	if state == "unknown" {
+		intent, err := s.loadUnknownImport(ctx, raw, signature, dataPin)
+		if err != nil {
+			return zero, fmt.Errorf("reload unknown import: %w", err)
+		}
+		request, err := importNativeRequest(intent)
+		if err != nil {
+			return zero, err
+		}
+		observation, err := dataRoot.VerifyImportedCheckpoint(ctx, dataPin, checkpointRoot, checkpointPin, request)
+		if err != nil {
+			return zero, fmt.Errorf("reconcile import: %w", err)
+		}
+		snapshot, err := observation.Snapshot()
+		if err != nil {
+			return zero, fmt.Errorf("reconcile import observation: %w", err)
+		}
+		return s.settleImportCheckpoint(ctx, intent, snapshot)
+	}
+	intent, replay, err := s.beginImportCheckpoint(ctx, raw, signature, dataPin)
+	if err != nil {
+		return zero, fmt.Errorf("begin import: %w", err)
+	}
+	if replay {
+		return s.ReadImportCheckpointReceipt(ctx, raw, signature)
+	}
+	request, err := importNativeRequest(intent)
+	if err != nil {
+		return zero, err
+	}
+	observation, err := dataRoot.ImportCheckpoint(ctx, dataPin, checkpointRoot, checkpointPin, request)
+	if err != nil {
+		return zero, fmt.Errorf("import checkpoint: %w", err)
+	}
+	snapshot, err := observation.Snapshot()
+	if err != nil {
+		return zero, fmt.Errorf("import observation: %w", err)
+	}
+	return s.settleImportCheckpoint(ctx, intent, snapshot)
+}
+
+func requireNativeRoots(ctx context.Context, dataRoot *data.Root, dataPin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity) error {
+	actual, err := dataRoot.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	if actual != dataPin {
+		return data.ErrUnsafe
+	}
+	actual, err = checkpointRoot.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	if actual != checkpointPin {
+		return data.ErrUnsafe
+	}
+	return nil
+}
+
+// importState classifies the effect without writing: "" when no row exists.
+func (s *Store) importState(ctx context.Context, raw, signature []byte) (string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return "", err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
+	if err != nil {
+		return "", err
+	}
+	c := verified.Command()
+	row, err := loadImportRow(ctx, tx, c.EffectID)
+	if err != nil {
+		return "", err
+	}
+	if row == nil {
+		return "", nil
+	}
+	if !row.sameCommand(c) {
+		return "", ErrCommandConflict
+	}
+	if row.state != "applied" && row.state != "unknown" {
+		return "", ErrFenceReconciliation
+	}
+	return row.state, nil
+}
