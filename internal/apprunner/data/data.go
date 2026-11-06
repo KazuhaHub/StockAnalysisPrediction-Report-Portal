@@ -5,6 +5,7 @@ package data
 import (
 	"encoding/hex"
 	"errors"
+	"math"
 	"os"
 	"regexp"
 )
@@ -20,6 +21,8 @@ var (
 	ErrRestoreIncomplete    = errors.New("data restore requires reconciliation")
 	ErrDeleteUnsafe         = errors.New("data deletion binding is unsafe")
 	ErrDeleteIncomplete     = errors.New("data deletion requires reconciliation")
+	ErrImportUnsafe         = errors.New("data checkpoint import binding is unsafe")
+	ErrImportIncomplete     = errors.New("data checkpoint import requires reconciliation")
 )
 var namespaceID = regexp.MustCompile(`^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$`)
 
@@ -220,3 +223,113 @@ func sha256Value(value string) bool {
 // Open requires an explicitly configured root-owned private existing data root.
 // Implementations own a new pinned descriptor; callers retain their input file.
 func Open(root *os.File) (*Root, error) { return openRoot(root) }
+
+// ImportProvenance is Portal's record of the host that produced a checkpoint.
+// It is compared with the archive manifest and never with the host receiving
+// the import, which has a different filesystem, root inode and device.
+type ImportProvenance struct {
+	ProjectID              uint32
+	NamespaceInode, Device uint64
+	Source, Checkpoint     RootIdentity
+}
+
+// ImportRequest binds one retained checkpoint archive to a namespace that does
+// not yet exist on the receiving root. It contains no host path. ProjectID and
+// the quota are the receiving host's reservation, not the old host's.
+type ImportRequest struct {
+	CheckpointID, NamespaceID, ReleaseSHA256, ManifestSHA256 string
+	ProjectID                                                uint32
+	DataFormat, ArchiveBytes, MaxArchiveBytes, WriterFence   int64
+	QuotaBytes, QuotaInodes                                  int64
+	Provenance                                               ImportProvenance
+}
+
+func (r ImportRequest) valid() bool {
+	p := r.Provenance
+	return namespaceID.MatchString(r.CheckpointID) && namespaceID.MatchString(r.NamespaceID) &&
+		sha256Value(r.ReleaseSHA256) && sha256Value(r.ManifestSHA256) &&
+		r.ProjectID > 0 && r.DataFormat > 0 && r.ArchiveBytes > 0 &&
+		r.MaxArchiveBytes > 0 && r.ArchiveBytes <= r.MaxArchiveBytes && r.WriterFence > 0 &&
+		r.QuotaBytes > 0 && r.QuotaBytes%512 == 0 && r.QuotaInodes > 0 &&
+		p.ProjectID > 0 && p.NamespaceInode > 0 && p.Device > 0 &&
+		p.Source.valid() && p.Checkpoint.valid() && p.Source != p.Checkpoint
+}
+
+// importFootprint is the conservative quota charge of an archive on the
+// receiving filesystem. XFS charges whole blocks, so every file rounds up to the
+// block size and every directory is charged one block; the namespace root takes
+// one block and one inode. Over-counting only refuses an import that would have
+// fit; under-counting would leave a half-written namespace behind.
+type importFootprint struct {
+	block, bytes, inodes int64
+	overflow             bool
+}
+
+func newImportFootprint(block int64) *importFootprint {
+	f := &importFootprint{block: block}
+	if block <= 0 || block&(block-1) != 0 {
+		f.overflow = true
+		return f
+	}
+	f.bytes, f.inodes = block, 1
+	return f
+}
+
+func (f *importFootprint) charge(bytes int64) {
+	if f.overflow || bytes < 0 || f.bytes > math.MaxInt64-bytes || f.inodes == math.MaxInt64 {
+		f.overflow = true
+		return
+	}
+	f.bytes += bytes
+	f.inodes++
+}
+
+func (f *importFootprint) addDirectory() { f.charge(f.block) }
+
+func (f *importFootprint) addFile(size int64) {
+	if f.overflow || size < 0 || size > math.MaxInt64-f.block {
+		f.overflow = true
+		return
+	}
+	f.charge((size + f.block - 1) / f.block * f.block)
+}
+
+func (f *importFootprint) fits(quotaBytes, quotaInodes int64) error {
+	if f.overflow || f.bytes > quotaBytes || f.inodes > quotaInodes {
+		return ErrImportUnsafe
+	}
+	return nil
+}
+
+// ImportSnapshot is minted only after the namespace was created, extracted and
+// read back entry by entry against the verified archive.
+type ImportSnapshot struct {
+	NamespaceID, ReleaseSHA256, ManifestSHA256 string
+	ProjectID                                  uint32
+	DataFormat, Entries, UsedBytes, UsedInodes int64
+	ByteLimit, InodeLimit, ObservedMS          int64
+	NamespaceDevice, NamespaceInode            uint64
+}
+
+// ImportObservation is not durable journal evidence or start authority.
+type ImportObservation struct {
+	snapshot ImportSnapshot
+	valid    bool
+}
+
+func (ImportObservation) MarshalJSON() ([]byte, error) { return nil, ErrImportUnsafe }
+func (o *ImportObservation) UnmarshalJSON([]byte) error {
+	*o = ImportObservation{}
+	return ErrImportUnsafe
+}
+func (o ImportObservation) Snapshot() (ImportSnapshot, error) {
+	s := o.snapshot
+	if !o.valid || !namespaceID.MatchString(s.NamespaceID) || !sha256Value(s.ReleaseSHA256) ||
+		!sha256Value(s.ManifestSHA256) || s.ProjectID == 0 || s.DataFormat <= 0 ||
+		s.NamespaceDevice == 0 || s.NamespaceInode == 0 || s.Entries < 0 ||
+		s.UsedBytes < 0 || s.UsedInodes < 0 || s.ByteLimit <= 0 || s.InodeLimit <= 0 ||
+		s.UsedBytes > s.ByteLimit || s.UsedInodes > s.InodeLimit || s.ObservedMS <= 0 {
+		return ImportSnapshot{}, ErrImportUnsafe
+	}
+	return s, nil
+}

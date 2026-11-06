@@ -39,3 +39,7 @@ func (*Root) Restore(context.Context, RootIdentity, *Root, RootIdentity, Restore
 func (*Root) Delete(context.Context, RootIdentity, DeleteRequest) (DeleteObservation, error) {
 	return DeleteObservation{}, ErrUnsupported
 }
+
+func (*Root) ImportCheckpoint(context.Context, RootIdentity, *Root, RootIdentity, ImportRequest) (ImportObservation, error) {
+	return ImportObservation{}, ErrUnsupported
+}
