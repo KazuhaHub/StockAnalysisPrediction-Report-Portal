@@ -44,13 +44,15 @@ const (
 	UpdateStartRemovalRead
 	ManagedDataDelete
 	ManagedDataRead
+	ImportCheckpointExecute
+	ImportCheckpointRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= ManagedDataRead
+	return a >= WritableWriterExecute && a <= ImportCheckpointRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -126,6 +128,12 @@ func (o WritableLifecycleObservation) RestoreReceipt() (journal.RestoreReceipt, 
 	}
 	return journal.ParseRestoreReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) ImportCheckpointReceipt() (journal.ImportCheckpointReceipt, error) {
+	if o.action != ImportCheckpointExecute && o.action != ImportCheckpointRead {
+		return journal.ImportCheckpointReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseImportCheckpointReceipt([]byte(o.body))
+}
 func (o WritableLifecycleObservation) UpdateStartReservation() (journal.UpdateStartReservation, error) {
 	if o.action < UpdateStartReserve || o.action > UpdateStartRead {
 		return journal.UpdateStartReservation{}, driver.ErrContainerUncertain
@@ -170,6 +178,7 @@ type writableLifecycleReference struct {
 	removal                 control.ManagedRemovalCommand
 	checkpoint              control.CheckpointCommand
 	restore                 control.RestoreCommand
+	importCheckpoint        control.ImportCheckpointCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -271,6 +280,19 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.deleteData = v.Command()
 		r.release = r.deleteData.Payload.ReleaseSHA256
+	case action == ImportCheckpointExecute || action == ImportCheckpointRead:
+		var v control.VerifiedImportCheckpointCommand
+		var err error
+		if settling {
+			v, err = control.VerifyImportCheckpointSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyImportCheckpoint(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.importCheckpoint = v.Command()
+		r.release = r.importCheckpoint.Payload.ReleaseSHA256
 	default:
 		v, err := control.VerifyUpdateStart(raw, sig, a, now)
 		if err != nil {
@@ -384,6 +406,30 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			v.SourceCheckpointOperationID != c.Payload.SourceCheckpointOperationID ||
 			v.SourceCheckpointEffectID != c.Payload.SourceCheckpointEffectID ||
 			v.SourceCheckpointReceiptSHA != c.Payload.SourceCheckpointReceiptSHA {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
+			return false
+		}
+		settled = v.SettledMS
+	case action == ImportCheckpointExecute || action == ImportCheckpointRead:
+		v, e := journal.ParseImportCheckpointReceipt(body)
+		c := r.importCheckpoint
+		p := c.Payload
+		if e != nil || v.Stage != "restore_data" || v.State != "imported" ||
+			v.DeploymentID != c.DeploymentID || v.ControllerEpoch != c.ControllerEpoch ||
+			v.InstallationID != c.InstallationID || v.OperationID != c.OperationID ||
+			v.TargetGeneration != c.TargetGeneration || v.EffectID != c.EffectID ||
+			v.PayloadSHA256 != c.PayloadSHA256 || v.GrantID != p.GrantID ||
+			v.RecoverySetID != p.RecoverySetID || v.CheckpointID != p.CheckpointID ||
+			v.NamespaceID != p.NamespaceID || v.ReleaseSHA256 != p.ReleaseSHA256 ||
+			v.ManifestSHA256 != p.ManifestSHA256 || v.ArchiveBytes != p.ArchiveBytes ||
+			v.DataFormat != p.DataFormat || v.WriterFence != p.WriterFence ||
+			v.QuotaBytes != p.QuotaBytes || v.QuotaInodes != p.QuotaInodes ||
+			v.Claim.EffectID != c.EffectID || v.Claim.GrantID != p.GrantID ||
+			v.Claim.AdmittedFence != c.InstallationFence {
 			return false
 		}
 		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)

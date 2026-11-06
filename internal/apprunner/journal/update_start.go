@@ -63,6 +63,10 @@ type updateStartSource struct {
 	checkpointRaw  []byte
 	checkpointSHA  string
 	checkpointData int64
+	// imported is set when the checkpoint evidence is an applied
+	// import-checkpoint receipt rather than a local snapshot. Such a source has
+	// no container, start receipt or prepare-data receipt in this journal.
+	imported *ImportCheckpointReceipt
 }
 
 type updateStartFacts struct {
@@ -127,6 +131,11 @@ func loadUpdateStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateStar
 func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, now int64, registrationEffect string) (updateStartSource, error) {
 	var zero updateStartSource
 	p := c.Payload
+	var sourceKind string
+	if err := tx.QueryRowContext(ctx, `SELECT kind FROM runner_commands WHERE effect_id=?`,
+		p.SourceCheckpointEffectID).Scan(&sourceKind); err == nil && sourceKind == "import-checkpoint" {
+		return loadImportedStartSource(ctx, tx, c, registrationEffect)
+	}
 	var operation, state, payload, raw, installation string
 	if err := tx.QueryRowContext(ctx, `SELECT operation_id,installation_id,state,payload_sha256,receipt_json
 		FROM runner_commands WHERE effect_id=? AND stage='snapshot' AND kind='snapshot'`,

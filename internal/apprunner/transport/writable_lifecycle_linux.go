@@ -27,8 +27,13 @@ const writableLifecycleReplyMagic = "PWLR0001"
 const maxWritableLifecycleReply = 16384
 const restoreExecutionTimeout = 2 * time.Minute
 
+// bulkDataAction reports the actions that read or write a whole checkpoint.
+func bulkDataAction(action WritableLifecycleAction) bool {
+	return action == RestoreExecute || action == ImportCheckpointExecute
+}
+
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
-	if action == RestoreExecute {
+	if bulkDataAction(action) {
 		return restoreExecutionTimeout
 	}
 	return candidateExecutionTimeout
@@ -81,7 +86,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		private.Close()
 	}
 	timeout := sessionTimeout
-	if action == RestoreExecute {
+	if bulkDataAction(action) {
 		timeout = restoreExecutionTimeout
 	} else if action.mutating() {
 		timeout = candidateExecutionTimeout
@@ -264,6 +269,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchRestore(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
 	case RestoreRead:
 		result, err = provider.store.ReadRestoreReceipt(ctx, raw, sig)
+	case ImportCheckpointExecute:
+		if provider.dataRoot == nil || provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchImportCheckpoint(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
+	case ImportCheckpointRead:
+		result, err = provider.store.ReadImportCheckpointReceipt(ctx, raw, sig)
 	case UpdateStartReserve:
 		result, err = provider.store.ReserveUpdateStart(ctx, raw, sig)
 	case UpdateStartRead:

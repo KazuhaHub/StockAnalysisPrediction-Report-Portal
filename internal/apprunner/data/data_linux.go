@@ -319,6 +319,10 @@ func (r *Root) Inspect(ctx context.Context, expected RootIdentity, id string, pr
 func (r *Root) Prepare(ctx context.Context, expected RootIdentity, request Request) (Observation, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.prepareLocked(ctx, expected, request)
+}
+
+func (r *Root) prepareLocked(ctx context.Context, expected RootIdentity, request Request) (Observation, error) {
 	var zero Observation
 	if r.closed || !request.valid() {
 		return zero, ErrUnsafe

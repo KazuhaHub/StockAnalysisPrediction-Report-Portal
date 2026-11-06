@@ -129,11 +129,13 @@ func validDataReceipt(r DataPreparationReceipt) bool {
 // requireDataRootHistory derives the deployment-wide root from retained command
 // metadata, including old epochs/absent resources. Never recycle these tombstones.
 // Unknown formats or truncated scans refuse instead of silently losing a binding.
+// Every kind that binds a data root is decoded with its own format; a kind that
+// is scanned here must not be added without its decoder.
 func requireDataRootHistory(ctx context.Context, tx *sql.Tx, expected data.RootIdentity) error {
 	if !validDataRoot(expected) {
 		return ErrFenceReconciliation
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT effect_id,state,receipt_json,admitted_fence,installation_id,payload_sha256,target_generation,controller_epoch FROM runner_commands WHERE kind='prepare-data' AND (receipt_json<>'{}' OR state<>'prepared') LIMIT 65537`)
+	rows, err := tx.QueryContext(ctx, `SELECT effect_id,kind,state,receipt_json,admitted_fence,installation_id,payload_sha256,target_generation,controller_epoch FROM runner_commands WHERE kind IN ('prepare-data','import-checkpoint') AND (receipt_json<>'{}' OR state<>'prepared') LIMIT 65537`)
 	if err != nil {
 		return err
 	}
@@ -144,30 +146,46 @@ func requireDataRootHistory(ctx context.Context, tx *sql.Tx, expected data.RootI
 		if count > maxDataReservations {
 			return ErrFenceReconciliation
 		}
-		var effect, state, raw, installation, payload, epoch string
+		var effect, kind, state, raw, installation, payload, epoch string
 		var fence, generation int64
-		if err := rows.Scan(&effect, &state, &raw, &fence, &installation, &payload, &generation, &epoch); err != nil {
+		if err := rows.Scan(&effect, &kind, &state, &raw, &fence, &installation, &payload, &generation, &epoch); err != nil {
 			return err
 		}
-		var marker dataClaimMarker
-		switch state {
-		case "unknown":
-			if !canonicalDataJSON(raw, &marker) || !validDataMarker(marker) {
+		var root data.RootIdentity
+		switch kind {
+		case "import-checkpoint":
+			marker, err := importHistoryMarker(effect, state, raw)
+			if err != nil || marker.AdmittedFence != strconv.FormatInt(fence, 10) {
 				return ErrFenceReconciliation
 			}
-		case "applied":
-			var receipt DataPreparationReceipt
-			if !canonicalDataJSON(raw, &receipt) || !validDataReceipt(receipt) || receipt.InstallationID != installation || receipt.PayloadSHA256 != payload || receipt.Generation != strconv.FormatInt(generation, 10) || receipt.ControllerEpoch != epoch {
-				return ErrFenceReconciliation
+			if state == "applied" {
+				var receipt ImportCheckpointReceipt
+				if !canonicalDataJSON(raw, &receipt) || receipt.InstallationID != installation || receipt.PayloadSHA256 != payload || receipt.TargetGeneration != strconv.FormatInt(generation, 10) || receipt.ControllerEpoch != epoch {
+					return ErrFenceReconciliation
+				}
 			}
-			marker = receipt.Claim
+			root = markerImportRoot(marker)
 		default:
-			return ErrFenceReconciliation
+			var marker dataClaimMarker
+			switch state {
+			case "unknown":
+				if !canonicalDataJSON(raw, &marker) || !validDataMarker(marker) {
+					return ErrFenceReconciliation
+				}
+			case "applied":
+				var receipt DataPreparationReceipt
+				if !canonicalDataJSON(raw, &receipt) || !validDataReceipt(receipt) || receipt.InstallationID != installation || receipt.PayloadSHA256 != payload || receipt.Generation != strconv.FormatInt(generation, 10) || receipt.ControllerEpoch != epoch {
+					return ErrFenceReconciliation
+				}
+				marker = receipt.Claim
+			default:
+				return ErrFenceReconciliation
+			}
+			if marker.EffectID != effect || marker.AdmittedFence != strconv.FormatInt(fence, 10) {
+				return ErrFenceReconciliation
+			}
+			root = markerRoot(marker)
 		}
-		if marker.EffectID != effect || marker.AdmittedFence != strconv.FormatInt(fence, 10) {
-			return ErrFenceReconciliation
-		}
-		root := markerRoot(marker)
 		if root != (data.RootIdentity{}) && root != expected {
 			return ErrFenceReconciliation
 		}
