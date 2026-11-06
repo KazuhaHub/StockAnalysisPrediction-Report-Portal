@@ -150,3 +150,40 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
 - XFS quota block rounding must be included in the import's byte bound.
 - One bundle restored into two Portals cannot be detected from inside either one, as stated in
   doc 167.
+- `writePlatformRecoveryBundle` is not reachable from any command or route. The existing `backup`
+  CLI takes one output file and the admin routes take no host paths, while the bundle needs a
+  directory, the host path of every retained checkpoint archive and the runner journal path. It is
+  exercised by tests only, and it reads the dump, retained sets and releases through separate
+  reads, relying on its before/after retained-set comparison to refuse a moving database. Wiring
+  it, and reading all three in one read transaction, is left until the operator command that
+  supplies those paths exists.
+- The runner's read-receipt answer is "receipt" or a closed connection. The Portal's import
+  reconciliation therefore treats a failed read as unknown and re-sends the same effect, which the
+  runner reconciles rather than repeats. A definite "no row" answer from the runner, which would
+  let the Portal revert the effect and revoke the grant without a review, needs a distinct reply
+  frame; the Portal side (`errPlatformImportAbsent`) is in place and the production transport does
+  not yet produce it.
+
+## Review follow-ups
+
+- **Takeover.** A lease takeover raises the installation fence, so an import effect is signed again
+  at the fence it was admitted under (the runner's claim binds it), never at the new one. A
+  non-fresh effect is read first; applied settles it and consumes the grant, a definite no-row
+  reverts the effect, revokes the grant and ends the operation as failed, and anything else sends
+  the same effect again.
+- **One import per epoch.** A review is refused when any grant of the installation's recovery sets
+  was consumed, or any `restore_import` completed, in the current controller epoch.
+- **Runner-free recovery actions.** `recovery_disable` settles any restored installation by
+  disabling it; `frontend_resume` activates a restored static frontend release again. Both are
+  reviewed on the plans route and committed on the operations route as one transition, recorded as
+  an operation admitted already complete. A review refuses an installation with an unsettled
+  import effect.
+- **Pre-restore trust.** A restore records the publishers that were enabled before it in
+  `app_platform_restore_trusted_publishers` (meta). Recovery verifies releases only against those
+  publishers; a missing record trusts none. Ending recovery removes the record.
+- **Unsettled start.** A resume ended with a reserved, unsettled start stays `recovery_required`
+  and keeps its activation, namespace and recovery-set state.
+- **Not done.** The golden pre-0021 SQLite fixture and second pooled connection test: the SQLite
+  pool is a single connection, so there is no second connection to reparse the rewritten schema,
+  and the rewound-store test already builds the legacy shape. The native import test on a second
+  XFS root is compile-only on this host.
