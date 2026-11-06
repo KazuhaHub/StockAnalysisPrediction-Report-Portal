@@ -350,3 +350,30 @@ func TestAbandonConfirmationIsNotReplayedInAnotherEpoch(t *testing.T) {
 		t.Fatalf("a confirmation from another epoch was answered from the earlier record: replayed=%v %v", replayed, err)
 	}
 }
+
+// An installation the administrator already disabled in recovery keeps that decision: abandoning the
+// runtime does not return it to review. The listing shows it apart, as left alone.
+func TestAbandonLeavesRecoveryDisabledInstallationsIntact(t *testing.T) {
+	f, _ := unknownImportFixture(t)
+	mustExec(t, f.s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='disabled' WHERE id=?`, f.installation)
+	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
+	plan, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Installations) != 0 || len(plan.Disabled) != 1 || plan.Disabled[0] != f.installation {
+		t.Fatalf("the listing does not set the disabled installation apart: %+v", plan)
+	}
+	got, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest)
+	if err != nil || got.Installations != 0 {
+		t.Fatalf("confirm: %+v %v", got, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:disabled" ||
+		scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation) != generation {
+		t.Fatal("abandoning the runtime changed a recovery-disabled installation")
+	}
+	if scalar[int](t, f.s.st, `SELECT enabled FROM app_platform_runtime_bindings WHERE id=?`, f.replacement.id) != 0 ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "revoked" {
+		t.Fatal("the runtime was not abandoned")
+	}
+}

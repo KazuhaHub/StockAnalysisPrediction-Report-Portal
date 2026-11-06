@@ -24,7 +24,8 @@ import (
 //     no native action: the host is gone, and a late receipt from it is refused because the runtime is
 //     retired, the grant revoked and the effect settled;
 //   - the operations still in flight on it are ended;
-//   - every installation placed on it returns to awaiting review: disabled, with the recovery set and
+//   - every installation placed on it returns to awaiting review (one the administrator already disabled
+//     in recovery is left as it is, and listed apart): disabled, with the recovery set and
 //     the data namespace awaiting review again and no activation, ready for a new import.
 //
 // It is admitted only while the Portal is paused. The decision belongs to the deployment, not to an
@@ -52,9 +53,12 @@ type platformAbandonRuntimePlan struct {
 	RuntimeRevision int64    `json:"runtime_revision"`
 	ControllerEpoch string   `json:"controller_epoch"`
 	Installations   []string `json:"installations"`
-	Grants          []string `json:"grants"`
-	Effects         []string `json:"effects"`
-	Operations      []string `json:"operations"`
+	// Disabled lists installations the administrator already disabled in recovery. They are left as
+	// they are: abandoning the runtime does not revisit that decision.
+	Disabled   []string `json:"disabled"`
+	Grants     []string `json:"grants"`
+	Effects    []string `json:"effects"`
+	Operations []string `json:"operations"`
 	// Finished lists the operations that already ended recovery_required on this runtime and rested on
 	// an effect this abandon settles: they are settled to failed with it.
 	Finished []string `json:"finished"`
@@ -89,7 +93,10 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 	}
 	p.Format, p.RuntimeID, p.DeploymentID, p.RuntimeRevision, p.ControllerEpoch, p.Reason =
 		platformAbandonRuntimeFormat, runtime.id, runtime.deploymentID, runtime.revision, runtime.controllerEpoch, platformAbandonReason
-	if p.Installations, err = platformIDList(e, `SELECT id FROM app_platform_installations WHERE runtime_id=? AND desired_state<>'removed' ORDER BY id`, runtime.id); err != nil {
+	if p.Installations, err = platformIDList(e, `SELECT id FROM app_platform_installations WHERE runtime_id=? AND desired_state<>'removed' AND phase<>'disabled' ORDER BY id`, runtime.id); err != nil {
+		return p, err
+	}
+	if p.Disabled, err = platformIDList(e, `SELECT id FROM app_platform_installations WHERE runtime_id=? AND desired_state<>'removed' AND phase='disabled' ORDER BY id`, runtime.id); err != nil {
 		return p, err
 	}
 	if p.Grants, err = platformIDList(e, `SELECT id FROM app_platform_import_grants WHERE runtime_id=? AND state='issued' ORDER BY id`, runtime.id); err != nil {
@@ -205,12 +212,13 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 			RuntimeID     string   `json:"runtime_id"`
 			DeploymentID  string   `json:"deployment_id"`
 			Installations []string `json:"installations"`
+			Disabled      []string `json:"disabled"`
 			Grants        []string `json:"grants"`
 			Effects       []string `json:"effects"`
 			Operations    []string `json:"operations"`
 			Finished      []string `json:"finished"`
 			Reason        string   `json:"reason"`
-		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Grants, plan.Effects, plan.Operations, plan.Finished, plan.Reason})
+		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Disabled, plan.Grants, plan.Effects, plan.Operations, plan.Finished, plan.Reason})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.runtime_abandoned','app_platform_runtime',?,?,'')`,
 			time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, plan.RuntimeID, string(detail)); err != nil {
 			return err

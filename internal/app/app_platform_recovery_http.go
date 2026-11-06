@@ -256,7 +256,7 @@ func (s *Server) apiPlatformAbandonRuntime(w http.ResponseWriter, r *http.Reques
 			"plan_sha256": digest,
 			"review": map[string]any{
 				"action": "abandon_runtime", "runtime_id": plan.RuntimeID, "deployment_id": plan.DeploymentID,
-				"installations": plan.Installations, "grants": plan.Grants, "effects": plan.Effects, "operations": plan.Operations, "finished": plan.Finished,
+				"installations": plan.Installations, "disabled": plan.Disabled, "grants": plan.Grants, "effects": plan.Effects, "operations": plan.Operations, "finished": plan.Finished,
 				"reason": plan.Reason, "data_effect": "none",
 			},
 		})
