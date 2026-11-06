@@ -99,7 +99,7 @@ func TestNativeImportCheckpoint(t *testing.T) {
 		MaxArchiveBytes: 1 << 20, WriterFence: 1, QuotaBytes: 8 << 20, QuotaInodes: 128,
 		Provenance: ImportProvenance{
 			ProjectID: project, NamespaceInode: prepared.Inode, Device: prepared.Device,
-			Source: rootIdentity, Checkpoint: checkpointIdentity,
+			Source: rootIdentity,
 		},
 	}
 	refuse := func(name string, request ImportRequest) {

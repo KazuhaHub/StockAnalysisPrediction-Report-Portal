@@ -34,7 +34,6 @@ func importTransportFixture(t *testing.T) (control.Authority, control.ImportChec
 			SourceProjectID: checkpoint.Payload.ProjectID, SourceNamespaceInode: checkpoint.Payload.NamespaceInode,
 			SourceDevice:         checkpoint.Payload.Device,
 			SourceFilesystemUUID: "11111111-1111-4111-8111-111111119a54", SourceRootInode: "64",
-			CheckpointFilesystemUUID: "11111111-1111-4111-8111-111111119a55", CheckpointRootInode: "65",
 		},
 	}
 	var err error

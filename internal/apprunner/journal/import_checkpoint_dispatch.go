@@ -263,9 +263,8 @@ func importNativeRequest(intent importIntent) (data.ImportRequest, error) {
 		WriterFence: mustDataInt(p.WriterFence), QuotaBytes: intent.quotaBytes, QuotaInodes: intent.quotaInodes,
 		Provenance: data.ImportProvenance{
 			ProjectID: uint32(sourceProject), NamespaceInode: mustDataUint(p.SourceNamespaceInode),
-			Device:     mustDataUint(p.SourceDevice),
-			Source:     data.RootIdentity{FilesystemUUID: p.SourceFilesystemUUID, Inode: mustDataUint(p.SourceRootInode)},
-			Checkpoint: data.RootIdentity{FilesystemUUID: p.CheckpointFilesystemUUID, Inode: mustDataUint(p.CheckpointRootInode)},
+			Device: mustDataUint(p.SourceDevice),
+			Source: data.RootIdentity{FilesystemUUID: p.SourceFilesystemUUID, Inode: mustDataUint(p.SourceRootInode)},
 		},
 	}, nil
 }

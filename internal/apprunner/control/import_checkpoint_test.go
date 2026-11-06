@@ -29,7 +29,6 @@ func importCheckpointFixture(t *testing.T) (ImportCheckpointCommand, ed25519.Pri
 			SourceProjectID: checkpoint.Payload.ProjectID, SourceNamespaceInode: checkpoint.Payload.NamespaceInode,
 			SourceDevice:         checkpoint.Payload.Device,
 			SourceFilesystemUUID: "f1000000-0000-4000-8000-0000000000f1", SourceRootInode: "64",
-			CheckpointFilesystemUUID: "f2000000-0000-4000-8000-0000000000f2", CheckpointRootInode: "65",
 		},
 	}
 	digest, err := ImportCheckpointLogicalDigest(command)
@@ -86,11 +85,7 @@ func TestVerifyImportCheckpointRoundTripAndBinding(t *testing.T) {
 		"source fs": func(c *ImportCheckpointCommand) {
 			c.Payload.SourceFilesystemUUID = "f1000000-0000-4000-8000-0000000000f9"
 		},
-		"source root": func(c *ImportCheckpointCommand) { c.Payload.SourceRootInode = "66" },
-		"checkpoint fs": func(c *ImportCheckpointCommand) {
-			c.Payload.CheckpointFilesystemUUID = "f2000000-0000-4000-8000-0000000000f9"
-		},
-		"checkpoint root":   func(c *ImportCheckpointCommand) { c.Payload.CheckpointRootInode = "67" },
+		"source root":       func(c *ImportCheckpointCommand) { c.Payload.SourceRootInode = "66" },
 		"target generation": func(c *ImportCheckpointCommand) { c.TargetGeneration = "3" },
 		"operation":         func(c *ImportCheckpointCommand) { c.OperationID = "b0000000-0000-4000-8000-00000000001b" },
 		"effect number":     func(c *ImportCheckpointCommand) { c.EffectNumber = "2" },
@@ -231,10 +226,6 @@ func TestVerifyImportCheckpointEffectBoundAndPayloadLimits(t *testing.T) {
 		"source fs invalid": func(c *ImportCheckpointCommand) {
 			c.Payload.SourceFilesystemUUID = "F1000000-0000-4000-8000-0000000000F1"
 		},
-		"same roots": func(c *ImportCheckpointCommand) {
-			c.Payload.CheckpointFilesystemUUID = c.Payload.SourceFilesystemUUID
-			c.Payload.CheckpointRootInode = c.Payload.SourceRootInode
-		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := command
@@ -282,5 +273,27 @@ func TestVerifyImportCheckpointExpiryAndForeignDeployment(t *testing.T) {
 	command.ExpiresMS = "60001"
 	if err := resignImport(t, command, key, authority, now); err == nil {
 		t.Fatal("import lifetime beyond 30 seconds accepted")
+	}
+}
+
+// The old checkpoint root is read from the digest-verified manifest, so a payload that still names it
+// is a different contract and must not parse, whether signed or not.
+func TestImportCheckpointRefusesPayloadNamingTheOldCheckpointRoot(t *testing.T) {
+	command, key, authority, now := importCheckpointFixture(t)
+	raw, _, err := SignImportCheckpoint(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, extra := range []string{
+		`,"checkpoint_filesystem_uuid":"f2000000-0000-4000-8000-0000000000f2"`,
+		`,"checkpoint_root_inode":"65"`,
+	} {
+		widened := []byte(strings.Replace(string(raw), `"source_root_inode":"64"`, `"source_root_inode":"64"`+extra, 1))
+		if string(widened) == string(raw) {
+			t.Fatal("fixture does not contain the anchor field")
+		}
+		if _, err := parseImportCheckpoint(widened); err == nil {
+			t.Fatalf("payload carrying %s parsed", extra)
+		}
 	}
 }

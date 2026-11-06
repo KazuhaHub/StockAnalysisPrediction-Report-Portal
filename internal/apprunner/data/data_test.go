@@ -85,8 +85,7 @@ func importRequestFixture() ImportRequest {
 		QuotaBytes: 8 << 20, QuotaInodes: 128,
 		Provenance: ImportProvenance{
 			ProjectID: 4201, NamespaceInode: 10, Device: 11,
-			Source:     RootIdentity{FilesystemUUID: "01234567-89ab-cdef-0123-456789abcdef", Inode: 64},
-			Checkpoint: RootIdentity{FilesystemUUID: "11234567-89ab-cdef-0123-456789abcdef", Inode: 65},
+			Source: RootIdentity{FilesystemUUID: "01234567-89ab-cdef-0123-456789abcdef", Inode: 64},
 		},
 	}
 }
@@ -113,8 +112,6 @@ func TestImportRequestBounds(t *testing.T) {
 		"source inode":     func(r *ImportRequest) { r.Provenance.NamespaceInode = 0 },
 		"source device":    func(r *ImportRequest) { r.Provenance.Device = 0 },
 		"source root":      func(r *ImportRequest) { r.Provenance.Source = RootIdentity{} },
-		"checkpoint root":  func(r *ImportRequest) { r.Provenance.Checkpoint = RootIdentity{} },
-		"same old roots":   func(r *ImportRequest) { r.Provenance.Checkpoint = r.Provenance.Source },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := good

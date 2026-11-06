@@ -19,8 +19,10 @@ import (
 // from a retained checkpoint archive that was produced on another host. Nothing
 // about the old host is trusted: the archive digest, canonical manifest, every
 // entry and the quota bound are verified before the first create, and the
-// manifest's old-root fields are compared with the provenance values carried in
-// the request, never with r or checkpointRoot.
+// manifest's old source-root fields are compared with the provenance values
+// carried in the request, never with r or checkpointRoot, and its old
+// checkpoint-root fields are accepted only as part of the digest-verified
+// manifest.
 //
 // The caller must durably claim the effect before calling this method. Any
 // failure after the namespace exists is incomplete, never safe to assume
@@ -127,7 +129,7 @@ func (r ImportRequest) restoreRequest() RestoreRequest {
 // openImportArchive opens the retained archive under the checkpoint root and
 // verifies its file profile, digest, canonical manifest and entry walk.
 func (r *Root) openImportArchive(ctx context.Context, request ImportRequest, restoreRequest RestoreRequest) (*os.File, []restoreEntry, error) {
-	archive, err := r.openRestoreArchive(ctx, restoreRequest)
+	archive, err := r.openRestoreArchiveFile(restoreRequest)
 	if err != nil {
 		return nil, nil, errors.Join(ErrImportUnsafe, fmt.Errorf("open archive: %w", err))
 	}
@@ -137,7 +139,7 @@ func (r *Root) openImportArchive(ctx context.Context, request ImportRequest, res
 			archive.Close()
 		}
 	}()
-	if err := importVerifyManifest(archive, request); err != nil {
+	if err := importVerifyArchive(ctx, archive, request); err != nil {
 		return nil, nil, err
 	}
 	entries, err := restoreArchiveEntries(ctx, archive, restoreRequest)
@@ -148,6 +150,18 @@ func (r *Root) openImportArchive(ctx context.Context, request ImportRequest, res
 	return archive, entries, nil
 }
 
+// importVerifyArchive proves the archive is the one Portal recorded, then reads
+// its manifest. The order is the invariant: the digest is checked first, so
+// every manifest field, including the old host's checkpoint-root identity that
+// the request does not carry, is authentic by the time it is compared.
+func importVerifyArchive(ctx context.Context, archive *os.File, request ImportRequest) error {
+	if err := restoreArchiveDigest(ctx, archive, request.restoreRequest()); err != nil {
+		return errors.Join(ErrImportUnsafe, fmt.Errorf("verify archive digest: %w", err))
+	}
+	return importVerifyManifest(archive, request)
+}
+
+// importVerifyManifest must only run on an archive whose digest has matched.
 func importVerifyManifest(archive *os.File, request ImportRequest) error {
 	fail := func(reason string) error {
 		return fmt.Errorf("%w: import manifest %s", ErrImportUnsafe, reason)
@@ -178,9 +192,14 @@ func importVerifyManifest(archive *os.File, request ImportRequest) error {
 		manifest.ReleaseSHA256 != request.ReleaseSHA256 || manifest.WriterFence != request.WriterFence ||
 		manifest.DataFormat != request.DataFormat || manifest.ProjectID != p.ProjectID ||
 		manifest.NamespaceInode != p.NamespaceInode || manifest.Device != p.Device ||
-		manifest.SourceFilesystemUUID != p.Source.FilesystemUUID || manifest.SourceRootInode != p.Source.Inode ||
-		manifest.CheckpointFilesystemUUID != p.Checkpoint.FilesystemUUID || manifest.CheckpointRootInode != p.Checkpoint.Inode {
+		manifest.SourceFilesystemUUID != p.Source.FilesystemUUID || manifest.SourceRootInode != p.Source.Inode {
 		return fail("binding")
+	}
+	// The old checkpoint root is taken from the verified manifest. The old and
+	// new roots of one checkpoint are different physical roots by construction.
+	oldCheckpoint := RootIdentity{FilesystemUUID: manifest.CheckpointFilesystemUUID, Inode: manifest.CheckpointRootInode}
+	if !oldCheckpoint.valid() || oldCheckpoint == p.Source {
+		return fail("old checkpoint root")
 	}
 	return nil
 }

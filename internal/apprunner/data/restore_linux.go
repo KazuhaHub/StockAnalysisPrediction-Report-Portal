@@ -148,6 +148,21 @@ func (r *Root) Restore(ctx context.Context, checkpointExpected RootIdentity, sou
 }
 
 func (r *Root) openRestoreArchive(ctx context.Context, request RestoreRequest) (*os.File, error) {
+	archive, err := r.openRestoreArchiveFile(request)
+	if err != nil {
+		return nil, err
+	}
+	if err := restoreArchiveDigest(ctx, archive, request); err != nil {
+		archive.Close()
+		return nil, err
+	}
+	return archive, nil
+}
+
+// openRestoreArchiveFile opens the retained archive and checks its file
+// profile and size only. The content is not yet trusted: callers must verify
+// the digest before reading anything from it.
+func (r *Root) openRestoreArchiveFile(request RestoreRequest) (*os.File, error) {
 	directory, err := r.openCheckpointDirectory()
 	if err != nil {
 		return nil, err
@@ -166,10 +181,6 @@ func (r *Root) openRestoreArchive(ctx context.Context, request RestoreRequest) (
 		stat.Size() != request.ArchiveBytes || stat.Size() > request.MaxArchiveBytes {
 		archive.Close()
 		return nil, ErrRestoreUnsafe
-	}
-	if err := restoreArchiveDigest(ctx, archive, request); err != nil {
-		archive.Close()
-		return nil, err
 	}
 	return archive, nil
 }

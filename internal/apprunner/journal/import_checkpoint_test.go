@@ -48,7 +48,6 @@ func importCommandFixture(t *testing.T, base int) control.ImportCheckpointComman
 			QuotaBytes: "268435456", QuotaInodes: "65536",
 			SourceProjectID: "4201", SourceNamespaceInode: "10", SourceDevice: "11",
 			SourceFilesystemUUID: fixtureID(base + 7), SourceRootInode: "64",
-			CheckpointFilesystemUUID: fixtureID(base + 8), CheckpointRootInode: "65",
 		},
 		IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
 	}

@@ -226,11 +226,14 @@ func Open(root *os.File) (*Root, error) { return openRoot(root) }
 
 // ImportProvenance is Portal's record of the host that produced a checkpoint.
 // It is compared with the archive manifest and never with the host receiving
-// the import, which has a different filesystem, root inode and device.
+// the import, which has a different filesystem, root inode and device. The old
+// checkpoint root is deliberately absent: Portal's recovery set records only
+// the archive digest, and once the digest matches the manifest's own value for
+// it is authentic, so the manifest is the only source.
 type ImportProvenance struct {
 	ProjectID              uint32
 	NamespaceInode, Device uint64
-	Source, Checkpoint     RootIdentity
+	Source                 RootIdentity
 }
 
 // ImportRequest binds one retained checkpoint archive to a namespace that does
@@ -252,7 +255,7 @@ func (r ImportRequest) valid() bool {
 		r.MaxArchiveBytes > 0 && r.ArchiveBytes <= r.MaxArchiveBytes && r.WriterFence > 0 &&
 		r.QuotaBytes > 0 && r.QuotaBytes%512 == 0 && r.QuotaInodes > 0 &&
 		p.ProjectID > 0 && p.NamespaceInode > 0 && p.Device > 0 &&
-		p.Source.valid() && p.Checkpoint.valid() && p.Source != p.Checkpoint
+		p.Source.valid()
 }
 
 // importFootprint is the conservative quota charge of an archive on the

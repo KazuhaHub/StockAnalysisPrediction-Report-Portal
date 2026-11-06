@@ -17,30 +17,30 @@ const importCheckpointSignaturePurpose = "portal.app/runner-data-import-command/
 const importCheckpointEffectPurpose = "portal.app/runner-data-import-effect/v1"
 
 // ImportCheckpointPayload carries one single-use import grant and the values the
-// archive must prove. The Source* and Checkpoint* fields are Portal's recorded
-// provenance of the old host; they are compared with the archive manifest and
-// never with the host that receives the import. The quota is the reservation
+// archive must prove. The Source* fields are Portal's recorded provenance of the
+// old host; they are compared with the archive manifest and never with the host
+// that receives the import. The old checkpoint root is not carried: Portal
+// records only the archive digest, and once the runner verifies it the
+// manifest's own value for that root is authentic. The quota is the reservation
 // for the namespace being created; the receiving runner allocates its own
 // project id, which an old-host command cannot know.
 type ImportCheckpointPayload struct {
-	GrantID                  string `json:"grant_id"`
-	RecoverySetID            string `json:"recovery_set_id"`
-	CheckpointID             string `json:"checkpoint_id"`
-	NamespaceID              string `json:"namespace_id"`
-	ReleaseSHA256            string `json:"release_sha256"`
-	ManifestSHA256           string `json:"manifest_sha256"`
-	ArchiveBytes             string `json:"archive_bytes"`
-	DataFormat               string `json:"data_format"`
-	WriterFence              string `json:"writer_fence"`
-	QuotaBytes               string `json:"quota_bytes"`
-	QuotaInodes              string `json:"quota_inodes"`
-	SourceProjectID          string `json:"source_project_id"`
-	SourceNamespaceInode     string `json:"source_namespace_inode"`
-	SourceDevice             string `json:"source_device"`
-	SourceFilesystemUUID     string `json:"source_filesystem_uuid"`
-	SourceRootInode          string `json:"source_root_inode"`
-	CheckpointFilesystemUUID string `json:"checkpoint_filesystem_uuid"`
-	CheckpointRootInode      string `json:"checkpoint_root_inode"`
+	GrantID              string `json:"grant_id"`
+	RecoverySetID        string `json:"recovery_set_id"`
+	CheckpointID         string `json:"checkpoint_id"`
+	NamespaceID          string `json:"namespace_id"`
+	ReleaseSHA256        string `json:"release_sha256"`
+	ManifestSHA256       string `json:"manifest_sha256"`
+	ArchiveBytes         string `json:"archive_bytes"`
+	DataFormat           string `json:"data_format"`
+	WriterFence          string `json:"writer_fence"`
+	QuotaBytes           string `json:"quota_bytes"`
+	QuotaInodes          string `json:"quota_inodes"`
+	SourceProjectID      string `json:"source_project_id"`
+	SourceNamespaceInode string `json:"source_namespace_inode"`
+	SourceDevice         string `json:"source_device"`
+	SourceFilesystemUUID string `json:"source_filesystem_uuid"`
+	SourceRootInode      string `json:"source_root_inode"`
 }
 
 type ImportCheckpointCommand struct {
@@ -75,7 +75,7 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 	for _, id := range []string{
 		c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.OperationID, c.EffectID,
 		p.GrantID, p.RecoverySetID, p.CheckpointID, p.NamespaceID,
-		p.SourceFilesystemUUID, p.CheckpointFilesystemUUID,
+		p.SourceFilesystemUUID,
 	} {
 		if !candidateUUID(id) {
 			return false
@@ -90,7 +90,7 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 		}
 	}
 	for _, value := range []string{
-		p.SourceProjectID, p.SourceNamespaceInode, p.SourceDevice, p.SourceRootInode, p.CheckpointRootInode,
+		p.SourceProjectID, p.SourceNamespaceInode, p.SourceDevice, p.SourceRootInode,
 	} {
 		if !checkpointUint(value) {
 			return false
@@ -100,11 +100,8 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 	archive, _ := strconv.ParseInt(p.ArchiveBytes, 10, 64)
 	quota, _ := strconv.ParseInt(p.QuotaBytes, 10, 64)
 	slot, _ := counter(c.EffectNumber, true)
-	// The old and new roots are different physical roots by construction; a
-	// payload naming one root for both is a malformed provenance record.
 	return sourceProject <= math.MaxUint32 &&
-		archive <= maxRestoreArchiveBytes && quota%512 == 0 && slot <= 32 &&
-		(p.SourceFilesystemUUID != p.CheckpointFilesystemUUID || p.SourceRootInode != p.CheckpointRootInode)
+		archive <= maxRestoreArchiveBytes && quota%512 == 0 && slot <= 32
 }
 
 func ImportCheckpointLogicalDigest(c ImportCheckpointCommand) (string, error) {
