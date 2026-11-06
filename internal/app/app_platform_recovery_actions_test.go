@@ -212,3 +212,25 @@ func TestRecoveryDisabledManagedInstallationIsUninstalledPortalSideOnly(t *testi
 		t.Fatal("the retired runtime binding changed")
 	}
 }
+
+// A portal-side uninstall retires the installation's secret bindings in the same transaction as it does
+// for an ordinary removal: a binding left usable would outlive an installation whose host is gone.
+func TestRecoveryPortalSideUninstallRevokesSecretBindings(t *testing.T) {
+	s, actor, updateLease, _ := platformManagedRestoreReviewFixture(t, false)
+	installation := updateLease.installationID
+	platformSimulateRestore(t, s)
+	plan := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE installation_id=? AND action='install'`, installation)
+	platformTestInsert(t, s.st.poolExec(), "credentials", map[string]any{"id": platformFixtureID(2001), "label": "Fixture custody", "state": "active", "sealed_value": "fixture-envelope", "value_revision": 1, "revision": 1, "created_ms": 1, "updated_ms": 1, "revoked_ms": nil})
+	platformTestInsert(t, s.st.poolExec(), "secret_bindings", map[string]any{"id": platformFixtureID(2010), "installation_id": installation, "name": "first", "credential_id": platformFixtureID(2001), "credential_value_revision": 1, "operation": "http_bearer", "state": "active", "policy_json": "{}", "policy_revision": 1, "review_plan_id": plan, "revision": 1, "created_ms": 1, "updated_ms": 1, "revoked_ms": nil})
+	h := platformRecoveryActionHTTP(t, s, actor)
+	h.reviewAndCommit("recovery_disable", installation, platformFixtureID(5930))
+	h.endRecovery(200)
+	removed := h.reviewAndCommit("uninstall", installation, platformFixtureID(5931))
+	if removed["stage"] != "complete" || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.portal_side_uninstall' AND target_id=?`, installation) != 1 {
+		t.Fatalf("fixture: the removal was not portal-side: %v", removed)
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_secret_bindings WHERE id=?`, platformFixtureID(2010)) != "revoked" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_secret_bindings WHERE installation_id=? AND state<>'revoked'`, installation) != 0 {
+		t.Fatal("a portal-side uninstall left a secret binding usable")
+	}
+}
