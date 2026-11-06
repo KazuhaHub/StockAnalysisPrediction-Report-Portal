@@ -26,6 +26,7 @@ add('higher-envelope-fence-needs-journal-floor',true,c=>c.body.installation_fenc
 add('expired-exclusive',false,c=>c.now_ms='130000');add('future-issued',false,c=>c.now_ms='99999');
 add('too-long-validity',false,c=>c.body.expires_ms='130001');add('empty-validity',false,c=>c.body.expires_ms=c.body.issued_ms);
 add('wrong-purpose',false,c=>c.purpose='portal.app/descriptor/v2');
+add('import-read-purpose',false,c=>c.purpose='portal.app/runner-data-import-read/v1');add('update-start-read-purpose',false,c=>c.purpose='portal.app/runner-data-update-start-read/v1');
 add('unframed-signature',false,c=>c.signature=sign(null,Buffer.from(JSON.stringify(c.body)),key));
 add('invalid-signature',false,c=>c.signature=Buffer.alloc(64,0));add('short-signature',false,c=>c.signature=Buffer.alloc(63));
 add('changed-bytes',false,c=>{c.raw=Buffer.from(JSON.stringify(c.body)+'\n');c.signature=sign(null,frame(c.purpose,Buffer.from(JSON.stringify(c.body))),key);});

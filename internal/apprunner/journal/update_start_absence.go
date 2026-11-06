@@ -71,12 +71,13 @@ func UpdateStartAbsenceMatchesCommand(a UpdateStartAbsence, c control.UpdateStar
 // ReadUpdateStartRunningOrAbsence is the runner's read-receipt answer for a start effect: the applied
 // running receipt, or, for a restore-start only, an UpdateStartAbsence when the journal holds no command
 // row for the effect identity. Every other outcome is the ordinary error of the running-receipt read.
+// The command is verified under the read purpose: a signature made for an execute is not a read.
 func (s *Store) ReadUpdateStartRunningOrAbsence(ctx context.Context, raw, signature []byte) (any, error) {
-	receipt, err := s.ReadUpdateStartRunningReceipt(ctx, raw, signature)
+	receipt, err := s.readUpdateStartRunningReceipt(ctx, raw, signature, control.VerifyUpdateStartRead)
 	if err == nil {
 		return receipt, nil
 	}
-	absence, absenceErr := s.readRestoreStartAbsence(ctx, raw, signature)
+	absence, absenceErr := s.readRestoreStartAbsence(ctx, raw, signature, control.VerifyUpdateStartRead)
 	if absenceErr == nil && absence != nil {
 		return *absence, nil
 	}
@@ -86,8 +87,8 @@ func (s *Store) ReadUpdateStartRunningOrAbsence(ctx context.Context, raw, signat
 // readRestoreStartAbsence finds a restore-start effect absent. A claim does not hold the data execution
 // gate the way an import does, but a read that finds no row still takes the gate and looks again, so it
 // cannot overtake work that holds it. It answers nil, nil when the effect is not provably absent.
-func (s *Store) readRestoreStartAbsence(ctx context.Context, raw, signature []byte) (*UpdateStartAbsence, error) {
-	absence, err := s.restoreStartAbsent(ctx, raw, signature)
+func (s *Store) readRestoreStartAbsence(ctx context.Context, raw, signature []byte, verify updateStartVerifier) (*UpdateStartAbsence, error) {
+	absence, err := s.restoreStartAbsent(ctx, raw, signature, verify)
 	if err != nil || absence == nil {
 		return nil, err
 	}
@@ -95,10 +96,10 @@ func (s *Store) readRestoreStartAbsence(ctx context.Context, raw, signature []by
 		return nil, err
 	}
 	defer s.releaseDataExecution()
-	return s.restoreStartAbsent(ctx, raw, signature)
+	return s.restoreStartAbsent(ctx, raw, signature, verify)
 }
 
-func (s *Store) restoreStartAbsent(ctx context.Context, raw, signature []byte) (*UpdateStartAbsence, error) {
+func (s *Store) restoreStartAbsent(ctx context.Context, raw, signature []byte, verify updateStartVerifier) (*UpdateStartAbsence, error) {
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return nil, ErrUpdateStartUnavailable
 	}
@@ -120,7 +121,7 @@ func (s *Store) restoreStartAbsent(ctx context.Context, raw, signature []byte) (
 		Fingerprint: deployment.Fingerprint,
 	}
 	now := time.Now().UTC().UnixMilli()
-	verified, err := control.VerifyUpdateStart(raw, signature, authority, now)
+	verified, err := verify(raw, signature, authority, now)
 	if err != nil {
 		return nil, err
 	}

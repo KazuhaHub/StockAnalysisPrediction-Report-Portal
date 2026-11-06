@@ -46,7 +46,7 @@ func TestWritableLifecycleRestoreStartAbsenceReply(t *testing.T) {
 	a, command, raw, sig, descriptor := restoreStartTransportFixture(t)
 	now := time.Now().UnixMilli()
 	started, received := time.Now().Add(-time.Second), time.Now().Add(time.Second)
-	read, err := verifyWritableLifecycle(UpdateStartReceipt, raw, sig, descriptor, a, now)
+	read, err := verifyWritableLifecycle(UpdateStartReceipt, raw, lifecycleSignature(t, UpdateStartReceipt, a, raw, sig), descriptor, a, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestWritableLifecycleRestoreStartAbsenceReply(t *testing.T) {
 	}
 	// An update-start (not a restore-start) is never answered with an absence.
 	_, updateCommand, updateRaw, updateSig, updateDescriptor, _ := updateStartTransportFixture(t)
-	updateRead, err := verifyWritableLifecycle(UpdateStartReceipt, updateRaw, updateSig, updateDescriptor, a, time.Now().UnixMilli())
+	updateRead, err := verifyWritableLifecycle(UpdateStartReceipt, updateRaw, lifecycleSignature(t, UpdateStartReceipt, a, updateRaw, updateSig), updateDescriptor, a, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatal(err)
 	}

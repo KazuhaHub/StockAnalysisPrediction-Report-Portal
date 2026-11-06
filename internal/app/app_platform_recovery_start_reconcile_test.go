@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 // platformStartReadFake stands in for the runner's restore-start read-receipt. It never executes
@@ -22,6 +23,16 @@ type platformStartReadFake struct {
 func (f *platformStartReadFake) read(_ context.Context, endpoint platformRuntimeEndpoint, intent platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 	f.calls++
 	f.last = intent
+	// The runner verifies the read purpose: only the read signature is a read, and it is not an execute.
+	if _, err := control.VerifyUpdateStartRead(intent.raw, intent.readSignature, intent.authority, time.Now().UnixMilli()); err != nil {
+		return nil, err
+	}
+	if _, err := control.VerifyUpdateStartRead(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli()); err == nil {
+		return nil, errors.New("the execute signature verifies as a read")
+	}
+	if _, err := control.VerifyUpdateStart(intent.raw, intent.readSignature, intent.authority, time.Now().UnixMilli()); err == nil {
+		return nil, errors.New("the read signature verifies as an execute")
+	}
 	switch {
 	case f.err != nil:
 		return nil, f.err

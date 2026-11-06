@@ -34,6 +34,11 @@ func runPlatformImportCheckpoint(ctx context.Context, endpoint platformRuntimeEn
 	if len(intent.descriptor) == 0 {
 		return transport.WritableLifecycleObservation{}, errAppPlatformStageEvidence
 	}
+	// A read-receipt carries the signature made under the read purpose; an execute never does.
+	signature := intent.signature
+	if action == transport.ImportCheckpointRead {
+		signature = intent.readSignature
+	}
 	return platformRunLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
-		action, intent.raw, intent.signature, intent.authority, intent.descriptor, nil)
+		action, intent.raw, signature, intent.authority, intent.descriptor, nil)
 }

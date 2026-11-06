@@ -14,6 +14,7 @@ import (
 
 const ImportCheckpointFormat = "portal.runner.data-import-command/1-dev.1"
 const importCheckpointSignaturePurpose = "portal.app/runner-data-import-command/v1"
+const importCheckpointReadPurpose = "portal.app/runner-data-import-read/v1"
 const importCheckpointEffectPurpose = "portal.app/runner-data-import-effect/v1"
 
 // ImportCheckpointPayload carries one single-use import grant and the values the
@@ -158,17 +159,36 @@ func parseImportCheckpoint(raw []byte) (ImportCheckpointCommand, error) {
 }
 
 func VerifyImportCheckpoint(raw, signature []byte, authority Authority, nowMS int64) (VerifiedImportCheckpointCommand, error) {
-	return verifyImportCheckpoint(raw, signature, authority, nowMS, false)
+	return verifyImportCheckpoint(raw, signature, authority, nowMS, false, importCheckpointSignaturePurpose)
+}
+
+// VerifyImportCheckpointRead checks a read-receipt command. A read is signed under its own purpose, so a
+// captured read cannot be submitted as an execute and an execute signature is not a read. Like a
+// settlement it is not bound by the expiry that governs dispatch.
+func VerifyImportCheckpointRead(raw, signature []byte, authority Authority, nowMS int64) (VerifiedImportCheckpointCommand, error) {
+	return verifyImportCheckpoint(raw, signature, authority, nowMS, true, importCheckpointReadPurpose)
+}
+
+// SignImportCheckpointRead signs the exact bytes of an import command for a read-receipt.
+func SignImportCheckpointRead(raw []byte, key ed25519.PrivateKey, authority Authority, nowMS int64) ([]byte, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return nil, ErrInvalidCommand
+	}
+	signature := ed25519.Sign(key, frame(importCheckpointReadPurpose, raw))
+	if _, err := VerifyImportCheckpointRead(raw, signature, authority, nowMS); err != nil {
+		return nil, err
+	}
+	return signature, nil
 }
 
 // VerifyImportCheckpointSettlement checks the exact command already admitted for
 // an in-flight effect. Expiry governs dispatch; an import that finishes after
 // the signed window must still be settled without reissuing the effect.
 func VerifyImportCheckpointSettlement(raw, signature []byte, authority Authority, nowMS int64) (VerifiedImportCheckpointCommand, error) {
-	return verifyImportCheckpoint(raw, signature, authority, nowMS, true)
+	return verifyImportCheckpoint(raw, signature, authority, nowMS, true, importCheckpointSignaturePurpose)
 }
 
-func verifyImportCheckpoint(raw, signature []byte, authority Authority, nowMS int64, settling bool) (VerifiedImportCheckpointCommand, error) {
+func verifyImportCheckpoint(raw, signature []byte, authority Authority, nowMS int64, settling bool, purpose string) (VerifiedImportCheckpointCommand, error) {
 	fail := func() (VerifiedImportCheckpointCommand, error) {
 		return VerifiedImportCheckpointCommand{}, ErrInvalidCommand
 	}
@@ -200,7 +220,7 @@ func verifyImportCheckpoint(raw, signature []byte, authority Authority, nowMS in
 	if err != nil || digest != c.PayloadSHA256 {
 		return fail()
 	}
-	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(importCheckpointSignaturePurpose, raw), signature) {
+	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(purpose, raw), signature) {
 		return fail()
 	}
 	return VerifiedImportCheckpointCommand{command: c}, nil

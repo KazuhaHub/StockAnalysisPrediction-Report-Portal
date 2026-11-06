@@ -77,6 +77,8 @@ type platformImportIntent struct {
 	command        control.ImportCheckpointCommand
 	descriptor     []byte
 	raw, signature []byte
+	// readSignature signs raw as a read-receipt, under its own purpose.
+	readSignature []byte
 	// pendingReceipt is the effect row's receipt as it was read ("{}" or the signed-until record), and
 	// priorSignedUntil the latest expiry of any command signed for the effect before this one.
 	pendingReceipt   string

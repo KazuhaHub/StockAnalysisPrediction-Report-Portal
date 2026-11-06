@@ -22,7 +22,7 @@ func TestRestoreStartReadReportsAbsenceOnlyWhenNoRowExists(t *testing.T) {
 	if command.PayloadSHA256, err = control.UpdateStartLogicalDigest(command); err != nil {
 		t.Fatal(err)
 	}
-	result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, signature)
+	result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,11 @@ func TestRestoreStartReadNeverReportsAbsenceForAnyRow(t *testing.T) {
 				signature = append([]byte(nil), signature...)
 				signature[0] ^= 0xff
 			}
-			result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, signature)
+			readSignature := updateStartReadSignature(t, raw)
+			if mode == "bad signature" {
+				readSignature[0] ^= 0xff
+			}
+			result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, readSignature)
 			if _, absent := result.(UpdateStartAbsence); absent {
 				t.Fatalf("an absence reply was minted for a non-absent effect: %v", err)
 			}
@@ -84,8 +88,8 @@ func TestRestoreStartReadNeverReportsAbsenceForAnyRow(t *testing.T) {
 
 // Only restore-start has the typed absence. An update-start (or enable-start) keeps its old behaviour.
 func TestUpdateStartReadHasNoAbsenceForOtherKinds(t *testing.T) {
-	f, _, _, raw, signature := updateStartJournalFixture(t)
-	result, err := f.store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, signature)
+	f, _, _, raw, _ := updateStartJournalFixture(t)
+	result, err := f.store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
 	if _, absent := result.(UpdateStartAbsence); absent || err == nil {
 		t.Fatalf("an update-start read was answered with an absence: %#v %v", result, err)
 	}
@@ -113,7 +117,7 @@ func TestRestoreStartAbsenceReadWaitsForTheExecutionGate(t *testing.T) {
 	}
 	done := make(chan answer, 1)
 	go func() {
-		result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, signature)
+		result, err := store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
 		done <- answer{result, err}
 	}()
 	select {

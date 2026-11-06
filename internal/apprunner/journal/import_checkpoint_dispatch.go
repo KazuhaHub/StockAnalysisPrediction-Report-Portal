@@ -206,7 +206,7 @@ func (s *Store) settleImportCheckpoint(ctx context.Context, intent importIntent,
 // ErrNoSuchEffect is returned only when the journal proves the effect was never
 // claimed; every other failure leaves the effect's fate unknown.
 func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
-	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature)
+	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature, control.VerifyImportCheckpointSettlement)
 	if err != nil {
 		return ImportCheckpointReceipt{}, err
 	}
@@ -218,9 +218,10 @@ func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature 
 
 // ReadImportCheckpointOrAbsence is the runner's read-receipt answer: the applied
 // receipt, or an ImportCheckpointAbsence when the journal holds no command row for
-// the effect identity.
+// the effect identity. The command is verified under the read purpose: a signature
+// made for an execute is not a read.
 func (s *Store) ReadImportCheckpointOrAbsence(ctx context.Context, raw, signature []byte) (any, error) {
-	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature)
+	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature, control.VerifyImportCheckpointRead)
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +235,8 @@ func (s *Store) ReadImportCheckpointOrAbsence(ctx context.Context, raw, signatur
 // data execution gate from before its claim commits until it has settled, so a read that finds no row
 // may have overtaken a claim in progress. It therefore takes the gate before it reports an absence and
 // looks again: a claim that was racing it is then visible and the answer is unknown, not absent.
-func (s *Store) readImportCheckpointOrWaitForClaim(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
-	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+func (s *Store) readImportCheckpointOrWaitForClaim(ctx context.Context, raw, signature []byte, verify importCommandVerifier) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature, verify)
 	if err != nil || absence == nil {
 		return receipt, absence, err
 	}
@@ -243,10 +244,14 @@ func (s *Store) readImportCheckpointOrWaitForClaim(ctx context.Context, raw, sig
 		return ImportCheckpointReceipt{}, nil, err
 	}
 	defer s.releaseDataExecution()
-	return s.readImportCheckpoint(ctx, raw, signature)
+	return s.readImportCheckpoint(ctx, raw, signature, verify)
 }
 
-func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
+// importCommandVerifier is the verification a read applies to the command it is given: the settlement
+// check for the command already admitted for an effect, or the read check for a read-receipt.
+type importCommandVerifier func(raw, signature []byte, authority control.Authority, nowMS int64) (control.VerifiedImportCheckpointCommand, error)
+
+func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte, verify importCommandVerifier) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
 	var zero ImportCheckpointReceipt
 	if s.closing.Load() {
 		return zero, nil, ErrImportCheckpointUnavailable
@@ -264,7 +269,7 @@ func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte)
 		return zero, nil, err
 	}
 	now := time.Now().UTC().UnixMilli()
-	verified, err := control.VerifyImportCheckpointSettlement(raw, signature, importAuthorityFrom(deployment), now)
+	verified, err := verify(raw, signature, importAuthorityFrom(deployment), now)
 	if err != nil {
 		return zero, nil, err
 	}
@@ -548,7 +553,7 @@ func loadImportedStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateSt
 
 // readImportReceiptHeld reads a receipt while the caller already holds the data execution gate.
 func (s *Store) readImportReceiptHeld(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
-	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature, control.VerifyImportCheckpointSettlement)
 	if err != nil {
 		return ImportCheckpointReceipt{}, err
 	}

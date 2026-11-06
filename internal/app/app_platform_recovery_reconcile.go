@@ -165,6 +165,9 @@ func (s *Server) signPlatformRecoveryImportRead(ctx context.Context, lease platf
 	if intent.raw, intent.signature, err = control.SignImportCheckpoint(intent.command, key, intent.authority, issued); err != nil {
 		return zero, err
 	}
+	if intent.readSignature, err = control.SignImportCheckpointRead(intent.raw, key, intent.authority, issued); err != nil {
+		return zero, err
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}

@@ -90,6 +90,13 @@ func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, i
 }
 func (f *platformImportTestExecutor) Execute(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.calls++
+	// The runner verifies the execute purpose: a read signature must never carry an execute.
+	if _, err := control.VerifyImportCheckpoint(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli()); err != nil {
+		return nil, err
+	}
+	if _, err := control.VerifyImportCheckpoint(intent.raw, intent.readSignature, intent.authority, time.Now().UnixMilli()); err == nil {
+		return nil, errors.New("the read signature verifies as an execute")
+	}
 	if d, ok := ctx.Deadline(); ok {
 		f.deadline = time.Until(d)
 	}
@@ -105,6 +112,13 @@ func (f *platformImportTestExecutor) Execute(ctx context.Context, endpoint platf
 }
 func (f *platformImportTestExecutor) Read(_ context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.reads++
+	// The runner verifies the read purpose: only the read signature is a read.
+	if _, err := control.VerifyImportCheckpointRead(intent.raw, intent.readSignature, intent.authority, time.Now().UnixMilli()); err != nil {
+		return nil, err
+	}
+	if _, err := control.VerifyImportCheckpointRead(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli()); err == nil {
+		return nil, errors.New("the execute signature verifies as a read")
+	}
 	if f.absent {
 		return nil, errPlatformImportAbsent
 	}

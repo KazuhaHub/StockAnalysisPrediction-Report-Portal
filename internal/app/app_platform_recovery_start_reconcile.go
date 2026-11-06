@@ -277,6 +277,9 @@ func (s *Server) signPlatformRecoveryStartRead(ctx context.Context, c platformRe
 	if facts.intent.raw, facts.intent.signature, err = control.SignUpdateStart(facts.intent.command, key, facts.intent.authority, issued); err != nil {
 		return zero, err
 	}
+	if facts.intent.readSignature, err = control.SignUpdateStartRead(facts.intent.raw, key, facts.intent.authority, issued); err != nil {
+		return zero, err
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}

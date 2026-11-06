@@ -67,6 +67,9 @@ type platformUpdateStartIntent struct {
 	readiness            *journal.UpdateStartReadiness
 	activationObserved   int64
 	raw, signature       []byte
+	// readSignature signs raw as a read-receipt, under its own purpose. It is set only where a read of the
+	// effect is expected.
+	readSignature []byte
 }
 
 func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, source platformCheckpointSource) (platformManagedUpdatePlan, []byte, error) {

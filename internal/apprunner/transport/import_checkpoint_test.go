@@ -77,7 +77,7 @@ func TestWritableLifecycleImportCheckpointReferenceAndReply(t *testing.T) {
 		if !action.valid() {
 			t.Fatal("import action is not a valid lifecycle action", action)
 		}
-		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		ref, err := verifyWritableLifecycle(action, raw, lifecycleSignature(t, action, a, raw, sig), descriptor, a, now)
 		if err != nil || ref.importCheckpoint.EffectID != command.EffectID || ref.release != command.Payload.ReleaseSHA256 {
 			t.Fatal("import reference", action, err)
 		}
@@ -169,7 +169,7 @@ func TestWritableLifecycleImportAbsenceReply(t *testing.T) {
 	now := time.Now().UnixMilli()
 	// The reply is built after this, so its observation time must not be ahead of the receive time.
 	started, received := time.Now().Add(-time.Second), time.Now().Add(time.Second)
-	read, err := verifyWritableLifecycle(ImportCheckpointRead, raw, sig, descriptor, a, now)
+	read, err := verifyWritableLifecycle(ImportCheckpointRead, raw, lifecycleSignature(t, ImportCheckpointRead, a, raw, sig), descriptor, a, now)
 	if err != nil {
 		t.Fatal(err)
 	}

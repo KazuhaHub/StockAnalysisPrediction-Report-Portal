@@ -258,6 +258,14 @@ func ParseUpdateStartRunningReceipt(raw []byte) (UpdateStartRunningReceipt, erro
 }
 
 func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []byte, state string) (*sql.Tx, updateStartFacts, error) {
+	return s.beginUpdateStartExecutionVerified(ctx, raw, signature, state, control.VerifyUpdateStart)
+}
+
+// updateStartVerifier is the verification applied to the command a call is given: the execute check, or
+// the read check for a read-receipt.
+type updateStartVerifier func(raw, signature []byte, authority control.Authority, nowMS int64) (control.VerifiedUpdateStartCommand, error)
+
+func (s *Store) beginUpdateStartExecutionVerified(ctx context.Context, raw, signature []byte, state string, verify updateStartVerifier) (*sql.Tx, updateStartFacts, error) {
 	var zero updateStartFacts
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes ||
 		len(signature) != 64 || (state != "prepared" && state != "unknown" && state != "applied") {
@@ -288,7 +296,7 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 	}
 	started := time.Now()
 	now := started.UnixMilli()
-	verified, err := control.VerifyUpdateStart(raw, signature, authority, now)
+	verified, err := verify(raw, signature, authority, now)
 	if err != nil {
 		return nil, zero, err
 	}
@@ -954,8 +962,12 @@ func (s *Store) DispatchUpdateStart(ctx context.Context, raw, signature, descrip
 }
 
 func (s *Store) ReadUpdateStartRunningReceipt(ctx context.Context, raw, signature []byte) (UpdateStartRunningReceipt, error) {
+	return s.readUpdateStartRunningReceipt(ctx, raw, signature, control.VerifyUpdateStart)
+}
+
+func (s *Store) readUpdateStartRunningReceipt(ctx context.Context, raw, signature []byte, verify updateStartVerifier) (UpdateStartRunningReceipt, error) {
 	var zero UpdateStartRunningReceipt
-	tx, f, err := s.beginUpdateStartExecution(ctx, raw, signature, "applied")
+	tx, f, err := s.beginUpdateStartExecutionVerified(ctx, raw, signature, "applied", verify)
 	if err != nil {
 		return zero, err
 	}

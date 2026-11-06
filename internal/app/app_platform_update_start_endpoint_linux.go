@@ -35,7 +35,7 @@ func platformProbeUpdateStart(ctx context.Context, endpoint platformRuntimeEndpo
 // ordinary error, which the Portal treats as unknown.
 func platformReadUpdateStartReceipt(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 	observation, err := platformRunLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
-		transport.UpdateStartReceipt, intent.raw, intent.signature, intent.authority, intent.targetDescriptor, nil)
+		transport.UpdateStartReceipt, intent.raw, intent.readSignature, intent.authority, intent.targetDescriptor, nil)
 	if errors.Is(err, journal.ErrNoSuchEffect) {
 		return nil, errPlatformStartAbsent
 	}

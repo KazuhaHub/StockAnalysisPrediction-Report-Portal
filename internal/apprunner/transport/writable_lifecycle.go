@@ -283,7 +283,10 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 	case action == ImportCheckpointExecute || action == ImportCheckpointRead:
 		var v control.VerifiedImportCheckpointCommand
 		var err error
-		if settling {
+		if action == ImportCheckpointRead {
+			// A read-receipt is signed under its own purpose and never as an execute.
+			v, err = control.VerifyImportCheckpointRead(raw, sig, a, now)
+		} else if settling {
 			v, err = control.VerifyImportCheckpointSettlement(raw, sig, a, now)
 		} else {
 			v, err = control.VerifyImportCheckpoint(raw, sig, a, now)
@@ -294,7 +297,12 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		r.importCheckpoint = v.Command()
 		r.release = r.importCheckpoint.Payload.ReleaseSHA256
 	default:
-		v, err := control.VerifyUpdateStart(raw, sig, a, now)
+		verify := control.VerifyUpdateStart
+		if action == UpdateStartReceipt {
+			// A read-receipt is signed under its own purpose and never as an execute.
+			verify = control.VerifyUpdateStartRead
+		}
+		v, err := verify(raw, sig, a, now)
 		if err != nil {
 			return r, err
 		}

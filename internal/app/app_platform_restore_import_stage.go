@@ -350,6 +350,9 @@ func (s *Server) signPlatformRestoreImport(ctx context.Context, expected platfor
 	if result.raw, result.signature, err = control.SignImportCheckpoint(result.command, key, result.authority, issued); err != nil {
 		return zero, err
 	}
+	if result.readSignature, err = control.SignImportCheckpointRead(result.raw, key, result.authority, issued); err != nil {
+		return zero, err
+	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 		return zero, err
 	}

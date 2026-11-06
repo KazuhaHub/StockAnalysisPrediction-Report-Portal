@@ -17,7 +17,7 @@ func TestImportReadReportsNoSuchEffectOnlyWhenRowIsAbsent(t *testing.T) {
 	if _, err := store.ReadImportCheckpointReceipt(context.Background(), raw, signature); !errors.Is(err, ErrNoSuchEffect) {
 		t.Fatalf("an unclaimed effect must be absent: %v", err)
 	}
-	result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, signature)
+	result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, importReadSignature(t, raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +57,10 @@ func TestImportReadNeverReportsNoSuchEffectForAnyRow(t *testing.T) {
 				signature = append([]byte(nil), signature...)
 				signature[0] ^= 0xff
 			}
+			readSignature := importReadSignature(t, raw)
+			if mode == "bad signature" {
+				readSignature[0] ^= 0xff
+			}
 			_, err := store.ReadImportCheckpointReceipt(context.Background(), raw, signature)
 			if mode == "applied" {
 				if err != nil {
@@ -67,7 +71,7 @@ func TestImportReadNeverReportsNoSuchEffectForAnyRow(t *testing.T) {
 			if err == nil || errors.Is(err, ErrNoSuchEffect) {
 				t.Fatalf("a non-absent effect must not read as absent: %v", err)
 			}
-			if result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, signature); err == nil {
+			if result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, readSignature); err == nil {
 				if _, absent := result.(ImportCheckpointAbsence); absent {
 					t.Fatal("an absence reply was minted for a non-absent effect")
 				}
@@ -99,7 +103,7 @@ func TestImportAbsenceReadWaitsForTheExecutionGate(t *testing.T) {
 	}
 	done := make(chan answer, 1)
 	go func() {
-		result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, signature)
+		result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, importReadSignature(t, raw))
 		done <- answer{result, err}
 	}()
 	select {
