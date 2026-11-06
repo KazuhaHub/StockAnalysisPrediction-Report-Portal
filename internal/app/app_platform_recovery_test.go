@@ -242,7 +242,7 @@ func testEndRecoveryHTTP(t *testing.T, pg bool) {
 		t.Fatal("ending recovery resumed notification dispatch")
 	}
 	// Ending it again is refused: the Portal is no longer in recovery.
-	if again := sessionTestRequest(mux, "POST", path, cookie, body); again.Code != 503 || audits() != 1 {
+	if again := sessionTestRequest(mux, "POST", path, cookie, body); again.Code != 409 || audits() != 1 {
 		t.Fatalf("a second request answered %d with %d audits", again.Code, audits())
 	}
 }
