@@ -24,8 +24,6 @@ import (
 // from a request: enrollment reads the runner's own report, and the resume target is read from the
 // replacement runner, never from a body.
 
-var errAppPlatformRecoveryInactive = errors.New("application recovery is not active")
-
 // platformRecoveryError is platformManagementError for the recovery actions. On these routes a
 // control pause that is not the recovery pause means the Portal is not in recovery at all, which is
 // a different thing to tell an administrator than "paused pending recovery review". A runtime that

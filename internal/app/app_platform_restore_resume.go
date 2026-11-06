@@ -152,8 +152,6 @@ func loadPlatformResumeImport(e migExec, installation string) (platformResumeImp
 	return r, nil
 }
 
-func (r platformResumeImport) quotaBytes() string { return r.receipt.QuotaBytes }
-
 // platformResumeSandboxProfile reads, from the old host's applied start receipt, which sandbox profile
 // the app ran under. Candidate receipts do not name one: they are the default profile.
 func platformResumeSandboxProfile(e migExec, startEffect string) (string, error) {

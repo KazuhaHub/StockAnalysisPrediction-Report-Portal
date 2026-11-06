@@ -109,7 +109,6 @@ type platformRecoveryKind struct {
 	action     appplatform.Action
 	format     string
 	audit      string
-	release    func(planJSON string) string
 	fresh      func(e migExec, installation string, actor platformActorFacts, control platformActorControl) (platformRecoveryPlanFacts, error)
 	transition func(e migExec, planID, planSHA string, facts platformRecoveryPlanFacts, now int64) error
 }
