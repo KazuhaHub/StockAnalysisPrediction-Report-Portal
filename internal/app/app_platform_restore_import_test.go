@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
@@ -361,6 +362,12 @@ func testRestoreImportCommandCarriesProvenance(t *testing.T, pg bool) {
 	if scalar[string](t, f.s.st, `SELECT kind||':'||state||':'||runtime_id||':'||payload_sha256 FROM app_platform_operation_effects WHERE operation_id=? AND stage='restore_data' AND effect_number=1`, commit.OperationID) !=
 		"import-checkpoint:prepared:"+f.replacement.id+":"+c.PayloadSHA256 {
 		t.Fatal("effect bookkeeping does not match the command")
+	}
+	// The runner verifies the command against the release descriptor it names, so the intent must
+	// carry the very descriptor the Portal staged for that release.
+	stored, err := platformReleaseDescriptor(migExec{s: f.s.st, ex: f.s.st.db}, p.ReleaseSHA256)
+	if err != nil || len(intent.descriptor) == 0 || !bytes.Equal(intent.descriptor, stored) {
+		t.Fatalf("intent does not carry the release descriptor: %v", err)
 	}
 	again, err := f.s.preparePlatformRestoreImport(context.Background(), lease)
 	if err != nil || again.effectID != intent.effectID || again.command.PayloadSHA256 != c.PayloadSHA256 {

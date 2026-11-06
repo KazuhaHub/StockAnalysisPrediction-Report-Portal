@@ -224,7 +224,11 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 	} else if command.PayloadSHA256 != digest {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	return platformImportIntent{effectID: effectID, runtime: runtime, authority: platformImportAuthority(runtime), command: command}, fresh, nil
+	descriptor, err := platformReleaseDescriptor(e, ev.source.release)
+	if err != nil || len(descriptor) == 0 {
+		return zero, false, fmt.Errorf("%w: release descriptor", errAppPlatformStageEvidence)
+	}
+	return platformImportIntent{effectID: effectID, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor}, fresh, nil
 }
 
 func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected platformOperationLease) (platformImportIntent, error) {

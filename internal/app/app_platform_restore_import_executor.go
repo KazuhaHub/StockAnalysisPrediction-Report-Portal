@@ -73,6 +73,7 @@ type platformImportIntent struct {
 	runtime        platformRuntimeRegistration
 	authority      control.Authority
 	command        control.ImportCheckpointCommand
+	descriptor     []byte
 	raw, signature []byte
 }
 
@@ -94,11 +95,19 @@ type platformImportCheckpointExecutor interface {
 type platformImportTransport struct{}
 
 func (platformImportTransport) Execute(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
-	return platformExecuteImportCheckpoint(ctx, endpoint, intent)
+	observation, err := platformExecuteImportCheckpoint(ctx, endpoint, intent)
+	if err != nil {
+		return nil, err
+	}
+	return observation, nil
 }
 
 func (platformImportTransport) Read(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
-	return platformReadImportCheckpointReceipt(ctx, endpoint, intent)
+	observation, err := platformReadImportCheckpointReceipt(ctx, endpoint, intent)
+	if err != nil {
+		return nil, err
+	}
+	return observation, nil
 }
 
 func (s *Server) platformImportExecutor() platformImportCheckpointExecutor {
