@@ -77,66 +77,85 @@ func (s *Server) dek() ([]byte, error) {
 }
 
 func (s *Server) loadOrCreateDEK() ([]byte, error) {
-	saltB64, wrapped, ok := s.st.Keyring()
-	if ok {
-		salt, err := base64.StdEncoding.DecodeString(saltB64)
-		if err != nil {
-			return nil, fmt.Errorf("keyring salt is corrupt: %w", err)
+	stored, err := readStoredKeyring(s.st.poolExec())
+	if err != nil {
+		return nil, err
+	}
+	if !stored.exists {
+		if err := s.createKeyringCandidate(); err != nil {
+			return nil, err
 		}
-		kek, err := s.kek(salt)
+		// Another process may have won initialization. Never cache the local
+		// candidate: only the atomically stored pair can open durable secrets.
+		stored, err = readStoredKeyring(s.st.poolExec())
 		if err != nil {
 			return nil, err
 		}
-		dek, err := aesOpen(kek, wrapped, []byte("dek"))
-		if err == nil {
-			// The keyring opened under the key in force. A previous key still configured is now
-			// dead weight — harmless, but it is a second live key sitting on disk.
-			if s.cfg.SecretKeyPrevious != "" {
-				log.Printf("keyring: secret_key_previous is set but not needed — the keyring already opens under the current secret_key; remove it from the config")
-			}
-			return dek, nil
+		if !stored.exists {
+			return nil, errKeyringIncomplete
 		}
-		// This is what a rotated secret_key looks like, and it is the whole reason the keyring is an
-		// envelope: the data key that actually encrypts the secrets never changes, so a rotation has
-		// to re-wrap ONE row rather than re-encrypt everything. That was the design and nothing
-		// implemented it, so rotating left the data key permanently unopenable — SSO down, captcha
-		// silently failing, and no page able to repair it, because saving a secret needs the very
-		// key that will not open.
-		if s.cfg.SecretKeyPrevious != "" {
-			if dek, rerr := s.rewrapKeyring(salt, wrapped); rerr == nil {
-				return dek, nil
-			} else {
-				log.Printf("keyring: secret_key_previous did not open the keyring either: %v", rerr)
-			}
-		}
-		// Named remedies, not an opaque crypto error: one of these is always the answer, and an
-		// operator reading this at 3am should not have to derive them.
-		return nil, fmt.Errorf("cannot unwrap the SSO key — secret_key looks rotated. "+
-			"Put the OLD key in secret_key_previous (or RP_SECRET_KEY_PREVIOUS) and restart once to "+
-			"re-wrap it; or, if the old key is gone, delete the two keyring rows from `meta` "+
-			"(%s, %s) and re-enter the SSO secrets, which cannot be recovered without it: %w",
-			setKeyringSalt, setKeyringDEK, err)
 	}
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return nil, err
-	}
-	dek := make([]byte, 32)
-	if _, err := rand.Read(dek); err != nil {
-		return nil, err
+	return s.openStoredKeyring(stored.salt, stored.wrapped)
+}
+
+func (s *Server) openStoredKeyring(saltB64, wrapped string) ([]byte, error) {
+	salt, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return nil, fmt.Errorf("keyring salt is corrupt: %w", err)
 	}
 	kek, err := s.kek(salt)
 	if err != nil {
 		return nil, err
 	}
+	dek, err := aesOpen(kek, wrapped, []byte("dek"))
+	if err == nil {
+		// The keyring opened under the key in force. A previous key still configured is now
+		// dead weight — harmless, but it is a second live key sitting on disk.
+		if s.cfg.SecretKeyPrevious != "" {
+			log.Printf("keyring: secret_key_previous is set but not needed — the keyring already opens under the current secret_key; remove it from the config")
+		}
+		return dek, nil
+	}
+	// This is what a rotated secret_key looks like, and it is the whole reason the keyring is an
+	// envelope: the data key that actually encrypts the secrets never changes, so a rotation has
+	// to re-wrap ONE row rather than re-encrypt everything. That was the design and nothing
+	// implemented it, so rotating left the data key permanently unopenable — SSO down, captcha
+	// silently failing, and no page able to repair it, because saving a secret needs the very
+	// key that will not open.
+	if s.cfg.SecretKeyPrevious != "" {
+		if dek, rerr := s.rewrapKeyring(salt, wrapped); rerr == nil {
+			return dek, nil
+		} else {
+			log.Printf("keyring: secret_key_previous did not open the keyring either: %v", rerr)
+		}
+	}
+	// Named remedies, not an opaque crypto error: one of these is always the answer, and an
+	// operator reading this at 3am should not have to derive them.
+	return nil, fmt.Errorf("cannot unwrap the SSO key — secret_key looks rotated. "+
+		"Put the OLD key in secret_key_previous (or RP_SECRET_KEY_PREVIOUS) and restart once to "+
+		"re-wrap it; or, if the old key is gone, delete the two keyring rows from `meta` "+
+		"(%s, %s) and re-enter the SSO secrets, which cannot be recovered without it: %w",
+		setKeyringSalt, setKeyringDEK, err)
+}
+
+func (s *Server) createKeyringCandidate() error {
+	salt := make([]byte, 16)
+	if _, err := rand.Read(salt); err != nil {
+		return err
+	}
+	dek := make([]byte, 32)
+	if _, err := rand.Read(dek); err != nil {
+		return err
+	}
+	kek, err := s.kek(salt)
+	if err != nil {
+		return err
+	}
 	sealed, err := aesSeal(kek, dek, []byte("dek"))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err := s.st.SaveKeyring(base64.StdEncoding.EncodeToString(salt), sealed); err != nil {
-		return nil, err
-	}
-	return dek, nil
+	return s.st.SaveKeyring(base64.StdEncoding.EncodeToString(salt), sealed)
 }
 
 // rewrapKeyring opens the keyring under the previous secret_key and closes it under the current one.
@@ -203,12 +222,14 @@ func (s *Server) openSecret(slug, purpose, sealed string) (string, error) {
 // aad binds a ciphertext to where it is stored.
 func aad(slug, purpose string) []byte { return []byte(slug + "\x00" + purpose) }
 
-// Keyring returns the stored salt and wrapped DEK. ok=false when the keyring has not been created
-// yet (no auth secret has ever been sealed).
+// Keyring retains the legacy non-error read; ok=false means absent or unavailable.
+// Initialization uses readStoredKeyring directly so errors cannot imply creation.
 func (s *Store) Keyring() (salt, wrappedDEK string, ok bool) {
-	salt = s.GetSetting(setKeyringSalt, "")
-	wrappedDEK = s.GetSetting(setKeyringDEK, "")
-	return salt, wrappedDEK, salt != "" && wrappedDEK != ""
+	stored, err := readStoredKeyring(s.poolExec())
+	if err != nil {
+		return "", "", false
+	}
+	return stored.salt, stored.wrapped, stored.exists
 }
 
 // PurgeExpiredAuthState drops expired pending logins and expired SAML replay entries. Both are
@@ -229,19 +250,6 @@ func (s *Store) PurgeExpiredAuthState(now time.Time) (requests, assertions int64
 	}
 	assertions, _ = res.RowsAffected()
 	return requests, assertions, nil
-}
-
-// SaveKeyring writes the single keyring row, refusing to overwrite one that already exists.
-// Replacing it would make every secret sealed under the old DEK permanently unreadable, so the
-// write is create-if-absent and a caller that raced loses harmlessly.
-func (s *Store) SaveKeyring(salt, wrappedDEK string) error {
-	if _, _, ok := s.Keyring(); ok {
-		return nil
-	}
-	if err := s.SetSetting(setKeyringSalt, salt); err != nil {
-		return err
-	}
-	return s.SetSetting(setKeyringDEK, wrappedDEK)
 }
 
 // RewrapKeyring replaces the wrapped data key, deliberately bypassing SaveKeyring's create-once

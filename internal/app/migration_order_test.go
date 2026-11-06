@@ -13,7 +13,7 @@ import (
 //
 // When a branch adds a step, append its id here as well. A rebase that resolves the migrations() line
 // by sorting the ids fails this test.
-var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006", "0010", "0009", "0007", "0008", "0011", "0012", "0013", "0014"}
+var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006", "0010", "0009", "0007", "0008", "0011", "0012", "0013", "0014", "0015", "0016", "0017", "0018", "0019", "0020"}
 
 // reservedMigrationIDs are ids held by a long-lived branch that has not reached main. main must not
 // define them: the branch merges main in regularly and the ledger is keyed by id, so a second step with
@@ -25,14 +25,7 @@ var migrationListOrder = []string{"0001", "0002", "0003", "0004", "0005", "0006"
 // entries are gone. Reserving an id does not reserve a position: if main appends a step first, the
 // branch's steps are appended after it, so databases and backups written by a pre-merge build of the
 // branch are disposable.
-var reservedMigrationIDs = map[string]string{
-	"0015": "application platform (feat/app-platform-integration)",
-	"0016": "application platform (feat/app-platform-integration)",
-	"0017": "application platform (feat/app-platform-integration)",
-	"0018": "application platform (feat/app-platform-integration)",
-	"0019": "application platform (feat/app-platform-integration)",
-	"0020": "application platform (feat/app-platform-integration)",
-}
+var reservedMigrationIDs = map[string]string{}
 
 func TestMigrationListKeepsItsMergeOrder(t *testing.T) {
 	st := newTestStore(t)

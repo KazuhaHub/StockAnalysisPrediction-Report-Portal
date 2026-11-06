@@ -1,0 +1,368 @@
+package app
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
+)
+
+func TestManagedInstallRequiresOpaqueRuntimeFacts(t *testing.T) {
+	s, session, release := platformInstallFixture(t, false)
+	if _, err := s.createPlatformManagedInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("missing runtime minted managed review")
+	}
+	if _, err := s.consumePlatformManagedInstallReview(context.Background(), session, platformFixtureID(880), release.sha256, platformFixtureID(881), platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("missing runtime consumed managed review")
+	}
+	if _, err := s.createPlatformInstallReviewForFormatContext(context.Background(), session, release.sha256, 1, nil, platformManagedInstallFormat); err == nil {
+		t.Fatal("caller format minted managed review")
+	}
+	policy, err := appplatform.ParseHTTPPolicy([]byte(platformNetworkPolicyFixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformNetworkWritableInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}, policy.Policy); err == nil {
+		t.Fatal("network policy metadata minted runtime facts")
+	}
+	streamPolicy, err := appplatform.ParseHTTPStreamPolicy([]byte(platformNetworkStreamPolicyFixture(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformNetworkStreamWritableInstallReview(context.Background(), session, release.sha256, 1, nil, platformRuntimeEndpoint{}, streamPolicy.Policy); err == nil {
+		t.Fatal("stream policy metadata minted runtime facts")
+	}
+	if _, err := s.consumePlatformNetworkWritableInstallReview(context.Background(), session, platformFixtureID(880), release.sha256, platformFixtureID(881), platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("missing review became network grant")
+	}
+	if _, err := managedInstallTarget(platformManagedRuntimeFacts{}, platformRuntimeEndpoint{}); err == nil {
+		t.Fatal("zero facts minted target")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_review_plans`)+scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 {
+		t.Fatal("refused managed review created authority")
+	}
+}
+func testManagedInstallTargetValidation(t *testing.T, pg bool) {
+	s, _, lease := platformDataIntentFixture(t, pg)
+	intent, err := s.preparePlatformInstallData(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := intent.runtime
+	target := platformManagedInstallTarget{RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision, ControlRevision: r.controlRevision, Fingerprint: r.fingerprint, Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol, SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(999), RootInode: "10"}}
+	e := migExec{s: s.st, ex: s.st.db}
+	if err := validateManagedInstallTarget(e, &target, lease.controllerEpoch); err != nil {
+		t.Fatal("synthetic target metadata", err)
+	}
+	for _, mode := range []string{"runtime", "epoch", "binding", "control", "fingerprint", "ready", "platform", "root", "inode", "sandbox"} {
+		copy := target
+		switch mode {
+		case "runtime":
+			copy.RuntimeID = platformFixtureID(900)
+		case "epoch":
+			copy.ControllerEpoch = platformFixtureID(900)
+		case "binding":
+			copy.BindingRevision++
+		case "control":
+			copy.ControlRevision++
+		case "fingerprint":
+			copy.Fingerprint = ""
+		case "ready":
+			copy.Profile.ExecutionReady = true
+		case "platform":
+			copy.Profile.Platform = "linux/other"
+		case "root":
+			copy.Profile.RootFilesystemUUID = ""
+		case "inode":
+			copy.Profile.RootInode = "0"
+		case "sandbox":
+			copy.Profile.SandboxProfile = "unrestricted"
+		}
+		if err := validateManagedInstallTarget(e, &copy, lease.controllerEpoch); err == nil {
+			t.Fatal("changed target accepted", mode)
+		}
+	}
+	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=0`)
+	if err := validateManagedInstallTarget(e, &target, lease.controllerEpoch); err == nil {
+		t.Fatal("disabled target accepted")
+	}
+}
+func TestManagedInstallTargetSQLite(t *testing.T)   { testManagedInstallTargetValidation(t, false) }
+func TestManagedInstallTargetPostgres(t *testing.T) { testManagedInstallTargetValidation(t, true) }
+func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
+	raw, err := os.ReadFile("../appplatform/testdata/descriptors/managed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := appplatform.ParseDescriptor(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := parsed.Manifest
+	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
+	m.Capabilities.Required = []string{}
+	m.Capabilities.Optional = nil
+	target := &platformManagedInstallTarget{Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol}}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal(err)
+	}
+	m.Capabilities.Required = []string{"storage.files"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("platform object storage provider refused", err)
+	}
+	m.Capabilities.Required = []string{"secrets.use"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("implemented secrets.use provider refused", err)
+	}
+	m.Capabilities.Required = []string{"secrets.read"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err == nil {
+		t.Fatal("raw credential disclosure admitted")
+	}
+	m.Capabilities.Required = []string{"background.run", "reports.read"}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("background service identity provider refused", err)
+	}
+	m.Capabilities.Required = []string{"background.run", "notifications.publish"}
+	if selection, err := platformInstallCapabilitySelection(m, target); err != nil || len(selection) != 2 || !selection[1].granted {
+		t.Fatal("notification capability selection", selection, err)
+	}
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err != nil {
+		t.Fatal("notification publication provider refused", err)
+	}
+	m.Capabilities.Required = []string{}
+	if err := installRequirementsForTarget(m, platformFrontendInstallFormat, target); err == nil {
+		t.Fatal("managed metadata entered frontend profile")
+	}
+	m.Backend = nil
+	if err := installRequirementsForTarget(m, platformManagedInstallFormat, target); err == nil {
+		t.Fatal("static release became managed")
+	}
+}
+
+func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
+	t.Helper()
+	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
+	var m appplatform.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	m.ID = "scheduled-digest"
+	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
+	m.Capabilities.Required = []string{}
+	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, archive
+}
+
+func platformScheduledDigestReleaseFixture(
+	t *testing.T, platform string,
+) ([]byte, []byte) {
+	t.Helper()
+	candidate := os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE")
+	if candidate == "" {
+		return platformManagedReleaseFixture(t, platform)
+	}
+	raw, err := os.ReadFile(candidate + "/descriptor.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := os.ReadFile(candidate + "/frontend.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m appplatform.Manifest
+	if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" ||
+		m.Backend == nil {
+		t.Fatal("scheduled digest candidate identity")
+	}
+	m.Publisher = "fixture-publisher"
+	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
+	if image := scheduledDigestManagedImage(); image != "" {
+		m.Backend.Image = image
+	}
+	raw, err = json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, archive
+}
+
+func scheduledDigestExactManaged() bool {
+	return os.Getenv("PORTAL_SCHEDULED_DIGEST_EXACT") == "1"
+}
+
+func scheduledDigestManagedImage() string {
+	if scheduledDigestExactManaged() {
+		return os.Getenv("APP_SCHEDULED_DIGEST_NATIVE_IMAGE")
+	}
+	return os.Getenv("PORTAL_MANAGED_IMAGE")
+}
+
+func TestManagedInstallSignedRelease(t *testing.T) {
+	s, session := platformTrustTestServer(t, false)
+	platformRegisterTestPublisher(t, s, session)
+	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
+	release, err := s.stagePlatformRelease(session, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal("managed signed release", err)
+	}
+	if release.appID != "scheduled-digest" {
+		t.Fatal("wrong managed fixture identity")
+	}
+	if _, err := s.createPlatformNativeInstallReview(session, release.sha256, 1); err == nil {
+		t.Fatal("legacy admitted managed fixture")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 {
+		t.Fatal("release staging granted installation")
+	}
+}
+
+func testLegacyAppContinuesWhenManagedReleaseIsRejected(
+	t *testing.T, postgres bool,
+) {
+	t.Helper()
+	s, session := platformTrustTestServer(t, postgres)
+	platformRegisterTestPublisher(t, s, session)
+	raw, archive := platformManagedReleaseFixture(t, "linux/amd64")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("<h1>legacy application remains</h1>")
+	if err := s.st.InstallApp(App{
+		ID: manifest.ID, Name: "Legacy fixture", Version: "legacy-1",
+		Entry: "index.html",
+	}, map[string]AppFile{
+		"index.html": {
+			Ctype: "text/html", Content: content,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	release, err := s.stagePlatformRelease(
+		session, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.createPlatformNativeInstallReview(
+		session, release.sha256, 1,
+	); err == nil {
+		t.Fatal("managed release was admitted through the legacy consumer")
+	}
+	legacy, ok := s.st.GetApp(manifest.ID)
+	if !ok || legacy.Name != "Legacy fixture" ||
+		legacy.Version != "legacy-1" ||
+		legacy.Entry != "index.html" {
+		t.Fatalf("legacy manifest changed: %+v %v", legacy, ok)
+	}
+	ctype, stored, ok := s.st.AppFile(manifest.ID, "index.html")
+	if !ok || ctype != "text/html" || !bytes.Equal(stored, content) {
+		t.Fatalf("legacy file changed: %q %q %v",
+			ctype, stored, ok)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations`) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations`) != 0 {
+		t.Fatal("rejected managed admission created platform work")
+	}
+	s.appTok = newAppTokens(time.Hour)
+	request := httptest.NewRequest(
+		"POST", "/api/apps/"+manifest.ID+"/token", nil)
+	request.SetPathValue("id", manifest.ID)
+	response := httptest.NewRecorder()
+	s.apiAppToken(response, request, session.username)
+	if response.Code != http.StatusOK {
+		t.Fatalf("legacy app token path failed: %d %s",
+			response.Code, response.Body.String())
+	}
+}
+
+func TestLegacyAppContinuesWhenManagedReleaseIsRejectedSQLite(t *testing.T) {
+	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, false)
+}
+
+func TestLegacyAppContinuesWhenManagedReleaseIsRejectedPostgres(t *testing.T) {
+	testLegacyAppContinuesWhenManagedReleaseIsRejected(t, true)
+}
+
+func TestScheduledDigestCandidateRelease(t *testing.T) {
+	if os.Getenv("APP_SCHEDULED_DIGEST_CANDIDATE") == "" {
+		t.Skip("scheduled digest candidate not supplied")
+	}
+	s, session := platformTrustTestServer(t, false)
+	platformRegisterTestPublisher(t, s, session)
+	raw, archive := platformScheduledDigestReleaseFixture(t, "linux/amd64")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Capabilities.Required = []string{
+		"background.run", "events.subscribe", "reports.read",
+		"secrets.use", "storage.files", "tasks.schedule",
+	}
+	manifest.Backend.Image = os.Getenv("PORTAL_MANAGED_IMAGE")
+	raw, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.stagePlatformRelease(
+		session, raw, platformSignTestDescriptor(t, raw), archive); err != nil {
+		t.Fatal(err)
+	}
+	if err := installRequirementsForTarget(
+		manifest, platformManagedInstallFormat,
+		&platformManagedInstallTarget{
+			Profile: transport.ManagedRuntimeProfile{
+				Protocol:        transport.ManagedRunnerProtocol,
+				Platform:        "linux/amd64",
+				BackendProtocol: transport.ManagedBackendProtocol,
+				SandboxProfile:  control.CandidateSandboxProfile,
+			},
+		}); err != nil {
+		t.Fatal("scheduled digest managed requirements", err)
+	}
+}
+
+func TestManagedPackageStagingDefersOnlyRunnerCompatibility(t *testing.T) {
+	raw, _ := platformManagedReleaseFixture(t, "linux/amd64")
+	parsed, err := appplatform.ParseDescriptor(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := platformPackageRequirements(parsed.Manifest); err != nil {
+		t.Fatal("runner availability was required before staging", err)
+	}
+	for name, mutate := range map[string]func(*appplatform.Manifest){
+		"platform api": func(m *appplatform.Manifest) {
+			m.Compatibility.PlatformAPI = ">=3.0.0"
+		},
+		"required capability": func(m *appplatform.Manifest) {
+			m.Capabilities.Required = []string{"secrets.read"}
+		},
+		"duplicate capability": func(m *appplatform.Manifest) {
+			m.Capabilities.Required = []string{"storage.files", "storage.files"}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			manifest := parsed.Manifest
+			mutate(&manifest)
+			if err := platformPackageRequirements(manifest); err == nil {
+				t.Fatal("invalid package metadata passed staging requirements")
+			}
+		})
+	}
+}
