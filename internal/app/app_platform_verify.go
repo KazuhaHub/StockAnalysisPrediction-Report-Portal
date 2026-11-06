@@ -2,19 +2,29 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
 )
 
 // Verification is read-only. Catalog definitions, not the migration ledger or
 // constraint names alone, must still establish the approved storage contract.
+//
+// Step 0015 accepts either action list on the two tables 0021 widens: a database that has not yet
+// applied 0021 still carries the frozen legacy list, and verification runs before that step.
 func verifyAppPlatformSchema(e migExec) error {
-	return verifyPlatformSchemaProducts(e, platformSchemaTables(), platformSchemaIndexes())
+	return verifyPlatformSchemaProductsWithAlternates(e, platformSchemaTables(), platformSchemaIndexes(), platformLegacySchemaTables())
 }
 
 func verifyPlatformSchemaProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex) error {
+	return verifyPlatformSchemaProductsWithAlternates(e, tables, declaredIndexes, nil)
+}
+
+// alternates are other acceptable definitions of tables in the first list, matched by name. A table
+// in the alternates that is not in the list is ignored.
+func verifyPlatformSchemaProductsWithAlternates(e migExec, tables []platformTable, declaredIndexes []platformIndex, alternates []platformTable) error {
 	if e.s.driver == "postgres" {
-		return verifyPlatformPostgresProducts(e, tables, declaredIndexes)
+		return verifyPlatformPostgresProducts(e, tables, declaredIndexes, alternates)
 	}
 	var enabled int
 	if err := e.queryRow("PRAGMA foreign_keys").Scan(&enabled); err != nil {
@@ -23,12 +33,17 @@ func verifyPlatformSchemaProducts(e migExec, tables []platformTable, declaredInd
 	if enabled != 1 {
 		return fmt.Errorf("application control requires foreign-key enforcement")
 	}
-	expected := map[string]string{}
+	expected := map[string][]string{}
 	for _, t := range tables {
-		expected[platformPrefix+t.name] = compactPlatformSQL(t.ddl("sqlite"))
+		expected[platformPrefix+t.name] = append(expected[platformPrefix+t.name], compactPlatformSQL(t.ddl("sqlite")))
+	}
+	for _, t := range alternates {
+		if _, ok := expected[platformPrefix+t.name]; ok {
+			expected[platformPrefix+t.name] = append(expected[platformPrefix+t.name], compactPlatformSQL(t.ddl("sqlite")))
+		}
 	}
 	for _, i := range declaredIndexes {
-		expected[i.name] = compactPlatformSQL(i.ddl())
+		expected[i.name] = []string{compactPlatformSQL(i.ddl())}
 	}
 	rows, err := e.query(`SELECT name,sql FROM sqlite_master WHERE sql IS NOT NULL`)
 	if err != nil {
@@ -44,7 +59,7 @@ func verifyPlatformSchemaProducts(e migExec, tables []platformTable, declaredInd
 		if !ok {
 			continue
 		}
-		if compactPlatformSQL(definition) != want {
+		if !slices.Contains(want, compactPlatformSQL(definition)) {
 			return fmt.Errorf("application control product %s has an incompatible definition", name)
 		}
 		delete(expected, name)
@@ -66,7 +81,7 @@ func platformTableFilter(tables []platformTable) string {
 	return "(" + strings.Join(names, ",") + ")"
 }
 
-func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex) error {
+func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredIndexes []platformIndex, alternates []platformTable) error {
 	type columnShape struct {
 		typ      string
 		nullable bool
@@ -75,6 +90,19 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 	constraints := map[string]string{}
 	constraintKinds := map[string]string{}
 	constraintTargets := map[string]string{}
+	alternateChecks := map[string]string{}
+	listed := map[string]bool{}
+	for _, t := range tables {
+		listed[t.name] = true
+	}
+	for _, t := range alternates {
+		if !listed[t.name] {
+			continue
+		}
+		for n, check := range t.checkExpressions("postgres") {
+			alternateChecks[fmt.Sprintf("%s_ck_%d", platformPrefix+t.name, n+1)] = check
+		}
+	}
 	for _, t := range tables {
 		name := platformPrefix + t.name
 		for _, c := range t.columns() {
@@ -146,7 +174,11 @@ func verifyPlatformPostgresProducts(e migExec, tables []platformTable, declaredI
 			same = compactPlatformForeignKey(definition, constraintTargets[name]) == compactPlatformForeignKey(want, constraintTargets[name])
 		}
 		if kind == "c" {
-			same = canonicalPlatformBoolean(strings.TrimSpace(strings.TrimPrefix(definition, "CHECK"))) == canonicalPlatformBoolean(want)
+			got := canonicalPlatformBoolean(strings.TrimSpace(strings.TrimPrefix(definition, "CHECK")))
+			same = got == canonicalPlatformBoolean(want)
+			if alternate, ok := alternateChecks[name]; ok && !same {
+				same = got == canonicalPlatformBoolean(alternate)
+			}
 		}
 		if !same {
 			rows.Close()

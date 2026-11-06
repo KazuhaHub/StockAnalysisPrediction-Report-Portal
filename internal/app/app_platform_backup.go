@@ -39,6 +39,7 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	var prior platformRestorePrior
 	if e.s.driver == "postgres" {
 		names := append(migration0015().tables, migration0016().tables...)
+		names = append(names, migration0021().tables...)
 		sort.Strings(names)
 		if _, err := e.exec("LOCK TABLE " + strings.Join(names, ",") + " IN ACCESS EXCLUSIVE MODE"); err != nil {
 			return prior, err
@@ -148,6 +149,9 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 		{`UPDATE app_platform_recovery_sets SET state='review_required',controller_epoch=?,updated_ms=? WHERE state<>'deleted'`, []any{epoch, now}},
 		{`UPDATE app_platform_review_plans SET expires_ms=CASE WHEN expires_ms>? THEN ? ELSE expires_ms END,updated_ms=?`, []any{now, now, now}},
 		{`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=? WHERE state='prepared'`, []any{now}},
+		// An issued import grant authorises one import into the database it was issued in; a restored
+		// database is a different one. Consumed grants are history and stay as they are.
+		{`UPDATE app_platform_import_grants SET state='revoked',updated_ms=? WHERE state='issued'`, []any{now}},
 	}
 	for _, statement := range statements {
 		if _, err := e.exec(statement.q, statement.args...); err != nil {

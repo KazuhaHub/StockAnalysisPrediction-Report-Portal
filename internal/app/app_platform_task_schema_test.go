@@ -59,7 +59,8 @@ func TestAppPlatformTaskSnapshotsDoNotReferencePublisherOrReleaseRows(t *testing
 func TestAppPlatformTaskOlderDumpRestoresWithEmptyTables(t *testing.T) {
 	src := newTestStore(t)
 	tables := append(migration0019().tables, migration0020().tables...)
-	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0019", "0020"})
+	tables = append(tables, migration0021().tables...)
+	dump := withoutSections(t, dumpOf(t, src), tables, []string{"0019", "0020", "0021"})
 	if bytes.Contains(dump, []byte(`"0019"`)) || bytes.Contains(dump, []byte(`"0020"`)) || bytes.Contains(dump, []byte("app_platform_tasks")) {
 		t.Fatal("fixture still describes 0019 or 0020")
 	}

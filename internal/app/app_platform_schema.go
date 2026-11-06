@@ -83,8 +83,16 @@ func platformEnum(column string, values ...string) string {
 	}
 	return strings.Join(parts, " OR ")
 }
-func platformActions() string {
+
+// platformLegacyActions is the action list migration 0015 created. It is frozen: 0015 still creates
+// its tables with it, and step 0021 widens the stored list to platformActions.
+func platformLegacyActions() string {
 	return platformEnum("action", "install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore")
+}
+
+// platformActions is the current action list of review_plans and operations.
+func platformActions() string {
+	return platformEnum("action", "install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore", "restore_import")
 }
 
 func (t platformTable) columns() []platformColumn {
@@ -212,7 +220,7 @@ func (i platformIndex) ddlOn(table string) string {
 }
 
 func migration0015() migration {
-	tables, indexes := platformSchemaTables(), platformSchemaIndexes()
+	tables, indexes := platformLegacySchemaTables(), platformSchemaIndexes()
 	m := migration{id: "0015", restore: restoreRule{olderDumpOK: true}, verify: verifyAppPlatformSchema}
 	for _, t := range tables {
 		m.tables = append(m.tables, platformPrefix+t.name)

@@ -72,6 +72,7 @@ func TestAppPlatformEventSubscriptionOlderDumpRestoresEmpty(t *testing.T) {
 	src := newTestStore(t)
 	dump := withoutSections(
 		t, dumpOf(t, src), migration0020().tables, []string{"0020"})
+	dump = withoutSections(t, dump, migration0021().tables, []string{"0021"})
 	if bytes.Contains(dump, []byte(`"0020"`)) ||
 		bytes.Contains(dump, []byte("app_platform_event_subscriptions")) {
 		t.Fatal("fixture still describes 0020")

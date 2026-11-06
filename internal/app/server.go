@@ -49,6 +49,11 @@ type Server struct {
 	platformNetworkStreams  platformDocumentBudget
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
 	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
+	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
+	// transport. platformImportRoots supplies the old host's checkpoint-root identity, which no stored
+	// receipt records today; nil refuses every import (see loadPlatformImportProvenance).
+	platformImportCheckpoint platformImportCheckpointExecutor
+	platformImportRoots      func(e migExec, recoverySetID string) (filesystemUUID, rootInode string, err error)
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

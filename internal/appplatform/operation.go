@@ -18,6 +18,9 @@ const (
 	ActionUninstall  Action = "uninstall"
 	ActionDeleteData Action = "delete_data"
 	ActionRestore    Action = "restore"
+	// ActionRestoreImport re-homes a restored installation onto a replacement runtime and imports
+	// one retained checkpoint by content. It exists only while a restored Portal is in recovery.
+	ActionRestoreImport Action = "restore_import"
 
 	StageQueued           Stage = "queued"
 	StageValidate         Stage = "validate"
@@ -196,6 +199,8 @@ func operationStages(action Action, managed bool) []Stage {
 		stages = append(stages, StageRevoke, StageQuiesce, StageSnapshot, StageRestoreData)
 		startAndProbe()
 		stages = append(stages, StageActivate)
+	case ActionRestoreImport:
+		stages = append(stages, StageRestoreData)
 	default:
 		return nil
 	}
