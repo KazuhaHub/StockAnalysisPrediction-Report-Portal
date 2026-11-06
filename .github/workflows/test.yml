@@ -117,6 +117,10 @@ jobs:
       # module graph back onto a vulnerable version without CI noticing. Pinned so a new advisory
       # database release is the only thing that can change this gate's verdict.
       - run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+      # The step above cannot see crewjam/saml: go.mod replaces it with an unversioned patched copy
+      # (third_party/crewjam-saml/PATCHED.md). This scans the released module instead, failing on any
+      # advisory the copy does not carry and once the carried one has an upstream fix.
+      - run: scripts/govulncheck-released-saml.sh
       # -count=1 disables Go's test result cache: the build cache is restored between runs, and a
       # cached "ok" from a previous run would let a flaky test report green without executing.
       - name: Test

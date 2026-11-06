@@ -5,6 +5,7 @@ go 1.26.10
 require (
 	github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a
 	github.com/KazuhaHub/authcore v0.6.1
+	github.com/beevik/etree v1.7.0
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/crewjam/saml v0.5.1
 	github.com/descope/virtualwebauthn v1.0.5
@@ -13,6 +14,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/mileusna/useragent v1.3.5
 	github.com/pquerna/otp v1.5.0
+	github.com/russellhaering/goxmldsig v1.6.1
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.37.0
@@ -23,7 +25,6 @@ require (
 
 require (
 	github.com/aymerick/douceur v0.2.0 // indirect
-	github.com/beevik/etree v1.7.0 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.4 // indirect
@@ -48,7 +49,6 @@ require (
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
-	github.com/russellhaering/goxmldsig v1.6.1 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	golang.org/x/image v0.43.0 // indirect
@@ -59,3 +59,8 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+// GO-2026-6909: crewjam/saml v0.5.1 is the latest release and is unfixed. The replacement is v0.5.1
+// with the upstream fix proposed in crewjam/saml#674 applied; see third_party/crewjam-saml/PATCHED.md
+// for provenance and the condition for removing this line.
+replace github.com/crewjam/saml => ./third_party/crewjam-saml
