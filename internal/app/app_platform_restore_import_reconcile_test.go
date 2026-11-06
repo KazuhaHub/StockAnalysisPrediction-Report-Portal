@@ -97,3 +97,30 @@ func TestRestoreImportUnknownStaysUnknownAndIsReRead(t *testing.T) {
 		t.Fatal("an unknown effect changed state, identity or grant")
 	}
 }
+
+// One installation is imported at most once per controller epoch, whichever recovery set was used.
+func TestRestoreImportRefusedAfterAnyImportInTheEpoch(t *testing.T) {
+	t.Run("consumed grant on another recovery set", func(t *testing.T) {
+		f := platformRestoreImportFixture(t, false)
+		mustExec(t, f.s.st, `INSERT INTO app_platform_recovery_sets(id,installation_id,data_namespace_id,operation_id,release_sha256,data_format,checkpoint_id,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms)
+			SELECT ?,installation_id,data_namespace_id,operation_id,release_sha256,data_format,?,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms FROM app_platform_recovery_sets WHERE id=?`,
+			platformFixtureID(5600), platformFixtureID(5601), f.recoverySet)
+		epoch := f.s.st.GetSetting("app_platform_controller_epoch", "")
+		mustExec(t, f.s.st, `INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'consumed',7,1,1)`,
+			platformFixtureID(5602), platformFixtureID(5600), f.replacement.id, epoch)
+		if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+			t.Fatal("an installation already imported from another recovery set was admitted")
+		}
+	})
+	t.Run("completed import without a consumed grant", func(t *testing.T) {
+		f := platformRestoreImportFixture(t, false)
+		commit := f.reviewAndConsume(t)
+		if done, err := f.drive(t, commit.OperationID); err != nil || done.snapshot.Stage != appplatform.StageComplete {
+			t.Fatal(err)
+		}
+		mustExec(t, f.s.st, `UPDATE app_platform_import_grants SET state='revoked',consumed_ms=NULL`)
+		if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+			t.Fatal("an installation with a completed import was admitted again")
+		}
+	})
+}
