@@ -25,7 +25,7 @@ schema.
 | Store | Change | Section |
 | --- | --- | --- |
 | Runner journal | Schema v2: `kind` gains `import-checkpoint`, `migrate-data`, `discard-migration`, `load-image`; explicit v1→v2 upgrade with tests on a populated v1 journal | 1, 2, 3 |
-| Portal platform schema | `operations.action` gains `restore_import`; one table `app_platform_import_grants` (id, recovery_set_id, runtime_id, controller_epoch, state, consumed_ms, timestamps) | 1 |
+| Portal platform schema | `operations.action` and `review_plans.action` gain `restore_import`; one table `app_platform_import_grants` (id, recovery_set_id, runtime_id, controller_epoch, state, consumed_ms, timestamps) | 1 |
 | Portal task retention | One table `app_platform_task_occurrence_tombstones` (installation_id, occurrence_id, payload_sha256, created_ms) kept for the operations retention period | 5 |
 | Descriptor contract | Revision: per-platform `manifest_digest` and `config_digest`, and per layer `diff_id` and `uncompressed_bytes`, for the backend image; `data.migrations` (single-hop `{from, to}`, migration entrypoint, wall-clock limit) | 2, 3 |
 | Offline envelope | `portalapp/2` with image manifest, config and layer blobs | 3 |
