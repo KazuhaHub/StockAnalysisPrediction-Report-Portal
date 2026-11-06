@@ -866,8 +866,12 @@ func (s *Server) claimNextPlatformRestoreResume(ctx context.Context, worker stri
 		if old.leaseUntilMS > facts.now || old.snapshot.Action != appplatform.ActionRestore || !old.snapshot.Managed {
 			continue
 		}
+		evidenceErr := error(nil)
 		if _, _, _, _, err := loadPlatformResumeCheckpoint(e, old); err != nil {
-			return zero, err
+			if !errors.Is(err, errAppPlatformStageEvidence) {
+				return zero, err
+			}
+			evidenceErr = err
 		}
 		lease, err := writePlatformOperationLease(e, facts, worker, nil)
 		if err != nil {
@@ -887,6 +891,14 @@ func (s *Server) claimNextPlatformRestoreResume(ctx context.Context, worker stri
 		}
 		if err := tx.Commit(); err != nil {
 			return zero, err
+		}
+		if evidenceErr != nil {
+			// The evidence of this resume no longer loads, so it can never run. It is leased properly
+			// above and ended for review here, which frees the claim for the resumes behind it.
+			if err := s.finishPlatformRestoreResumeForReview(ctx, lease); err != nil {
+				return zero, err
+			}
+			return zero, nil
 		}
 		return platformInstallSelection{lease: lease, operationID: id}, nil
 	}

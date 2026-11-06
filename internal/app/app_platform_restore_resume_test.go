@@ -514,3 +514,24 @@ func TestResumeUnknownStartStaysRecoveryRequired(t *testing.T) {
 func TestResumeUnknownStartStaysRecoveryRequiredPostgres(t *testing.T) {
 	testResumeUnknownStartStaysRecoveryRequired(t, true)
 }
+
+// A queued resume whose import evidence no longer loads is ended for review by the claim, rather than
+// failing every claim after it and so blocking the resumes that are fine.
+func TestResumeClaimEndsAQueuedResumeWhoseEvidenceFails(t *testing.T) {
+	f := platformResumeFixture(t, false)
+	ctx := context.Background()
+	commit := f.reviewAndConsumeResume(t)
+	mustExec(t, f.s.st, `UPDATE app_platform_import_grants SET state='revoked',consumed_ms=NULL`)
+	next, err := f.s.claimNextPlatformRestoreResume(ctx, platformFixtureID(5800))
+	if err != nil || next.lease.id != "" {
+		t.Fatalf("the claim was blocked or selected a broken resume: %+v %v", next, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed" ||
+		scalar[string](t, f.s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.installation) != "review_required" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.restore_resume_ended' AND target_id=?`, commit.OperationID) != 1 {
+		t.Fatal("the broken resume was not ended for review")
+	}
+	if again, err := f.s.claimNextPlatformRestoreResume(ctx, platformFixtureID(5801)); err != nil || again.lease.id != "" {
+		t.Fatalf("a later claim failed: %+v %v", again, err)
+	}
+}
