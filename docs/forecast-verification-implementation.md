@@ -324,12 +324,15 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 **Order of checks.** The first failing check decides `rejected`, but collect all errors that can be
 collected.
 
+0. **Unwrap.** A JSON string whose content is a valid JSON object, or `null`, is replaced by that
+   content; exactly one level. Every later step, including the size cap and the hash, sees the
+   unwrapped bytes. Any other string is left as is and fails step 3.
 1. **Raw empty or `null`.** If `predictionRtypes[rtype]`, return state `absent`. Otherwise return
    nil (no row).
 2. **Size.** `len(Raw) > predPayloadMax` → `too_large`. Store the first 64 KiB and set
    `payload_truncated=1`.
 3. **Shape.** The first non-space byte must be `{`, else `not_object`. This is what catches Dify
-   passing an unparseable template result as a string.
+   passing an unrendered template (`"{{#node.var#}}"`) or an emptied parameter (`""`).
 4. **Decode** into a struct with `DisallowUnknownFields()`. Failure → `bad_schema`. Unknown fields
    are refused here, unlike the report body, because the contract is new and strict.
    **Every price, probability and weight field is typed `json.RawMessage`**, never `string`.
@@ -420,7 +423,7 @@ classifier, plus HTTP tests through `v1Ingest`.
   - `"8.655"`, JSON number `8.65`, `"-1.00"` and `"1e2"` → `bad_price`;
   - `"1.0001"` and `"0.33333"` → `bad_probability`;
   - scenario sums of 9999 and 10001 → `probability_sum`; 10000 accepted;
-  - a string-valued payload → `not_object`;
+  - a string that does not hold a JSON object → `not_object`; a string holding one is unwrapped;
   - 64 KiB + 1 byte → `too_large` with `payload_truncated=1`;
   - an unknown field → `bad_schema`;
   - `stop_loss` at or above the baseline or the entry price → `stop_loss_level` (was `reserved_kind`
