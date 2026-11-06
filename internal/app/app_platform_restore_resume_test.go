@@ -535,3 +535,42 @@ func TestResumeClaimEndsAQueuedResumeWhoseEvidenceFails(t *testing.T) {
 		t.Fatalf("a later claim failed: %+v %v", again, err)
 	}
 }
+
+// A restore disables every publisher, which erases which ones the operator had disabled. The restore
+// records the publishers that were enabled before it, and recovery trusts no others.
+func TestRestoreRecordsPublishersEnabledBeforeIt(t *testing.T) {
+	enabled := func(t *testing.T, s *Server) string {
+		return scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_trusted_publishers'`)
+	}
+	t.Run("enabled publisher", func(t *testing.T) {
+		s, _, _, _ := platformManagedRestoreReviewFixture(t, false)
+		id := scalar[string](t, s.st, `SELECT id FROM app_platform_publishers`)
+		platformSimulateRestore(t, s)
+		if got := enabled(t, s); got != `["`+id+`"]` {
+			t.Fatalf("recorded publishers: %s", got)
+		}
+	})
+	t.Run("publisher disabled before the restore", func(t *testing.T) {
+		s, _, _, _ := platformManagedRestoreReviewFixture(t, false)
+		mustExec(t, s.st, `UPDATE app_platform_publishers SET enabled=0`)
+		platformSimulateRestore(t, s)
+		if got := enabled(t, s); got != `[]` {
+			t.Fatalf("a disabled publisher was recorded as enabled: %s", got)
+		}
+	})
+}
+
+func TestResumeRefusesAPublisherDisabledBeforeTheRestore(t *testing.T) {
+	f := platformResumeFixture(t, false)
+	if _, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err != nil {
+		t.Fatal("fixture: the enabled publisher was refused:", err)
+	}
+	mustExec(t, f.s.st, `UPDATE meta SET v='[]' WHERE k='app_platform_restore_trusted_publishers'`)
+	if review, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err == nil {
+		t.Fatalf("a resume was reviewed for a publisher that was disabled before the restore: %+v", review)
+	}
+	mustExec(t, f.s.st, `DELETE FROM meta WHERE k='app_platform_restore_trusted_publishers'`)
+	if _, err := f.s.createPlatformRestoreResumeReview(context.Background(), f.actor, f.installation, f.target()); err == nil {
+		t.Fatal("a resume was reviewed with no record of which publishers were trusted")
+	}
+}

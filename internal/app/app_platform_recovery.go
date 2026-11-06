@@ -73,6 +73,9 @@ func (s *Server) endPlatformRecoveryContext(ctx context.Context, session platfor
 		if err := platformLeaseCAS(changed, err); err != nil {
 			return err
 		}
+		if _, err := e.exec(`DELETE FROM meta WHERE k=?`, platformRestoreTrustedPublishersKey); err != nil {
+			return err
+		}
 		detail, _ := json.Marshal(struct {
 			Epoch string `json:"controller_epoch"`
 		}{control.epoch})

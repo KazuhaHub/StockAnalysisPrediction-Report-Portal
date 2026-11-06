@@ -179,15 +179,33 @@ func platformResumeSandboxProfile(e migExec, startEffect string) (string, error)
 
 // platformRecoveryTrust is the publisher trust a resume verifies a release against. A restore leaves
 // every publisher disabled and recovery admits no trust change, so the signature and key validity are
-// verified as they would be for an enabled publisher; the publisher stays disabled and is re-enabled by
-// the ordinary trust review once recovery has ended.
-func platformRecoveryTrust(trust appplatform.PublisherTrust) appplatform.PublisherTrust {
+// verified as they would be for an enabled publisher, but only for a publisher the restore recorded as
+// enabled before it ran. A publisher that was disabled before the backup, or any publisher when the
+// record is missing, stays untrusted. The publisher itself stays disabled and is re-enabled by the
+// ordinary trust review once recovery has ended.
+func platformRecoveryTrust(e migExec, trust appplatform.PublisherTrust) (appplatform.PublisherTrust, error) {
+	var raw string
+	if err := e.queryRow(`SELECT v FROM meta WHERE k=?`, platformRestoreTrustedPublishersKey).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			raw = "[]"
+		} else {
+			return trust, err
+		}
+	}
+	var ids []string
+	if json.Unmarshal([]byte(raw), &ids) != nil {
+		return trust, errAppPlatformStageEvidence
+	}
+	trusted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		trusted[id] = true
+	}
 	result := trust
 	result.Publishers = append([]appplatform.TrustedPublisher(nil), trust.Publishers...)
 	for i := range result.Publishers {
-		result.Publishers[i].Enabled = true
+		result.Publishers[i].Enabled = trusted[result.Publishers[i].ID]
 	}
-	return result
+	return result, nil
 }
 
 // platformResumeTargetMatches reports whether a managed-runtime target describes the replacement
@@ -289,7 +307,11 @@ func loadPlatformResumeCandidate(e migExec, installation string, runtime platfor
 	if err != nil {
 		return result, err
 	}
-	verified, err := platformVerifyStoredRelease(e, imp.source.release, result.trustRevision, platformRecoveryTrust(trust), now)
+	recovery, err := platformRecoveryTrust(e, trust)
+	if err != nil {
+		return result, err
+	}
+	verified, err := platformVerifyStoredRelease(e, imp.source.release, result.trustRevision, recovery, now)
 	if err != nil || verified.appID != result.appID || verified.publisherID != result.publisherID || !verified.managed {
 		return result, errAppPlatformStageEvidence
 	}

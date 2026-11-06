@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 type platformRestorePublisher struct {
 	id, namespaces             string
 	revision, created, updated int64
+	enabled                    int
 }
 type platformRestoreKey struct {
 	publisher, id, algorithm            string
@@ -49,14 +51,14 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 			return prior, err
 		}
 	}
-	rows, err := e.query(`SELECT id,namespaces_json,revision,created_ms,updated_ms FROM app_platform_publishers
+	rows, err := e.query(`SELECT id,namespaces_json,revision,created_ms,updated_ms,enabled FROM app_platform_publishers
         WHERE enabled=0 OR id IN (SELECT publisher_id FROM app_platform_publisher_keys WHERE revoked_ms IS NOT NULL)`)
 	if err != nil {
 		return prior, err
 	}
 	for rows.Next() {
 		var p platformRestorePublisher
-		if err := rows.Scan(&p.id, &p.namespaces, &p.revision, &p.created, &p.updated); err != nil {
+		if err := rows.Scan(&p.id, &p.namespaces, &p.revision, &p.created, &p.updated, &p.enabled); err != nil {
 			rows.Close()
 			return prior, err
 		}
@@ -87,6 +89,10 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	err = capturePlatformCredentialFloors(e, &prior)
 	return prior, err
 }
+
+// platformRestoreTrustedPublishersKey is the meta key holding the publishers that were enabled before
+// a restore, as a JSON array of ids. Recovery trusts only these; ending recovery removes it.
+const platformRestoreTrustedPublishersKey = "app_platform_restore_trusted_publishers"
 
 func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 	now := time.Now().UTC().UnixMilli()
@@ -130,6 +136,41 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 	}
 	epoch, err := platformNewUUID()
 	if err != nil {
+		return err
+	}
+	// The blanket disable below erases which publishers were trusted. Record them first, minus any the
+	// database being restored over had disabled, so recovery can trust exactly those and no others.
+	disabledBefore := map[string]bool{}
+	for _, p := range prior.publishers {
+		if p.enabled == 0 {
+			disabledBefore[p.id] = true
+		}
+	}
+	trusted := []string{}
+	rows, err := e.query(`SELECT id FROM app_platform_publishers WHERE enabled=1 ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if !disabledBefore[id] {
+			trusted = append(trusted, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	encodedTrusted, err := json.Marshal(trusted)
+	if err != nil {
+		return err
+	}
+	if err := e.setSetting(platformRestoreTrustedPublishersKey, string(encodedTrusted)); err != nil {
 		return err
 	}
 	statements := []struct {
