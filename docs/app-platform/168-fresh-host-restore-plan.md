@@ -236,12 +236,37 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   gate. While paused and idle the scheduler re-reads the original start effect at its stored fence. An
   applied receipt settles the effect and reopens the operation at the probe stage on a lease at that
   fence, which the unchanged stage code runs to ready (only while the installation's fence is still that
-  fence). A definite absence, after every command signed for the effect has expired (the original ones
-  are bounded by the end of the operation, the recovery read's expiry is recorded in the effect's receipt
-  column), reverts the effect and returns the installation to review for a new resume. A reserved start the
-  runner holds in state prepared or unknown stays unknown until the runtime is abandoned.
+  fence). A reserved start the runner holds in state prepared or unknown stays unknown until the runtime
+  is abandoned. (The fourth round changed what an absence reply means; see below.)
 - **Abandon.** The idempotency record is keyed by runtime and controller epoch. An installation the
   administrator already disabled in recovery is left alone and listed apart. The data roots that imports
   on the runtime were applied to are recorded in meta and a replacement whose import lands on one is
   refused. A runtime abandoned before any import was applied has no root to record. A consumed grant on a
   retired runtime no longer blocks a new import review.
+
+## Fourth-round review follow-ups
+
+- **Resume after an abandon.** A recovery set can carry the consumed grant of a retired runtime beside the
+  replacement's own. The resume loader selects its grant by the import receipt's grant id and the plan's
+  runtime instead of assuming a single live grant, so resume review and execution, and the resumed
+  backend's launch history, work after abandon and a second import.
+- **Absence of a reserved start.** A start effect that carries a recorded reservation was acknowledged by
+  the runner, so an absence reply for it means the runner's journal lost the row. The reconcile audits
+  that once and reverts nothing: the effect stays unknown, the operation `recovery_required`, and only an
+  abandon settles it. This replaces the earlier revert-on-absence rule. A start without a reservation is
+  never read here: ending the resume returns the installation to review at once. (Such an effect row stays
+  unknown on a `recovery_required` operation; settling it is not done.)
+- **Replacement data root.** Confirming a replacement observes the runner's profile and records the data
+  root it reports in meta (`app_platform_replacement_root`, one record, no DDL). Abandoning the runtime
+  carries that root into the abandoned roots beside the roots of applied imports, so an unknown or lost
+  import still leaves its root recorded. A replacement whose reported root is an abandoned one is refused at
+  confirm (the binding stays enabled so it can be abandoned in turn) and its import review is refused.
+- **Recovery-only operation states.** The revision one past an ordinary operation's last stage (a failure
+  settled out of `recovery_required`, a completion recovered out of it) is restored by the snapshot loader,
+  and offered by `Settle`, `Recover` and `Reopen`, only for the restore import and restore actions whose
+  recovery paths write it.
+- **Read-receipt signature purpose.** Import and restore-start read-receipt commands are signed under their
+  own purposes (`portal.app/runner-data-import-read/v1`, `portal.app/runner-data-update-start-read/v1`).
+  The runner verifies the purpose per action, so a captured read cannot be submitted as an execute and an
+  execute signature is not a read. The Portal signs both signatures with the command, so the read after a
+  lost execute reply uses the read one. Ordinary update-start and reservation reads are unchanged.
