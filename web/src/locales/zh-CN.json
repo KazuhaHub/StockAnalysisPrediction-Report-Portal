@@ -3850,6 +3850,7 @@
   "err.app_platform_package_untrusted": "软件包签名或发布者信任已变化。",
   "err.app_platform_requirements_unavailable": "此应用需要尚未支持的平台能力。",
   "err.app_platform_control_paused": "应用控制已暂停，等待恢复审核。",
+  "err.app_platform_recovery_unsettled": "应用恢复尚未完成：仍有安装需要恢复或停用，或有恢复导入、恢复操作正在运行。",
   "err.app_platform_operation_missing": "找不到此应用操作。",
   "err.app_platform_operation_failed": "应用操作失败，需要管理员审核。",
   "err.app_platform_busy": "应用校验繁忙，请稍后重试。",

@@ -3850,6 +3850,7 @@
   "err.app_platform_package_untrusted": "The package signature or publisher trust has changed.",
   "err.app_platform_requirements_unavailable": "This application requires platform features that are not available yet.",
   "err.app_platform_control_paused": "Application control is paused pending recovery review.",
+  "err.app_platform_recovery_unsettled": "Application recovery is not finished: an installation still needs to be resumed or disabled, or a restore import or resume is still running.",
   "err.app_platform_operation_missing": "This application operation was not found.",
   "err.app_platform_operation_failed": "The application operation failed. Administrator review is required.",
   "err.app_platform_busy": "Application verification is busy. Try again shortly.",

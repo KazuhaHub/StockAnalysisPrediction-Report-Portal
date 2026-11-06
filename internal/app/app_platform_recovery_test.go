@@ -3,8 +3,12 @@ package app
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func platformSetPause(t *testing.T, st *Store, paused string) {
@@ -157,3 +161,88 @@ func TestEndRecoveryRequiresSettledInstallationsSQLite(t *testing.T) {
 func TestEndRecoveryRequiresSettledInstallationsPostgres(t *testing.T) {
 	testEndRecoveryRequiresSettledInstallations(t, true)
 }
+
+// Ending recovery is an administrator action on the same surface as the other platform actions: it is
+// refused while any installation is unsettled or any resume is in flight, and once every installation
+// has been resumed through the real stages it clears the pause and leaves an audit row.
+func testEndRecoveryHTTP(t *testing.T, pg bool) {
+	f := platformResumeFixture(t, pg)
+	s := f.s
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	const path = "/api/admin/app-platform/control/end-recovery"
+	const body = `{"action":"end_recovery"}`
+	paused := func() string {
+		return scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`)
+	}
+	audits := func() int {
+		return scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_ended'`)
+	}
+	refused := func(why string) {
+		t.Helper()
+		got := sessionTestRequest(mux, "POST", path, cookie, body)
+		if got.Code != 409 || !strings.Contains(got.Body.String(), "app_platform_recovery_unsettled") {
+			t.Fatalf("%s: ending recovery answered %d %s", why, got.Code, got.Body.String())
+		}
+		if paused() != "1" || audits() != 0 {
+			t.Fatalf("%s: a refused request changed state", why)
+		}
+	}
+	refused("an installation still awaits review")
+	commit := f.reviewAndConsumeResume(t)
+	refused("a resume is in flight")
+	startLease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
+	refused("a resume has not reached ready")
+	platformResumeStartToReady(t, s, startLease, f.endpoint)
+	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.installation) != "ready" {
+		t.Fatal("fixture: the resume did not reach ready")
+	}
+
+	// The surface keeps the same guards as its siblings.
+	if got := sessionTestRequest(mux, "POST", path, cookie, `{"action":"initialize"}`); got.Code != 400 {
+		t.Fatalf("a wrong action was accepted: %d", got.Code)
+	}
+	foreign := httptest.NewRequest("POST", path, strings.NewReader(body))
+	foreign.Header.Set("Content-Type", "application/json")
+	foreign.Header.Set("Origin", "https://foreign.example")
+	foreign.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, foreign)
+	if rec.Code != 403 || paused() != "1" {
+		t.Fatalf("a cross-origin request ended recovery: %d", rec.Code)
+	}
+	if got := sessionTestRequest(mux, "POST", path, "", body); got.Code != 401 && got.Code != 403 {
+		t.Fatalf("an anonymous request reached the surface: %d", got.Code)
+	}
+	mustExec(t, s.st, `UPDATE users SET role='user' WHERE username=?`, f.actor.username)
+	if got := sessionTestRequest(mux, "POST", path, cookie, body); got.Code != 403 || paused() != "1" {
+		t.Fatalf("a non-administrator ended recovery: %d", got.Code)
+	}
+	mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, f.actor.username)
+
+	if err := s.st.SetSetting("notification_dispatch_paused", "1"); err != nil {
+		t.Fatal(err)
+	}
+	got := sessionTestRequest(mux, "POST", path, cookie, body)
+	if got.Code != 200 || !strings.Contains(got.Body.String(), `"ended":true`) {
+		t.Fatalf("a settled Portal could not end recovery: %d %s", got.Code, got.Body.String())
+	}
+	if paused() != "0" || audits() != 1 {
+		t.Fatalf("recovery ended without clearing the pause or leaving an audit row (paused=%s audits=%d)", paused(), audits())
+	}
+	if scalar[string](t, s.st, `SELECT actor FROM audit_log WHERE action='app_platform.recovery_ended'`) != f.actor.username {
+		t.Fatal("the audit row does not name the administrator")
+	}
+	// Notifications stay paused until their own review: ending recovery does not resume them.
+	if scalar[string](t, s.st, `SELECT v FROM meta WHERE k='notification_dispatch_paused'`) != "1" {
+		t.Fatal("ending recovery resumed notification dispatch")
+	}
+	// Ending it again is refused: the Portal is no longer in recovery.
+	if again := sessionTestRequest(mux, "POST", path, cookie, body); again.Code != 503 || audits() != 1 {
+		t.Fatalf("a second request answered %d with %d audits", again.Code, audits())
+	}
+}
+
+func TestEndRecoveryHTTP(t *testing.T)         { testEndRecoveryHTTP(t, false) }
+func TestEndRecoveryHTTPPostgres(t *testing.T) { testEndRecoveryHTTP(t, true) }

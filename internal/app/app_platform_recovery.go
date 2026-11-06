@@ -47,7 +47,11 @@ func (s *Server) withPlatformRecoveryTransactionContext(ctx context.Context, ses
 // Ending recovery does not resume anything: notifications and tasks stay paused until each is
 // reviewed through its own flow.
 func (s *Server) endPlatformRecovery(session platformActorSession) error {
-	return s.withPlatformRecoveryTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	return s.endPlatformRecoveryContext(context.Background(), session)
+}
+
+func (s *Server) endPlatformRecoveryContext(ctx context.Context, session platformActorSession) error {
+	return s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var inflight int
 		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE action IN ('restore_import','restore') AND completed_ms IS NULL`).Scan(&inflight); err != nil {
 			return err

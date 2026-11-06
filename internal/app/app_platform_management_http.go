@@ -179,6 +179,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_plan_changed"
 	case errors.Is(err, errAppPlatformOperationConflict):
 		status, code = 409, "app_platform_operation_conflict"
+	case errors.Is(err, errAppPlatformRecoveryUnsettled):
+		status, code = 409, "app_platform_recovery_unsettled"
 	case errors.Is(err, errAppPlatformCredentialUnavailable):
 		status, code = 409, "app_platform_credential_unavailable"
 	case errors.Is(err, errAppPlatformReleaseConflict), errors.Is(err, errAppPlatformTrustConflict):
