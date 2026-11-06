@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // platformReenablePublisherRequest is the ordinary trust review request that turns one publisher back
@@ -136,4 +137,53 @@ func TestResumedManagedAppRefusedOnBrokenEvidenceSQLite(t *testing.T) {
 }
 func TestResumedManagedAppRefusedOnBrokenEvidencePostgres(t *testing.T) {
 	testResumedManagedAppRefusedOnBrokenEvidence(t, true)
+}
+
+// An abandoned runtime that had applied its import leaves a consumed grant in the recovery set beside the
+// replacement's own. The resume, the end of recovery and the resumed backend's history each name the grant
+// by identity, so the retired runtime's grant does not make them refuse.
+func testResumeAfterAbandonedAppliedImport(t *testing.T, pg bool) {
+	f := platformResumeFixture(t, pg)
+	if _, err := f.abandon(t); err != nil {
+		t.Fatal(err)
+	}
+	f.executor.mutate = func(r *journal.ImportCheckpointReceipt) { r.Claim.RootFilesystemUUID = platformFixtureID(78) }
+	operation, err := f.reenrollAndImport(t, platformFixtureID(5102), platformFixtureID(5621))
+	if err != nil || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "complete" {
+		t.Fatalf("the import on the new replacement did not complete: %v", err)
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE state='consumed'`) != 2 {
+		t.Fatal("fixture: the recovery set does not carry two consumed grants")
+	}
+	f.rootUUID = platformFixtureID(78)
+	s, actor := f.s, f.actor
+	commit := f.reviewAndConsumeResume(t)
+	startLease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
+	if done := platformResumeStartToReady(t, s, startLease, f.endpoint); done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("the resume did not complete")
+	}
+	platformRecoveryActionHTTP(t, s, actor).endRecovery(200)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	publisher := scalar[string](t, s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, f.installation)
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/publishers", cookie, platformReenablePublisherRequest(t, s, publisher)); got.Code != 200 {
+		t.Fatalf("trust review: %d %s", got.Code, got.Body.String())
+	}
+	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
+		_, why := s.inspectPlatformLaunchAccess(actor, f.installation)
+		t.Fatalf("a resumed app did not launch after an abandoned applied import: %d %s (%v)", got.Code, got.Body.String(), why)
+	}
+	access, err := s.preparePlatformWritableBackendAccess(context.Background(), actor, f.installation)
+	if err != nil {
+		t.Fatal("the resumed backend history was refused:", err)
+	}
+	access.Close()
+}
+
+func TestResumeAfterAbandonedAppliedImportSQLite(t *testing.T) {
+	testResumeAfterAbandonedAppliedImport(t, false)
+}
+func TestResumeAfterAbandonedAppliedImportPostgres(t *testing.T) {
+	testResumeAfterAbandonedAppliedImport(t, true)
 }

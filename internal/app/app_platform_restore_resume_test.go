@@ -19,6 +19,9 @@ type platformResumeFixtureState struct {
 	*platformImportFixtureState
 	importOperation string
 	endpoint        platformRuntimeEndpoint
+	// rootUUID overrides the data root identity an observation reports, for a replacement whose import
+	// landed on another root than the fixture's default.
+	rootUUID string
 }
 
 func platformResumeFixture(t *testing.T, pg bool) *platformResumeFixtureState {
@@ -36,12 +39,16 @@ func platformResumeFixture(t *testing.T, pg bool) *platformResumeFixtureState {
 // data root the import landed on.
 func (f *platformResumeFixtureState) target() *platformManagedInstallTarget {
 	r := f.replacement
+	root := platformFixtureID(77)
+	if f.rootUUID != "" {
+		root = f.rootUUID
+	}
 	return &platformManagedInstallTarget{
 		RuntimeID: r.id, DeploymentID: r.deploymentID, ControllerEpoch: r.controllerEpoch, BindingRevision: r.revision,
 		ControlRevision: r.controlRevision, Fingerprint: r.fingerprint,
 		Profile: transport.ManagedRuntimeProfile{
 			Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol,
-			SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(77), RootInode: "555",
+			SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: root, RootInode: "555",
 		},
 	}
 }

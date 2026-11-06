@@ -128,12 +128,13 @@ func loadPlatformResumeImport(e migExec, installation string) (platformResumeImp
 		return fail("receipt")
 	}
 	r.receipt = receipt
-	// The grant that paid for this import: consumed together with the receipt, by this runner, and the
-	// only grant of the recovery set that is not revoked.
+	// The grant that paid for this import: the one the receipt names, on the plan's runtime, consumed
+	// together with the receipt. A recovery set may carry the consumed grant of a retired runtime from an
+	// earlier import, so the grant is selected by identity rather than by being the only live one.
 	var consumed sql.NullInt64
 	var grantState, grantRuntime, grantEpoch string
 	if err := e.queryRow(`SELECT id,state,consumed_ms,runtime_id,controller_epoch FROM app_platform_import_grants
-		WHERE recovery_set_id=? AND state<>'revoked'`+lock, plan.RecoverySetID).Scan(&r.grantID, &grantState, &consumed, &grantRuntime, &grantEpoch); err != nil ||
+		WHERE id=? AND recovery_set_id=? AND runtime_id=? AND state<>'revoked'`+lock, receipt.GrantID, plan.RecoverySetID, plan.RuntimeID).Scan(&r.grantID, &grantState, &consumed, &grantRuntime, &grantEpoch); err != nil ||
 		grantState != "consumed" || !consumed.Valid || consumed.Int64 != effectUpdated || grantRuntime != plan.RuntimeID ||
 		grantEpoch != plan.ControllerEpoch || r.grantID != receipt.GrantID {
 		return fail("grant")
