@@ -33,12 +33,13 @@ import (
 // action is a prepare and a confirm, like the replacement runtime's. Prepare lists exactly what will
 // change and the digest of that listing; confirm names the digest and is refused if any of the listed
 // work changed since. The confirmation is idempotent: its outcome is recorded under a meta key naming the
-// runtime, and the same confirmation again answers the recorded outcome without acting.
+// runtime and the controller epoch, and the same confirmation again answers the recorded outcome without acting.
 
 const (
 	platformAbandonRuntimeFormat = "portal.recovery-abandon-runtime-review/1-dev.1"
 	platformAbandonReason        = "runtime abandoned"
-	// platformAbandonedRuntimeKeyPrefix names the meta key that records the outcome of an abandon.
+	// platformAbandonedRuntimeKeyPrefix names the meta key that records the outcome of an abandon; the
+	// key carries the runtime and the controller epoch it was decided in.
 	platformAbandonedRuntimeKeyPrefix = "app_platform_abandoned_runtime:"
 )
 
@@ -154,12 +155,13 @@ type platformAbandonResult struct {
 // platformAbandonOutcome is what is recorded of an abandon: the digest of the listing it acted on and
 // what it settled.
 type platformAbandonOutcome struct {
-	PlanSHA256    string `json:"plan_sha256"`
-	RuntimeID     string `json:"runtime_id"`
-	Installations int    `json:"installations"`
-	Grants        int    `json:"grants"`
-	Effects       int    `json:"effects"`
-	Operations    int    `json:"operations"`
+	PlanSHA256      string `json:"plan_sha256"`
+	RuntimeID       string `json:"runtime_id"`
+	ControllerEpoch string `json:"controller_epoch"`
+	Installations   int    `json:"installations"`
+	Grants          int    `json:"grants"`
+	Effects         int    `json:"effects"`
+	Operations      int    `json:"operations"`
 }
 
 // confirmPlatformAbandonRuntime abandons the runtime the listing named. It reports replayed when the
@@ -172,12 +174,12 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 	}
 	err := s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		result, replayed = platformAbandonResult{}, false
-		key := platformAbandonedRuntimeKeyPrefix + runtimeID
+		key := platformAbandonedRuntimeKeyPrefix + runtimeID + ":" + control.epoch
 		var recorded string
 		switch err := e.queryRow(`SELECT v FROM meta WHERE k=?`, key).Scan(&recorded); {
 		case err == nil:
 			var outcome platformAbandonOutcome
-			if json.Unmarshal([]byte(recorded), &outcome) != nil || outcome.RuntimeID != runtimeID || outcome.PlanSHA256 != planSHA {
+			if json.Unmarshal([]byte(recorded), &outcome) != nil || outcome.RuntimeID != runtimeID || outcome.PlanSHA256 != planSHA || outcome.ControllerEpoch != control.epoch {
 				return errAppPlatformPlanChanged
 			}
 			result = platformAbandonResult{RuntimeID: runtimeID, Installations: outcome.Installations, Grants: outcome.Grants, Effects: outcome.Effects, Operations: outcome.Operations}
@@ -214,7 +216,7 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 			return err
 		}
 		result = platformAbandonResult{RuntimeID: plan.RuntimeID, Installations: len(plan.Installations), Grants: len(plan.Grants), Effects: len(plan.Effects), Operations: len(plan.Operations) + len(plan.Finished)}
-		outcome, _ := json.Marshal(platformAbandonOutcome{PlanSHA256: digest, RuntimeID: plan.RuntimeID, Installations: result.Installations,
+		outcome, _ := json.Marshal(platformAbandonOutcome{PlanSHA256: digest, RuntimeID: plan.RuntimeID, ControllerEpoch: control.epoch, Installations: result.Installations,
 			Grants: result.Grants, Effects: result.Effects, Operations: result.Operations})
 		if err := e.setSetting(key, string(outcome)); err != nil {
 			return err

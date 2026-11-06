@@ -329,3 +329,24 @@ func TestAbandonSettlesAFinishedUnknownImportAndFreesLaunch(t *testing.T) {
 		t.Fatal("an abandoned import still blocks launch")
 	}
 }
+
+// The record of an abandon belongs to one controller epoch. After another restore the same runtime id
+// and listing are a different decision, so the recorded outcome is not replayed for them.
+func TestAbandonConfirmationIsNotReplayedInAnotherEpoch(t *testing.T) {
+	f, _ := unknownImportFixture(t)
+	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, replayed, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest); err != nil || replayed {
+		t.Fatalf("confirm: replayed=%v %v", replayed, err)
+	}
+	before := f.s.st.GetSetting("app_platform_controller_epoch", "")
+	platformSimulateRestore(t, f.s)
+	if f.s.st.GetSetting("app_platform_controller_epoch", "") == before {
+		t.Fatal("fixture: the second restore did not change the controller epoch")
+	}
+	if _, replayed, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest); replayed || !errors.Is(err, errAppPlatformAbandonUnavailable) {
+		t.Fatalf("a confirmation from another epoch was answered from the earlier record: replayed=%v %v", replayed, err)
+	}
+}
