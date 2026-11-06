@@ -34,14 +34,18 @@ type fakeMigrationNative struct {
 	markers    int
 	lastRun    driver.MigrationJobRequest
 	absentHook func()
+	runCtx     func(context.Context)
 	absentIDs  []driver.MigrationJobRequest
 }
 
-func (n *fakeMigrationNative) RunMigrationJob(_ context.Context, r driver.MigrationJobRequest) (driver.MigrationJobSnapshot, error) {
+func (n *fakeMigrationNative) RunMigrationJob(ctx context.Context, r driver.MigrationJobRequest) (driver.MigrationJobSnapshot, error) {
 	n.runs++
 	n.lastRun = r
 	if n.onRun != nil {
 		n.onRun(r)
+	}
+	if n.runCtx != nil {
+		n.runCtx(ctx)
 	}
 	if n.runErr != nil {
 		return driver.MigrationJobSnapshot{}, n.runErr
@@ -449,5 +453,32 @@ func TestMigrateAbsenceOnlyUnderGate(t *testing.T) {
 	got, err = m.f.store.ReadMigrateDataOrStatus(context.Background(), m.raw, read)
 	if _, ok := got.(MigrateDataReceipt); err != nil || !ok {
 		t.Fatalf("settled read: %#v %v", got, err)
+	}
+}
+
+// The connection that carried the command times out and is cancelled while the job runs: the claimed
+// job still runs to a definite end and settles, with a context that is not cancelled.
+func TestMigrateConnectionTimeoutJobContinues(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	var observed error
+	m.native.onRun = func(driver.MigrationJobRequest) {
+		cancel()
+	}
+	m.native.runCtx = func(c context.Context) {
+		observed = c.Err()
+		if deadline, ok := c.Deadline(); !ok || time.Until(deadline) < time.Minute {
+			t.Error("claimed migration has no generous own bound")
+		}
+	}
+	receipt, err := m.f.store.DispatchMigrateData(ctx, m.raw, m.sig, m.descriptor, m.native, importDataPin)
+	if err != nil || receipt.State != "migrated" || observed != nil {
+		t.Fatalf("claimed migration followed its connection: %+v err=%v ctx=%v", receipt, err, observed)
+	}
+	if rowState(t, m.f.store, m.command.EffectID) != "applied" {
+		t.Fatal("migration left unsettled by a cancelled connection")
+	}
+	if bound := MigrateDataBound(60); bound != 60*time.Second+driver.MigrationGrace {
+		t.Fatalf("bound = %s", bound)
 	}
 }

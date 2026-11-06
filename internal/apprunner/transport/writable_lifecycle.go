@@ -46,13 +46,17 @@ const (
 	ManagedDataRead
 	ImportCheckpointExecute
 	ImportCheckpointRead
+	MigrateDataExecute
+	MigrateDataRead
+	DiscardMigrationExecute
+	DiscardMigrationRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= ImportCheckpointRead
+	return a >= WritableWriterExecute && a <= DiscardMigrationRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -134,6 +138,27 @@ func (o WritableLifecycleObservation) ImportCheckpointReceipt() (journal.ImportC
 	}
 	return journal.ParseImportCheckpointReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) MigrateDataReceipt() (journal.MigrateDataReceipt, error) {
+	if o.action != MigrateDataExecute && o.action != MigrateDataRead {
+		return journal.MigrateDataReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseMigrateDataReceipt([]byte(o.body))
+}
+func (o WritableLifecycleObservation) DiscardMigrationReceipt() (journal.DiscardMigrationReceipt, error) {
+	if o.action != DiscardMigrationExecute && o.action != DiscardMigrationRead {
+		return journal.DiscardMigrationReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseDiscardMigrationReceipt([]byte(o.body))
+}
+
+// MigrationStatus returns the typed "pending" or "orphaned" answer to a migrate-data, discard-migration
+// or restore read-back. A definite absence is not an observation: it is reported as journal.ErrNoSuchEffect.
+func (o WritableLifecycleObservation) MigrationStatus() (journal.MigrateDataStatus, error) {
+	if o.action != MigrateDataRead && o.action != DiscardMigrationRead && o.action != RestoreRead {
+		return journal.MigrateDataStatus{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseMigrateDataStatus([]byte(o.body))
+}
 func (o WritableLifecycleObservation) UpdateStartReservation() (journal.UpdateStartReservation, error) {
 	if o.action < UpdateStartReserve || o.action > UpdateStartRead {
 		return journal.UpdateStartReservation{}, driver.ErrContainerUncertain
@@ -179,6 +204,8 @@ type writableLifecycleReference struct {
 	checkpoint              control.CheckpointCommand
 	restore                 control.RestoreCommand
 	importCheckpoint        control.ImportCheckpointCommand
+	migrate                 control.MigrateDataCommand
+	discard                 control.DiscardMigrationCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -247,7 +274,10 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 	case action <= RestoreRead:
 		var v control.VerifiedRestoreCommand
 		var err error
-		if settling {
+		if action == RestoreRead {
+			// A read-receipt is signed under its own purpose and never as an execute.
+			v, err = control.VerifyRestoreRead(raw, sig, a, now)
+		} else if settling {
 			v, err = control.VerifyRestoreSettlement(raw, sig, a, now)
 		} else {
 			v, err = control.VerifyRestore(raw, sig, a, now)
@@ -296,6 +326,36 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.importCheckpoint = v.Command()
 		r.release = r.importCheckpoint.Payload.ReleaseSHA256
+	case action == MigrateDataExecute || action == MigrateDataRead:
+		var v control.VerifiedMigrateDataCommand
+		var err error
+		if action == MigrateDataRead {
+			v, err = control.VerifyMigrateDataRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifyMigrateDataSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyMigrateData(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.migrate = v.Command()
+		r.release = r.migrate.Payload.TargetReleaseSHA256
+	case action == DiscardMigrationExecute || action == DiscardMigrationRead:
+		var v control.VerifiedDiscardMigrationCommand
+		var err error
+		if action == DiscardMigrationRead {
+			v, err = control.VerifyDiscardMigrationRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifyDiscardMigrationSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyDiscardMigration(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.discard = v.Command()
+		r.release = r.discard.Payload.TargetReleaseSHA256
 	default:
 		verify := control.VerifyUpdateStart
 		if action == UpdateStartReceipt {
@@ -321,6 +381,9 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r writableLifecycleReference, started, received time.Time) bool {
 	if received.Before(started) {
 		return false
+	}
+	if status, ok := lifecycleStatusReply(action, body); ok {
+		return validLifecycleStatus(action, status, r, received)
 	}
 	var settled string
 	switch {
@@ -449,6 +512,28 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 		}
 		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
 		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
+			return false
+		}
+		settled = v.SettledMS
+	case action == MigrateDataExecute || action == MigrateDataRead:
+		v, e := journal.ParseMigrateDataReceipt(body)
+		if e != nil || !journal.MigrateDataReceiptMatchesCommand(v, r.migrate) {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(r.migrate.IssuedMS, 10, 64)
+		if observedErr != nil || issuedErr != nil || observed < issued {
+			return false
+		}
+		settled = v.SettledMS
+	case action == DiscardMigrationExecute || action == DiscardMigrationRead:
+		v, e := journal.ParseDiscardMigrationReceipt(body)
+		if e != nil || !journal.DiscardMigrationReceiptMatchesCommand(v, r.discard) {
+			return false
+		}
+		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(r.discard.IssuedMS, 10, 64)
 		if observedErr != nil || issuedErr != nil || observed < issued {
 			return false
 		}
@@ -596,6 +681,50 @@ func importAbsenceReply(action WritableLifecycleAction, body []byte) bool {
 	}
 	_, err := journal.ParseImportCheckpointAbsence(body)
 	return err == nil
+}
+
+// lifecycleStatusReply decodes the typed pending, orphaned or absent answer a migrate-data, discard-migration
+// or restore read-back may get instead of a receipt. Only those reads can be answered so; an execute that
+// found no row would claim one instead.
+func lifecycleStatusReply(action WritableLifecycleAction, body []byte) (journal.MigrateDataStatus, bool) {
+	if action != MigrateDataRead && action != DiscardMigrationRead && action != RestoreRead {
+		return journal.MigrateDataStatus{}, false
+	}
+	status, err := journal.ParseMigrateDataStatus(body)
+	return status, err == nil
+}
+
+// migrateAbsenceReply reports whether body is the runner's definite "never claimed" answer. Pending and
+// orphaned are not definite and stay observations.
+func migrateAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	status, ok := lifecycleStatusReply(action, body)
+	return ok && status.State == "absent"
+}
+
+func validLifecycleStatus(action WritableLifecycleAction, status journal.MigrateDataStatus, r writableLifecycleReference, received time.Time) bool {
+	var header control.CommandHeader
+	var issuedMS string
+	switch action {
+	case MigrateDataRead:
+		header, issuedMS = r.migrate.CommandHeader, r.migrate.IssuedMS
+	case DiscardMigrationRead:
+		header, issuedMS = r.discard.CommandHeader, r.discard.IssuedMS
+	default:
+		c := r.restore
+		header = control.CommandHeader{
+			DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, InstallationID: c.InstallationID, OperationID: c.OperationID,
+			TargetGeneration: c.TargetGeneration, Stage: c.Stage, EffectNumber: c.EffectNumber, EffectID: c.EffectID, Kind: "restore",
+			PayloadSHA256: c.PayloadSHA256,
+		}
+		issuedMS = c.IssuedMS
+	}
+	observed, observedErr := strconv.ParseInt(status.ObservedMS, 10, 64)
+	issued, issuedErr := strconv.ParseInt(issuedMS, 10, 64)
+	return status.Kind == header.Kind && status.DeploymentID == header.DeploymentID && status.ControllerEpoch == header.ControllerEpoch &&
+		status.InstallationID == header.InstallationID && status.OperationID == header.OperationID &&
+		status.TargetGeneration == header.TargetGeneration && status.Stage == header.Stage && status.EffectNumber == header.EffectNumber &&
+		status.EffectID == header.EffectID && status.PayloadSHA256 == header.PayloadSHA256 &&
+		observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
 }
 
 // startAbsenceReply reports whether body is the runner's definite "never admitted" answer to a start

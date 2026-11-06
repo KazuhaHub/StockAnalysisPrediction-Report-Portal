@@ -633,46 +633,6 @@ func migrateResourceMatches(ctx context.Context, tx *sql.Tx, c control.MigrateDa
 	return nil
 }
 
-// loadUnknownMigrate rebuilds the intent of a migration left unknown, from the journal alone. It
-// writes nothing. Expiry governs dispatch, not settlement.
-func (s *Store) loadUnknownMigrate(ctx context.Context, raw, signature []byte) (migrateIntent, error) {
-	var zero migrateIntent
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return zero, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
-		return zero, err
-	}
-	deployment, err := readControllerDeployment(ctx, tx)
-	if err != nil {
-		return zero, err
-	}
-	verified, err := control.VerifyMigrateDataSettlement(raw, signature, migrateAuthority(deployment), time.Now().UTC().UnixMilli())
-	if err != nil {
-		return zero, err
-	}
-	c := verified.Command()
-	row, err := loadImportRow(ctx, tx, c.EffectID)
-	if err != nil || row == nil || !sameMigrateCommand(row, c.CommandHeader) || row.state != "unknown" {
-		return zero, ErrFenceReconciliation
-	}
-	var marker migrateClaimMarker
-	if !canonicalDataJSON(row.receipt, &marker) || !validMigrateMarker(marker) || !migrateMarkerMatchesCommand(marker, c) {
-		return zero, ErrFenceReconciliation
-	}
-	if err := migrateResourceMatches(ctx, tx, c, marker); err != nil {
-		return zero, err
-	}
-	return migrateIntent{full: c, raw: bytes.Clone(raw), signature: bytes.Clone(signature), marker: marker, markerRaw: row.receipt}, nil
-}
-
-// migrateWallClock reads the wall clock a payload carries.
-func migrateWallClock(c control.MigrateDataCommand) time.Duration {
-	return time.Duration(mustDataInt(c.Payload.WallClockSeconds)) * time.Second
-}
-
 // MigrateDataBound is the longest a claimed migration may run: its wall clock plus the grace for the
 // kill, removal and absence proofs. The Portal polls by read-back for this long.
 func MigrateDataBound(wallClockSeconds int64) time.Duration {

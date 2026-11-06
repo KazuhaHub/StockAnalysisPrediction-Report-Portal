@@ -359,14 +359,6 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 	return source, false, nil
 }
 
-func (s *Store) settleRestore(ctx context.Context, source restoreSource, observation data.RestoreObservation) (RestoreReceipt, error) {
-	snapshot, err := observation.Snapshot()
-	if err != nil {
-		return RestoreReceipt{}, fmt.Errorf("restore observation binding: %w", ErrFenceReconciliation)
-	}
-	return s.settleRestoreSnapshot(ctx, source, snapshot)
-}
-
 func (s *Store) settleRestoreSnapshot(ctx context.Context, source restoreSource, snapshot data.RestoreSnapshot) (RestoreReceipt, error) {
 	var zero RestoreReceipt
 	var err error

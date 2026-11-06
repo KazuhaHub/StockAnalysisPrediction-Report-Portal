@@ -33,7 +33,7 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportCheckpointExecute
+	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
 }
 
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
@@ -160,7 +160,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
-	if importAbsenceReply(action, body) || startAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -277,7 +277,21 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		}
 		result, err = provider.store.DispatchRestore(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
 	case RestoreRead:
-		result, err = provider.store.ReadRestoreReceipt(ctx, raw, sig)
+		result, err = provider.store.ReadRestoreOrStatus(ctx, raw, sig)
+	case MigrateDataExecute:
+		if provider.dataRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchMigrateData(ctx, raw, sig, descriptor, journal.NewMigrationNative(provider.native, provider.dataRoot), provider.dataPin)
+	case MigrateDataRead:
+		result, err = provider.store.ReadMigrateDataOrStatus(ctx, raw, sig)
+	case DiscardMigrationExecute:
+		if provider.dataRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchDiscardMigration(ctx, raw, sig, descriptor, journal.NewMigrationNative(provider.native, provider.dataRoot), provider.dataPin)
+	case DiscardMigrationRead:
+		result, err = provider.store.ReadDiscardMigrationOrStatus(ctx, raw, sig)
 	case ImportCheckpointExecute:
 		if provider.dataRoot == nil || provider.checkpointRoot == nil {
 			return

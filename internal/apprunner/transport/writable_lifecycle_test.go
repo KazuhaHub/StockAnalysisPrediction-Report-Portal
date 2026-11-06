@@ -560,7 +560,7 @@ func TestWritableLifecycleRestoreReferenceAndReply(t *testing.T) {
 	a, command, raw, sig, descriptor, receipt := restoreTransportFixture(t)
 	now := time.Now().UnixMilli()
 	for _, action := range []WritableLifecycleAction{RestoreExecute, RestoreRead} {
-		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		ref, err := verifyWritableLifecycle(action, raw, lifecycleSignature(t, action, a, raw, sig), descriptor, a, now)
 		if err != nil || ref.restore.EffectID != command.EffectID || ref.release != command.Payload.ReleaseSHA256 {
 			t.Fatal("restore reference", action, err)
 		}
