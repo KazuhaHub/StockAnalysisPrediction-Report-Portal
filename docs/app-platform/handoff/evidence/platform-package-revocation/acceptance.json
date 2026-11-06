@@ -1,0 +1,31 @@
+{
+  "format": "portal.package-revocation-native-acceptance/1-dev.1",
+  "candidate": "08d5e898",
+  "apps": "4c53f10",
+  "quotaProbeRun": "41594944957",
+  "quotaProbeJob": "125779995923",
+  "runnerDaemonRun": "41594945155",
+  "artifact": "project-quota-evidence",
+  "artifactSha256": "710fd2c629781ef82e819789bc24b39f82d78f79c59fe492c62fda905a10772f",
+  "observed": {
+    "native_package_revocation_managed_stop": true,
+    "native_managed_disable_stop_verified": true,
+    "native_managed_enable_start_probe_activated": true,
+    "native_managed_enable_backend_request": true,
+    "native_portal_writable_background_owned_cleanup": true,
+    "native_portal_writable_background_neighbor_preserved": true,
+    "native_portal_writable_fixture_cleanup_superseded_by_managed_uninstall": true,
+    "execution_ready": false
+  },
+  "coverage": [
+    "A publisher policy revocation scoped to the exact app queued the existing reviewed disable operation for a real managed installation.",
+    "The disposable root runner stopped the exact runtime, and Portal recorded a complete stop effect before the test continued.",
+    "The revocation retained the data namespace, current access grants, capability grants and runtime identity while denying launch authority.",
+    "Restoring publisher trust advanced the revision. Managed enable and repair then reverified the same signed release under current trust and activated a new current tuple.",
+    "Owned cleanup removed only fixture resources and preserved the neighbor."
+  ],
+  "limits": [
+    "This is a development acceptance on the disposable GitHub Linux root runner. It is not production deployment approval.",
+    "Trust is deployment-local; no external trust source is fetched, so an unreachable remote trust source is not simulated."
+  ]
+}

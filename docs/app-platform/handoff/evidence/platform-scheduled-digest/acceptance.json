@@ -1,0 +1,49 @@
+{
+  "format": "portal.app-platform.scheduled-digest/1-dev.1",
+  "captured_at": "2026-11-04T00:55:53-08:00",
+  "status": "pass-development",
+  "portal": {
+    "commit": "998dcd0a7a2994a8b8705477f8775266b2ce0cf0",
+    "pull_request": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/364"
+  },
+  "apps": {
+    "commit": "f274e064121d5d8377c2e22a1411309da9dc6c6e",
+    "pull_request": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/pull/36"
+  },
+  "hosted_ci": {
+    "portal_test": "41801011351",
+    "portal_go_test_job": "126477001613",
+    "app_project_quota_probe": "41801011370",
+    "app_project_quota_job": "126476466287",
+    "app_runner_daemon_probe": "41801011480",
+    "app_runner_daemon_job": "126476466967",
+    "apps_check": "41794178889",
+    "apps_scheduled_digest_job": "126454249393",
+    "exact_managed_image_native": "41872400475",
+    "result": "pass"
+  },
+  "observed": {
+    "native_scheduled_digest_handler": true,
+    "native_current_viewer_request_verified": true,
+    "native_portal_managed_backend_readiness": true,
+    "native_event_duplicate_out_of_order_lost_ack": true,
+    "native_managed_uninstall_remove_data": true,
+    "native_managed_reinstall_fresh_namespace_and_launch": true,
+    "native_scheduled_digest_exact_managed_image": true
+  },
+  "coverage": [
+    "The exact Apps frontend candidate is built, packed and installed by the managed Portal lifecycle.",
+    "Portal maps the app-bound scheduled-digest.run handler to the fixed POST /v1/tasks/digest route. No payload can select a path, destination or arbitrary handler.",
+    "The native ready backend receives the signed service-task command, checks the current app/generation/policy/release service identity and returns a bounded digest result.",
+    "The native worker completes the digest task without a browser or viewer; exact occurrence replay creates no second task and changed bytes under the same occurrence conflict.",
+    "The Apps service independently tests persisted idempotent digest state, duplicate replay and changed-identity refusal. The frontend tests current backend state, host navigation, locale changes and credential-name-only network access.",
+    "The managed lifecycle still passes current-viewer gating, reviewed event delivery, uninstall clear and fresh reinstall.",
+    "The later managed exact-image run starts the real Scheduled Digest service, delivers protected registration, verifies the boot handshake and completes the fixed digest task. Its evidence is in platform-scheduled-digest-managed/acceptance.json."
+  ],
+  "limits": [
+    "This file keeps the ready-fixture event/replay coverage. The exact service image has separate native evidence and does not claim an event endpoint it does not implement.",
+    "The exact managed task test seeds the final activation rows after delivery and boot; it is not a neutral-operator market walkthrough.",
+    "A neutral clean-market walkthrough installing both Notes and Scheduled Digest and opening both from My Apps remains outstanding.",
+    "Update-generation service-task registration variants, production deployment and protocol freeze remain gated."
+  ]
+}

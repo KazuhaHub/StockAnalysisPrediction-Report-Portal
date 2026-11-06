@@ -1,0 +1,35 @@
+{
+  "format": "portal.managed-staging-restart-acceptance/1-dev.1",
+  "candidate": "95e358fd",
+  "apps": "4c53f10",
+  "quotaProbeRun": "41599541528",
+  "quotaProbeJob": "125794746175",
+  "runnerDaemonRun": "41599541499",
+  "artifact": "project-quota-evidence",
+  "artifactSha256": "7af3a921905973faed88f30f05f97ddfa57aa62bc4c73bddda848df90e8b8e37",
+  "observed": {
+    "native_managed_staging_restart_recovery": true,
+    "native_portal_writable_background_claimed_progress": true,
+    "native_portal_writable_worker_artifact_data": true,
+    "native_portal_writable_worker_writer_rollback": true,
+    "native_portal_writable_worker_start_rollback": true,
+    "native_portal_writable_worker_probe_rollback": true,
+    "native_portal_writable_worker_registration_rollback": true,
+    "native_portal_writable_worker_registration_token": true,
+    "native_portal_writable_worker_activated": true,
+    "native_portal_writable_background_owned_cleanup": true,
+    "native_portal_writable_background_neighbor_preserved": true,
+    "execution_ready": false
+  },
+  "coverage": [
+    "A real managed writable installation advanced through validate, download and stage under an initial worker lease.",
+    "The first worker was abandoned without releasing its lease. A new scheduler reclaimed the same operation with a higher fence after lease expiry.",
+    "The resumed scheduler completed data preparation, actual candidate start, readiness/registration work and activation with exactly one applied copy of each durable effect.",
+    "Owned cleanup removed only fixture resources and preserved the neighbor."
+  ],
+  "limits": [
+    "This proves recovery while the process and bounded in-memory download model restart within the durable operation state. It does not prove cross-process persistence of an uncommitted artifact download.",
+    "Persistent market-cache design and approval remain open; no new cache table or unmanaged cache file was added.",
+    "This is disposable development-runner evidence, not production deployment approval."
+  ]
+}

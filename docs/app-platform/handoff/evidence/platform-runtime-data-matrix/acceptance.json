@@ -1,0 +1,413 @@
+{
+  "format": "portal.app-platform.runtime-data-matrix/1-dev.1",
+  "captured_at": "2026-11-03T01:48:00-08:00",
+  "candidate": "bcb7081e",
+  "runner_daemon_candidate": "bcb7081e",
+  "runner_daemon_ci": "41623015662",
+  "database_evidence": "SQLite plus separate fresh PostgreSQL 18.6 databases for lifecycle, migration, restore and cleanup batches",
+  "test_isolation": "Schema-mutating batches used independent databases. Reusing one database across unrelated migration/restore groups produced lock or residual-product failures; those failed attempts are not counted as passes.",
+  "rows": {
+    "RUN-03": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|CandidateSeccomp.*))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: TestDockerAcceptanceCandidateContainer, TestDockerAcceptanceCandidateLifecycle, TestNativeCandidateMountPins.*"
+      ],
+      "coverage": [
+        "The portable adapter proves reviewed user, readonly rootfs, dropped capabilities, no-new-privileges, fixed seccomp, resource limits, network none, no host ports/devices/sockets and exactly three bind mounts.",
+        "Container observation rejects substituted native identity, mount, user, network, capability, limit, log and ownership policy before removal.",
+        "On the disposable Linux/Docker/XFS runner, an actual reference container passed the closed policy and its lifecycle passed against the real daemon."
+      ],
+      "limits": [
+        "This is development acceptance on a disposable GitHub-hosted rootful host. It is not production enrollment or a claim for every host profile.",
+        "The security package evidence records the same exact workflow."
+      ]
+    },
+    "RUN-04": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestCandidateLifecycleTransitionsAndReadOnlyIdempotence|TestCandidateIPCResolverDoesNotRestartTimedOutWork)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^TestCandidateReadinessMetadata$' -count=1",
+        "Disposable app-runner workflow 41623015662: TestDockerAcceptanceCandidateLifecycle"
+      ],
+      "coverage": [
+        "A container record in exited state is never implicitly restarted by the start adapter; it requires fresh reviewed authority. Readiness refusal and timeout do not fabricate a running process.",
+        "The runner service configuration uses a bounded systemd restart policy and start limit rather than an unbounded service crash loop.",
+        "On the disposable Linux/Docker runner, the same owned container was explicitly restarted by the test fixture and then killed three times. After each exit, the production start path refused to restart it. A final observation after 300ms still found it exited.",
+        "The native log marker CANDIDATE_REPEATED_EXIT_NO_AUTO_RESTART_VERIFIED was present on the exact candidate."
+      ],
+      "limits": [
+        "The platform's safe policy is no implicit app restart. Service-level systemd restart bounds are separate and tested by the runner service configuration/profile.",
+        "This is development acceptance on a disposable GitHub-hosted runner, not a production health/SLO claim."
+      ]
+    },
+    "RUN-05": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/service -run '^(TestConfigStrictAndBounded|TestConfigRefusesExposureAndOverlappingRoots|TestBootstrapConfigPinsPublicKey)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestAppPlatformRestorePausesAuthority|TestPlatformManagedDisableSchedulerRequiresRecovery(SQLite|Postgres)|TestPlatformWritableReadinessWaitRevocation(SQLite|Postgres)|TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite)$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_runner_unavailable GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite$' -count=1",
+        "Portal CI test run 41631852903"
+      ],
+      "coverage": [
+        "A full HTTP route stack was exercised while the managed scheduler used an absent runner endpoint. /healthz, /api/site, login, /api/me, /api/home, an existing report read and /api/notifications/unread stayed available through the outage checks.",
+        "A reviewed managed disable reached the stop boundary three times. The operation settled at recovery_required / managed_disable_stop_pending with one prepared stop effect and no receipt, so the unavailable endpoint was never reported as a stopped process.",
+        "The affected installation became disabled and non-openable in the app directory, and its launch route failed closed without exposing the socket path. Portal business routes remained available.",
+        "A fresh Server over the same durable state retained the same bounded operation projection and kept the business routes available. Runner unavailability is represented separately from confirmed stop; pending managed work becomes unavailable or recovery-required rather than claiming a physical stop.",
+        "Authority leases are fenced and restore pause invalidates old live authority. Readiness waits recheck revocation."
+      ],
+      "limits": [
+        "The runner outage uses a local absent endpoint, and the Portal stop is a route-stack re-instantiation over the same store rather than an operating-system process kill.",
+        "This is development availability evidence across SQLite, a fresh PostgreSQL 18.6 database and race instrumentation. It is not a deployed multi-process drill, production availability claim or continuous-outage SLO."
+      ]
+    },
+    "RUN-06": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(Test(ResourceIdentityAndGenerationRefusal|CandidateAdmissionRejectsChangedLogicalResourceAndPendingWork|CandidatePreflightBindsBeforeEffectAndRejectsOpaqueForgery|CandidateNativeHandlesCannotBeForgedByJSON))$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity))$' -count=1",
+        "Disposable app-runner workflow 41636603183: TestDockerAcceptanceCandidateInventoryReconciliation"
+      ],
+      "coverage": [
+        "Restart cannot reconstruct executable native handles or reclaim unknown work. Ownership, generation, writer fence and controller epoch must match the durable intent.",
+        "Inventory/removal refuses foreign labels, names, images, mounts, IDs and pending work rather than deleting by name.",
+        "On the disposable Docker daemon, a stale test-owned container referencing the exact private mount was discovered by native ID, then rejected because its complete policy and ownership did not match. A fresh daemon client observed the same result.",
+        "A second container referencing the same private mount made reference resolution ambiguous. Reconciliation refused to choose one resource, and a second daemon-client restart still found both test-owned resources unchanged.",
+        "The fixture deleted only its own two containers during teardown. Production reconciliation did not infer ownership, rewrite a resource or guess-delete the duplicate."
+      ],
+      "limits": [
+        "This is development acceptance on a disposable GitHub-hosted rootful Docker worker, not a production daemon upgrade or foreign-resource cleanup claim.",
+        "The native case deliberately covers stale/orphan resources that reference the app's private mount. Resources with no reference are outside the app recovery inventory and must not be adopted or removed."
+      ]
+    },
+    "RUN-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^TestCandidateLifecycleLostAcknowledgementDoesNotRetry$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(TestCheckpointPersistsOneExactUnknownIntent|TestCheckpointReceiptReadMatchesAppliedIntent|TestManagedRemovalPersistsOneExactStopIntent|TestUpdateStartExecutionClaimIsSingleUseAndUncertain)$' -count=1"
+      ],
+      "coverage": [
+        "A lost start/stop acknowledgement returns uncertain with no fabricated state and no retry of the physical effect.",
+        "Checkpoint preparation persists one exact unknown intent before native work. Replay cannot reissue it, and only an applied receipt matching the signed intent can be read.",
+        "Managed stop persists one exact intent. Update-start execution claims are single-use and preserve uncertain state across process authority loss."
+      ],
+      "limits": [
+        "These are portable driver/journal transactions. The same interruption points also need exact-candidate native execution before final RUN-07 acceptance.",
+        "The result is development recovery evidence, not an exactly-once claim for arbitrary external effects."
+      ]
+    },
+    "RUN-08": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformObjectsPluginQuotaIsTransactional|TestPlatformObjectQuotaContract|TestPlatformReleaseStagingDatabaseFullRollsBack|TestPlatformDataReservationCapacityBoundary)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestDataWriter.*|TestWritableRecovery.*)$' -count=1",
+        "Disposable app-project-quota workflow 41636602878: TestNativeDataWriterContainer on the owned XFS project-quota loop"
+      ],
+      "coverage": [
+        "Object limits are checked transactionally at account, plugin and global levels; release staging rolls back on a full SQLite database; data reservation has a bounded capacity boundary.",
+        "On the disposable Linux/XFS host, the real writable fixture exhausted its 8 MiB byte limit and 128 inode limit, observed ENOSPC, retained project identity and attributes, and left a separate healthy project writable. The fixture also survived remount and detected disabled quota enforcement.",
+        "A real 16 MiB tmpfs was filled until ENOSPC, the file was removed, and a fresh write succeeded. The measured file remained at or below the kernel tmpfs bound.",
+        "An 8 MiB stderr flood against the production json-file policy (max-size 1m, max-file 2) left between 1 MiB and 3 MiB on disk, proving rotation rather than uncontrolled host growth.",
+        "Container policy fixes bounded logging and resource limits, and data writer recovery evidence is opaque and bound to the exact owner."
+      ],
+      "limits": [
+        "This is a disposable GitHub-hosted Linux/Docker/XFS development drill. It is not a production volume-capacity, long-duration log soak or every-host-profile claim.",
+        "The global filesystem remained above the fixture's independent capacity floor; the evidence proves bounded refusal and cleanup, not guaranteed capacity under arbitrary host pressure."
+      ]
+    },
+    "LIFE-01": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_life_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestPlatformManagementInstallHTTP(SQLite|Postgres)|TestPlatformInstallReview(SQLite|Postgres)|TestPlatformInstallQueueConcurrent(SQLite|Postgres))$' -count=1"
+      ],
+      "coverage": [
+        "A review creates no installation. Confirmation with the same idempotency key returns the same operation and installation; a different confirmation under the same key is a 409.",
+        "Concurrent confirmation produces one installation and one operation. Durable progress remains queryable through queued and complete stages.",
+        "An unfinished operation or recovery-required operation cannot be hidden by a removed tombstone; reinstall requires a fresh identity and a fresh idempotency key."
+      ],
+      "limits": [
+        "Browser double-click and page reload are covered by component behavior elsewhere; this evidence is the server idempotency boundary."
+      ]
+    },
+    "LIFE-02": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$|^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "Disposable managed lifecycle evidence in docs/app-platform/handoff/evidence/platform-install/acceptance.json and docs/app-platform/handoff/evidence/platform-lifecycle-runner/acceptance.json"
+      ],
+      "coverage": [
+        "A managed install consumes data preparation, candidate start, readiness, protected registration, boot and activation without an installer copying a pairing key or address.",
+        "The static install path remains independent of a configured runner."
+      ],
+      "limits": [
+        "A neutral operator on a clean market has not performed the complete two-app install/open flow from the production SPA.",
+        "H12 remains blocked by the unapproved task persistence design and the missing Scheduled Digest reference app."
+      ]
+    },
+    "LIFE-03": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatform(FrontendRecovery(SQLite|Postgres)|FrontendProofRefusals(SQLite|Postgres)|DataStageRefusals(SQLite|Postgres)|DataStageRollback(SQLite|Postgres)|InstallQueueRecovery(SQLite|Postgres)|ManagedUpdateRetryExhaustion(SQLite|Postgres)))$' -count=1"
+      ],
+      "coverage": [
+        "Download, signature, proof, data-stage, activation and retry-exhaustion failures are classified without exposing a failed candidate to user traffic. Unresolved native effects become recovery-required.",
+        "A failed update keeps the source generation only when the data compatibility gate admits it."
+      ],
+      "limits": [
+        "Every named stage has not been injected against one continuous real runner drill with residue accounting.",
+        "LIFE-03 remains partial until that stage-by-stage native matrix exists."
+      ]
+    },
+    "LIFE-05": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN=... GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestPlatformInstallQueueConcurrent(SQLite|Postgres)|TestPlatformFrontendUpdateConcurrentClaim(SQLite|Postgres)|TestPlatformFrontendUninstallConcurrentClaim(SQLite|Postgres)|TestPlatformDeleteDataOperatorConflict(SQLite|Postgres)|TestAppPlatformRemovalConcurrentCommit|TestPostgresAppPlatformRemovalConcurrentCommit)$' -count=1"
+      ],
+      "coverage": [
+        "Competing install, update, uninstall and delete-data workers/operators admit or claim exactly one operation.",
+        "Concurrent identical confirmation replays one result; concurrent conflicting confirmation is refused deterministically without changing live authority twice."
+      ],
+      "limits": [
+        "This is server/API concurrency evidence on both drivers, not a two-browser manual review of every action pair."
+      ]
+    },
+    "LIFE-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_capability_update GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilityPostgres$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -race -p 1 ./internal/app -run '^TestPlatformUpdateReviewRefusesNewRequiredCapabilitySQLite$' -count=1"
+      ],
+      "coverage": [
+        "An update whose target adds storage.files as a newly required capability is refused during review construction, before an operation or privilege mutation is admitted.",
+        "The active A release, generation, policy revision and granted-capability count remain unchanged; A remains launchable after the refusal.",
+        "Routine updates are now restricted to a capability subset already granted to the installation. Adding host authority requires a separate reviewed permission change."
+      ],
+      "limits": [
+        "This covers the server-side update-review boundary on SQLite and fresh PostgreSQL 18.6. Browser presentation of a dedicated permission-expansion review remains part of the broader UX/manual matrix."
+      ]
+    },
+    "LIFE-08": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestDataLifecycle' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatform(UpdateReviewRefusesIncompatibleDataAndStaleSource|ManagedUpdateRetryExhaustion(SQLite|Postgres)|ManagedRestoreReview(SQLite|Postgres)))$' -count=1"
+      ],
+      "coverage": [
+        "Data schema must not move backwards, must explicitly list the current schema as readable and may not write on startup. An incompatible update is refused before admission.",
+        "A failed managed update enters recovery rather than blindly rerunning migration or starting old code against unproven data."
+      ],
+      "limits": [
+        "The repository has no generic host migration runner. Mid-migration command, acknowledgement loss and explicit application migration adaptation still need an approved implementation and a real A/B/C drill."
+      ]
+    },
+    "LIFE-14": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformInstallRemovedFence(SQLite|Postgres)|TestPlatformPluginStorageUsesOneTablePerApp|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres)|TestPlatformReviewedReinstallStartsEmptySQLite)$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_reinstall GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformReviewedReinstallStartsEmptyPostgres$' -count=1",
+        "Disposable app-project-quota workflow 41652513493: managed reinstall on the real runner and owned XFS project quota"
+      ],
+      "coverage": [
+        "Reinstall after a completed removal creates a new installation identity and preserves the old tombstone.",
+        "A reviewed management uninstall removed the selected installation's plugin table and object rows while preserving the other plugin, completed its operation, and left no old grant.",
+        "A reviewed reinstall of the same release created a distinct installation. Its plugin table and registry entry were absent until first fresh use, the old payload was not listed, and a fresh object write succeeded without reviving the old row.",
+        "On the real runner, the managed uninstall completed stop, remove-code and remove-data. The old namespace became deleted and the dedicated plugin table was removed.",
+        "The same signed release was then reinstalled through the writable managed scheduler. It received a new installation and a new active namespace distinct from the deleted one, completed backend registration and activation, and served a launch document. The old namespace, access grants and plugin payload did not carry over.",
+        "The deterministic plugin table is recreated empty after the last installation is removed; prior grants and payload do not carry into the new identity."
+      ],
+      "limits": [
+        "This is development acceptance on a disposable GitHub-hosted Linux/Docker/XFS runner and fresh SQLite/PostgreSQL fixtures, not a production upgrade or data-retention policy claim.",
+        "The reviewed lifecycle intentionally clears the selected plugin's data and backend namespace; applications needing retention must use the separate disable/repair or reviewed recovery workflow."
+      ]
+    },
+    "DATA-01": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_data_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestAContendedStepIsRetried|TestAFreshDatabaseRunsAndRecordsEveryStep|TestAnAcceptedDatabaseWithoutTheLedgerIsMigratedOnce|TestAStepRunsAtMostOnce|TestConcurrentMigrationsApplyEachStepOnce|TestPostgresMigrationsCatchUpAndStayPut|TestPostgresConcurrentMigrationsSerialise)$' -count=1"
+      ],
+      "coverage": [
+        "SQLite and PostgreSQL 18.6 apply each declared step once, serialise concurrent migration and produce the same recorded products.",
+        "Fresh and accepted pre-ledger databases reach the current baseline, while the frozen baseline remains unchanged."
+      ],
+      "limits": [
+        "This is repository schema evidence on disposable databases, not a production migration approval."
+      ]
+    },
+    "DATA-02": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN=... go test -p 1 ./internal/app -run '^(Test(AContendedStepIsRetried|AnUnknownLedgerRowIsRefusedAtStartup|ADeclaredProductMustExist|ARecordedStepWhoseProductWasDroppedIsRefused|AFailedStepRollsBackCompletelyAndIsRetried|AStepThatFailsBeforeAnyDDLLeavesNothing|ConcurrentMigrationsApplyEachStepOnce|PostgresFailedStepRollsBack))$' -count=1"
+      ],
+      "coverage": [
+        "An unknown ledger row or missing/corrupt declared product refuses startup before claiming success. A failed step rolls back completely and can be retried.",
+        "Concurrent SQLite/PostgreSQL migration applies each step once and leaves the ledger consistent."
+      ],
+      "limits": [
+        "This proves declared migration products, not an application-owned data rewrite or an in-place production cutover."
+      ]
+    },
+    "DATA-03": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_restore_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(Test(BackupRestoreRoundTrip|RestoreDryRunWritesNothing|RestoreReplacesEverything|RestoreRefusesWhatItCannotStore|RestoreRejectsForeignFiles|RestoreRefusesADumpFromAnOlderShape|TruncatedRestoreLeavesNothingBehind|RestoreRefusesAnotherSchemaGeneration|PostgresRestoresADumpFromBeforeAMigration))$' -count=1"
+      ],
+      "coverage": [
+        "Old compatible dumps, current round trips and missing/wrong/newer schema products are handled as documented. Dry run writes nothing; truncated or foreign content rolls back.",
+        "A pre-migration PostgreSQL dump restores through the supported path."
+      ],
+      "limits": [
+        "This is logical repository restore, not restoration of the coordinated runtime/data/key recovery set on a fresh host."
+      ]
+    },
+    "DATA-04": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(TestCheckpointPersistsOneExactUnknownIntent|TestCheckpointRejectsChangedSourceAndPendingWork|TestCheckpointReceiptReadMatchesAppliedIntent)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformCheckpoint.*|TestPlatformRestore.*)$' -count=1",
+        "Disposable app-project-quota workflow 41663884010: real writable update checkpoint and coordinated association verification"
+      ],
+      "coverage": [
+        "A writable source with existing data is quiesced and checkpointed on the owned XFS project namespace. The archive is read back and its manifest digest and bounded archive size are persisted before the update advances.",
+        "The native recovery set was cross-checked in one operation against the current Portal review plan, source activation, data namespace/schema, source and target releases, controller epoch, writer fence, runtime binding key fingerprint and applied checkpoint receipt.",
+        "Checkpoint intent is persisted before native work and replay cannot replace its source, namespace, fence, checkpoint or effect identity. Prepared or unknown work cannot be checkpointed again."
+      ],
+      "limits": [
+        "This proves the coordinated data checkpoint and its cross-store identity links. It is not an online hot-copy claim for writes that race quiesce.",
+        "Restoring the complete Portal/runner/data/key set on a separate fresh host remains DATA-05/OPS-06 work."
+      ]
+    },
+    "DATA-05": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(Test(AppPlatformRestorePausesAuthority|AppPlatformRestoreRetainsRevocations|PlatformCredentialRestore(SQLite|Postgres)|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1",
+        "Disposable app-project-quota workflow 41663884010: native managed restore and post-restore start activation"
+      ],
+      "coverage": [
+        "A verified native checkpoint can be restored to the retained namespace and the post-restore generation can start, register, pass readiness and activate.",
+        "Portal restore pauses authority, rotates the controller epoch, preserves revocation floors and fences old runtime identities. Credential and runtime restore fixtures fail closed on missing or newer key generations."
+      ],
+      "limits": [
+        "The recovery set has not yet been copied as one coordinated Portal/runner/data/key bundle to an isolated fresh Linux host.",
+        "The fresh-host drill still needs fixture-secret decryption, restored health and proof that every external effect remains paused before activation."
+      ]
+    },
+    "DATA-06": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_restore_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(Test(AppPlatformRestorePausesAuthority|PostgresAppPlatformRestorePausesAuthority|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1",
+        "app runner daemon probe 41726689783: TestControllerIdentityAcceptance"
+      ],
+      "coverage": [
+        "Restore rotates the controller epoch, fences installation generation, disables runtime bindings and removes their signing key material.",
+        "Pending operations become recovery-required, leases are cleared, and a restored runtime cannot regenerate the prior signing identity.",
+        "The native runner enrolled epoch 402, admitted and retained an epoch-402 command, then refused the restored epoch-401 command both directly in the journal and over the real Unix control socket.",
+        "Re-admitting the epoch-402 command after the stale attempt returned the original effect as an inert replay; the old command did not replace or mutate newer native state.",
+        "The same native run retained the opposite direction: an old runner refused a successor epoch and kept its previously admitted intent inert."
+      ],
+      "limits": [
+        "This is a development two-sided epoch/isolation drill, not an in-place production backup restoration or a production runner upgrade procedure.",
+        "Task replay remains outside this evidence until the separately unapproved H09 task persistence exists."
+      ]
+    },
+    "DATA-07": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN=... GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(Test(AppPlatformRestoreRetainsRevocations|PostgresAppPlatformRestoreRetainsRevocations|AppPlatformRestoreReleaseIntegrity|PostgresAppPlatformRestoreReleaseIntegrity|PlatformCredentialRestore(SQLite|Postgres)|PlatformCredentialMissingFloorRecord(SQLite|Postgres)|PlatformSignedReleaseRestore(SQLite|Postgres)|PlatformRuntimeRestore(SQLite|Postgres)))$' -count=1"
+      ],
+      "coverage": [
+        "Missing, wrong or newer credential values fail closed. A restored backup cannot remove a current revocation floor or resurrect a removed credential.",
+        "Release/frontend/descriptor corruption and a missing runtime/control key produce explicit refusal. Restore pauses authority and rotates the controller epoch.",
+        "A refused restore leaves its target unchanged."
+      ],
+      "limits": [
+        "These are isolated fixture products. The full coordinated recovery-set/key-generation drill remains H16/native work."
+      ]
+    },
+    "DATA-08": {
+      "status": "partial",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_cleanup_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^(TestPlatformObjectsUninstallAndAccountDeletionClearDataPostgres|TestPostgresAppPlatformPrincipalCleanup|TestEveryPrincipalTableIsSweptOnDelete|TestPlatformDeleteDataOperatorConflictPostgres|TestPlatformDeleteDataUncertaintyRequiresReview)$' -count=1"
+      ],
+      "coverage": [
+        "Account and OU deletion sweep discovered principal tables and exact account-owned plugin rows without deleting another account/plugin.",
+        "Delete-data admission is exact-scope, concurrent conflicts admit once, and an uncertain external result requires review instead of automatic replay.",
+        "Plugin/global counters are recomputed and remain transactional after account/installation cleanup."
+      ],
+      "limits": [
+        "Retention with pending schedules/events/notifications remains blocked because H09/H10 persistence is unapproved and not implemented.",
+        "DATA-08 remains partial until background-work retention/uncertainty is implemented under an approved structure."
+      ]
+    },
+    "JOB-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformServiceNotificationUsesCentralRulesAndOccurrence|TestNotificationPublisherIsNamespacedAndIdempotent|TestNotificationPublisherQuotaDoesNotLeavePartialCapture|TestNotificationPublisherUsesAdministratorRulesForInbox|TestNotificationAppPublisherRechecksIssuerAndInstallation)$' -count=1"
+      ],
+      "coverage": [
+        "The application event type is registered in the administrator catalogue and delivery still uses the existing central webhook route.",
+        "Repeating the same occurrence ID returns created=false and creates no second event. A changed body under the same occurrence is a conflict.",
+        "An application cannot inject recipients or a destination. Audience revocation immediately removes inbox eligibility.",
+        "Publisher quota refusal leaves no partial event. App publisher identity is rechecked against the current issuer role and installed application."
+      ],
+      "limits": [
+        "This is the central notification service path with a local fake webhook. It does not send real email, Slack or webhook messages."
+      ]
+    },
+    "JOB-08": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestNotificationRestorePausesPreviouslyPendingWork|TestNotificationRuntimeHonorsRestorePause|TestNotificationReplayIsIdempotentAndDoesNotRewriteEvidence|TestNotificationReplayCannotRestoreDeletedAccount)$' -count=1"
+      ],
+      "coverage": [
+        "Restore sets notification dispatch paused and changes previously claimed work to uncertain; the runtime does not claim pending work while paused.",
+        "An uncertain delivery requires explicit review before replay. Replay creates a new reviewed occurrence with the same source event, not a second business event, and preserves the original uncertain attempt evidence.",
+        "A replay cannot bind to a deleted/recreated account or duplicate an already active replay request.",
+        "Same-request replay is idempotent."
+      ],
+      "limits": [
+        "This proves possible-delivery restore for the existing notification service, not paid task replay or newly proposed event-subscription persistence."
+      ]
+    },
+    "OPS-02": {
+      "status": "pass-development",
+      "commands": [
+        "Disposable app-runner workflow 41623015662: explicit bootstrap, fail-closed startup, owned service stop/restart and controller observation",
+        "Disposable app-project-quota workflow 41623015503: service.Serve managed Portal fixture"
+      ],
+      "coverage": [
+        "The runtime administrator bootstrap document contains only the public controller identity, deployment, epoch, revision and fingerprint. Repeating the exact document is idempotent; changed identity conflicts.",
+        "The real service refused unsupported or unsafe prerequisites, started on the owned XFS project-quota root, bound its protected control endpoint, restarted without replacing the journal/enrollment, and removed its socket on stop.",
+        "The quota/browser fixture started the same service boundary and completed a managed Portal installation through data preparation, candidate start, readiness, protected registration and activation.",
+        "Static applications still do not require a runner, and the service boundary is initialized outside per-app installation."
+      ],
+      "limits": [
+        "This was performed on a disposable GitHub-hosted rootful Linux host. It is not production deployment approval.",
+        "A human operator walkthrough using only the handbook remains part of final D6/H17 acceptance."
+      ]
+    },
+    "OPS-03": {
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailableSQLite$' -count=1",
+        "TEST_POSTGRES_DSN=postgres://.../platform_runner_unavailable GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformRunnerUnavailableLeavesPortalBusinessAvailablePostgres$' -count=1",
+        "Portal CI test run 41631852903"
+      ],
+      "coverage": [
+        "The first failure drill keeps Portal health, public branding, login, authenticated identity, home, an ordinary report read and the notification queue available while a managed disable cannot reach its runner.",
+        "The affected app and management progress enter a bounded disabled / recovery-required state; the error projection is sanitized and does not include the unavailable endpoint."
+      ],
+      "limits": [
+        "OPS-03 requires every application failure drill. This evidence covers the runner-unavailable drill, not the full download, verification, readiness, migration, task, notification and operator failure matrix.",
+        "This is not a production deployment or availability-SLO measurement."
+      ]
+    }
+  },
+  "open": [
+    "JOB-01 through JOB-06 remain dependent on the unapproved H09/H10 persistence design and are not claimed from unrelated queue tests.",
+    "DATA-05 still requires isolated fresh-host recovery with all external effects paused.",
+    "LIFE-02/03/08 retain manual or implementation gaps.",
+    "OPS-03 has its first runner-unavailable availability drill but still requires the complete application failure matrix."
+  ]
+}

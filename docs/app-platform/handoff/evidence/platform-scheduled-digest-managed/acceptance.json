@@ -1,0 +1,45 @@
+{
+  "format": "portal.scheduled-digest-managed-image-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T09:00:00-08:00",
+  "status": "pass-development",
+  "portal_candidate": "0e1cc6f4d2b7f867ec3a9d9f2c852cdf9056cfb7",
+  "apps_candidate": "2c3a8e3d614a8ced2aa810ecd1ee1b30193ed920",
+  "hosted_ci": {
+    "apps_check": "41872387752",
+    "apps_scheduled_digest_job": "126722675361",
+    "quota_native": "41872400475",
+    "quota_browser": "41872409052",
+    "runner_daemon": "41872409019",
+    "general_test": "41872409107",
+    "codeql": "41872395756",
+    "quota_native_result": "pass"
+  },
+  "image": {
+    "runtime_digest": "localhost:32768/scheduled-digest-exact@sha256:6cc21ef507b3838f828c6d3a647ec8940cd20f6f0938e8aa2c2e634c35fe367d",
+    "runtime_image_id": "sha256:aa1612ea295a7c6b977d25a96abbee1df3b679b059e2b254b481f59b0b5db877"
+  },
+  "assertions": {
+    "exact_image_selected_instead_of_ready_stub": true,
+    "candidate_start_remained_unready": true,
+    "candidate_start_probe_verified": true,
+    "protected_registration_rpc": true,
+    "registration_boot_handshake_verified": true,
+    "fixed_digest_task_succeeded": true,
+    "canonical_task_response_verified": true,
+    "uninstall_removed_installation_data": true,
+    "reinstall_used_fresh_namespace_and_launch": true,
+    "exact_image_runtime_smoke_passed": true
+  },
+  "commands": [
+    "gh workflow run app-project-quota-probe.yml --ref feat/app-platform-integration -f skip_browser=true",
+    "gh run download 41872400475 -n project-quota-evidence",
+    "gh run download 41872400475 -n scheduled-digest-exact-image"
+  ],
+  "limits": [
+    "This is an automated disposable Linux/XFS/Docker development acceptance, not production deployment or protocol freeze.",
+    "The task fixture seeds the final Portal activation rows after verifying delivery and boot; it does not replace the normal administrator activation path.",
+    "The exact Scheduled Digest descriptor declares no event subscription route, so event delivery remains covered by separate ready-fixture evidence.",
+    "The disposable loop remained externally held during UUID replacement, so owned cleanup was deferred to worker teardown.",
+    "A neutral operator clean-market walkthrough and the manual screen-reader audit remain open."
+  ]
+}

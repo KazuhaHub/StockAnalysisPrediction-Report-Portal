@@ -1,0 +1,46 @@
+{
+  "format": "portal.failure-availability-acceptance/1-dev.1",
+  "candidate": "b2301ce1e62b349d0fead12a668d37f651dd1b51",
+  "business_routes": [
+    "/healthz",
+    "/api/site",
+    "/api/login",
+    "/api/me",
+    "/api/home",
+    "/api/stock/600519",
+    "/api/notifications/unread"
+  ],
+  "covered": {
+    "descriptor_changed": true,
+    "signature_changed": true,
+    "archive_changed": true,
+    "archive_interrupted": true,
+    "trust_revoked": true,
+    "fetch_cancelled": true,
+    "task_handler_failed": true,
+    "notification_delivery_failed": true,
+    "invalid_operator_request": true,
+    "readiness_zero_or_unstarted": true,
+    "readiness_state_malformed": true,
+    "protocol_mismatch": true,
+    "explicit_migration_stage_failed": true,
+    "migration_recovery_required": true,
+    "runner_unavailable": true,
+    "portal_route_stack_restart": true
+  },
+  "hosted_ci": {
+    "general_test": "41956907211",
+    "app_project_quota_probe": "41956907159",
+    "app_runner_daemon_probe": "41956907257",
+    "codeql": "pass",
+    "result": "pass"
+  },
+  "known_initial_failure": {
+    "test": "TestForecastShadowDiagnosticsAcrossSQLiteConnections",
+    "cause": "SQLITE_BUSY",
+    "rerun_same_job": "pass"
+  },
+  "remaining": [
+    "This does not claim production availability or an SLO."
+  ]
+}
