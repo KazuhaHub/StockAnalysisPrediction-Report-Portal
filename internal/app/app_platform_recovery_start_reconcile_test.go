@@ -178,8 +178,9 @@ func TestRecoveryReconcileResumeStartRunsFromTheSchedulerWhenIdle(t *testing.T) 
 	}
 }
 
-// Nothing is read for a resume the reconcile cannot continue: when the installation's fence moved since the
-// operation held it, the stored fence no longer matches and the start stays unknown.
+// A resume the reconcile cannot continue is left as it is: when the installation's fence moved since the
+// operation held it, the stored fence no longer matches, so even an applied answer settles nothing and the
+// start stays unknown.
 func TestRecoveryReconcileRefusesAnInstallationFenceThatMoved(t *testing.T) {
 	f, operation, fake := unknownResumeStartFixture(t)
 	fake.applied = true

@@ -1029,26 +1029,7 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 		}
 		return tx.Commit()
 	}
-	// Return what the attempt staged. The data stage and the start each change one thing, and only
-	// while their own conditions still hold, so a stage the attempt never reached changes nothing.
-	if _, err := e.exec(`DELETE FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`,
-		expected.installationID, plan.TargetGeneration); err != nil {
-		return err
-	}
-	if _, err := e.exec(`UPDATE app_platform_data_namespaces SET state='review_required',owner_installation_id=NULL,revision=revision+1,updated_ms=?
-		WHERE id=? AND origin_installation_id=? AND owner_installation_id=? AND state='active' AND writer_fence=?`,
-		now, plan.NamespaceID, expected.installationID, expected.installationID, plan.NamespaceWriterFence); err != nil {
-		return err
-	}
-	if _, err := e.exec(`UPDATE app_platform_recovery_sets SET state='review_required',updated_ms=?
-		WHERE id=? AND installation_id=? AND state='verified' AND controller_epoch=?`,
-		now, plan.RecoverySetID, expected.installationID, expected.controllerEpoch); err != nil {
-		return err
-	}
-	changed, err = e.exec(`UPDATE app_platform_installations SET desired_state='disabled',phase='review_required',revision=revision+1,updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase='recovery_required' AND generation=? AND controller_epoch=? AND runtime_id=?`,
-		now, expected.installationID, plan.SourceGeneration, expected.controllerEpoch, plan.RuntimeID)
-	if err := platformLeaseCAS(changed, err); err != nil {
+	if err := returnPlatformResumeToReview(e, expected.installationID, expected.controllerEpoch, plan, now); err != nil {
 		return err
 	}
 	detail, _ := json.Marshal(struct {
@@ -1063,4 +1044,29 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 		return err
 	}
 	return tx.Commit()
+}
+
+// returnPlatformResumeToReview returns everything a resume attempt staged: the candidate activation is
+// dropped, the namespace and the recovery set await review again, and the installation is where a resume
+// review finds it, disabled and awaiting review. The data stage and the start each change one thing, and
+// only while their own conditions still hold, so a stage the attempt never reached changes nothing.
+func returnPlatformResumeToReview(e migExec, installation, epoch string, plan platformRestoreResumePlan, now int64) error {
+	if _, err := e.exec(`DELETE FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`,
+		installation, plan.TargetGeneration); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_data_namespaces SET state='review_required',owner_installation_id=NULL,revision=revision+1,updated_ms=?
+		WHERE id=? AND origin_installation_id=? AND owner_installation_id=? AND state='active' AND writer_fence=?`,
+		now, plan.NamespaceID, installation, installation, plan.NamespaceWriterFence); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_recovery_sets SET state='review_required',updated_ms=?
+		WHERE id=? AND installation_id=? AND state='verified' AND controller_epoch=?`,
+		now, plan.RecoverySetID, installation, epoch); err != nil {
+		return err
+	}
+	changed, err := e.exec(`UPDATE app_platform_installations SET desired_state='disabled',phase='review_required',revision=revision+1,updated_ms=?
+		WHERE id=? AND desired_state='enabled' AND phase='recovery_required' AND generation=? AND controller_epoch=? AND runtime_id=?`,
+		now, installation, plan.SourceGeneration, epoch, plan.RuntimeID)
+	return platformLeaseCAS(changed, err)
 }

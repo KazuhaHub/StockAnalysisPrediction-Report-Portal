@@ -121,6 +121,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				if _, reconcileErr := w.server.reconcilePlatformRecoveryImports(ctx, w.endpoint); reconcileErr != nil {
 					log.Printf("app-platform recovery reconcile: %v", reconcileErr)
 				}
+				// A resume whose start is settled as applied comes back as a lease at the probe stage, which
+				// the scheduler runs on like any claimed operation.
+				if resumed, reconcileErr := w.server.reconcilePlatformRecoveryResumes(ctx, w.endpoint, w.worker); reconcileErr != nil {
+					log.Printf("app-platform recovery resume reconcile: %v", reconcileErr)
+				} else {
+					selected = resumed
+				}
 			}
 		} else if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
