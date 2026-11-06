@@ -11,8 +11,10 @@ vi.mock('../../api/client', () => ({ api: apiMock, errText: () => 'Request faile
 vi.mock('react-i18next', () => {
   const t = (k: string, o?: unknown) => (o === undefined ? k : `${k}:${JSON.stringify(o)}`)
   const hook = { t, i18n: { language: 'en-US' } }
-  return { useTranslation: () => hook }
+  return { useTranslation: () => hook, initReactI18next: { type: '3rdParty', init: () => undefined } }
 })
+vi.mock('../../auth', () => ({ useAuth: () => ({ user: 'admin' }) }))
+vi.mock('../../prefs', () => ({ usePrefs: () => ({ lang: 'en-US' }) }))
 // Dragging itself is dnd.test.tsx's concern. This stand-in exposes the wrapper's contract, a reordered
 // id sequence, through a button, so the test can assert what the page persists.
 vi.mock('./dnd', () => ({
@@ -29,10 +31,10 @@ vi.mock('./dnd', () => ({
 function Detail() {
   return <div>detail:{useParams().key}</div>
 }
-const renderPage = () =>
+const renderPage = (path = '/manage/apps') =>
   render(
     <App>
-      <MemoryRouter initialEntries={['/manage/apps']}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
           <Route path="/manage/apps" element={<AppsAdminPage />} />
           <Route path="/manage/apps/:key" element={<Detail />} />
@@ -119,6 +121,36 @@ describe('Apps list', () => {
     renderPage()
     const link = (await screen.findByRole('link', { name: /nav\.quotes/ })) as HTMLAnchorElement
     expect(link.getAttribute('href')).toBe('/manage/apps/builtin%3Aquotes')
+  })
+
+  it('restores the application platform tab when an operation URL is refreshed', async () => {
+    const operation = '11111111-1111-4111-8111-111111111111'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url === '/api/admin/app-platform/releases' || url.startsWith('/api/admin/app-platform/subjects')) return { items: [], next_cursor: '' }
+      if (url === `/api/admin/app-platform/operations/${operation}`)
+        return { operation_id: operation, installation_id: operation, action: 'install', stage: 'queued', terminal: false, control_paused: false }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage(`/manage/apps?operation=${operation}`)
+    const platform = screen.getByRole('tab', { name: 'appPlatform.tab' })
+    await waitFor(() => expect(platform.getAttribute('aria-selected')).toBe('true'))
+    expect(await screen.findByText(/appPlatform\.stage\.queued/)).toBeTruthy()
+  })
+
+  it('opens lifecycle actions when an installation settings link is followed', async () => {
+    const installation = '22222222-2222-4222-8222-222222222222'
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url === '/api/admin/app-platform/releases' || url.startsWith('/api/admin/app-platform/subjects')) return { items: [], next_cursor: '' }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage(`/manage/apps?installation=${installation}`)
+    const platform = screen.getByRole('tab', { name: 'appPlatform.tab' })
+    await waitFor(() => expect(platform.getAttribute('aria-selected')).toBe('true'))
+    expect(await screen.findByText('appPlatform.development')).toBeTruthy()
   })
 
   it('says the load failed instead of claiming there are no apps', async () => {

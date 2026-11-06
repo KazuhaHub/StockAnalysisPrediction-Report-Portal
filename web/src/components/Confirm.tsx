@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Popconfirm, type ModalFuncProps } from 'antd'
 import type { HookAPI } from 'antd/es/modal/useModal'
 import { useTranslation } from 'react-i18next'
@@ -45,6 +45,7 @@ export default function Confirm({
   children: ReactNode
 }) {
   const { t } = useTranslation()
+  const trigger = useRef<HTMLElement | null>(null)
   const body = description || irreversible ? (
     <>
       {description}
@@ -61,7 +62,20 @@ export default function Confirm({
       okButtonProps={{ danger }}
       cancelButtonProps={{ autoFocus: true }}
       onConfirm={onConfirm}
-      onOpenChange={onOpenChange}
+      onOpenChange={(open) => {
+        if (open) {
+          trigger.current = document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null
+        } else {
+          const target = trigger.current
+          trigger.current = null
+          if (target?.isConnected) {
+            setTimeout(() => target.focus(), 0)
+          }
+        }
+        onOpenChange?.(open)
+      }}
       disabled={disabled}
       placement={placement}
     >

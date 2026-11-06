@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
-import { Button, Card, Input, Space, Typography, theme } from 'antd'
+import { useEffect, useMemo, useState } from 'react'
+import { Button, Card, Input, Space, Tabs, Typography, theme } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { OrderedListOutlined, RightOutlined } from '@ant-design/icons'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import LoadGate from '../../components/LoadGate'
 import AppInstall from './AppInstall'
@@ -10,6 +10,10 @@ import AppReorderModal from './AppReorderModal'
 import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdminModel'
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import CardTable from '../../components/CardTable'
+import AppPlatformInstallPanel from './AppPlatformInstallPanel'
+import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
+import AppPlatformTasksPanel from './AppPlatformTasksPanel'
+import AppPlatformEventSubscriptionsPanel from './AppPlatformEventSubscriptionsPanel'
 
 // The Apps list: every built-in and installed app with where it is switched on, in the administrator's
 // order (ADR 0048). Opening one leads to its detail, and from there to its service status by OU. Order
@@ -18,10 +22,17 @@ export default function AppsAdminPage() {
   const { t } = useTranslation()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const operation = params.get('operation')
+  const installation = params.get('installation')
   const labels = useAppLabels()
   const { apps, loading, error, reload } = useAppsCatalog()
   const [search, setSearch] = useState('')
   const [reordering, setReordering] = useState(false)
+  const [activeTab, setActiveTab] = useState(operation || installation ? 'platform' : 'apps')
+  useEffect(() => {
+    if (operation || installation) setActiveTab('platform')
+  }, [installation, operation])
 
   // The muted line under a name: what a built-in app is for, or which build of an installed app this is.
   const subtitle = (a: AdminApp) => (a.builtin ? labels.description(a) : [a.version && `v${a.version}`, a.key].filter(Boolean).join(' · '))
@@ -57,9 +68,12 @@ export default function AppsAdminPage() {
     { title: '', className: 'rp-apps-col-chevron', align: 'right', render: () => <RightOutlined aria-hidden="true" style={{ color: token.colorTextTertiary }} /> },
   ]
 
-  return (
-    <LoadGate loading={loading} error={error} onRetry={reload}>
-      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+  return <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+    {
+      key: 'apps',
+      label: t('nav.apps'),
+      children: <LoadGate loading={loading} error={error} onRetry={reload}>
+        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Space wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button icon={<OrderedListOutlined aria-hidden="true" />} onClick={() => setReordering(true)} disabled={apps.length < 2}>
             {t('apps.reorder')}
@@ -95,8 +109,13 @@ export default function AppsAdminPage() {
           />
           </div>
         </Card>
-      </Space>
-      <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />
-    </LoadGate>
-  )
+        </Space>
+        <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />
+      </LoadGate>,
+    },
+    { key: 'platform', label: t('appPlatform.tab'), children: <AppPlatformInstallPanel /> },
+    { key: 'publishers', label: t('appTrust.tab'), children: <AppPlatformPublishersPanel /> },
+    { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
+    { key: 'subscriptions', label: t('appPlatform.events.tab'), children: <AppPlatformEventSubscriptionsPanel /> },
+  ]} />
 }

@@ -46,6 +46,7 @@ describe('parseCalVer / compareCalVer', () => {
     for (const v of ['dev', 'ci', 'none', 'unknown', '', 'v0.4.72', 'v2026.38.1-rc']) {
       expect(parseCalVer(v), v).toBeNull()
     }
+    expect(parseCalVer(undefined as unknown as string)).toBeNull()
   })
 
   it('orders numerically, never lexically', () => {

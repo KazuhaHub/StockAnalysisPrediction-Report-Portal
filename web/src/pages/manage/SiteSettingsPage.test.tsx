@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App } from 'antd'
@@ -55,6 +55,12 @@ function renderPage() {
 }
 
 describe('SiteSettingsPage', () => {
+  // antd's tab and select internals schedule a 300ms useDelayState callback.
+  // Keep this file's jsdom alive long enough to drain it after the global cleanup.
+  afterEach(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 350))
+  })
+
   beforeEach(() => {
     apiMock.get.mockReset()
     apiMock.post.mockReset()

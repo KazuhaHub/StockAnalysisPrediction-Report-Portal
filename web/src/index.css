@@ -29,6 +29,12 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
+:root[data-theme='light'] a:not([class]) { color: #0958d9; }
+:root[data-theme='light'] a:not([class]):hover { color: #003eb3; }
+:root[data-theme='light'] a:not([class]):active { color: #002766; }
+:root[data-theme='dark'] a:not([class]) { color: #91caff; }
+:root[data-theme='dark'] a:not([class]):hover { color: #bae0ff; }
+:root[data-theme='dark'] a:not([class]):active { color: #e6f4ff; }
 
 .rp-number-input-addon.ant-btn:disabled {
   background: var(--ant-color-fill-quaternary);
@@ -93,6 +99,41 @@ body {
     overflow: hidden;
     box-shadow: var(--ant-box-shadow-secondary);
   }
+}
+
+.rp-platform-settings .ant-tag.ant-tag-success.ant-tag-filled {
+  color: #237804;
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+.rp-platform-settings .ant-tag.ant-tag-error {
+  color: #a8071a;
+  background: #fff2f0;
+  border-color: #ffccc7;
+}
+.rp-platform-settings .ant-tag.ant-tag-filled.ant-tag-error {
+  color: #a8071a;
+}
+.rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
+  color: #a8071a;
+  border-color: #a8071a;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-success.ant-tag-filled {
+  color: #73d13d;
+  background: #162312;
+  border-color: #274916;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-error {
+  color: #ff7875;
+  background: #2a1215;
+  border-color: #58181c;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-tag.ant-tag-filled.ant-tag-error {
+  color: #ff7875;
+}
+:root[data-theme='dark'] .rp-platform-settings .ant-btn-dangerous.ant-btn-variant-outlined {
+  color: #ff7875;
+  border-color: #ff7875;
 }
 
 /* Dark mode elevation: on a black page a shadow is all but invisible, so a floating surface would
@@ -3138,6 +3179,35 @@ body {
   .rp-apps-col-chevron { display: none; }
 }
 .rp-apps-table .ant-table-cell { overflow-wrap: anywhere; }
+
+/* Application lifecycle management keeps wide package metadata inside the page. The table wraps
+   long names/digests instead of forcing the whole admin body sideways, and the confirmation dialog
+   owns its vertical scroll when permissions or recovery details exceed the viewport. */
+.rp-platform-release-table { min-width: 0; }
+.rp-platform-release-table .ant-table-content { overflow-x: auto; }
+.rp-platform-release-table :is(th, td) { vertical-align: top; overflow-wrap: anywhere; white-space: normal; }
+.rp-platform-release-table :is(.ant-space, .ant-tag, .ant-typography) { max-width: 100%; overflow-wrap: anywhere; }
+.rp-platform-review { min-width: 0; }
+.rp-platform-review .ant-descriptions-view { min-width: 0; }
+.rp-platform-review .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.rp-platform-review .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
+.rp-platform-review-modal .ant-descriptions-item-content { min-width: 0; overflow-wrap: anywhere; }
+.rp-platform-review-modal .ant-descriptions-item-label { color: var(--ant-color-text); font-weight: 500; }
+.rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous) { background: #0958d9; border-color: #0958d9; }
+.rp-platform-review-modal .ant-btn-primary:not(.ant-btn-dangerous):not(:disabled):hover { background: #003eb3; border-color: #003eb3; }
+.rp-platform-review-modal .ant-btn-dangerous { background: #a8071a; border-color: #a8071a; }
+.rp-platform-review-modal .ant-btn-dangerous:not(:disabled):hover { background: #820014; border-color: #820014; }
+.rp-platform-review-modal .ant-modal-footer .ant-btn-default,
+.rp-platform-review-modal .ant-modal-footer .ant-btn-default > span { color: var(--ant-color-text) !important; border-color: var(--ant-color-primary); }
+.rp-platform-review-modal { top: 24px; width: min(560px, calc(100vw - 24px)) !important; padding-bottom: 24px; }
+.rp-platform-review-modal :is(.ant-modal-container, .ant-modal-content),
+.rp-platform-review-modal.ant-modal-content { display: flex; flex-direction: column; max-height: calc(100dvh - 72px); }
+.rp-platform-review-modal :is(.ant-modal-header, .ant-modal-footer) { flex: none; }
+.rp-platform-review-modal .ant-modal-body { display: flex; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.rp-platform-review-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.rp-platform-review-scroll:focus-visible { outline: 2px solid var(--ant-color-primary); outline-offset: 2px; }
+.rp-safe-primary.ant-btn-primary { background: #0958d9 !important; border-color: #0958d9 !important; }
+.rp-safe-primary.ant-btn-primary > span { color: #fff !important; }
 
 /* Admin settings bodies: a card inside a card drops its frame and tightens its padding, and wide
    tables scroll inside their container instead of being clipped. */
