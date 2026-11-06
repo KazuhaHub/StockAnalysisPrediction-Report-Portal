@@ -153,3 +153,61 @@ func TestWritableLifecycleImportCheckpointReferenceAndReply(t *testing.T) {
 		t.Fatal("import receipt settled in the future accepted")
 	}
 }
+
+func importAbsenceFor(command control.ImportCheckpointCommand) journal.ImportCheckpointAbsence {
+	return journal.ImportCheckpointAbsence{
+		Format: "portal.runner.import-checkpoint-absence/1-dev.1", DeploymentID: command.DeploymentID,
+		ControllerEpoch: command.ControllerEpoch, InstallationID: command.InstallationID,
+		OperationID: command.OperationID, TargetGeneration: command.TargetGeneration, Stage: command.Stage,
+		EffectNumber: command.EffectNumber, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		State: "absent", ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10),
+	}
+}
+
+func TestWritableLifecycleImportAbsenceReply(t *testing.T) {
+	a, command, raw, sig, descriptor, _ := importTransportFixture(t)
+	now := time.Now().UnixMilli()
+	started, received := time.Now().Add(-time.Second), time.Now()
+	read, err := verifyWritableLifecycle(ImportCheckpointRead, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	execute, err := verifyWritableLifecycle(ImportCheckpointExecute, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	absence := importAbsenceFor(command)
+	body, _ := json.Marshal(absence)
+	if !validWritableLifecycleReply(ImportCheckpointRead, body, read, started, received) {
+		t.Fatal("exact absence reply refused for a read")
+	}
+	if !importAbsenceReply(ImportCheckpointRead, body) {
+		t.Fatal("absence reply not recognised")
+	}
+	if validWritableLifecycleReply(ImportCheckpointExecute, body, execute, started, received) || importAbsenceReply(ImportCheckpointExecute, body) {
+		t.Fatal("an execute may never be answered with an absence")
+	}
+	for name, mutate := range map[string]func(*journal.ImportCheckpointAbsence){
+		"effect":       func(v *journal.ImportCheckpointAbsence) { v.EffectID = "11111111-1111-4111-8111-111111119a64" },
+		"operation":    func(v *journal.ImportCheckpointAbsence) { v.OperationID = "11111111-1111-4111-8111-111111119a65" },
+		"installation": func(v *journal.ImportCheckpointAbsence) { v.InstallationID = "11111111-1111-4111-8111-111111119a66" },
+		"number":       func(v *journal.ImportCheckpointAbsence) { v.EffectNumber = "2" },
+		"stage":        func(v *journal.ImportCheckpointAbsence) { v.Stage = "validate" },
+		"payload":      func(v *journal.ImportCheckpointAbsence) { v.PayloadSHA256 = strings.Repeat("f", 64) },
+		"generation":   func(v *journal.ImportCheckpointAbsence) { v.TargetGeneration = "9" },
+		"state":        func(v *journal.ImportCheckpointAbsence) { v.State = "imported" },
+		"future": func(v *journal.ImportCheckpointAbsence) {
+			v.ObservedMS = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
+		},
+		"before issue": func(v *journal.ImportCheckpointAbsence) { v.ObservedMS = "1" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := absence
+			mutate(&changed)
+			encoded, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(ImportCheckpointRead, encoded, read, started, received) {
+				t.Fatal("changed absence reply accepted")
+			}
+		})
+	}
+}

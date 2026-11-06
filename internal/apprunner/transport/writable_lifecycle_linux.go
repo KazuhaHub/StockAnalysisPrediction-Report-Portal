@@ -20,6 +20,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 const writableLifecycleQueryMagic = "PWLQ0001"
@@ -156,6 +157,11 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
+	if importAbsenceReply(action, body) {
+		// The runner proved it never claimed this effect. This is the only definite negative
+		// the transport reports; every other failure above stays uncertain.
+		return zero, journal.ErrNoSuchEffect
+	}
 	command := sha256.Sum256(raw)
 	return WritableLifecycleObservation{action: action, body: string(body), authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: profile.owner, ControllerUID: uint32(os.Geteuid()), ControllerGID: profile.group, RootController: profile.shared}, receivedAt: received, commandSHA: hex.EncodeToString(command[:])}, nil
 }
@@ -275,7 +281,7 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		}
 		result, err = provider.store.DispatchImportCheckpoint(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
 	case ImportCheckpointRead:
-		result, err = provider.store.ReadImportCheckpointReceipt(ctx, raw, sig)
+		result, err = provider.store.ReadImportCheckpointOrAbsence(ctx, raw, sig)
 	case UpdateStartReserve:
 		result, err = provider.store.ReserveUpdateStart(ctx, raw, sig)
 	case UpdateStartRead:

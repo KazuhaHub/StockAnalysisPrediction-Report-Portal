@@ -415,6 +415,13 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 		}
 		settled = v.SettledMS
 	case action == ImportCheckpointExecute || action == ImportCheckpointRead:
+		if importAbsenceReply(action, body) {
+			absence, _ := journal.ParseImportCheckpointAbsence(body)
+			observed, observedErr := strconv.ParseInt(absence.ObservedMS, 10, 64)
+			issued, issuedErr := strconv.ParseInt(r.importCheckpoint.IssuedMS, 10, 64)
+			return journal.ImportAbsenceMatchesCommand(absence, r.importCheckpoint) &&
+				observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+		}
 		v, e := journal.ParseImportCheckpointReceipt(body)
 		c := r.importCheckpoint
 		p := c.Payload
@@ -564,6 +571,16 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 	}
 	n, e := strconv.ParseInt(settled, 10, 64)
 	return e == nil && n <= received.UnixMilli()
+}
+
+// importAbsenceReply reports whether body is the runner's definite "never claimed" answer. Only a
+// read-receipt can be answered that way; an execute that found no row would claim one instead.
+func importAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	if action != ImportCheckpointRead {
+		return false
+	}
+	_, err := journal.ParseImportCheckpointAbsence(body)
+	return err == nil
 }
 
 func mustLifecycleInt(value string) int64 {
