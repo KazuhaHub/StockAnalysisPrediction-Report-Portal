@@ -137,7 +137,47 @@ func validManifest(m Manifest) bool {
 		}
 		schemas[schema] = true
 	}
-	return schemas[m.Data.Schema]
+	return schemas[m.Data.Schema] && validMigrations(m.Data, m.Backend != nil)
+}
+
+// validMigrations bounds the declared single-hop steps. Each step must end at
+// the declared schema, start strictly below it and start from a unique schema,
+// so the installed schema selects at most one step.
+func validMigrations(data DataCompatibility, hasBackend bool) bool {
+	if len(data.Migrations) == 0 {
+		return data.Migrations == nil
+	}
+	if !hasBackend || len(data.Migrations) > maxDescriptorMigrations {
+		return false
+	}
+	from := map[int]bool{}
+	for _, step := range data.Migrations {
+		if step.To != data.Schema || step.From < minDescriptorDataSchema || step.From >= step.To || from[step.From] || !validMigrationEntrypoint(step.Entrypoint) {
+			return false
+		}
+		if step.WallClockSeconds != nil && (*step.WallClockSeconds < minMigrationWallClockSeconds || *step.WallClockSeconds > maxMigrationWallClockSeconds) {
+			return false
+		}
+		from[step.From] = true
+	}
+	return true
+}
+
+func validMigrationEntrypoint(argv []string) bool {
+	if len(argv) < 1 || len(argv) > maxMigrationEntrypointArgs || !strings.HasPrefix(argv[0], "/") {
+		return false
+	}
+	for _, arg := range argv {
+		if len(arg) < 1 || len(arg) > maxMigrationEntrypointBytes {
+			return false
+		}
+		for i := 0; i < len(arg); i++ {
+			if arg[i] < 0x20 || arg[i] > 0x7e {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func safeRelativePath(value string) bool {

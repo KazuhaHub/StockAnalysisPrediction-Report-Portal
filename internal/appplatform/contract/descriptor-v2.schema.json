@@ -408,11 +408,60 @@
             false,
             null
           ]
+        },
+        "migrations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DataMigration"
+          },
+          "maxItems": 8,
+          "x-go-omitempty": true,
+          "description": "Single-hop data migration steps. The strict parser also requires a backend, to equal data.schema, from below to, and unique from values."
         }
       },
       "required": [
         "schema",
         "readable_schemas"
+      ]
+    },
+    "DataMigration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "to": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000
+        },
+        "entrypoint": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "^[\\x20-\\x7e]+$"
+          },
+          "minItems": 1,
+          "maxItems": 16,
+          "description": "The strict parser also requires the first element to be an absolute path."
+        },
+        "wall_clock_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600,
+          "x-go-pointer": true,
+          "x-go-omitempty": true
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "entrypoint"
       ]
     },
     "AppDisplay": {
