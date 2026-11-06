@@ -17,6 +17,22 @@ import (
 const platformInstallAttemptLimit = 3
 const platformInstallAttemptTimeout = 20 * time.Second
 
+// An import-checkpoint is a bulk data action the runner bounds at two minutes, so the attempt that
+// drives it outlives that bound with a margin and still ends inside the 180 second operation lease.
+// An attempt that gives up earlier abandons an import that is still running.
+const platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
+
+// platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy
+// with the same effect before they count as failures.
+const platformBusyWaitLimit = 20
+
+func platformAttemptTimeout(lease platformOperationLease) time.Duration {
+	if lease.snapshot.Action == appplatform.ActionRestoreImport && lease.snapshot.Stage == appplatform.StageRestoreData {
+		return platformImportAttemptTimeout
+	}
+	return platformInstallAttemptTimeout
+}
+
 type platformInstallWorkerStatus struct {
 	code, operationID string
 	stage             appplatform.Stage
@@ -35,6 +51,7 @@ type platformInstallScheduler struct {
 	status   atomic.Pointer[platformInstallWorkerStatus]
 	active   platformOperationLease
 	attempts int
+	waits    int
 	writable bool
 }
 
@@ -76,7 +93,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	defer func() { <-w.gate }()
 	ctx, cancel := context.WithTimeout(parent, platformInstallAttemptTimeout)
-	defer cancel()
+	defer func() { cancel() }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -146,7 +163,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			w.publish("idle", "", "")
 			return nil
 		}
-		w.active, w.attempts = selected.lease, 0
+		w.active, w.attempts, w.waits = selected.lease, 0, 0
 	}
 	if w.attempts >= platformInstallAttemptLimit {
 		return w.finish(ctx)
@@ -164,6 +181,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		return err
 	}
 	w.active = renewed
+	if timeout := platformAttemptTimeout(w.active); timeout != platformInstallAttemptTimeout {
+		cancel()
+		ctx, cancel = context.WithTimeout(parent, timeout)
+	}
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
 	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
@@ -233,6 +254,16 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
+	if w.active.snapshot.Action == appplatform.ActionRestoreImport &&
+		(errors.Is(err, errPlatformImportBusy) || (errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)) &&
+		w.waits < platformBusyWaitLimit {
+		// The runner is still working on the import, or the wait for it ran out: it has not failed.
+		// The same effect is read again on the next attempt; nothing is sent under a new identity.
+		w.waits++
+		w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
+		return err
+	}
+	w.waits = 0
 	w.attempts++
 	w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
 	if w.attempts >= platformInstallAttemptLimit {

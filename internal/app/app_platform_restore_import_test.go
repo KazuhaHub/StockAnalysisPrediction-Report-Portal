@@ -74,6 +74,8 @@ type platformImportTestExecutor struct {
 	// runner's definite statement that it holds no row for the effect.
 	readErr error
 	absent  bool
+	// deadline is how long the context given to the last Execute had left.
+	deadline time.Duration
 }
 
 func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
@@ -84,8 +86,11 @@ func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, i
 	}
 	return o, nil
 }
-func (f *platformImportTestExecutor) Execute(_ context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
+func (f *platformImportTestExecutor) Execute(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.calls++
+	if d, ok := ctx.Deadline(); ok {
+		f.deadline = time.Until(d)
+	}
 	if f.err != nil {
 		f.last = intent
 		return nil, f.err

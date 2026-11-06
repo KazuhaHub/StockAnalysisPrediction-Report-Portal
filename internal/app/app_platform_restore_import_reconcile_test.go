@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -123,4 +124,54 @@ func TestRestoreImportRefusedAfterAnyImportInTheEpoch(t *testing.T) {
 			t.Fatal("an installation with a completed import was admitted again")
 		}
 	})
+}
+
+// The runner bounds a bulk data action at two minutes, so the attempt that drives it must outlive that
+// bound, and still end before its lease does.
+func TestRestoreImportAttemptOutlivesTheRunnerBound(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	commit := f.reviewAndConsume(t)
+	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5302), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 8 && f.executor.calls == 0; i++ {
+		if err := worker.tick(context.Background()); err != nil {
+			t.Fatal(i, err)
+		}
+	}
+	if f.executor.calls != 1 {
+		t.Fatal("the import never reached the runner")
+	}
+	leaseBound := time.Duration(appPlatformLeaseMS) * time.Millisecond
+	if f.executor.deadline < 2*time.Minute+5*time.Second || f.executor.deadline >= leaseBound {
+		t.Fatalf("the import attempt had %s; it must exceed the runner's two-minute bound and fit the %s lease", f.executor.deadline, leaseBound)
+	}
+	_ = commit
+}
+
+// A runner that is still busy with the import has not failed the attempt.
+func TestRestoreImportBusyRunnerIsNotAFailedAttempt(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	commit := f.reviewAndConsume(t)
+	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5303), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.executor.err, f.executor.readErr = errPlatformImportBusy, errPlatformImportBusy
+	for i := 0; i < platformInstallAttemptLimit*3; i++ {
+		_ = worker.tick(context.Background())
+	}
+	if worker.attempts != 0 || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "restore_data" {
+		t.Fatalf("a busy runner counted as a failed attempt: attempts=%d stage=%s", worker.attempts, scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID))
+	}
+	f.executor.err, f.executor.readErr = nil, nil
+	for i := 0; i < 4 && scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete"; i++ {
+		if err := worker.tick(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "complete" {
+		t.Fatal("the import did not complete once the runner was free")
+	}
 }
