@@ -45,6 +45,7 @@ type containerPlan struct {
 	owner       containerOwner
 	writable    *WritableCandidateBinding
 	updateStart *UpdateStartBinding
+	migration   *MigrationBinding
 	profile     string
 }
 type containerMount struct {
@@ -84,6 +85,8 @@ type containerCreate struct {
 	Image, User, Hostname, WorkingDir                                                   string
 	NetworkDisabled, AttachStdin, AttachStdout, AttachStderr, OpenStdin, StdinOnce, Tty bool
 	Env                                                                                 []string
+	Entrypoint                                                                          []string `json:",omitempty"`
+	Cmd                                                                                 []string `json:",omitempty"`
 	Labels                                                                              map[string]string
 	Healthcheck                                                                         struct{ Test []string }
 	StopSignal                                                                          string
@@ -130,6 +133,15 @@ func validContainerPlan(plan containerPlan) bool {
 		return false
 	}
 	labels := ownerContainerLabels(plan.owner)
+	if plan.migration == nil && (len(request.Entrypoint) > 0 || len(request.Cmd) > 0) {
+		return false
+	}
+	if plan.migration != nil {
+		if plan.writable != nil || plan.updateStart != nil || !validMigrationPlan(plan, request) {
+			return false
+		}
+		labels = migrationLabels(plan.owner, *plan.migration)
+	}
 	if plan.writable != nil {
 		if !validWritableCandidateBinding(*plan.writable) || plan.owner.Generation != "1" || plan.owner.WriterFence != "1" || len(request.HostConfig.Mounts) != 3 || request.HostConfig.Mounts[0].Target != "/data" || request.HostConfig.Mounts[0].ReadOnly {
 			return false

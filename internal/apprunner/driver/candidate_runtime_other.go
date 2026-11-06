@@ -66,3 +66,10 @@ func (*CandidateRuntime) ExchangeCandidateHandshake(context.Context, CandidateLa
 func (*CandidateRuntime) ForwardCandidateRequest(context.Context, CandidateLaunch, BackendRegistrationSnapshot, string, string, []byte, string) (BackendRequestObservation, error) {
 	return BackendRequestObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) RunMigrationJob(context.Context, MigrationJobRequest) (MigrationJobObservation, error) {
+	return MigrationJobObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) ProveMigrationAbsent(context.Context, MigrationJobRequest) error {
+	return ErrUnsupported
+}
