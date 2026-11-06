@@ -13,11 +13,12 @@ import (
 
 func (f *platformImportFixtureState) abandon(t *testing.T) (platformAbandonResult, error) {
 	t.Helper()
-	review, err := f.s.createPlatformAbandonRuntimeReview(context.Background(), f.actor, f.replacement.id)
+	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
 	if err != nil {
 		return platformAbandonResult{}, err
 	}
-	return f.s.consumePlatformAbandonRuntimeReview(context.Background(), f.actor, review.ID, review.SHA256)
+	result, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest)
+	return result, err
 }
 
 // The owner's decision: the replacement host is discarded. Everything that rested on it is settled
@@ -86,16 +87,17 @@ func TestAbandonEndsAnOperationInFlightAndRefusesOutsideRecovery(t *testing.T) {
 	}
 }
 
-// A review is a contract: it is refused when what it listed has changed, and cannot be spent twice.
-func TestAbandonReviewIsRefusedWhenTheListedWorkChanged(t *testing.T) {
+// The listing is a contract: a confirmation is refused when what it listed has changed, and a repeated
+// confirmation of the same listing replays the first answer rather than acting again.
+func TestAbandonConfirmationIsRefusedWhenTheListedWorkChanged(t *testing.T) {
 	f, _ := unknownImportFixture(t)
-	review, err := f.s.createPlatformAbandonRuntimeReview(context.Background(), f.actor, f.replacement.id)
+	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mustExec(t, f.s.st, `UPDATE app_platform_import_grants SET state='revoked'`)
-	if _, err := f.s.consumePlatformAbandonRuntimeReview(context.Background(), f.actor, review.ID, review.SHA256); !errors.Is(err, errAppPlatformPlanChanged) {
-		t.Fatalf("a stale abandon review was committed: %v", err)
+	if _, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest); !errors.Is(err, errAppPlatformPlanChanged) {
+		t.Fatalf("a stale abandon confirmation was accepted: %v", err)
 	}
 	if scalar[int](t, f.s.st, `SELECT enabled FROM app_platform_runtime_bindings WHERE id=?`, f.replacement.id) != 1 {
 		t.Fatal("a refused abandon retired the runtime")
@@ -192,20 +194,30 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 		t.Fatalf("a second replacement was enrolled beside the live one: %d", got.Code)
 	}
 
-	// Abandon: reviewed, then committed once.
-	abandonReview := h.json(h.post(plans, `{"action":"abandon_runtime","runtime_id":"`+registered.id+`"}`), 200)
-	if r, _ := abandonReview["review"].(map[string]any); r["action"] != "abandon_runtime" || r["runtime_id"] != registered.id || len(r["grants"].([]any)) != 1 || len(r["effects"].([]any)) != 1 {
-		t.Fatalf("abandon review: %v", abandonReview)
+	// Abandon: listed, then confirmed against that listing; confirming it again replays.
+	const abandon = "/api/admin/app-platform/control/abandon-runtime"
+	listing := h.json(h.post(abandon, `{"action":"prepare","runtime_id":"`+registered.id+`"}`), 200)
+	if r, _ := listing["review"].(map[string]any); r["action"] != "abandon_runtime" || r["runtime_id"] != registered.id || len(r["grants"].([]any)) != 1 || len(r["effects"].([]any)) != 1 {
+		t.Fatalf("abandon listing: %v", listing)
 	}
-	if got := h.post(plans, `{"action":"abandon_runtime","runtime_id":"`+platformFixtureID(9999)+`"}`); got.Code != 409 {
-		t.Fatalf("a review named a runtime that is not enrolled: %d", got.Code)
+	if got := h.post(abandon, `{"action":"prepare","runtime_id":"`+platformFixtureID(9999)+`"}`); got.Code != 409 {
+		t.Fatalf("a listing named a runtime that is not enrolled: %d", got.Code)
 	}
-	commitBody := `{"plan_id":"` + h.str(abandonReview, "plan_id") + `","plan_sha256":"` + h.str(abandonReview, "plan_sha256") + `","idempotency_key":"` + platformFixtureID(5810) + `"}`
-	if abandoned := h.json(h.post(operations, commitBody), 202); abandoned["abandoned"] != true || abandoned["runtime_id"] != registered.id {
-		t.Fatalf("abandon commit: %v", abandoned)
+	if got := h.post(abandon, `{"action":"confirm","runtime_id":"`+registered.id+`","plan_sha256":"`+platformDigest([]byte("other"))+`"}`); got.Code != 409 {
+		t.Fatalf("a confirmation of another listing was accepted: %d", got.Code)
 	}
-	if got := h.post(operations, commitBody); got.Code != 409 {
-		t.Fatalf("an abandon review was spent twice: %d", got.Code)
+	confirmBody := `{"action":"confirm","runtime_id":"` + registered.id + `","plan_sha256":"` + h.str(listing, "plan_sha256") + `"}`
+	if abandoned := h.json(h.post(abandon, confirmBody), 202); abandoned["abandoned"] != true || abandoned["runtime_id"] != registered.id || abandoned["replayed"] != false {
+		t.Fatalf("abandon confirmation: %v", abandoned)
+	}
+	if replay := h.json(h.post(abandon, confirmBody), 202); replay["abandoned"] != true || replay["replayed"] != true {
+		t.Fatalf("an abandon confirmation did not replay: %v", replay)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.runtime_abandoned' AND target_id=?`, registered.id) != 1 {
+		t.Fatal("the abandon acted twice")
+	}
+	if got := h.post(plans, `{"action":"abandon_runtime","runtime_id":"`+registered.id+`"}`); got.Code == 200 {
+		t.Fatal("the plans route still reviews an abandon")
 	}
 
 	// A new replacement runtime, a fresh deployment, and the import is redone.
@@ -246,5 +258,42 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, installation) != "ready" ||
 		scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`) != "0" {
 		t.Fatal("the installation is not ready or recovery did not end")
+	}
+}
+
+// Abandoning is a deployment-level decision. The review-plan table is installation-shaped (it demands
+// an application and a publisher), so the abandon must not write one with borrowed values: nothing in
+// that table may name a publisher the abandon has no business with.
+func TestAbandonWritesNoReviewPlanAndIsIdempotent(t *testing.T) {
+	f, _ := unknownImportFixture(t)
+	plans := func() int { return scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_review_plans`) }
+	before := plans()
+	plan, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
+	if err != nil || plan.RuntimeID != f.replacement.id || len(plan.Grants) != 1 {
+		t.Fatalf("preview: %+v %v", plan, err)
+	}
+	if again, sum, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id); err != nil || sum != digest || len(again.Effects) != len(plan.Effects) {
+		t.Fatalf("a preview is not deterministic: %v", err)
+	}
+	first, replayed, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest)
+	if err != nil || replayed || first.Grants != 1 {
+		t.Fatalf("confirm: %+v replayed=%v %v", first, replayed, err)
+	}
+	// The same confirmation again answers what the first did, and acts on nothing.
+	generation := scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
+	again, replayed, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest)
+	if err != nil || !replayed || again != first {
+		t.Fatalf("replay: %+v replayed=%v %v", again, replayed, err)
+	}
+	if scalar[int64](t, f.s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation) != generation ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.runtime_abandoned' AND target_id=?`, f.replacement.id) != 1 {
+		t.Fatal("a replayed confirmation acted again")
+	}
+	// A different listing for a runtime that was already abandoned is a conflict, not a second abandon.
+	if _, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, platformDigest([]byte("other"))); !errors.Is(err, errAppPlatformPlanChanged) {
+		t.Fatalf("a different listing replayed an abandon: %v", err)
+	}
+	if plans() != before || scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE app_id='recovery' OR (installation_id IS NULL AND action='disable')`) != 0 {
+		t.Fatal("the abandon wrote a review plan row")
 	}
 }

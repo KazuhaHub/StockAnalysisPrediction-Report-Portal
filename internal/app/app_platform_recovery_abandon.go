@@ -5,8 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"math"
-	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -29,12 +27,19 @@ import (
 //   - every installation placed on it returns to awaiting review: disabled, with the recovery set and
 //     the data namespace awaiting review again and no activation, ready for a new import.
 //
-// It is admitted only while the Portal is paused. The review lists exactly what will change, and the
-// commit refuses if any of it changed since.
+// It is admitted only while the Portal is paused. The decision belongs to the deployment, not to an
+// installation, so it is not a review plan: the review-plan table is installation-shaped (it demands an
+// application and a publisher) and a runtime-level row there would need borrowed values. Instead the
+// action is a prepare and a confirm, like the replacement runtime's. Prepare lists exactly what will
+// change and the digest of that listing; confirm names the digest and is refused if any of the listed
+// work changed since. The confirmation is idempotent: its outcome is recorded under a meta key naming the
+// runtime, and the same confirmation again answers the recorded outcome without acting.
 
 const (
 	platformAbandonRuntimeFormat = "portal.recovery-abandon-runtime-review/1-dev.1"
 	platformAbandonReason        = "runtime abandoned"
+	// platformAbandonedRuntimeKeyPrefix names the meta key that records the outcome of an abandon.
+	platformAbandonedRuntimeKeyPrefix = "app_platform_abandoned_runtime:"
 )
 
 var errAppPlatformAbandonUnavailable = errors.New("application recovery has no replacement runtime to abandon")
@@ -50,10 +55,6 @@ type platformAbandonRuntimePlan struct {
 	Effects         []string `json:"effects"`
 	Operations      []string `json:"operations"`
 	Reason          string   `json:"reason"`
-}
-
-func platformPlanIsAbandonRuntime(planRaw string) bool {
-	return strings.HasPrefix(planRaw, `{"format":"`+platformAbandonRuntimeFormat+`"`)
 }
 
 func platformIDList(e migExec, query string, args ...any) ([]string, error) {
@@ -101,61 +102,38 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 	return p, nil
 }
 
-func (s *Server) createPlatformAbandonRuntimeReview(ctx context.Context, session platformActorSession, runtimeID string) (platformRemovalReview, error) {
+// previewPlatformAbandonRuntime lists what abandoning the runtime would settle, with the digest a
+// confirmation must name. It changes nothing.
+func (s *Server) previewPlatformAbandonRuntime(ctx context.Context, session platformActorSession, runtimeID string) (platformAbandonRuntimePlan, string, error) {
+	var plan platformAbandonRuntimePlan
+	var digest string
 	if !platformValidUUID(runtimeID) {
-		return platformRemovalReview{}, errAppPlatformPlanChanged
+		return plan, "", errAppPlatformAbandonUnavailable
 	}
-	var result platformRemovalReview
 	err := s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
-		plan, err := loadPlatformAbandonRuntimePlan(e, runtimeID, control)
-		if err != nil {
+		var err error
+		if plan, digest, err = loadPlatformAbandonRuntimeListing(e, runtimeID, control); err != nil {
 			return err
 		}
-		publisher, trust, err := platformAbandonReviewPublisher(e)
-		if err != nil {
-			return err
-		}
-		control, err = platformRefreshActor(e, session, actor, control)
-		if err != nil {
-			return err
-		}
-		raw, err := json.Marshal(plan)
-		if err != nil || len(raw) > 65536 || control.nowMS > math.MaxInt64-900000 {
-			return errAppPlatformPlanChanged
-		}
-		id, err := platformNewUUID()
-		if err != nil {
-			return err
-		}
-		digest, expires := platformDigest(raw), control.nowMS+900000
-		// The plan row's columns are installation-shaped; a runtime-level review fills them with the
-		// first publisher and a fixed application name, and carries no installation or release. The plan
-		// reuses the stored action of a disable, and its format tells it apart, as every recovery review does.
-		if _, err := e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,
-			installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,
-			plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
-			VALUES(?,NULL,'recovery',?,'disable',NULL,NULL,0,0,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
-			id, publisher, trust, control.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint,
-			digest, string(raw), expires, control.nowMS, control.nowMS); err != nil {
-			return err
-		}
-		result = platformRemovalReview{ID: id, SHA256: digest, JSON: string(raw), ExpiresMS: expires}
 		_, err = platformRefreshActor(e, session, actor, control)
 		return err
 	})
 	if err != nil {
-		return platformRemovalReview{}, err
+		return platformAbandonRuntimePlan{}, "", err
 	}
-	return result, nil
+	return plan, digest, nil
 }
 
-func platformAbandonReviewPublisher(e migExec) (string, int64, error) {
-	var id string
-	var revision int64
-	if err := e.queryRow(`SELECT id,revision FROM app_platform_publishers ORDER BY id LIMIT 1`).Scan(&id, &revision); err != nil || revision < 1 {
-		return "", 0, errAppPlatformAbandonUnavailable
+func loadPlatformAbandonRuntimeListing(e migExec, runtimeID string, control platformActorControl) (platformAbandonRuntimePlan, string, error) {
+	plan, err := loadPlatformAbandonRuntimePlan(e, runtimeID, control)
+	if err != nil {
+		return plan, "", err
 	}
-	return id, revision, nil
+	raw, err := json.Marshal(plan)
+	if err != nil || len(raw) > 65536 {
+		return plan, "", errAppPlatformPlanChanged
+	}
+	return plan, platformDigest(raw), nil
 }
 
 type platformAbandonResult struct {
@@ -163,63 +141,55 @@ type platformAbandonResult struct {
 	Installations, Grants, Effects, Operations int
 }
 
-func (s *Server) consumePlatformAbandonRuntimeReview(ctx context.Context, session platformActorSession, planID, planSHA string) (platformAbandonResult, error) {
+// platformAbandonOutcome is what is recorded of an abandon: the digest of the listing it acted on and
+// what it settled.
+type platformAbandonOutcome struct {
+	PlanSHA256    string `json:"plan_sha256"`
+	RuntimeID     string `json:"runtime_id"`
+	Installations int    `json:"installations"`
+	Grants        int    `json:"grants"`
+	Effects       int    `json:"effects"`
+	Operations    int    `json:"operations"`
+}
+
+// confirmPlatformAbandonRuntime abandons the runtime the listing named. It reports replayed when the
+// same listing was already confirmed: the recorded outcome is answered and nothing is done again.
+func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session platformActorSession, runtimeID, planSHA string) (platformAbandonResult, bool, error) {
 	var result platformAbandonResult
-	if !platformValidUUID(planID) || !platformValidSHA(planSHA) {
-		return result, errAppPlatformPlanChanged
+	var replayed bool
+	if !platformValidUUID(runtimeID) || !platformValidSHA(planSHA) {
+		return result, false, errAppPlatformPlanChanged
 	}
 	err := s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
-		lock := ""
-		if e.s.driver == "postgres" {
-			lock = " FOR UPDATE"
+		result, replayed = platformAbandonResult{}, false
+		key := platformAbandonedRuntimeKeyPrefix + runtimeID
+		var recorded string
+		switch err := e.queryRow(`SELECT v FROM meta WHERE k=?`, key).Scan(&recorded); {
+		case err == nil:
+			var outcome platformAbandonOutcome
+			if json.Unmarshal([]byte(recorded), &outcome) != nil || outcome.RuntimeID != runtimeID || outcome.PlanSHA256 != planSHA {
+				return errAppPlatformPlanChanged
+			}
+			result = platformAbandonResult{RuntimeID: runtimeID, Installations: outcome.Installations, Grants: outcome.Grants, Effects: outcome.Effects, Operations: outcome.Operations}
+			replayed = true
+			_, err = platformRefreshActor(e, session, actor, control)
+			return err
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
 		}
-		var raw, digest, scope, username, created, authority, action, epoch string
-		var installation sql.NullString
-		var expires, accountGeneration int64
-		var consumed sql.NullInt64
-		if err := e.queryRow(`SELECT plan_json,plan_sha256,actor_scope,username,account_created,account_generation,authority_fingerprint,expires_ms,consumed_ms,
-			controller_epoch,action,installation_id FROM app_platform_review_plans WHERE id=?`+lock, planID).
-			Scan(&raw, &digest, &scope, &username, &created, &accountGeneration, &authority, &expires, &consumed, &epoch, &action, &installation); err != nil {
-			return errAppPlatformPlanChanged
-		}
-		if scope != actor.scope {
-			return errAppPlatformActorUnavailable
-		}
-		if consumed.Valid {
-			return errAppPlatformOperationConflict
-		}
-		control, err := platformRefreshActor(e, session, actor, control)
+		plan, digest, err := loadPlatformAbandonRuntimeListing(e, runtimeID, control)
 		if err != nil {
 			return err
 		}
-		if expires <= control.nowMS {
-			return errAppPlatformPlanExpired
-		}
-		if installation.Valid || action != "disable" || !platformPlanIsAbandonRuntime(raw) || username != actor.username || created != actor.created ||
-			accountGeneration != actor.generation || authority != actor.authorityFingerprint || epoch != control.epoch || digest != planSHA || platformDigest([]byte(raw)) != planSHA {
-			return errAppPlatformPlanChanged
-		}
-		var plan platformAbandonRuntimePlan
-		if json.Unmarshal([]byte(raw), &plan) != nil {
-			return errAppPlatformPlanChanged
-		}
-		fresh, err := loadPlatformAbandonRuntimePlan(e, plan.RuntimeID, control)
-		if err != nil {
-			return errAppPlatformPlanChanged
-		}
-		if encoded, err := json.Marshal(fresh); err != nil || string(encoded) != raw {
+		if digest != planSHA {
 			return errAppPlatformPlanChanged
 		}
 		now := control.nowMS
-		changed, err := e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND expires_ms>? AND plan_sha256=?`, now, now, planID, now, planSHA)
-		if err := platformLeaseCAS(changed, err); err != nil {
-			return err
-		}
 		if err := applyPlatformAbandonRuntime(e, plan, now); err != nil {
 			return err
 		}
 		detail, _ := json.Marshal(struct {
-			Plan          string   `json:"plan_id"`
+			PlanSHA256    string   `json:"plan_sha256"`
 			RuntimeID     string   `json:"runtime_id"`
 			DeploymentID  string   `json:"deployment_id"`
 			Installations []string `json:"installations"`
@@ -227,19 +197,24 @@ func (s *Server) consumePlatformAbandonRuntimeReview(ctx context.Context, sessio
 			Effects       []string `json:"effects"`
 			Operations    []string `json:"operations"`
 			Reason        string   `json:"reason"`
-		}{planID, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Grants, plan.Effects, plan.Operations, plan.Reason})
+		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Grants, plan.Effects, plan.Operations, plan.Reason})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.runtime_abandoned','app_platform_runtime',?,?,'')`,
 			time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, plan.RuntimeID, string(detail)); err != nil {
 			return err
 		}
 		result = platformAbandonResult{RuntimeID: plan.RuntimeID, Installations: len(plan.Installations), Grants: len(plan.Grants), Effects: len(plan.Effects), Operations: len(plan.Operations)}
+		outcome, _ := json.Marshal(platformAbandonOutcome{PlanSHA256: digest, RuntimeID: plan.RuntimeID, Installations: result.Installations,
+			Grants: result.Grants, Effects: result.Effects, Operations: result.Operations})
+		if err := e.setSetting(key, string(outcome)); err != nil {
+			return err
+		}
 		_, err = platformRefreshActor(e, session, actor, control)
 		return err
 	})
 	if err != nil {
-		return platformAbandonResult{}, err
+		return platformAbandonResult{}, false, err
 	}
-	return result, nil
+	return result, replayed, nil
 }
 
 func applyPlatformAbandonRuntime(e migExec, plan platformAbandonRuntimePlan, now int64) error {

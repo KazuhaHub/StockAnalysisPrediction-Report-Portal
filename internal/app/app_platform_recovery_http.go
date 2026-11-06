@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,9 @@ import (
 //   - replacement runtime enrollment, a prepare and a confirm on one route;
 //   - restore_import and resume, each reviewed on the ordinary plans route and committed on the
 //     ordinary operations route, so they share the plan, expiry, idempotency and audit machinery of
-//     every other lifecycle action.
+//     every other lifecycle action;
+//   - abandoning the replacement runtime, a prepare and a confirm on its own route: it is a decision
+//     about the deployment, with no installation or publisher a review plan could be filed under.
 //
 // Ending recovery is its own route (apiPlatformEndRecovery). None of these accepts runner evidence
 // from a request: enrollment reads the runner's own report, and the resume target is read from the
@@ -140,7 +143,7 @@ func platformPlanIsResume(planRaw string) bool {
 
 // platformRecoveryAction reports whether a plan action belongs to the recovery surface.
 func platformRecoveryAction(action string) bool {
-	return action == "restore_import" || action == "resume" || action == "recovery_disable" || action == "frontend_resume" || action == "abandon_runtime"
+	return action == "restore_import" || action == "resume" || action == "recovery_disable" || action == "frontend_resume"
 }
 
 func platformRecoveryActionResponse(action string, review platformRemovalReview) (map[string]any, error) {
@@ -217,33 +220,54 @@ func (s *Server) apiPlatformRecoveryPlan(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, response)
 }
 
-// apiPlatformAbandonRuntimePlan reviews abandoning the replacement runtime: it lists what the commit
-// will settle, and nothing is changed by asking.
-func (s *Server) apiPlatformAbandonRuntimePlan(w http.ResponseWriter, r *http.Request, actor platformActorSession, runtimeID string) {
-	review, err := s.createPlatformAbandonRuntimeReview(r.Context(), actor, runtimeID)
+// apiPlatformAbandonRuntime abandons the replacement runtime. "prepare" lists what the confirmation
+// will settle with the digest of that listing, and changes nothing; "confirm" names the digest and
+// settles it. A repeated confirmation of the same listing answers the first outcome.
+func (s *Server) apiPlatformAbandonRuntime(w http.ResponseWriter, r *http.Request, user string) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, platformManagementBodyLimit))
 	if err != nil {
-		platformRecoveryError(w, err)
+		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
-	var plan platformAbandonRuntimePlan
-	if err := json.Unmarshal([]byte(review.JSON), &plan); err != nil || plan.Format != platformAbandonRuntimeFormat {
-		platformRecoveryError(w, errAppPlatformPlanChanged)
+	fields, err := platformManagementObject(raw, "action", "runtime_id", "plan_sha256")
+	if err != nil {
+		platformManagementError(w, err)
 		return
 	}
-	writeJSON(w, map[string]any{
-		"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10),
-		"review": map[string]any{
-			"action": "abandon_runtime", "runtime_id": plan.RuntimeID, "deployment_id": plan.DeploymentID,
-			"installations": plan.Installations, "grants": plan.Grants, "effects": plan.Effects, "operations": plan.Operations,
-			"reason": plan.Reason, "data_effect": "none",
-		},
-	})
-}
-
-// apiPlatformAbandonRuntimeCommit spends the reviewed abandon. It admits no operation: the one
-// transition is recorded in the audit log, and a plan can be spent once.
-func (s *Server) apiPlatformAbandonRuntimeCommit(w http.ResponseWriter, r *http.Request, actor platformActorSession, planID, planSHA string) {
-	result, err := s.consumePlatformAbandonRuntimeReview(r.Context(), actor, planID, planSHA)
+	action, actionErr := platformManagementString(fields, "action")
+	runtimeID, runtimeErr := platformManagementString(fields, "runtime_id")
+	if actionErr != nil || runtimeErr != nil || !platformValidUUID(runtimeID) || (action != "prepare" && action != "confirm") ||
+		(action == "prepare" && len(fields) != 2) || (action == "confirm" && len(fields) != 3) {
+		platformManagementError(w, errPlatformManagementInput)
+		return
+	}
+	actor, err := s.platformHTTPReader(r, user)
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	if action == "prepare" {
+		plan, digest, err := s.previewPlatformAbandonRuntime(r.Context(), actor, runtimeID)
+		if err != nil {
+			platformRecoveryError(w, err)
+			return
+		}
+		writeJSON(w, map[string]any{
+			"plan_sha256": digest,
+			"review": map[string]any{
+				"action": "abandon_runtime", "runtime_id": plan.RuntimeID, "deployment_id": plan.DeploymentID,
+				"installations": plan.Installations, "grants": plan.Grants, "effects": plan.Effects, "operations": plan.Operations,
+				"reason": plan.Reason, "data_effect": "none",
+			},
+		})
+		return
+	}
+	digest, err := platformManagementString(fields, "plan_sha256")
+	if err != nil || !platformValidSHA(digest) {
+		platformManagementError(w, errPlatformManagementInput)
+		return
+	}
+	result, replayed, err := s.confirmPlatformAbandonRuntime(r.Context(), actor, runtimeID, digest)
 	if err != nil {
 		platformRecoveryError(w, err)
 		return
@@ -251,7 +275,7 @@ func (s *Server) apiPlatformAbandonRuntimeCommit(w http.ResponseWriter, r *http.
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]any{
-		"abandoned": true, "runtime_id": result.RuntimeID, "installations": result.Installations,
+		"abandoned": true, "replayed": replayed, "runtime_id": result.RuntimeID, "installations": result.Installations,
 		"grants": result.Grants, "effects": result.Effects, "operations": result.Operations,
 	})
 }

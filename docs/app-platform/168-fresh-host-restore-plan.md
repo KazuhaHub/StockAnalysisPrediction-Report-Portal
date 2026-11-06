@@ -197,10 +197,13 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   kept. A resume left with an unsettled start is not reconciled: its start is bound to the lease fence
   it ran under, which a finished operation cannot reach, and the runner has no typed absence for it.
   That case is settled by the owner decision below.
-- **Abandon replacement runtime.** A reviewed recovery-mode action (`abandon_runtime` on the plans
-  route, spent once on the operations route) retires the enrolled replacement binding, revokes its issued
-  grants, marks its unsettled import and resume effects reverted ("runtime abandoned", no native
-  action), ends its in-flight operations and returns its installations to review. A new replacement with
+- **Abandon replacement runtime.** A recovery-mode action on its own route (`control/abandon-runtime`,
+  a prepare that lists the affected work with a digest and a confirm that names the digest) retires the
+  enrolled replacement binding, revokes its issued grants, marks its unsettled import and resume effects
+  reverted ("runtime abandoned", no native action), ends its in-flight operations and returns its
+  installations to review. It is not a review plan: that table is installation-shaped (an application
+  and a publisher are required), so the decision is a deployment-level confirmation instead. The
+  confirmation is idempotent through a meta record of its outcome, and a changed listing is refused. A new replacement with
   a fresh journal and deployment is then enrolled and the imports redone. An import that landed on a
   retired runtime no longer counts against the one-import-per-epoch rule.
 - **Claimed import.** A claimed native import runs detached from the connection to a definite end, bounded
@@ -210,6 +213,10 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   (no schema change) and treats an absence as definite only after that expiry plus a margin.
 - **Frontend resume.** A resumed static frontend carries its capability rows to the resumed policy
   revision, so it launches and can take a frontend update.
+- **Managed resume.** A resumed managed app carries its capability rows to the resumed policy revision in
+  the same way, is read back for launch and backend access through its restore-start and registration
+  evidence (as a completed update is), and settles a failed update it resumed from. Ordinary
+  (snapshot-based) restores are not read back for access by this path.
 - **Recovery disable.** A managed installation disabled in recovery is recorded as managed. Once recovery
   has ended it is uninstalled by a removal that changes Portal rows only (no runner call, its data and
   recovery sets recorded as deleted).
