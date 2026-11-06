@@ -93,7 +93,7 @@ func Open(directory string) (*Store, error) {
 		return nil, err
 	}
 	probe.SetMaxOpenConns(1)
-	empty, inspectErr := inspect(ctx, probe)
+	found, inspectErr := inspectAt(ctx, probe, schemaVersion)
 	closeErr := probe.Close()
 	if inspectErr != nil {
 		return nil, inspectErr
@@ -116,7 +116,7 @@ func Open(directory string) (*Store, error) {
 			db.Close()
 		}
 	}()
-	if empty {
+	if found == 0 {
 		var mode string
 		if err := db.QueryRowContext(ctx, `PRAGMA journal_mode=WAL`).Scan(&mode); err != nil {
 			return nil, err
@@ -128,6 +128,10 @@ func Open(directory string) (*Store, error) {
 			return nil, err
 		}
 		if _, err := inspect(ctx, db); err != nil {
+			return nil, err
+		}
+	} else if found < schemaVersion {
+		if err := upgrade(ctx, db, found); err != nil {
 			return nil, err
 		}
 	}
@@ -157,122 +161,134 @@ func (s *Store) Close() error {
 }
 
 func initialize(ctx context.Context, db *sql.DB) error {
+	return initializeVersion(ctx, db, schemaVersion)
+}
+
+func initializeVersion(ctx context.Context, db *sql.DB, version int) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, product := range schemaProducts() {
+	for _, product := range schemaProducts(version) {
 		if _, err := tx.ExecContext(ctx, product.sql); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `PRAGMA user_version=1`); err != nil {
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, version)); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func inspect(ctx context.Context, db *sql.DB) (bool, error) {
+	version, err := inspectAt(ctx, db, schemaVersion)
+	return version == 0, err
+}
+
+// inspectAt verifies the journal against the exact closed schema of the version
+// it declares and returns that version; zero means a blank database. Versions
+// above supported are refused, which is how an older binary treats a newer file.
+func inspectAt(ctx context.Context, db *sql.DB, supported int) (int, error) {
 	var version int
 	if err := db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
-		return false, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		return 0, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
-	if version > schemaVersion {
-		return false, ErrNewerVersion
+	if version > supported {
+		return 0, ErrNewerVersion
 	}
 	if version < 0 {
-		return false, ErrIncompatible
+		return 0, ErrIncompatible
 	}
 	var all int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_schema`).Scan(&all); err != nil {
-		return false, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		return 0, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
 	if version == 0 && all != 0 {
-		return false, ErrIncompatible
+		return 0, ErrIncompatible
 	}
-	if version == schemaVersion {
+	if version != 0 {
 		expected := map[string]schemaProduct{}
-		for _, product := range schemaProducts() {
+		for _, product := range schemaProducts(version) {
 			expected[product.name] = product
 		}
 		rows, err := db.QueryContext(ctx, `SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'`)
 		if err != nil {
-			return false, fmt.Errorf("%w: %v", ErrCorrupt, err)
+			return 0, fmt.Errorf("%w: %v", ErrCorrupt, err)
 		}
 		for rows.Next() {
 			var kind, name string
 			var definition sql.NullString
 			if err := rows.Scan(&kind, &name, &definition); err != nil {
 				rows.Close()
-				return false, err
+				return 0, err
 			}
 			want, ok := expected[name]
 			if !ok || kind != want.kind || !definition.Valid || strings.TrimSpace(definition.String) != want.sql {
 				rows.Close()
-				return false, ErrIncompatible
+				return 0, ErrIncompatible
 			}
 			delete(expected, name)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return false, err
+			return 0, err
 		}
 		if len(expected) != 0 {
-			return false, ErrIncompatible
+			return 0, ErrIncompatible
 		}
 		var mode string
 		if err := db.QueryRowContext(ctx, `PRAGMA journal_mode`).Scan(&mode); err != nil {
-			return false, err
+			return 0, err
 		}
 		if mode != "wal" {
-			return false, ErrIncompatible
+			return 0, ErrIncompatible
 		}
 	}
 	var integrity string
 	if err := db.QueryRowContext(ctx, `PRAGMA integrity_check(1)`).Scan(&integrity); err != nil {
-		return false, fmt.Errorf("%w: %v", ErrCorrupt, err)
+		return 0, fmt.Errorf("%w: %v", ErrCorrupt, err)
 	}
 	if integrity != "ok" {
-		return false, ErrCorrupt
+		return 0, ErrCorrupt
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_check`)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	bad := rows.Next()
 	rowErr := rows.Err()
 	rows.Close()
 	if rowErr != nil {
-		return false, rowErr
+		return 0, rowErr
 	}
 	if bad {
-		return false, ErrCorrupt
+		return 0, ErrCorrupt
 	}
-	if version == schemaVersion {
+	if version != 0 {
 		// Validate row contracts directly as well as running the engine's
 		// integrity pragma. Do not assume its read-only execution checks every
 		// table CHECK expression. Predicates come only from our closed schema.
-		for _, product := range schemaProducts() {
+		for _, product := range schemaProducts(version) {
 			if product.kind == "table" {
 				var invalid bool
 				if err := db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM `+product.name+` WHERE (`+product.rowCheck+`) IS NOT TRUE)`).Scan(&invalid); err != nil {
 					if ctx.Err() != nil {
-						return false, ctx.Err()
+						return 0, ctx.Err()
 					}
-					return false, fmt.Errorf("%w: %w", ErrCorrupt, err)
+					return 0, fmt.Errorf("%w: %w", ErrCorrupt, err)
 				}
 				if invalid {
-					return false, ErrCorrupt
+					return 0, ErrCorrupt
 				}
 			}
 		}
 		if err := checkDeployment(ctx, db); err != nil {
-			return false, err
+			return 0, err
 		}
 	}
-	return version == 0, nil
+	return version, nil
 }
 
 func checkDeployment(ctx context.Context, db *sql.DB) error {
@@ -333,3 +349,62 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 	}
 	return nil
 }
+
+// upgrade moves a verified older journal to the current schema in one
+// transaction. The v1 table is renamed aside, the current table is created from
+// its exact product SQL, rows are copied by explicit column name and counted,
+// and only then is the old table dropped; nothing is created by renaming.
+func upgrade(ctx context.Context, db *sql.DB, from int) error {
+	if from != 1 {
+		return ErrIncompatible
+	}
+	products := map[string]schemaProduct{}
+	for _, product := range schemaProducts(schemaVersion) {
+		products[product.name] = product
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var before int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands`).Scan(&before); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE runner_commands RENAME TO runner_commands_v1`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, products["runner_commands"].sql); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(`+runnerCommandColumns+`) SELECT `+runnerCommandColumns+` FROM runner_commands_v1`); err != nil {
+		return err
+	}
+	var after int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands`).Scan(&after); err != nil {
+		return err
+	}
+	if after != before {
+		return fmt.Errorf("%w: upgrade copied %d of %d command rows", ErrCorrupt, after, before)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE runner_commands_v1`); err != nil {
+		return err
+	}
+	for _, product := range schemaProducts(schemaVersion) {
+		if product.kind == "index" && strings.Contains(product.sql, " ON runner_commands(") {
+			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_, err = inspectAt(ctx, db, schemaVersion)
+	return err
+}
+
+const runnerCommandColumns = "effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms"

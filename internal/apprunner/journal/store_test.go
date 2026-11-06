@@ -68,7 +68,7 @@ func TestNewJournalSchemaProfileAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("SQLite engine", engine)
-	if scalar(t, store.db, `PRAGMA user_version`) != 1 {
+	if scalar(t, store.db, `PRAGMA user_version`) != 2 {
 		t.Fatal("wrong journal version")
 	}
 	if scalar(t, store.db, `SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'`) != 4 {
@@ -115,7 +115,7 @@ func TestNewJournalSchemaProfileAndReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if scalar(t, reopened.db, `PRAGMA user_version`) != 1 {
+	if scalar(t, reopened.db, `PRAGMA user_version`) != 2 {
 		t.Fatal("reopen lost schema")
 	}
 }
@@ -127,7 +127,7 @@ func TestUnknownOrNewerJournalIsNotModified(t *testing.T) {
 		want error
 	}{
 		{"unknown", []string{`CREATE TABLE unrelated(value TEXT)`, `INSERT INTO unrelated VALUES('fixture')`}, ErrIncompatible},
-		{"future", []string{`PRAGMA user_version=2`}, ErrNewerVersion},
+		{"future", []string{`PRAGMA user_version=3`}, ErrNewerVersion},
 		{"partial", []string{`CREATE TABLE runner_deployment(singleton INTEGER)`}, ErrIncompatible},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {

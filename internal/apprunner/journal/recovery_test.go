@@ -177,7 +177,7 @@ func TestJournalInitializationIsAtomicOnPageExhaustion(t *testing.T) {
 	if _, err := measure.Exec(`PRAGMA page_size=512`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := measure.Exec(schemaProducts()[0].sql); err != nil {
+	if _, err := measure.Exec(schemaProducts(schemaVersion)[0].sql); err != nil {
 		t.Fatal(err)
 	}
 	pages := scalar(t, measure, `PRAGMA page_count`)
@@ -214,7 +214,7 @@ func TestJournalInitializationIsAtomicOnPageExhaustion(t *testing.T) {
 	if err := initialize(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if scalar(t, db, `PRAGMA user_version`) != 1 {
+	if scalar(t, db, `PRAGMA user_version`) != 2 {
 		t.Fatal("clean retry did not initialize")
 	}
 }
