@@ -143,7 +143,7 @@ func testEndRecoveryRequiresSettledInstallations(t *testing.T, pg bool) {
 	if scalar[string](t, st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`) != "0" {
 		t.Fatal("recovery ended without clearing the pause")
 	}
-	if scalar[int](t, st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_ended'`) != 1 {
+	if scalar[int](t, st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_ended' AND target_id=?`, st.GetSetting("app_platform_controller_epoch", "")) != 1 {
 		t.Fatal("ending recovery left no audit row")
 	}
 	if err := s.endPlatformRecovery(session); !errors.Is(err, errAppPlatformControlPaused) {

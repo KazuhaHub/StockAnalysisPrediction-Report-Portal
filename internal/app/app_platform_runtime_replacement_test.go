@@ -50,7 +50,7 @@ func testReplacementRuntimeAfterRestore(t *testing.T, pg bool) {
 		t.Fatalf("replacement audit does not name what it replaces: %s", detail)
 	}
 	again, err := s.preparePlatformReplacementRuntime(actor, deployment)
-	if err != nil || again.id != reg.id || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.runtime_replacement_prepared'`) != 1 {
+	if err != nil || again.id != reg.id || scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.runtime_replacement_prepared' AND target_id=?`, reg.id) != 1 {
 		t.Fatal("replacement preparation is not idempotent", err)
 	}
 	if _, err := s.preparePlatformReplacementRuntime(actor, platformFixtureID(5101)); !errors.Is(err, errAppPlatformRuntimeConflict) {
