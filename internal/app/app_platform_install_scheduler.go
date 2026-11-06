@@ -17,9 +17,12 @@ import (
 const platformInstallAttemptLimit = 3
 const platformInstallAttemptTimeout = 20 * time.Second
 
-// An import-checkpoint is a bulk data action the runner bounds at two minutes, so the attempt that
-// drives it outlives that bound with a margin and still ends inside the 180 second operation lease.
-// An attempt that gives up earlier abandons an import that is still running.
+// An import-checkpoint is a bulk data action. The connection that carries it is bounded at two
+// minutes by the runner, but a claimed import runs on, detached, for up to journal.ImportCheckpointBound.
+// An attempt therefore waits a little longer than the connection, ends inside the 180 second operation
+// lease, and the Portal polls: an attempt that ends because the runner is still working is not a
+// failure, and the next one reads the receipt of the same effect (platformBusyWaitLimit of them cover
+// the longest bound).
 const platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
 
 // platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy

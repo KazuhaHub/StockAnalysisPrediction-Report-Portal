@@ -374,3 +374,34 @@ func TestUpgradedV1JournalStillRefusesForeignRoot(t *testing.T) {
 		t.Fatalf("upgraded journal refused its own root: %v", err)
 	}
 }
+
+func TestImportCheckpointBoundIsSizedFromTheArchive(t *testing.T) {
+	small, large := ImportCheckpointBound(1<<20), ImportCheckpointBound(512<<20)
+	if small < 5*time.Minute || large <= small {
+		t.Fatalf("bound must have a floor and grow with the archive: %s %s", small, large)
+	}
+	if ImportCheckpointBound(0) != 5*time.Minute || ImportCheckpointBound(-1) != 5*time.Minute {
+		t.Fatal("an empty or invalid size must fall back to the floor")
+	}
+	if ImportCheckpointBound((1<<20)+1) != ImportCheckpointBound(2<<20) {
+		t.Fatal("a partial MiB must round up")
+	}
+	if large < 20*time.Minute || large > time.Hour {
+		t.Fatalf("the largest archive's bound is %s", large)
+	}
+}
+
+// A claimed import must outlive the connection that asked for it, yet stay bounded.
+func TestClaimedImportRunsDetachedFromTheConnection(t *testing.T) {
+	parent, cancel := context.WithTimeout(context.Background(), time.Minute)
+	cancel()
+	work, stop := detachedImportContext(parent, 256<<20)
+	defer stop()
+	if work.Err() != nil {
+		t.Fatalf("a canceled connection canceled the claimed import: %v", work.Err())
+	}
+	deadline, ok := work.Deadline()
+	if !ok || time.Until(deadline) > ImportCheckpointBound(256<<20) || time.Until(deadline) < ImportCheckpointBound(256<<20)-time.Minute {
+		t.Fatalf("the detached import has the wrong hard bound: %v %v", deadline, ok)
+	}
+}

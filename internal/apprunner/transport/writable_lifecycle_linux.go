@@ -26,6 +26,9 @@ import (
 const writableLifecycleQueryMagic = "PWLQ0001"
 const writableLifecycleReplyMagic = "PWLR0001"
 const maxWritableLifecycleReply = 16384
+
+// restoreExecutionTimeout bounds the connection that carries a bulk data action, not the work. A
+// claimed import-checkpoint continues past it, detached, up to journal.ImportCheckpointBound.
 const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.

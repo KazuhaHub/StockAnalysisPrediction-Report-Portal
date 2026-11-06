@@ -374,6 +374,9 @@ func (s *Store) DispatchImportCheckpoint(ctx context.Context, raw, signature []b
 		if err != nil {
 			return zero, err
 		}
+		// An effect that is already claimed is taken to a definite end whatever happens to the connection.
+		ctx, cancel := detachedImportContext(ctx, request.ArchiveBytes)
+		defer cancel()
 		observation, err := dataRoot.VerifyImportedCheckpoint(ctx, dataPin, checkpointRoot, checkpointPin, request)
 		if err != nil {
 			return zero, fmt.Errorf("reconcile import: %w", err)
@@ -395,6 +398,11 @@ func (s *Store) DispatchImportCheckpoint(ctx context.Context, raw, signature []b
 	if err != nil {
 		return zero, err
 	}
+	// The claim is committed: from here the import runs to a definite end, applied or failed, detached
+	// from the connection that asked for it. The Portal that sent the command may have timed out and
+	// gone; it settles the effect later by reading the receipt.
+	ctx, cancel := detachedImportContext(ctx, request.ArchiveBytes)
+	defer cancel()
 	observation, err := dataRoot.ImportCheckpoint(ctx, dataPin, checkpointRoot, checkpointPin, request)
 	if err != nil {
 		return zero, fmt.Errorf("import checkpoint: %w", err)
@@ -548,4 +556,30 @@ func (s *Store) readImportReceiptHeld(ctx context.Context, raw, signature []byte
 		return ImportCheckpointReceipt{}, ErrNoSuchEffect
 	}
 	return receipt, nil
+}
+
+// The hard bound on a claimed import. The connection that carried the command is bounded at two minutes
+// and is not what bounds the work: a claimed import is copied, verified and settled for as long as its
+// archive needs, up to this limit, so a slow disk does not turn a half-written namespace into an
+// unknown effect. It is generous on purpose: five minutes plus two seconds for each MiB of archive,
+// about 22 minutes for the largest archive (512 MiB). The Portal polls by read-receipt for the length of
+// this bound.
+const (
+	importCheckpointBaseBound   = 5 * time.Minute
+	importCheckpointPerMiBBound = 2 * time.Second
+)
+
+// ImportCheckpointBound is the longest a claimed import of an archive of this size may run.
+func ImportCheckpointBound(archiveBytes int64) time.Duration {
+	if archiveBytes < 0 {
+		archiveBytes = 0
+	}
+	mib := (archiveBytes + (1 << 20) - 1) >> 20
+	return importCheckpointBaseBound + time.Duration(mib)*importCheckpointPerMiBBound
+}
+
+// detachedImportContext carries the work of a claimed import: it keeps the parent's values, drops its
+// cancellation and deadline, and applies the import's own bound.
+func detachedImportContext(parent context.Context, archiveBytes int64) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), ImportCheckpointBound(archiveBytes))
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // dispatchLost leaves an import effect behind whose first answer was lost, then takes the operation
@@ -206,4 +207,16 @@ func TestRestoreImportRefusedWhileAnyGrantOrEffectIsLive(t *testing.T) {
 			t.Fatal("a review was admitted beside an unsettled import effect")
 		}
 	})
+}
+
+// The runner lets a claimed import run past the connection that carried it, up to a bound sized from
+// the archive. The Portal polls by read-receipt, so its polling window must cover the longest bound.
+func TestRestoreImportPollingWindowCoversTheRunnerBound(t *testing.T) {
+	window := time.Duration(platformBusyWaitLimit) * platformImportAttemptTimeout
+	if bound := journal.ImportCheckpointBound(512 << 20); window < bound {
+		t.Fatalf("the Portal polls for %s but a claimed import may run for %s", window, bound)
+	}
+	if platformImportAttemptTimeout >= time.Duration(appPlatformLeaseMS)*time.Millisecond {
+		t.Fatal("an import attempt must end inside the operation lease")
+	}
 }
