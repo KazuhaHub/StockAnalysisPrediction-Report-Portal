@@ -224,7 +224,7 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
 
 ## Third-round review follow-ups
 
-- **Operations out of `recovery_required`.** The operation model has two more transitions, both from
+- **Operations out of `recovery_required`.** The operation model has three more transitions, all from
   `recovery_required` only: `Settle` (to `failed`, once every effect is reverted or never applied),
   `Recover` (to `complete`, one revision after the failure) and `Reopen` (to the stage after the one that
   failed, at the revision `Advance` would have given it). A reverted import and an operation an abandon
