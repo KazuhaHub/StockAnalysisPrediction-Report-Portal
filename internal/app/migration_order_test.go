@@ -32,6 +32,7 @@ var reservedMigrationIDs = map[string]string{
 	"0018": "application platform (feat/app-platform-integration)",
 	"0019": "application platform (feat/app-platform-integration)",
 	"0020": "application platform (feat/app-platform-integration)",
+	"0021": "application platform (integration/app-platform)",
 }
 
 func TestMigrationListKeepsItsMergeOrder(t *testing.T) {
