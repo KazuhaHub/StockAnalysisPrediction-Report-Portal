@@ -426,6 +426,9 @@ func (s *Server) commitPlatformRestoreImport(ctx context.Context, expected platf
 	if err != nil {
 		return zero, err
 	}
+	if err := refusePlatformAbandonedRoot(e, receipt); err != nil {
+		return zero, err
+	}
 	ev, err := loadPlatformRestoreImportEvidence(e, s, expected)
 	if err != nil || ev.plan.RuntimeID != runtime.id {
 		return zero, errors.Join(errAppPlatformStageEvidence, err)

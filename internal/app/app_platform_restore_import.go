@@ -169,7 +169,9 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 	if imported != 0 {
 		return result, errAppPlatformOperationConflict
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_import_grants WHERE recovery_set_id=? AND state<>'revoked'`, recoverySetID).Scan(&grants); err != nil {
+	// A grant on a runtime since retired (abandoned) is history, like the import it recorded.
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_import_grants g JOIN app_platform_runtime_bindings b ON b.id=g.runtime_id AND b.enabled=1
+		WHERE g.recovery_set_id=? AND g.state<>'revoked'`, recoverySetID).Scan(&grants); err != nil {
 		return result, err
 	}
 	if grants != 0 {

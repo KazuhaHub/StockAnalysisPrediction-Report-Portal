@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // Abandoning the replacement runtime (doc 168, owner decision).
@@ -53,6 +55,9 @@ type platformAbandonRuntimePlan struct {
 	RuntimeRevision int64    `json:"runtime_revision"`
 	ControllerEpoch string   `json:"controller_epoch"`
 	Installations   []string `json:"installations"`
+	// DataRoots names the data roots ("filesystem uuid/root inode") that imports on this runtime were
+	// applied to. They are recorded with the abandon: a replacement landing on one of them is refused.
+	DataRoots []string `json:"data_roots"`
 	// Disabled lists installations the administrator already disabled in recovery. They are left as
 	// they are: abandoning the runtime does not revisit that decision.
 	Disabled   []string `json:"disabled"`
@@ -63,6 +68,85 @@ type platformAbandonRuntimePlan struct {
 	// an effect this abandon settles: they are settled to failed with it.
 	Finished []string `json:"finished"`
 	Reason   string   `json:"reason"`
+}
+
+// platformAbandonedRootsKey names the meta record of the data roots of abandoned runtimes.
+const platformAbandonedRootsKey = "app_platform_abandoned_data_roots"
+
+const platformAbandonedRootsLimit = 64
+
+type platformAbandonedRoot struct {
+	RuntimeID  string `json:"runtime_id"`
+	Filesystem string `json:"filesystem_uuid"`
+	RootInode  string `json:"root_inode"`
+}
+
+func loadPlatformAbandonedRoots(e migExec) ([]platformAbandonedRoot, error) {
+	var raw string
+	if err := e.queryRow(`SELECT COALESCE((SELECT v FROM meta WHERE k=?),'')`, platformAbandonedRootsKey).Scan(&raw); err != nil {
+		return nil, err
+	}
+	if raw == "" {
+		return nil, nil
+	}
+	var roots []platformAbandonedRoot
+	if json.Unmarshal([]byte(raw), &roots) != nil || len(roots) > platformAbandonedRootsLimit {
+		return nil, errAppPlatformStageEvidence
+	}
+	return roots, nil
+}
+
+// refusePlatformAbandonedRoot refuses an import receipt whose data root is one an abandoned runtime's
+// import landed on. One journal binds one data root, and the abandoned host was never asked what it had
+// done there, so a new journal must not take that root over. It fails closed: an unreadable record
+// refuses too.
+func refusePlatformAbandonedRoot(e migExec, receipt journal.ImportCheckpointReceipt) error {
+	roots, err := loadPlatformAbandonedRoots(e)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	for _, r := range roots {
+		if r.Filesystem == receipt.Claim.RootFilesystemUUID && r.RootInode == receipt.Claim.RootInode {
+			return errAppPlatformStageEvidence
+		}
+	}
+	return nil
+}
+
+// loadPlatformAbandonDataRoots reads the roots from the applied import receipts of the runtime.
+func loadPlatformAbandonDataRoots(e migExec, runtimeID string) ([]string, error) {
+	rows, err := e.query(`SELECT receipt_json FROM app_platform_operation_effects WHERE runtime_id=? AND kind='import-checkpoint' AND state='applied' ORDER BY effect_id`, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	var raws []string
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		raws = append(raws, raw)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	result := []string{}
+	seen := map[string]bool{}
+	for _, raw := range raws {
+		receipt, err := journal.ParseImportCheckpointReceipt([]byte(raw))
+		if err != nil || !platformValidUUID(receipt.Claim.RootFilesystemUUID) || receipt.Claim.RootInode == "" {
+			return nil, errAppPlatformStageEvidence
+		}
+		root := receipt.Claim.RootFilesystemUUID + "/" + receipt.Claim.RootInode
+		if !seen[root] {
+			seen[root] = true
+			result = append(result, root)
+		}
+	}
+	return result, nil
 }
 
 func platformIDList(e migExec, query string, args ...any) ([]string, error) {
@@ -108,6 +192,9 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 	}
 	if p.Operations, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE i.runtime_id=? AND o.action IN ('restore_import','restore') AND o.completed_ms IS NULL ORDER BY o.id`, runtime.id); err != nil {
+		return p, err
+	}
+	if p.DataRoots, err = loadPlatformAbandonDataRoots(e, runtime.id); err != nil {
 		return p, err
 	}
 	if p.Finished, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
@@ -204,6 +291,9 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 			return errAppPlatformPlanChanged
 		}
 		now := control.nowMS
+		if err := recordPlatformAbandonedRoots(e, plan); err != nil {
+			return err
+		}
 		if err := applyPlatformAbandonRuntime(e, plan, now); err != nil {
 			return err
 		}
@@ -213,12 +303,13 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 			DeploymentID  string   `json:"deployment_id"`
 			Installations []string `json:"installations"`
 			Disabled      []string `json:"disabled"`
+			DataRoots     []string `json:"data_roots"`
 			Grants        []string `json:"grants"`
 			Effects       []string `json:"effects"`
 			Operations    []string `json:"operations"`
 			Finished      []string `json:"finished"`
 			Reason        string   `json:"reason"`
-		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Disabled, plan.Grants, plan.Effects, plan.Operations, plan.Finished, plan.Reason})
+		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Disabled, plan.DataRoots, plan.Grants, plan.Effects, plan.Operations, plan.Finished, plan.Reason})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.runtime_abandoned','app_platform_runtime',?,?,'')`,
 			time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, plan.RuntimeID, string(detail)); err != nil {
 			return err
@@ -236,6 +327,31 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 		return platformAbandonResult{}, false, err
 	}
 	return result, replayed, nil
+}
+
+func recordPlatformAbandonedRoots(e migExec, plan platformAbandonRuntimePlan) error {
+	if len(plan.DataRoots) == 0 {
+		return nil
+	}
+	roots, err := loadPlatformAbandonedRoots(e)
+	if err != nil {
+		return err
+	}
+	for _, root := range plan.DataRoots {
+		filesystem, inode, ok := strings.Cut(root, "/")
+		if !ok {
+			return errAppPlatformStageEvidence
+		}
+		roots = append(roots, platformAbandonedRoot{RuntimeID: plan.RuntimeID, Filesystem: filesystem, RootInode: inode})
+	}
+	if len(roots) > platformAbandonedRootsLimit {
+		return errAppPlatformStageEvidence
+	}
+	raw, err := json.Marshal(roots)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	return e.setSetting(platformAbandonedRootsKey, string(raw))
 }
 
 func applyPlatformAbandonRuntime(e migExec, plan platformAbandonRuntimePlan, now int64) error {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 func (f *platformImportFixtureState) abandon(t *testing.T) (platformAbandonResult, error) {
@@ -375,5 +376,71 @@ func TestAbandonLeavesRecoveryDisabledInstallationsIntact(t *testing.T) {
 	if scalar[int](t, f.s.st, `SELECT enabled FROM app_platform_runtime_bindings WHERE id=?`, f.replacement.id) != 0 ||
 		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "revoked" {
 		t.Fatal("the runtime was not abandoned")
+	}
+}
+
+// reenrollAndImport enrolls a new replacement runtime after an abandon and drives a fresh import of the
+// installation on it, returning the import's final error.
+func (f *platformImportFixtureState) reenrollAndImport(t *testing.T, deployment, key string) (string, error) {
+	t.Helper()
+	reg, err := f.s.preparePlatformReplacementRuntime(f.actor, deployment)
+	if err != nil {
+		t.Fatal("a new replacement could not be enrolled after the abandon:", err)
+	}
+	if f.replacement, err = f.s.confirmPlatformObservedReplacementRuntime(f.actor, reg, runtimeObservationFixture(reg)); err != nil {
+		t.Fatal(err)
+	}
+	review, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet)
+	if err != nil {
+		t.Fatal("the import could not be reviewed again after the abandon:", err)
+	}
+	retry, err := f.s.consumePlatformRestoreImportReview(context.Background(), f.actor, review.ID, review.SHA256, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.drive(t, retry.OperationID)
+	return retry.OperationID, err
+}
+
+// One journal binds one data root. The data root an abandoned runtime's import landed on is recorded with
+// the abandon, and a replacement whose import lands on that same root is refused: the abandoned host was
+// never asked what it had done, so its root may hold an import the new journal knows nothing about.
+func TestAbandonedRuntimeDataRootIsRefusedForTheReplacement(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	commit := f.reviewAndConsume(t)
+	if done, err := f.drive(t, commit.OperationID); err != nil || done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatalf("fixture: the first import did not complete: %v", err)
+	}
+	root := platformFixtureID(77) + "/555"
+	plan, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
+	if err != nil || len(plan.DataRoots) != 1 || plan.DataRoots[0] != root {
+		t.Fatalf("the listing does not name the data root the import landed on: %+v %v", plan, err)
+	}
+	if _, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest); err != nil {
+		t.Fatal(err)
+	}
+	operation, err := f.reenrollAndImport(t, platformFixtureID(5102), platformFixtureID(5621))
+	if err == nil || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) == "complete" {
+		t.Fatal("a replacement whose import landed on the abandoned data root was accepted")
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='applied'`, operation) != 0 ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants WHERE runtime_id=?`, f.replacement.id) == "consumed" {
+		t.Fatal("the refused import was settled as applied")
+	}
+}
+
+func TestAbandonedRuntimeRootDoesNotRefuseADifferentRoot(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	commit := f.reviewAndConsume(t)
+	if _, err := f.drive(t, commit.OperationID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.abandon(t); err != nil {
+		t.Fatal(err)
+	}
+	f.executor.mutate = func(r *journal.ImportCheckpointReceipt) { r.Claim.RootFilesystemUUID = platformFixtureID(78) }
+	operation, err := f.reenrollAndImport(t, platformFixtureID(5102), platformFixtureID(5621))
+	if err != nil || scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "complete" {
+		t.Fatalf("a replacement on a different data root was refused: %v", err)
 	}
 }

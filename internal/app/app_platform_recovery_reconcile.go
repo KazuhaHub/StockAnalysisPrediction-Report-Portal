@@ -198,6 +198,9 @@ func (s *Server) commitPlatformRecoveryImport(ctx context.Context, lease platfor
 	if paused, err := platformRecoveryPaused(e); err != nil || !paused {
 		return false, errAppPlatformControlPaused
 	}
+	if err := refusePlatformAbandonedRoot(e, receipt); err != nil {
+		return false, err
+	}
 	runtime, seed, err := s.platformDataRuntime(e, lease.controllerEpoch, dek)
 	if err != nil {
 		return false, err
