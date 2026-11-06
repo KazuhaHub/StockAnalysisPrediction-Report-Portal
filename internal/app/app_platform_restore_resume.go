@@ -892,3 +892,112 @@ func (s *Server) claimNextPlatformRestoreResume(ctx context.Context, worker stri
 	}
 	return zero, nil
 }
+
+// finishPlatformRestoreResumeForReview ends a resume that cannot go on and puts the installation back
+// where a resume review finds it: disabled and awaiting review, with the recovery set and the
+// namespace awaiting review again and the candidate activation gone. It deliberately does not
+// re-prove the import. A resume whose grant or receipt was lost must still be endable, and it ends by
+// returning everything it staged, which needs only the reviewed plan. An effect that was issued but
+// never settled is marked unknown, so the operation is retained as needing recovery rather than as a
+// clean failure.
+func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expected platformOperationLease) error {
+	if expected.snapshot.Action != appplatform.ActionRestore || !expected.snapshot.Managed || expected.id == "" ||
+		expected.snapshot.Stage == appplatform.StageComplete || expected.snapshot.Stage == appplatform.StageFailed ||
+		expected.snapshot.Stage == appplatform.StageRecoveryRequired {
+		return errAppPlatformStageEvidence
+	}
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return err
+	}
+	facts, err := loadPlatformBoundOperationLease(e, expected)
+	if err != nil {
+		return err
+	}
+	var raw string
+	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.id=? AND o.installation_id=? AND o.action='restore' AND p.action='restore'`, expected.id, expected.installationID).Scan(&raw); err != nil {
+		return errAppPlatformStageEvidence
+	}
+	var plan platformRestoreResumePlan
+	if json.Unmarshal([]byte(raw), &plan) != nil || plan.Format != platformRestoreResumeFormat || plan.InstallationID != expected.installationID ||
+		plan.ControllerEpoch != expected.controllerEpoch || plan.TargetGeneration != int64(expected.snapshot.Generation) {
+		return errAppPlatformStageEvidence
+	}
+	var effects int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, expected.id).Scan(&effects); err != nil {
+		return err
+	}
+	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	outcome, code, target := appplatform.EffectsNone, "restore_resume_failed", "failed"
+	if effects != 0 {
+		outcome, code, target = appplatform.EffectsUnknown, "restore_resume_recovery_required", "recovery_required"
+	}
+	ended, err := model.Fail(expected.snapshot.Revision, outcome)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	now, err := finalPlatformOperationLeaseCheck(e, facts)
+	if err != nil {
+		return err
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code=?,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
+		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=?
+		AND lease_owner=? AND lease_until_ms=? AND lease_until_ms>? AND completed_ms IS NULL`,
+		target, int64(ended.Snapshot().Revision), code, now, now, expected.id, expected.installationID, expected.controllerEpoch,
+		string(expected.snapshot.Stage), int64(expected.snapshot.Revision), expected.rowRevision, expected.fence, expected.owner,
+		expected.leaseUntilMS, now)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	if effects != 0 {
+		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=? WHERE operation_id=? AND state='prepared'`, now, expected.id); err != nil {
+			return err
+		}
+	}
+	// Return what the attempt staged. The data stage and the start each change one thing, and only
+	// while their own conditions still hold, so a stage the attempt never reached changes nothing.
+	if _, err := e.exec(`DELETE FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`,
+		expected.installationID, plan.TargetGeneration); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_data_namespaces SET state='review_required',owner_installation_id=NULL,revision=revision+1,updated_ms=?
+		WHERE id=? AND origin_installation_id=? AND owner_installation_id=? AND state='active' AND writer_fence=?`,
+		now, plan.NamespaceID, expected.installationID, expected.installationID, plan.NamespaceWriterFence); err != nil {
+		return err
+	}
+	if _, err := e.exec(`UPDATE app_platform_recovery_sets SET state='review_required',updated_ms=?
+		WHERE id=? AND installation_id=? AND state='verified' AND controller_epoch=?`,
+		now, plan.RecoverySetID, expected.installationID, expected.controllerEpoch); err != nil {
+		return err
+	}
+	changed, err = e.exec(`UPDATE app_platform_installations SET desired_state='disabled',phase='review_required',revision=revision+1,updated_ms=?
+		WHERE id=? AND desired_state='enabled' AND phase='recovery_required' AND generation=? AND controller_epoch=? AND runtime_id=?`,
+		now, expected.installationID, plan.SourceGeneration, expected.controllerEpoch, plan.RuntimeID)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		Stage appplatform.Stage `json:"stage"`
+		Code  string            `json:"code"`
+	}{expected.snapshot.Stage, code})
+	if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.restore_resume_ended','app_platform_operation',?,?,'')`,
+		time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
+		return err
+	}
+	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

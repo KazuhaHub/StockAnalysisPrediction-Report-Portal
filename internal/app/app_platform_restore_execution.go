@@ -198,6 +198,11 @@ func (s *Server) finishPlatformManagedRestoreForReview(ctx context.Context, expe
 		expected.snapshot.Stage == appplatform.StageRecoveryRequired {
 		return errAppPlatformStageEvidence
 	}
+	if resume, err := platformOperationIsResume(s.st.poolExec(), expected.id); err != nil {
+		return err
+	} else if resume {
+		return s.finishPlatformRestoreResumeForReview(ctx, expected)
+	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

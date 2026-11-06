@@ -396,3 +396,92 @@ func TestResumeSchedulerDrivesEvidenceStages(t *testing.T) {
 		t.Fatalf("the scheduler left the resume at %s", got)
 	}
 }
+
+// A resume whose start fails ends where an import that failed ends: the installation is awaiting
+// review again, nothing the attempt staged survives, the failed operation cannot be continued, and a
+// new resume review is admitted. A resume still in flight keeps refusing a second one.
+func testResumeRetryAfterFailedStart(t *testing.T, pg bool, reserve bool) {
+	f := platformResumeFixture(t, pg)
+	s := f.s
+	ctx := context.Background()
+	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
+	namespaceWriter := scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE id=?`, f.namespaceID(t))
+	first := f.reviewAndConsumeResume(t)
+	lease := f.driveResume(t, first.OperationID, appplatform.StageStart)
+	if reserve {
+		intent, err := s.preparePlatformRestoreStart(ctx, lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reserved, err := s.commitPlatformRestoreStartReservation(ctx, lease, intent, f.endpoint,
+			platformUpdateStartReservationFixture(intent, f.endpoint).reservation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lease = reserved.lease
+	}
+	if review, err := s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target()); err == nil {
+		t.Fatalf("a second resume was reviewed while one was in flight: %+v", review)
+	}
+	if err := s.finishPlatformManagedRestoreForReview(ctx, lease); err != nil {
+		t.Fatal("ending the failed resume:", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND lease_owner IS NULL`, first.OperationID) != 1 {
+		t.Fatal("the failed resume was left in flight")
+	}
+	if _, err := s.st.claimPlatformOperation(first.OperationID, platformFixtureID(5710)); err == nil {
+		t.Fatal("a failed resume regained a lease")
+	}
+	if next, err := s.claimNextPlatformRestoreResume(ctx, platformFixtureID(5711)); err != nil || next.lease.id != "" {
+		t.Fatalf("the scheduler selected a failed resume: %+v %v", next, err)
+	}
+	var phase, desired, nsState, recoveryState string
+	var owner *string
+	if err := s.st.queryRow(`SELECT i.phase,i.desired_state,n.state,n.owner_installation_id,r.state
+		FROM app_platform_installations i JOIN app_platform_data_namespaces n ON n.id=? JOIN app_platform_recovery_sets r ON r.id=? WHERE i.id=?`,
+		f.namespaceID(t), f.recoverySet, f.installation).Scan(&phase, &desired, &nsState, &owner, &recoveryState); err != nil {
+		t.Fatal(err)
+	}
+	if phase != "review_required" || desired != "disabled" || nsState != "review_required" || owner != nil || recoveryState != "review_required" {
+		t.Fatalf("failed resume state: %s %s %s %v %s", phase, desired, nsState, owner, recoveryState)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND generation=?`, f.installation, generation+1) != 0 {
+		t.Fatal("the failed resume left an activation behind")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.restore_resume_ended' AND target_id=?`, first.OperationID) != 1 {
+		t.Fatal("the failed resume left no audit row")
+	}
+
+	second := func() platformRemovalCommit {
+		review, err := s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target())
+		if err != nil {
+			t.Fatal("a resume could not be retried:", err)
+		}
+		commit, err := s.consumePlatformRestoreResumeReview(ctx, f.actor, review.ID, review.SHA256, platformFixtureID(5713))
+		if err != nil || commit.OperationID == first.OperationID {
+			t.Fatalf("retry consume: %+v %v", commit, err)
+		}
+		return commit
+	}()
+	startLease := f.driveResume(t, second.OperationID, appplatform.StageStart)
+	done := platformResumeStartToReady(t, s, startLease, f.endpoint)
+	if done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatalf("the retried resume did not complete: %v", done.snapshot.Stage)
+	}
+	if got := scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.installation); got != "ready" {
+		t.Fatalf("installation after retry: %s", got)
+	}
+	if scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation) != generation+1 ||
+		scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE id=?`, f.namespaceID(t)) != namespaceWriter+1 {
+		t.Fatal("the retry did not advance the generation and the writer fence exactly once")
+	}
+}
+
+func TestResumeRetryAfterFailedStart(t *testing.T) {
+	t.Run("before any effect", func(t *testing.T) { testResumeRetryAfterFailedStart(t, false, false) })
+	t.Run("after a reserved start", func(t *testing.T) { testResumeRetryAfterFailedStart(t, false, true) })
+}
+func TestResumeRetryAfterFailedStartPostgres(t *testing.T) {
+	t.Run("before any effect", func(t *testing.T) { testResumeRetryAfterFailedStart(t, true, false) })
+	t.Run("after a reserved start", func(t *testing.T) { testResumeRetryAfterFailedStart(t, true, true) })
+}
