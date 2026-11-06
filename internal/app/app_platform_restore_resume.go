@@ -978,6 +978,10 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, expected.id).Scan(&effects); err != nil {
 		return err
 	}
+	var unsettled int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown')`, expected.id).Scan(&unsettled); err != nil {
+		return err
+	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
 		return errAppPlatformStageEvidence
@@ -1003,17 +1007,19 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
-	if effects != 0 {
+	if unsettled != 0 {
 		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=? WHERE operation_id=? AND state='prepared'`, now, expected.id); err != nil {
 			return err
 		}
 	}
-	// A start effect may have been executed, and the Portal holds no record that it was not: even one with
-	// no recorded reservation may be a reserve the runner accepted whose reply was lost. Until the runner
-	// settles that effect (the paused scheduler reads it back, or the runtime is abandoned) the
-	// activation, the namespace and the installation stay exactly as the start left them: returning them
-	// to review would admit a second start over a candidate that may already be running.
-	if effects != 0 {
+	// A start effect that is prepared or unknown may have been executed, and the Portal holds no record that
+	// it was not: even one with no recorded reservation may be a reserve the runner accepted whose reply
+	// was lost. Until the runner settles that effect (the paused scheduler reads it back, or the runtime
+	// is abandoned) the activation, the namespace and the installation stay exactly as the start left
+	// them: returning them to review would admit a second start over a candidate that may already be
+	// running. When every effect is settled (applied or reverted) the failed resume returns to review and
+	// settles to failed, so a retry can be admitted.
+	if unsettled != 0 {
 		detail, _ := json.Marshal(struct {
 			Stage appplatform.Stage `json:"stage"`
 			Code  string            `json:"code"`
@@ -1029,6 +1035,11 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	}
 	if err := returnPlatformResumeToReview(e, expected.installationID, expected.controllerEpoch, plan, now); err != nil {
 		return err
+	}
+	if effects != 0 {
+		if err := settlePlatformRecoveryOperation(e, expected.id, "", now); err != nil {
+			return err
+		}
 	}
 	detail, _ := json.Marshal(struct {
 		Stage appplatform.Stage `json:"stage"`

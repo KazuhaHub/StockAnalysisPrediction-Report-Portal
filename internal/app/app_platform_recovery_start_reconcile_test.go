@@ -294,3 +294,68 @@ func TestRecoveryReconcileRefusesAnInstallationFenceThatMoved(t *testing.T) {
 		t.Fatal("the effect was settled although the operation could not continue")
 	}
 }
+
+// A resume that fails after its start was applied (probe timeout, slow boot, activation failure) has no
+// unsettled effect: it returns to review and settles to failed, so a retry resume can be admitted and
+// reach ready and launch. Only a prepared or unknown effect holds the installation recovery_required.
+func testResumeFailsAfterAppliedStart(t *testing.T, pg bool) {
+	ctx := context.Background()
+	f := platformResumeFixture(t, pg)
+	commit := f.reviewAndConsumeResume(t)
+	lease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
+	intent, err := f.s.preparePlatformRestoreStart(ctx, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation := platformUpdateStartReservationFixture(intent, f.endpoint).reservation
+	reserved, err := f.s.commitPlatformRestoreStartReservation(ctx, lease, intent, f.endpoint, reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof := platformUpdateStartRunningFixture(reserved.intent, reservation, f.endpoint)
+	probeLease, err := f.s.commitPlatformRestoreStartRunning(ctx, reserved.lease, reserved.intent, f.endpoint, proof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, commit.OperationID) != "applied" {
+		t.Fatal("fixture: the start was not applied")
+	}
+	if err := f.s.finishPlatformRestoreResumeForReview(ctx, probeLease); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "failed" ||
+		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" ||
+		platformOperationBlocksLaunch(t, f.s, commit.OperationID) {
+		t.Fatal("a resume that failed after an applied start was not returned to review and settled to failed")
+	}
+	review, err := f.s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target())
+	if err != nil {
+		t.Fatal("a retry resume review was refused:", err)
+	}
+	retry, err := f.s.consumePlatformRestoreResumeReview(ctx, f.actor, review.ID, review.SHA256, platformFixtureID(5641))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := f.driveResume(t, retry.OperationID, appplatform.StageStart)
+	if done := platformResumeStartToReady(t, f.s, start, f.endpoint); done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("the retried resume did not complete")
+	}
+	platformRecoveryActionHTTP(t, f.s, f.actor).endRecovery(200)
+	mux := http.NewServeMux()
+	f.s.wireRoutes(mux)
+	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	publisher := scalar[string](t, f.s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, f.installation)
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/publishers", cookie, platformReenablePublisherRequest(t, f.s, publisher)); got.Code != 200 {
+		t.Fatalf("trust review: %d %s", got.Code, got.Body.String())
+	}
+	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
+		t.Fatalf("the retried resume did not launch: %d %s", got.Code, got.Body.String())
+	}
+}
+
+func TestResumeFailsAfterAppliedStartAllowsARetry(t *testing.T) {
+	testResumeFailsAfterAppliedStart(t, false)
+}
+func TestResumeFailsAfterAppliedStartAllowsARetryPostgres(t *testing.T) {
+	testResumeFailsAfterAppliedStart(t, true)
+}
