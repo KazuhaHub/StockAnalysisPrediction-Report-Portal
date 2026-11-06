@@ -28,36 +28,17 @@ type platformDataIntent struct {
 // The data service is shared infrastructure. A static installation retains NULL
 // runtime_id and managed=false; only this typed data effect references the runner.
 func (s *Server) platformDataRuntime(e migExec, epoch string, dek []byte) (platformRuntimeRegistration, []byte, error) {
-	var zero, current platformRuntimeRegistration
-	lock := ""
-	if s.st.driver == "postgres" {
-		lock = " FOR UPDATE"
-	}
-	rows, err := e.query(`SELECT id,deployment_id,controller_epoch,control_revision,revision,enabled,verification_key_fingerprint,sealed_control_key,created_ms,updated_ms FROM app_platform_runtime_bindings ORDER BY id LIMIT 2` + lock)
+	var zero platformRuntimeRegistration
+	row, found, _, err := platformActiveRuntime(e, true)
 	if err != nil {
 		return zero, nil, err
 	}
-	var enabled, count int
-	var pin, sealed sql.NullString
-	var created, updated int64
-	for rows.Next() {
-		count++
-		err = rows.Scan(&current.id, &current.deploymentID, &current.controllerEpoch, &current.controlRevision, &current.revision, &enabled, &pin, &sealed, &created, &updated)
-		if err != nil {
-			rows.Close()
-			return zero, nil, err
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return zero, nil, err
-	}
+	current, enabled, pin, sealed, created, updated := row.platformRuntimeRegistration, row.enabled, row.pin, row.sealed, row.created, row.updated
 	now, err := platformDatabaseNow(e)
 	if err != nil {
 		return zero, nil, err
 	}
-	if count != 1 || enabled != 1 || current.revision != 2 || current.controlRevision < 1 || current.controllerEpoch != epoch || !platformValidUUID(current.id) || !platformValidUUID(current.deploymentID) || !pin.Valid || !platformValidSHA(pin.String) || !sealed.Valid || !strings.HasPrefix(sealed.String, sealPrefix) || created < 0 || updated < created || updated > now {
+	if !found || enabled != 1 || current.revision != 2 || current.controlRevision < 1 || current.controllerEpoch != epoch || !platformValidUUID(current.id) || !platformValidUUID(current.deploymentID) || !pin.Valid || !platformValidSHA(pin.String) || !sealed.Valid || !strings.HasPrefix(sealed.String, sealPrefix) || created < 0 || updated < created || updated > now {
 		return zero, nil, errAppPlatformRuntimeConflict
 	}
 	seed, err := aesOpen(dek, strings.TrimPrefix(sealed.String, sealPrefix), aad("app-platform", "runtime-control:"+current.id))

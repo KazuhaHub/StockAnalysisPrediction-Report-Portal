@@ -43,11 +43,28 @@ type platformRuntimeObservation struct {
 // transactionally. It confirms enrollment authority, not native compatibility or
 // app execution readiness. Managed admission still refuses unsupported runtimes.
 func (s *Server) confirmPlatformRuntimeBinding(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, false)
+}
+
+// confirmPlatformReplacementRuntime is the same confirmation for a replacement enrolled in recovery
+// mode. The two differ only in which pause state they require.
+func (s *Server) confirmPlatformReplacementRuntime(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, true)
+}
+
+func (s *Server) platformRuntimeTransaction(recovery bool) func(platformActorSession, func(migExec, platformActorFacts, platformActorControl) error) error {
+	if recovery {
+		return s.withPlatformRecoveryTransaction
+	}
+	return s.withPlatformTrustTransaction
+}
+
+func (s *Server) confirmPlatformRuntimeBindingMode(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint, recovery bool) (platformRuntimeRegistration, error) {
 	if endpoint.path == "" || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0) {
 		return platformRuntimeRegistration{}, errAppPlatformRuntimeConflict
 	}
 	expected.publicKey = bytes.Clone(expected.publicKey)
-	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.platformRuntimeTransaction(recovery)(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if _, err := s.platformRuntimeForConfirmation(e, expected, control); err != nil {
 			return err
 		}
@@ -64,7 +81,7 @@ func (s *Server) confirmPlatformRuntimeBinding(ctx context.Context, session plat
 	if err := ctx.Err(); err != nil {
 		return platformRuntimeRegistration{}, err
 	}
-	return s.confirmPlatformObservedRuntime(session, expected, observation)
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, recovery)
 }
 
 func (s *Server) platformRuntimeForConfirmation(e migExec, expected platformRuntimeRegistration, control platformActorControl) (platformRuntimeRegistration, error) {
@@ -83,15 +100,16 @@ func (s *Server) platformRuntimeForConfirmation(e migExec, expected platformRunt
 	if err != nil {
 		return zero, platformLeaseReadError(err)
 	}
-	var total int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_runtime_bindings`).Scan(&total); err != nil {
+	// The binding in force must be this one. Retired rows beside it are history, not competitors.
+	active, found, _, err := platformActiveRuntime(e, false)
+	if err != nil {
 		return zero, err
 	}
 	now, err := platformDatabaseNow(e)
 	if err != nil {
 		return zero, err
 	}
-	if total != 1 || updated > now {
+	if !found || active.id != expected.id || updated > now {
 		return zero, errAppPlatformRuntimeConflict
 	}
 	if current.deploymentID != expected.deploymentID || current.controllerEpoch != expected.controllerEpoch || current.controlRevision != expected.controlRevision || !((current.revision == 1 && enabled == 0) || (current.revision == 2 && enabled == 1)) || !pin.Valid || pin.String != expected.fingerprint || !sealed.Valid || !strings.HasPrefix(sealed.String, sealPrefix) || created < 0 || updated < created {
@@ -123,10 +141,18 @@ func validPlatformRuntimeObservation(expected platformRuntimeRegistration, obser
 // private value to exercise database fences; management handlers must use the
 // endpoint entry point above and must never accept an observation from a body.
 func (s *Server) confirmPlatformObservedRuntime(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, false)
+}
+
+func (s *Server) confirmPlatformObservedReplacementRuntime(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, true)
+}
+
+func (s *Server) confirmPlatformObservedRuntimeMode(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation, recovery bool) (platformRuntimeRegistration, error) {
 	var result, zero platformRuntimeRegistration
 	expected.publicKey = bytes.Clone(expected.publicKey)
 	observation.controller.PublicKey = bytes.Clone(observation.controller.PublicKey)
-	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.platformRuntimeTransaction(recovery)(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		current, err := s.platformRuntimeForConfirmation(e, expected, control)
 		if err != nil {
 			return err
