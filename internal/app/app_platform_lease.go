@@ -182,7 +182,9 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 	}
 	if (phase == "review_required" &&
 		action != string(appplatform.ActionDeleteData) &&
-		action != string(appplatform.ActionRepair)) ||
+		action != string(appplatform.ActionRepair) &&
+		action != string(appplatform.ActionRestoreImport)) ||
+		(action == string(appplatform.ActionRestoreImport) && phase != "review_required") ||
 		phase == "quarantined" ||
 		(phase == "recovery_required" &&
 			action != string(appplatform.ActionRestore) &&
@@ -197,7 +199,7 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 		return zero, errAppPlatformLeaseConflict
 	}
 	for _, setting := range []struct{ key, value string }{
-		{"app_platform_restore_paused", "0"},
+		{"app_platform_restore_paused", platformPausedValueFor(appplatform.Action(action))},
 		{"app_platform_controller_epoch", epoch},
 	} {
 		var value string
@@ -221,6 +223,16 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 		return zero, errAppPlatformLeaseConflict
 	}
 	return platformLeaseFacts{lease: lease, installationRevision: installationRevision, controlFence: controlFence, now: now}, nil
+}
+
+// platformPausedValueFor is the value the restore pause must hold for an operation to be leased or to
+// commit. A restore import is the recovery operation: it exists only while the Portal is paused,
+// and every other action only while it is not.
+func platformPausedValueFor(action appplatform.Action) string {
+	if action == appplatform.ActionRestoreImport {
+		return "1"
+	}
+	return "0"
 }
 
 func platformLeaseReadError(err error) error {
@@ -314,7 +326,7 @@ func platformOperationControlTime(e migExec, facts platformLeaseFacts) (int64, e
 		lock = " FOR SHARE"
 	}
 	for _, setting := range []struct{ key, value string }{
-		{"app_platform_restore_paused", "0"},
+		{"app_platform_restore_paused", platformPausedValueFor(facts.lease.snapshot.Action)},
 		{"app_platform_controller_epoch", facts.lease.controllerEpoch},
 	} {
 		var value string

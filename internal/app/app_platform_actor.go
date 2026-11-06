@@ -32,6 +32,9 @@ type platformActorFacts struct {
 type platformActorControl struct {
 	epoch string
 	nowMS int64
+	// recovery marks a transaction opened by withPlatformRecoveryTransaction: the Portal is paused
+	// for restore review, and only the recovery admissions may run.
+	recovery bool
 }
 
 type platformActorAccount struct {
@@ -143,6 +146,13 @@ func (s *Server) withAppPlatformActorRead(session platformActorSession, fn func(
 }
 
 func (s *Server) withAppPlatformActorContextMode(ctx context.Context, session platformActorSession, initialize, allowPaused bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
+	return s.withAppPlatformActorMode(ctx, session, initialize, allowPaused, false, fn)
+}
+
+// withAppPlatformActorMode adds recovery mode to the paused-read mode above. In recovery mode the
+// restore pause must be SET (recovery is the only thing a paused Portal admits), and the control
+// handed to fn says so, so that every later authority refresh holds the same invariant.
+func (s *Server) withAppPlatformActorMode(ctx context.Context, session platformActorSession, initialize, allowPaused, recovery bool, fn func(migExec, platformActorFacts, platformActorControl) error) error {
 	// Filter stale/non-admin proofs before lazy keyring creation. This unlocked
 	// read is only a precheck; the authoritative check is repeated under the
 	// shared principal-lifecycle lock below.
@@ -176,7 +186,7 @@ func (s *Server) withAppPlatformActorContextMode(ctx context.Context, session pl
 		return err
 	}
 	seed, epoch, err := platformControlIdentity(
-		e, dek, initialize, allowPaused)
+		e, dek, initialize, allowPaused, recovery)
 	if err != nil {
 		return err
 	}
@@ -186,14 +196,14 @@ func (s *Server) withAppPlatformActorContextMode(ctx context.Context, session pl
 		return err
 	}
 	if fn != nil {
-		if err := fn(e, facts, platformActorControl{epoch: epoch, nowMS: now}); err != nil {
+		if err := fn(e, facts, platformActorControl{epoch: epoch, nowMS: now, recovery: recovery}); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func platformControlIdentity(e migExec, dek []byte, initialize, allowPaused bool) ([]byte, string, error) {
+func platformControlIdentity(e migExec, dek []byte, initialize, allowPaused, recovery bool) ([]byte, string, error) {
 	rows, err := e.query(`SELECT k,v FROM meta WHERE k IN ('app_platform_actor_seed','app_platform_controller_epoch','app_platform_restore_paused')`)
 	if err != nil {
 		return nil, "", err
@@ -246,7 +256,8 @@ func platformControlIdentity(e migExec, dek []byte, initialize, allowPaused bool
 	}
 	sealed, epoch := values["app_platform_actor_seed"], values["app_platform_controller_epoch"]
 	if len(values) != 3 ||
-		(values["app_platform_restore_paused"] != "0" &&
+		(recovery && values["app_platform_restore_paused"] != "1") ||
+		(!recovery && values["app_platform_restore_paused"] != "0" &&
 			!(allowPaused && values["app_platform_restore_paused"] == "1")) ||
 		!platformValidUUID(epoch) ||
 		!strings.HasPrefix(sealed, sealPrefix) {
@@ -347,7 +358,11 @@ func platformRefreshActor(e migExec, session platformActorSession, actor platfor
 		return control, errAppPlatformPlanChanged
 	}
 	var markers int
-	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE (k='app_platform_controller_epoch' AND v=?) OR (k='app_platform_restore_paused' AND v='0')`, control.epoch).Scan(&markers); err != nil {
+	paused := "0"
+	if control.recovery {
+		paused = "1"
+	}
+	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE (k='app_platform_controller_epoch' AND v=?) OR (k='app_platform_restore_paused' AND v=?)`, control.epoch, paused).Scan(&markers); err != nil {
 		return control, err
 	}
 	if markers != 2 {
