@@ -319,7 +319,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		}
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
 		action != "repair" && action != "restore" &&
-		action != "delete_data" {
+		action != "delete_data" && !platformRecoveryAction(action) {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -335,6 +335,21 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	defer releaseSlot()
 	n, _ := strconv.ParseInt(revision, 10, 64)
 	switch action {
+	case "restore_import", "resume":
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		recoverySetID, recoveryErr := platformManagementString(fields, "recovery_set_id")
+		want := 2
+		if action == "restore_import" {
+			want = 3
+		} else {
+			recoverySetID, recoveryErr = "", nil
+		}
+		if len(fields) != want || installationErr != nil || recoveryErr != nil || !platformValidUUID(installation) ||
+			(action == "restore_import" && !platformValidUUID(recoverySetID)) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		s.apiPlatformRecoveryPlan(w, r, actor, action, map[string]string{"installation_id": installation, "recovery_set_id": recoverySetID})
 	case "install":
 		if len(fields) != 4 || fields["audience"] == nil || fields["installation_id"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
@@ -620,6 +635,7 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var result platformRemovalCommit
+	var recovery bool
 	switch action {
 	case "install":
 		format, formatErr := platformParseInstallProfile(planRaw)
@@ -660,12 +676,26 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		result, err = s.consumePlatformManagedRepairReviewContext(
 			r.Context(), actor, id, sha, key, endpoint)
 	case "restore":
+		if platformPlanIsResume(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRestoreResumeReview(
+				r.Context(), actor, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformManagedRestoreReview(
+			r.Context(), actor, id, sha, key)
+	case "restore_import":
+		recovery = true
+		result, err = s.consumePlatformRestoreImportReview(
 			r.Context(), actor, id, sha, key)
 	default:
 		err = errAppPlatformPlanChanged
 	}
 	if err != nil {
+		if recovery {
+			platformRecoveryError(w, err)
+			return
+		}
 		platformManagementError(w, err)
 		return
 	}

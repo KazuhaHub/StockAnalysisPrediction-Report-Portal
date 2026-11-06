@@ -74,7 +74,11 @@ func (s *Server) confirmPlatformRuntimeBindingMode(ctx context.Context, session 
 	if err != nil {
 		return platformRuntimeRegistration{}, err
 	}
-	observation, err := platformObserveRuntimeEndpoint(ctx, endpoint)
+	observe := platformObserveRuntimeEndpoint
+	if s.platformObserveRuntime != nil {
+		observe = s.platformObserveRuntime
+	}
+	observation, err := observe(ctx, endpoint)
 	if err != nil {
 		return platformRuntimeRegistration{}, err
 	}

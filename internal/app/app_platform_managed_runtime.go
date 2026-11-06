@@ -36,10 +36,20 @@ func validPlatformManagedRuntimeObservation(o transport.ManagedRuntimeObservatio
 // checks the current admin/control binding before and after the fresh profile,
 // and issues no install intent, grant, runtime enablement or readiness state.
 func (s *Server) observePlatformManagedRuntime(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint) (platformManagedRuntimeFacts, error) {
+	return s.observePlatformManagedRuntimeMode(ctx, session, endpoint, false)
+}
+
+// observePlatformRecoveryRuntime is the same observation for a paused Portal in recovery, where the
+// replacement runtime is the only binding in force and the ordinary transaction would refuse.
+func (s *Server) observePlatformRecoveryRuntime(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint) (platformManagedRuntimeFacts, error) {
+	return s.observePlatformManagedRuntimeMode(ctx, session, endpoint, true)
+}
+
+func (s *Server) observePlatformManagedRuntimeMode(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint, recovery bool) (platformManagedRuntimeFacts, error) {
 	var result platformManagedRuntimeFacts
 	var actorPin string
 	capture := func(first bool) error {
-		return s.withPlatformTrustActorContext(ctx, session, func(e migExec, actor platformActorFacts, c platformActorControl, _ appplatform.PublisherTrust) error {
+		return s.withPlatformRuntimeActorContext(ctx, session, recovery, func(e migExec, actor platformActorFacts, c platformActorControl, _ appplatform.PublisherTrust) error {
 			dek, err := s.dek()
 			if err != nil {
 				return err
@@ -95,4 +105,38 @@ func validPlatformInstallRuntimeFacts(f platformManagedRuntimeFacts, e platformR
 		return f.network == nil
 	}
 	return f.network != nil && samePlatformManagedRuntime(f.network.runtime, f.runtime) && validPlatformNetworkRuntimeObservation(f.network.observation, f.runtime, e)
+}
+
+// withPlatformRuntimeActorContext is withPlatformTrustActorContext, or its recovery-mode counterpart.
+func (s *Server) withPlatformRuntimeActorContext(ctx context.Context, session platformActorSession, recovery bool, fn func(migExec, platformActorFacts, platformActorControl, appplatform.PublisherTrust) error) error {
+	if !recovery {
+		return s.withPlatformTrustActorContext(ctx, session, fn)
+	}
+	return s.withPlatformRecoveryTransactionContext(ctx, session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+		if err := lockPlatformPublisherTrust(e); err != nil {
+			return err
+		}
+		trust, err := loadPlatformPublisherTrust(e)
+		if err != nil {
+			return err
+		}
+		control, err = platformRefreshActor(e, session, actor, control)
+		if err != nil {
+			return err
+		}
+		return fn(e, actor, control, trust)
+	})
+}
+
+// platformRecoveryResumeTarget reads the target a resume is reviewed against from the replacement
+// runner itself. A request never supplies it.
+func (s *Server) platformRecoveryResumeTarget(ctx context.Context, session platformActorSession, endpoint platformRuntimeEndpoint) (*platformManagedInstallTarget, error) {
+	if s.platformRecoveryTarget != nil {
+		return s.platformRecoveryTarget(ctx, session, endpoint)
+	}
+	facts, err := s.observePlatformRecoveryRuntime(ctx, session, endpoint)
+	if err != nil {
+		return nil, err
+	}
+	return managedInstallTarget(facts, endpoint)
 }

@@ -52,6 +52,11 @@ type Server struct {
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
 	// transport.
 	platformImportCheckpoint platformImportCheckpointExecutor
+	// platformObserveRuntime and platformRecoveryTarget are the runner seams of recovery enrollment
+	// and of the resume review; nil selects the local socket. Neither accepts anything a request
+	// carries: both read what the runner itself reports.
+	platformObserveRuntime func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error)
+	platformRecoveryTarget func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error)
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget
