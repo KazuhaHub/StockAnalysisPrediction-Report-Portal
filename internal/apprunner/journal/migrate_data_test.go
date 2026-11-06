@@ -21,19 +21,20 @@ import (
 )
 
 type fakeMigrationNative struct {
-	t         *testing.T
-	runs      int
-	absents   int
-	onRun     func(driver.MigrationJobRequest)
-	exit      int
-	killed    bool
-	runErr    error
-	absentErr error
-	marker    data.SchemaMarkerSnapshot
-	markerErr error
-	markers   int
-	lastRun   driver.MigrationJobRequest
-	absentIDs []driver.MigrationJobRequest
+	t          *testing.T
+	runs       int
+	absents    int
+	onRun      func(driver.MigrationJobRequest)
+	exit       int
+	killed     bool
+	runErr     error
+	absentErr  error
+	marker     data.SchemaMarkerSnapshot
+	markerErr  error
+	markers    int
+	lastRun    driver.MigrationJobRequest
+	absentHook func()
+	absentIDs  []driver.MigrationJobRequest
 }
 
 func (n *fakeMigrationNative) RunMigrationJob(_ context.Context, r driver.MigrationJobRequest) (driver.MigrationJobSnapshot, error) {
@@ -54,6 +55,9 @@ func (n *fakeMigrationNative) RunMigrationJob(_ context.Context, r driver.Migrat
 func (n *fakeMigrationNative) ProveMigrationAbsent(_ context.Context, r driver.MigrationJobRequest) error {
 	n.absents++
 	n.absentIDs = append(n.absentIDs, r)
+	if n.absentHook != nil {
+		n.absentHook()
+	}
 	return n.absentErr
 }
 func (n *fakeMigrationNative) ReadSchemaMarker(_ context.Context, _ data.RootIdentity, id string, project uint32) (data.SchemaMarkerSnapshot, error) {

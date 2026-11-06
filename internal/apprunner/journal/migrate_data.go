@@ -98,6 +98,8 @@ type migrateClaimMarker struct {
 	WriterFence             string `json:"writer_fence"`
 	StartWriterFence        string `json:"start_writer_fence"`
 	ProjectID               string `json:"project_id"`
+	NamespaceInode          string `json:"namespace_inode"`
+	Device                  string `json:"device"`
 	QuotaBytes              string `json:"quota_bytes"`
 	QuotaInodes             string `json:"quota_inodes"`
 }
@@ -148,6 +150,9 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 		if !dataNumber(value, true) {
 			return false
 		}
+	}
+	if !nativeNumber(m.NamespaceInode, true) || !nativeNumber(m.Device, true) {
+		return false
 	}
 	source, _ := strconv.ParseInt(m.SourceSchema, 10, 64)
 	target, _ := strconv.ParseInt(m.TargetSchema, 10, 64)
@@ -214,7 +219,7 @@ func migrateMarkerMatchesCommand(m migrateClaimMarker, c control.MigrateDataComm
 		m.SourceReleaseSHA256 == p.SourceReleaseSHA256 && m.TargetReleaseSHA256 == p.TargetReleaseSHA256 &&
 		m.SourceSchema == p.SourceSchema && m.TargetSchema == p.TargetSchema && m.CheckpointWriterFence == p.CheckpointWriterFence &&
 		m.WriterFence == p.WriterFence && m.StartWriterFence == p.StartWriterFence && m.ProjectID == p.ProjectID &&
-		m.QuotaBytes == p.QuotaBytes && m.QuotaInodes == p.QuotaInodes && m.AdmittedFence == c.InstallationFence
+		m.NamespaceInode == p.NamespaceInode && m.Device == p.Device && m.QuotaBytes == p.QuotaBytes && m.QuotaInodes == p.QuotaInodes && m.AdmittedFence == c.InstallationFence
 }
 
 // MigrateDataReceiptMatchesCommand reports whether the receipt answers exactly this signed command.
@@ -482,7 +487,7 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 		SourceReleaseSHA256: p.SourceReleaseSHA256, TargetReleaseSHA256: p.TargetReleaseSHA256,
 		SourceSchema: p.SourceSchema, TargetSchema: p.TargetSchema, CheckpointWriterFence: p.CheckpointWriterFence,
 		WriterFence: p.WriterFence, StartWriterFence: p.StartWriterFence, ProjectID: p.ProjectID,
-		QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
+		NamespaceInode: p.NamespaceInode, Device: p.Device, QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
 	}
 	markerRaw, err := json.Marshal(marker)
 	if err != nil || len(markerRaw) > 16384 || !validMigrateMarker(marker) || !migrateMarkerMatchesCommand(marker, c) {

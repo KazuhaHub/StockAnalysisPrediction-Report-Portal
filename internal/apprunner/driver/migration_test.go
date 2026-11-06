@@ -254,3 +254,46 @@ func TestMigrationAbsenceByNameAndLabel(t *testing.T) {
 		t.Fatal("job not removed", err)
 	}
 }
+
+func TestDiscardStopsRunningJob(t *testing.T) {
+	plan, _, _ := migrationFixture(t)
+	daemon := &fakeJobDaemon{t: t, plan: plan, present: true, state: "running"}
+	client := daemonClient(transportFunc(daemon.round))
+	if err := discardMigrationJobHTTP(context.Background(), client, plan); err != nil {
+		t.Fatal(err)
+	}
+	if !daemon.killed || daemon.present {
+		t.Fatalf("running job was not stopped and removed: killed=%v present=%v calls=%v", daemon.killed, daemon.present, daemon.calls)
+	}
+	last := ""
+	for _, call := range daemon.calls {
+		if strings.HasPrefix(call, "DELETE") {
+			last = call
+		}
+	}
+	if last == "" || strings.Index(strings.Join(daemon.calls, "|"), "/kill") > strings.Index(strings.Join(daemon.calls, "|"), "DELETE") {
+		t.Fatal("job removed before it was stopped", daemon.calls)
+	}
+}
+
+func TestDiscardRemovesExitedJob(t *testing.T) {
+	plan, _, _ := migrationFixture(t)
+	daemon := &fakeJobDaemon{t: t, plan: plan, present: true, state: "exited"}
+	client := daemonClient(transportFunc(daemon.round))
+	if err := discardMigrationJobHTTP(context.Background(), client, plan); err != nil {
+		t.Fatal(err)
+	}
+	if daemon.killed || daemon.present {
+		t.Fatalf("exited job handling: killed=%v present=%v", daemon.killed, daemon.present)
+	}
+	// With nothing present the discard only proves absence.
+	daemon = &fakeJobDaemon{t: t, plan: plan}
+	if err := discardMigrationJobHTTP(context.Background(), daemonClient(transportFunc(daemon.round)), plan); err != nil {
+		t.Fatal(err)
+	}
+	for _, call := range daemon.calls {
+		if call[:4] != "GET " {
+			t.Fatal("absence proof mutated", daemon.calls)
+		}
+	}
+}
