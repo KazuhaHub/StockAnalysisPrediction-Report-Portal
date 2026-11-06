@@ -14,9 +14,15 @@ var errAppPlatformLaunchUnavailable = errors.New("application launch is unavaila
 
 func platformResolvedRecoveryPredicate(e migExec) string {
 	restoreReference := `json_extract(rp.plan_json,'$.checkpoint_operation_id')=o.id`
+	planFormat := `json_extract(rp.plan_json,'$.format')`
 	if e.s.driver == "postgres" {
 		restoreReference = `(rp.plan_json::jsonb->>'checkpoint_operation_id')=o.id`
+		planFormat = `(rp.plan_json::jsonb->>'format')`
 	}
+	// An ordinary restore lands on the generation of the operation it settles. A recovery resume
+	// settles the operation its imported checkpoint came from one generation later: it starts from the
+	// generation the failed operation had reached.
+	generation := `(r.target_generation=o.target_generation OR (` + planFormat + `='` + platformRestoreResumeFormat + `' AND r.source_generation=o.target_generation))`
 	return `EXISTS (
 		SELECT 1
 		FROM app_platform_operations r
@@ -25,7 +31,7 @@ func platformResolvedRecoveryPredicate(e migExec) string {
 		AND r.action='restore' AND r.managed=1
 		AND r.stage='complete' AND r.completed_ms IS NOT NULL
 		AND r.completed_ms>=o.completed_ms
-		AND r.target_generation=o.target_generation
+		AND ` + generation + `
 		AND r.controller_epoch=i.controller_epoch
 		AND r.lease_owner IS NULL AND r.lease_until_ms IS NULL
 		AND r.error_code IS NULL

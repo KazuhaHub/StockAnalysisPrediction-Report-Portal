@@ -38,6 +38,12 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	if b.generation > 1 {
+		if resumed, err := platformCompletedResumeAt(e, b.installation, b.generation); err != nil {
+			return zero, errAppPlatformLaunchUnavailable
+		} else if resumed {
+			return s.loadPlatformWritableResumeBackendHistory(
+				e, b, runtime, seed, dek, now)
+		}
 		return s.loadPlatformWritableUpdateBackendHistory(
 			e, b, runtime, seed, dek, now)
 	}

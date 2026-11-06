@@ -584,13 +584,19 @@ func loadPlatformResumeCheckpointSource(e migExec, lease platformOperationLease,
 	if err != nil {
 		return zero, err
 	}
-	plan, r, cp := ev.plan, ev.imp.receipt, ev.imp.source.checkpoint
-	if runtime.id != plan.RuntimeID || runtime.deploymentID != plan.DeploymentID || runtime.controllerEpoch != plan.ControllerEpoch {
-		return zero, errAppPlatformStageEvidence
-	}
 	var pending int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND completed_ms IS NULL`, lease.installationID).Scan(&pending); err != nil || pending != 1 {
 		return zero, errAppPlatformStageEvidence
+	}
+	return platformResumeCheckpointSourceFor(ev, runtime)
+}
+
+// platformResumeCheckpointSourceFor builds the start source from proven resume evidence. It does not
+// look at what else is in flight, so a completed resume is read back through it as well.
+func platformResumeCheckpointSourceFor(ev platformResumeEvidence, runtime platformRuntimeRegistration) (platformCheckpointSource, error) {
+	plan, r, cp := ev.plan, ev.imp.receipt, ev.imp.source.checkpoint
+	if runtime.id != plan.RuntimeID || runtime.deploymentID != plan.DeploymentID || runtime.controllerEpoch != plan.ControllerEpoch {
+		return platformCheckpointSource{}, errAppPlatformStageEvidence
 	}
 	return platformCheckpointSource{
 		operationID: cp.SourceOperationID, startEffectID: cp.SourceStartEffectID, dataEffectID: cp.SourceDataEffectID,

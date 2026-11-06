@@ -460,6 +460,19 @@ func (s *Server) commitPlatformRestoreStartActivation(ctx context.Context, lease
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	if resume {
+		// The Portal's restore raised the installation's policy revision past the capability rows the
+		// resume was reviewed against. The administrator approved resuming with exactly those rows, so
+		// they are carried to the resumed revision (never lowered); launch accepts only rows at the
+		// installation's own revision.
+		if _, err := e.exec(`UPDATE app_platform_capability_grants
+			SET policy_revision=?,updated_ms=?
+			WHERE installation_id=? AND policy_revision<?`,
+			current.start.plan.TargetPolicyRevision, now,
+			lease.installationID, current.start.plan.TargetPolicyRevision); err != nil {
+			return zero, err
+		}
+	}
 	activationPhase, err := platformReadyPhaseForInstallation(
 		e, lease.installationID, current.start.plan.TargetPolicyRevision)
 	if err != nil {

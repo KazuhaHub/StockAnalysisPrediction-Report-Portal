@@ -142,6 +142,16 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	if err != nil {
 		return zero, fmt.Errorf("update history activation: %w", err)
 	}
+	return platformWritableHistoryFromStart(
+		e, b, expected, runtime, seed, dek, now, start, descriptor)
+}
+
+// platformWritableHistoryFromStart turns a completed operation's proven start evidence into the
+// access intent: it binds the evidence to the active activation and signs fresh envelopes that serve
+// as access proofs only.
+func platformWritableHistoryFromStart(e migExec, b platformBackendHistoryBinding, expected platformOperationLease, runtime platformRuntimeRegistration, seed, dek []byte, now int64, start platformUpdateStartIntent, descriptor []byte) (platformWritableRegistrationIntent, error) {
+	var zero platformWritableRegistrationIntent
+	var err error
 	if start.running == nil || start.readiness == nil ||
 		start.resourceID != b.activation || start.running.NativeID == "" {
 		return zero, fmt.Errorf(
