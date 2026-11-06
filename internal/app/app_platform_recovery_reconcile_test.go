@@ -39,9 +39,13 @@ func TestRecoveryReconcileSettlesCompletedUnknownImport(t *testing.T) {
 	f, operation := unknownImportFixture(t)
 	effect := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=?`, operation)
 	admitted := scalar[int64](t, f.s.st, `SELECT admitted_fence FROM app_platform_operation_effects WHERE operation_id=?`, operation)
+	before := scalar[int64](t, f.s.st, `SELECT state_revision FROM app_platform_operations WHERE id=?`, operation)
 	settled, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture())
 	if err != nil || settled != 1 {
 		t.Fatalf("reconcile: settled=%d err=%v", settled, err)
+	}
+	if after := scalar[int64](t, f.s.st, `SELECT state_revision FROM app_platform_operations WHERE id=?`, operation); after != before+1 {
+		t.Fatalf("a recovered import did not advance its state revision by one: %d -> %d", before, after)
 	}
 	if f.executor.reads < 1 {
 		t.Fatal("the effect was not read back")

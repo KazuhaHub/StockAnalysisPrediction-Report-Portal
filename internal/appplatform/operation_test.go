@@ -208,3 +208,47 @@ func TestSettleMovesRecoveryRequiredToFailed(t *testing.T) {
 		t.Fatal("an operation still in flight was settled")
 	}
 }
+
+// An operation that ended recovery_required completes, one revision later, when evidence shows its last
+// effect was applied after all. It must be a state the model restores, so an operation that failed
+// before it could have done any work (queued) is refused.
+func TestRecoverCompletesARecoveryRequiredOperation(t *testing.T) {
+	stages := operationStages(ActionRestoreImport, true)
+	for index, want := range map[int]bool{0: false, 1: true, 2: true} {
+		op, _ := NewOperation(ActionRestoreImport, true, 3)
+		var err error
+		for step := 1; step <= index; step++ {
+			if op, err = op.Advance(op.Snapshot().Revision, stages[step]); err != nil {
+				t.Fatal(err)
+			}
+		}
+		unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+		if err != nil {
+			t.Fatal(err)
+		}
+		done, err := unsettled.Recover(unsettled.Snapshot().Revision)
+		if (err == nil) != want {
+			t.Fatalf("recover after a failure at %s: %v", stages[index], err)
+		}
+		if err != nil {
+			continue
+		}
+		if done.Snapshot().Stage != StageComplete || done.Snapshot().Revision != unsettled.Snapshot().Revision+1 {
+			t.Fatalf("recovered: %+v", done.Snapshot())
+		}
+		if _, err := OperationFromSnapshot(done.Snapshot()); err != nil {
+			t.Fatalf("the recovered snapshot is not a model state: %v", err)
+		}
+		if _, err := unsettled.Recover(unsettled.Snapshot().Revision + 1); !errors.Is(err, ErrRevisionConflict) {
+			t.Fatal("a stale recover was accepted")
+		}
+		if _, err := done.Recover(done.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatal("a completed operation was recovered again")
+		}
+	}
+	failed, _ := NewOperation(ActionRestoreImport, true, 3)
+	failed, _ = failed.Fail(failed.Snapshot().Revision, EffectsNone)
+	if _, err := failed.Recover(failed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("a clean failure was recovered")
+	}
+}

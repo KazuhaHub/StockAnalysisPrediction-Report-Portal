@@ -102,6 +102,10 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 				break
 			}
 		}
+		// An operation recovered out of recovery_required completes one revision after the failure.
+		if snapshot.Stage == StageComplete && snapshot.Revision == uint64(len(stages))+1 {
+			valid = true
+		}
 	}
 	if !valid {
 		return Operation{}, ErrInvalidTransition
@@ -161,6 +165,21 @@ func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
 		return Operation{}, ErrInvalidTransition
 	}
 	o.stage, o.revision = StageFailed, o.revision+1
+	return o, nil
+}
+
+// Recover completes an operation that ended recovery_required once evidence shows its effect was applied.
+// The result must be a state OperationFromSnapshot restores, which refuses a failure from too early a
+// stage to have done the work. Like Settle it cannot judge the evidence itself.
+func (o Operation) Recover(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	stages := operationStages(o.action, o.managed)
+	if o.stage != StageRecoveryRequired || o.revision+1 < uint64(len(stages)) || o.revision+1 > uint64(len(stages))+1 {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageComplete, o.revision+1
 	return o, nil
 }
 

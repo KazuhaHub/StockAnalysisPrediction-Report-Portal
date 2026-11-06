@@ -229,13 +229,17 @@ func (s *Server) commitPlatformRecoveryImport(ctx context.Context, lease platfor
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return false, err
 	}
-	complete, err := appplatform.CompletedOperation(appplatform.ActionRestoreImport, true, lease.snapshot.Generation)
+	model, err := appplatform.OperationFromSnapshot(lease.snapshot)
+	if err != nil {
+		return false, errAppPlatformStageEvidence
+	}
+	complete, err := model.Recover(lease.snapshot.Revision)
 	if err != nil {
 		return false, errAppPlatformStageEvidence
 	}
 	changed, err = e.exec(`UPDATE app_platform_operations SET stage='complete',state_revision=?,row_revision=row_revision+1,error_code=NULL,updated_ms=?
 		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND completed_ms IS NOT NULL`,
-		int64(complete.Revision), now, lease.id, lease.installationID, lease.controllerEpoch, int64(lease.snapshot.Revision), lease.rowRevision)
+		int64(complete.Snapshot().Revision), now, lease.id, lease.installationID, lease.controllerEpoch, int64(lease.snapshot.Revision), lease.rowRevision)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return false, err
 	}
