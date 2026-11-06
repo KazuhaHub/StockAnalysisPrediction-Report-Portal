@@ -76,7 +76,7 @@ func TestWritableLifecycleRestoreStartAbsenceRoundTrip(t *testing.T) {
 			if mode == "execute" {
 				action = UpdateStartExecute
 			}
-			_, err = writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, raw, sig, a, descriptor, nil)
+			_, err = writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, raw, lifecycleSignature(t, action, a, raw, sig), a, descriptor, nil)
 			<-done
 			if err == nil {
 				t.Fatal("an absence reply produced an observation")

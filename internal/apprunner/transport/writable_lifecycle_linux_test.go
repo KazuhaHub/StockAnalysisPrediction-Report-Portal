@@ -78,7 +78,7 @@ func TestReadonlyEndpointRefusesAllWritableLifecycleActions(t *testing.T) {
 	}
 	importAuthority, _, importRaw, importSig, importDescriptor, _ := importTransportFixture(t)
 	for _, action := range []WritableLifecycleAction{ImportCheckpointExecute, ImportCheckpointRead} {
-		proof, err := writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, importRaw, importSig, importAuthority, importDescriptor, nil)
+		proof, err := writableLifecycleFrame(context.Background(), path, privateProfile(uint32(os.Geteuid())), action, importRaw, lifecycleSignature(t, action, importAuthority, importRaw, importSig), importAuthority, importDescriptor, nil)
 		if err == nil || !proof.ReceivedAt().IsZero() || backend.calls.Load() != 0 {
 			t.Fatal("readonly minted import lifecycle", action, err)
 		}

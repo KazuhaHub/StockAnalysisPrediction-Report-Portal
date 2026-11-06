@@ -40,7 +40,7 @@ func stubLifecycleRunner(t *testing.T, err error) {
 
 func importEndpointFixture() (platformRuntimeEndpoint, platformImportIntent) {
 	endpoint := platformRuntimeEndpoint{path: "/nonexistent/import.sock", controllerUID: 1000, controllerGID: 1001}
-	return endpoint, platformImportIntent{raw: []byte("{}"), signature: make([]byte, 64), descriptor: []byte("{}")}
+	return endpoint, platformImportIntent{raw: []byte("{}"), signature: make([]byte, 64), readSignature: make([]byte, 64), descriptor: []byte("{}")}
 }
 
 // Only the runner's typed absence reply becomes the definite no-effect answer, and only for a read.
@@ -83,6 +83,8 @@ func TestRestoreImportRunnerAbsentReplyRevokesGrantAndAllowsRetry(t *testing.T) 
 	f.s.platformImportCheckpoint = importAbsentRunnerExecutor{fake: f.executor}
 	stubLifecycleRunner(t, journal.ErrNoSuchEffect)
 	endpoint := platformRestoreEndpointFixture()
+	// An absence is definite only once every command signed for the effect has expired.
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, commit.OperationID)
 	if _, err := f.s.runPlatformRestoreImport(context.Background(), lease, endpoint); !errors.Is(err, errPlatformImportEnded) {
 		t.Fatalf("a runner absent reply must end the operation: %v", err)
 	}
