@@ -26,10 +26,19 @@ five places where doc 167 did not match the code and how each is resolved.
    from the import receipt.
 4. **The checkpoint manifest has no per-file digests.** `manifest_sha256` covers the whole
    archive. Resolution: the archive digest plus a per-entry SHA-256 read-back after extraction,
-   following the existing restore pattern. The manifest's old-root fields are compared with
-   Portal's provenance values, never with the new host.
+   following the existing restore pattern. The manifest's old source-root fields are compared
+   with Portal's provenance values, never with the new host.
 5. **`review_plans.action` shares the `operations.action` CHECK.** Resolution: migration 0021
    relaxes both. Doc 167's approved-changes table is amended accordingly.
+6. **The old checkpoint root is not recorded anywhere Portal can read.** No stored receipt names
+   the root the archive was written to, so the command cannot carry it honestly. Resolution:
+   the import-checkpoint payload drops `checkpoint_filesystem_uuid` and `checkpoint_root_inode`.
+   Portal's recovery set records `manifest_sha256`; once the runner verifies that the archive
+   digest equals it, the manifest's own old checkpoint-root identity is authentic, so the runner
+   reads those two values from the verified manifest (validating them and requiring them to
+   differ from the source root) instead of from the payload. The `source_*` fields stay in the
+   payload, sourced from the data-preparation receipt as before. A manifest that does not hash
+   to the recorded digest is refused before any of its fields is read.
 
 Per-installation resume: a managed `restore` operation whose source is the applied import. Its
 revoke, quiesce, snapshot and restore-data stages advance on evidence only; `restore-start`, probe
@@ -61,7 +70,8 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
    - the identities of both roots;
    - archive opened with `O_NOFOLLOW`, regular file, 0400, size;
    - SHA-256 of the archive;
-   - the canonical manifest against the payload and the provenance values;
+   - the canonical manifest against the payload and the source provenance values, its old
+     checkpoint root being trusted only because the digest above matched;
    - the entry walk, with totals;
    - the quota bound, checked before any create;
    - prepare, extract, sync, then a per-entry read-back.
