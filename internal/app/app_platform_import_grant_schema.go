@@ -82,7 +82,7 @@ func platformActionCheckName(table string) (string, error) {
 
 // setPlatformActionChecks replaces the action list `from` with `to` on the checked tables, in place.
 //
-// PostgreSQL drops and re-adds the named constraint. SQLite cannot alter a CHECK, so the stored table
+// PostgreSQL drops and re-adds the named constraint, and refuses a table that does not have it. SQLite cannot alter a CHECK, so the stored table
 // text is rewritten under writable_schema: the new list is a strict superset, so every stored row
 // already satisfies it and nothing on disk changes. The schema cookie is bumped so other connections
 // reparse, and the rewritten tables are checked before the transaction may commit. The call is
@@ -96,7 +96,17 @@ func setPlatformActionChecks(e migExec, from, to string) error {
 				return err
 			}
 			full := platformPrefix + table
-			if _, err := e.exec("ALTER TABLE " + full + " DROP CONSTRAINT IF EXISTS " + name); err != nil {
+			// The constraint must exist. Dropping it only if present would add a fresh one over a table
+			// that is not the expected shape and hide that.
+			var present int
+			if err := e.queryRow(`SELECT COUNT(*) FROM pg_constraint c JOIN pg_class t ON t.oid=c.conrelid
+				WHERE t.relname=? AND c.conname=? AND c.contype='c' AND pg_table_is_visible(t.oid)`, full, name).Scan(&present); err != nil {
+				return err
+			}
+			if present != 1 {
+				return fmt.Errorf("application control table %s lacks its action check %s", full, name)
+			}
+			if _, err := e.exec("ALTER TABLE " + full + " DROP CONSTRAINT " + name); err != nil {
 				return err
 			}
 			if _, err := e.exec("ALTER TABLE " + full + " ADD CONSTRAINT " + name + " CHECK (" + to + ")"); err != nil {

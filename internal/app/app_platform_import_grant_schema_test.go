@@ -264,3 +264,25 @@ func TestSchemaUpgradeCLIAcceptsPre0021Database(t *testing.T) {
 		t.Fatalf("upgraded file refused restore_import after reopen: %v %v", p, o)
 	}
 }
+
+// PostgreSQL must find the constraint it is about to replace. A missing one means the table is not the
+// shape this step expects, and re-adding a constraint over it would hide that.
+func TestSetPlatformActionChecksPostgresRefusesAMissingConstraint(t *testing.T) {
+	st := platformTestStore(t, true)
+	name, err := platformActionCheckName("review_plans")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	e := migExec{s: st, ex: tx}
+	if _, err := e.exec("ALTER TABLE app_platform_review_plans DROP CONSTRAINT " + name); err != nil {
+		t.Fatal(err)
+	}
+	if err := setPlatformActionChecks(e, platformActions(), platformActions()); err == nil {
+		t.Fatal("a missing action constraint was re-created silently")
+	}
+}
