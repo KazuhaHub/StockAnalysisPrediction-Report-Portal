@@ -175,3 +175,40 @@ func TestRecoveryResumedFrontendLaunchesAndTakesAnUpdate(t *testing.T) {
 		t.Fatalf("the updated frontend does not launch: %+v %v", binding, err)
 	}
 }
+
+// A managed installation given up in recovery stays recorded as managed, cannot be enabled (its runtime
+// is retired and its data is on a host that is gone), and can be uninstalled by a removal that touches
+// only the Portal: no runner is called and the old host's data is not on this one.
+func TestRecoveryDisabledManagedInstallationIsUninstalledPortalSideOnly(t *testing.T) {
+	s, actor, updateLease, _ := platformManagedRestoreReviewFixture(t, false)
+	installation := updateLease.installationID
+	oldRuntime := scalar[string](t, s.st, `SELECT id FROM app_platform_runtime_bindings`)
+	platformSimulateRestore(t, s)
+	h := platformRecoveryActionHTTP(t, s, actor)
+	committed := h.reviewAndCommit("recovery_disable", installation, platformFixtureID(5930))
+	if scalar[int](t, s.st, `SELECT managed FROM app_platform_operations WHERE id=?`, committed["operation_id"]) != 1 {
+		t.Fatal("a recovery disable of a managed installation was recorded as unmanaged")
+	}
+	h.endRecovery(200)
+	if got := h.post(recoveryPlansPath, `{"action":"enable","installation_id":"`+installation+`"}`); got.Code == 200 {
+		t.Fatalf("a recovery-disabled managed installation on a retired runtime was reviewed for enable: %s", got.Body.String())
+	}
+	namespace := scalar[string](t, s.st, `SELECT id FROM app_platform_data_namespaces WHERE origin_installation_id=?`, installation)
+	removed := h.reviewAndCommit("uninstall", installation, platformFixtureID(5931))
+	if removed["stage"] != "complete" ||
+		scalar[string](t, s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, installation) != "removed:removed" ||
+		scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, removed["operation_id"]) != "complete" ||
+		scalar[int](t, s.st, `SELECT managed FROM app_platform_operations WHERE id=?`, removed["operation_id"]) != 1 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, removed["operation_id"]) != 0 {
+		t.Fatalf("portal-side uninstall: %v", removed)
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE id=?`, namespace) != "deleted" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_recovery_sets WHERE installation_id=? AND state<>'deleted'`, installation) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?`, installation) != 0 ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.portal_side_uninstall' AND target_id=?`, installation) != 1 {
+		t.Fatal("the orphaned data, recovery sets and grants were not settled, or the removal left no audit row")
+	}
+	if scalar[int](t, s.st, `SELECT enabled FROM app_platform_runtime_bindings WHERE id=?`, oldRuntime) != 0 {
+		t.Fatal("the retired runtime binding changed")
+	}
+}

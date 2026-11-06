@@ -121,6 +121,8 @@ type platformRecoveryPlanFacts struct {
 	installationRevision, policyRevision       int64
 	trustRevision, targetGeneration, sourceGen int64
 	controllerEpoch                            string
+	// managed records whether the installation ran on a runtime, which the operation row keeps.
+	managed bool
 }
 
 var platformRecoveryDisableKind = platformRecoveryKind{
@@ -140,7 +142,7 @@ var platformRecoveryDisableKind = platformRecoveryKind{
 		}
 		return platformRecoveryPlanFacts{json: string(raw), appID: p.AppID, publisherID: p.PublisherID,
 			installationRevision: p.InstallationRevision, policyRevision: p.PolicyRevision, trustRevision: trust,
-			targetGeneration: p.TargetGeneration, sourceGen: p.SourceGeneration, controllerEpoch: p.ControllerEpoch}, nil
+			targetGeneration: p.TargetGeneration, sourceGen: p.SourceGeneration, controllerEpoch: p.ControllerEpoch, managed: p.RuntimeID != ""}, nil
 	},
 	transition: func(e migExec, planID, planSHA string, facts platformRecoveryPlanFacts, now int64) error {
 		var p platformRecoveryDisablePlan
@@ -318,7 +320,7 @@ func (s *Server) consumePlatformRecoveryReview(ctx context.Context, session plat
 		if err := kind.transition(e, planID, planSHA, facts, now); err != nil {
 			return err
 		}
-		snapshot, err := appplatform.CompletedOperation(kind.action, false, uint64(facts.targetGeneration))
+		snapshot, err := appplatform.CompletedOperation(kind.action, facts.managed, uint64(facts.targetGeneration))
 		if err != nil {
 			return errAppPlatformPlanChanged
 		}
@@ -328,8 +330,8 @@ func (s *Server) consumePlatformRecoveryReview(ctx context.Context, session plat
 		}
 		if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
 			source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,0,?,?,'complete',?,1,NULL,NULL,0,?,NULL,?,?,?)`,
-			operationID, installation.String, planID, actor.scope, keyDigest, requestDigest, string(kind.action),
+			VALUES(?,?,?,?,?,?,?,?,?,?,'complete',?,1,NULL,NULL,0,?,NULL,?,?,?)`,
+			operationID, installation.String, planID, actor.scope, keyDigest, requestDigest, string(kind.action), boolInt(facts.managed),
 			facts.sourceGen, facts.targetGeneration, int64(snapshot.Revision), epoch, now, now, now); err != nil {
 			return err
 		}
