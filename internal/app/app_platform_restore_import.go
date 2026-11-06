@@ -169,6 +169,11 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 	if imported != 0 {
 		return result, errAppPlatformOperationConflict
 	}
+	// A runtime whose runner reported an abandoned data root must not take an import: the abandoned host
+	// was never asked what it did there.
+	if err := refusePlatformReplacementOnAbandonedRoot(e, runtime.id); err != nil {
+		return result, err
+	}
 	// A grant on a runtime since retired (abandoned) is history, like the import it recorded.
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_import_grants g JOIN app_platform_runtime_bindings b ON b.id=g.runtime_id AND b.enabled=1
 		WHERE g.recovery_set_id=? AND g.state<>'revoked'`, recoverySetID).Scan(&grants); err != nil {

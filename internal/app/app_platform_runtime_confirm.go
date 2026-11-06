@@ -48,8 +48,26 @@ func (s *Server) confirmPlatformRuntimeBinding(ctx context.Context, session plat
 
 // confirmPlatformReplacementRuntime is the same confirmation for a replacement enrolled in recovery
 // mode. The two differ only in which pause state they require.
+//
+// Once the binding is enabled the runner is asked for its profile, and the data root it reports is
+// recorded. A replacement whose root is one an abandoned runtime's import landed on is refused: the
+// binding stays enabled so that it can be abandoned in its turn, but nothing is imported onto it.
 func (s *Server) confirmPlatformReplacementRuntime(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint) (platformRuntimeRegistration, error) {
-	return s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, true)
+	confirmed, err := s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, true)
+	if err != nil {
+		return confirmed, err
+	}
+	target, err := s.platformRecoveryResumeTarget(ctx, session, endpoint)
+	if err != nil {
+		return platformRuntimeRegistration{}, err
+	}
+	if target == nil || target.RuntimeID != confirmed.id {
+		return platformRuntimeRegistration{}, errAppPlatformRuntimeConflict
+	}
+	if err := s.recordPlatformReplacementRoot(session, confirmed.id, target.Profile.RootFilesystemUUID, target.Profile.RootInode); err != nil {
+		return platformRuntimeRegistration{}, err
+	}
+	return confirmed, nil
 }
 
 func (s *Server) platformRuntimeTransaction(recovery bool) func(platformActorSession, func(migExec, platformActorFacts, platformActorControl) error) error {

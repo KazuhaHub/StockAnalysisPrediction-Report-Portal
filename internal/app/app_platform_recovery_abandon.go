@@ -113,7 +113,102 @@ func refusePlatformAbandonedRoot(e migExec, receipt journal.ImportCheckpointRece
 	return nil
 }
 
-// loadPlatformAbandonDataRoots reads the roots from the applied import receipts of the runtime.
+// platformReplacementRootKey names the meta record of the data root the replacement runtime reported
+// when it was confirmed. It holds one record: only one runtime is ever the replacement in force, and the
+// root of a retired one moves to the abandoned roots when it is abandoned.
+const platformReplacementRootKey = "app_platform_replacement_root"
+
+func loadPlatformReplacementRoot(e migExec) (platformAbandonedRoot, bool, error) {
+	var raw string
+	if err := e.queryRow(`SELECT COALESCE((SELECT v FROM meta WHERE k=?),'')`, platformReplacementRootKey).Scan(&raw); err != nil {
+		return platformAbandonedRoot{}, false, err
+	}
+	if raw == "" {
+		return platformAbandonedRoot{}, false, nil
+	}
+	var root platformAbandonedRoot
+	if json.Unmarshal([]byte(raw), &root) != nil || !platformValidUUID(root.RuntimeID) || !platformValidUUID(root.Filesystem) || root.RootInode == "" {
+		return platformAbandonedRoot{}, false, errAppPlatformStageEvidence
+	}
+	return root, true, nil
+}
+
+// platformRootAbandoned reports whether a data root belongs to an abandoned runtime.
+func platformRootAbandoned(e migExec, filesystem, inode string) (bool, error) {
+	roots, err := loadPlatformAbandonedRoots(e)
+	if err != nil {
+		return false, errAppPlatformStageEvidence
+	}
+	for _, r := range roots {
+		if r.Filesystem == filesystem && r.RootInode == inode {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// recordPlatformReplacementRoot records the data root the runner reported for the replacement runtime. The
+// root is recorded even when it is an abandoned one, so that the import review can keep refusing it; the
+// caller learns of the refusal from the error. The runtime must be the binding in force.
+func (s *Server) recordPlatformReplacementRoot(session platformActorSession, runtimeID, filesystem, inode string) error {
+	if !platformValidUUID(runtimeID) || !platformValidUUID(filesystem) || inode == "" {
+		return errAppPlatformRuntimeConflict
+	}
+	refused := false
+	err := s.withPlatformRecoveryTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+		active, found, _, err := platformActiveRuntime(e, true)
+		if err != nil {
+			return err
+		}
+		if !found || active.id != runtimeID || active.enabled != 1 {
+			return errAppPlatformRuntimeConflict
+		}
+		if refused, err = platformRootAbandoned(e, filesystem, inode); err != nil {
+			return err
+		}
+		raw, err := json.Marshal(platformAbandonedRoot{RuntimeID: runtimeID, Filesystem: filesystem, RootInode: inode})
+		if err != nil {
+			return errAppPlatformStageEvidence
+		}
+		if err := e.setSetting(platformReplacementRootKey, string(raw)); err != nil {
+			return err
+		}
+		_, err = platformRefreshActor(e, session, actor, control)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	if refused {
+		return errAppPlatformRuntimeConflict
+	}
+	return nil
+}
+
+// refusePlatformReplacementOnAbandonedRoot refuses to work with a runtime whose recorded data root is an
+// abandoned one. A runtime with no recorded root is not refused here: its import receipt is still checked
+// against the abandoned roots when it lands.
+func refusePlatformReplacementOnAbandonedRoot(e migExec, runtimeID string) error {
+	root, found, err := loadPlatformReplacementRoot(e)
+	if err != nil {
+		return err
+	}
+	if !found || root.RuntimeID != runtimeID {
+		return nil
+	}
+	abandoned, err := platformRootAbandoned(e, root.Filesystem, root.RootInode)
+	if err != nil {
+		return err
+	}
+	if abandoned {
+		return errAppPlatformRuntimeConflict
+	}
+	return nil
+}
+
+// loadPlatformAbandonDataRoots reads the roots from the applied import receipts of the runtime, and the
+// root the runtime reported when it was confirmed: an import that is lost or still in flight may have
+// landed on it although no receipt says so.
 func loadPlatformAbandonDataRoots(e migExec, runtimeID string) ([]string, error) {
 	rows, err := e.query(`SELECT receipt_json FROM app_platform_operation_effects WHERE runtime_id=? AND kind='import-checkpoint' AND state='applied' ORDER BY effect_id`, runtimeID)
 	if err != nil {
@@ -135,6 +230,13 @@ func loadPlatformAbandonDataRoots(e migExec, runtimeID string) ([]string, error)
 	}
 	result := []string{}
 	seen := map[string]bool{}
+	if recorded, found, err := loadPlatformReplacementRoot(e); err != nil {
+		return nil, err
+	} else if found && recorded.RuntimeID == runtimeID {
+		root := recorded.Filesystem + "/" + recorded.RootInode
+		seen[root] = true
+		result = append(result, root)
+	}
 	for _, raw := range raws {
 		receipt, err := journal.ParseImportCheckpointReceipt([]byte(raw))
 		if err != nil || !platformValidUUID(receipt.Claim.RootFilesystemUUID) || receipt.Claim.RootInode == "" {

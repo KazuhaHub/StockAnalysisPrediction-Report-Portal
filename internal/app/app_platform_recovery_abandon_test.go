@@ -14,11 +14,15 @@ import (
 
 func (f *platformImportFixtureState) abandon(t *testing.T) (platformAbandonResult, error) {
 	t.Helper()
-	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id)
+	return f.abandonRuntime(f.replacement.id)
+}
+
+func (f *platformImportFixtureState) abandonRuntime(runtime string) (platformAbandonResult, error) {
+	_, digest, err := f.s.previewPlatformAbandonRuntime(context.Background(), f.actor, runtime)
 	if err != nil {
 		return platformAbandonResult{}, err
 	}
-	result, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, f.replacement.id, digest)
+	result, _, err := f.s.confirmPlatformAbandonRuntime(context.Background(), f.actor, runtime, digest)
 	return result, err
 }
 
@@ -144,9 +148,7 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 	executor := &platformImportTestExecutor{}
 	s.platformImportCheckpoint = executor
 	var registered platformRuntimeRegistration
-	s.platformObserveRuntime = func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error) {
-		return runtimeObservationFixture(registered), nil
-	}
+	platformReplacementRootSeams(s, &registered, platformFixtureID(77))
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	h := platformRecoveryHTTP{t: t, mux: mux, cookie: s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())}
@@ -222,7 +224,10 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 	}
 
 	// A new replacement runtime, a fresh deployment, and the import is redone.
+	// The abandoned runtime's root is remembered, so the new host is on another one.
 	executor.err, executor.readErr = nil, nil
+	platformReplacementRootSeams(s, &registered, platformFixtureID(78))
+	executor.mutate = func(r *journal.ImportCheckpointReceipt) { r.Claim.RootFilesystemUUID = platformFixtureID(78) }
 	enroll(platformFixtureID(5101))
 	secondImport := importOnce(platformFixtureID(5801))
 	worker, err = newPlatformWritableInstallScheduler(s, platformRestoreEndpointFixture(), platformFixtureID(5806), time.Second)
@@ -237,7 +242,7 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 	if stage(secondImport) != "complete" {
 		t.Fatalf("the redone import did not complete: %s", stage(secondImport))
 	}
-	state := &platformResumeFixtureState{platformImportFixtureState: &platformImportFixtureState{replacement: registered}, endpoint: endpoint}
+	state := &platformResumeFixtureState{platformImportFixtureState: &platformImportFixtureState{replacement: registered}, endpoint: endpoint, rootUUID: platformFixtureID(78)}
 	s.platformRecoveryTarget = func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error) {
 		return state.target(), nil
 	}

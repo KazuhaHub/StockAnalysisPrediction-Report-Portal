@@ -57,9 +57,7 @@ func testRecoveryThroughHTTP(t *testing.T, pg bool) {
 	executor := &platformImportTestExecutor{}
 	s.platformImportCheckpoint = executor
 	var registered platformRuntimeRegistration
-	s.platformObserveRuntime = func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error) {
-		return runtimeObservationFixture(registered), nil
-	}
+	platformReplacementRootSeams(s, &registered, platformFixtureID(77))
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
 	h := platformRecoveryHTTP{t: t, mux: mux, cookie: s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())}
