@@ -138,7 +138,7 @@ audit policy. A requested capability is not effective until granted.
 | `events.subscribe` | Allowlisted event types and current resource authority; no raw global event stream |
 | `notifications.publish` | Source-bound event namespace, rate limits and centrally selected recipients/routes |
 | `network.http` | Approved origins, methods/path segments and data/time limits |
-| `network.stream` | Explicit protocol/destination/port policy; disabled until adapter tests prove enforcement |
+| `network.stream` | Separate ordinary-HTTPS response-stream policy; no upgrades, tunnels or arbitrary protocols; bounded frames, duration, idle time, total bytes and per-frame current authority |
 | `secrets.use` | Specific binding and broker operation; never arbitrary vault enumeration |
 | `secrets.read` | Exceptional raw access; separately reviewed per binding with disclosure warning |
 | `background.run` | Approved service work, leases and finite authority duration; no viewer impersonation |

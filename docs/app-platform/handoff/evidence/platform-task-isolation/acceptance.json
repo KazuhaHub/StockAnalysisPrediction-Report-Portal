@@ -1,0 +1,67 @@
+{
+  "format": "portal.application-task-isolation-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T05:03:15-08:00",
+  "status": "pass-development",
+  "candidate": "d467b1c6ab68f1667956b76ebf804092068fdfed",
+  "hosted_ci": {
+    "general_test": "41831586307",
+    "quota_browser": "41831586437",
+    "runner_daemon": "41831586506",
+    "codeql": "41831581692",
+    "result": "pass"
+  },
+  "host": {
+    "os": "Darwin 25.6.0",
+    "architecture": "arm64",
+    "cpu": "Apple M5",
+    "logical_cpus": 10,
+    "go_toolchain": "go1.26.10",
+    "postgres": "18.6"
+  },
+  "workload": {
+    "installation_active_task_limit": 256,
+    "active_tasks_created": 256,
+    "event_subscription_max_inflight": 1,
+    "event_source_events": 2,
+    "event_delivery_tasks": 1,
+    "quota_refusal_attempts": 64,
+    "analysis_jobs_queued": 1
+  },
+  "measurements": {
+    "sqlite": {
+      "refusal_burst": "15.425333ms",
+      "analysis_queue_max": "2.033833ms",
+      "analysis_queue_p95": "1.888458ms",
+      "auth_account_read_max": "253.583us",
+      "health_max": "24.084us"
+    },
+    "postgres_18_6": {
+      "refusal_burst": "65.892542ms",
+      "analysis_queue_max": "739.292us",
+      "analysis_queue_p95": "491.5us",
+      "auth_account_read_max": "169.75us",
+      "health_max": "46.541us"
+    }
+  },
+  "assertions": {
+    "installation_ceiling_enforced": true,
+    "quota_refusals_inserted_tasks": false,
+    "event_saturation_duplicated_delivery": false,
+    "event_saturation_lost_source_event": false,
+    "analysis_queue_changed": false,
+    "analysis_queue_p95_under_one_second": true,
+    "analysis_queue_max_under_five_seconds": true,
+    "auth_account_read_under_one_second": true,
+    "health_under_five_hundred_milliseconds": true,
+    "sqlite_and_postgres_passed": true
+  },
+  "commands": [
+    "TEST_POSTGRES_DSN=<fresh PostgreSQL 18.6 database> GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 1 ./internal/app -run '^TestPlatformTaskCapacityIsolation(SQLite|Postgres)$' -count=1 -v"
+  ],
+  "limits": [
+    "This is a controlled local capacity measurement, not a production SLO or the final OPS-08 multi-host maximum-envelope test.",
+    "The analysis queue probe reads the existing run queue; it does not start an external Dify execution.",
+    "Authentication account lookup is measured as the shared authentication datastore path. The separate fixed notification/mail runtime is not placed under an external SMTP flood.",
+    "An application task worker is a separate process and does not consume the analysis queue's execution slots."
+  ]
+}

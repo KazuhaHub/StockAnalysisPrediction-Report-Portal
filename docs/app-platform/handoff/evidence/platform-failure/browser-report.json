@@ -1,0 +1,43 @@
+{
+  "accepted": true,
+  "browserErrors": [],
+  "assertions": {
+    "nonopenableStatusActionsEnabled": true,
+    "readerStatusBoundedProjection": true,
+    "readerStatusRefresh": true,
+    "readerInternalIdentityHidden": true,
+    "readerStatusTimelineVisible": true,
+    "readerStatusTimelineSanitized": true,
+    "mainContentAxeSeriousOrCriticalViolations": 0
+  },
+  "scenarios": [
+    {
+      "name": "directory-states-admin",
+      "violations": []
+    },
+    {
+      "name": "directory-states-reader",
+      "violations": []
+    },
+    {
+      "name": "directory-reader-status",
+      "violations": []
+    },
+    {
+      "name": "denied",
+      "violations": []
+    },
+    {
+      "name": "backend-stopped",
+      "violations": []
+    },
+    {
+      "name": "ready-timeout",
+      "violations": []
+    },
+    {
+      "name": "protocol-incompatible",
+      "violations": []
+    }
+  ]
+}

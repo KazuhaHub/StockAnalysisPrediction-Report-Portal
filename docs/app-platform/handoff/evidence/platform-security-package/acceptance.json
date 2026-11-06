@@ -1,0 +1,224 @@
+{
+  "format": "portal.app-platform.security-package-acceptance/1-dev.1",
+  "captured_at": "2026-11-03T01:40:00-08:00",
+  "candidate": "bcb7081e",
+  "runner_daemon_candidate": "bcb7081e",
+  "runner_daemon_ci": "41623015662",
+  "database_evidence": "SQLite plus a dedicated temporary PostgreSQL 18.6 database",
+  "rows": {
+    "SEC-01": {
+      "status": "partial",
+      "commands": [
+        "TEST_POSTGRES_DSN='postgres://kazuha@127.0.0.1:5432/platform_sec_20261103?sslmode=disable' GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatformMarketTransportBounds|TestPlatformMarketHTTPAuthorityAndInput|TestPlatformMarketFetchCancellation|TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)|TestPlatformStagedRelease(SQLite|Postgres)|TestPlatformStoredReleaseRefusal(SQLite|Postgres))$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker -run '^TestHTTP' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^(TestSharedPublisherSignatureVectors|TestPublisherSignatureSchema|TestPublisherTrustBounds|TestStoredPublisherNamespaces)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestBackendImageInspection.*|TestBackendImageDockerHubReferenceForms)$' -count=1"
+      ],
+      "coverage": [
+        "The shared publisher corpus rejects changed descriptor bytes, changed descriptor digests, wrong signature frames, wrong publisher/key/namespace, malformed envelopes, expired and revoked keys, disabled publishers, duplicate or aliased JSON fields and unsafe trust revisions.",
+        "Market staging compares the catalogue descriptor digest, verifies the exact descriptor and signature under current trust, refuses changed signatures and artifacts, and rechecks current trust and actor authority before downloading executable frontend bytes.",
+        "Stored-release admission rechecks the current trust revision and immutable descriptor, signature, version, frontend, managed flag and backend digest. Refusal occurs before the admission callback and does not mutate durable state.",
+        "The market URL policy permits only public HTTPS. Loopback, link-local and metadata addresses, CGNAT, private, multicast, documentation, benchmarking and non-public IPv6 destinations are refused at their address boundary.",
+        "Broker DNS tests provide a safe and an unsafe answer in the same result set. Every mixed set containing a non-public address is refused before dial. DNS lookup failure also never dials.",
+        "Redirects are bounded and the destination is revalidated. Market redirects deliberately drop all inherited headers and retain only identity encoding plus the validated Range/If-Range continuation fields. Tests prove catalogue/publisher requests carry no Portal Cookie, Authorization or Referer.",
+        "Credential-bearing broker requests use one fixed Authorization or X-API-Key shape. Arbitrary headers and Cookie are refused before DNS. Echoed credential values in response body or headers become uncertain and release no status or body.",
+        "Managed image admission requires an exact digest-pinned descriptor reference and matching local native image ID/platform. Tags, changed digests, other repositories and Docker Hub familiar-name substitutions do not match."
+      ],
+      "limits": [
+        "Portal currently has no registry-authentication client or registry token store. Managed image inspection reads an already-present local image through the checked Docker Unix socket and never reads registry credentials; a future controlled registry fetch must add its own auth-scope tests before that feature is admitted.",
+        "Mixed DNS is exercised through injected resolver results and the production dial-time address hook, not through a hostile public DNS service.",
+        "This is development security evidence, not a production network review or a complete deployed-host firewall assessment."
+      ]
+    },
+    "SEC-02": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestFrontendInspection' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestOfflineEnvelope' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./cmd/app-inspect -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(TestBackendImageInspection.*|TestInspectionIsRedactedAndNeverExecutionEvidence|TestInspectionRefusesIncompatibleDaemonClaims|TestAPIRangeCheckedBeforeVersionedRequests|TestMalformedAndOversizedResponsesRefused|TestDaemonRedirectDoesNotFollowLocation|TestCancellationAndUpstreamErrorsAreBounded)$' -count=1"
+      ],
+      "coverage": [
+        "Frontend inspection reads the exact bounded ZIP bytes in memory. A fixture whose application JavaScript would create a marker file is inspected successfully, and the marker is proven absent afterward.",
+        "Executable files, server programs, symlinks, devices, setuid entries, traversal, absolute paths, duplicate and case-colliding members and unsupported media are refused before any installation.",
+        "Offline envelope inspection returns descriptor, signature and frontend bytes only after the closed three-member structure, signature schema and exact digest relationships pass. Unsafe or mismatched members return no partial executable bytes.",
+        "The app inspector prints only bounded public metadata and never package contents or local paths. It rejects symlinked, oversized and invalid inputs, and emits no partial success output.",
+        "Image metadata inspection uses exactly one fixed read-only local daemon image request. A fixture image declaring a shell entrypoint that would create a marker file is inspected, and the marker is proven absent with exactly one daemon request.",
+        "Daemon metadata inspection issues only GET /version and the fixed supported-version GET /v1.47/info. It does not follow redirects, send cookies or authorization, return execution_ready=true, or expose daemon paths, proxy settings, labels, image environment or entrypoint."
+      ],
+      "limits": [
+        "This verifies the package, offline-envelope, inspector and image-metadata inspection surfaces. It does not claim that a later install/start operation executed no code; those lifecycle operations have separate acceptance rows.",
+        "The image entrypoint test is a portable metadata fixture. The native Docker image inspection result remains separately tied to Linux CI."
+      ]
+    },
+    "SEC-03": {
+      "status": "pass-development",
+      "commands": [
+        "npm --prefix web test -- --run src/lib/bridge-v2.test.ts src/components/apps/AppFrameV2.test.tsx src/components/apps/AppFrameV2.integration.test.tsx src/lib/appLaunchV2.test.ts"
+      ],
+      "coverage": [
+        "The host accepts the initial hello only when event.source is the exact current frameWindow. Wrong windows, non-null unrelated origins and stale child nonces are ignored.",
+        "The bridge uses a fresh host nonce, child nonce and channel nonce for each document. Old hello challenges, old generations, stale acknowledgements and late presentation completions cannot reveal or control the successor document.",
+        "Live channel messages cannot transfer extra MessagePorts. Closed or replaced channels cannot dispatch backend, network, navigation, draft, page or layout callbacks.",
+        "Repeated sleep/wake animation frames are coalesced. Invalid, fractional, negative, infinite and greater-than-100000 heights are refused; a 100-message resize burst delivered only the latest accepted measurement.",
+        "Navigation requests bind the current generation, presentation revision and route revision. Injected absolute destinations fail the channel before host navigation.",
+        "The four selected frontend files passed 122 tests in jsdom with real structured-cloned Node MessagePorts. This is protocol evidence, not a substitute for the separately recorded native browser matrix."
+      ],
+      "limits": [
+        "The channel transport test runs in jsdom with Node MessagePorts rather than a hostile sibling browser window.",
+        "Native SDK browser CI remains the browser-level evidence for the rendered frame path."
+      ]
+    },
+    "SEC-04": {
+      "status": "pass-development",
+      "commands": [
+        "npm --prefix web test -- --run src/components/apps/AppFrameV2.test.tsx src/components/apps/AppFrameV2.integration.test.tsx",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestFrontendDocument' -count=1",
+        "PLAYWRIGHT_PACKAGE_JSON=/absolute/path/to/playwright/package.json node scripts/security-document-browser.cjs"
+      ],
+      "coverage": [
+        "The real AppFrameV2 fixture uses sandbox=allow-scripts with no allow-same-origin, no-referrer and a null iframe origin. It refuses javascript:, foreign HTTPS, protocol-relative, query and fragment executable sources before creating an iframe.",
+        "The product-generated frontend document keeps the exact sandbox, no-same-origin, connect-src none, worker-src none, object-src none, base-uri none, form-action none and frame-ancestors self policy.",
+        "The document builder refuses base, iframe, frame, object, embed, applet, portal, external resource, inline event handler, refresh, module, absolute/query resource and unsafe CSS forms.",
+        "The Chromium fixture extracted the actual production CSP and loaded a hostile scripted document in a null-origin iframe. Parent DOM and host localStorage access were denied; document.cookie was empty; top navigation and window.open were blocked; direct fetch was blocked before any /api/private request."
+      ],
+      "browser_evidence": {
+        "engine": "Playwright Chromium headless",
+        "parent_dom_denied": true,
+        "host_storage_denied": true,
+        "cookie_denied": true,
+        "top_navigation_denied": true,
+        "popup_denied": true,
+        "private_requests": 0,
+        "popup_requests": 0,
+        "host_secrets_unchanged": true
+      },
+      "limits": [
+        "This is a local Chromium security fixture, not the deployed Portal origin or a cross-browser certification.",
+        "Bearer and signing material are separately covered by bridge/backend credential tests and are not placed in the child document."
+      ]
+    },
+    "SEC-05": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/apprunner/transport -run '^(Test(HTTP.*|SignedNetworkCall.*|NetworkPool.*|NetworkConfirmation.*|NetworkHTTP.*|NetworkSession.*|NetworkRuntime.*))$' -count=1",
+        "TEST_POSTGRES_DSN=... GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app ./internal/apprunner/broker ... -count=1"
+      ],
+      "coverage": [
+        "A reviewed policy fixes the origin, path prefix, methods, body/response bytes, deadline and concurrency. Unknown hosts, ports, credentials in URLs, path aliases, traversal, fragments and unsupported methods are refused before DNS.",
+        "The dial-time address hook checks the concrete connected address, including redirect hops. Mixed DNS sets containing loopback, metadata, private, CGNAT, multicast, documentation, benchmarking or special IPv6 ranges never dial.",
+        "Signed network calls bind deployment, controller epoch, installation, generation, policy revision, release, actor scope, body bytes/digest and request identity. Changed bytes, policy, executor or authority are refused.",
+        "Authority is rechecked before DNS, before dispatch and after IO. A post-IO revocation or expiry becomes uncertain, returns no remote status/body and cannot be retried.",
+        "Network confirmation uses a fresh nonce for each actual IO check. Replayed, wrong-request, rotated-authority, expired, private-error and timed-out confirmations are refused, and malformed requests never reach the controller.",
+        "Installation and global network pools reject excess requests before allocating an executor. Policy/epoch identifiers cannot create extra budget, and revoked authority never produces a cached executor.",
+        "The Network Session refuses malformed, oversized, trailing, mismatched-signature, wrong-body and stale-proof requests before execution; forged or unbounded replies release no response."
+      ],
+      "limits": [
+        "The broker/local TLS tests do not represent a production firewall, DNS deployment or upstream proxy configuration.",
+        "The native HTTPS pre/post-IO revocation artifact is recorded in the AUTH-06 evidence for its exact code candidate."
+      ]
+    },
+    "SEC-06": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/driver -run '^(Test(ContainerCreatePolicyIsClosed|ContainerCreateRequestAndAmbiguity|ContainerPlanAndCreateRejectChangedInputs|ContainerObservationRejectsOwnershipAndPolicySubstitution|ContainerRemoveRequiresExactStoppedNativeIdentity|CandidateSeccomp.*))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: TestDockerAcceptanceCandidateContainer, TestDockerAcceptanceCandidateLifecycle and TestNativeCandidateMountPins.*"
+      ],
+      "coverage": [
+        "The candidate container request is a closed structure: fixed reviewed user, immutable image ID, network none, readonly rootfs, private cgroup namespace, no-new-privileges, fixed seccomp, dropped capabilities, bounded memory/swap/CPU/PIDs, no host ports, no devices, no sockets, no privileged mode and no inherited image healthcheck.",
+        "Only the three reviewed bind mounts are accepted. Root, overlapping, ambiguous, traversal and overlong socket roots are refused before daemon access.",
+        "The sealed candidate command rejects changed deployment, epoch, installation, operation, resource, namespace, release, generation, fences, sandbox profile, format, size, duplicate JSON fields and wrong signature domains.",
+        "Container observation refuses substituted native identity, ownership labels, user, image, environment, network, seccomp, capabilities, ports, limits, mounts and writable data before removal.",
+        "Only an exact owned stopped container can be removed; running or restarting containers are not force-removed.",
+        "On the disposable Linux/Docker/XFS runner, an actual reference container and lifecycle passed with the reviewed no-network, non-root, readonly, seccomp, capability, resource and mount policy."
+      ],
+      "limits": [
+        "The exact-code runner workflow passed, but it is still development acceptance on a disposable GitHub-hosted host, not production Docker authorization.",
+        "Host runtime enrollment and production deployment remain separately gated."
+      ]
+    },
+    "SEC-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/journal -run '^(Test(JournalRejectsInsecurePaths|ResourceIdentityAndGenerationRefusal|CandidatePreflightBindsBeforeEffectAndRejectsOpaqueForgery|CandidateNativeHandlesCannotBeForgedByJSON))$' -count=1",
+        "Disposable GitHub-hosted Linux app-runner workflow 41613324105: full apprunner test set plus TestNativeCandidateMountPins.*"
+      ],
+      "coverage": [
+        "Journal storage refuses shared/writable directories, symlinked or hard-linked files, orphan WALs, unknown files and wrong permissions.",
+        "Candidate native handles cannot be reconstructed from JSON. Preflight records the exact resource, namespace, release, generation, fences and controller epoch, and refuses substitution before effect.",
+        "Resource history binds installation ownership, generation, writer fence and controller epoch; foreign owner or foreign epoch cannot be adopted.",
+        "Linux mount/socket tests define inode, parent, symlink, ownership, permission and wrong-plan refusal at pin, create and start boundaries.",
+        "The disposable Linux workflow passed data-inode, symlink, parent replacement, permissions, owner, wrong-plan, unsafe-initial-state, create-boundary and start-boundary substitution checks."
+      ],
+      "limits": [
+        "The native results bind code candidate 4a374dc1 through docs-only candidate 8211d961.",
+        "Cross-installation and cross-host access still require maintained deployment isolation review; this evidence proves the socket/mount ownership and substitution boundaries tested by the repository."
+      ]
+    },
+    "SEC-08": {
+      "status": "pass-development",
+      "commands": [
+        "TEST_POSTGRES_DSN=... GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatform(Credential.*|SecretBinding.*|SecretUninstall.*))$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/control -run '^(TestNetworkHTTP.*)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker -run '^(TestHTTPCredentialInjectionIsFixedAndEchoSafe|TestSignedNetworkCallInjectsReviewedCredentialOnce)$' -count=1"
+      ],
+      "coverage": [
+        "Credential values are sealed under installation/id/value-revision context. Wrong key, wrong context, plaintext or malformed ciphertext returns no value, and generic JSON encoding of a credential mutation is impossible.",
+        "Credential create/list/preview/replace/revoke responses contain bounded metadata only: no value, ciphertext or sealed_value field. Binding review and list responses include no secret value.",
+        "Only one fixed Authorization Bearer or X-API-Key shape can be injected. Arbitrary headers, Cookie, Basic credentials, control characters and malformed shapes are refused before signing or DNS.",
+        "Credential echoes through response bodies or content-type headers become uncertain with no status/body. A successful call clears its command, signature, body and decrypted credential copy.",
+        "Restore pauses credential/binding use, preserves revocation floors and cannot resurrect values or authority removed by a newer backup. Audit insert failure rolls the credential mutation back.",
+        "Uninstall revokes only its installation bindings while retaining shared custody and neighbour bindings; rollback leaves authority and bindings intact."
+      ],
+      "limits": [
+        "The sealed credential tests use disposable synthetic values and a development keyring. They do not inspect a production backup or real provider credential.",
+        "Log/export/diagnostic absence is asserted at repository response/error/serialization boundaries, not through every deployed proxy logger."
+      ]
+    },
+    "SEC-09": {
+      "status": "partial",
+      "commands": [
+        "npm --prefix web test -- --run src/lib/bridge-v2.test.ts src/components/apps/AppFrameV2.test.tsx",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/apprunner/transport ./internal/apprunner/driver -run '^(Test(NetworkPool.*|HTTP.*|NetworkHTTP.*|NetworkSession.*|Container.*|Candidate.*|Inspection.*))$' -count=1",
+        "TEST_POSTGRES_DSN=... GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^(TestPlatform(HTTPDocumentEnrolmentAndBudget|ManagementHTTPVerificationBudget|Storage.*|Object.*))$' -count=1"
+      ],
+      "coverage": [
+        "The bridge caps distinct document hellos, draft/report messages, live channel message rate, document height, HTML depth, repeated asset expansion and extra transferred ports. A 21-message draft flood fails after 20 accepted reports.",
+        "Network executor pools independently cap per-installation concurrency and global concurrency before allocating resources; policy revision and epoch aliases cannot bypass the installation budget.",
+        "HTTP, control, readiness, registration, handshake and receipt channels reject oversized, truncated, trailing, unknown and malformed frames before admission.",
+        "Container limits set fixed memory/swap/CPU/PID bounds and refuse missing or unbounded log policy. Plugin/object/account/global storage limits are separately enforced before use.",
+        "Authentication/verification budgets remain distinct from authenticated data paths and cannot replace authentication with throttling."
+      ],
+      "limits": [
+        "Repository-level flooding and quota bounds passed. No measured maximum-capacity benchmark, deployed memory/PID pressure run, log-volume soak or Portal business-queue starvation measurement has been performed.",
+        "SEC-09 remains partial until OPS-08-style measured capacity and sustained attack evidence exists."
+      ]
+    },
+    "SEC-10": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/control ./internal/apprunner/journal -run '^(Test(NetworkHTTPRefusesSignedInvalidRequests|CandidateCommandRejectsSignedInvalidInputs|SignedCommandAdmissionAndReplay|CommandIdentityAndPendingWorkRefusal|ConcurrentSignedCommandHasOneIntent|ResourceIdentityAndGenerationRefusal))$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/service -run '^(TestConfigStrictAndBounded|TestConfigRefusesExposureAndOverlappingRoots|TestBootstrapConfigPinsPublicKey)$' -count=1",
+        "Disposable app-runner workflow 41623015662: TestControllerIdentityAcceptance"
+      ],
+      "coverage": [
+        "Every signed runner command carries deployment ID, controller epoch and control revision; changed values, malformed signed JSON, duplicate/alias fields, wrong signature domains and oversized frames are refused.",
+        "One logical command/effect has one journal admission. Concurrent identical commands produce one intent; replay after reopen returns the prior result; changed payload, slot, pending work, signature, fence, generation, writer or foreign epoch is refused.",
+        "Deployment enrollment refuses unowned work, mismatched keys, epochs, deployments, revisions and pins. Missing or corrupt deployment state cannot be silently replaced.",
+        "Service bootstrap configuration is strict and bounded, pins the public key and refuses exposed, overlapping or relative runtime roots.",
+        "On the disposable Linux runner, a command signed for a successor controller epoch was refused by the old enrolled runner. Replaying the already admitted old command returned only its existing prepared intent and did not create a second command or Docker action.",
+        "Wrong UID, same-group non-controller UID, missing endpoint group and impostor-server cases never reached command admission."
+      ],
+      "limits": [
+        "The successor-epoch test proves the old runner refuses new authority and that replay of a previously admitted effect is inert. It does not invent an automatic re-enrollment or erase-and-reenroll flow.",
+        "The full Portal-restore-versus-newer-runner reconciliation drill remains DATA-06/H17 operator work and requires explicit recovery approval."
+      ]
+    }
+  },
+  "open": [
+    "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
+    "SEC-09 remains partial pending measured-capacity evidence.",
+    "SEC-10 has development transport/replay evidence; automatic runner re-enrollment is intentionally absent and remains an operator-approved recovery boundary.",
+    "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
+  ]
+}

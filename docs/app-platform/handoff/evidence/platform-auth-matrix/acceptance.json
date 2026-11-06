@@ -1,0 +1,139 @@
+{
+  "format": "portal.auth-matrix-acceptance/1-dev.1",
+  "candidate": "136beda3",
+  "database_evidence": "SQLite plus temporary PostgreSQL 18.6",
+  "rows": {
+    "AUTH-01": {
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformManagementHTTPRefusals$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformManagementCommitRefusals$' -count=1"
+      ],
+      "coverage": [
+        "An ordinary authenticated user receives 403 from the management plan route before a review is created.",
+        "A demoted user receives 403 from the management commit route even with a previously valid plan and idempotency key.",
+        "Ordinary users also receive 403 from operation progress; anonymous access receives 401 and creates no operation.",
+        "The same typed install/update/action plan route is used for management review, so role enforcement does not depend on frontend controls."
+      ]
+    },
+    "AUTH-02": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformDirectoryOU(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformLaunchOUAccess(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformReportsTwoOUsAndOldBinding|TestPlatformReportsNoAccessAndAdminDemotion|TestPlatformLaunchAdministratorNeedsAudienceGrant)$' -count=1"
+      ],
+      "coverage": [
+        "An ungranted reader receives an empty directory; administrators receive no implicit audience bypass.",
+        "OU ancestry grants access only through the current group creation identity and current membership topology. Reparenting, stale creation identity, zero identity and cycles fail closed.",
+        "Two disjoint restricted OU readers each list exactly their own one report; direct IDs from the other OU return 404 without leaking content.",
+        "Launch inspection and directory routes deny ungranted, stale-generation and no-access readers without exposing hidden installation metadata."
+      ]
+    },
+    "AUTH-03": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformNetworkRequestRequiresGrant(SQLite|Postgres)$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestPlatformInstallCapabilitySelection$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^TestManagedPackageStagingDefersOnlyRunnerCompatibility$' -count=1"
+      ],
+      "coverage": [
+        "A denied optional network capability cannot sign or dispatch a direct request, releases no response and does not mutate authority state.",
+        "Optional capabilities are not implicitly granted. An undeclared or invalid selection is refused.",
+        "An unsupported required capability is refused by package staging/capability selection before installation admission.",
+        "Missing or mismatched runtime profiles for a required provider are refused instead of being synthesized."
+      ]
+    },
+    "AUTH-04": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(Test(AppPlatformActorIdentity|PostgresAppPlatformActorIdentity|AppPlatformActorGuards|PostgresAppPlatformActorGuards|AppPlatformActorAuthorityContinuity|PostgresAppPlatformActorAuthorityContinuity|AppPlatformPrincipalCleanup|PostgresAppPlatformPrincipalCleanup))$' -count=1",
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformManagementOUReviewBinding|PlatformInstallAudienceRefusals(SQLite|Postgres)|PlatformLaunchRefusals(SQLite|Postgres))$' -count=1"
+      ],
+      "coverage": [
+        "Role demotion, inactive account, expired/revoked session, changed session revision and deleted/recreated username invalidate the next actor/launch check rather than inheriting prior authority.",
+        "Moving an account between OUs changes the authority fingerprint without changing lifecycle identity. Deleted/recreated users and OUs cannot resurrect access grants.",
+        "Replacing an OU after review creation makes commit return 409 and creates no operation.",
+        "Deleted/recreated/inactive/expired audience principals and changed OU creation identities are refused with no persistent mutation."
+      ]
+    },
+    "AUTH-05": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformLaunchRefusals(SQLite|Postgres)|TestPlatformViewerIdentity(SQLite|Postgres)|TestPlatformViewerRefusals(SQLite|Postgres)|TestPlatformManagedRequestSigningSQLite|TestPlatformWritableRequestSigningSQLite)$' -count=1"
+      ],
+      "coverage": [
+        "Wrong app ID, wrong generation, stale policy/capability policy, inactive/expired account, session-revision mismatch and invalid installation IDs are refused before launch metadata is exposed.",
+        "Viewer derivation rejects revoked/expired sessions, changed account generation, removed grants, stale OU identity, corrupt/missing identity keys and restore pause.",
+        "Backend request signing derives viewer authority from the current host account; app-supplied role/subject fields do not become the execution viewer.",
+        "Writable and managed request tests fence policy/account drift before response consumption."
+      ]
+    },
+    "AUTH-06": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformInstallStaging(SQLite|Postgres)|TestPlatformInstallCapabilityRows(SQLite|Postgres)|TestPlatformSecretBindingLifecycle(SQLite|Postgres)|TestPlatformSecretBindingReviewRefusesDrift|TestPlatformNetworkRequestPayloadBoundary|TestPlatformManagedRequestPayloadBoundary|TestPlatformWritableRequestBindingBoundary|TestPlatformWritableRequestBinding(SQLite|Postgres))$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175"
+      ],
+      "coverage": [
+        "Changing a capability grant while install staging is pending refuses the stage and leaves durable state unchanged.",
+        "A pending required grant cannot become active; exact capability row/policy/review changes are refused at commit.",
+        "Credential rotation revokes the old binding until explicit reapproval, and credential revocation invalidates the current use immediately. Stale binding review after network-policy drift writes no row.",
+        "Writable request binding rejects generation, policy and release drift before dispatch.",
+        "Missing or malformed native provenance is classified as uncertain, releases no response and is not automatically retried.",
+        "The native artifact records revocation before and after an actual external IO boundary, post-IO OU revocation, uncertain no-retry and owned cleanup."
+      ],
+      "native_evidence": {
+        "candidate": "95e358fd",
+        "quota_probe_run": "41599541528",
+        "artifact_sha256": "7af3a921905973faed88f30f05f97ddfa57aa62bc4c73bddda848df90e8b8e37",
+        "native_portal_network_https_pre_io_revoked": true,
+        "native_portal_network_https_post_io_revoked": true,
+        "native_portal_writable_post_io_ou_revoked": true,
+        "native_writable_backend_request_uncertain_no_retry": true
+      }
+    },
+    "AUTH-07": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformServiceIdentityUsesNoUserAndRechecksCurrentState|TestPlatformServiceIdentityInvalidatedByLifecycleAndRestore|TestPlatformBackgroundProbeCannotSubmitAfterRevocation)$' -count=1"
+      ],
+      "coverage": [
+        "Background service assertions contain no user identity and cannot impersonate a user.",
+        "Every use rechecks current installation generation, policy revision, background capability grant and restore pause.",
+        "Disable, generation change, policy drift, grant removal and restored state invalidate the service assertion.",
+        "A background probe cannot submit after revocation and cannot claim results under a stale service identity."
+      ]
+    },
+    "AUTH-08": {
+      "status": "pass-development",
+      "commands": [
+        "GOTOOLCHAIN=go1.26.10 go test ./internal/app -run '^(TestPlatformUpdateReviewQueuesTargetGenerationWithoutBreakingCurrent|TestPlatformUpdateReviewRefusesIncompatibleDataAndStaleSource|TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(SQLite|Postgres)|TestPlatformStaticUpdateActivatesCandidateAndRetiresSource|TestPlatformFrontendUpdateRetryExhaustionKeepsSourceGeneration|TestPlatformFrontendUpdateResumesAfterExpiredWorker(SQLite|Postgres)|TestPlatformPublisherTrust(SQLite|Postgres)|TestPlatformTrustReviewInvalidation(SQLite|Postgres)|TestPlatformSignedReleaseRestore(SQLite|Postgres)|TestPlatformManagedRestoreReview(SQLite|Postgres)|TestPlatformManagedRestoreReviewRefusals(SQLite|Postgres)|TestPlatformManagedRestoreReviewStaleTrust(SQLite|Postgres)|TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres))$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175"
+      ],
+      "coverage": [
+        "Update admission preserves the current installation/live generation until reviewed target activation; success retires the source generation and failure keeps the source launchable.",
+        "Policy, package or trust drift while update review is open invalidates the review. Stale installation generations cannot be updated.",
+        "Publisher key add/rotation and revocation advance exact trust revisions; trust changes invalidate open reviews, and revoked keys cannot sign later stages.",
+        "Restore requires a verified recovery set, a recovered failed update, an unpaused control plane and exact current trust. Signed-release restore cannot resurrect revoked trust.",
+        "Uninstall clears only the selected installation; reinstall starts with an empty dedicated plugin table.",
+        "The native artifact records a real managed A-to-B update, failed-update restore, package revocation stop, enable/start/probe/backend request and clear-on-uninstall."
+      ],
+      "native_evidence": {
+        "candidate": "95e358fd",
+        "quota_probe_run": "41599541528",
+        "artifact_sha256": "7af3a921905973faed88f30f05f97ddfa57aa62bc4c73bddda848df90e8b8e37",
+        "native_managed_update_a_to_b": true,
+        "native_managed_restore_from_failed_update": true,
+        "native_package_revocation_managed_stop": true,
+        "native_managed_enable_start_probe_activated": true,
+        "native_managed_enable_backend_request": true,
+        "native_managed_uninstall_remove_data": true
+      }
+    }
+  },
+  "limits": [
+    "These are development server/API tests, not the complete H16 machine matrix, capacity benchmark or manual browser review.",
+    "The remaining SEC/RUN/LIFE rows are outside this evidence increment."
+  ]
+}

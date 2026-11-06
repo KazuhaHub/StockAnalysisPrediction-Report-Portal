@@ -1,0 +1,60 @@
+{
+  "format": "portal.application-failure-browser-acceptance/1-dev.3",
+  "captured_at": "2026-11-04T06:07:31-08:00",
+  "candidate": "7f397e4710554e306c43586a40e3cb0baac4597d",
+  "hosted_ci": {
+    "general_test": "41839627687",
+    "quota_browser": "41839627798",
+    "runner_daemon": "41839627672",
+    "codeql": "41839618971",
+    "result": "pass"
+  },
+  "physicalViewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "scenarios": [
+    "directory-states-admin",
+    "directory-states-reader",
+    "directory-reader-status",
+    "denied",
+    "backend-stopped",
+    "ready-timeout",
+    "protocol-incompatible"
+  ],
+  "assertions": {
+    "pendingDisabledAttentionDistinct": true,
+    "adminRecoveryLinks": true,
+    "readerManagementLinksHidden": true,
+    "nonopenableStatusActionsEnabled": true,
+    "readerStatusBoundedProjection": true,
+    "readerStatusRefresh": true,
+    "readerInternalIdentityHidden": true,
+    "readerStatusTimelineVisible": true,
+    "readerStatusTimelineSanitized": true,
+    "installationIdentityHidden": true,
+    "countsHidden": true,
+    "serverDiagnosticsHidden": true,
+    "refusedLaunchMountedNoFrame": true,
+    "retryRemainsAvailable": true,
+    "missingReadyMountedNoFrame": true,
+    "incompatibleProtocolMountedNoFrame": true,
+    "mainContentAxeSeriousOrCriticalViolations": 0,
+    "browserErrors": 0
+  },
+  "evidence": [
+    "directory-states-admin.png",
+    "directory-states-reader.png",
+    "directory-reader-status.png",
+    "denied.png",
+    "backend-stopped.png",
+    "ready-timeout.png",
+    "protocol-incompatible.png",
+    "browser-report.json"
+  ],
+  "limits": [
+    "The reader timeline contains at most 20 events and exposes only normalized time, a fixed event class, a valid operation stage and a restricted error code. Actor, IP, endpoint, namespace, effect and other raw detail fields are never returned or rendered.",
+    "The timeline reads the existing app_platform audit trail and is governed by the existing audit cleanup target (365-day default, 30-day floor). Audit cleanup still ships disabled by default, so enabling a bounded production retention remains an owner decision rather than being silently changed here.",
+    "The administrator progress and task pages remain the stronger operational surfaces; this reader projection does not expose arbitrary server logs."
+  ]
+}
