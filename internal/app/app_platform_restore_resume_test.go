@@ -400,7 +400,7 @@ func TestResumeSchedulerDrivesEvidenceStages(t *testing.T) {
 // A resume whose start fails ends where an import that failed ends: the installation is awaiting
 // review again, nothing the attempt staged survives, the failed operation cannot be continued, and a
 // new resume review is admitted. A resume still in flight keeps refusing a second one.
-func testResumeRetryAfterFailedStart(t *testing.T, pg bool, reserve bool) {
+func testResumeRetryAfterFailedStart(t *testing.T, pg bool) {
 	f := platformResumeFixture(t, pg)
 	s := f.s
 	ctx := context.Background()
@@ -408,18 +408,6 @@ func testResumeRetryAfterFailedStart(t *testing.T, pg bool, reserve bool) {
 	namespaceWriter := scalar[int64](t, s.st, `SELECT writer_fence FROM app_platform_data_namespaces WHERE id=?`, f.namespaceID(t))
 	first := f.reviewAndConsumeResume(t)
 	lease := f.driveResume(t, first.OperationID, appplatform.StageStart)
-	if reserve {
-		intent, err := s.preparePlatformRestoreStart(ctx, lease)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reserved, err := s.commitPlatformRestoreStartReservation(ctx, lease, intent, f.endpoint,
-			platformUpdateStartReservationFixture(intent, f.endpoint).reservation)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lease = reserved.lease
-	}
 	if review, err := s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target()); err == nil {
 		t.Fatalf("a second resume was reviewed while one was in flight: %+v", review)
 	}
@@ -477,11 +465,52 @@ func testResumeRetryAfterFailedStart(t *testing.T, pg bool, reserve bool) {
 	}
 }
 
-func TestResumeRetryAfterFailedStart(t *testing.T) {
-	t.Run("before any effect", func(t *testing.T) { testResumeRetryAfterFailedStart(t, false, false) })
-	t.Run("after a reserved start", func(t *testing.T) { testResumeRetryAfterFailedStart(t, false, true) })
-}
+func TestResumeRetryAfterFailedStart(t *testing.T) { testResumeRetryAfterFailedStart(t, false) }
 func TestResumeRetryAfterFailedStartPostgres(t *testing.T) {
-	t.Run("before any effect", func(t *testing.T) { testResumeRetryAfterFailedStart(t, true, false) })
-	t.Run("after a reserved start", func(t *testing.T) { testResumeRetryAfterFailedStart(t, true, true) })
+	testResumeRetryAfterFailedStart(t, true)
+}
+
+// A start that was reserved may have been executed: the runner can be running the candidate with no
+// Portal record. Ending the resume then keeps everything the start staged and leaves the installation
+// awaiting recovery, so neither a new resume nor the end of recovery can be admitted over it.
+func testResumeUnknownStartStaysRecoveryRequired(t *testing.T, pg bool) {
+	f := platformResumeFixture(t, pg)
+	s := f.s
+	ctx := context.Background()
+	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, f.installation)
+	first := f.reviewAndConsumeResume(t)
+	lease := f.driveResume(t, first.OperationID, appplatform.StageStart)
+	intent, err := s.preparePlatformRestoreStart(ctx, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reserved, err := s.commitPlatformRestoreStartReservation(ctx, lease, intent, f.endpoint, platformUpdateStartReservationFixture(intent, f.endpoint).reservation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.finishPlatformManagedRestoreForReview(ctx, reserved.lease); err != nil {
+		t.Fatal("ending the resume:", err)
+	}
+	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, first.OperationID) != "recovery_required" ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=?`, first.OperationID) != "unknown" {
+		t.Fatal("an unsettled start did not leave the operation recovery_required with an unknown effect")
+	}
+	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.installation) != "recovery_required" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND generation=?`, f.installation, generation+1) != 1 ||
+		scalar[string](t, s.st, `SELECT state FROM app_platform_data_namespaces WHERE id=?`, f.namespaceID(t)) != "active" {
+		t.Fatal("an unsettled start was returned to review or lost its staged rows")
+	}
+	if _, err := s.createPlatformRestoreResumeReview(ctx, f.actor, f.installation, f.target()); err == nil {
+		t.Fatal("a new resume was reviewed over an unsettled start")
+	}
+	if err := s.endPlatformRecovery(f.actor); !errors.Is(err, errAppPlatformRecoveryUnsettled) {
+		t.Fatalf("recovery ended over an unsettled start: %v", err)
+	}
+}
+
+func TestResumeUnknownStartStaysRecoveryRequired(t *testing.T) {
+	testResumeUnknownStartStaysRecoveryRequired(t, false)
+}
+func TestResumeUnknownStartStaysRecoveryRequiredPostgres(t *testing.T) {
+	testResumeUnknownStartStaysRecoveryRequired(t, true)
 }

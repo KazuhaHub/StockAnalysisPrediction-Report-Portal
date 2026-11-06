@@ -899,7 +899,8 @@ func (s *Server) claimNextPlatformRestoreResume(ctx context.Context, worker stri
 // re-prove the import. A resume whose grant or receipt was lost must still be endable, and it ends by
 // returning everything it staged, which needs only the reviewed plan. An effect that was issued but
 // never settled is marked unknown, so the operation is retained as needing recovery rather than as a
-// clean failure.
+// clean failure. A start that was reserved and not settled is the exception: its staged rows are kept
+// and the installation stays recovery_required until the runner settles the effect.
 func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expected platformOperationLease) error {
 	if expected.snapshot.Action != appplatform.ActionRestore || !expected.snapshot.Managed || expected.id == "" ||
 		expected.snapshot.Stage == appplatform.StageComplete || expected.snapshot.Stage == appplatform.StageFailed ||
@@ -936,6 +937,10 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, expected.id).Scan(&effects); err != nil {
 		return err
 	}
+	var unsettled int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown') AND receipt_json<>'{}'`, expected.id).Scan(&unsettled); err != nil {
+		return err
+	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
 		return errAppPlatformStageEvidence
@@ -965,6 +970,24 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 		if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=? WHERE operation_id=? AND state='prepared'`, now, expected.id); err != nil {
 			return err
 		}
+	}
+	// A start that was reserved may have been executed, and the Portal holds no record that it was not.
+	// Until the runner settles that effect the activation, the namespace and the installation stay
+	// exactly as the start left them: returning them to review would admit a second start over a
+	// candidate that may already be running.
+	if unsettled > 0 {
+		detail, _ := json.Marshal(struct {
+			Stage appplatform.Stage `json:"stage"`
+			Code  string            `json:"code"`
+		}{expected.snapshot.Stage, code})
+		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.restore_resume_ended','app_platform_operation',?,?,'')`,
+			time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
+			return err
+		}
+		if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	// Return what the attempt staged. The data stage and the start each change one thing, and only
 	// while their own conditions still hold, so a stage the attempt never reached changes nothing.
