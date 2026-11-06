@@ -201,3 +201,39 @@ func TestEnableStartReusesCheckpointOperationAtSameRelease(t *testing.T) {
 		t.Fatal("enable-start changed release")
 	}
 }
+
+func TestUpdateStartMigrationBindingFields(t *testing.T) {
+	command, _, _, _ := updateStartFixture(t)
+	command.Payload.CheckpointWriterFence = "1"
+	command.Payload.SourceWriterFence = "2"
+	command.Payload.TargetWriterFence = "3"
+	command.Payload.MigrateEffectID = "c0000000-0000-4000-8000-00000000000c"
+	command.Payload.MigrateReceiptSHA256 = strings.Repeat("9", 64)
+	base, err := UpdateStartLogicalDigest(command)
+	if err != nil {
+		t.Fatalf("migration binding refused: %v", err)
+	}
+	changed := command
+	changed.Payload.MigrateReceiptSHA256 = strings.Repeat("8", 64)
+	if digest, err := UpdateStartLogicalDigest(changed); err != nil || digest == base {
+		t.Fatal("migration receipt is not bound by the digest")
+	}
+	for name, mutate := range map[string]func(*UpdateStartCommand){
+		"effect without receipt": func(c *UpdateStartCommand) { c.Payload.MigrateReceiptSHA256 = "" },
+		"receipt without effect": func(c *UpdateStartCommand) { c.Payload.MigrateEffectID = "" },
+		"bad effect":             func(c *UpdateStartCommand) { c.Payload.MigrateEffectID = "nope" },
+		"bad receipt":            func(c *UpdateStartCommand) { c.Payload.MigrateReceiptSHA256 = "nope" },
+		"restore start":          func(c *UpdateStartCommand) { c.Kind = "restore-start" },
+		"enable start":           func(c *UpdateStartCommand) { c.Kind = "enable-start" },
+		"no checkpoint fence":    func(c *UpdateStartCommand) { c.Payload.CheckpointWriterFence = "" },
+		"checkpoint not below":   func(c *UpdateStartCommand) { c.Payload.CheckpointWriterFence = "2" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := command
+			mutate(&bad)
+			if _, err := UpdateStartLogicalDigest(bad); err == nil {
+				t.Fatal("invalid migration binding admitted")
+			}
+		})
+	}
+}

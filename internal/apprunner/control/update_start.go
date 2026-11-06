@@ -48,6 +48,8 @@ type UpdateStartPayload struct {
 	SourceWriterFence             string `json:"source_writer_fence"`
 	TargetWriterFence             string `json:"target_writer_fence"`
 	CheckpointWriterFence         string `json:"checkpoint_writer_fence,omitempty"`
+	MigrateEffectID               string `json:"migrate_effect_id,omitempty"`
+	MigrateReceiptSHA256          string `json:"migrate_receipt_sha256,omitempty"`
 	Platform                      string `json:"platform"`
 	SandboxProfile                string `json:"sandbox_profile"`
 }
@@ -123,6 +125,15 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 			return false
 		}
 		checkpointWriter = parsed
+	}
+	// A migration binds the update to its applied migrate-data receipt, and only an update-start
+	// can carry one: the checkpoint writer fence S, the migration's S+1 as the source fence and the
+	// target above it.
+	migrating := p.MigrateEffectID != "" || p.MigrateReceiptSHA256 != ""
+	if migrating && (c.Kind != "update-start" || p.MigrateEffectID == "" || p.MigrateReceiptSHA256 == "" ||
+		!candidateUUID(p.MigrateEffectID) || !shaPattern.MatchString(p.MigrateReceiptSHA256) ||
+		p.CheckpointWriterFence == "" || checkpointWriter >= sourceWriter) {
+		return false
 	}
 	project, _ := strconv.ParseInt(p.ProjectID, 10, 64)
 	archive, _ := strconv.ParseInt(p.CheckpointArchiveBytes, 10, 64)
