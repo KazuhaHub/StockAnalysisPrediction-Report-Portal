@@ -127,6 +127,7 @@ func platformTestStore(t *testing.T, postgres bool) *Store {
 		tables = append(tables, migration0018().tables...)
 		tables = append(tables, migration0019().tables...)
 		tables = append(tables, migration0020().tables...)
+		tables = append(tables, migration0021().tables...)
 		sort.Strings(tables)
 		for _, name := range tables {
 			if name == platformPrefix+"object_storage" || name == platformPrefix+"storage_objects" || name == platformPrefix+"object_namespaces" || name == platformPrefix+"plugin_tables" {
