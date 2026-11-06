@@ -100,6 +100,13 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		baseEffects = 4
+		// A resume has only the start effect before this one: the import already ran the data
+		// stages, and nothing was stopped or removed on the new host.
+		if resume, err := platformOperationIsResume(e, lease.id); err != nil {
+			return zero, false, err
+		} else if resume {
+			baseEffects = 1
+		}
 	}
 	if fresh {
 		if !create || count != baseEffects || !freshPlatformUpdateRegistrationSourceAt(start, now) {

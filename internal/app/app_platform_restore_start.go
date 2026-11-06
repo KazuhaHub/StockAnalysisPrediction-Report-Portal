@@ -21,6 +21,13 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 		targetPolicy < 1 {
 		return control.UpdateStartCommand{}, errAppPlatformStageEvidence
 	}
+	// An imported checkpoint was cut under an older writer fence than the namespace now holds (the
+	// Portal's own restore advanced it). The start is fenced above the namespace's, and names the
+	// checkpoint's separately so the runner can match it to the import receipt.
+	sourceWriter, checkpointWriter := checkpoint.WriterFence, ""
+	if source.currentWriterFence != "" {
+		sourceWriter, checkpointWriter = source.currentWriterFence, checkpoint.WriterFence
+	}
 	command := control.UpdateStartCommand{
 		Format: control.UpdateStartFormat, DeploymentID: runtime.deploymentID,
 		ControllerEpoch: lease.controllerEpoch,
@@ -55,11 +62,12 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 			RootFilesystemUUID:   source.rootFilesystemUUID,
 			RootInode:            source.rootInode,
 			DataFormat:           checkpoint.DataFormat,
-			SourceWriterFence:    checkpoint.WriterFence,
+			SourceWriterFence:    sourceWriter,
 			TargetWriterFence: strconv.FormatInt(
-				mustPlatformCheckpointInt(checkpoint.WriterFence)+1, 10),
-			Platform:       source.platform,
-			SandboxProfile: source.sandboxProfile,
+				mustPlatformCheckpointInt(sourceWriter)+1, 10),
+			CheckpointWriterFence: checkpointWriter,
+			Platform:              source.platform,
+			SandboxProfile:        source.sandboxProfile,
 		},
 	}
 	digest, err := control.UpdateStartLogicalDigest(command)
@@ -126,15 +134,26 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 	if err != nil || recoverySetID == "" {
 		return zero, errAppPlatformStageEvidence
 	}
+	resume, err := platformOperationIsResume(e, lease.id)
+	if err != nil {
+		return zero, err
+	}
+	// The checkpoint a restore rests on is a snapshot; a resume rests on the applied import.
+	checkpointStage := "snapshot"
+	if resume {
+		checkpointStage = "restore_data"
+	}
 	var checkpointRaw string
 	if err := e.queryRow(`SELECT receipt_json
 		FROM app_platform_operation_effects
-		WHERE operation_id=? AND effect_id=? AND stage='snapshot'
+		WHERE operation_id=? AND effect_id=? AND stage=?
 		AND state='applied'`,
-		checkpoint.OperationID, checkpoint.EffectID).
+		checkpoint.OperationID, checkpoint.EffectID, checkpointStage).
 		Scan(&checkpointRaw); err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
+	// A restore first stops and removes the failed update's target. A resume has none: the import
+	// started nothing on the new host.
 	var stopState, removeState string
 	if err := e.queryRow(`SELECT
 		COALESCE(MAX(CASE WHEN effect_number=1 THEN state END),''),
@@ -142,7 +161,8 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'`,
 		lease.id).Scan(&stopState, &removeState); err != nil ||
-		stopState != "applied" || removeState != "applied" {
+		(!resume && (stopState != "applied" || removeState != "applied")) ||
+		(resume && (stopState != "" || removeState != "")) {
 		return zero, errAppPlatformStageEvidence
 	}
 	var activation, namespace, activationState, readinessRaw string
@@ -264,6 +284,10 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
+	sourceWriter, checkpointWriter := checkpoint.WriterFence, ""
+	if source.currentWriterFence != "" {
+		sourceWriter, checkpointWriter = source.currentWriterFence, checkpoint.WriterFence
+	}
 	result := platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
 		authority: authority, command: command, checkpoint: checkpoint,
@@ -286,7 +310,8 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 			CheckpointArchiveBytes:   mustPlatformCheckpointInt(checkpoint.ArchiveBytes),
 			DataNamespaceID:          checkpoint.NamespaceID,
 			DataFormat:               mustPlatformCheckpointInt(checkpoint.DataFormat),
-			SourceWriterFence:        mustPlatformCheckpointInt(checkpoint.WriterFence),
+			SourceWriterFence:        mustPlatformCheckpointInt(sourceWriter),
+			CheckpointWriterFence:    mustPlatformCheckpointInt(checkpointWriter),
 			TargetRuntime:            source.runtimeTarget,
 		},
 		targetDescriptor: source.descriptor, raw: raw, signature: signature,

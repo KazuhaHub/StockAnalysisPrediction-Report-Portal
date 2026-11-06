@@ -49,7 +49,7 @@ func (s *Server) withPlatformRecoveryTransactionContext(ctx context.Context, ses
 func (s *Server) endPlatformRecovery(session platformActorSession) error {
 	return s.withPlatformRecoveryTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var inflight int
-		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE action='restore_import' AND completed_ms IS NULL`).Scan(&inflight); err != nil {
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE action IN ('restore_import','restore') AND completed_ms IS NULL`).Scan(&inflight); err != nil {
 			return err
 		}
 		var issued int

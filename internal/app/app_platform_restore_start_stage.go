@@ -382,9 +382,22 @@ func (s *Server) commitPlatformRestoreStartActivation(ctx context.Context, lease
 	if err != nil {
 		return zero, err
 	}
+	resume, err := platformOperationIsResume(e, lease.id)
+	if err != nil {
+		return zero, err
+	}
 	var sourceActivation, sourceRelease, sourceState string
 	var sourceGeneration, sourcePolicy, sourceFormat, sourceWriter int64
-	if err := e.queryRow(`SELECT id,release_sha256,generation,
+	if resume {
+		// A restored Portal retired every activation, and the resume brought none up before this
+		// one: there is nothing to retire, and nothing may be active beside the candidate.
+		var active int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_activations
+			WHERE installation_id=? AND state='active'`, lease.installationID).
+			Scan(&active); err != nil || active != 0 {
+			return zero, errAppPlatformStageEvidence
+		}
+	} else if err := e.queryRow(`SELECT id,release_sha256,generation,
 		policy_revision,data_format,state FROM app_platform_activations
 		WHERE installation_id=? AND state='active'`,
 		lease.installationID).
@@ -410,18 +423,20 @@ func (s *Server) commitPlatformRestoreStartActivation(ctx context.Context, lease
 	if err != nil {
 		return zero, err
 	}
-	changed, err := e.exec(`UPDATE app_platform_activations
-		SET state='retired',updated_ms=?
-		WHERE id=? AND installation_id=? AND release_sha256=?
-		AND generation=? AND policy_revision=? AND data_namespace_id=?
-		AND data_format=? AND state='active'`,
-		now, sourceActivation, lease.installationID, sourceRelease,
-		sourceGeneration, sourcePolicy, current.start.plan.DataNamespaceID,
-		sourceFormat)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return zero, err
+	if !resume {
+		changed, err := e.exec(`UPDATE app_platform_activations
+			SET state='retired',updated_ms=?
+			WHERE id=? AND installation_id=? AND release_sha256=?
+			AND generation=? AND policy_revision=? AND data_namespace_id=?
+			AND data_format=? AND state='active'`,
+			now, sourceActivation, lease.installationID, sourceRelease,
+			sourceGeneration, sourcePolicy, current.start.plan.DataNamespaceID,
+			sourceFormat)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return zero, err
+		}
 	}
-	changed, err = e.exec(`UPDATE app_platform_activations
+	changed, err := e.exec(`UPDATE app_platform_activations
 		SET state='active',updated_ms=?
 		WHERE id=? AND installation_id=? AND release_sha256=?
 		AND generation=? AND policy_revision=? AND data_namespace_id=?

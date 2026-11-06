@@ -84,10 +84,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		var selected platformInstallSelection
 		var err error
 		if w.endpoint.path != "" && w.server.platformRecoveryPaused(ctx) {
-			// A Portal in recovery runs restore imports and nothing else; every other selector
+			// A Portal in recovery runs restore imports and resumes and nothing else; every other selector
 			// would refuse on the pause and mask the import behind its error. The frontend-only
 			// service has no runner endpoint, so it keeps refusing on the pause as before.
 			selected, err = w.server.claimNextPlatformRestoreImport(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformRestoreResume(ctx, w.worker)
+			}
 		} else if w.writable {
 			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
 			if err == nil && !selected.reviewed && selected.lease.id == "" {

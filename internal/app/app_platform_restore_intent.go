@@ -72,6 +72,11 @@ func platformRestoreReceiptMatchesCommand(receipt journal.RestoreReceipt, comman
 }
 
 func loadPlatformRestoreCheckpoint(e migExec, expected platformOperationLease) (string, string, journal.CheckpointReceipt, int64, error) {
+	if resume, err := platformOperationIsResume(e, expected.id); err != nil {
+		return "", "", journal.CheckpointReceipt{}, 0, err
+	} else if resume {
+		return loadPlatformResumeCheckpoint(e, expected)
+	}
 	var planRaw, planSHA, planInstallation, planEpoch string
 	var planSource, planTarget int64
 	if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,p.installation_id,p.controller_epoch,
