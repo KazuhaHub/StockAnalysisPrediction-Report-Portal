@@ -299,6 +299,13 @@ func platformResumeStartToReady(t *testing.T, s *Server, startLease platformOper
 	if err != nil {
 		t.Fatal(err)
 	}
+	return platformResumeProbeToReady(t, s, probeLease, endpoint)
+}
+
+// platformResumeProbeToReady runs the probe and activate stages from a lease at the probe stage.
+func platformResumeProbeToReady(t *testing.T, s *Server, probeLease platformOperationLease, endpoint platformRuntimeEndpoint) platformOperationLease {
+	t.Helper()
+	ctx := context.Background()
 	probeIntent, err := s.preparePlatformRestoreProbe(ctx, probeLease)
 	if err != nil {
 		t.Fatal(err)

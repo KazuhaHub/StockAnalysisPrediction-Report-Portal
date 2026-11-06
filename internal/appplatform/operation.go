@@ -183,6 +183,26 @@ func (o Operation) Recover(expectedRevision uint64) (Operation, error) {
 	return o, nil
 }
 
+// Reopen returns an operation that ended recovery_required to the stage after the one that failed, once
+// evidence shows that stage's effect was applied after all. Fail leaves the revision one past the failed
+// stage's, which is the revision Advance gives the next stage, so the reopened state is exactly the one
+// Advance would have produced had the reply not been lost. Completing the operation is Recover's job.
+func (o Operation) Reopen(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	stages := operationStages(o.action, o.managed)
+	if o.stage != StageRecoveryRequired || o.revision < 2 || o.revision >= uint64(len(stages)) {
+		return Operation{}, ErrInvalidTransition
+	}
+	next := stages[o.revision-1]
+	if next == StageComplete {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage = next
+	return o, nil
+}
+
 func (o Operation) checkRevision(expected uint64) error {
 	if o.generation == 0 || o.revision == 0 || len(operationStages(o.action, o.managed)) == 0 {
 		return ErrInvalidTransition

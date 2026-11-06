@@ -252,3 +252,55 @@ func TestRecoverCompletesARecoveryRequiredOperation(t *testing.T) {
 		t.Fatal("a clean failure was recovered")
 	}
 }
+
+// An operation that ended recovery_required because the reply to one stage's effect was lost goes on from
+// the next stage when evidence shows the effect was applied. The state it returns to is the one Advance
+// would have given had the reply arrived, so the model restores it and it runs like any other.
+func TestReopenContinuesAfterTheFailedStage(t *testing.T) {
+	op, err := NewOperation(ActionRestore, true, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []Stage{StageValidate, StageRevoke, StageQuiesce, StageSnapshot, StageRestoreData, StageStart} {
+		if op, err = op.Advance(op.Snapshot().Revision, stage); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := op.Advance(op.Snapshot().Revision, StageProbe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := unsettled.Reopen(unsettled.Snapshot().Revision)
+	if err != nil || got.Snapshot() != want.Snapshot() {
+		t.Fatalf("reopen: %+v want %+v (%v)", got.Snapshot(), want.Snapshot(), err)
+	}
+	if _, err := OperationFromSnapshot(got.Snapshot()); err != nil {
+		t.Fatalf("the reopened snapshot is not a model state: %v", err)
+	}
+	if _, err := got.Advance(got.Snapshot().Revision, StageActivate); err != nil {
+		t.Fatalf("a reopened operation cannot go on: %v", err)
+	}
+	if _, err := unsettled.Reopen(unsettled.Snapshot().Revision + 1); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatal("a stale reopen was accepted")
+	}
+	if _, err := got.Reopen(got.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("an operation in flight was reopened")
+	}
+	failed, _ := op.Fail(op.Snapshot().Revision, EffectsNone)
+	if _, err := failed.Reopen(failed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("a clean failure was reopened")
+	}
+	// The last stage before complete is finished by Recover, not reopened into complete.
+	last, _ := NewOperation(ActionRestoreImport, true, 3)
+	for _, stage := range []Stage{StageValidate, StageRestoreData} {
+		last, _ = last.Advance(last.Snapshot().Revision, stage)
+	}
+	lastUnsettled, _ := last.Fail(last.Snapshot().Revision, EffectsUnknown)
+	if _, err := lastUnsettled.Reopen(lastUnsettled.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("an operation was reopened into complete")
+	}
+}
