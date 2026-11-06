@@ -171,8 +171,16 @@ func TestNativeImportCheckpoint(t *testing.T) {
 	if content, err := os.ReadFile(filepath.Join(namespacePath, "nested", "value.json")); err != nil || string(content) != `{"v":2}` {
 		t.Fatal("imported nested content", string(content), err)
 	}
+	reconciled, err := root.VerifyImportedCheckpoint(ctx, rootIdentity, checkpointRoot, checkpointIdentity, good)
+	reconciledSnapshot, reconciledErr := reconciled.Snapshot()
+	if err != nil || reconciledErr != nil || reconciledSnapshot.NamespaceInode != imported.NamespaceInode || reconciledSnapshot.Entries != imported.Entries {
+		t.Fatalf("read-only reconciliation: %+v %v", reconciledSnapshot, errors.Join(err, reconciledErr))
+	}
 	if err := os.WriteFile(filepath.Join(namespacePath, "hello.txt"), []byte("changed after import"), 0640); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := root.VerifyImportedCheckpoint(ctx, rootIdentity, checkpointRoot, checkpointIdentity, good); !errors.Is(err, ErrImportUnsafe) {
+		t.Fatalf("reconciliation accepted a changed namespace: %v", err)
 	}
 	if _, err := root.ImportCheckpoint(ctx, rootIdentity, checkpointRoot, checkpointIdentity, good); !errors.Is(err, ErrConflict) {
 		t.Fatalf("second import over an existing namespace: %v", err)

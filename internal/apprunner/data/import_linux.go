@@ -240,3 +240,52 @@ func (r *Root) importReadBack(ctx context.Context, namespace *os.File, receiving
 		NamespaceDevice: uint64(stat.Dev), NamespaceInode: stat.Ino,
 	}}, nil
 }
+
+// VerifyImportedCheckpoint is the read-only reconciliation of an import whose
+// outcome is unknown. It never creates, repairs or removes anything: it proves
+// that the namespace now on r equals the verified archive under the requested
+// allocation, or it refuses. An import that cannot be proven is not retried.
+func (r *Root) VerifyImportedCheckpoint(ctx context.Context, receivingExpected RootIdentity, checkpointRoot *Root, checkpointExpected RootIdentity, request ImportRequest) (ImportObservation, error) {
+	var zero ImportObservation
+	if r == nil || checkpointRoot == nil || r == checkpointRoot || !request.valid() {
+		return zero, ErrImportUnsafe
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	checkpointRoot.mu.Lock()
+	defer checkpointRoot.mu.Unlock()
+	if r.closed || checkpointRoot.closed || receivingExpected == checkpointExpected {
+		return zero, ErrImportUnsafe
+	}
+	if err := r.requireIdentity(ctx, receivingExpected); err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	if err := checkpointRoot.requireIdentity(ctx, checkpointExpected); err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	archive, entries, err := checkpointRoot.openImportArchive(ctx, request, request.restoreRequest())
+	if err != nil {
+		return zero, err
+	}
+	defer archive.Close()
+	allocation, err := r.inspect(ctx, request.NamespaceID, request.ProjectID)
+	if err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	if allocation.ByteLimit != request.QuotaBytes || allocation.InodeLimit != request.QuotaInodes {
+		return zero, ErrImportUnsafe
+	}
+	namespace, err := r.openNamespace(request.NamespaceID)
+	if err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	defer namespace.Close()
+	observed, err := r.importReadBack(ctx, namespace, receivingExpected, entries, allocation, request)
+	if err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	if err := checkpointRoot.requireIdentity(ctx, checkpointExpected); err != nil {
+		return zero, errors.Join(ErrImportUnsafe, err)
+	}
+	return observed, nil
+}

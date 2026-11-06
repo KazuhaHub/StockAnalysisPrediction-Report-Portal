@@ -19,8 +19,9 @@ const importCheckpointEffectPurpose = "portal.app/runner-data-import-effect/v1"
 // ImportCheckpointPayload carries one single-use import grant and the values the
 // archive must prove. The Source* and Checkpoint* fields are Portal's recorded
 // provenance of the old host; they are compared with the archive manifest and
-// never with the host that receives the import. ProjectID and the quota are the
-// new host's reservation for the namespace being created.
+// never with the host that receives the import. The quota is the reservation
+// for the namespace being created; the receiving runner allocates its own
+// project id, which an old-host command cannot know.
 type ImportCheckpointPayload struct {
 	GrantID                  string `json:"grant_id"`
 	RecoverySetID            string `json:"recovery_set_id"`
@@ -31,7 +32,6 @@ type ImportCheckpointPayload struct {
 	ArchiveBytes             string `json:"archive_bytes"`
 	DataFormat               string `json:"data_format"`
 	WriterFence              string `json:"writer_fence"`
-	ProjectID                string `json:"project_id"`
 	QuotaBytes               string `json:"quota_bytes"`
 	QuotaInodes              string `json:"quota_inodes"`
 	SourceProjectID          string `json:"source_project_id"`
@@ -83,7 +83,7 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 	}
 	for _, value := range []string{
 		c.TargetGeneration, c.EffectNumber, c.InstallationFence, p.ArchiveBytes, p.DataFormat,
-		p.WriterFence, p.ProjectID, p.QuotaBytes, p.QuotaInodes,
+		p.WriterFence, p.QuotaBytes, p.QuotaInodes,
 	} {
 		if _, ok := counter(value, true); !ok {
 			return false
@@ -96,14 +96,13 @@ func validImportCheckpointLogical(c ImportCheckpointCommand) bool {
 			return false
 		}
 	}
-	project, _ := strconv.ParseInt(p.ProjectID, 10, 64)
 	sourceProject, _ := strconv.ParseUint(p.SourceProjectID, 10, 64)
 	archive, _ := strconv.ParseInt(p.ArchiveBytes, 10, 64)
 	quota, _ := strconv.ParseInt(p.QuotaBytes, 10, 64)
 	slot, _ := counter(c.EffectNumber, true)
 	// The old and new roots are different physical roots by construction; a
 	// payload naming one root for both is a malformed provenance record.
-	return project > 0 && project <= math.MaxUint32 && sourceProject <= math.MaxUint32 &&
+	return sourceProject <= math.MaxUint32 &&
 		archive <= maxRestoreArchiveBytes && quota%512 == 0 && slot <= 32 &&
 		(p.SourceFilesystemUUID != p.CheckpointFilesystemUUID || p.SourceRootInode != p.CheckpointRootInode)
 }
