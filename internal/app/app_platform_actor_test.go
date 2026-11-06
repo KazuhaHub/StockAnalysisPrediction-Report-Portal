@@ -18,7 +18,7 @@ func platformActorTestServer(t *testing.T, postgres bool) (*Server, platformActo
 
 func platformActorTestServerWithStore(t *testing.T, st *Store) (*Server, platformActorSession) {
 	t.Helper()
-	for _, key := range []string{setKeyringSalt, setKeyringDEK, "app_platform_actor_seed", "app_platform_controller_epoch", "app_platform_restore_paused"} {
+	for _, key := range []string{setKeyringSalt, setKeyringDEK, "app_platform_actor_seed", "app_platform_controller_epoch", "app_platform_restore_paused", platformRestoreTrustedPublishersKey} {
 		var value sql.NullString
 		err := st.queryRow(`SELECT v FROM meta WHERE k=?`, key).Scan(&value)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {

@@ -12,7 +12,7 @@ import (
 
 func platformSeedLeaseControl(t *testing.T, st *Store) {
 	t.Helper()
-	for _, key := range []string{"app_platform_controller_epoch", "app_platform_restore_paused"} {
+	for _, key := range []string{"app_platform_controller_epoch", "app_platform_restore_paused", platformRestoreTrustedPublishersKey} {
 		var previous string
 		err := st.queryRow(`SELECT v FROM meta WHERE k=?`, key).Scan(&previous)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
