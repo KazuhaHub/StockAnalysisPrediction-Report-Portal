@@ -190,3 +190,95 @@ func TestNativeImportCheckpoint(t *testing.T) {
 	}
 	t.Log("NATIVE_DATA_IMPORT_VERIFIED")
 }
+
+// TestNativeImportCheckpointOntoASecondRoot is the fresh-host case itself: the namespace is still on
+// the first root, and the checkpoint is imported by content onto a different physical XFS root. The
+// import must not depend on, touch or reuse anything of the first root, and the receiving root must
+// not be the one the checkpoint came from. It needs a third disposable XFS filesystem in
+// APP_DATA_IMPORT_ROOT beside the data and checkpoint roots, and otherwise skips.
+func TestNativeImportCheckpointOntoASecondRoot(t *testing.T) {
+	rootPath := os.Getenv("APP_DATA_NATIVE_ROOT")
+	checkpointPath := os.Getenv("APP_DATA_CHECKPOINT_ROOT")
+	secondPath := os.Getenv("APP_DATA_IMPORT_ROOT")
+	if rootPath == "" || checkpointPath == "" || secondPath == "" {
+		t.Skip("explicit disposable native fixture with a second root only")
+	}
+	if os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || os.Geteuid() != 0 ||
+		!filepath.IsAbs(rootPath) || !filepath.IsAbs(checkpointPath) || !filepath.IsAbs(secondPath) {
+		t.Fatal("native fixture requires disposable Linux roots")
+	}
+	if os.Getenv("APP_DATA_NATIVE_PHASE") != "" {
+		t.Skip("import runs in the primary phase only")
+	}
+	ctx := context.Background()
+	open := func(path string) (*Root, RootIdentity) {
+		t.Helper()
+		input, err := os.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { input.Close() })
+		root, err := Open(input)
+		if err != nil {
+			t.Fatal("native root", path, err)
+		}
+		t.Cleanup(func() { root.Close() })
+		identity, err := root.Identity(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return root, identity
+	}
+	root, rootIdentity := open(rootPath)
+	checkpointRoot, checkpointIdentity := open(checkpointPath)
+	second, secondIdentity := open(secondPath)
+	if secondIdentity == rootIdentity || secondIdentity == checkpointIdentity || rootIdentity == checkpointIdentity {
+		t.Fatal("the three roots must be three different filesystems", rootIdentity, checkpointIdentity, secondIdentity)
+	}
+
+	const project = 4270
+	namespaceName := nativeNamespace(70)
+	prepared, err := root.Prepare(ctx, rootIdentity, Request{namespaceName, project, 8 << 20, 128})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rootPath, namespaceName, "hello.txt"), []byte("moved payload"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	checkpointRequest := CheckpointRequest{
+		CheckpointID: nativeNamespace(700), NamespaceID: namespaceName, ReleaseSHA256: strings.Repeat("b", 64),
+		ProjectID: project, DataFormat: 1, MaxArchiveBytes: 1 << 20, ExpectedDevice: prepared.Device,
+		ExpectedNamespaceInode: prepared.Inode, WriterFence: 1,
+	}
+	checkpoint, err := checkpointRoot.Checkpoint(ctx, checkpointIdentity, root, rootIdentity, checkpointRequest)
+	snapshot, snapshotErr := checkpoint.Snapshot()
+	if err != nil || snapshotErr != nil {
+		t.Fatal("checkpoint fixture", errors.Join(err, snapshotErr))
+	}
+	request := ImportRequest{
+		CheckpointID: checkpointRequest.CheckpointID, NamespaceID: namespaceName,
+		ReleaseSHA256: checkpointRequest.ReleaseSHA256, ManifestSHA256: snapshot.ManifestSHA256,
+		ProjectID: project, DataFormat: 1, ArchiveBytes: snapshot.ArchiveBytes,
+		MaxArchiveBytes: 1 << 20, WriterFence: 1, QuotaBytes: 8 << 20, QuotaInodes: 128,
+		Provenance: ImportProvenance{ProjectID: project, NamespaceInode: prepared.Inode, Device: prepared.Device, Source: rootIdentity},
+	}
+	observed, err := second.ImportCheckpoint(ctx, secondIdentity, checkpointRoot, checkpointIdentity, request)
+	imported, importedErr := observed.Snapshot()
+	if err != nil || importedErr != nil || imported.NamespaceID != namespaceName || imported.ManifestSHA256 != snapshot.ManifestSHA256 {
+		t.Fatalf("import onto the second root: %+v %v", imported, errors.Join(err, importedErr))
+	}
+	if imported.NamespaceDevice == prepared.Device {
+		t.Fatal("the imported namespace is on the device the checkpoint came from")
+	}
+	if content, err := os.ReadFile(filepath.Join(secondPath, namespaceName, "hello.txt")); err != nil || string(content) != "moved payload" {
+		t.Fatal("imported file content", string(content), err)
+	}
+	if content, err := os.ReadFile(filepath.Join(rootPath, namespaceName, "hello.txt")); err != nil || string(content) != "moved payload" {
+		t.Fatal("the import changed the first root", string(content), err)
+	}
+	// The first root is not a valid place to import the same checkpoint to: its provenance is the source.
+	if _, err := root.ImportCheckpoint(ctx, rootIdentity, checkpointRoot, checkpointIdentity, request); err == nil {
+		t.Fatal("a checkpoint was imported back onto the root it came from")
+	}
+	t.Log("NATIVE_DATA_IMPORT_SECOND_ROOT_VERIFIED")
+}
