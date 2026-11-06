@@ -13,8 +13,9 @@ import (
 	"testing"
 )
 
-// v1Journal builds a populated journal exactly as the frozen v1 binary wrote it.
-func v1Journal(t *testing.T) string {
+// newV1Journal creates an empty journal exactly as the frozen v1 binary wrote
+// it and returns it open, so a test can add the rows it needs.
+func newV1Journal(t *testing.T) (string, *sql.DB) {
 	t.Helper()
 	directory := privateDirectory(t)
 	path := filepath.Join(directory, journalName)
@@ -33,6 +34,13 @@ func v1Journal(t *testing.T) string {
 	if err := initializeVersion(context.Background(), db, 1); err != nil {
 		t.Fatal(err)
 	}
+	return directory, db
+}
+
+// v1Journal builds a populated v1 journal.
+func v1Journal(t *testing.T) string {
+	t.Helper()
+	directory, db := newV1Journal(t)
 	if err := insertDeployment(db); err != nil {
 		t.Fatal(err)
 	}

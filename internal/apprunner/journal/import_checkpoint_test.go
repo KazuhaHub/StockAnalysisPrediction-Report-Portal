@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -72,6 +73,11 @@ func importStoreFixture(t *testing.T) (*Store, control.ImportCheckpointCommand, 
 	t.Helper()
 	store, _ := enrolledCommandStore(t)
 	command := importCommandFixture(t, 1700)
+	digest, err := control.ImportCheckpointLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.PayloadSHA256 = digest
 	raw, signature := signImportCommand(t, command)
 	return store, command, raw, signature
 }
@@ -237,5 +243,135 @@ func TestImportCheckpointRefusesFenceAndEpochRegression(t *testing.T) {
 	mustJournalExec(t, store.db, `UPDATE runner_commands SET controller_epoch=? WHERE effect_id=?`, fixtureID(1752), fixtureID(1750))
 	if _, _, err := store.beginImportCheckpoint(context.Background(), raw, signature, importDataPin); err == nil {
 		t.Fatal("import admitted over rows from another controller epoch")
+	}
+}
+
+var importOtherPin = data.RootIdentity{FilesystemUUID: "fedcba98-7654-3210-fedc-ba9876543210", Inode: 99}
+
+func TestRootHistoryScansImportCheckpoint(t *testing.T) {
+	store, command, raw, signature := importStoreFixture(t)
+	if _, _, err := store.beginImportCheckpoint(context.Background(), raw, signature, importDataPin); err != nil {
+		t.Fatal(err)
+	}
+	check := func(pin data.RootIdentity) error {
+		tx, err := store.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback()
+		return requireDataRootHistory(context.Background(), tx, pin)
+	}
+	if err := check(importDataPin); err != nil {
+		t.Fatalf("unknown import refused its own root: %v", err)
+	}
+	if err := check(importOtherPin); !errors.Is(err, ErrFenceReconciliation) {
+		t.Fatalf("unknown import did not hold the root: %v", err)
+	}
+	// A new import under another root is refused before it writes anything.
+	next := importCommandFixture(t, 1900)
+	nextRaw, nextSignature := signImportCommand(t, next)
+	if _, _, err := store.beginImportCheckpoint(context.Background(), nextRaw, nextSignature, importOtherPin); !errors.Is(err, ErrFenceReconciliation) {
+		t.Fatalf("second root bound by import: %v", err)
+	}
+	if scalar(t, store.db, `SELECT COUNT(*) FROM runner_commands`) != 1 {
+		t.Fatal("refused import wrote a command")
+	}
+	// Once applied, the receipt's claim holds the same root.
+	var marker importClaimMarker
+	var markerRaw string
+	if err := store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, command.EffectID).Scan(&markerRaw); err != nil || !canonicalDataJSON(markerRaw, &marker) {
+		t.Fatal(err)
+	}
+	receipt := importReceiptFixture(command, marker)
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustJournalExec(t, store.db, `UPDATE runner_commands SET state='applied',receipt_json=? WHERE effect_id=?`, string(encoded), command.EffectID)
+	if err := check(importDataPin); err != nil {
+		t.Fatalf("applied import refused its own root: %v", err)
+	}
+	if err := check(importOtherPin); !errors.Is(err, ErrFenceReconciliation) {
+		t.Fatalf("applied import did not hold the root: %v", err)
+	}
+	// History that cannot be decoded refuses rather than losing a binding.
+	for name, statement := range map[string]string{
+		"garbage":          `UPDATE runner_commands SET receipt_json='{"format":"x"}' WHERE effect_id=?`,
+		"effect":           `UPDATE runner_commands SET effect_id='` + fixtureID(1799) + `' WHERE effect_id=?`,
+		"reverted":         `UPDATE runner_commands SET state='reverted' WHERE effect_id=?`,
+		"receipt as claim": `UPDATE runner_commands SET state='unknown' WHERE effect_id=?`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			tx, err := store.db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err := tx.Exec(statement, command.EffectID); err != nil {
+				t.Fatal(err)
+			}
+			if err := requireDataRootHistory(context.Background(), tx, importDataPin); !errors.Is(err, ErrFenceReconciliation) {
+				t.Fatalf("unreadable import history accepted: %v", err)
+			}
+		})
+	}
+}
+
+func importReceiptFixture(command control.ImportCheckpointCommand, marker importClaimMarker) ImportCheckpointReceipt {
+	now := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+	p := command.Payload
+	return ImportCheckpointReceipt{
+		Format: importReceiptFormat, Claim: marker, DeploymentID: command.DeploymentID,
+		ControllerEpoch: command.ControllerEpoch, InstallationID: command.InstallationID,
+		OperationID: command.OperationID, TargetGeneration: command.TargetGeneration,
+		Stage: command.Stage, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		RecoverySetID: p.RecoverySetID, GrantID: p.GrantID, CheckpointID: p.CheckpointID,
+		NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256, ManifestSHA256: p.ManifestSHA256,
+		ArchiveBytes: p.ArchiveBytes, DataFormat: p.DataFormat, WriterFence: p.WriterFence,
+		ProjectID: marker.ProjectID, NamespaceInode: "77", Device: "78",
+		QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes, Entries: "3", UsedBytes: "8192",
+		UsedInodes: "4", State: "imported", ObservedMS: now, SettledMS: now,
+	}
+}
+
+func TestUpgradedV1JournalStillRefusesForeignRoot(t *testing.T) {
+	directory, db := newV1Journal(t)
+	enrollment := enrollmentFixture(30)
+	mustJournalExec(t, db, `INSERT INTO runner_deployment(singleton,deployment_id,controller_epoch,control_revision,verification_algorithm,verification_key,key_fingerprint,revision,created_ms,updated_ms)
+		VALUES(1,?,?,?,'Ed25519',?,?,1,1,1)`, enrollment.DeploymentID, enrollment.ControllerEpoch, enrollment.ControlRevision, []byte(enrollment.PublicKey), enrollment.Fingerprint)
+	marker := dataClaimMarker{
+		Format: "portal.runner.prepare-data-claim/1-dev.1", ClaimID: fixtureID(1601), EffectID: fixtureID(1602),
+		ResourceID: fixtureID(1603), OwnershipSHA256: strings.Repeat("d", 64), AdmittedFence: "1",
+		ClaimedMS: "1", ExpiresMS: "2", RootFilesystemUUID: importDataPin.FilesystemUUID,
+		RootInode: strconv.FormatUint(importDataPin.Inode, 10),
+	}
+	markerRaw, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustJournalExec(t, db, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		VALUES(?,?,?,'prepare_data',1,'prepare-data',?,1,?,1,'unknown',?,NULL,1,1)`,
+		marker.EffectID, fixtureID(1604), fixtureID(1605), strings.Repeat("e", 64), enrollment.ControllerEpoch, string(markerRaw))
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if scalar(t, store.db, `PRAGMA user_version`) != 2 {
+		t.Fatal("journal not upgraded")
+	}
+	command := importCommandFixture(t, 1700)
+	raw, signature := signImportCommand(t, command)
+	if _, _, err := store.beginImportCheckpoint(context.Background(), raw, signature, importOtherPin); !errors.Is(err, ErrFenceReconciliation) {
+		t.Fatalf("upgraded journal accepted a foreign root: %v", err)
+	}
+	if scalar(t, store.db, `SELECT COUNT(*) FROM runner_commands`) != 1 {
+		t.Fatal("refused import wrote a command")
+	}
+	if _, _, err := store.beginImportCheckpoint(context.Background(), raw, signature, importDataPin); err != nil {
+		t.Fatalf("upgraded journal refused its own root: %v", err)
 	}
 }
