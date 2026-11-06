@@ -93,7 +93,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	defer func() { <-w.gate }()
 	ctx, cancel := context.WithTimeout(parent, platformInstallAttemptTimeout)
-	defer func() { cancel() }()
+	defer cancel()
+	bulkCtx, bulkCancel := context.WithTimeout(parent, platformImportAttemptTimeout)
+	defer bulkCancel()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -181,9 +183,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		return err
 	}
 	w.active = renewed
-	if timeout := platformAttemptTimeout(w.active); timeout != platformInstallAttemptTimeout {
-		cancel()
-		ctx, cancel = context.WithTimeout(parent, timeout)
+	if platformAttemptTimeout(w.active) == platformImportAttemptTimeout {
+		ctx = bulkCtx
 	}
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
