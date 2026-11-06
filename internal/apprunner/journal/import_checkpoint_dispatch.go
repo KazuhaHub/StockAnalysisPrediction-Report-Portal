@@ -206,7 +206,7 @@ func (s *Store) settleImportCheckpoint(ctx context.Context, intent importIntent,
 // ErrNoSuchEffect is returned only when the journal proves the effect was never
 // claimed; every other failure leaves the effect's fate unknown.
 func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
-	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature)
 	if err != nil {
 		return ImportCheckpointReceipt{}, err
 	}
@@ -220,7 +220,7 @@ func (s *Store) ReadImportCheckpointReceipt(ctx context.Context, raw, signature 
 // receipt, or an ImportCheckpointAbsence when the journal holds no command row for
 // the effect identity.
 func (s *Store) ReadImportCheckpointOrAbsence(ctx context.Context, raw, signature []byte) (any, error) {
-	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	receipt, absence, err := s.readImportCheckpointOrWaitForClaim(ctx, raw, signature)
 	if err != nil {
 		return nil, err
 	}
@@ -228,6 +228,22 @@ func (s *Store) ReadImportCheckpointOrAbsence(ctx context.Context, raw, signatur
 		return *absence, nil
 	}
 	return receipt, nil
+}
+
+// readImportCheckpointOrWaitForClaim is the read a caller outside a dispatch uses. A dispatch holds the
+// data execution gate from before its claim commits until it has settled, so a read that finds no row
+// may have overtaken a claim in progress. It therefore takes the gate before it reports an absence and
+// looks again: a claim that was racing it is then visible and the answer is unknown, not absent.
+func (s *Store) readImportCheckpointOrWaitForClaim(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	if err != nil || absence == nil {
+		return receipt, absence, err
+	}
+	if err := s.acquireDataExecution(ctx); err != nil {
+		return ImportCheckpointReceipt{}, nil, err
+	}
+	defer s.releaseDataExecution()
+	return s.readImportCheckpoint(ctx, raw, signature)
 }
 
 func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, *ImportCheckpointAbsence, error) {
@@ -337,7 +353,7 @@ func (s *Store) DispatchImportCheckpoint(ctx context.Context, raw, signature []b
 		return zero, fmt.Errorf("import state: %w", err)
 	}
 	if state == "applied" {
-		receipt, err := s.ReadImportCheckpointReceipt(ctx, raw, signature)
+		receipt, err := s.readImportReceiptHeld(ctx, raw, signature)
 		if err != nil {
 			return zero, err
 		}
@@ -373,7 +389,7 @@ func (s *Store) DispatchImportCheckpoint(ctx context.Context, raw, signature []b
 		return zero, fmt.Errorf("begin import: %w", err)
 	}
 	if replay {
-		return s.ReadImportCheckpointReceipt(ctx, raw, signature)
+		return s.readImportReceiptHeld(ctx, raw, signature)
 	}
 	request, err := importNativeRequest(intent)
 	if err != nil {
@@ -520,4 +536,16 @@ func loadImportedStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateSt
 		imported: &receipt, checkpointRaw: []byte(row.receipt),
 		checkpointSHA: p.SourceCheckpointReceiptSHA256, checkpointData: mustDataInt(receipt.ArchiveBytes),
 	}, nil
+}
+
+// readImportReceiptHeld reads a receipt while the caller already holds the data execution gate.
+func (s *Store) readImportReceiptHeld(ctx context.Context, raw, signature []byte) (ImportCheckpointReceipt, error) {
+	receipt, absence, err := s.readImportCheckpoint(ctx, raw, signature)
+	if err != nil {
+		return ImportCheckpointReceipt{}, err
+	}
+	if absence != nil {
+		return ImportCheckpointReceipt{}, ErrNoSuchEffect
+	}
+	return receipt, nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 )
 
 // The runner answers "no such effect" only when the journal proves no command row exists for the
@@ -73,4 +74,60 @@ func TestImportReadNeverReportsNoSuchEffectForAnyRow(t *testing.T) {
 			}
 		})
 	}
+}
+
+// An absence read must not overtake a claim in progress. A dispatch holds the data execution gate from
+// before its claim commits until it has settled, so a read that finds no row waits for the gate and
+// looks again: it then sees the claim and answers unknown, never absent.
+func TestImportAbsenceReadWaitsForTheExecutionGate(t *testing.T) {
+	store, _, raw, signature := importStoreFixture(t)
+	if err := store.acquireDataExecution(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			store.releaseDataExecution()
+		}
+	}
+	// A failing assertion must not leave the gate held, or the store's cleanup would wait on it.
+	defer release()
+	type answer struct {
+		result any
+		err    error
+	}
+	done := make(chan answer, 1)
+	go func() {
+		result, err := store.ReadImportCheckpointOrAbsence(context.Background(), raw, signature)
+		done <- answer{result, err}
+	}()
+	select {
+	case got := <-done:
+		t.Fatalf("an absence was reported while a dispatch held the gate: %#v %v", got.result, got.err)
+	case <-time.After(150 * time.Millisecond):
+	}
+	// The dispatch claims, then releases the gate.
+	if _, replay, err := store.beginImportCheckpoint(context.Background(), raw, signature, importDataPin); err != nil || replay {
+		t.Fatalf("claim: replay=%v err=%v", replay, err)
+	}
+	release()
+	got := <-done
+	if _, absent := got.result.(ImportCheckpointAbsence); absent || got.err == nil || errors.Is(got.err, ErrNoSuchEffect) {
+		t.Fatalf("a claimed effect read as absent: %#v %v", got.result, got.err)
+	}
+}
+
+func TestImportAbsenceReadAnswersOnceTheGateIsFree(t *testing.T) {
+	store, _, raw, signature := importStoreFixture(t)
+	if _, err := store.ReadImportCheckpointReceipt(context.Background(), raw, signature); !errors.Is(err, ErrNoSuchEffect) {
+		t.Fatalf("an unclaimed effect must be absent when the gate is free: %v", err)
+	}
+	// The gate is released again afterwards.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := store.acquireDataExecution(ctx); err != nil {
+		t.Fatalf("the absence read kept the gate: %v", err)
+	}
+	store.releaseDataExecution()
 }
