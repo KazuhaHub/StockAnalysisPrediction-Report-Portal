@@ -201,3 +201,34 @@ func TestTamperedV1SchemaNotUpgraded(t *testing.T) {
 		})
 	}
 }
+
+// The upgraded schema is inspected inside the upgrade transaction, so an inspection that fails leaves
+// the v1 file exactly as it was instead of a committed v2 journal nobody verified.
+func TestUpgradeFailingInspectionLeavesAV1Journal(t *testing.T) {
+	directory := v1Journal(t)
+	original := inspectUpgraded
+	inspectUpgraded = func(context.Context, querier, int) (int, error) { return 0, ErrIncompatible }
+	defer func() { inspectUpgraded = original }()
+	if store, err := Open(directory); err == nil {
+		store.Close()
+		t.Fatal("a journal whose upgrade failed inspection opened")
+	}
+	inspectUpgraded = original
+	raw, err := sql.Open(journalDriver, journalDSN(directory, "rw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer raw.Close()
+	if scalar(t, raw, `PRAGMA user_version`) != 1 || scalar(t, raw, `SELECT COUNT(*) FROM runner_commands`) != 3 ||
+		scalar(t, raw, `SELECT COUNT(*) FROM sqlite_schema WHERE name LIKE '%_v1'`) != 0 {
+		t.Fatal("a failed upgrade did not roll back to the v1 journal")
+	}
+	if _, err := inspectAt(context.Background(), raw, 1); err != nil {
+		t.Fatalf("the rolled-back journal is not a valid v1 journal: %v", err)
+	}
+	store, err := Open(directory)
+	if err != nil {
+		t.Fatalf("the v1 journal did not upgrade afterwards: %v", err)
+	}
+	store.Close()
+}

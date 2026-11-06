@@ -186,10 +186,19 @@ func inspect(ctx context.Context, db *sql.DB) (bool, error) {
 	return version == 0, err
 }
 
+// querier is the read side of a database handle or of a transaction on it.
+type querier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// inspectUpgraded is the inspection an upgrade runs on its own transaction before committing.
+var inspectUpgraded = inspectAt
+
 // inspectAt verifies the journal against the exact closed schema of the version
 // it declares and returns that version; zero means a blank database. Versions
 // above supported are refused, which is how an older binary treats a newer file.
-func inspectAt(ctx context.Context, db *sql.DB, supported int) (int, error) {
+func inspectAt(ctx context.Context, db querier, supported int) (int, error) {
 	var version int
 	if err := db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrCorrupt, err)
@@ -291,7 +300,7 @@ func inspectAt(ctx context.Context, db *sql.DB, supported int) (int, error) {
 	return version, nil
 }
 
-func checkDeployment(ctx context.Context, db *sql.DB) error {
+func checkDeployment(ctx context.Context, db querier) error {
 	var key []byte
 	var fingerprint string
 	err := db.QueryRowContext(ctx, `SELECT verification_key,key_fingerprint FROM runner_deployment WHERE singleton=1`).Scan(&key, &fingerprint)
@@ -400,11 +409,12 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
 		return err
 	}
-	if err := tx.Commit(); err != nil {
+	// Inspect the result before it can be committed: the transaction sees its own schema changes, and a
+	// failure here rolls back to the untouched v1 file.
+	if _, err := inspectUpgraded(ctx, tx, schemaVersion); err != nil {
 		return err
 	}
-	_, err = inspectAt(ctx, db, schemaVersion)
-	return err
+	return tx.Commit()
 }
 
 const runnerCommandColumns = "effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms"
