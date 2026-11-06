@@ -166,3 +166,45 @@ func TestCompletedOperationIsAModelState(t *testing.T) {
 		t.Fatal("generation zero produced a completed operation")
 	}
 }
+
+// An operation that ended recovery_required is settled to failed once every effect it left is known to be
+// reverted or never applied. Only that one transition leaves recovery_required, and the result must be
+// a state the model itself restores from a snapshot, whichever stage the failure came from.
+func TestSettleMovesRecoveryRequiredToFailed(t *testing.T) {
+	for _, action := range []Action{ActionRestoreImport, ActionRestore} {
+		managed := true
+		stages := operationStages(action, managed)
+		for index := 1; index < len(stages)-1; index++ {
+			op, err := NewOperation(action, managed, 3)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for step := 1; step <= index; step++ {
+				if op, err = op.Advance(op.Snapshot().Revision, stages[step]); err != nil {
+					t.Fatal(err)
+				}
+			}
+			unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+			if err != nil {
+				t.Fatal(err)
+			}
+			settled, err := unsettled.Settle(unsettled.Snapshot().Revision)
+			if err != nil || settled.Snapshot().Stage != StageFailed || settled.Snapshot().Revision != unsettled.Snapshot().Revision+1 {
+				t.Fatalf("%s from %s: %+v %v", action, stages[index], settled.Snapshot(), err)
+			}
+			if _, err := OperationFromSnapshot(settled.Snapshot()); err != nil {
+				t.Fatalf("%s from %s: the settled snapshot is not a model state: %v", action, stages[index], err)
+			}
+			if _, err := unsettled.Settle(unsettled.Snapshot().Revision + 1); !errors.Is(err, ErrRevisionConflict) {
+				t.Fatal("a stale settle was accepted")
+			}
+			if _, err := settled.Settle(settled.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatal("a failed operation was settled again")
+			}
+		}
+	}
+	live, _ := NewOperation(ActionRestoreImport, true, 3)
+	if _, err := live.Settle(live.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("an operation still in flight was settled")
+	}
+}

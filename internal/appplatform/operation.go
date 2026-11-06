@@ -88,8 +88,13 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 	valid := false
 	if snapshot.Stage == StageFailed || snapshot.Stage == StageRecoveryRequired {
 		// Failure follows one nonterminal state; it cannot precede queued or
-		// follow complete. State revisions do not include lease heartbeats.
-		valid = snapshot.Revision >= 2 && snapshot.Revision <= uint64(len(stages))
+		// follow complete. State revisions do not include lease heartbeats. A
+		// failure settled out of recovery_required is one transition later.
+		limit := uint64(len(stages))
+		if snapshot.Stage == StageFailed {
+			limit++
+		}
+		valid = snapshot.Revision >= 2 && snapshot.Revision <= limit
 	} else {
 		for index, stage := range stages {
 			if snapshot.Stage == stage && snapshot.Revision == uint64(index+1) {
@@ -142,6 +147,20 @@ func (o Operation) Fail(expectedRevision uint64, outcome EffectOutcome) (Operati
 		return Operation{}, ErrInvalidTransition
 	}
 	o.revision++
+	return o, nil
+}
+
+// Settle moves an operation that ended recovery_required to failed. It is the one transition that
+// leaves recovery_required, and it requires evidence the model cannot hold: every effect the operation
+// left must be known to be reverted or never applied. Anything else keeps the operation recovery_required.
+func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	if o.stage != StageRecoveryRequired {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageFailed, o.revision+1
 	return o, nil
 }
 
