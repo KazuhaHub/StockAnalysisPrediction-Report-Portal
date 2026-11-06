@@ -39,7 +39,7 @@ func TestRunnerCommandVectors(t *testing.T) {
 	if hex.EncodeToString(sum[:]) != commandCorpusSHA256 {
 		t.Fatal("runner command corpus drift")
 	}
-	if len(corpus.Cases) != 48 {
+	if len(corpus.Cases) != 50 {
 		t.Fatalf("unexpected case count: %d", len(corpus.Cases))
 	}
 	for _, c := range corpus.Cases {
@@ -71,4 +71,4 @@ func TestRunnerCommandVectors(t *testing.T) {
 	}
 }
 
-const commandCorpusSHA256 = "6134a1b6cf5e7a5b4fb86ae6cf20860a118da05320dc9c01ac22c46340295d80"
+const commandCorpusSHA256 = "18c1e4d2d222df1609c57e34bb0bb39de8962a8da18e7336d3ce9e2b209f10e7"

@@ -43,11 +43,88 @@ type platformRuntimeObservation struct {
 // transactionally. It confirms enrollment authority, not native compatibility or
 // app execution readiness. Managed admission still refuses unsupported runtimes.
 func (s *Server) confirmPlatformRuntimeBinding(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, false)
+}
+
+// confirmPlatformReplacementRuntime is the same confirmation for a replacement enrolled in recovery
+// mode. The two differ only in which pause state they require.
+//
+// Once the binding is enabled the runner is asked for its profile, and the data root it reports is
+// recorded. A replacement whose root is one an abandoned runtime's import landed on is refused: the
+// binding stays enabled so that it can be abandoned in its turn, but nothing is imported onto it.
+func (s *Server) confirmPlatformReplacementRuntime(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint) (platformRuntimeRegistration, error) {
+	confirmed, err := s.confirmPlatformRuntimeBindingMode(ctx, session, expected, endpoint, true)
+	if err != nil {
+		return confirmed, err
+	}
+	if err := s.completePlatformReplacementRoot(ctx, session, confirmed.id, endpoint); err != nil {
+		return platformRuntimeRegistration{}, err
+	}
+	return confirmed, nil
+}
+
+// completePlatformReplacementRoot asks the enabled replacement runner for its profile and records the data
+// root it reports.
+func (s *Server) completePlatformReplacementRoot(ctx context.Context, session platformActorSession, runtimeID string, endpoint platformRuntimeEndpoint) error {
+	target, err := s.platformRecoveryResumeTarget(ctx, session, endpoint)
+	if err != nil {
+		return err
+	}
+	if target == nil || target.RuntimeID != runtimeID {
+		return errAppPlatformRuntimeConflict
+	}
+	return s.recordPlatformReplacementRoot(session, runtimeID, target.Profile.RootFilesystemUUID, target.Profile.RootInode)
+}
+
+// platformReplacementAwaitingRoot finds a replacement for the deployment that was enabled but whose root
+// was never recorded, because the profile call of its confirm failed. A repeated confirm completes it.
+func (s *Server) platformReplacementAwaitingRoot(session platformActorSession, deployment string) (platformRuntimeRegistration, bool, error) {
+	var result platformRuntimeRegistration
+	found := false
+	err := s.withPlatformRecoveryTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+		row, ok, retired, err := platformActiveRuntime(e, true)
+		if err != nil {
+			return err
+		}
+		if !ok || len(retired) == 0 || row.enabled != 1 || row.revision != 2 || row.deploymentID != deployment {
+			return nil
+		}
+		dek, err := s.dek()
+		if err != nil {
+			return err
+		}
+		current, seed, err := s.platformDataRuntime(e, control.epoch, dek)
+		clear(seed)
+		if err != nil {
+			return err
+		}
+		root, recorded, err := loadPlatformReplacementRoot(e)
+		if err != nil {
+			return err
+		}
+		if recorded && root.RuntimeID == current.id {
+			return nil
+		}
+		result, found = current, true
+		_, err = platformRefreshActor(e, session, actor, control)
+		return err
+	})
+	return result, found, err
+}
+
+func (s *Server) platformRuntimeTransaction(recovery bool) func(platformActorSession, func(migExec, platformActorFacts, platformActorControl) error) error {
+	if recovery {
+		return s.withPlatformRecoveryTransaction
+	}
+	return s.withPlatformTrustTransaction
+}
+
+func (s *Server) confirmPlatformRuntimeBindingMode(ctx context.Context, session platformActorSession, expected platformRuntimeRegistration, endpoint platformRuntimeEndpoint, recovery bool) (platformRuntimeRegistration, error) {
 	if endpoint.path == "" || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0) {
 		return platformRuntimeRegistration{}, errAppPlatformRuntimeConflict
 	}
 	expected.publicKey = bytes.Clone(expected.publicKey)
-	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.platformRuntimeTransaction(recovery)(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		if _, err := s.platformRuntimeForConfirmation(e, expected, control); err != nil {
 			return err
 		}
@@ -57,14 +134,18 @@ func (s *Server) confirmPlatformRuntimeBinding(ctx context.Context, session plat
 	if err != nil {
 		return platformRuntimeRegistration{}, err
 	}
-	observation, err := platformObserveRuntimeEndpoint(ctx, endpoint)
+	observe := platformObserveRuntimeEndpoint
+	if s.platformObserveRuntime != nil {
+		observe = s.platformObserveRuntime
+	}
+	observation, err := observe(ctx, endpoint)
 	if err != nil {
 		return platformRuntimeRegistration{}, err
 	}
 	if err := ctx.Err(); err != nil {
 		return platformRuntimeRegistration{}, err
 	}
-	return s.confirmPlatformObservedRuntime(session, expected, observation)
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, recovery)
 }
 
 func (s *Server) platformRuntimeForConfirmation(e migExec, expected platformRuntimeRegistration, control platformActorControl) (platformRuntimeRegistration, error) {
@@ -83,15 +164,16 @@ func (s *Server) platformRuntimeForConfirmation(e migExec, expected platformRunt
 	if err != nil {
 		return zero, platformLeaseReadError(err)
 	}
-	var total int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_runtime_bindings`).Scan(&total); err != nil {
+	// The binding in force must be this one. Retired rows beside it are history, not competitors.
+	active, found, _, err := platformActiveRuntime(e, false)
+	if err != nil {
 		return zero, err
 	}
 	now, err := platformDatabaseNow(e)
 	if err != nil {
 		return zero, err
 	}
-	if total != 1 || updated > now {
+	if !found || active.id != expected.id || updated > now {
 		return zero, errAppPlatformRuntimeConflict
 	}
 	if current.deploymentID != expected.deploymentID || current.controllerEpoch != expected.controllerEpoch || current.controlRevision != expected.controlRevision || !((current.revision == 1 && enabled == 0) || (current.revision == 2 && enabled == 1)) || !pin.Valid || pin.String != expected.fingerprint || !sealed.Valid || !strings.HasPrefix(sealed.String, sealPrefix) || created < 0 || updated < created {
@@ -123,10 +205,18 @@ func validPlatformRuntimeObservation(expected platformRuntimeRegistration, obser
 // private value to exercise database fences; management handlers must use the
 // endpoint entry point above and must never accept an observation from a body.
 func (s *Server) confirmPlatformObservedRuntime(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, false)
+}
+
+func (s *Server) confirmPlatformObservedReplacementRuntime(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation) (platformRuntimeRegistration, error) {
+	return s.confirmPlatformObservedRuntimeMode(session, expected, observation, true)
+}
+
+func (s *Server) confirmPlatformObservedRuntimeMode(session platformActorSession, expected platformRuntimeRegistration, observation platformRuntimeObservation, recovery bool) (platformRuntimeRegistration, error) {
 	var result, zero platformRuntimeRegistration
 	expected.publicKey = bytes.Clone(expected.publicKey)
 	observation.controller.PublicKey = bytes.Clone(observation.controller.PublicKey)
-	err := s.withPlatformTrustTransaction(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
+	err := s.platformRuntimeTransaction(recovery)(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		current, err := s.platformRuntimeForConfirmation(e, expected, control)
 		if err != nil {
 			return err

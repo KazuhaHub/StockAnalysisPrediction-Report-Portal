@@ -153,6 +153,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 	var encoded []byte
 	var actualDeclined []byte
 	var enableAudienceSHA, enableGrantsSHA string
+	var grantsRebase int64
 	switch action {
 	case "install":
 		if generation != 1 || policy != 1 {
@@ -185,8 +186,17 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 			return fail
 		}
 		var p platformFrontendEnablePlan
-		if json.Unmarshal([]byte(plan), &p) != nil ||
-			p.Format != platformFrontendEnableFormat {
+		if json.Unmarshal([]byte(plan), &p) != nil {
+			return fail
+		}
+		// A recovery resume is an enable of a restored installation: it starts from review_required and
+		// is committed already ready, where an ordinary enable starts disabled and is committed pending.
+		sourcePhase, targetPhase := "disabled", "pending"
+		switch p.Format {
+		case platformFrontendEnableFormat:
+		case platformFrontendResumeFormat:
+			sourcePhase, targetPhase = "review_required", "ready"
+		default:
 			return fail
 		}
 		encoded, _ = json.Marshal(p)
@@ -204,9 +214,9 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 			p.DeclaredDataSchema != int64(manifest.Data.Schema) ||
 			p.FrontendSHA256 != manifest.Frontend.SHA256 ||
 			p.SourceDesiredState != "disabled" ||
-			p.SourcePhase != "disabled" ||
+			p.SourcePhase != sourcePhase ||
 			p.TargetDesiredState != "enabled" ||
-			p.TargetPhase != "pending" ||
+			p.TargetPhase != targetPhase ||
 			p.SourceRuntimeRequired ||
 			p.DataEffect != "preserve" ||
 			!platformValidSHA(p.GrantsSHA256) ||
@@ -216,6 +226,9 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		}
 		enableAudienceSHA, enableGrantsSHA =
 			p.AudienceSHA256, p.GrantsSHA256
+		if p.Format == platformFrontendResumeFormat {
+			grantsRebase = p.SourcePolicyRevision
+		}
 	default:
 		return fail
 	}
@@ -229,7 +242,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		return fail
 	}
 	if action == "enable" {
-		grantsSHA, err := platformRemovalGrantsDigest(e, installation)
+		grantsSHA, err := platformRemovalGrantsDigestAt(e, installation, grantsRebase)
 		if err != nil || grantsSHA != enableGrantsSHA ||
 			audienceSHA != enableAudienceSHA {
 			return fail

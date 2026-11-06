@@ -81,6 +81,13 @@ func loadPlatformCheckpointSourceForEnableReview(e migExec, expected platformOpe
 }
 
 func loadPlatformCheckpointSourceMode(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, now int64, allowDisabled bool, expectedPending int) (platformCheckpointSource, error) {
+	if expected.snapshot.Action == appplatform.ActionRestore && !allowDisabled {
+		if resume, err := platformOperationIsResume(e, expected.id); err != nil {
+			return platformCheckpointSource{}, err
+		} else if resume {
+			return loadPlatformResumeCheckpointSource(e, expected, runtime)
+		}
+	}
 	var action string
 	if err := e.queryRow(`SELECT action FROM app_platform_operations
 		WHERE installation_id=?

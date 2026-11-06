@@ -23,3 +23,9 @@ func platformExecuteUpdateStart(context.Context, platformRuntimeEndpoint, platfo
 func platformProbeUpdateStart(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (transport.WritableLifecycleObservation, error) {
 	return transport.WritableLifecycleObservation{}, errAppPlatformRuntimeConflict
 }
+
+// The runner's start read-receipt needs the Linux lifecycle transport. Elsewhere the endpoint refuses, so a
+// Portal can never settle a start it did not read.
+func platformReadUpdateStartReceipt(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+	return nil, errAppPlatformRuntimeConflict
+}

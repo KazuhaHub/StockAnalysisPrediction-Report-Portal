@@ -15,6 +15,7 @@ import (
 
 const UpdateStartFormat = "portal.runner.data-update-start-command/1-dev.1"
 const updateStartSignaturePurpose = "portal.app/runner-data-update-start-command/v1"
+const updateStartReadPurpose = "portal.app/runner-data-update-start-read/v1"
 const updateStartEffectPurpose = "portal.app/runner-data-update-start-effect/v1"
 const maxUpdateStartArchiveBytes int64 = 512 << 20
 
@@ -197,6 +198,29 @@ func parseUpdateStart(raw []byte) (UpdateStartCommand, error) {
 }
 
 func VerifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64) (VerifiedUpdateStartCommand, error) {
+	return verifyUpdateStart(raw, signature, authority, nowMS, updateStartSignaturePurpose)
+}
+
+// VerifyUpdateStartRead checks a read-receipt command. It is signed under its own purpose and valid for
+// the same window as any command, so a captured read cannot be submitted as an execute and an execute
+// signature is not a read.
+func VerifyUpdateStartRead(raw, signature []byte, authority Authority, nowMS int64) (VerifiedUpdateStartCommand, error) {
+	return verifyUpdateStart(raw, signature, authority, nowMS, updateStartReadPurpose)
+}
+
+// SignUpdateStartRead signs the exact bytes of an update-start command for a read-receipt.
+func SignUpdateStartRead(raw []byte, key ed25519.PrivateKey, authority Authority, nowMS int64) ([]byte, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return nil, ErrInvalidCommand
+	}
+	signature := ed25519.Sign(key, frame(updateStartReadPurpose, raw))
+	if _, err := VerifyUpdateStartRead(raw, signature, authority, nowMS); err != nil {
+		return nil, err
+	}
+	return signature, nil
+}
+
+func verifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64, purpose string) (VerifiedUpdateStartCommand, error) {
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 ||
 		nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return VerifiedUpdateStartCommand{}, fmt.Errorf(
@@ -243,7 +267,7 @@ func VerifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64) 
 		return VerifiedUpdateStartCommand{}, fmt.Errorf(
 			"update-start payload digest: %w", ErrInvalidCommand)
 	}
-	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(updateStartSignaturePurpose, raw), signature) {
+	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(purpose, raw), signature) {
 		return VerifiedUpdateStartCommand{}, fmt.Errorf(
 			"update-start signature: %w", ErrInvalidCommand)
 	}

@@ -179,6 +179,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_plan_changed"
 	case errors.Is(err, errAppPlatformOperationConflict):
 		status, code = 409, "app_platform_operation_conflict"
+	case errors.Is(err, errAppPlatformRecoveryUnsettled):
+		status, code = 409, "app_platform_recovery_unsettled"
 	case errors.Is(err, errAppPlatformCredentialUnavailable):
 		status, code = 409, "app_platform_credential_unavailable"
 	case errors.Is(err, errAppPlatformReleaseConflict), errors.Is(err, errAppPlatformTrustConflict):
@@ -317,7 +319,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		}
 	} else if action != "disable" && action != "uninstall" && action != "enable" &&
 		action != "repair" && action != "restore" &&
-		action != "delete_data" {
+		action != "delete_data" && !platformRecoveryAction(action) {
 		platformManagementError(w, errPlatformManagementInput)
 		return
 	}
@@ -333,6 +335,21 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	defer releaseSlot()
 	n, _ := strconv.ParseInt(revision, 10, 64)
 	switch action {
+	case "restore_import", "resume", "recovery_disable", "frontend_resume":
+		installation, installationErr := platformManagementString(fields, "installation_id")
+		recoverySetID, recoveryErr := platformManagementString(fields, "recovery_set_id")
+		want := 2
+		if action == "restore_import" {
+			want = 3
+		} else {
+			recoverySetID, recoveryErr = "", nil
+		}
+		if len(fields) != want || installationErr != nil || recoveryErr != nil || !platformValidUUID(installation) ||
+			(action == "restore_import" && !platformValidUUID(recoverySetID)) {
+			platformManagementError(w, errPlatformManagementInput)
+			return
+		}
+		s.apiPlatformRecoveryPlan(w, r, actor, action, map[string]string{"installation_id": installation, "recovery_set_id": recoverySetID})
 	case "install":
 		if len(fields) != 4 || fields["audience"] == nil || fields["installation_id"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
@@ -618,6 +635,7 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var result platformRemovalCommit
+	var recovery bool
 	switch action {
 	case "install":
 		format, formatErr := platformParseInstallProfile(planRaw)
@@ -642,11 +660,21 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		result, err = s.consumePlatformUpdateReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "disable", "uninstall":
+		if platformPlanIsRecoveryDisable(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRecoveryReview(r.Context(), actor, platformRecoveryDisableKind, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformRemovalReviewContext(r.Context(), actor, id, sha, key)
 	case "delete_data":
 		result, err = s.consumePlatformDeleteDataReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "enable":
+		if platformPlanIsFrontendResume(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRecoveryReview(r.Context(), actor, platformFrontendResumeKind, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformFrontendEnableReviewContext(
 			r.Context(), actor, id, sha, key)
 	case "repair":
@@ -658,12 +686,26 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 		result, err = s.consumePlatformManagedRepairReviewContext(
 			r.Context(), actor, id, sha, key, endpoint)
 	case "restore":
+		if platformPlanIsResume(planRaw) {
+			recovery = true
+			result, err = s.consumePlatformRestoreResumeReview(
+				r.Context(), actor, id, sha, key)
+			break
+		}
 		result, err = s.consumePlatformManagedRestoreReview(
+			r.Context(), actor, id, sha, key)
+	case "restore_import":
+		recovery = true
+		result, err = s.consumePlatformRestoreImportReview(
 			r.Context(), actor, id, sha, key)
 	default:
 		err = errAppPlatformPlanChanged
 	}
 	if err != nil {
+		if recovery {
+			platformRecoveryError(w, err)
+			return
+		}
 		platformManagementError(w, err)
 		return
 	}

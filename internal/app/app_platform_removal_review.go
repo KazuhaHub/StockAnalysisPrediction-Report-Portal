@@ -43,6 +43,10 @@ type platformRemovalProjection struct {
 	GrantsSHA256         string               `json:"grants_sha256"`
 	DataEffect           string               `json:"data_effect"`
 	Data                 *platformRemovalData `json:"data"`
+	// PortalSide marks the uninstall of a disabled managed installation whose runtime binding was
+	// retired by a restore. Its code and data lived on a host that is gone, so the removal changes
+	// Portal rows only and calls no runner.
+	PortalSide bool `json:"portal_side,omitempty"`
 }
 
 type platformRemovalData struct {
@@ -85,8 +89,15 @@ func platformValidSHA(s string) bool {
 }
 
 func platformRemovalGrantsDigest(e migExec, installation string) (string, error) {
+	return platformRemovalGrantsDigestAt(e, installation, 0)
+}
+
+// platformRemovalGrantsDigestAt is the grants digest with every capability row read as if it sat at
+// policy revision rebase (when positive). A recovery resume carries the rows to the resumed revision
+// when it commits, so its review and its later verification both digest the rows at that revision.
+func platformRemovalGrantsDigestAt(e migExec, installation string, rebase int64) (string, error) {
 	h := sha256.New()
-	for _, q := range []string{
+	for queryIndex, q := range []string{
 		`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`,
 		`SELECT id,principal_type,username,account_created,account_generation,group_id,group_created,revision FROM app_platform_access_grants WHERE installation_id=? ORDER BY id`,
 		`SELECT id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,revoked_ms FROM app_platform_secret_bindings WHERE installation_id=? ORDER BY id`,
@@ -117,6 +128,9 @@ func platformRemovalGrantsDigest(e migExec, installation string) (string, error)
 				if text, ok := value.([]byte); ok {
 					values[index] = string(text)
 				}
+			}
+			if queryIndex == 0 && rebase > 0 {
+				values[3] = rebase
 			}
 			raw, err := json.Marshal(values)
 			if err != nil {
@@ -204,6 +218,14 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 	p.GrantsSHA256, err = platformRemovalGrantsDigest(e, id)
 	if err != nil {
 		return p, err
+	}
+	if runtime.Valid && action == appplatform.ActionUninstall && p.Phase == "disabled" {
+		var enabled int
+		var sealed, pin sql.NullString
+		if err := e.queryRow(`SELECT enabled,sealed_control_key,verification_key_fingerprint FROM app_platform_runtime_bindings WHERE id=?`, runtime.String).Scan(&enabled, &sealed, &pin); err != nil {
+			return p, err
+		}
+		p.PortalSide = enabled == 0 && !sealed.Valid && !pin.Valid
 	}
 	p.Format, p.InstallationID, p.Action, p.Managed, p.TargetGeneration, p.ActorAuthority = "portal.removal-review/1", id, action, runtime.Valid, p.Generation+1, actor.authorityFingerprint
 	p.DataEffect = "preserve"
@@ -385,6 +407,9 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 		desired, phase := "disabled", "disabled"
 		if action == appplatform.ActionUninstall {
 			desired, phase = "removed", "pending"
+			if p.PortalSide {
+				phase = "removed"
+			}
 		}
 		updated, err := e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND plan_sha256=? AND expires_ms>?`, control.nowMS, control.nowMS, planID, planSHA, control.nowMS)
 		if err := platformLeaseCAS(updated, err); err != nil {
@@ -433,6 +458,32 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 				return err
 			}
 		}
+		if p.PortalSide {
+			// Recorded as one transition, already complete: there is no runner stage to run.
+			snapshot, err := appplatform.CompletedOperation(action, p.Managed, uint64(p.TargetGeneration))
+			if err != nil {
+				return errAppPlatformPlanChanged
+			}
+			if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
+				source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
+				VALUES(?,?,?,?,?,?,?,?,?,?,'complete',?,1,NULL,NULL,0,?,NULL,?,?,?)`, id, p.InstallationID, planID, actor.scope, keyDigest, requestDigest, string(action),
+				boolInt(p.Managed), p.Generation, p.TargetGeneration, int64(snapshot.Revision), control.epoch, control.nowMS, control.nowMS, control.nowMS); err != nil {
+				return err
+			}
+			if err := settlePlatformPortalSideUninstall(e, p.InstallationID, control.nowMS); err != nil {
+				return err
+			}
+			detail, _ := json.Marshal(struct {
+				Plan      string `json:"plan_id"`
+				RuntimeID string `json:"runtime_id"`
+			}{planID, p.RuntimeID})
+			if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.portal_side_uninstall','app_platform_installation',?,?,'')`,
+				time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, p.InstallationID, string(detail)); err != nil {
+				return err
+			}
+			result = platformRemovalCommit{OperationID: id, InstallationID: p.InstallationID, Generation: p.TargetGeneration, Revision: int64(snapshot.Revision), Stage: appplatform.StageComplete}
+			return nil
+		}
 		_, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
             source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
             VALUES(?,?,?,?,?,?,?,?,?,?,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, id, p.InstallationID, planID, actor.scope, keyDigest, requestDigest, string(action), boolInt(p.Managed), p.Generation, p.TargetGeneration, control.epoch, control.nowMS, control.nowMS)
@@ -454,4 +505,27 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 		return platformRemovalCommit{}, err
 	}
 	return result, nil
+}
+
+// settlePlatformPortalSideUninstall retires what a removed installation leaves behind in the Portal when
+// no runner can be asked to: its data namespaces and recovery sets (whose bytes live on a host that is
+// gone) are recorded as deleted, and its grants are dropped.
+func settlePlatformPortalSideUninstall(e migExec, installation string, now int64) error {
+	for _, q := range []string{
+		`UPDATE app_platform_recovery_sets SET state='deleted',deleted_ms=?,updated_ms=? WHERE installation_id=? AND state<>'deleted'`,
+		`UPDATE app_platform_data_namespaces SET state='deleted',owner_installation_id=NULL,deleted_ms=?,revision=revision+1,updated_ms=? WHERE origin_installation_id=? AND state<>'deleted'`,
+	} {
+		if _, err := e.exec(q, now, now, installation); err != nil {
+			return err
+		}
+	}
+	for _, q := range []string{
+		`DELETE FROM app_platform_capability_grants WHERE installation_id=?`,
+		`DELETE FROM app_platform_access_grants WHERE installation_id=?`,
+	} {
+		if _, err := e.exec(q, installation); err != nil {
+			return err
+		}
+	}
+	return nil
 }

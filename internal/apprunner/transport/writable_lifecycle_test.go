@@ -668,7 +668,7 @@ func TestWritableLifecycleUpdateStartRunningReceipt(t *testing.T) {
 		t.Fatal("parse running receipt", err)
 	}
 	for _, action := range []WritableLifecycleAction{UpdateStartExecute, UpdateStartReceipt} {
-		ref, err := verifyWritableLifecycle(action, raw, sig, descriptor, a, now)
+		ref, err := verifyWritableLifecycle(action, raw, lifecycleSignature(t, action, a, raw, sig), descriptor, a, now)
 		if err != nil || ref.updateStart.EffectID != command.EffectID {
 			t.Fatal("update-start running reference", action, err)
 		}

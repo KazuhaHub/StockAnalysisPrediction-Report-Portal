@@ -67,6 +67,9 @@ type platformUpdateStartIntent struct {
 	readiness            *journal.UpdateStartReadiness
 	activationObserved   int64
 	raw, signature       []byte
+	// readSignature signs raw as a read-receipt, under its own purpose. It is set only where a read of the
+	// effect is expected.
+	readSignature []byte
 }
 
 func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, source platformCheckpointSource) (platformManagedUpdatePlan, []byte, error) {
@@ -473,6 +476,17 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		startKind = platformSameReleaseStartKind(expected.snapshot.Action)
 	}
+	// A completed recovery resume is read back through the same start evidence; its start is the
+	// restore start, built from the imported checkpoint rather than a snapshot.
+	restore := expected.snapshot.Action == appplatform.ActionRestore
+	checkpointRaw := []byte(mustMarshalPlatformCheckpointReceipt(checkpoint))
+	if restore {
+		startKind = "restore-start"
+		var err error
+		if checkpointRaw, err = loadPlatformRestoreCheckpointRaw(e, expected, checkpoint); err != nil {
+			return zero, err
+		}
+	}
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR UPDATE"
@@ -521,8 +535,16 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 	}
 	effectLease := expected
 	effectLease.fence = admitted
-	command, err := platformUpdateStartCommand(
-		effectLease, runtime, source, checkpoint, plan, activation, effectID)
+	var command control.UpdateStartCommand
+	var err error
+	if restore {
+		command, err = platformRestoreStartCommand(
+			effectLease, runtime, source, checkpoint, checkpointRaw,
+			activation, effectID, plan.TargetPolicyRevision)
+	} else {
+		command, err = platformUpdateStartCommand(
+			effectLease, runtime, source, checkpoint, plan, activation, effectID)
+	}
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, fmt.Errorf(
 			"update-start activation start digest: %w",
@@ -575,7 +597,7 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 			PublicKey:       bytes.Clone(runtime.publicKey), Fingerprint: runtime.fingerprint,
 		},
 		command: command, checkpoint: checkpoint,
-		checkpointRaw: []byte(mustMarshalPlatformCheckpointReceipt(checkpoint)),
+		checkpointRaw: checkpointRaw,
 		source:        source, plan: plan,
 		targetDescriptor: bytes.Clone(source.descriptor),
 		reservation:      &reservation, running: &running, readiness: &readiness,

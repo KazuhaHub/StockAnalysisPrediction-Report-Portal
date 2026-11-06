@@ -202,6 +202,32 @@ func (s *Server) apiPlatformControlInitialize(w http.ResponseWriter, r *http.Req
 	writeJSON(w, map[string]bool{"initialized": true})
 }
 
+// apiPlatformEndRecovery ends the restore pause once every installation is resumed or disabled and no
+// import or resume is in flight. It resumes nothing itself: notifications and tasks stay paused until
+// their own reviews.
+func (s *Server) apiPlatformEndRecovery(w http.ResponseWriter, r *http.Request, user string) {
+	fields, err := platformManagementRead(w, r, "action")
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	action, err := platformManagementString(fields, "action")
+	if err != nil || action != "end_recovery" {
+		platformManagementError(w, errPlatformManagementInput)
+		return
+	}
+	actor, err := s.platformHTTPReader(r, user)
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	if err := s.endPlatformRecoveryContext(r.Context(), actor); err != nil {
+		platformRecoveryError(w, err)
+		return
+	}
+	writeJSON(w, map[string]bool{"ended": true})
+}
+
 type platformPublisherDirectory struct {
 	Initialized bool                           `json:"initialized"`
 	Paused      bool                           `json:"paused"`

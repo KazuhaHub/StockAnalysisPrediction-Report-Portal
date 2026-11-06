@@ -182,7 +182,9 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 	}
 	if (phase == "review_required" &&
 		action != string(appplatform.ActionDeleteData) &&
-		action != string(appplatform.ActionRepair)) ||
+		action != string(appplatform.ActionRepair) &&
+		action != string(appplatform.ActionRestoreImport)) ||
+		(action == string(appplatform.ActionRestoreImport) && phase != "review_required") ||
 		phase == "quarantined" ||
 		(phase == "recovery_required" &&
 			action != string(appplatform.ActionRestore) &&
@@ -196,8 +198,12 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 	if (action == string(appplatform.ActionInstall)) != (source == 0) || source == math.MaxInt64 || target != source+1 || (generation != source && generation != target) || controlFence < lease.fence {
 		return zero, errAppPlatformLeaseConflict
 	}
+	pausedValue, err := platformPausedValueFor(e, id, appplatform.Action(action))
+	if err != nil {
+		return zero, err
+	}
 	for _, setting := range []struct{ key, value string }{
-		{"app_platform_restore_paused", "0"},
+		{"app_platform_restore_paused", pausedValue},
 		{"app_platform_controller_epoch", epoch},
 	} {
 		var value string
@@ -221,6 +227,25 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 		return zero, errAppPlatformLeaseConflict
 	}
 	return platformLeaseFacts{lease: lease, installationRevision: installationRevision, controlFence: controlFence, now: now}, nil
+}
+
+// platformPausedValueFor is the value the restore pause must hold for an operation to be leased or to
+// commit. The recovery operations, a restore import and a per-installation resume, exist only while the
+// Portal is paused, and every other action only while it is not.
+func platformPausedValueFor(e migExec, operation string, action appplatform.Action) (string, error) {
+	switch action {
+	case appplatform.ActionRestoreImport:
+		return "1", nil
+	case appplatform.ActionRestore:
+		resume, err := platformOperationIsResume(e, operation)
+		if err != nil {
+			return "", err
+		}
+		if resume {
+			return "1", nil
+		}
+	}
+	return "0", nil
 }
 
 func platformLeaseReadError(err error) error {
@@ -313,8 +338,12 @@ func platformOperationControlTime(e migExec, facts platformLeaseFacts) (int64, e
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE"
 	}
+	pausedValue, err := platformPausedValueFor(e, facts.lease.id, facts.lease.snapshot.Action)
+	if err != nil {
+		return 0, err
+	}
 	for _, setting := range []struct{ key, value string }{
-		{"app_platform_restore_paused", "0"},
+		{"app_platform_restore_paused", pausedValue},
 		{"app_platform_controller_epoch", facts.lease.controllerEpoch},
 	} {
 		var value string

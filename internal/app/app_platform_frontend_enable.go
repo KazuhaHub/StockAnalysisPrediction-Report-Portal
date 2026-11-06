@@ -46,6 +46,15 @@ type platformFrontendEnablePlan struct {
 }
 
 func platformLoadFrontendEnablePlan(e migExec, installation string, action appplatform.Action, actor platformActorFacts, control platformActorControl) (platformFrontendEnablePlan, error) {
+	return platformLoadFrontendEnablePlanMode(e, installation, action, actor, control, false)
+}
+
+// platformLoadFrontendEnablePlanMode is the enable plan for either a disabled installation (recovery
+// false) or a restored one awaiting review (recovery true). A restore raises the policy revision above
+// the retired activation's and disables every publisher, so the recovery variant accepts an older
+// activation policy and verifies the release against the publishers recorded as trusted before the
+// restore instead of the (all disabled) live ones.
+func platformLoadFrontendEnablePlanMode(e migExec, installation string, action appplatform.Action, actor platformActorFacts, control platformActorControl, recovery bool) (platformFrontendEnablePlan, error) {
 	var p platformFrontendEnablePlan
 	if !platformValidUUID(installation) || action != appplatform.ActionEnable {
 		return p, errAppPlatformPlanChanged
@@ -66,8 +75,12 @@ func platformLoadFrontendEnablePlan(e migExec, installation string, action apppl
 		}
 		return p, err
 	}
+	sourcePhase := "disabled"
+	if recovery {
+		sourcePhase = "review_required"
+	}
 	if runtime.Valid || p.ControllerEpoch != control.epoch ||
-		p.SourceDesiredState != "disabled" || p.SourcePhase != "disabled" ||
+		p.SourceDesiredState != "disabled" || p.SourcePhase != sourcePhase ||
 		p.SourceGeneration < 1 || p.SourceGeneration == math.MaxInt64 ||
 		p.InstallationRevision == math.MaxInt64 || p.SourcePolicyRevision < 1 ||
 		p.SourcePolicyRevision == math.MaxInt64 || fence == math.MaxInt64 {
@@ -117,7 +130,8 @@ func platformLoadFrontendEnablePlan(e migExec, installation string, action apppl
 		!platformValidUUID(p.SourceActivationID) ||
 		p.SourceActivationGeneration < 1 ||
 		p.SourceActivationGeneration >= p.SourceGeneration ||
-		activationPolicy != p.SourcePolicyRevision {
+		(!recovery && activationPolicy != p.SourcePolicyRevision) ||
+		(recovery && activationPolicy > p.SourcePolicyRevision) {
 		return p, fmt.Errorf("frontend enable source activation: %w",
 			errAppPlatformPlanChanged)
 	}
@@ -127,6 +141,11 @@ func platformLoadFrontendEnablePlan(e migExec, installation string, action apppl
 	trust, err := loadPlatformPublisherTrust(e)
 	if err != nil {
 		return p, err
+	}
+	if recovery {
+		if trust, err = platformRecoveryTrust(e, trust); err != nil {
+			return p, err
+		}
 	}
 	verified, err := platformVerifyStoredRelease(
 		e, p.SourceReleaseSHA256, p.TrustRevision, trust, control.nowMS)
@@ -167,16 +186,26 @@ func platformLoadFrontendEnablePlan(e migExec, installation string, action apppl
 	if err != nil {
 		return p, fmt.Errorf("frontend enable audience: %w", err)
 	}
-	p.GrantsSHA256, err = platformRemovalGrantsDigest(e, installation)
+	rebase := int64(0)
+	if recovery {
+		rebase = p.SourcePolicyRevision
+	}
+	p.GrantsSHA256, err = platformRemovalGrantsDigestAt(e, installation, rebase)
 	if err != nil {
 		return p, fmt.Errorf("frontend enable grants: %w", err)
 	}
 	p.Format = platformFrontendEnableFormat
+	if recovery {
+		p.Format = platformFrontendResumeFormat
+	}
 	p.InstallationID, p.Action = installation, action
 	p.TargetGeneration, p.TargetPolicyRevision = p.SourceGeneration+1, p.SourcePolicyRevision
 	p.ActorAuthority = actor.authorityFingerprint
 	p.SourceRuntimeRequired = false
 	p.TargetDesiredState, p.TargetPhase = "enabled", "pending"
+	if recovery {
+		p.TargetPhase = "ready"
+	}
 	p.DataEffect = "preserve"
 	return p, nil
 }

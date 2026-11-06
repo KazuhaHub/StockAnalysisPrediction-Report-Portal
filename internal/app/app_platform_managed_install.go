@@ -144,6 +144,15 @@ func platformManagedTargetForOperation(e migExec, operation string) (*platformMa
 			return nil, err
 		}
 		return plan.TargetRuntime, nil
+	case platformRestoreResumeFormat:
+		var resume platformRestoreResumePlan
+		if json.Unmarshal([]byte(raw), &resume) != nil || resume.Format != probe.Format || resume.Target == nil {
+			return nil, errAppPlatformStageEvidence
+		}
+		if err := validateManagedInstallTarget(e, resume.Target, resume.ControllerEpoch); err != nil {
+			return nil, err
+		}
+		return resume.Target, nil
 	case platformManagedRestoreFormat:
 		var restore platformManagedRestorePlan
 		if json.Unmarshal([]byte(raw), &restore) != nil ||

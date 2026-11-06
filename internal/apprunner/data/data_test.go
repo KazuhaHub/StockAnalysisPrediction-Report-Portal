@@ -2,6 +2,7 @@ package data
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 )
@@ -73,5 +74,102 @@ func TestCheckpointObservationIsOpaque(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"manifest_sha256":"`+strings.Repeat("a", 64)+`"}`), &observation); err == nil {
 		t.Fatal("checkpoint observation decoded")
+	}
+}
+
+func importRequestFixture() ImportRequest {
+	return ImportRequest{
+		CheckpointID: "00000000-0000-0000-0000-000000000001", NamespaceID: "00000000-0000-0000-0000-000000000002",
+		ReleaseSHA256: strings.Repeat("a", 64), ManifestSHA256: strings.Repeat("b", 64),
+		ProjectID: 5201, DataFormat: 1, ArchiveBytes: 4096, MaxArchiveBytes: 1 << 20, WriterFence: 1,
+		QuotaBytes: 8 << 20, QuotaInodes: 128,
+		Provenance: ImportProvenance{
+			ProjectID: 4201, NamespaceInode: 10, Device: 11,
+			Source: RootIdentity{FilesystemUUID: "01234567-89ab-cdef-0123-456789abcdef", Inode: 64},
+		},
+	}
+}
+
+func TestImportRequestBounds(t *testing.T) {
+	good := importRequestFixture()
+	if !good.valid() {
+		t.Fatal("valid import request refused")
+	}
+	for name, mutate := range map[string]func(*ImportRequest){
+		"checkpoint":       func(r *ImportRequest) { r.CheckpointID = "../x" },
+		"namespace":        func(r *ImportRequest) { r.NamespaceID = "" },
+		"release":          func(r *ImportRequest) { r.ReleaseSHA256 = strings.Repeat("g", 64) },
+		"manifest":         func(r *ImportRequest) { r.ManifestSHA256 = "" },
+		"project":          func(r *ImportRequest) { r.ProjectID = 0 },
+		"format":           func(r *ImportRequest) { r.DataFormat = 0 },
+		"archive zero":     func(r *ImportRequest) { r.ArchiveBytes = 0 },
+		"archive over max": func(r *ImportRequest) { r.ArchiveBytes = r.MaxArchiveBytes + 1 },
+		"fence":            func(r *ImportRequest) { r.WriterFence = 0 },
+		"quota zero":       func(r *ImportRequest) { r.QuotaBytes = 0 },
+		"quota unaligned":  func(r *ImportRequest) { r.QuotaBytes = 513 },
+		"inodes zero":      func(r *ImportRequest) { r.QuotaInodes = 0 },
+		"source project":   func(r *ImportRequest) { r.Provenance.ProjectID = 0 },
+		"source inode":     func(r *ImportRequest) { r.Provenance.NamespaceInode = 0 },
+		"source device":    func(r *ImportRequest) { r.Provenance.Device = 0 },
+		"source root":      func(r *ImportRequest) { r.Provenance.Source = RootIdentity{} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := good
+			mutate(&changed)
+			if changed.valid() {
+				t.Fatal("malformed import request accepted")
+			}
+		})
+	}
+}
+
+func TestImportFootprintRoundsToFilesystemBlocks(t *testing.T) {
+	const block = 4096
+	footprint := newImportFootprint(block)
+	footprint.addFile(1)
+	footprint.addFile(block)
+	footprint.addFile(block + 1)
+	footprint.addFile(0)
+	footprint.addDirectory()
+	// 1 + 1 + 2 blocks of file data and one directory block, plus the namespace
+	// root block; the namespace root and every entry each take an inode.
+	if footprint.bytes != 5*block+block || footprint.inodes != 5+1 {
+		t.Fatalf("unexpected footprint: %+v", footprint)
+	}
+	if err := footprint.fits(6*block, 6); err != nil {
+		t.Fatalf("exact quota refused: %v", err)
+	}
+	if err := footprint.fits(6*block-512, 6); err == nil {
+		t.Fatal("byte quota smaller than the rounded footprint accepted")
+	}
+	if err := footprint.fits(6*block, 5); err == nil {
+		t.Fatal("inode quota smaller than the entry count accepted")
+	}
+}
+
+func TestImportFootprintRefusesOverflowAndBadBlockSize(t *testing.T) {
+	footprint := newImportFootprint(4096)
+	footprint.addFile(math.MaxInt64)
+	footprint.addFile(math.MaxInt64)
+	if err := footprint.fits(math.MaxInt64, math.MaxInt64); err == nil {
+		t.Fatal("overflowing footprint accepted")
+	}
+	for _, block := range []int64{0, -1, 3000} {
+		if err := newImportFootprint(block).fits(1<<40, 1<<20); err == nil {
+			t.Fatalf("block size %d accepted", block)
+		}
+	}
+}
+
+func TestImportObservationIsOpaque(t *testing.T) {
+	var observation ImportObservation
+	if _, err := observation.Snapshot(); err == nil {
+		t.Fatal("zero import observation accepted")
+	}
+	if _, err := json.Marshal(observation); err == nil {
+		t.Fatal("import observation serialized")
+	}
+	if err := json.Unmarshal([]byte(`{"namespace_id":"x"}`), &observation); err == nil {
+		t.Fatal("import observation decoded")
 	}
 }

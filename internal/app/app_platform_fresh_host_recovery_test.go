@@ -4,15 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
 
@@ -30,6 +34,8 @@ type platformRecoveryBundleMetadata struct {
 	ExpectedSecret        string `json:"expected_secret"`
 	ExpectedDataSHA256    string `json:"expected_data_sha256"`
 	SourceControllerEpoch string `json:"source_controller_epoch"`
+	JournalSHA256         string `json:"journal_sha256"`
+	JournalSourceDir      string `json:"journal_source_dir"`
 }
 
 func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
@@ -69,11 +75,32 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 	}
 	data := []byte(`{"fixture":"fresh-host-recovery","value":7}`)
 	dataSHA := platformDigest(data)
-	dataDir := filepath.Join(bundle, "data")
-	if err := os.MkdirAll(dataDir, 0700); err != nil {
+	// The old host: the checkpoint archive on its checkpoint root, and the runner's journal.
+	oldHost := t.TempDir()
+	archivePath := filepath.Join(oldHost, "checkpoint.archive")
+	if err := os.WriteFile(archivePath, data, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dataDir, "payload.json"), data, 0600); err != nil {
+	journalDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(journalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	oldJournal, err := journal.Open(journalDir)
+	if errors.Is(err, journal.ErrUnsupported) {
+		t.Skip("the runner journal is not supported on this platform")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := oldJournal.Close(); err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(journalDir, "journal.sqlite3")
+	journalBytes, err := os.ReadFile(journalPath)
+	if err != nil {
 		t.Fatal(err)
 	}
 	credentialID, checkpointID := platformFixtureID(7001), platformFixtureID(7002)
@@ -129,11 +156,15 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 		"verified_ms": now, "deleted_ms": nil,
 		"created_ms": now, "updated_ms": now,
 	})
-	dump := dumpOf(t, s.st)
-	if err := os.WriteFile(
-		filepath.Join(bundle, "portal.dump"), dump, 0600,
-	); err != nil {
+	manifest, err := s.writePlatformRecoveryBundle(bundle, platformRecoveryBundleInput{
+		Archives:      map[string]string{recoveryID: archivePath},
+		RunnerJournal: journalPath,
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if len(manifest.Checkpoints) != 1 || manifest.Checkpoints[0].Archive.SHA256 != dataSHA || manifest.RunnerJournal == nil {
+		t.Fatalf("bundle manifest: %+v", manifest)
 	}
 	metadata := platformRecoveryBundleMetadata{
 		InstallationID: installation, RecoverySetID: recoveryID,
@@ -144,6 +175,8 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 		ExpectedSecret:        secret,
 		ExpectedDataSHA256:    platformDigest(data),
 		SourceControllerEpoch: epoch,
+		JournalSHA256:         platformDigest(journalBytes),
+		JournalSourceDir:      journalDir,
 	}
 	encoded, err := json.Marshal(metadata)
 	if err != nil {
@@ -175,10 +208,13 @@ func TestFreshHostPortalRecoveryBundleRestore(t *testing.T) {
 			err, output)
 	}
 	for _, marker := range []string{
+		"FRESH_RECOVERY_BUNDLE_VERIFIED",
 		"FRESH_RECOVERY_DB_RESTORED",
 		"FRESH_RECOVERY_PAUSED",
 		"FRESH_RECOVERY_SECRET_DECRYPTED",
 		"FRESH_RECOVERY_DATA_MATCH",
+		"FRESH_RECOVERY_RELEASES_MATCH",
+		"FRESH_RECOVERY_JOURNAL_UNOPENED",
 		"FRESH_RECOVERY_HEALTH_AVAILABLE",
 	} {
 		if !bytes.Contains(output, []byte(marker)) {
@@ -201,11 +237,21 @@ func TestFreshHostPortalRecoveryBundleChild(t *testing.T) {
 	if err != nil || json.Unmarshal(raw, &metadata) != nil {
 		t.Fatal("invalid recovery metadata", err)
 	}
-	data, err := os.ReadFile(filepath.Join(bundle, "data", "payload.json"))
+	manifest, err := verifyPlatformRecoveryBundle(bundle)
+	if err != nil {
+		t.Fatal("bundle does not verify:", err)
+	}
+	if len(manifest.Checkpoints) != 1 || manifest.Checkpoints[0].RecoverySetID != metadata.RecoverySetID ||
+		manifest.Checkpoints[0].Archive.SHA256 != metadata.ExpectedDataSHA256 || manifest.RunnerJournal == nil ||
+		manifest.RunnerJournal.SHA256 != metadata.JournalSHA256 {
+		t.Fatalf("bundle manifest lists the wrong evidence: %+v", manifest)
+	}
+	data, err := os.ReadFile(filepath.Join(bundle, filepath.FromSlash(manifest.Checkpoints[0].Archive.Path)))
 	if err != nil || platformDigest(data) != metadata.ExpectedDataSHA256 {
 		t.Fatal("copied data identity changed", err)
 	}
-	dump, err := os.ReadFile(filepath.Join(bundle, "portal.dump"))
+	t.Log("FRESH_RECOVERY_BUNDLE_VERIFIED")
+	dump, err := os.ReadFile(filepath.Join(bundle, filepath.FromSlash(manifest.Dump.Path)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,6 +337,47 @@ func TestFreshHostPortalRecoveryBundleChild(t *testing.T) {
 		t.Fatal("recovery identity changed", err)
 	}
 	t.Log("FRESH_RECOVERY_DATA_MATCH")
+	// The release inventory was computed on the old Portal; the restored one derives the same set, and
+	// every static frontend it names came with the dump. Managed backend content is the open item.
+	restored, err := platformRequiredReleaseBlobs(store.poolExec())
+	if err != nil || !reflect.DeepEqual(restored, manifest.Releases) {
+		t.Fatalf("release inventory differs after restore: %v\n%+v\n%+v", err, restored, manifest.Releases)
+	}
+	var carried bool
+	for _, blob := range restored {
+		if blob.ReleaseSHA256 == metadata.ReleaseSHA256 && blob.Frontend == platformBlobInDump && blob.Backend == platformBlobNone &&
+			reflect.DeepEqual(blob.Reasons, []string{"active", "pinned"}) {
+			carried = true
+		}
+	}
+	if !carried || len(platformPendingReleaseBlobs(restored)) != 0 {
+		t.Fatalf("the active release is not accounted for: %+v", restored)
+	}
+	t.Log("FRESH_RECOVERY_RELEASES_MATCH")
+	// The keyring in the bundle is the one the restored database holds.
+	keyringRaw, err := os.ReadFile(filepath.Join(bundle, filepath.FromSlash(manifest.Keyring.Path)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	liveKeyring, err := platformBundleKeyring(store.poolExec())
+	if err != nil || !bytes.Equal(liveKeyring, keyringRaw) {
+		t.Fatalf("bundle keyring differs from the restored keyring: %v", err)
+	}
+	// The old runner's journal travelled as bytes: still identical, and nothing opened it (an opened
+	// journal grows write-ahead files beside it, in the bundle or at the old host).
+	copied, err := os.ReadFile(filepath.Join(bundle, filepath.FromSlash(manifest.RunnerJournal.Path)))
+	if err != nil || platformDigest(copied) != metadata.JournalSHA256 {
+		t.Fatalf("bundled journal is not the original: %v", err)
+	}
+	for _, dir := range []string{bundle, metadata.JournalSourceDir} {
+		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if err == nil && !d.IsDir() && (strings.HasSuffix(path, "-wal") || strings.HasSuffix(path, "-shm")) {
+				t.Fatalf("a journal sidecar appeared: %s", path)
+			}
+			return nil
+		})
+	}
+	t.Log("FRESH_RECOVERY_JOURNAL_UNOPENED")
 	recorder := httptest.NewRecorder()
 	server.handleHealthz(
 		recorder,

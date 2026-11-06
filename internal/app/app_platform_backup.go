@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +20,7 @@ import (
 type platformRestorePublisher struct {
 	id, namespaces             string
 	revision, created, updated int64
+	enabled                    int
 }
 type platformRestoreKey struct {
 	publisher, id, algorithm            string
@@ -39,6 +43,7 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	var prior platformRestorePrior
 	if e.s.driver == "postgres" {
 		names := append(migration0015().tables, migration0016().tables...)
+		names = append(names, migration0021().tables...)
 		sort.Strings(names)
 		if _, err := e.exec("LOCK TABLE " + strings.Join(names, ",") + " IN ACCESS EXCLUSIVE MODE"); err != nil {
 			return prior, err
@@ -48,14 +53,14 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 			return prior, err
 		}
 	}
-	rows, err := e.query(`SELECT id,namespaces_json,revision,created_ms,updated_ms FROM app_platform_publishers
+	rows, err := e.query(`SELECT id,namespaces_json,revision,created_ms,updated_ms,enabled FROM app_platform_publishers
         WHERE enabled=0 OR id IN (SELECT publisher_id FROM app_platform_publisher_keys WHERE revoked_ms IS NOT NULL)`)
 	if err != nil {
 		return prior, err
 	}
 	for rows.Next() {
 		var p platformRestorePublisher
-		if err := rows.Scan(&p.id, &p.namespaces, &p.revision, &p.created, &p.updated); err != nil {
+		if err := rows.Scan(&p.id, &p.namespaces, &p.revision, &p.created, &p.updated, &p.enabled); err != nil {
 			rows.Close()
 			return prior, err
 		}
@@ -86,6 +91,10 @@ func capturePlatformRestorePrior(e migExec) (platformRestorePrior, error) {
 	err = capturePlatformCredentialFloors(e, &prior)
 	return prior, err
 }
+
+// platformRestoreTrustedPublishersKey is the meta key holding the publishers that were enabled before
+// a restore, as a JSON array of ids. Recovery trusts only these; ending recovery removes it.
+const platformRestoreTrustedPublishersKey = "app_platform_restore_trusted_publishers"
 
 func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 	now := time.Now().UTC().UnixMilli()
@@ -131,6 +140,55 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 	if err != nil {
 		return err
 	}
+	// The blanket disable below erases which publishers were trusted. Record them first, minus any the
+	// database being restored over had disabled, so recovery can trust exactly those and no others.
+	disabledBefore := map[string]bool{}
+	for _, p := range prior.publishers {
+		if p.enabled == 0 {
+			disabledBefore[p.id] = true
+		}
+	}
+	// The publisher rows are the dump's own. A dump taken while its Portal was itself in recovery has
+	// every publisher disabled and carries the record of who was trusted: that record is carried over,
+	// never replaced by the empty set the disabled rows would give.
+	trusted := []string{}
+	seen := map[string]bool{}
+	var carried []string
+	var carriedRaw sql.NullString
+	if err := e.queryRow(`SELECT v FROM meta WHERE k=?`, platformRestoreTrustedPublishersKey).Scan(&carriedRaw); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if carriedRaw.Valid && json.Unmarshal([]byte(carriedRaw.String), &carried) != nil {
+		carried = nil
+	}
+	rows, err := e.query(`SELECT id,enabled FROM app_platform_publishers ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var enabled int
+		if err := rows.Scan(&id, &enabled); err != nil {
+			rows.Close()
+			return err
+		}
+		if (enabled == 1 || slices.Contains(carried, id)) && !disabledBefore[id] && !seen[id] {
+			seen[id] = true
+			trusted = append(trusted, id)
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	encodedTrusted, err := json.Marshal(trusted)
+	if err != nil {
+		return err
+	}
+	if err := e.setSetting(platformRestoreTrustedPublishersKey, string(encodedTrusted)); err != nil {
+		return err
+	}
 	statements := []struct {
 		q    string
 		args []any
@@ -148,6 +206,9 @@ func applyPlatformRestore(e migExec, prior platformRestorePrior) error {
 		{`UPDATE app_platform_recovery_sets SET state='review_required',controller_epoch=?,updated_ms=? WHERE state<>'deleted'`, []any{epoch, now}},
 		{`UPDATE app_platform_review_plans SET expires_ms=CASE WHEN expires_ms>? THEN ? ELSE expires_ms END,updated_ms=?`, []any{now, now, now}},
 		{`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=? WHERE state='prepared'`, []any{now}},
+		// An issued import grant authorises one import into the database it was issued in; a restored
+		// database is a different one. Consumed grants are history and stay as they are.
+		{`UPDATE app_platform_import_grants SET state='revoked',updated_ms=? WHERE state='issued'`, []any{now}},
 	}
 	for _, statement := range statements {
 		if _, err := e.exec(statement.q, statement.args...); err != nil {

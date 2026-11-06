@@ -21,6 +21,13 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 		targetPolicy < 1 {
 		return control.UpdateStartCommand{}, errAppPlatformStageEvidence
 	}
+	// An imported checkpoint was cut under an older writer fence than the namespace now holds (the
+	// Portal's own restore advanced it). The start is fenced above the namespace's, and names the
+	// checkpoint's separately so the runner can match it to the import receipt.
+	sourceWriter, checkpointWriter := checkpoint.WriterFence, ""
+	if source.currentWriterFence != "" {
+		sourceWriter, checkpointWriter = source.currentWriterFence, checkpoint.WriterFence
+	}
 	command := control.UpdateStartCommand{
 		Format: control.UpdateStartFormat, DeploymentID: runtime.deploymentID,
 		ControllerEpoch: lease.controllerEpoch,
@@ -55,11 +62,12 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 			RootFilesystemUUID:   source.rootFilesystemUUID,
 			RootInode:            source.rootInode,
 			DataFormat:           checkpoint.DataFormat,
-			SourceWriterFence:    checkpoint.WriterFence,
+			SourceWriterFence:    sourceWriter,
 			TargetWriterFence: strconv.FormatInt(
-				mustPlatformCheckpointInt(checkpoint.WriterFence)+1, 10),
-			Platform:       source.platform,
-			SandboxProfile: source.sandboxProfile,
+				mustPlatformCheckpointInt(sourceWriter)+1, 10),
+			CheckpointWriterFence: checkpointWriter,
+			Platform:              source.platform,
+			SandboxProfile:        source.sandboxProfile,
 		},
 	}
 	digest, err := control.UpdateStartLogicalDigest(command)
@@ -68,6 +76,60 @@ func platformRestoreStartCommand(lease platformOperationLease, runtime platformR
 	}
 	command.PayloadSHA256 = digest
 	return command, nil
+}
+
+// platformRestoreStartPlan is the update-shaped plan a restore start is verified against. It is
+// derived from the checkpoint alone: a restore has no reviewed update plan of its own.
+func platformRestoreStartPlan(lease platformOperationLease, checkpoint journal.CheckpointReceipt, recoverySetID string, policy int64, source platformCheckpointSource) platformManagedUpdatePlan {
+	sourceWriter, checkpointWriter := checkpoint.WriterFence, ""
+	if source.currentWriterFence != "" {
+		sourceWriter, checkpointWriter = source.currentWriterFence, checkpoint.WriterFence
+	}
+	return platformManagedUpdatePlan{
+		Format:              platformManagedUpdateFormat,
+		InstallationID:      lease.installationID,
+		SourceReleaseSHA256: checkpoint.ReleaseSHA256,
+		TargetReleaseSHA256: checkpoint.ReleaseSHA256,
+		SourceGeneration: mustPlatformCheckpointInt(
+			checkpoint.TargetGeneration) - 1,
+		TargetGeneration:         mustPlatformCheckpointInt(checkpoint.TargetGeneration),
+		SourcePolicyRevision:     policy,
+		TargetPolicyRevision:     policy,
+		ControllerEpoch:          lease.controllerEpoch,
+		RecoverySetID:            recoverySetID,
+		CheckpointOperationID:    checkpoint.OperationID,
+		CheckpointEffectID:       checkpoint.EffectID,
+		CheckpointID:             checkpoint.CheckpointID,
+		CheckpointManifestSHA256: checkpoint.ManifestSHA256,
+		CheckpointArchiveBytes:   mustPlatformCheckpointInt(checkpoint.ArchiveBytes),
+		DataNamespaceID:          checkpoint.NamespaceID,
+		DataFormat:               mustPlatformCheckpointInt(checkpoint.DataFormat),
+		SourceWriterFence:        mustPlatformCheckpointInt(sourceWriter),
+		CheckpointWriterFence:    mustPlatformCheckpointInt(checkpointWriter),
+		TargetRuntime:            source.runtimeTarget,
+	}
+}
+
+// loadPlatformRestoreCheckpointRaw reads the applied receipt a restore start names as its checkpoint:
+// a snapshot for an ordinary restore, the applied import for a resume.
+func loadPlatformRestoreCheckpointRaw(e migExec, lease platformOperationLease, checkpoint journal.CheckpointReceipt) ([]byte, error) {
+	resume, err := platformOperationIsResume(e, lease.id)
+	if err != nil {
+		return nil, err
+	}
+	stage := "snapshot"
+	if resume {
+		stage = "restore_data"
+	}
+	var raw string
+	if err := e.queryRow(`SELECT receipt_json
+		FROM app_platform_operation_effects
+		WHERE operation_id=? AND effect_id=? AND stage=?
+		AND state='applied'`,
+		checkpoint.OperationID, checkpoint.EffectID, stage).Scan(&raw); err != nil {
+		return nil, errAppPlatformStageEvidence
+	}
+	return []byte(raw), nil
 }
 
 func (s *Server) preparePlatformRestoreStart(ctx context.Context, lease platformOperationLease) (platformUpdateStartIntent, error) {
@@ -126,14 +188,23 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 	if err != nil || recoverySetID == "" {
 		return zero, errAppPlatformStageEvidence
 	}
-	var checkpointRaw string
-	if err := e.queryRow(`SELECT receipt_json
-		FROM app_platform_operation_effects
-		WHERE operation_id=? AND effect_id=? AND stage='snapshot'
-		AND state='applied'`,
-		checkpoint.OperationID, checkpoint.EffectID).
-		Scan(&checkpointRaw); err != nil {
-		return zero, errAppPlatformStageEvidence
+	resume, err := platformOperationIsResume(e, lease.id)
+	if err != nil {
+		return zero, err
+	}
+	checkpointRaw, err := loadPlatformRestoreCheckpointRaw(e, lease, checkpoint)
+	if err != nil {
+		return zero, err
+	}
+	// A restore first stops and removes the failed update's target. A first resume has none: the import
+	// started nothing on the new host. A resume that follows an applied start stops and removes that
+	// earlier container first.
+	containerRequired := false
+	if resume {
+		_, containerRequired, err = platformResumeContainerSource(e, lease, runtime.id)
+		if err != nil {
+			return zero, err
+		}
 	}
 	var stopState, removeState string
 	if err := e.queryRow(`SELECT
@@ -142,7 +213,9 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'`,
 		lease.id).Scan(&stopState, &removeState); err != nil ||
-		stopState != "applied" || removeState != "applied" {
+		(!resume && (stopState != "applied" || removeState != "applied")) ||
+		(resume && containerRequired && (stopState != "applied" || removeState != "applied")) ||
+		(resume && !containerRequired && (stopState != "" || removeState != "")) {
 		return zero, errAppPlatformStageEvidence
 	}
 	var activation, namespace, activationState, readinessRaw string
@@ -217,7 +290,7 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 		return zero, errAppPlatformStageEvidence
 	}
 	command, err := platformRestoreStartCommand(
-		lease, runtime, source, checkpoint, []byte(checkpointRaw),
+		lease, runtime, source, checkpoint, checkpointRaw,
 		activation, effectID, installationPolicy)
 	if err != nil {
 		return zero, err
@@ -267,28 +340,9 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 	result := platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime,
 		authority: authority, command: command, checkpoint: checkpoint,
-		checkpointRaw: []byte(checkpointRaw), source: source, plan: platformManagedUpdatePlan{
-			Format:              platformManagedUpdateFormat,
-			InstallationID:      lease.installationID,
-			SourceReleaseSHA256: checkpoint.ReleaseSHA256,
-			TargetReleaseSHA256: checkpoint.ReleaseSHA256,
-			SourceGeneration: mustPlatformCheckpointInt(
-				checkpoint.TargetGeneration) - 1,
-			TargetGeneration:         mustPlatformCheckpointInt(checkpoint.TargetGeneration),
-			SourcePolicyRevision:     installationPolicy,
-			TargetPolicyRevision:     installationPolicy,
-			ControllerEpoch:          lease.controllerEpoch,
-			RecoverySetID:            recoverySetID,
-			CheckpointOperationID:    checkpoint.OperationID,
-			CheckpointEffectID:       checkpoint.EffectID,
-			CheckpointID:             checkpoint.CheckpointID,
-			CheckpointManifestSHA256: checkpoint.ManifestSHA256,
-			CheckpointArchiveBytes:   mustPlatformCheckpointInt(checkpoint.ArchiveBytes),
-			DataNamespaceID:          checkpoint.NamespaceID,
-			DataFormat:               mustPlatformCheckpointInt(checkpoint.DataFormat),
-			SourceWriterFence:        mustPlatformCheckpointInt(checkpoint.WriterFence),
-			TargetRuntime:            source.runtimeTarget,
-		},
+		checkpointRaw: checkpointRaw, source: source,
+		plan: platformRestoreStartPlan(
+			lease, checkpoint, recoverySetID, installationPolicy, source),
 		targetDescriptor: source.descriptor, raw: raw, signature: signature,
 	}
 	if !freshEffect {

@@ -12,6 +12,11 @@ import (
 
 func (s *Server) advancePlatformRestoreStage(ctx context.Context, expected platformOperationLease, next appplatform.Stage) (platformOperationLease, error) {
 	var zero platformOperationLease
+	if resume, err := platformOperationIsResume(s.st.poolExec(), expected.id); err != nil {
+		return zero, err
+	} else if resume {
+		return s.advancePlatformResumeStage(ctx, expected, next)
+	}
 	if expected.snapshot.Action != appplatform.ActionRestore ||
 		!expected.snapshot.Managed ||
 		expected.rowRevision == math.MaxInt64 ||
@@ -126,6 +131,14 @@ func (s *Server) runPlatformManagedRestore(ctx context.Context, expected platfor
 		!expected.snapshot.Managed || endpoint.path == "" {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
+	if resume, err := platformOperationIsResume(s.st.poolExec(), expected.id); err != nil {
+		return platformOperationLease{}, err
+	} else if resume {
+		// The import performed the data effects; those stages advance on evidence alone.
+		if lease, handled, err := s.runPlatformRestoreResumeStage(ctx, expected); handled {
+			return lease, err
+		}
+	}
 	switch expected.snapshot.Stage {
 	case appplatform.StageQuiesce:
 		var stopState, removeState string
@@ -184,6 +197,11 @@ func (s *Server) finishPlatformManagedRestoreForReview(ctx context.Context, expe
 		expected.snapshot.Stage == appplatform.StageFailed ||
 		expected.snapshot.Stage == appplatform.StageRecoveryRequired {
 		return errAppPlatformStageEvidence
+	}
+	if resume, err := platformOperationIsResume(s.st.poolExec(), expected.id); err != nil {
+		return err
+	} else if resume {
+		return s.finishPlatformRestoreResumeForReview(ctx, expected)
 	}
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {

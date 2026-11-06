@@ -18,6 +18,9 @@ const (
 	ActionUninstall  Action = "uninstall"
 	ActionDeleteData Action = "delete_data"
 	ActionRestore    Action = "restore"
+	// ActionRestoreImport re-homes a restored installation onto a replacement runtime and imports
+	// one retained checkpoint by content. It exists only while a restored Portal is in recovery.
+	ActionRestoreImport Action = "restore_import"
 
 	StageQueued           Stage = "queued"
 	StageValidate         Stage = "validate"
@@ -85,8 +88,13 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 	valid := false
 	if snapshot.Stage == StageFailed || snapshot.Stage == StageRecoveryRequired {
 		// Failure follows one nonterminal state; it cannot precede queued or
-		// follow complete. State revisions do not include lease heartbeats.
-		valid = snapshot.Revision >= 2 && snapshot.Revision <= uint64(len(stages))
+		// follow complete. State revisions do not include lease heartbeats. A
+		// failure settled out of recovery_required is one transition later.
+		limit := uint64(len(stages))
+		if snapshot.Stage == StageFailed && recoverableAction(snapshot.Action) {
+			limit++
+		}
+		valid = snapshot.Revision >= 2 && snapshot.Revision <= limit
 	} else {
 		for index, stage := range stages {
 			if snapshot.Stage == stage && snapshot.Revision == uint64(index+1) {
@@ -94,11 +102,22 @@ func OperationFromSnapshot(snapshot OperationSnapshot) (Operation, error) {
 				break
 			}
 		}
+		// An operation recovered out of recovery_required completes one revision after the failure.
+		if snapshot.Stage == StageComplete && snapshot.Revision == uint64(len(stages))+1 && recoverableAction(snapshot.Action) {
+			valid = true
+		}
 	}
 	if !valid {
 		return Operation{}, ErrInvalidTransition
 	}
 	return Operation{action: snapshot.Action, managed: snapshot.Managed, generation: snapshot.Generation, revision: snapshot.Revision, stage: snapshot.Stage}, nil
+}
+
+// recoverableAction names the actions whose operations are settled, recovered or reopened out of
+// recovery_required: the restore import and the restore, whose recovery paths are the only writers of the
+// states one revision past an ordinary one. Every other action ends recovery_required for good.
+func recoverableAction(action Action) bool {
+	return action == ActionRestoreImport || action == ActionRestore
 }
 
 func (o Operation) Snapshot() OperationSnapshot {
@@ -139,6 +158,64 @@ func (o Operation) Fail(expectedRevision uint64, outcome EffectOutcome) (Operati
 		return Operation{}, ErrInvalidTransition
 	}
 	o.revision++
+	return o, nil
+}
+
+// Settle moves an operation that ended recovery_required to failed. It is the one transition that
+// leaves recovery_required, and it requires evidence the model cannot hold: every effect the operation
+// left must be known to be reverted or never applied. Anything else keeps the operation recovery_required.
+func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
+	}
+	if o.stage != StageRecoveryRequired {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageFailed, o.revision+1
+	return o, nil
+}
+
+// Recover completes an operation that ended recovery_required once evidence shows its effect was applied.
+// The result must be a state OperationFromSnapshot restores, which refuses a failure from too early a
+// stage to have done the work. Like Settle it cannot judge the evidence itself.
+func (o Operation) Recover(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
+	}
+	stages := operationStages(o.action, o.managed)
+	if o.stage != StageRecoveryRequired || o.revision+1 < uint64(len(stages)) || o.revision+1 > uint64(len(stages))+1 {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageComplete, o.revision+1
+	return o, nil
+}
+
+// Reopen returns an operation that ended recovery_required to the stage after the one that failed, once
+// evidence shows that stage's effect was applied after all. Fail leaves the revision one past the failed
+// stage's, which is the revision Advance gives the next stage, so the reopened state is exactly the one
+// Advance would have produced had the reply not been lost. Completing the operation is Recover's job.
+func (o Operation) Reopen(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	if !recoverableAction(o.action) {
+		return Operation{}, ErrInvalidTransition
+	}
+	stages := operationStages(o.action, o.managed)
+	if o.stage != StageRecoveryRequired || o.revision < 2 || o.revision >= uint64(len(stages)) {
+		return Operation{}, ErrInvalidTransition
+	}
+	next := stages[o.revision-1]
+	if next == StageComplete {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage = next
 	return o, nil
 }
 
@@ -196,8 +273,21 @@ func operationStages(action Action, managed bool) []Stage {
 		stages = append(stages, StageRevoke, StageQuiesce, StageSnapshot, StageRestoreData)
 		startAndProbe()
 		stages = append(stages, StageActivate)
+	case ActionRestoreImport:
+		stages = append(stages, StageRestoreData)
 	default:
 		return nil
 	}
 	return append(stages, StageComplete)
+}
+
+// CompletedOperation is the snapshot of an operation that has been through every stage of its action.
+// It exists for actions whose whole effect is one reviewed transition, which are recorded as admitted
+// complete rather than driven through stages that carry no work.
+func CompletedOperation(action Action, managed bool, generation uint64) (OperationSnapshot, error) {
+	stages := operationStages(action, managed)
+	if generation == 0 || len(stages) == 0 {
+		return OperationSnapshot{}, ErrInvalidTransition
+	}
+	return OperationSnapshot{Action: action, Managed: managed, Generation: generation, Revision: uint64(len(stages)), Stage: StageComplete}, nil
 }

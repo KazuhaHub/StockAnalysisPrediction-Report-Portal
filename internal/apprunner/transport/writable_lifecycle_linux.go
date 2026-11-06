@@ -20,15 +20,24 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 const writableLifecycleQueryMagic = "PWLQ0001"
 const writableLifecycleReplyMagic = "PWLR0001"
 const maxWritableLifecycleReply = 16384
+
+// restoreExecutionTimeout bounds the connection that carries a bulk data action, not the work. A
+// claimed import-checkpoint continues past it, detached, up to journal.ImportCheckpointBound.
 const restoreExecutionTimeout = 2 * time.Minute
 
+// bulkDataAction reports the actions that read or write a whole checkpoint.
+func bulkDataAction(action WritableLifecycleAction) bool {
+	return action == RestoreExecute || action == ImportCheckpointExecute
+}
+
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
-	if action == RestoreExecute {
+	if bulkDataAction(action) {
 		return restoreExecutionTimeout
 	}
 	return candidateExecutionTimeout
@@ -81,7 +90,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		private.Close()
 	}
 	timeout := sessionTimeout
-	if action == RestoreExecute {
+	if bulkDataAction(action) {
 		timeout = restoreExecutionTimeout
 	} else if action.mutating() {
 		timeout = candidateExecutionTimeout
@@ -150,6 +159,11 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		action, raw, sig, descriptor, a, received.UnixMilli()); err != nil {
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
+	}
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) {
+		// The runner proved it never claimed this effect. This is the only definite negative
+		// the transport reports; every other failure above stays uncertain.
+		return zero, journal.ErrNoSuchEffect
 	}
 	command := sha256.Sum256(raw)
 	return WritableLifecycleObservation{action: action, body: string(body), authority: a, endpoint: CandidateReceiptEndpoint{Path: path, RunnerUID: profile.owner, ControllerUID: uint32(os.Geteuid()), ControllerGID: profile.group, RootController: profile.shared}, receivedAt: received, commandSHA: hex.EncodeToString(command[:])}, nil
@@ -264,6 +278,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchRestore(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
 	case RestoreRead:
 		result, err = provider.store.ReadRestoreReceipt(ctx, raw, sig)
+	case ImportCheckpointExecute:
+		if provider.dataRoot == nil || provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchImportCheckpoint(ctx, raw, sig, provider.dataRoot, provider.dataPin, provider.checkpointRoot, provider.checkpointPin)
+	case ImportCheckpointRead:
+		result, err = provider.store.ReadImportCheckpointOrAbsence(ctx, raw, sig)
 	case UpdateStartReserve:
 		result, err = provider.store.ReserveUpdateStart(ctx, raw, sig)
 	case UpdateStartRead:
@@ -271,7 +292,7 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 	case UpdateStartExecute:
 		result, err = provider.store.DispatchUpdateStart(ctx, raw, sig, descriptor, provider.native)
 	case UpdateStartReceipt:
-		result, err = provider.store.ReadUpdateStartRunningReceipt(ctx, raw, sig)
+		result, err = provider.store.ReadUpdateStartRunningOrAbsence(ctx, raw, sig)
 	case UpdateStartProbe:
 		result, err = provider.store.ObserveUpdateStartReadiness(ctx, raw, sig, provider.native, descriptor)
 	case UpdateStartRegistrationDeliver:
