@@ -17,14 +17,14 @@ import (
 )
 
 type platformImportTestObservation struct {
-	receipt    platformImportCheckpointReceipt
+	receipt    journal.ImportCheckpointReceipt
 	authority  control.Authority
 	endpoint   transport.CandidateReceiptEndpoint
 	receivedAt time.Time
 	commandSHA string
 }
 
-func (o platformImportTestObservation) ImportReceipt() (platformImportCheckpointReceipt, error) {
+func (o platformImportTestObservation) ImportCheckpointReceipt() (journal.ImportCheckpointReceipt, error) {
 	return o.receipt, nil
 }
 func (o platformImportTestObservation) Controller() control.Authority { return o.authority }
@@ -39,7 +39,7 @@ func platformImportObservationFixture(intent platformImportIntent, endpoint plat
 	c, p := intent.command, intent.command.Payload
 	stamp := strconv.FormatInt(now, 10)
 	return platformImportTestObservation{
-		receipt: platformImportCheckpointReceipt{
+		receipt: journal.ImportCheckpointReceipt{
 			Format: platformImportReceiptFormat, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
 			InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: c.Stage,
 			EffectID: c.EffectID, PayloadSHA256: c.PayloadSHA256, GrantID: p.GrantID, RecoverySetID: p.RecoverySetID,
@@ -48,7 +48,7 @@ func platformImportObservationFixture(intent platformImportIntent, endpoint plat
 			// The new root's own identity: deliberately unlike the old host's provenance values.
 			ProjectID: "424242", NamespaceInode: "777", Device: "9", QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
 			Entries: "3", UsedBytes: "4096", UsedInodes: "12", State: "imported", ObservedMS: stamp, SettledMS: stamp,
-			Claim: platformImportCheckpointClaim{
+			Claim: journal.ImportCheckpointClaim{
 				Format: "portal.runner.import-checkpoint-claim/1-dev.1", ClaimID: platformFixtureID(70), EffectID: c.EffectID,
 				ResourceID: p.NamespaceID, OwnershipSHA256: platformDigest([]byte("owner")), AdmittedFence: c.InstallationFence,
 				ClaimedMS: stamp, GrantID: p.GrantID, RecoverySetID: p.RecoverySetID, CheckpointID: p.CheckpointID,
@@ -67,7 +67,7 @@ func platformImportObservationFixture(intent platformImportIntent, endpoint plat
 type platformImportTestExecutor struct {
 	calls, reads int
 	last         platformImportIntent
-	mutate       func(*platformImportCheckpointReceipt)
+	mutate       func(*journal.ImportCheckpointReceipt)
 	err          error
 }
 
@@ -354,7 +354,10 @@ func testRestoreImportCommandCarriesProvenance(t *testing.T, pg bool) {
 		t.Fatalf("command payload does not carry the recovery set and the old root's provenance: %+v", p)
 	}
 	if len(intent.raw) == 0 || len(intent.signature) != ed25519.SignatureSize ||
-		!ed25519.Verify(intent.authority.PublicKey, platformImportSigningInput(intent.raw), intent.signature) {
+		func() bool {
+			_, err := control.VerifyImportCheckpoint(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli())
+			return err != nil
+		}() {
 		t.Fatal("command is not signed by the replacement runtime's control key")
 	}
 	if scalar[string](t, f.s.st, `SELECT kind||':'||state||':'||runtime_id||':'||payload_sha256 FROM app_platform_operation_effects WHERE operation_id=? AND stage='restore_data' AND effect_number=1`, commit.OperationID) !=
@@ -403,7 +406,7 @@ func testGrantConsumedAtomicallyWithReceipt(t *testing.T, pg bool) {
 	// Replay: the identical receipt settles to the same result; a different one is refused.
 	intent := f.executor.last
 	same := platformImportObservationFixture(intent, platformRestoreEndpointFixture())
-	var stored platformImportCheckpointReceipt
+	var stored journal.ImportCheckpointReceipt
 	if err := json.Unmarshal([]byte(receipt), &stored); err != nil {
 		t.Fatal(err)
 	}
@@ -472,13 +475,13 @@ func TestGrantConsumedAtomicallyWithReceiptRollsBackTogether(t *testing.T) {
 }
 
 func TestRestoreImportRefusesAChangedReceipt(t *testing.T) {
-	for name, mutate := range map[string]func(*platformImportCheckpointReceipt){
-		"other manifest":   func(r *platformImportCheckpointReceipt) { r.ManifestSHA256 = strings.Repeat("c", 64) },
-		"other checkpoint": func(r *platformImportCheckpointReceipt) { r.CheckpointID = platformFixtureID(1) },
-		"other grant":      func(r *platformImportCheckpointReceipt) { r.GrantID = platformFixtureID(2) },
-		"not imported":     func(r *platformImportCheckpointReceipt) { r.State = "restored" },
-		"other effect":     func(r *platformImportCheckpointReceipt) { r.EffectID = platformFixtureID(3) },
-		"other bytes":      func(r *platformImportCheckpointReceipt) { r.ArchiveBytes = "1" },
+	for name, mutate := range map[string]func(*journal.ImportCheckpointReceipt){
+		"other manifest":   func(r *journal.ImportCheckpointReceipt) { r.ManifestSHA256 = strings.Repeat("c", 64) },
+		"other checkpoint": func(r *journal.ImportCheckpointReceipt) { r.CheckpointID = platformFixtureID(1) },
+		"other grant":      func(r *journal.ImportCheckpointReceipt) { r.GrantID = platformFixtureID(2) },
+		"not imported":     func(r *journal.ImportCheckpointReceipt) { r.State = "restored" },
+		"other effect":     func(r *journal.ImportCheckpointReceipt) { r.EffectID = platformFixtureID(3) },
+		"other bytes":      func(r *journal.ImportCheckpointReceipt) { r.ArchiveBytes = "1" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := platformRestoreImportFixture(t, false)

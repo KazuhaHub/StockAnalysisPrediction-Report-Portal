@@ -14,6 +14,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // Execution of a restore_import operation: queued -> validate -> restore_data -> complete. The
@@ -150,14 +151,14 @@ func (s *Server) advancePlatformRestoreImportStage(ctx context.Context, expected
 	return result, nil
 }
 
-func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID, checkpointUUID, checkpointInode string) (platformImportCheckpointCommand, error) {
+func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID, checkpointUUID, checkpointInode string) (control.ImportCheckpointCommand, error) {
 	cp := ev.source.checkpoint
-	command := platformImportCheckpointCommand{
-		Format: platformImportCommandFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
+	command := control.ImportCheckpointCommand{
+		Format: control.ImportCheckpointFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
 		ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: expected.installationID, OperationID: expected.id,
 		TargetGeneration: strconv.FormatUint(expected.snapshot.Generation, 10), Stage: "restore_data", EffectNumber: "1", EffectID: effectID,
 		Kind: "import-checkpoint", InstallationFence: strconv.FormatInt(expected.fence, 10),
-		Payload: platformImportCheckpointPayload{
+		Payload: control.ImportCheckpointPayload{
 			GrantID: ev.grantID, RecoverySetID: ev.plan.RecoverySetID, CheckpointID: ev.source.checkpointID, NamespaceID: ev.source.namespaceID,
 			ReleaseSHA256: ev.source.release, ManifestSHA256: ev.source.manifest, ArchiveBytes: strconv.FormatInt(ev.source.archiveBytes, 10),
 			DataFormat: strconv.FormatInt(ev.source.dataFormat, 10), WriterFence: strconv.FormatInt(ev.source.writerFence, 10),
@@ -167,7 +168,7 @@ func platformImportCommand(expected platformOperationLease, runtime platformRunt
 			CheckpointFilesystemUUID: checkpointUUID, CheckpointRootInode: checkpointInode,
 		},
 	}
-	digest, err := platformImportLogicalDigest(command)
+	digest, err := control.ImportCheckpointLogicalDigest(command)
 	if err != nil {
 		return command, errAppPlatformStageEvidence
 	}
@@ -291,7 +292,7 @@ func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected plat
 	result.command.IssuedMS, result.command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(expires, 10)
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
-	if result.raw, result.signature, err = platformSignImportCheckpoint(result.command, key); err != nil {
+	if result.raw, result.signature, err = control.SignImportCheckpoint(result.command, key, result.authority, issued); err != nil {
 		return zero, err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
@@ -303,16 +304,16 @@ func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected plat
 	return result, nil
 }
 
-func validPlatformImportObservation(observation platformImportObservation, intent platformImportIntent, endpoint platformRuntimeEndpoint) (platformImportCheckpointReceipt, bool) {
-	receipt, err := observation.ImportReceipt()
+func validPlatformImportObservation(observation platformImportObservation, intent platformImportIntent, endpoint platformRuntimeEndpoint) (journal.ImportCheckpointReceipt, bool) {
+	receipt, err := observation.ImportCheckpointReceipt()
 	if err != nil || !platformImportReceiptMatchesCommand(receipt, intent.command) ||
 		observation.CommandSHA256() != platformDigest(intent.raw) || observation.ReceivedAt().IsZero() {
-		return platformImportCheckpointReceipt{}, false
+		return journal.ImportCheckpointReceipt{}, false
 	}
 	a, b := observation.Controller(), intent.authority
 	if a.DeploymentID != b.DeploymentID || a.ControllerEpoch != b.ControllerEpoch || a.ControlRevision != b.ControlRevision ||
 		a.Fingerprint != b.Fingerprint || !bytes.Equal(a.PublicKey, b.PublicKey) {
-		return platformImportCheckpointReceipt{}, false
+		return journal.ImportCheckpointReceipt{}, false
 	}
 	peer := observation.Endpoint()
 	age := time.Since(observation.ReceivedAt())
@@ -322,7 +323,7 @@ func validPlatformImportObservation(observation platformImportObservation, inten
 	if !peer.RootController || peer.Path != endpoint.path || peer.RunnerUID != 0 || peer.ControllerUID != endpoint.controllerUID ||
 		peer.ControllerGID != endpoint.controllerGID || age < 0 || age > 3*time.Second || observedErr != nil || settledErr != nil ||
 		issuedErr != nil || observed < issued || observed > settled || settled > observation.ReceivedAt().UnixMilli() {
-		return platformImportCheckpointReceipt{}, false
+		return journal.ImportCheckpointReceipt{}, false
 	}
 	return receipt, true
 }
