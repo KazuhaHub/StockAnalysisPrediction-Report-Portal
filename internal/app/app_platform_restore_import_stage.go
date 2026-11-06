@@ -182,6 +182,33 @@ func platformImportAuthority(runtime platformRuntimeRegistration) control.Author
 	}
 }
 
+// While an import effect is prepared, its receipt column records the latest expiry of any command the
+// Portal has signed for it ("signed_until_ms"), or is "{}" before the first. The runner accepts a
+// command until it expires, so until then an absent answer proves nothing about a command that may
+// still be in flight. The column is the effect row's own: no schema is involved.
+const platformImportAbsenceMarginMS = 5000
+
+func platformImportPendingReceipt(until int64) string {
+	raw, _ := json.Marshal(struct {
+		SignedUntil int64 `json:"signed_until_ms"`
+	}{until})
+	return string(raw)
+}
+
+// platformImportSignedUntil reads the pending receipt of a prepared import effect.
+func platformImportSignedUntil(receipt string) (int64, bool) {
+	if receipt == "{}" {
+		return 0, true
+	}
+	var probe struct {
+		SignedUntil int64 `json:"signed_until_ms"`
+	}
+	if json.Unmarshal([]byte(receipt), &probe) != nil || probe.SignedUntil <= 0 || platformImportPendingReceipt(probe.SignedUntil) != receipt {
+		return 0, false
+	}
+	return probe.SignedUntil, true
+}
+
 // loadPlatformImportIntent accepts either no effect (create, once) or the exact original unobserved
 // one. It never repairs a partial row and never mints a second effect for a lease takeover: a
 // takeover raises the installation fence, and the original effect is signed again at the fence it was
@@ -201,6 +228,7 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		return zero, false, effectErr
 	}
 	fresh := errors.Is(effectErr, sql.ErrNoRows)
+	var priorSignedUntil int64
 	if fresh {
 		if !create {
 			return zero, false, errAppPlatformStageEvidence
@@ -209,10 +237,14 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		if effectID, err = platformNewUUID(); err != nil {
 			return zero, false, err
 		}
-		admitted = expected.fence
-	} else if kind != "import-checkpoint" || effectEpoch != expected.controllerEpoch || admitted <= 0 || admitted > expected.fence || observed != 0 ||
-		state != "prepared" || receipt != "{}" {
-		return zero, false, errAppPlatformStageEvidence
+		admitted, receipt = expected.fence, "{}"
+	} else {
+		until, ok := platformImportSignedUntil(receipt)
+		if kind != "import-checkpoint" || effectEpoch != expected.controllerEpoch || admitted <= 0 || admitted > expected.fence || observed != 0 ||
+			state != "prepared" || !ok {
+			return zero, false, errAppPlatformStageEvidence
+		}
+		priorSignedUntil = until
 	}
 	command, err := platformImportCommand(expected, runtime, ev, effectID, admitted)
 	if err != nil {
@@ -231,7 +263,8 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 	if err != nil || len(descriptor) == 0 {
 		return zero, false, fmt.Errorf("%w: release descriptor", errAppPlatformStageEvidence)
 	}
-	return platformImportIntent{effectID: effectID, admittedFence: admitted, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor}, fresh, nil
+	return platformImportIntent{effectID: effectID, admittedFence: admitted, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor,
+		pendingReceipt: receipt, priorSignedUntil: priorSignedUntil}, fresh, nil
 }
 
 func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected platformOperationLease) (platformImportIntent, error) {
@@ -300,6 +333,13 @@ func (s *Server) signPlatformRestoreImport(ctx context.Context, expected platfor
 		return zero, errAppPlatformLeaseConflict
 	}
 	result.command.IssuedMS, result.command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(expires, 10)
+	// Record the expiry before the command exists outside this transaction.
+	changed, err := e.exec(`UPDATE app_platform_operation_effects SET receipt_json=?
+		WHERE operation_id=? AND stage='restore_data' AND effect_number=1 AND effect_id=? AND state='prepared' AND observed_fence=0 AND receipt_json=?`,
+		platformImportPendingReceipt(max(result.priorSignedUntil, expires)), expected.id, result.effectID, result.pendingReceipt)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return zero, err
+	}
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
 	if result.raw, result.signature, err = control.SignImportCheckpoint(result.command, key, result.authority, issued); err != nil {
@@ -402,9 +442,9 @@ func (s *Server) commitPlatformRestoreImport(ctx context.Context, expected platf
 	changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
 		WHERE operation_id=? AND stage='restore_data' AND effect_number=1 AND effect_id=? AND kind='import-checkpoint'
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
-		AND observed_fence=0 AND receipt_json='{}'`,
+		AND observed_fence=0 AND receipt_json=?`,
 		expected.fence, string(encoded), now, expected.id, current.effectID, current.command.PayloadSHA256, runtime.id,
-		expected.controllerEpoch, current.admittedFence)
+		expected.controllerEpoch, current.admittedFence, current.pendingReceipt)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
@@ -532,7 +572,10 @@ func (s *Server) reconcilePlatformRestoreImport(ctx context.Context, expected pl
 func (s *Server) settlePlatformRestoreImportReceipt(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformOperationLease, string, error) {
 	observation, err := s.platformImportExecutor().Read(ctx, endpoint, intent)
 	if errors.Is(err, errPlatformImportAbsent) {
-		if err := s.endPlatformRestoreImport(ctx, expected, intent.effectID); err != nil {
+		if err := s.endPlatformRestoreImport(ctx, expected, intent.effectID, intent.priorSignedUntil); err != nil {
+			if errors.Is(err, errPlatformImportAbsenceNotDefinite) {
+				return platformOperationLease{}, platformImportUnknown, nil
+			}
 			return platformOperationLease{}, platformImportUnknown, err
 		}
 		return platformOperationLease{}, platformImportAbsent, errPlatformImportEnded
@@ -568,13 +611,18 @@ func (s *Server) runPlatformRestoreImport(ctx context.Context, expected platform
 // One that did may have applied: it is left for review with the grant intact and the effect unknown,
 // never retried under a new identity.
 func (s *Server) finishPlatformRestoreImportForReview(ctx context.Context, expected platformOperationLease) error {
-	return s.endPlatformRestoreImport(ctx, expected, "")
+	return s.endPlatformRestoreImport(ctx, expected, "", 0)
 }
+
+// errPlatformImportAbsenceNotDefinite reports an absent answer that cannot yet be taken as final,
+// because a command signed for the effect has not expired.
+var errPlatformImportAbsenceNotDefinite = errors.New("a command signed for the import effect has not expired")
 
 // endPlatformRestoreImport ends the operation. revertedEffect names an effect the runner has
 // definitively never claimed: it is reverted and the operation fails with the grant given back, as if
-// the effect had never been created.
-func (s *Server) endPlatformRestoreImport(ctx context.Context, expected platformOperationLease, revertedEffect string) error {
+// the effect had never been created. That is final only once every command signed for it before this
+// one has expired (definiteAfterMS plus a margin): until then the runner could still claim one.
+func (s *Server) endPlatformRestoreImport(ctx context.Context, expected platformOperationLease, revertedEffect string, definiteAfterMS int64) error {
 	if !platformImportRestoreGuard(expected) || expected.snapshot.Stage == appplatform.StageComplete ||
 		expected.snapshot.Stage == appplatform.StageFailed || expected.snapshot.Stage == appplatform.StageRecoveryRequired {
 		return errAppPlatformStageEvidence
@@ -611,6 +659,9 @@ func (s *Server) endPlatformRestoreImport(ctx context.Context, expected platform
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
 		return err
+	}
+	if revertedEffect != "" && now <= definiteAfterMS+platformImportAbsenceMarginMS {
+		return errPlatformImportAbsenceNotDefinite
 	}
 	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code=?,completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
 		WHERE id=? AND installation_id=? AND controller_epoch=? AND stage=? AND state_revision=? AND row_revision=? AND fence=?

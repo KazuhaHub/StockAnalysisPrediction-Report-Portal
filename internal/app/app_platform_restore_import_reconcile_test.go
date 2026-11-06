@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -59,6 +60,8 @@ func TestRestoreImportDefiniteNoRowRevokesGrantAndAllowsRetry(t *testing.T) {
 	commit := f.reviewAndConsume(t)
 	lease, _ := dispatchLostAndTakeOver(t, f, commit.OperationID)
 	f.executor.absent = true
+	// Every command signed for the effect has expired, so no runner can still claim it.
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, commit.OperationID)
 	_, err := f.s.runPlatformRestoreImport(context.Background(), lease, platformRestoreEndpointFixture())
 	if !errors.Is(err, errPlatformImportEnded) {
 		t.Fatalf("a definite no-row answer must end the operation: %v", err)
@@ -221,5 +224,34 @@ func TestRestoreImportPollingWindowCoversTheRunnerBound(t *testing.T) {
 	}
 	if platformImportAttemptTimeout >= time.Duration(appPlatformLeaseMS)*time.Millisecond {
 		t.Fatal("an import attempt must end inside the operation lease")
+	}
+}
+
+// An absence is definite only once every command signed for the effect has expired: until then the
+// runner may still claim one that is in flight, so the effect, its grant and the operation are kept.
+func TestRestoreImportAbsenceIsDefiniteOnlyAfterTheSignedIntentExpired(t *testing.T) {
+	f := platformRestoreImportFixture(t, false)
+	commit := f.reviewAndConsume(t)
+	lease, _ := dispatchLostAndTakeOver(t, f, commit.OperationID)
+	var stored struct {
+		SignedUntil int64 `json:"signed_until_ms"`
+	}
+	if err := json.Unmarshal([]byte(scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=?`, commit.OperationID)), &stored); err != nil || stored.SignedUntil <= time.Now().UnixMilli() {
+		t.Fatalf("the effect did not record the expiry of the command it signed: %+v %v", stored, err)
+	}
+	f.executor.absent = true
+	_, outcome, err := f.s.reconcilePlatformRestoreImport(context.Background(), lease, platformRestoreEndpointFixture())
+	if err != nil || outcome != platformImportUnknown {
+		t.Fatalf("an absence before the signed intent expired was taken as definite: outcome=%q err=%v", outcome, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=?`, commit.OperationID) != "prepared" ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "issued" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NULL`, commit.OperationID) != 1 {
+		t.Fatal("an unexpired absence changed the effect, the grant or the operation")
+	}
+	// The reads themselves did not extend what the runner could still claim by more than their own window.
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, commit.OperationID)
+	if _, outcome, err := f.s.reconcilePlatformRestoreImport(context.Background(), lease, platformRestoreEndpointFixture()); !errors.Is(err, errPlatformImportEnded) || outcome != platformImportAbsent {
+		t.Fatalf("an absence after the intent expired was not definite: outcome=%q err=%v", outcome, err)
 	}
 }
