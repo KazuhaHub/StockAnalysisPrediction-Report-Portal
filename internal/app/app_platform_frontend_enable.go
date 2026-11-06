@@ -186,7 +186,11 @@ func platformLoadFrontendEnablePlanMode(e migExec, installation string, action a
 	if err != nil {
 		return p, fmt.Errorf("frontend enable audience: %w", err)
 	}
-	p.GrantsSHA256, err = platformRemovalGrantsDigest(e, installation)
+	rebase := int64(0)
+	if recovery {
+		rebase = p.SourcePolicyRevision
+	}
+	p.GrantsSHA256, err = platformRemovalGrantsDigestAt(e, installation, rebase)
 	if err != nil {
 		return p, fmt.Errorf("frontend enable grants: %w", err)
 	}

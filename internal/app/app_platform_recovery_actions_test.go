@@ -1,9 +1,13 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 const (
@@ -114,5 +118,60 @@ func TestRecoveryDisablesRestoredInstallationsThroughRoutes(t *testing.T) {
 	h.endRecovery(200)
 	if got := h.post(recoveryPlansPath, `{"action":"recovery_disable","installation_id":"`+first+`"}`); got.Code != 409 || !strings.Contains(got.Body.String(), "app_platform_recovery_inactive") {
 		t.Fatalf("recovery disable outside recovery: %d %s", got.Code, got.Body.String())
+	}
+}
+
+// A resumed static frontend is an ordinary ready installation: it launches through the real route and
+// can later take a frontend update, both of which re-verify the activation it was resumed with.
+func TestRecoveryResumedFrontendLaunchesAndTakesAnUpdate(t *testing.T) {
+	s, actor, installation, _ := platformUpdateFixture(t, []int{1})
+	platformSimulateRestore(t, s)
+	h := platformRecoveryActionHTTP(t, s, actor)
+	h.reviewAndCommit("frontend_resume", installation, platformFixtureID(5920))
+	h.endRecovery(200)
+	// Trust in the publishers is an administrator decision taken once recovery has ended.
+	mustExec(t, s.st, `UPDATE app_platform_publishers SET enabled=1,revision=revision+1`)
+	mux := http.NewServeMux()
+	s.wireRoutes(mux)
+	cookie := s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())
+	launch := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+installation+"/launch", cookie, "")
+	var err error
+	if launch.Code != 200 {
+		_, err = s.inspectPlatformLaunchAccess(actor, installation)
+		t.Fatalf("a resumed frontend did not launch: %d %s (%v)", launch.Code, launch.Body.String(), err)
+	}
+	// The restore moved the publisher's trust revision, so a release is staged afresh for the update.
+	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
+	var manifest appplatform.Manifest
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
+	manifest.Capabilities.Required = nil
+	if raw, err = json.Marshal(manifest); err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.stagePlatformRelease(actor, raw, platformSignTestDescriptor(t, raw), archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, err := s.createPlatformFrontendUpdateReviewContext(context.Background(), actor, installation, target.sha256, scalar[int64](t, s.st, `SELECT revision FROM app_platform_publishers`))
+	if err != nil {
+		t.Fatal("update review of a resumed frontend:", err)
+	}
+	commit, err := s.consumePlatformUpdateReview(actor, review.ID, review.SHA256, platformFixtureID(5921))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, err := s.st.claimPlatformOperation(commit.OperationID, platformFixtureID(5922))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.runPlatformStaticUpdate(context.Background(), lease); err != nil {
+		t.Fatal("update of a resumed frontend:", err)
+	}
+	binding, err := s.inspectPlatformLaunchAccess(actor, installation)
+	if err != nil || binding.releaseSHA != target.sha256 {
+		t.Fatalf("the updated frontend does not launch: %+v %v", binding, err)
 	}
 }

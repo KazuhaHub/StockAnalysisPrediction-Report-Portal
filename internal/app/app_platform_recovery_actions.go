@@ -190,6 +190,13 @@ var platformFrontendResumeKind = platformRecoveryKind{
 			activation, p.InstallationID, p.SourceReleaseSHA256, p.TargetGeneration, p.TargetPolicyRevision, string(evidence), now, now, now); err != nil {
 			return err
 		}
+		// The restore raised the installation's policy revision past the capability rows the review
+		// listed. The administrator approved resuming with exactly those rows, so they are carried to the
+		// resumed policy revision; launch accepts only rows at the installation's own revision.
+		if _, err := e.exec(`UPDATE app_platform_capability_grants SET policy_revision=?,updated_ms=? WHERE installation_id=?`,
+			p.TargetPolicyRevision, now, p.InstallationID); err != nil {
+			return err
+		}
 		phase, err := platformReadyPhaseForInstallation(e, p.InstallationID, p.TargetPolicyRevision)
 		if err != nil {
 			return err

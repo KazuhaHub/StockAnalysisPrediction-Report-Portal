@@ -85,8 +85,15 @@ func platformValidSHA(s string) bool {
 }
 
 func platformRemovalGrantsDigest(e migExec, installation string) (string, error) {
+	return platformRemovalGrantsDigestAt(e, installation, 0)
+}
+
+// platformRemovalGrantsDigestAt is the grants digest with every capability row read as if it sat at
+// policy revision rebase (when positive). A recovery resume carries the rows to the resumed revision
+// when it commits, so its review and its later verification both digest the rows at that revision.
+func platformRemovalGrantsDigestAt(e migExec, installation string, rebase int64) (string, error) {
 	h := sha256.New()
-	for _, q := range []string{
+	for queryIndex, q := range []string{
 		`SELECT capability,granted,policy_json,policy_revision,review_plan_id FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`,
 		`SELECT id,principal_type,username,account_created,account_generation,group_id,group_created,revision FROM app_platform_access_grants WHERE installation_id=? ORDER BY id`,
 		`SELECT id,name,credential_id,credential_value_revision,operation,state,policy_json,policy_revision,review_plan_id,revision,revoked_ms FROM app_platform_secret_bindings WHERE installation_id=? ORDER BY id`,
@@ -117,6 +124,9 @@ func platformRemovalGrantsDigest(e migExec, installation string) (string, error)
 				if text, ok := value.([]byte); ok {
 					values[index] = string(text)
 				}
+			}
+			if queryIndex == 0 && rebase > 0 {
+				values[3] = rebase
 			}
 			raw, err := json.Marshal(values)
 			if err != nil {

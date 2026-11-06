@@ -119,7 +119,7 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		if json.Unmarshal([]byte(raw), &formatProbe) != nil {
 			return fail
 		}
-		if formatProbe.Format == platformFrontendEnableFormat {
+		if formatProbe.Format == platformFrontendEnableFormat || formatProbe.Format == platformFrontendResumeFormat {
 			var enable platformFrontendEnablePlan
 			if json.Unmarshal([]byte(raw), &enable) != nil {
 				return fail
