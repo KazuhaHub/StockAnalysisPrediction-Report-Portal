@@ -21,8 +21,10 @@ func platformResolvedRecoveryPredicate(e migExec) string {
 	}
 	// An ordinary restore lands on the generation of the operation it settles. A recovery resume
 	// settles the operation its imported checkpoint came from one generation later: it starts from the
-	// generation the failed operation had reached.
-	generation := `(r.target_generation=o.target_generation OR (` + planFormat + `='` + platformRestoreResumeFormat + `' AND r.source_generation=o.target_generation))`
+	// generation the failed operation had reached, or from a later one when abandoning a replacement
+	// runtime advanced the installation's generation in between. The review plan's checkpoint
+	// reference below is what binds the resume to the operation.
+	generation := `(r.target_generation=o.target_generation OR (` + planFormat + `='` + platformRestoreResumeFormat + `' AND r.source_generation>=o.target_generation))`
 	return `EXISTS (
 		SELECT 1
 		FROM app_platform_operations r

@@ -294,6 +294,11 @@ func (s *Server) revertPlatformRecoveryImport(ctx context.Context, lease platfor
 		now, plan.RecoverySetID, plan.RuntimeID); err != nil {
 		return false, err
 	}
+	// Every effect the import left is now reverted, so the operation is a clean failure rather than a
+	// recovery the launch gate waits on for ever.
+	if err := settlePlatformRecoveryOperation(e, lease.id, "", now); err != nil {
+		return false, err
+	}
 	detail, _ := json.Marshal(struct {
 		RecoverySetID string `json:"recovery_set_id"`
 		EffectID      string `json:"effect_id"`
@@ -306,4 +311,38 @@ func (s *Server) revertPlatformRecoveryImport(ctx context.Context, lease platfor
 		return false, err
 	}
 	return true, nil
+}
+
+// settlePlatformRecoveryOperation moves a finished operation that stayed recovery_required to failed. It
+// is admitted only while none of the operation's effects is unsettled, so it can never hide an effect the
+// runner may have applied, and it goes through the model's one transition out of recovery_required. An
+// empty code keeps the error code the operation already carries.
+func settlePlatformRecoveryOperation(e migExec, operation, code string, now int64) error {
+	var action, stage string
+	var managed int
+	var generation, revision, rowRevision int64
+	if err := e.queryRow(`SELECT action,managed,target_generation,state_revision,row_revision,stage FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL`, operation).
+		Scan(&action, &managed, &generation, &revision, &rowRevision, &stage); err != nil || generation < 1 || revision < 1 {
+		return errAppPlatformStageEvidence
+	}
+	var unsettled int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown')`, operation).Scan(&unsettled); err != nil {
+		return err
+	}
+	if unsettled != 0 {
+		return errAppPlatformStageEvidence
+	}
+	model, err := appplatform.OperationFromSnapshot(appplatform.OperationSnapshot{Action: appplatform.Action(action), Managed: managed == 1,
+		Generation: uint64(generation), Revision: uint64(revision), Stage: appplatform.Stage(stage)})
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	settled, err := model.Settle(model.Snapshot().Revision)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code=COALESCE(NULLIF(?,''),error_code),updated_ms=?
+		WHERE id=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND completed_ms IS NOT NULL`,
+		string(settled.Snapshot().Stage), int64(settled.Snapshot().Revision), code, now, operation, revision, rowRevision)
+	return platformLeaseCAS(changed, err)
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 
@@ -123,5 +124,79 @@ func TestRecoveryReconcileRunsFromTheSchedulerWhenIdle(t *testing.T) {
 	}
 	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "complete" {
 		t.Fatal("an idle scheduler did not settle the unknown import")
+	}
+}
+
+// platformOperationBlocksLaunch reports whether the one operation is counted by the launch gate.
+func platformOperationBlocksLaunch(t *testing.T, s *Server, operation string) bool {
+	t.Helper()
+	e := s.st.poolExec()
+	return scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.id=? AND `+platformUnresolvedOperationPredicate(e), operation) != 0
+}
+
+// An import the runner proved it never applied is settled completely: every effect it left is reverted,
+// so the operation is failed rather than recovery_required, and it no longer blocks launch for ever.
+func TestRecoveryRevertedImportEndsFailedAndDoesNotBlockLaunch(t *testing.T) {
+	f, operation := unknownImportFixture(t)
+	if !platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("fixture: an unsettled import does not block launch")
+	}
+	f.executor.absent = true
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, operation)
+	if settled, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture()); err != nil || settled != 1 {
+		t.Fatalf("reconcile: %d %v", settled, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL AND error_code IS NOT NULL`, operation) != 1 {
+		t.Fatal("a reverted import did not end failed")
+	}
+	if platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("a reverted import still blocks launch")
+	}
+	if again, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture()); err != nil || again != 0 {
+		t.Fatalf("a failed import was reconciled again: %d %v", again, err)
+	}
+}
+
+// The whole path: an import the runner never applied is reverted, the import is redone, the app is
+// resumed, recovery ends and the publisher is trusted again. The app launches: nothing the first import
+// left behind blocks it.
+func TestRecoveryRevertedImportThenResumeLaunches(t *testing.T) {
+	f, first := unknownImportFixture(t)
+	f.executor.absent = true
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json='{"signed_until_ms":1}' WHERE operation_id=?`, first)
+	if settled, err := f.s.reconcilePlatformRecoveryImports(context.Background(), platformRestoreEndpointFixture()); err != nil || settled != 1 {
+		t.Fatalf("reconcile: %d %v", settled, err)
+	}
+	f.executor.absent = false
+	review, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := f.s.consumePlatformRestoreImportReview(context.Background(), f.actor, review.ID, review.SHA256, platformFixtureID(5611))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done, err := f.drive(t, retry.OperationID); err != nil || done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatalf("the retry did not complete: %v", err)
+	}
+	r := &platformResumeFixtureState{platformImportFixtureState: f, importOperation: retry.OperationID, endpoint: platformUpdateStartEndpointFixture()}
+	resume := r.reviewAndConsumeResume(t)
+	start := r.driveResume(t, resume.OperationID, appplatform.StageStart)
+	if done := platformResumeStartToReady(t, f.s, start, r.endpoint); done.snapshot.Stage != appplatform.StageComplete {
+		t.Fatal("the resume did not complete")
+	}
+	platformRecoveryActionHTTP(t, f.s, f.actor).endRecovery(200)
+	mux := http.NewServeMux()
+	f.s.wireRoutes(mux)
+	cookie := f.s.managedCookie(*f.s.st.GetUser(f.actor.username), f.actor.sessionID, f.actor.expires.Unix())
+	publisher := scalar[string](t, f.s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, f.installation)
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/publishers", cookie, platformReenablePublisherRequest(t, f.s, publisher)); got.Code != 200 {
+		t.Fatalf("trust review: %d %s", got.Code, got.Body.String())
+	}
+	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+f.installation+"/launch", cookie, ""); got.Code != 200 {
+		_, why := f.s.inspectPlatformLaunchAccess(f.actor, f.installation)
+		t.Fatalf("a resumed app did not launch after a reverted import: %d %s (%v)", got.Code, got.Body.String(), why)
 	}
 }

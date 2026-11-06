@@ -54,7 +54,10 @@ type platformAbandonRuntimePlan struct {
 	Grants          []string `json:"grants"`
 	Effects         []string `json:"effects"`
 	Operations      []string `json:"operations"`
-	Reason          string   `json:"reason"`
+	// Finished lists the operations that already ended recovery_required on this runtime and rested on
+	// an effect this abandon settles: they are settled to failed with it.
+	Finished []string `json:"finished"`
+	Reason   string   `json:"reason"`
 }
 
 func platformIDList(e migExec, query string, args ...any) ([]string, error) {
@@ -97,6 +100,13 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 	}
 	if p.Operations, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE i.runtime_id=? AND o.action IN ('restore_import','restore') AND o.completed_ms IS NULL ORDER BY o.id`, runtime.id); err != nil {
+		return p, err
+	}
+	if p.Finished, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE i.runtime_id=? AND o.action IN ('restore_import','restore') AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
+		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id=? AND f.state IN ('prepared','unknown'))
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id<>? AND f.state IN ('prepared','unknown'))
+		ORDER BY o.id`, runtime.id, runtime.id, runtime.id); err != nil {
 		return p, err
 	}
 	return p, nil
@@ -196,13 +206,14 @@ func (s *Server) confirmPlatformAbandonRuntime(ctx context.Context, session plat
 			Grants        []string `json:"grants"`
 			Effects       []string `json:"effects"`
 			Operations    []string `json:"operations"`
+			Finished      []string `json:"finished"`
 			Reason        string   `json:"reason"`
-		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Grants, plan.Effects, plan.Operations, plan.Reason})
+		}{digest, plan.RuntimeID, plan.DeploymentID, plan.Installations, plan.Grants, plan.Effects, plan.Operations, plan.Finished, plan.Reason})
 		if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,'app_platform.runtime_abandoned','app_platform_runtime',?,?,'')`,
 			time.UnixMilli(now).UTC().Format(time.RFC3339), actor.username, actor.ouID, plan.RuntimeID, string(detail)); err != nil {
 			return err
 		}
-		result = platformAbandonResult{RuntimeID: plan.RuntimeID, Installations: len(plan.Installations), Grants: len(plan.Grants), Effects: len(plan.Effects), Operations: len(plan.Operations)}
+		result = platformAbandonResult{RuntimeID: plan.RuntimeID, Installations: len(plan.Installations), Grants: len(plan.Grants), Effects: len(plan.Effects), Operations: len(plan.Operations) + len(plan.Finished)}
 		outcome, _ := json.Marshal(platformAbandonOutcome{PlanSHA256: digest, RuntimeID: plan.RuntimeID, Installations: result.Installations,
 			Grants: result.Grants, Effects: result.Effects, Operations: result.Operations})
 		if err := e.setSetting(key, string(outcome)); err != nil {
@@ -258,6 +269,12 @@ func applyPlatformAbandonRuntime(e migExec, plan platformAbandonRuntimePlan, now
 		changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,error_code='runtime_abandoned',completed_ms=?,updated_ms=?,lease_owner=NULL,lease_until_ms=NULL
 			WHERE id=? AND completed_ms IS NULL`, string(ended.Snapshot().Stage), int64(ended.Snapshot().Revision), now, now, id)
 		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
+	}
+	for _, id := range plan.Finished {
+		// Every effect of these rested on the retired runtime and is reverted above.
+		if err := settlePlatformRecoveryOperation(e, id, "runtime_abandoned", now); err != nil {
 			return err
 		}
 	}

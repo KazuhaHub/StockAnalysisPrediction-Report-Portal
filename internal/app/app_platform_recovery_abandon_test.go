@@ -127,7 +127,7 @@ func TestAbandonedRuntimeCannotSettleLateReceipt(t *testing.T) {
 	}
 	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE operation_id=?`, operation) != "reverted" ||
 		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "revoked" ||
-		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" {
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" {
 		t.Fatal("a late receipt changed the effect, the grant or the operation")
 	}
 }
@@ -259,6 +259,19 @@ func TestRecoveryAbandonThroughHTTP(t *testing.T) {
 		scalar[string](t, s.st, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`) != "0" {
 		t.Fatal("the installation is not ready or recovery did not end")
 	}
+	// The abandoned import and the lost first one left nothing that blocks launch: once the publisher
+	// is trusted again the resumed app launches.
+	if platformOperationBlocksLaunch(t, s, firstImport) {
+		t.Fatal("the abandoned import still blocks launch")
+	}
+	publisher := scalar[string](t, s.st, `SELECT publisher_id FROM app_platform_installations WHERE id=?`, installation)
+	if got := sessionTestRequest(mux, "POST", "/api/admin/app-platform/publishers", h.cookie, platformReenablePublisherRequest(t, s, publisher)); got.Code != 200 {
+		t.Fatalf("trust review: %d %s", got.Code, got.Body.String())
+	}
+	if got := sessionTestRequest(mux, "GET", "/api/app-platform/installations/"+installation+"/launch", h.cookie, ""); got.Code != 200 {
+		_, why := s.inspectPlatformLaunchAccess(actor, installation)
+		t.Fatalf("a resumed app did not launch after an abandoned import: %d %s (%v)", got.Code, got.Body.String(), why)
+	}
 }
 
 // Abandoning is a deployment-level decision. The review-plan table is installation-shaped (it demands
@@ -295,5 +308,24 @@ func TestAbandonWritesNoReviewPlanAndIsIdempotent(t *testing.T) {
 	}
 	if plans() != before || scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE app_id='recovery' OR (installation_id IS NULL AND action='disable')`) != 0 {
 		t.Fatal("the abandon wrote a review plan row")
+	}
+}
+
+// An operation that had already ended recovery_required when the runtime was abandoned is settled too:
+// every effect it left is reverted, so it ends failed and no longer blocks launch.
+func TestAbandonSettlesAFinishedUnknownImportAndFreesLaunch(t *testing.T) {
+	f, operation := unknownImportFixture(t)
+	if !platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("fixture: an unsettled import does not block launch")
+	}
+	if _, err := f.abandon(t); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND error_code='runtime_abandoned' AND completed_ms IS NOT NULL`, operation) != 1 {
+		t.Fatal("an abandoned finished import did not end failed")
+	}
+	if platformOperationBlocksLaunch(t, f.s, operation) {
+		t.Fatal("an abandoned import still blocks launch")
 	}
 }
