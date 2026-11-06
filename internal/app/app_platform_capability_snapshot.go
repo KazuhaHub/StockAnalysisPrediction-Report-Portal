@@ -17,8 +17,9 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 	}
 	var planID, raw, digest, action string
 	if err := e.queryRow(`SELECT p.id,p.plan_json,p.plan_sha256,o.action FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_installations i ON i.id=o.installation_id
-		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair') AND o.target_generation=i.generation)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
-		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, epoch, release).Scan(&planID, &raw, &digest, &action); err != nil {
+		WHERE o.installation_id=? AND ((o.action='install') OR ((o.action='update' OR o.action='enable' OR o.action='repair') AND o.target_generation=i.generation) OR
+			(o.action='restore' AND o.managed=1 AND o.target_generation=i.generation AND p.plan_json LIKE ?)) AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.controller_epoch=? AND p.target_release_sha256=? AND p.controller_epoch=o.controller_epoch AND p.consumed_ms IS NOT NULL
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation, platformResumePlanPrefix(), epoch, release).Scan(&planID, &raw, &digest, &action); err != nil {
 		return fail
 	}
 	if len(raw) > 65536 || platformDigest([]byte(raw)) != digest {
@@ -78,6 +79,39 @@ func verifyPlatformLaunchCapabilitySnapshot(e migExec, installation, release, ep
 		default:
 			return fail
 		}
+	case "restore":
+		// Only a resume reaches here (the query admits no other restore). A restore of a host's
+		// controller epoch is the operation that re-establishes the capability snapshot the epoch
+		// rotation retired, so it is read like the same-release lifecycles: the consumed review
+		// names the runtime the retained rows were granted against.
+		var resume platformRestoreResumePlan
+		if json.Unmarshal([]byte(raw), &resume) != nil {
+			return fail
+		}
+		canonical, err := json.Marshal(resume)
+		if err != nil || string(canonical) != raw ||
+			resume.Format != platformRestoreResumeFormat ||
+			resume.InstallationID != installation ||
+			resume.ControllerEpoch != epoch ||
+			resume.ReleaseSHA256 != release ||
+			resume.Target == nil ||
+			resume.Target.ControllerEpoch != epoch {
+			return fail
+		}
+		format := platformManagedInstallFormat
+		if resume.Target.Profile.WritableSandboxProfile ==
+			control.WritableCandidateSandboxProfile {
+			format = platformWritableInstallFormat
+		}
+		if installRequirementsForTarget(m, format, resume.Target) != nil {
+			return fail
+		}
+		expected, err := platformInstallCapabilitySelection(m, resume.Target)
+		if err != nil {
+			return fail
+		}
+		return verifyPlatformRetainedCapabilityRows(
+			e, installation, expected, policy, fail)
 	case "enable", "repair":
 		var formatProbe struct {
 			Format string `json:"format"`
