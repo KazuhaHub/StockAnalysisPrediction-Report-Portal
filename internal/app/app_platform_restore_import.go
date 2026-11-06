@@ -170,6 +170,19 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 	if grants != 0 {
 		return result, errAppPlatformOperationConflict
 	}
+	// Any other claim on an import blocks a new one: a grant still issued on any recovery set of the
+	// installation, or an import effect the runner has not settled. Either may become a second copy.
+	var live int
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_import_grants g JOIN app_platform_recovery_sets r ON r.id=g.recovery_set_id
+			WHERE r.installation_id=? AND g.state='issued')
+		+ (SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
+			WHERE o.installation_id=? AND o.action='restore_import' AND o.controller_epoch=? AND f.state IN ('prepared','unknown'))`,
+		installation, installation, runtime.controllerEpoch).Scan(&live); err != nil {
+		return result, err
+	}
+	if live != 0 {
+		return result, errAppPlatformOperationConflict
+	}
 	if err := e.queryRow(`SELECT revision FROM app_platform_publishers WHERE id=?`, result.publisherID).Scan(&result.trustRevision); err != nil || result.trustRevision < 1 {
 		return result, errAppPlatformStageEvidence
 	}

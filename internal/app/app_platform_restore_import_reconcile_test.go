@@ -175,3 +175,35 @@ func TestRestoreImportBusyRunnerIsNotAFailedAttempt(t *testing.T) {
 		t.Fatal("the import did not complete once the runner was free")
 	}
 }
+
+// A review is refused while the installation holds any live claim on an import: an issued grant on any
+// of its recovery sets, or an import effect the runner has not settled.
+func TestRestoreImportRefusedWhileAnyGrantOrEffectIsLive(t *testing.T) {
+	t.Run("issued grant on another recovery set", func(t *testing.T) {
+		f := platformRestoreImportFixture(t, false)
+		mustExec(t, f.s.st, `INSERT INTO app_platform_recovery_sets(id,installation_id,data_namespace_id,operation_id,release_sha256,data_format,checkpoint_id,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms)
+			SELECT ?,installation_id,data_namespace_id,operation_id,release_sha256,data_format,?,manifest_sha256,bytes,state,controller_epoch,writer_fence,verified_ms,deleted_ms,created_ms,updated_ms FROM app_platform_recovery_sets WHERE id=?`,
+			platformFixtureID(5610), platformFixtureID(5611), f.recoverySet)
+		mustExec(t, f.s.st, `INSERT INTO app_platform_import_grants(id,recovery_set_id,runtime_id,controller_epoch,state,consumed_ms,created_ms,updated_ms) VALUES(?,?,?,?,'issued',NULL,1,1)`,
+			platformFixtureID(5612), platformFixtureID(5610), f.replacement.id, f.s.st.GetSetting("app_platform_controller_epoch", ""))
+		if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+			t.Fatal("a review was admitted beside an issued grant on another recovery set")
+		}
+	})
+	t.Run("unsettled import effect without a grant", func(t *testing.T) {
+		f := platformRestoreImportFixture(t, false)
+		commit := f.reviewAndConsume(t)
+		f.executor.err = errors.New("lost reply")
+		lease, err := f.drive(t, commit.OperationID)
+		if err == nil {
+			t.Fatal("a lost reply did not surface")
+		}
+		if err := f.s.finishPlatformRestoreImportForReview(context.Background(), lease); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, f.s.st, `UPDATE app_platform_import_grants SET state='revoked'`)
+		if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+			t.Fatal("a review was admitted beside an unsettled import effect")
+		}
+	})
+}
