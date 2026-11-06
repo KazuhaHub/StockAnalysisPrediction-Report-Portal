@@ -46,7 +46,7 @@ func platformImportReceiptMatchesCommand(r journal.ImportCheckpointReceipt, c co
 	k := r.Claim
 	if k.EffectID != r.EffectID || k.GrantID != r.GrantID || k.RecoverySetID != r.RecoverySetID ||
 		k.CheckpointID != r.CheckpointID || k.NamespaceID != r.NamespaceID || k.ResourceID != r.NamespaceID ||
-		k.ProjectID != r.ProjectID || !platformValidUUID(k.RootFilesystemUUID) {
+		k.ProjectID != r.ProjectID || k.AdmittedFence != c.InstallationFence || !platformValidUUID(k.RootFilesystemUUID) {
 		return false
 	}
 	for _, value := range []string{r.ProjectID, r.NamespaceInode, r.Device, k.RootInode, k.ClaimedMS, r.ObservedMS, r.SettledMS} {
@@ -70,6 +70,8 @@ func platformImportReceiptMatchesCommand(r journal.ImportCheckpointReceipt, c co
 
 type platformImportIntent struct {
 	effectID       string
+	admittedFence  int64
+	fresh          bool
 	runtime        platformRuntimeRegistration
 	authority      control.Authority
 	command        control.ImportCheckpointCommand

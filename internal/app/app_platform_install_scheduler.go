@@ -208,6 +208,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	} else {
 		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
 	}
+	if errors.Is(err, errPlatformImportEnded) {
+		w.publish("review_required", w.active.id, "")
+		w.active, w.attempts = platformOperationLease{}, 0
+		return nil
+	}
 	if err == nil {
 		if result.lease.id != "" &&
 			result.lease.snapshot.Stage != appplatform.StageComplete {

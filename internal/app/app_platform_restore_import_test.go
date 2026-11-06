@@ -70,13 +70,14 @@ type platformImportTestExecutor struct {
 	last         platformImportIntent
 	mutate       func(*journal.ImportCheckpointReceipt)
 	err          error
+	// readErr and absent shape only the read-receipt answer: a transport failure (unknown), or the
+	// runner's definite statement that it holds no row for the effect.
+	readErr error
+	absent  bool
 }
 
 func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.last = intent
-	if f.err != nil {
-		return nil, f.err
-	}
 	o := platformImportObservationFixture(intent, endpoint)
 	if f.mutate != nil {
 		f.mutate(&o.receipt)
@@ -85,10 +86,20 @@ func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, i
 }
 func (f *platformImportTestExecutor) Execute(_ context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.calls++
+	if f.err != nil {
+		f.last = intent
+		return nil, f.err
+	}
 	return f.observe(endpoint, intent)
 }
 func (f *platformImportTestExecutor) Read(_ context.Context, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
 	f.reads++
+	if f.absent {
+		return nil, errPlatformImportAbsent
+	}
+	if f.readErr != nil {
+		return nil, f.readErr
+	}
 	return f.observe(endpoint, intent)
 }
 

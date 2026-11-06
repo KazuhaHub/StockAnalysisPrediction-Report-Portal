@@ -151,13 +151,13 @@ func (s *Server) advancePlatformRestoreImportStage(ctx context.Context, expected
 	return result, nil
 }
 
-func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID string) (control.ImportCheckpointCommand, error) {
+func platformImportCommand(expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, effectID string, admittedFence int64) (control.ImportCheckpointCommand, error) {
 	cp := ev.source.checkpoint
 	command := control.ImportCheckpointCommand{
 		Format: control.ImportCheckpointFormat, DeploymentID: runtime.deploymentID, ControllerEpoch: expected.controllerEpoch,
 		ControlRevision: strconv.FormatInt(runtime.controlRevision, 10), InstallationID: expected.installationID, OperationID: expected.id,
 		TargetGeneration: strconv.FormatUint(expected.snapshot.Generation, 10), Stage: "restore_data", EffectNumber: "1", EffectID: effectID,
-		Kind: "import-checkpoint", InstallationFence: strconv.FormatInt(expected.fence, 10),
+		Kind: "import-checkpoint", InstallationFence: strconv.FormatInt(admittedFence, 10),
 		Payload: control.ImportCheckpointPayload{
 			GrantID: ev.grantID, RecoverySetID: ev.plan.RecoverySetID, CheckpointID: ev.source.checkpointID, NamespaceID: ev.source.namespaceID,
 			ReleaseSHA256: ev.source.release, ManifestSHA256: ev.source.manifest, ArchiveBytes: strconv.FormatInt(ev.source.archiveBytes, 10),
@@ -183,7 +183,9 @@ func platformImportAuthority(runtime platformRuntimeRegistration) control.Author
 }
 
 // loadPlatformImportIntent accepts either no effect (create, once) or the exact original unobserved
-// one. It never repairs a partial row and never mints a second effect for a lease takeover.
+// one. It never repairs a partial row and never mints a second effect for a lease takeover: a
+// takeover raises the installation fence, and the original effect is signed again at the fence it was
+// admitted under, which is the fence the runner's claim binds.
 func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLease, runtime platformRuntimeRegistration, ev platformRestoreImportEvidence, now int64, create bool) (platformImportIntent, bool, error) {
 	var zero platformImportIntent
 	lock := ""
@@ -207,18 +209,19 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 		if effectID, err = platformNewUUID(); err != nil {
 			return zero, false, err
 		}
-	} else if kind != "import-checkpoint" || effectEpoch != expected.controllerEpoch || admitted != expected.fence || observed != 0 ||
+		admitted = expected.fence
+	} else if kind != "import-checkpoint" || effectEpoch != expected.controllerEpoch || admitted <= 0 || admitted > expected.fence || observed != 0 ||
 		state != "prepared" || receipt != "{}" {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	command, err := platformImportCommand(expected, runtime, ev, effectID)
+	command, err := platformImportCommand(expected, runtime, ev, effectID, admitted)
 	if err != nil {
 		return zero, false, err
 	}
 	if fresh {
 		if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
 			VALUES(?,'restore_data',1,?,'import-checkpoint',?,?,?,?,0,'prepared','{}',?,?)`,
-			expected.id, effectID, command.PayloadSHA256, runtime.id, expected.controllerEpoch, expected.fence, now, now); err != nil {
+			expected.id, effectID, command.PayloadSHA256, runtime.id, expected.controllerEpoch, admitted, now, now); err != nil {
 			return zero, false, err
 		}
 	} else if command.PayloadSHA256 != digest {
@@ -228,10 +231,16 @@ func loadPlatformImportIntent(e migExec, s *Server, expected platformOperationLe
 	if err != nil || len(descriptor) == 0 {
 		return zero, false, fmt.Errorf("%w: release descriptor", errAppPlatformStageEvidence)
 	}
-	return platformImportIntent{effectID: effectID, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor}, fresh, nil
+	return platformImportIntent{effectID: effectID, admittedFence: admitted, runtime: runtime, authority: platformImportAuthority(runtime), command: command, descriptor: descriptor}, fresh, nil
 }
 
 func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected platformOperationLease) (platformImportIntent, error) {
+	return s.signPlatformRestoreImport(ctx, expected, true)
+}
+
+// signPlatformRestoreImport signs the import effect of the operation, creating it only when create
+// is set and none exists. The result's fresh flag says whether this call created it.
+func (s *Server) signPlatformRestoreImport(ctx context.Context, expected platformOperationLease, create bool) (platformImportIntent, error) {
 	var zero platformImportIntent
 	if !platformImportRestoreGuard(expected) || expected.snapshot.Stage != appplatform.StageRestoreData || ctx == nil || ctx.Err() != nil {
 		return zero, errAppPlatformStageEvidence
@@ -262,10 +271,11 @@ func (s *Server) preparePlatformRestoreImport(ctx context.Context, expected plat
 	if err != nil || ev.plan.RuntimeID != runtime.id {
 		return zero, errors.Join(errAppPlatformStageEvidence, err)
 	}
-	result, fresh, err := loadPlatformImportIntent(e, s, expected, runtime, ev, facts.now, true)
+	result, fresh, err := loadPlatformImportIntent(e, s, expected, runtime, ev, facts.now, create)
 	if err != nil {
 		return zero, err
 	}
+	result.fresh = fresh
 	if fresh {
 		detail, _ := json.Marshal(struct {
 			RecoverySetID string `json:"recovery_set_id"`
@@ -394,7 +404,7 @@ func (s *Server) commitPlatformRestoreImport(ctx context.Context, expected platf
 		AND payload_sha256=? AND runtime_id=? AND controller_epoch=? AND admitted_fence=? AND state='prepared'
 		AND observed_fence=0 AND receipt_json='{}'`,
 		expected.fence, string(encoded), now, expected.id, current.effectID, current.command.PayloadSHA256, runtime.id,
-		expected.controllerEpoch, expected.fence)
+		expected.controllerEpoch, current.admittedFence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
@@ -478,6 +488,15 @@ func (s *Server) dispatchPlatformRestoreImport(ctx context.Context, expected pla
 	if err != nil {
 		return platformOperationLease{}, err
 	}
+	if !intent.fresh {
+		// An earlier attempt may have reached the runner. Ask before sending anything: an applied
+		// answer settles the effect, a definite no-row answer ends the operation, and anything else
+		// falls through to executing the same effect, which the runner reconciles rather than repeats.
+		lease, outcome, err := s.settlePlatformRestoreImportReceipt(ctx, expected, endpoint, intent)
+		if err != nil || outcome != platformImportUnknown {
+			return lease, err
+		}
+	}
 	observation, err := s.platformImportExecutor().Execute(ctx, endpoint, intent)
 	if err != nil {
 		return platformOperationLease{}, err
@@ -485,18 +504,47 @@ func (s *Server) dispatchPlatformRestoreImport(ctx context.Context, expected pla
 	return s.commitPlatformRestoreImport(ctx, expected, intent, endpoint, observation)
 }
 
-// readPlatformRestoreImportReceipt settles an import whose first answer was lost: the runner replays
-// the receipt of the same effect, so the effect is reconciled rather than issued again.
-func (s *Server) readPlatformRestoreImportReceipt(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
-	intent, err := s.preparePlatformRestoreImport(ctx, expected)
+const (
+	platformImportApplied = "applied"
+	platformImportAbsent  = "absent"
+	platformImportUnknown = "unknown"
+)
+
+// errPlatformImportAbsent is what an executor returns when the runner states definitively that it
+// holds no row for the effect: the command was refused before it was claimed.
+var errPlatformImportAbsent = errors.New("runner holds no import effect")
+
+// errPlatformImportEnded reports an import operation that this attempt ended as failed with its grant
+// revoked; the scheduler has nothing left to retry or finish.
+var errPlatformImportEnded = errors.New("restore import ended without an effect")
+
+// reconcilePlatformRestoreImport asks the runner for the receipt of the operation's existing import
+// effect, never creating one. Applied settles the effect and consumes the grant; absent reverts the
+// effect and revokes the grant so a new review can be admitted; unknown changes nothing.
+func (s *Server) reconcilePlatformRestoreImport(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, string, error) {
+	intent, err := s.signPlatformRestoreImport(ctx, expected, false)
 	if err != nil {
-		return platformOperationLease{}, err
+		return platformOperationLease{}, platformImportUnknown, err
 	}
+	return s.settlePlatformRestoreImportReceipt(ctx, expected, endpoint, intent)
+}
+
+func (s *Server) settlePlatformRestoreImportReceipt(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformOperationLease, string, error) {
 	observation, err := s.platformImportExecutor().Read(ctx, endpoint, intent)
-	if err != nil {
-		return platformOperationLease{}, err
+	if errors.Is(err, errPlatformImportAbsent) {
+		if err := s.endPlatformRestoreImport(ctx, expected, intent.effectID); err != nil {
+			return platformOperationLease{}, platformImportUnknown, err
+		}
+		return platformOperationLease{}, platformImportAbsent, errPlatformImportEnded
 	}
-	return s.commitPlatformRestoreImport(ctx, expected, intent, endpoint, observation)
+	if err != nil {
+		return platformOperationLease{}, platformImportUnknown, nil
+	}
+	lease, err := s.commitPlatformRestoreImport(ctx, expected, intent, endpoint, observation)
+	if err != nil {
+		return platformOperationLease{}, platformImportUnknown, err
+	}
+	return lease, platformImportApplied, nil
 }
 
 func (s *Server) runPlatformRestoreImport(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
@@ -520,6 +568,13 @@ func (s *Server) runPlatformRestoreImport(ctx context.Context, expected platform
 // One that did may have applied: it is left for review with the grant intact and the effect unknown,
 // never retried under a new identity.
 func (s *Server) finishPlatformRestoreImportForReview(ctx context.Context, expected platformOperationLease) error {
+	return s.endPlatformRestoreImport(ctx, expected, "")
+}
+
+// endPlatformRestoreImport ends the operation. revertedEffect names an effect the runner has
+// definitively never claimed: it is reverted and the operation fails with the grant given back, as if
+// the effect had never been created.
+func (s *Server) endPlatformRestoreImport(ctx context.Context, expected platformOperationLease, revertedEffect string) error {
 	if !platformImportRestoreGuard(expected) || expected.snapshot.Stage == appplatform.StageComplete ||
 		expected.snapshot.Stage == appplatform.StageFailed || expected.snapshot.Stage == appplatform.StageRecoveryRequired {
 		return errAppPlatformStageEvidence
@@ -546,7 +601,7 @@ func (s *Server) finishPlatformRestoreImportForReview(ctx context.Context, expec
 		return errAppPlatformStageEvidence
 	}
 	outcome, code, target := appplatform.EffectsNone, "restore_import_failed", "failed"
-	if effects != 0 {
+	if effects != 0 && revertedEffect == "" {
 		outcome, code, target = appplatform.EffectsUnknown, "restore_import_recovery_required", "recovery_required"
 	}
 	ended, err := model.Fail(expected.snapshot.Revision, outcome)
@@ -566,7 +621,14 @@ func (s *Server) finishPlatformRestoreImportForReview(ctx context.Context, expec
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return err
 	}
-	if effects == 0 {
+	if revertedEffect != "" {
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',updated_ms=? WHERE operation_id=? AND effect_id=? AND state='prepared' AND observed_fence=0`,
+			now, expected.id, revertedEffect)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
+	}
+	if effects == 0 || revertedEffect != "" {
 		var planRaw string
 		if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, expected.id).Scan(&planRaw); err != nil {
 			return err
