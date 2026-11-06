@@ -481,14 +481,15 @@ func TestGrantConsumedAtomicallyWithReceiptRollsBackTogether(t *testing.T) {
 		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "restore_data" {
 		t.Fatal("a partial commit survived the failure")
 	}
-	// The same lease retries the same effect and then settles both halves together.
+	// The same lease retries the same effect: the receipt is read back rather than sent again, and both
+	// halves settle together.
 	mustExec(t, f.s.st, `DROP TRIGGER fail_import_complete`)
 	firstEffect := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=?`, commit.OperationID)
 	if _, err := f.s.runPlatformRestoreImport(context.Background(), lease, platformRestoreEndpointFixture()); err != nil {
 		t.Fatal(err)
 	}
 	if scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=?`, commit.OperationID) != firstEffect ||
-		f.executor.calls != 2 || f.executor.last.effectID != firstEffect {
+		f.executor.calls != 1 || f.executor.reads != 1 || f.executor.last.effectID != firstEffect {
 		t.Fatal("the retry did not reuse the effect identity")
 	}
 	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "consumed" ||
