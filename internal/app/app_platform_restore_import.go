@@ -122,15 +122,20 @@ func loadPlatformRestoreImportCandidate(e migExec, s *Server, installation, reco
 		&generation, &result.installationRevision, &result.policyRevision, &epoch, &old); err != nil {
 		return result, errAppPlatformStageEvidence
 	}
-	if desired == "removed" || phase != "review_required" || epoch != runtime.controllerEpoch || !old.Valid || old.String == runtime.id {
+	if desired == "removed" || phase != "review_required" || epoch != runtime.controllerEpoch || !old.Valid {
 		return result, errAppPlatformStageEvidence
 	}
-	// The binding being left must be retired: re-homing never takes over a live runtime's installation.
-	var enabled int
-	var sealed, pin sql.NullString
-	if err := e.queryRow(`SELECT enabled,sealed_control_key,verification_key_fingerprint FROM app_platform_runtime_bindings WHERE id=?`, old.String).Scan(&enabled, &sealed, &pin); err != nil ||
-		enabled != 0 || sealed.Valid || pin.Valid {
-		return result, errAppPlatformStageEvidence
+	// A retry after a failed import finds the installation already on the replacement runtime. That is
+	// admitted, and only because no grant on the recovery set was consumed (checked below): a consumed
+	// grant means the checkpoint was imported, and importing it again would be a second copy.
+	if old.String != runtime.id {
+		// The binding being left must be retired: re-homing never takes over a live runtime's installation.
+		var enabled int
+		var sealed, pin sql.NullString
+		if err := e.queryRow(`SELECT enabled,sealed_control_key,verification_key_fingerprint FROM app_platform_runtime_bindings WHERE id=?`, old.String).Scan(&enabled, &sealed, &pin); err != nil ||
+			enabled != 0 || sealed.Valid || pin.Valid {
+			return result, errAppPlatformStageEvidence
+		}
 	}
 	source, err := loadPlatformImportSource(e, s, installation, recoverySetID)
 	if err != nil {

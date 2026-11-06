@@ -614,3 +614,51 @@ func TestRevokedImportGrantAllowsRetry(t *testing.T) { testRevokedImportGrantAll
 func TestRevokedImportGrantAllowsRetryPostgres(t *testing.T) {
 	testRevokedImportGrantAllowsRetry(t, true)
 }
+
+// A failed import leaves the installation already pointed at the replacement runtime. Retrying must not
+// need the old binding as a source, and must still refuse once a grant has been consumed.
+func testRestoreImportRetryAfterFailedImport(t *testing.T, pg bool) {
+	f := platformRestoreImportFixture(t, pg)
+	first := f.reviewAndConsume(t)
+	lease, err := f.s.st.claimPlatformOperation(first.OperationID, platformFixtureID(5300))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.s.finishPlatformRestoreImportForReview(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, f.installation) != f.replacement.id ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_import_grants`) != "revoked" {
+		t.Fatal("fixture: the failed import must leave the installation on the replacement with a revoked grant")
+	}
+	review, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet)
+	if err != nil {
+		t.Fatal("retry review refused:", err)
+	}
+	var plan platformRestoreImportPlan
+	if json.Unmarshal([]byte(review.JSON), &plan) != nil || plan.SourceRuntimeID != f.replacement.id || plan.RuntimeID != f.replacement.id {
+		t.Fatalf("retry plan: %+v", plan)
+	}
+	retry, err := f.s.consumePlatformRestoreImportReview(context.Background(), f.actor, review.ID, review.SHA256, platformFixtureID(5210))
+	if err != nil {
+		t.Fatal("retry consume refused:", err)
+	}
+	done, err := f.drive(t, retry.OperationID)
+	if err != nil || done.snapshot.Stage != appplatform.StageComplete || f.executor.calls != 1 {
+		t.Fatalf("the retried import did not complete: %v calls=%d", err, f.executor.calls)
+	}
+	if scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_import_grants WHERE state='consumed'`) != 1 {
+		t.Fatal("the retry did not consume exactly one grant")
+	}
+	// With a consumed grant on the replacement the installation has been imported: no third review.
+	if _, err := f.s.createPlatformRestoreImportReview(context.Background(), f.actor, f.installation, f.recoverySet); err == nil {
+		t.Fatal("a review was admitted for an installation whose grant is consumed")
+	}
+}
+
+func TestRestoreImportRetryAfterFailedImport(t *testing.T) {
+	testRestoreImportRetryAfterFailedImport(t, false)
+}
+func TestRestoreImportRetryAfterFailedImportPostgres(t *testing.T) {
+	testRestoreImportRetryAfterFailedImport(t, true)
+}
