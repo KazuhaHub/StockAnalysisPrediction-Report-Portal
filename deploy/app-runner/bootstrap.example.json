@@ -1,0 +1,11 @@
+{
+  "format": "portal.app-runner.bootstrap/1-dev.1",
+  "journal_dir": "/var/lib/portal-app-runner/journal",
+  "controller_public_key": "REPLACE_WITH_43_CHARACTER_ED25519_PUBLIC_KEY",
+  "controller": {
+    "deployment_id": "10000000-0000-4000-8000-000000000001",
+    "controller_epoch": "20000000-0000-4000-8000-000000000002",
+    "control_revision": 1,
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}
