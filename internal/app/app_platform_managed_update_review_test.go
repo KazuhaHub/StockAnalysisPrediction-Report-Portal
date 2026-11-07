@@ -224,7 +224,12 @@ func TestManagedRestoreRootResolvesUpdateRuntime(t *testing.T) {
 
 func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
-	fixture := platformManagedUpdateProjectionFixture(t, pg)
+	return platformManagedUpdateOperationFixtureWith(t, pg, nil)
+}
+
+func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease) {
+	t.Helper()
+	fixture := platformManagedUpdateProjectionFixtureWith(t, pg, mutate)
 	projection, err := platformBuildManagedUpdateProjection(
 		fixture.server.st.poolExec(), fixture.installation, fixture.source,
 		fixture.revision, fixture.policy, fixture.format,
@@ -401,7 +406,12 @@ func TestPlatformManagedUpdateSchedulerClaimsBeforeRemoval(t *testing.T) {
 
 func platformManagedUpdateQuiesceFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformManagedUpdateQuiesceIntent, platformRuntimeEndpoint) {
 	t.Helper()
-	s, operation := platformManagedUpdateOperationFixture(t, pg)
+	return platformManagedUpdateQuiesceFixtureWith(t, pg, nil)
+}
+
+func platformManagedUpdateQuiesceFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease, platformManagedUpdateQuiesceIntent, platformRuntimeEndpoint) {
+	t.Helper()
+	s, operation := platformManagedUpdateOperationFixtureWith(t, pg, mutate)
 	selected, err := s.claimNextPlatformManagedUpdate(
 		context.Background(), platformFixtureID(6120))
 	if err != nil || selected.lease.id != operation.id {

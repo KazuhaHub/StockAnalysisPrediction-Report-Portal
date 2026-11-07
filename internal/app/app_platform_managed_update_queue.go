@@ -429,6 +429,7 @@ func (s *Server) loadPlatformFinalizedManagedUpdateAdmission(e migExec, lease pl
 		TrustRevision:        trustRevision,
 		ControllerEpoch:      epoch, ActorAuthority: authority,
 		CurrentDataFormat: finalized.DataFormat,
+		Migration:         finalized.Migration,
 		Target: platformInstallProjection{
 			Format: sourcePlan.format, AppID: finalized.AppID,
 			PublisherID:     finalized.PublisherID,

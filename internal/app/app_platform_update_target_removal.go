@@ -129,9 +129,14 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
 			"restore target failed update checkpoint reload: %w", err)
 	}
+	migration, err := loadPlatformAppliedMigration(e, sourceLease.id, plan)
+	if err != nil {
+		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
+			"restore target failed update migration: %w", err)
+	}
 	command, err := platformUpdateStartCommand(
 		sourceLease, runtime, source, checkpointReceipt,
-		plan, activation, effectID)
+		plan, activation, effectID, migration)
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
 			"restore target failed update start command: %w",

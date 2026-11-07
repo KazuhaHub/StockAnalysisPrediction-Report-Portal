@@ -52,6 +52,8 @@ type Server struct {
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
 	// transport.
 	platformImportCheckpoint platformImportCheckpointExecutor
+	// platformMigration is the runner seam for the migration lifecycle; nil selects the transport.
+	platformMigration platformMigrationRunner
 	// platformReadStartReceipt is the runner seam for the restore-start read-receipt that recovery uses to
 	// settle an unknown resume start; nil selects the transport.
 	platformReadStartReceipt platformStartReceiptReader

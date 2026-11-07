@@ -265,6 +265,7 @@ func platformFinalizeManagedUpdatePlan(e migExec, expected platformOperationLeas
 		SourceWriterFence: mustPlatformCheckpointInt(
 			checkpoint.source.writerFence),
 		TargetRuntime: review.Target.Runtime,
+		Migration:     review.Migration,
 	}
 	planRaw, err := json.Marshal(plan)
 	if err != nil || len(planRaw) > 65536 {

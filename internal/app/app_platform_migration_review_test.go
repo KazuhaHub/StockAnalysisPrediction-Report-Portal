@@ -9,8 +9,11 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
-func platformMigrationManifest(format int, wallClock *int) func(*appplatform.Manifest) {
+// platformMigrationManifest declares one migration from the installed schema (which the fixture has
+// already set as the manifest's) to the next.
+func platformMigrationManifest(wallClock *int) func(*appplatform.Manifest) {
 	return func(m *appplatform.Manifest) {
+		format := m.Data.Schema
 		m.Data.Schema = format + 1
 		m.Data.ReadableSchemas = []int{format + 1}
 		m.Data.Migrations = []appplatform.DataMigration{{From: format, To: format + 1, Entrypoint: []string{"/bin/migrate", "--apply"}, WallClockSeconds: wallClock}}
@@ -29,8 +32,7 @@ func buildPlatformMigrationProjection(t *testing.T, f platformManagedUpdateRevie
 // step, so the reviewed plan binds the entrypoint and the wall-clock bound the job will run under.
 func testManagedUpdateReviewBindsMigrationStep(t *testing.T, pg bool) {
 	seconds := 120
-	f := platformManagedUpdateProjectionFixtureWith(t, pg, nil)
-	f = platformManagedUpdateProjectionFixtureWith(t, pg, platformMigrationManifest(int(f.format), &seconds))
+	f := platformManagedUpdateProjectionFixtureWith(t, pg, platformMigrationManifest(&seconds))
 	projection, err := buildPlatformMigrationProjection(t, f)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +54,7 @@ func testManagedUpdateReviewBindsMigrationStep(t *testing.T, pg bool) {
 		t.Fatalf("migration step does not round trip: %v", err)
 	}
 	// An unset wall clock takes the descriptor default.
-	f = platformManagedUpdateProjectionFixtureWith(t, pg, platformMigrationManifest(int(f.format), nil))
+	f = platformManagedUpdateProjectionFixtureWith(t, pg, platformMigrationManifest(nil))
 	if projection, err = buildPlatformMigrationProjection(t, f); err != nil || projection.Migration == nil || projection.Migration.WallClockSeconds != 600 {
 		t.Fatalf("default wall clock: %+v %v", projection.Migration, err)
 	}

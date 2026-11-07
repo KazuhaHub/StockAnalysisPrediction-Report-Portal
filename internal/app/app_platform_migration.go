@@ -3,6 +3,7 @@ package app
 import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // platformDefaultMigrationWallClockSeconds is the descriptor's default bound on a migration job.
@@ -40,4 +41,50 @@ func platformPlanMigration(currentFormat int64, data appplatform.DataCompatibili
 		From: int64(step.From), To: int64(step.To), WallClockSeconds: seconds,
 		EntrypointSHA256: control.MigrationEntrypointSHA256(step.Entrypoint),
 	}, nil
+}
+
+func samePlatformMigration(a, b *platformMigrationStep) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
+}
+
+// targetDataFormat is the data format the target release declares, and so the format its activation and
+// readiness carry: the migration's target when the update migrates, else the installed format.
+func (p platformManagedUpdatePlan) targetDataFormat() int64 {
+	if p.Migration != nil {
+		return p.Migration.To
+	}
+	return p.DataFormat
+}
+
+// activationWriterFence is the namespace writer fence once the target is active.
+func (p platformManagedUpdatePlan) activationWriterFence() int64 {
+	if p.Migration != nil {
+		return p.SourceWriterFence + 2
+	}
+	return p.SourceWriterFence + 1
+}
+
+// platformMigrationEvidence names the applied migrate-data effect an update-start binds.
+type platformMigrationEvidence struct{ effectID, receiptSHA256 string }
+
+// loadPlatformAppliedMigration returns the operation's applied migrate-data evidence, or none when the plan
+// declares no migration. A plan that declares one has no start without an applied migration.
+func loadPlatformAppliedMigration(e migExec, operationID string, plan platformManagedUpdatePlan) (*platformMigrationEvidence, error) {
+	if plan.Migration == nil {
+		return nil, nil
+	}
+	var effectID, kind, state, receipt string
+	if err := e.queryRow(`SELECT effect_id,kind,state,receipt_json FROM app_platform_operation_effects
+		WHERE operation_id=? AND stage='migrate' AND effect_number=2`, operationID).
+		Scan(&effectID, &kind, &state, &receipt); err != nil || kind != "migrate-data" || state != "applied" {
+		return nil, errAppPlatformStageEvidence
+	}
+	parsed, err := journal.ParseMigrateDataReceipt([]byte(receipt))
+	if err != nil || parsed.State != "migrated" || parsed.EffectID != effectID || parsed.OperationID != operationID {
+		return nil, errAppPlatformStageEvidence
+	}
+	return &platformMigrationEvidence{effectID: effectID, receiptSHA256: platformDigest([]byte(receipt))}, nil
 }

@@ -33,6 +33,10 @@ func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Action == appplatform.ActionRestoreImport && lease.snapshot.Stage == appplatform.StageRestoreData {
 		return platformImportAttemptTimeout
 	}
+	// A migration job runs on, detached, for up to its wall clock; the attempt waits like an import's.
+	if lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageMigrate {
+		return platformImportAttemptTimeout
+	}
 	return platformInstallAttemptTimeout
 }
 
@@ -249,7 +253,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	} else {
 		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
 	}
-	if errors.Is(err, errPlatformImportEnded) {
+	if errors.Is(err, errPlatformImportEnded) || errors.Is(err, errPlatformMigrationEnded) {
 		w.publish("review_required", w.active.id, "")
 		w.active, w.attempts = platformOperationLease{}, 0
 		return nil
@@ -274,8 +278,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
-	if w.active.snapshot.Action == appplatform.ActionRestoreImport &&
-		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil &&
+	if ((w.active.snapshot.Action == appplatform.ActionRestoreImport &&
+		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
+		(w.active.snapshot.Action == appplatform.ActionUpdate && w.active.snapshot.Stage == appplatform.StageMigrate &&
+			(errors.Is(err, errPlatformMigrationBusy) ||
+				(errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)))) &&
 		w.waits < platformBusyWaitLimit {
 		// The wait for the runner ran out while it was still working on the import: it has not failed.
 		// The same effect is read again on the next attempt; nothing is sent under a new identity.
