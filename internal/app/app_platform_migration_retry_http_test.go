@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -207,5 +208,89 @@ func TestMigrationC5RetryReviewCommitLaunchHTTP(t *testing.T) {
 	}
 	if got := h.launch(); got != 200 {
 		t.Fatalf("launch after the retry answered %d", got)
+	}
+}
+
+// settleNeverClaimed ends the leased migrate stage with its command lost in transit, then settles the update: the
+// absence read back becomes definite once the signed window has passed, and nothing is restored.
+func settleNeverClaimed(t *testing.T, f *settleFixture, lease platformOperationLease) {
+	t.Helper()
+	f.fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errors.New("lost in transit")
+	}
+	f.fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
+	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), lease, f.endpoint); !errors.Is(err, errPlatformMigrationBusy) {
+		t.Fatal(err)
+	}
+	if err := f.s.finishPlatformManagedUpdateForReview(context.Background(), lease); err != nil {
+		t.Fatal(err)
+	}
+	f.fake.calls = nil
+	past := strconv.FormatInt(time.Now().Add(-time.Minute).UnixMilli(), 10)
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='migrate' AND effect_number=2`,
+		`{"signed_until_ms":`+past+`}`, lease.id)
+	settled := &settleFixture{s: f.s, lease: f.lease, endpoint: f.endpoint, fake: f.fake, op: lease.id}
+	settled.step(t)
+	settled.step(t)
+	if settled.settleState(t) != "settled" || f.fake.count("execute-restore") != 0 {
+		t.Fatalf("a never-claimed migration did not settle without a restore: %s %v", settled.settleState(t), f.fake.calls)
+	}
+}
+
+// The migration never reached the runner. Settlement restores nothing, and the retry offered afterwards goes through
+// review, commit, migration, start and activation over the routes to a launching application.
+func TestMigrationNeverClaimedRetryReviewCommitLaunchHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
+	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
+	settleNeverClaimed(t, f, lease)
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	if h.launch() == 200 {
+		t.Fatal("an application launched while its failed update was unresolved")
+	}
+	operation := h.retryOverHTTP(platformFixtureID(7640))
+	retry := driveRetryToMigrate(t, f, operation)
+	sent := h.activateMigrated(t, retry, "migrated")
+	if len(sent) != 1 || sent[0].RecoversOperationID != f.op {
+		t.Fatalf("the retry's migration does not name the update it recovers: %+v", sent)
+	}
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the retry answered %d", got)
+	}
+}
+
+// The first retry's migration is lost as well. The second retry names the first, and the application launches.
+func TestMigrationNeverClaimedRetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
+	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
+	settleNeverClaimed(t, f, lease)
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	first := h.retryOverHTTP(platformFixtureID(7650))
+	retry := driveRetryToMigrate(t, f, first)
+	settleNeverClaimed(t, f, retry)
+	if h.launch() == 200 {
+		t.Fatal("an application launched while its failed retry was unresolved")
+	}
+	if choice := h.retryChoice(); choice["recovers_operation_id"] != first {
+		t.Fatalf("the second retry does not name the first: %v", choice)
+	}
+	second := h.retryOverHTTP(platformFixtureID(7660))
+	lease2 := driveRetryToMigrate(t, f, second)
+	sent := h.activateMigrated(t, lease2, "migrated")
+	if len(sent) != 1 || sent[0].RecoversOperationID != first {
+		t.Fatalf("the second retry's migration does not name the first: %+v", sent)
+	}
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the retry of a retry answered %d", got)
+	}
+	for _, failed := range []string{f.op, first} {
+		if effectState(t, f.s, failed, "recovered", 1) != "applied" {
+			t.Fatalf("%s was left unresolved", failed)
+		}
 	}
 }
