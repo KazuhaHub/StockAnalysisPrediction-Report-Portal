@@ -587,6 +587,11 @@ func (s *Server) settleSettlementDiscard(ctx context.Context, endpoint platformR
 		if time.Now().UnixMilli() <= intent.priorSignedUntil+platformImportAbsenceMarginMS {
 			return false, nil
 		}
+		// The discard was never admitted, and no command signed for it can still arrive. The runner refuses a
+		// discard once the migration is no longer unknown, so before sending it again ask the migration.
+		if done, handled, err := s.supersedeSettlementDiscard(ctx, endpoint, lease, intent); handled || err != nil {
+			return done, err
+		}
 	default:
 		return false, nil
 	}
@@ -600,6 +605,55 @@ func (s *Server) settleSettlementDiscard(ctx context.Context, endpoint platformR
 		return false, nil
 	}
 	return commit(executed)
+}
+
+// supersedeSettlementDiscard reads the migrate-data a discard was opened for. When the migration reached a
+// definite end on its own (a receipt), the discard is closed as not applied and the migration is settled from
+// that receipt, so settlement goes on from the migration's real state. It reports handled=false when the
+// migration is still orphaned and the discard is still the way forward.
+func (s *Server) supersedeSettlementDiscard(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease, discard platformDiscardIntent) (done, handled bool, err error) {
+	migrate, err := s.signPlatformSettlementMigrate(ctx, lease)
+	if err != nil {
+		return false, true, err
+	}
+	runner := s.platformMigrationRunner()
+	if err := runner.CheckRoot(ctx, lease.id, migrate.runtime, migrate.authority, endpoint); err != nil {
+		return false, true, err
+	}
+	observation, readErr := runner.ReadMigrate(ctx, endpoint, migrate)
+	if readErr != nil {
+		return false, true, nil
+	}
+	receipt, ok := validPlatformMigrateObservation(observation, migrate, endpoint)
+	if !ok {
+		status, statusErr := observation.MigrationStatus()
+		if statusErr != nil || !validPlatformMigrateStatus(observation, status, migrate.command.CommandHeader, migrate.raw, migrate.authority, endpoint) {
+			return false, true, errAppPlatformStageEvidence
+		}
+		return false, status.State != "orphaned", nil
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil || len(encoded) > 16384 {
+		return false, true, errAppPlatformStageEvidence
+	}
+	state := "reverted"
+	if receipt.State == "migrated" {
+		state = "applied"
+	}
+	return true, true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+			WHERE operation_id=? AND stage='migrate' AND effect_number=3 AND effect_id=? AND kind='discard-migration' AND payload_sha256=?
+			AND state='prepared' AND observed_fence=0`,
+			platformAbsentReceipt, now, lease.id, discard.effectID, discard.command.PayloadSHA256)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
+		changed, err = e.exec(`UPDATE app_platform_operation_effects SET state=?,observed_fence=?,receipt_json=?,updated_ms=?
+			WHERE operation_id=? AND stage='migrate' AND effect_number=2 AND effect_id=? AND kind='migrate-data' AND payload_sha256=?
+			AND admitted_fence=? AND state IN ('prepared','unknown') AND observed_fence=0`,
+			state, migrate.admittedFence, string(encoded), now, lease.id, migrate.effectID, migrate.command.PayloadSHA256, migrate.admittedFence)
+		return platformLeaseCAS(changed, err)
+	})
 }
 
 // commitSettlementDiscard applies the discard effect and reverts the migrate-data effect it settled, in one

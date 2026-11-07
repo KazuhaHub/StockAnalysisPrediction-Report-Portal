@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -89,4 +90,61 @@ func TestSettlementRestoreReadBackOfEarlierReceiptSettles(t *testing.T) {
 	if f.settleState(t) != "settled" || f.fake.count("execute-restore") != 1 {
 		t.Fatalf("settlement after the read-back: %s %v", f.settleState(t), f.fake.calls)
 	}
+}
+
+// The runner refuses a discard once the migration is no longer unknown. A discard it never admitted reads back as a
+// typed absence, which is definite only after the signed window; then the portal closes the discard as not applied,
+// reads the migration again, and settles from its definite state instead of sending the discard forever.
+func testSettlementDiscardRefusedAfterMigrationSettled(t *testing.T, state, outcome string) {
+	f := settleAfterEnd(t, false, orphanedScript)
+	f.fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		return platformMigrateStatusAnswer(i, f.endpoint, "orphaned"), nil
+	}
+	f.step(t) // orphaned: the discard is opened
+	sends := 0
+	f.fake.executeDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) {
+		sends++
+		return nil, errors.New("the runner refused: the migration is no longer unknown")
+	}
+	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) { return nil, errPlatformMigrationAbsent }
+	f.step(t)
+	if sends != 1 {
+		t.Fatalf("the discard was not sent once: %d", sends)
+	}
+	// Meanwhile the job finished on its own.
+	f.fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		return platformMigrateAnswers(i, f.endpoint, state, outcome), nil
+	}
+	if f.step(t) && sends != 1 {
+		t.Fatal("an absence inside the signed window was acted on")
+	}
+	past := strconv.FormatInt(time.Now().Add(-time.Minute).UnixMilli(), 10)
+	mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='migrate' AND effect_number=3`,
+		`{"signed_until_ms":`+past+`}`, f.op)
+	if !f.step(t) || sends != 1 {
+		t.Fatalf("a final absence sent the discard again instead of reading the migration: sends=%d", sends)
+	}
+	if effectState(t, f.s, f.op, "migrate", 3) != "reverted" {
+		t.Fatalf("the discard was not closed as not applied: %s", effectState(t, f.s, f.op, "migrate", 3))
+	}
+	want := map[string]string{"migrated": "applied", "failed": "reverted"}[state]
+	if effectState(t, f.s, f.op, "migrate", 2) != want {
+		t.Fatalf("the migration is %s, want %s", effectState(t, f.s, f.op, "migrate", 2), want)
+	}
+	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+		return restoreAnswer(i, f.endpoint), nil
+	}
+	f.step(t)
+	f.step(t)
+	if f.settleState(t) != "settled" {
+		t.Fatalf("settlement did not continue from the migration's state: %s %v", f.settleState(t), f.fake.calls)
+	}
+}
+
+func TestSettlementDiscardRefusedAfterMigrationRevertedSettles(t *testing.T) {
+	testSettlementDiscardRefusedAfterMigrationSettled(t, "failed", "exit_nonzero")
+}
+
+func TestSettlementDiscardRefusedAfterMigrationAppliedSettles(t *testing.T) {
+	testSettlementDiscardRefusedAfterMigrationSettled(t, "migrated", "")
 }
