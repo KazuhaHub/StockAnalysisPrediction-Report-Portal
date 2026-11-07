@@ -237,3 +237,30 @@ func TestUpdateStartMigrationBindingFields(t *testing.T) {
 		})
 	}
 }
+
+// The runner judges a command by its own clock alone: zero tolerance for a command issued ahead of it, and acceptance
+// until that clock reaches the expiry. A runner whose clock lags the controller's by the skew the controller allows for
+// therefore still accepts the command that long after the controller's expiry, which is why the controller waits for
+// CommandClockSkewMS beyond the expiry before it concludes no command can still be accepted.
+func TestUpdateStartIsJudgedByTheRunnerClockAlone(t *testing.T) {
+	command, key, authority, now := updateStartFixture(t)
+	raw, signature, err := SignUpdateStart(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires, _ := counter(command.ExpiresMS, false)
+	issued, _ := counter(command.IssuedMS, false)
+	if _, err := VerifyUpdateStart(raw, signature, authority, issued-1); err == nil {
+		t.Fatal("a command issued ahead of the runner clock was accepted")
+	}
+	// A runner clock behind by the allowed skew: the controller's time is expires+skew-1 when the runner reads expires-1.
+	if _, err := VerifyUpdateStart(raw, signature, authority, expires-1); err != nil {
+		t.Fatalf("a command inside the window by the runner clock was refused: %v", err)
+	}
+	if _, err := VerifyUpdateStart(raw, signature, authority, expires); err == nil {
+		t.Fatal("a command at the expiry by the runner clock was accepted")
+	}
+	if CommandClockSkewMS <= 0 {
+		t.Fatal("no skew is allowed for")
+	}
+}

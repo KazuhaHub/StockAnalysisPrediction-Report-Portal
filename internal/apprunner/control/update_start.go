@@ -19,6 +19,13 @@ const updateStartReadPurpose = "portal.app/runner-data-update-start-read/v1"
 const updateStartEffectPurpose = "portal.app/runner-data-update-start-effect/v1"
 const maxUpdateStartArchiveBytes int64 = 512 << 20
 
+// CommandClockSkewMS is the lag of the runner's clock behind the controller's that the controller allows for when it
+// concludes that no command it signed can still be accepted. The runner compares a command only with its own clock: one
+// issued after that clock is refused, and one is accepted until that clock reaches its expiry. A runner whose clock
+// lags therefore accepts a command for exactly that long after the controller's expiry, and the runner does not bound
+// the lag itself.
+const CommandClockSkewMS = 5000
+
 type UpdateStartPayload struct {
 	ResourceID                    string `json:"resource_id"`
 	NamespaceID                   string `json:"namespace_id"`

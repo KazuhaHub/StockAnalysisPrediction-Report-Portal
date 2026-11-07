@@ -241,6 +241,11 @@ func listMigrationContainersHTTP(ctx context.Context, client *http.Client, filte
 	return result, nil
 }
 
+// ErrForeignContainer is the typed reason a namespace listing is refused: a container carries the namespace label
+// but not a resource label this runner could have written. Nothing is skipped silently and nothing is removed on its
+// word; an administrator has to look at the container.
+var ErrForeignContainer = errors.New("a container of the namespace is not one of this runner's")
+
 // NamespaceContainer is a container labeled for a data namespace.
 type NamespaceContainer struct {
 	NativeID   string

@@ -84,9 +84,11 @@ type platformInstallationSettings struct {
 // platformSettingsMigrationRecovery projects the settlement of a failed data migration: settling or blocked
 // while the namespace is being brought back to the checkpoint, settled once both choices are offered.
 type platformSettingsMigrationRecovery struct {
-	State       string                            `json:"state"`
-	OperationID string                            `json:"operation_id"`
-	Choices     []platformSettingsMigrationChoice `json:"choices"`
+	State       string `json:"state"`
+	OperationID string `json:"operation_id"`
+	// Reason says why a blocked settlement is stuck, when the runner reported it ("foreign_container").
+	Reason  string                            `json:"reason,omitempty"`
+	Choices []platformSettingsMigrationChoice `json:"choices"`
 }
 
 // platformSettingsMigrationChoice is one recovery choice. Rollback carries the recovery set to restore the
@@ -450,6 +452,11 @@ func platformMigrationRecoveryProjection(e migExec, installation string) (*platf
 		return nil, err
 	}
 	result := &platformSettingsMigrationRecovery{State: state, OperationID: operation, Choices: []platformSettingsMigrationChoice{}}
+	if state == "blocked" {
+		if result.Reason, err = platformMigrationSettlementReason(e, operation); err != nil {
+			return nil, err
+		}
+	}
 	if state != "settled" {
 		return result, nil
 	}

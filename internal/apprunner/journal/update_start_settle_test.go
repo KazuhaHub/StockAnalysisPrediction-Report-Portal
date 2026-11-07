@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,6 +27,8 @@ type fakeInspector struct {
 	listErr   error
 	removeErr error
 	removed   []string
+	// beforeRemove and afterRemove observe each removal.
+	beforeRemove, afterRemove func()
 }
 
 func (f *fakeInspector) ListNamespaceContainers(context.Context, string) ([]driver.NamespaceContainer, error) {
@@ -38,6 +41,12 @@ func (f *fakeInspector) ListNamespaceContainers(context.Context, string) ([]driv
 func (f *fakeInspector) RemoveStrayContainer(_ context.Context, nativeID string) error {
 	if f.removeErr != nil {
 		return f.removeErr
+	}
+	if f.beforeRemove != nil {
+		f.beforeRemove()
+	}
+	if f.afterRemove != nil {
+		defer f.afterRemove()
 	}
 	f.removed = append(f.removed, nativeID)
 	kept := f.listed[:0:0]
@@ -354,22 +363,106 @@ func TestSweepRemovesOnlyUnaccountedContainersOfTheNamespace(t *testing.T) {
 			t.Fatalf("sweep: %+v %v", receipt, err)
 		}
 	})
-	t.Run("a failed listing or removal writes nothing", func(t *testing.T) {
+	t.Run("accounted containers are left alone", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		c := r.command
+		accounted := func(id int, native string, desired, observed string) {
+			mustJournalExec(t, r.f.store.db, `INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms) VALUES(?,?,?,'container',?,?,1,?,1,1,?,?,?,1,NULL,1,1)`,
+				fixtureID(id), c.InstallationID, c.Payload.NamespaceID, native, c.Payload.TargetReleaseSHA256, c.ControllerEpoch, desired, observed, strings.Repeat("b", 64))
+		}
+		source, sibling, gone := strings.Repeat("a1", 32), strings.Repeat("a2", 32), strings.Repeat("a3", 32)
+		accounted(3001, source, "present", "running")  // the live source
+		accounted(3002, sibling, "stopped", "stopped") // another resource of the installation
+		accounted(3003, gone, "absent", "absent")      // a resource that is gone no longer accounts for its container
+		stray := strings.Repeat("ee", 32)
+		inspector := &fakeInspector{listed: []driver.NamespaceContainer{
+			{NativeID: source, State: "running"}, {NativeID: sibling, State: "exited"}, {NativeID: gone, State: "exited"}, {NativeID: stray, State: "running"},
+		}}
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+		if err != nil || receipt.Removed != "2" {
+			t.Fatalf("sweep: %+v %v", receipt, err)
+		}
+		if len(inspector.removed) != 2 || slices.Contains(inspector.removed, source) || slices.Contains(inspector.removed, sibling) {
+			t.Fatalf("an accounted container was removed: %v", inspector.removed)
+		}
+	})
+	t.Run("a failed listing writes nothing", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{listErr: errTargetExists}); err == nil {
+			t.Fatal("a failed sweep settled")
+		}
+		var n int
+		if err := r.f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE effect_id=?`, fixtureID(2803)).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("a failed listing left a row: %d %v", n, err)
+		}
+	})
+	t.Run("nothing is removed before the claim, and a crash after the removal reports the intended set", func(t *testing.T) {
 		r := reservedStart(t)
 		removeTarget(r)
 		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
 		stray := strings.Repeat("ee", 32)
-		for _, inspector := range []*fakeInspector{
-			{listErr: errTargetExists},
-			{listed: []driver.NamespaceContainer{{NativeID: stray, State: "running"}}, removeErr: errTargetExists},
-		} {
-			if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil {
-				t.Fatal("a failed sweep settled")
+		inspector := &fakeInspector{listed: []driver.NamespaceContainer{{NativeID: stray, State: "running"}}}
+		inspector.beforeRemove = func() {
+			var state, claim string
+			if err := r.f.store.db.QueryRow(`SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, fixtureID(2803)).Scan(&state, &claim); err != nil {
+				t.Fatalf("no claim row before the removal: %v", err)
 			}
+			if state != "unknown" || !strings.Contains(claim, stray) {
+				t.Fatalf("the claim does not record the intended set: %s %s", state, claim)
+			}
+		}
+		// The runner removes the container, then dies before it records the outcome: the namespace read-back fails.
+		inspector.afterRemove = func() { inspector.listErr = errTargetExists }
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil {
+			t.Fatal("a crash before the outcome was recorded settled")
+		}
+		var state string
+		if err := r.f.store.db.QueryRow(`SELECT state FROM runner_commands WHERE effect_id=?`, fixtureID(2803)).Scan(&state); err != nil || state != "unknown" {
+			t.Fatalf("the claim is %q %v", state, err)
+		}
+		// The resend finds the namespace already clean and still reports what the claim intended.
+		inspector.listErr = nil
+		receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+		if err != nil || receipt.Outcome != "swept" || receipt.Removed != "1" {
+			t.Fatalf("resend: %+v %v", receipt, err)
+		}
+		if again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{listErr: errTargetExists}); err != nil || again != receipt {
+			t.Fatalf("a replay differed: %+v %v", again, err)
+		}
+	})
+	t.Run("a failed removal keeps the claim and the resend finishes it", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		stray := strings.Repeat("ee", 32)
+		inspector := &fakeInspector{listed: []driver.NamespaceContainer{{NativeID: stray, State: "running"}}, removeErr: errTargetExists}
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil {
+			t.Fatal("a failed removal settled")
+		}
+		inspector.removeErr = nil
+		if receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err != nil || receipt.Removed != "1" {
+			t.Fatalf("resend: %+v %v", receipt, err)
+		}
+	})
+	t.Run("a foreign container blocks the sweep with a typed reason and removes nothing", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		inspector := &fakeInspector{listErr: driver.ErrForeignContainer, listed: []driver.NamespaceContainer{{NativeID: strings.Repeat("ee", 32), State: "running"}}}
+		receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+		if err != nil || receipt.Outcome != "blocked" || receipt.Reason != SettleReasonForeignContainer || len(inspector.removed) != 0 {
+			t.Fatalf("blocked: %+v %v %v", receipt, err, inspector.removed)
+		}
+		if !validSettleUpdateStartReceipt(receipt) {
+			t.Fatal("the blocked answer is not a valid receipt")
 		}
 		var n int
 		if err := r.f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE effect_id=?`, fixtureID(2803)).Scan(&n); err != nil || n != 0 {
-			t.Fatalf("a failed sweep left a row: %d %v", n, err)
+			t.Fatalf("a blocked sweep left a row: %d %v", n, err)
 		}
 	})
 	t.Run("the target must be removed first", func(t *testing.T) {

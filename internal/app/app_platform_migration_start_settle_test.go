@@ -378,8 +378,9 @@ func TestSettlementDoesNotActOnAHeldStartBeforeItsWindowAndCreateGraceHavePassed
 			})
 			h.scriptRemoval(t, true)
 			now := time.Now().UnixMilli()
-			// Past the window and the margin, but inside the create grace.
-			inside := now - platformStartCommandWindowMS - platformImportAbsenceMarginMS - platformCreateGraceMS/2
+			// Past the window and the margin, but inside the create grace and the clock-skew allowance.
+			total := platformSigningSlackMS + platformStartCommandWindowMS + platformImportAbsenceMarginMS + platformCreateGraceMS + control.CommandClockSkewMS
+			inside := now - total + 2000
 			mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=? WHERE id=?`, inside, f.op)
 			for range 3 {
 				if f.step(t) {
@@ -391,7 +392,7 @@ func TestSettlementDoesNotActOnAHeldStartBeforeItsWindowAndCreateGraceHavePassed
 				t.Fatalf("a %s start was touched early: removals=%v settlements=%d", state, h.removals, h.settled)
 			}
 			// Past the grace it is acted on.
-			mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=? WHERE id=?`, inside-platformCreateGraceMS, f.op)
+			mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=? WHERE id=?`, inside-4000, f.op)
 			if !f.step(t) {
 				t.Fatalf("a %s start was not acted on after the create grace passed", state)
 			}
@@ -523,5 +524,76 @@ func TestSettlementSweepsTheNamespaceBeforeTheRestore(t *testing.T) {
 	}
 	if effectState(t, f.s, f.op, "settle", 6) != "applied" {
 		t.Fatal("the sweep was not recorded")
+	}
+}
+
+// The runner judges a command by its own clock, and does not bound how far that clock lags the Portal's. A runner that
+// lags by the skew allowed for accepts the last command signed for the start until the Portal's own expiry plus that
+// skew, so the time after which the Portal acts on the start is later than that, by the absence margin and the create
+// grace as well.
+func TestSettlementWindowAllowsForARunnerClockThatLags(t *testing.T) {
+	f := startPendingFixture(t, true)
+	lease, err := platformSettlementLease(f.s.st.poolExec(), f.op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, err := f.s.signPlatformSettlementStartRead(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := scalar[int64](t, f.s.st, `SELECT completed_ms FROM app_platform_operations WHERE id=?`, f.op)
+	// The latest a start command can have been signed: issued a second past the clock of the update's last moment.
+	lastExpiry := completed + platformSigningSlackMS + platformStartCommandWindowMS
+	lagging := lastExpiry + control.CommandClockSkewMS
+	if read.definiteAfter < lagging+platformImportAbsenceMarginMS+platformCreateGraceMS {
+		t.Fatalf("the Portal would act %dms before a command could still be accepted by a runner that lags", lagging+platformImportAbsenceMarginMS+platformCreateGraceMS-read.definiteAfter)
+	}
+}
+
+// A container of the namespace that is not the runner's blocks the sweep with a reason the settlement projection
+// shows. Nothing is skipped and the checkpoint is not restored; once the runner can sweep again the settlement goes on.
+func TestSettlementShowsWhyASweepIsBlockedByAForeignContainer(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
+	h := newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		if len(h.removals) > 1 && h.f.fake.count("sweep") > 0 {
+			return nil, held("never_ran")
+		}
+		return nil, held("reserved")
+	})
+	h.scriptRemoval(t, true)
+	blocked := true
+	inner := platformFakeSettleStart(f.fake, nil)
+	f.s.platformSettleStart = func(ctx context.Context, e platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+		if intent.mode == control.SettleModeSweep && blocked {
+			receipt, err := platformFakeSweepReceipt(intent, 0)
+			receipt.Outcome, receipt.Reason, receipt.Removed = "blocked", journal.SettleReasonForeignContainer, ""
+			return receipt, err
+		}
+		return inner(ctx, e, intent)
+	}
+	for range 8 {
+		f.step(t)
+	}
+	if f.fake.count("execute-restore") != 0 {
+		t.Fatal("the checkpoint was restored beside a container nothing accounts for")
+	}
+	state, err := platformMigrationSettlementState(f.s.st.poolExec(), f.op)
+	if err != nil || state != "blocked" {
+		t.Fatalf("a blocked sweep projects as %q %v", state, err)
+	}
+	reason, err := platformMigrationSettlementReason(f.s.st.poolExec(), f.op)
+	if err != nil || reason != journal.SettleReasonForeignContainer {
+		t.Fatalf("the reason is %q %v", reason, err)
+	}
+	projection, err := platformMigrationRecoveryProjection(f.s.st.poolExec(), f.lease.installationID)
+	if err != nil || projection == nil || projection.State != "blocked" || projection.Reason != "foreign_container" {
+		t.Fatalf("the projection does not show why: %+v %v", projection, err)
+	}
+	blocked = false
+	h.settle(t, 10)
+	if effectState(t, f.s, f.op, "settle", 6) != "applied" {
+		t.Fatal("the sweep did not go on once it could")
 	}
 }

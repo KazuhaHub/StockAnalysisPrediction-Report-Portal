@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -44,6 +46,9 @@ type TargetInspector interface {
 	RemoveStrayContainer(ctx context.Context, nativeID string) error
 }
 
+// SettleReasonForeignContainer is why a sweep is blocked: a container of the namespace is not one of the runner's.
+const SettleReasonForeignContainer = "foreign_container"
+
 const settleUpdateStartReceiptFormat = "portal.runner.settle-update-start-receipt/1-dev.1"
 
 // SettleUpdateStartReceipt records how an orphaned start was settled and what was observed.
@@ -62,6 +67,7 @@ type SettleUpdateStartReceipt struct {
 	Outcome          string `json:"outcome"`
 	ContainerState   string `json:"container_state"`
 	Removed          string `json:"removed,omitempty"`
+	Reason           string `json:"reason,omitempty"`
 	NativeID         string `json:"native_id"`
 	ObservedMS       string `json:"observed_ms"`
 	SettledMS        string `json:"settled_ms"`
@@ -77,7 +83,13 @@ func validSettleUpdateStartReceipt(r SettleUpdateStartReceipt) bool {
 			return false
 		}
 	}
+	if r.Reason != "" && !(r.Outcome == "blocked" && r.Reason == SettleReasonForeignContainer) {
+		return false
+	}
 	switch r.Outcome {
+	case "blocked":
+		// Never recorded: it answers a sweep that could not proceed, with the reason an administrator is shown.
+		return r.Reason == SettleReasonForeignContainer && r.ContainerState == "" && r.Removed == "" && r.NativeID == control.ReservedStartNativeID(r.ResourceID)
 	case "never_ran":
 		return r.ContainerState == "" && r.Removed == "" && r.NativeID == control.ReservedStartNativeID(r.ResourceID)
 	case "swept":
@@ -178,10 +190,10 @@ func loadSettleStart(ctx context.Context, tx *sql.Tx, raw, signature []byte, mod
 // SettleUpdateStart settles an orphaned start, or sweeps the namespace of a settled one, as the command asks. It takes
 // the data execution gate without waiting: a start that is executing holds it, and nothing is touched then.
 //
-// Nothing here changes anything natively before it has looked, so nothing is claimed beforehand: it inspects first,
-// then writes the outcome in a single transaction. A failed inspection writes nothing, and a retry starts clean; no
-// row is ever left unknown for an installation-wide check to trip over. It reports the settlement receipt, which a
-// replay returns again.
+// Settling an orphan changes nothing natively (it only looks), so nothing is claimed beforehand: it inspects first,
+// then writes the outcome in a single transaction. A failed inspection writes nothing, and a retry starts clean. The
+// sweep does change things natively, so it is claimed first: see sweepNamespace. It reports the settlement receipt,
+// which a replay returns again.
 func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, inspector TargetInspector) (SettleUpdateStartReceipt, error) {
 	var zero SettleUpdateStartReceipt
 	if inspector == nil || s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
@@ -225,7 +237,7 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 
 // insertSettleRow records the settlement as applied, in the transaction that carries its effect.
 func insertSettleRow(ctx context.Context, tx *sql.Tx, command control.SettleUpdateStartCommand, start control.UpdateStartCommand, receipt SettleUpdateStartReceipt, now int64) error {
-	if !validSettleUpdateStartReceipt(receipt) {
+	if !validSettleUpdateStartReceipt(receipt) || receipt.Outcome == "blocked" {
 		return fmt.Errorf("%w: settle update-start receipt", ErrFenceReconciliation)
 	}
 	encoded, err := json.Marshal(receipt)
@@ -240,45 +252,126 @@ func insertSettleRow(ctx context.Context, tx *sql.Tx, command control.SettleUpda
 	return err
 }
 
+// sweepClaimFormat is the claim a sweep writes before it removes anything.
+const sweepClaimFormat = "portal.runner.sweep-claim/1-dev.1"
+
+// sweepClaim holds the intended container ids; the journal's JSON reader takes objects and strings only, so they are
+// joined by commas in the encoded form.
+type sweepClaim struct {
+	Intended []string
+}
+
+type sweepClaimJSON struct {
+	Format   string `json:"format"`
+	Intended string `json:"intended"`
+}
+
+func (c sweepClaim) encode() ([]byte, error) {
+	return json.Marshal(sweepClaimJSON{Format: sweepClaimFormat, Intended: strings.Join(c.Intended, ",")})
+}
+
+func parseSweepClaim(raw string) (sweepClaim, bool) {
+	var encoded sweepClaimJSON
+	if len(raw) > 65536 || !canonicalDataJSON(raw, &encoded) || encoded.Format != sweepClaimFormat {
+		return sweepClaim{}, false
+	}
+	var claim sweepClaim
+	if encoded.Intended != "" {
+		claim.Intended = strings.Split(encoded.Intended, ",")
+	}
+	if len(claim.Intended) > 256 {
+		return sweepClaim{}, false
+	}
+	for _, id := range claim.Intended {
+		if !containerSHAValue(id) {
+			return sweepClaim{}, false
+		}
+	}
+	return claim, true
+}
+
 // sweepNamespace removes the containers labeled for the namespace that no live resource accounts for. It runs after
 // the start is settled and its own target is gone, so what it finds is the leftover of a create that was still in
 // flight when the runner stopped. A container a live resource accounts for is left alone.
+//
+// Removing a container is a native change, so the claim comes first: the set of container ids it intends to remove is
+// written as the command's own row (unknown) before the first removal, and only then are they removed. A crash after
+// the removals leaves that row; the resend removes the same set again (a removal of what is gone is a no-op), reads the
+// namespace back and reports the removed set from the claim, not from what it happens to find. A container that
+// appears after the claim is added to the claim before it is removed. A container that is not one of the runner's
+// blocks the sweep with a typed reason and nothing is claimed or removed on its account.
 func (s *Store) sweepNamespace(ctx context.Context, raw, signature []byte, facts settleStartFacts, inspector TargetInspector) (SettleUpdateStartReceipt, error) {
 	var zero SettleUpdateStartReceipt
 	start := facts.verified.Start().Command()
+	command := facts.verified.Command()
 	if facts.resource == nil || facts.resource.desired != "absent" || facts.resource.observed != "absent" {
 		return zero, fmt.Errorf("%w: the start's target is not removed", ErrUpdateStartNotOrphaned)
 	}
-	removed := 0
+	base := SettleUpdateStartReceipt{
+		Format: settleUpdateStartReceiptFormat, DeploymentID: start.DeploymentID, ControllerEpoch: start.ControllerEpoch,
+		InstallationID: start.InstallationID, OperationID: command.OperationID, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		StartOperationID: start.OperationID, StartEffectID: start.EffectID, ResourceID: start.Payload.ResourceID, NamespaceID: start.Payload.NamespaceID,
+		NativeID: control.ReservedStartNativeID(start.Payload.ResourceID),
+	}
+	var claim sweepClaim
+	claimed := false
+	if facts.row.effectID != "" {
+		var rawClaim string
+		if err := s.db.QueryRowContext(ctx, `SELECT receipt_json FROM runner_commands WHERE effect_id=?`, command.EffectID).Scan(&rawClaim); err != nil {
+			return zero, err
+		}
+		var ok bool
+		if claim, ok = parseSweepClaim(rawClaim); !ok {
+			return zero, fmt.Errorf("%w: sweep claim", ErrFenceReconciliation)
+		}
+		claimed = true
+	}
 	for round := 0; ; round++ {
 		listed, err := inspector.ListNamespaceContainers(ctx, start.Payload.NamespaceID)
+		if errors.Is(err, driver.ErrForeignContainer) {
+			blocked := base
+			blocked.Outcome, blocked.Reason = "blocked", SettleReasonForeignContainer
+			now := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+			blocked.ObservedMS, blocked.SettledMS = now, now
+			return blocked, nil
+		}
 		if err != nil {
 			return zero, fmt.Errorf("%w: list the namespace: %v", ErrManagedRemovalUnavailable, err)
 		}
-		strays := 0
+		var fresh []string
 		for _, container := range listed {
 			var accounted int
 			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE kind='container' AND native_id=? AND NOT (desired_state='absent' AND observed_state='absent')`,
 				container.NativeID).Scan(&accounted); err != nil {
 				return zero, err
 			}
-			if accounted != 0 {
-				continue
+			if accounted == 0 {
+				fresh = append(fresh, container.NativeID)
 			}
-			strays++
-			if round == 1 {
-				return zero, fmt.Errorf("%w: a stray container is still there", ErrManagedRemovalUnavailable)
-			}
-			if err := inspector.RemoveStrayContainer(ctx, container.NativeID); err != nil {
-				return zero, fmt.Errorf("%w: remove a stray container: %v", ErrManagedRemovalUnavailable, err)
-			}
-			removed++
 		}
-		// One more listing proves they are gone.
-		if strays == 0 {
+		if len(fresh) == 0 {
 			break
 		}
+		if round == 3 {
+			return zero, fmt.Errorf("%w: a stray container is still there", ErrManagedRemovalUnavailable)
+		}
+		// Claim what is about to be removed, durably, before removing any of it.
+		for _, id := range fresh {
+			if !slices.Contains(claim.Intended, id) {
+				claim.Intended = append(claim.Intended, id)
+			}
+		}
+		if err := s.writeSweepClaim(ctx, raw, signature, claim, claimed); err != nil {
+			return zero, err
+		}
+		claimed = true
+		for _, id := range fresh {
+			if err := inspector.RemoveStrayContainer(ctx, id); err != nil {
+				return zero, fmt.Errorf("%w: remove a stray container: %v", ErrManagedRemovalUnavailable, err)
+			}
+		}
 	}
+	// The set reported is the claim's, whether this call or an earlier one removed it.
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return zero, err
@@ -288,25 +381,76 @@ func (s *Store) sweepNamespace(ctx context.Context, raw, signature []byte, facts
 	if err != nil {
 		return zero, err
 	}
-	if again.row.effectID != "" {
-		return zero, fmt.Errorf("%w: settle update-start row", ErrFenceReconciliation)
+	if again.row.state == "applied" {
+		return readSettleReceipt(ctx, tx, again)
 	}
-	command := again.verified.Command()
 	now := time.Now().UTC().UnixMilli()
-	receipt := SettleUpdateStartReceipt{
-		Format: settleUpdateStartReceiptFormat, DeploymentID: start.DeploymentID, ControllerEpoch: start.ControllerEpoch,
-		InstallationID: start.InstallationID, OperationID: command.OperationID, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
-		StartOperationID: start.OperationID, StartEffectID: start.EffectID, ResourceID: start.Payload.ResourceID, NamespaceID: start.Payload.NamespaceID,
-		Outcome: "swept", Removed: strconv.Itoa(removed), NativeID: control.ReservedStartNativeID(start.Payload.ResourceID),
-		ObservedMS: strconv.FormatInt(now, 10), SettledMS: strconv.FormatInt(now, 10),
+	receipt := base
+	receipt.Outcome, receipt.Removed = "swept", strconv.Itoa(len(claim.Intended))
+	receipt.ObservedMS, receipt.SettledMS = strconv.FormatInt(now, 10), strconv.FormatInt(now, 10)
+	if !validSettleUpdateStartReceipt(receipt) {
+		return zero, fmt.Errorf("%w: settle update-start receipt", ErrFenceReconciliation)
 	}
-	if err := insertSettleRow(ctx, tx, command, start, receipt, now); err != nil {
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		return zero, err
+	}
+	if claimed {
+		changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND ack_attempted_ms IS NULL`,
+			string(encoded), now, command.EffectID)
+		if err != nil {
+			return zero, err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return zero, fmt.Errorf("%w: sweep outcome rows=%d err=%v", ErrFenceReconciliation, n, err)
+		}
+	} else if err := insertSettleRow(ctx, tx, command, start, receipt, now); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
 	return receipt, nil
+}
+
+// writeSweepClaim records the intended set as the sweep's own row: inserted unknown the first time, extended after.
+func (s *Store) writeSweepClaim(ctx context.Context, raw, signature []byte, claim sweepClaim, exists bool) error {
+	encoded, err := claim.encode()
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	facts, err := loadSettleStart(ctx, tx, raw, signature, "settle")
+	if err != nil {
+		return err
+	}
+	command, start := facts.verified.Command(), facts.verified.Start().Command()
+	now := time.Now().UTC().UnixMilli()
+	if exists {
+		if facts.row.state != "unknown" {
+			return fmt.Errorf("%w: sweep claim state %q", ErrFenceReconciliation, facts.row.state)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE runner_commands SET receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND ack_attempted_ms IS NULL`,
+			string(encoded), now, command.EffectID); err != nil {
+			return err
+		}
+		return tx.Commit()
+	}
+	if facts.row.effectID != "" {
+		return fmt.Errorf("%w: sweep claim exists", ErrFenceReconciliation)
+	}
+	fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,1,?,?,?,?,?,'unknown',?,NULL,?,?)`,
+		command.EffectID, command.OperationID, start.InstallationID, settleRowStage, settleRowKind, command.PayloadSHA256,
+		start.TargetGeneration, start.ControllerEpoch, fence, string(encoded), now, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // requirePendingTarget checks the resource is the start's own pending target, untouched.

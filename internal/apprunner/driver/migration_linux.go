@@ -174,8 +174,12 @@ func (r *CandidateRuntime) ListNamespaceContainers(ctx context.Context, namespac
 	result := make([]NamespaceContainer, 0, len(found))
 	for _, listed := range found {
 		resource := listed.Labels[containerLabelPrefix+"resource"]
-		if listed.State == "" || len(listed.State) > 24 || !containerUUID.MatchString(resource) {
+		if listed.State == "" || len(listed.State) > 24 {
 			return nil, ErrInvalidResponse
+		}
+		if !containerUUID.MatchString(resource) {
+			// Failing closed, with a reason an administrator can be shown, rather than skipping it or removing it.
+			return nil, ErrForeignContainer
 		}
 		result = append(result, NamespaceContainer{NativeID: listed.ID, State: listed.State, ResourceID: resource})
 	}

@@ -53,6 +53,12 @@ const (
 	// platformCreateGraceMS is how long after a start's last signed window a container create the runner gave up on
 	// may still be carried out by the Docker daemon: the driver's request timeout.
 	platformCreateGraceMS = int64(driver.DockerRequestTimeout / time.Millisecond)
+	// platformSigningSlackMS is how far past the database clock a start command is allowed to be issued when it is
+	// signed (the check in the signing transaction), so a command signed in the update's last moment can expire that
+	// much after the window from its completion.
+	platformSigningSlackMS = int64(1000)
+	// platformBlockedSweepReceipt notes on the sweep effect that the runner reported a container that is not its own.
+	platformBlockedSweepReceipt = `{"state":"blocked","reason":"foreign_container"}`
 )
 
 type platformSettleEffect struct {
@@ -146,7 +152,23 @@ func platformMigrationSettlementState(e migExec, operation string) (string, erro
 	if start.exists && start.state != "applied" && start.state != "reverted" && start.state != "prepared" && start.state != "unknown" {
 		return "blocked", nil
 	}
+	if reason, err := platformMigrationSettlementReason(e, operation); err != nil || reason != "" {
+		return "blocked", err
+	}
 	return "settling", nil
+}
+
+// platformMigrationSettlementReason is why a settlement is stuck when the runner said so: "foreign_container" when the
+// sweep found a container of the namespace that is not the runner's. It is empty otherwise.
+func platformMigrationSettlementReason(e migExec, operation string) (string, error) {
+	sweep, err := loadPlatformSettleEffect(e, operation, platformSettleStage, platformSettleSweepEffect)
+	if err != nil {
+		return "", err
+	}
+	if sweep.exists && sweep.state == "prepared" && sweep.receipt == platformBlockedSweepReceipt {
+		return journal.SettleReasonForeignContainer, nil
+	}
+	return "", nil
 }
 
 // platformMigrationSettlementCandidates lists the finished updates whose migration is not yet settled.
@@ -786,9 +808,12 @@ type platformSettlementStartRead struct {
 	intent platformUpdateStartIntent
 	// reserved is set when the effect records the runner's reservation, which the runner cannot truthfully lack.
 	reserved bool
-	// definiteAfter is the time before which a command for the start may still be on its way, or a container create it
-	// made may still be carried out: none was signed after the update ended, and the Docker daemon may finish a
-	// request the runner gave up on for the driver's request timeout after the command's window closed.
+	// definiteAfter is the time before which a command for the start may still be accepted, or a container create it
+	// made may still be carried out. No command was signed after the update ended (the latest one was issued at most
+	// the signing slack past it and expires one window later), the runner accepts a command until its own clock reaches
+	// the expiry and may lag the Portal's by CommandClockSkewMS, and the Docker daemon may finish a request the runner
+	// gave up on for the driver's request timeout. The start command's signed expiry itself is not recorded on its
+	// effect, so the bound is derived from when the update ended.
 	definiteAfter int64
 	admitted      int64
 }
@@ -857,7 +882,7 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		command: command, checkpoint: checkpoint, checkpointRaw: checkpointRaw, source: source, plan: plan,
 		targetDescriptor: bytes.Clone(descriptor), reservation: reservation,
 	}
-	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformStartCommandWindowMS + platformImportAbsenceMarginMS + platformCreateGraceMS}, nil
+	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformSigningSlackMS + platformStartCommandWindowMS + platformImportAbsenceMarginMS + platformCreateGraceMS + control.CommandClockSkewMS}, nil
 }
 
 // signPlatformSettlementStartRead signs the failed update's start for a read.
@@ -1308,6 +1333,17 @@ func (s *Server) sweepSettlementNamespace(ctx context.Context, endpoint platform
 	if err != nil {
 		return platformSweepStatus{}, nil
 	}
+	if receipt.Outcome == "blocked" && receipt.Reason == journal.SettleReasonForeignContainer && receipt.EffectID == intent.effectID && receipt.PayloadSHA256 == intent.digest {
+		// Failing closed, visibly: the reason is kept on the sweep effect for the settlement projection, and the sweep
+		// is sent again on later ticks, so it clears once the container is dealt with.
+		err := s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+			_, err := e.exec(`UPDATE app_platform_operation_effects SET receipt_json=?,updated_ms=?
+				WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind=? AND state='prepared'`,
+				platformBlockedSweepReceipt, now, lease.id, platformSettleStage, platformSettleSweepEffect, intent.effectID, platformSweepKind)
+			return err
+		})
+		return platformSweepStatus{}, err
+	}
 	if receipt.Outcome != "swept" || receipt.EffectID != intent.effectID || receipt.OperationID != intent.operationID || receipt.PayloadSHA256 != intent.digest ||
 		receipt.StartEffectID != intent.startEffectID || receipt.ResourceID != intent.resourceID || receipt.NamespaceID != intent.namespaceID {
 		return platformSweepStatus{}, errAppPlatformStageEvidence
@@ -1318,8 +1354,8 @@ func (s *Server) sweepSettlementNamespace(ctx context.Context, endpoint platform
 	}
 	err = s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-			WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind=? AND payload_sha256=? AND state='prepared' AND receipt_json='{}'`,
-			lease.fence, string(encoded), now, lease.id, platformSettleStage, platformSettleSweepEffect, intent.effectID, platformSweepKind, intent.digest)
+			WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind=? AND payload_sha256=? AND state='prepared' AND receipt_json IN ('{}',?)`,
+			lease.fence, string(encoded), now, lease.id, platformSettleStage, platformSettleSweepEffect, intent.effectID, platformSweepKind, intent.digest, platformBlockedSweepReceipt)
 		return platformLeaseCAS(changed, err)
 	})
 	return platformSweepStatus{progressed: err == nil}, err
