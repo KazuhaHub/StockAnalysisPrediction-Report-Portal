@@ -150,3 +150,38 @@ func TestSettlementDiscardRefusedAfterMigrationRevertedSettles(t *testing.T) {
 func TestSettlementDiscardRefusedAfterMigrationAppliedSettles(t *testing.T) {
 	testSettlementDiscardRefusedAfterMigrationSettled(t, "migrated", "")
 }
+
+// A status read back for the settling restore is held to the same checks as migrate and discard: it must answer
+// this effect, this payload and this operation, and be fresh. An answer for anything else is evidence of a fault,
+// never a reason to send the restore again.
+func TestSettlementRestoreStatusMustAnswerTheEffect(t *testing.T) {
+	for name, mutate := range map[string]func(*platformFakeObservation){
+		"another effect": func(o *platformFakeObservation) { o.status.EffectID = platformFixtureID(8801) },
+		"another payload": func(o *platformFakeObservation) {
+			o.status.PayloadSHA256 = platformDigest([]byte("another payload"))
+		},
+		"another operation": func(o *platformFakeObservation) { o.status.OperationID = platformFixtureID(8802) },
+		"another kind":      func(o *platformFakeObservation) { o.status.Kind = "migrate-data" },
+		"stale": func(o *platformFakeObservation) {
+			o.status.ObservedMS = strconv.FormatInt(time.Now().Add(-time.Hour).UnixMilli(), 10)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := settleAfterEnd(t, false, failedScript)
+			sends := 0
+			f.fake.executeRestore = func(platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+				sends++
+				return nil, errors.New("acknowledgement lost")
+			}
+			f.step(t)
+			f.fake.readRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+				o := restoreStatus(i, f.endpoint, "orphaned").(platformFakeObservation)
+				mutate(&o)
+				return o, nil
+			}
+			if _, err := f.s.settlePlatformMigration(context.Background(), f.endpoint, f.op); err == nil || sends != 1 {
+				t.Fatalf("a status that does not answer the restore was acted on: sends=%d err=%v", sends, err)
+			}
+		})
+	}
+}

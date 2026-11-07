@@ -707,7 +707,7 @@ func (s *Server) settleSettlementRestore(ctx context.Context, endpoint platformR
 				return commit(observation)
 			}
 			status, statusErr := observation.MigrationStatus()
-			if statusErr != nil {
+			if statusErr != nil || !validPlatformMigrateStatus(observation, status, platformRestoreHeader(intent.command), intent.raw, intent.authority, endpoint) {
 				return false, errAppPlatformStageEvidence
 			}
 			if status.State == "pending" {
@@ -732,6 +732,17 @@ func (s *Server) settleSettlementRestore(ctx context.Context, endpoint platformR
 		return true, nil
 	}
 	return commit(executed)
+}
+
+// platformRestoreHeader is the identity a status for the restore must carry, in the shape the migrate and discard
+// statuses are checked against.
+func platformRestoreHeader(c control.RestoreCommand) control.CommandHeader {
+	return control.CommandHeader{
+		Format: c.Format, DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch, ControlRevision: c.ControlRevision,
+		InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: c.Stage,
+		EffectNumber: c.EffectNumber, EffectID: c.EffectID, Kind: "restore", InstallationFence: c.InstallationFence,
+		PayloadSHA256: c.PayloadSHA256, IssuedMS: c.IssuedMS, ExpiresMS: c.ExpiresMS,
+	}
 }
 
 // removeSettlementTarget stops, then removes, the started target of the failed update under an operation
