@@ -172,7 +172,7 @@ func TestOrphanedStartIsSettledByTheAbsenceProof(t *testing.T) {
 
 func TestReservedStartRemovalRefusedWhenAContainerExists(t *testing.T) {
 	r := reservedStart(t)
-	prover := &fakeTargetProver{err: driverConflict}
+	prover := &fakeTargetProver{err: errTargetExists}
 	raw, sig := r.removal(t, "stop", 1)
 	if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, prover); err == nil {
 		t.Fatal("a removal was settled although a container exists for the resource")
@@ -240,4 +240,4 @@ func TestUpdateStartReadReportsWhatTheRunnerHolds(t *testing.T) {
 	}
 }
 
-var driverConflict = errors.New("a container exists for the resource")
+var errTargetExists = errors.New("a container exists for the resource")
