@@ -299,6 +299,34 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 	return command, nil
 }
 
+// platformRetryOwnsCandidate says whether the candidate activation at the retry's generation is the leftover of a failed
+// update the retry recovers, whose target settlement proved removed. The row carries no operation of its own, so the
+// evidence is the settlement's: one of the recovered updates removed a target whose resource, release and namespace
+// are this row's, and stopped it first. Anything else is not the retry's to take over.
+func platformRetryOwnsCandidate(e migExec, installation, recovers, activation, release, namespace string) bool {
+	chain, err := platformRetryAncestors(e, recovers)
+	if err != nil {
+		return false
+	}
+	for _, operation := range chain {
+		stop, err := loadPlatformSettleEffect(e, operation, platformSettleStage, platformSettleStopEffect)
+		if err != nil || stop.state != "applied" {
+			continue
+		}
+		remove, err := loadPlatformSettleEffect(e, operation, platformSettleStage, platformSettleRemoveEffect)
+		if err != nil || remove.state != "applied" {
+			continue
+		}
+		removed, err := journal.ParseManagedRemovalReceipt([]byte(remove.receipt))
+		if err == nil && removed.Stage == "remove_code" && removed.State == "absent" && removed.InstallationID == installation &&
+			removed.SourceOperationID == operation && removed.ResourceID == activation && removed.ReleaseSHA256 == release &&
+			removed.DataNamespaceID == namespace {
+			return true
+		}
+	}
+	return false
+}
+
 func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, now int64, create bool) (platformUpdateStartIntent, bool, error) {
 	var zero platformUpdateStartIntent
 	startKind := "update-start"
@@ -344,7 +372,8 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 	// behind, and an installation holds one activation per generation. The retry takes that row over under an
 	// identity of its own: the runner knows the failed update's target resource under the old one.
 	reuseRetryCandidate := !activationMissing && effectMissing && plan.RecoversOperationID != "" &&
-		expected.snapshot.Action == appplatform.ActionUpdate && generation == int64(expected.snapshot.Generation) && state == "candidate"
+		expected.snapshot.Action == appplatform.ActionUpdate && generation == int64(expected.snapshot.Generation) && state == "candidate" &&
+		namespace == plan.DataNamespaceID && platformRetryOwnsCandidate(e, expected.installationID, plan.RecoversOperationID, activation, release, namespace)
 	if activationMissing != effectMissing && !reuseRepairCandidate && !reuseRetryCandidate {
 		return zero, false, errAppPlatformStageEvidence
 	}

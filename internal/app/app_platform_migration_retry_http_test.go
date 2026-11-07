@@ -294,3 +294,80 @@ func TestMigrationNeverClaimedRetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
 		}
 	}
 }
+
+// c5RetryAtStart brings a retry of a readiness failure to the point where its migration is applied and its start is
+// about to be prepared, which is where it takes over the candidate activation the failed update left.
+func c5RetryAtStart(t *testing.T) (*settleFixture, platformOperationLease) {
+	t.Helper()
+	platformWritableUpdateFixtures(t)
+	f := readinessFailedFixture(t, false)
+	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		state := "stopped"
+		if i.command.Stage == "remove_code" {
+			state = "absent"
+		}
+		return platformUpdateTargetRemovalObservationFixture(i, f.endpoint, state), nil
+	}
+	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+		return restoreAnswer(i, f.endpoint), nil
+	}
+	for range 5 {
+		f.step(t)
+	}
+	if f.settleState(t) != "settled" {
+		t.Fatal("readiness failure did not settle")
+	}
+	f.fake.calls = nil
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	lease := driveRetryToMigrate(t, f, h.retryOverHTTP(platformFixtureID(7670)))
+	f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		return platformMigrateAnswers(i, f.endpoint, "migrated", ""), nil
+	}
+	start, err := f.s.dispatchPlatformMigrateData(context.Background(), lease, f.endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, start
+}
+
+// The retry takes over the failed update's candidate activation only when settlement shows that update removed the
+// target the row stands for. Each thing the evidence must show, withheld, refuses the start.
+func TestRetryTakesOverTheCandidateOnlyWithSettlementEvidence(t *testing.T) {
+	f, start := c5RetryAtStart(t)
+	if _, err := f.s.preparePlatformUpdateStart(context.Background(), start); err != nil {
+		t.Fatalf("a retry with the settlement's evidence was refused the failed update's candidate: %v", err)
+	}
+	for name, mutate := range map[string]func(f *settleFixture){
+		"the target was never stopped": func(f *settleFixture) {
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET state='prepared' WHERE operation_id=? AND stage='settle' AND effect_number=1`, f.op)
+		},
+		"the target's removal is not applied": func(f *settleFixture) {
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET state='prepared' WHERE operation_id=? AND stage='settle' AND effect_number=2`, f.op)
+		},
+		"the evidence belongs to an update outside the chain": func(f *settleFixture) {
+			other := scalar[string](t, f.s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install'`, f.lease.installationID)
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET operation_id=? WHERE operation_id=? AND stage='settle'`, other, f.op)
+		},
+		"the removed target was another resource": func(f *settleFixture) {
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=replace(receipt_json,?,?) WHERE operation_id=? AND stage='settle' AND effect_number=2`,
+				scalar[string](t, f.s.st, `SELECT id FROM app_platform_activations WHERE installation_id=? AND state='candidate'`, f.lease.installationID), platformFixtureID(8810), f.op)
+		},
+		"the removed target ran another release": func(f *settleFixture) {
+			mustExec(t, f.s.st, `UPDATE app_platform_activations SET release_sha256=(SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active') WHERE installation_id=? AND state='candidate'`,
+				f.lease.installationID, f.lease.installationID)
+		},
+		"the removed target held another namespace": func(f *settleFixture) {
+			mustExec(t, f.s.st, `UPDATE app_platform_operation_effects SET receipt_json=replace(receipt_json,?,?) WHERE operation_id=? AND stage='settle' AND effect_number=2`,
+				scalar[string](t, f.s.st, `SELECT data_namespace_id FROM app_platform_activations WHERE installation_id=? AND state='candidate'`, f.lease.installationID), platformFixtureID(8811), f.op)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f, start := c5RetryAtStart(t)
+			mutate(f)
+			if _, err := f.s.preparePlatformUpdateStart(context.Background(), start); err == nil {
+				t.Fatal("a retry took over a candidate activation without the evidence that it was the failed update's removed target")
+			}
+		})
+	}
+}
