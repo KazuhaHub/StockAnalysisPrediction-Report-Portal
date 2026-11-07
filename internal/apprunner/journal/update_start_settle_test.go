@@ -21,6 +21,33 @@ type fakeInspector struct {
 	inspection driver.TargetInspection
 	err        error
 	calls      int
+	// listed is what the namespace listing returns until a stray is removed; removeErr fails the removal.
+	listed    []driver.NamespaceContainer
+	listErr   error
+	removeErr error
+	removed   []string
+}
+
+func (f *fakeInspector) ListNamespaceContainers(context.Context, string) ([]driver.NamespaceContainer, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return append([]driver.NamespaceContainer(nil), f.listed...), nil
+}
+
+func (f *fakeInspector) RemoveStrayContainer(_ context.Context, nativeID string) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	f.removed = append(f.removed, nativeID)
+	kept := f.listed[:0:0]
+	for _, c := range f.listed {
+		if c.NativeID != nativeID {
+			kept = append(kept, c)
+		}
+	}
+	f.listed = kept
+	return nil
 }
 
 func (f *fakeInspector) InspectTarget(context.Context, string) (driver.TargetInspection, error) {
@@ -30,9 +57,14 @@ func (f *fakeInspector) InspectTarget(context.Context, string) (driver.TargetIns
 
 func (r reservedStartFixture) settleCommand(t *testing.T, effect int) ([]byte, []byte) {
 	t.Helper()
+	return r.modeCommand(t, effect, control.SettleModeSettle)
+}
+
+func (r reservedStartFixture) modeCommand(t *testing.T, effect int, mode string) ([]byte, []byte) {
+	t.Helper()
 	now := time.Now().UTC().UnixMilli()
 	command := control.SettleUpdateStartCommand{
-		Format: control.SettleUpdateStartFormat, EffectID: fixtureID(2800 + effect), OperationID: fixtureID(2890),
+		Format: control.SettleUpdateStartFormat, Mode: mode, EffectID: fixtureID(2800 + effect), OperationID: fixtureID(2890),
 		InstallationFence: r.command.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
 		StartRaw: r.raw, StartReadSignature: updateStartReadSignature(t, r.raw),
 	}
@@ -190,7 +222,7 @@ func TestSettleUpdateStartRefusals(t *testing.T) {
 		r.orphaned(t, false)
 		now := time.Now().UTC().UnixMilli()
 		command := control.SettleUpdateStartCommand{
-			Format: control.SettleUpdateStartFormat, EffectID: fixtureID(2899), OperationID: fixtureID(2890), InstallationFence: r.command.InstallationFence,
+			Format: control.SettleUpdateStartFormat, Mode: control.SettleModeSettle, EffectID: fixtureID(2899), OperationID: fixtureID(2890), InstallationFence: r.command.InstallationFence,
 			IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10), StartRaw: r.raw, StartReadSignature: r.sig,
 		}
 		command.PayloadSHA256, _ = control.SettleUpdateStartLogicalDigest(command)
@@ -238,4 +270,113 @@ func TestReservedRemovalRefusesAClaimedStartWithATypedReason(t *testing.T) {
 	if len(prover.calls) != 0 || r.startState(t) != "unknown" {
 		t.Fatal("the refusal proved or changed something")
 	}
+}
+
+// Settling makes no native change, so it inspects first and writes the outcome in one transaction: a failed
+// inspection leaves no row behind, and no installation-wide check can be blocked by a stranded unknown row.
+func TestSettleAndReservedRemovalLeaveNoRowAfterAFailedInspection(t *testing.T) {
+	countUnknown := func(r reservedStartFixture) int {
+		var n int
+		if err := r.f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE state='unknown' AND kind<>'update-start'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	rows := func(r reservedStartFixture) int {
+		var n int
+		if err := r.f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	t.Run("settle", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, false)
+		before := rows(r)
+		raw, sig := r.settleCommand(t, 1)
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{err: errTargetExists}); err == nil {
+			t.Fatal("a failed inspection settled the start")
+		}
+		if rows(r) != before || countUnknown(r) != 0 {
+			t.Fatalf("a failed inspection left rows behind: %d -> %d, unknown %d", before, rows(r), countUnknown(r))
+		}
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{}); err != nil {
+			t.Fatalf("a retry did not start clean: %v", err)
+		}
+	})
+	t.Run("reserved removal", func(t *testing.T) {
+		r := reservedStart(t)
+		before := rows(r)
+		raw, sig := r.removal(t, "stop", 1)
+		if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, &fakeTargetProver{err: errTargetExists}); err == nil {
+			t.Fatal("a failed proof removed the reserved start")
+		}
+		if rows(r) != before || countUnknown(r) != 0 {
+			t.Fatalf("a failed proof left rows behind: %d -> %d", before, rows(r))
+		}
+		if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, &fakeTargetProver{}); err != nil {
+			t.Fatalf("a retry did not start clean: %v", err)
+		}
+	})
+}
+
+func TestSweepRemovesOnlyUnaccountedContainersOfTheNamespace(t *testing.T) {
+	removeTarget := func(r reservedStartFixture) {
+		prover := &fakeTargetProver{}
+		for i, stage := range []string{"stop", "remove_code"} {
+			raw, sig := r.removal(t, stage, i+1)
+			if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, prover); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	t.Run("a stray is removed and read back", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		stray := strings.Repeat("ee", 32)
+		inspector := &fakeInspector{listed: []driver.NamespaceContainer{{NativeID: stray, State: "running", ResourceID: r.command.Payload.ResourceID}}}
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+		if err != nil || receipt.Outcome != "swept" || receipt.Removed != "1" || len(inspector.removed) != 1 || inspector.removed[0] != stray {
+			t.Fatalf("sweep: %+v %v %v", receipt, err, inspector.removed)
+		}
+		again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{listed: inspector.listed, listErr: errTargetExists})
+		if err != nil || again != receipt {
+			t.Fatalf("a replay inspected again or differed: %+v %v", again, err)
+		}
+	})
+	t.Run("a clean namespace sweeps nothing", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{})
+		if err != nil || receipt.Outcome != "swept" || receipt.Removed != "0" {
+			t.Fatalf("sweep: %+v %v", receipt, err)
+		}
+	})
+	t.Run("a failed listing or removal writes nothing", func(t *testing.T) {
+		r := reservedStart(t)
+		removeTarget(r)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		stray := strings.Repeat("ee", 32)
+		for _, inspector := range []*fakeInspector{
+			{listErr: errTargetExists},
+			{listed: []driver.NamespaceContainer{{NativeID: stray, State: "running"}}, removeErr: errTargetExists},
+		} {
+			if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil {
+				t.Fatal("a failed sweep settled")
+			}
+		}
+		var n int
+		if err := r.f.store.db.QueryRow(`SELECT COUNT(*) FROM runner_commands WHERE effect_id=?`, fixtureID(2803)).Scan(&n); err != nil || n != 0 {
+			t.Fatalf("a failed sweep left a row: %d %v", n, err)
+		}
+	})
+	t.Run("the target must be removed first", func(t *testing.T) {
+		r := reservedStart(t)
+		raw, sig := r.modeCommand(t, 3, control.SettleModeSweep)
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{}); err == nil {
+			t.Fatal("a namespace was swept while the start's own target still existed")
+		}
+	})
 }

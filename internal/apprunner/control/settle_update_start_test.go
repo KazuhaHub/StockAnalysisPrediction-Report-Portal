@@ -18,7 +18,7 @@ func settleUpdateStartFixture(t *testing.T) (SettleUpdateStartCommand, ed25519.P
 		t.Fatal(err)
 	}
 	command := SettleUpdateStartCommand{
-		Format: SettleUpdateStartFormat, EffectID: "c1000000-0000-4000-8000-0000000000c1", OperationID: "c2000000-0000-4000-8000-0000000000c2",
+		Format: SettleUpdateStartFormat, Mode: SettleModeSettle, EffectID: "c1000000-0000-4000-8000-0000000000c1", OperationID: "c2000000-0000-4000-8000-0000000000c2",
 		InstallationFence: start.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
 		StartRaw: startRaw, StartReadSignature: startRead,
 	}

@@ -23,7 +23,7 @@ func TestSettleUpdateStartActionsAndReceiptBinding(t *testing.T) {
 	}
 	_ = startSig
 	command := control.SettleUpdateStartCommand{
-		Format: control.SettleUpdateStartFormat, EffectID: migrateTransportID(60), OperationID: migrateTransportID(61), InstallationFence: start.InstallationFence,
+		Format: control.SettleUpdateStartFormat, Mode: control.SettleModeSettle, EffectID: migrateTransportID(60), OperationID: migrateTransportID(61), InstallationFence: start.InstallationFence,
 		IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10), StartRaw: startRaw, StartReadSignature: startRead,
 	}
 	if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {

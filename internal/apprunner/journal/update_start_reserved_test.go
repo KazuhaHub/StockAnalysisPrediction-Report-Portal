@@ -217,3 +217,18 @@ func TestUpdateStartReadReportsWhatTheRunnerHolds(t *testing.T) {
 }
 
 var errTargetExists = errors.New("a container exists for the resource")
+
+// A claim made after the command's signed window closed is refused and changes nothing, so a controller that waits
+// out the window (plus its margin) can act on a reserved start knowing no claim can still arrive.
+func TestClaimUpdateStartRefusesAnExpiredCommand(t *testing.T) {
+	real := updateStartExecutionClock
+	defer func() { updateStartExecutionClock = real }()
+	r := reservedStart(t)
+	updateStartExecutionClock = func() time.Time { return time.UnixMilli(mustDataInt(r.command.ExpiresMS)) }
+	if _, err := r.f.store.ClaimUpdateStart(context.Background(), r.raw, r.sig); !errors.Is(err, control.ErrInvalidCommand) {
+		t.Fatalf("an expired command was claimed: %v", err)
+	}
+	if r.startState(t) != "prepared" {
+		t.Fatalf("the refused claim changed the start to %s", r.startState(t))
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"runtime"
 	"time"
 )
@@ -150,4 +152,77 @@ func (r *CandidateRuntime) InspectTarget(ctx context.Context, resourceID string)
 		return TargetInspection{}, ErrInvalidResponse
 	}
 	return TargetInspection{Found: true, NativeID: byName[0].ID, State: byName[0].State}, ctx.Err()
+}
+
+// ListNamespaceContainers lists every container labeled for the data namespace, whatever its state. It changes
+// nothing.
+func (r *CandidateRuntime) ListNamespaceContainers(ctx context.Context, namespaceID string) ([]NamespaceContainer, error) {
+	if r == nil {
+		return nil, ErrUnsupported
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || !containerUUID.MatchString(namespaceID) || namespaceID == "00000000-0000-0000-0000-000000000000" {
+		return nil, ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	found, err := listMigrationContainersHTTP(ctx, client, map[string][]string{"label": {containerLabelPrefix + "namespace=" + namespaceID}})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]NamespaceContainer, 0, len(found))
+	for _, listed := range found {
+		resource := listed.Labels[containerLabelPrefix+"resource"]
+		if listed.State == "" || len(listed.State) > 24 || !containerUUID.MatchString(resource) {
+			return nil, ErrInvalidResponse
+		}
+		result = append(result, NamespaceContainer{NativeID: listed.ID, State: listed.State, ResourceID: resource})
+	}
+	return result, ctx.Err()
+}
+
+// RemoveStrayContainer kills the container if it is running and removes it, never forced and keeping its volumes. It
+// is meant for a container no live resource accounts for; a container that does not go away stays reported by the
+// next listing, and the caller tries again.
+func (r *CandidateRuntime) RemoveStrayContainer(ctx context.Context, nativeID string) error {
+	if r == nil {
+		return ErrUnsupported
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || !containerSHA.MatchString(nativeID) {
+		return ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	if err := killContainerHTTP(ctx, client, nativeID); err != nil {
+		return err
+	}
+	for range 50 {
+		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, "http://app-runner-docker.invalid/v"+APIVersion+"/containers/"+nativeID+"?force=false&v=false", nil)
+		if err != nil {
+			return ErrInvalidResponse
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			return errors.Join(ErrContainerUncertain, ctx.Err())
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		response.Body.Close()
+		switch response.StatusCode {
+		case http.StatusNoContent, http.StatusNotFound:
+			return ctx.Err()
+		case http.StatusConflict:
+			// Still stopping after the kill: look again shortly.
+			select {
+			case <-ctx.Done():
+				return errors.Join(ErrContainerUncertain, ctx.Err())
+			case <-time.After(100 * time.Millisecond):
+			}
+		default:
+			return ErrContainerUncertain
+		}
+	}
+	return ErrContainerUncertain
 }

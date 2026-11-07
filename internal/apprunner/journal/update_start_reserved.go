@@ -147,24 +147,12 @@ func (s *Store) RemoveReservedUpdateStart(ctx context.Context, raw, signature []
 	if err != nil {
 		return zero, err
 	}
-	command := facts.verified.Command()
 	if facts.row.state == "applied" {
 		return readReservedRemovalReceipt(ctx, tx, facts)
 	}
-	if facts.row.effectID == "" {
-		index := updateStartRemovalIndex(facts.verified)
-		fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
-		start := facts.verified.Start().Command()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,?,?,?,'unknown','{}',NULL,?,?)`,
-			command.EffectID, command.OperationID, start.InstallationID, command.Stage, "1", index.Kind, command.PayloadSHA256,
-			start.TargetGeneration, start.ControllerEpoch, fence, facts.now, facts.now); err != nil {
-			return zero, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
+	// The proof changes nothing, so nothing is claimed beforehand: the outcome is written in one transaction after it,
+	// and a failed proof leaves no row behind.
+	tx.Rollback()
 	if err := prover.ProveTargetAbsent(ctx, facts.resource.id); err != nil {
 		return zero, fmt.Errorf("%w: prove the reserved target absent: %v", ErrManagedRemovalUnavailable, err)
 	}
@@ -182,7 +170,7 @@ func (s *Store) settleReservedRemoval(ctx context.Context, raw, signature []byte
 	if err != nil {
 		return zero, err
 	}
-	if facts.row.state != "unknown" {
+	if facts.row.effectID != "" {
 		return zero, fmt.Errorf("%w: reserved start removal settlement state %q", ErrFenceReconciliation, facts.row.state)
 	}
 	command, start := facts.verified.Command(), facts.verified.Start().Command()
@@ -230,13 +218,13 @@ func (s *Store) settleReservedRemoval(ctx context.Context, raw, signature []byte
 	if _, err := ParseManagedRemovalReceipt(encoded); err != nil {
 		return zero, err
 	}
-	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND ack_attempted_ms IS NULL`,
-		string(encoded), now, command.EffectID)
-	if err != nil {
+	index := updateStartRemovalIndex(facts.verified)
+	fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,?,?,?,?,?,?,'applied',?,NULL,?,?)`,
+		command.EffectID, command.OperationID, start.InstallationID, command.Stage, "1", index.Kind, command.PayloadSHA256,
+		start.TargetGeneration, start.ControllerEpoch, fence, string(encoded), now, now); err != nil {
 		return zero, err
-	}
-	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, fmt.Errorf("%w: reserved start removal row=%d err=%v", ErrFenceReconciliation, n, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err

@@ -16,6 +16,11 @@ const Profile = "linux-docker-rootful-projectquota/v1-dev"
 const APIVersion = "1.47"
 const probeTimeout = 5 * time.Second
 
+// DockerRequestTimeout is how long the runner waits on one request to the Docker daemon. A request it gave up on may
+// still be carried out by the daemon, so anything that concludes a container was never created waits at least this
+// long after the last request that could have created it.
+const DockerRequestTimeout = probeTimeout
+
 var (
 	ErrUnsupported     = errors.New("unsupported application runtime host")
 	ErrUnsafeSocket    = errors.New("unsafe application runtime socket")

@@ -39,6 +39,9 @@ var ErrUpdateStartNotReserved = errors.New("runner update-start is not reserved"
 // TargetInspector reports what exists for a resource's container, by name and by label.
 type TargetInspector interface {
 	InspectTarget(ctx context.Context, resourceID string) (driver.TargetInspection, error)
+	// ListNamespaceContainers and RemoveStrayContainer serve the sweep that follows a settled start.
+	ListNamespaceContainers(ctx context.Context, namespaceID string) ([]driver.NamespaceContainer, error)
+	RemoveStrayContainer(ctx context.Context, nativeID string) error
 }
 
 const settleUpdateStartReceiptFormat = "portal.runner.settle-update-start-receipt/1-dev.1"
@@ -58,6 +61,7 @@ type SettleUpdateStartReceipt struct {
 	NamespaceID      string `json:"namespace_id"`
 	Outcome          string `json:"outcome"`
 	ContainerState   string `json:"container_state"`
+	Removed          string `json:"removed,omitempty"`
 	NativeID         string `json:"native_id"`
 	ObservedMS       string `json:"observed_ms"`
 	SettledMS        string `json:"settled_ms"`
@@ -75,9 +79,11 @@ func validSettleUpdateStartReceipt(r SettleUpdateStartReceipt) bool {
 	}
 	switch r.Outcome {
 	case "never_ran":
-		return r.ContainerState == "" && r.NativeID == control.ReservedStartNativeID(r.ResourceID)
+		return r.ContainerState == "" && r.Removed == "" && r.NativeID == control.ReservedStartNativeID(r.ResourceID)
+	case "swept":
+		return r.ContainerState == "" && dataNumber(r.Removed, false) && r.NativeID == control.ReservedStartNativeID(r.ResourceID)
 	case "applied":
-		return r.ContainerState != "" && len(r.ContainerState) <= 24
+		return r.ContainerState != "" && len(r.ContainerState) <= 24 && r.Removed == ""
 	}
 	return false
 }
@@ -169,8 +175,13 @@ func loadSettleStart(ctx context.Context, tx *sql.Tx, raw, signature []byte, mod
 	return settleStartFacts{verified: verified, start: start, row: row, resource: resource, startRow: startReceipt, now: now}, nil
 }
 
-// SettleUpdateStart settles an orphaned start. It takes the data execution gate without waiting: a start that is
-// executing holds it, and nothing is touched then. It reports the settlement receipt, which a replay returns again.
+// SettleUpdateStart settles an orphaned start, or sweeps the namespace of a settled one, as the command asks. It takes
+// the data execution gate without waiting: a start that is executing holds it, and nothing is touched then.
+//
+// Nothing here changes anything natively before it has looked, so nothing is claimed beforehand: it inspects first,
+// then writes the outcome in a single transaction. A failed inspection writes nothing, and a retry starts clean; no
+// row is ever left unknown for an installation-wide check to trip over. It reports the settlement receipt, which a
+// replay returns again.
 func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, inspector TargetInspector) (SettleUpdateStartReceipt, error) {
 	var zero SettleUpdateStartReceipt
 	if inspector == nil || s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
@@ -184,14 +195,20 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 	if err != nil {
 		return zero, err
 	}
-	defer tx.Rollback()
 	facts, err := loadSettleStart(ctx, tx, raw, signature, "execute")
 	if err != nil {
+		tx.Rollback()
 		return zero, err
 	}
-	command, start := facts.verified.Command(), facts.verified.Start().Command()
 	if facts.row.state == "applied" {
+		defer tx.Rollback()
 		return readSettleReceipt(ctx, tx, facts)
+	}
+	mode := facts.verified.Command().Mode
+	start := facts.verified.Start().Command()
+	tx.Rollback()
+	if mode == control.SettleModeSweep {
+		return s.sweepNamespace(ctx, raw, signature, facts, inspector)
 	}
 	if facts.start.state != "unknown" {
 		return zero, fmt.Errorf("%w: the start is %s", ErrUpdateStartNotOrphaned, facts.start.state)
@@ -199,23 +216,97 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 	if err := requirePendingTarget(facts.resource, start, facts.start.fence); err != nil {
 		return zero, err
 	}
-	if facts.row.effectID == "" {
-		fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,1,?,?,?,?,?,'unknown','{}',NULL,?,?)`,
-			command.EffectID, command.OperationID, start.InstallationID, settleRowStage, settleRowKind, command.PayloadSHA256,
-			start.TargetGeneration, start.ControllerEpoch, fence, facts.now, facts.now); err != nil {
-			return zero, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
 	observed, err := inspector.InspectTarget(ctx, facts.resource.id)
 	if err != nil {
 		return zero, fmt.Errorf("%w: inspect the target: %v", ErrManagedRemovalUnavailable, err)
 	}
 	return s.settleOrphan(ctx, raw, signature, observed)
+}
+
+// insertSettleRow records the settlement as applied, in the transaction that carries its effect.
+func insertSettleRow(ctx context.Context, tx *sql.Tx, command control.SettleUpdateStartCommand, start control.UpdateStartCommand, receipt SettleUpdateStartReceipt, now int64) error {
+	if !validSettleUpdateStartReceipt(receipt) {
+		return fmt.Errorf("%w: settle update-start receipt", ErrFenceReconciliation)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
+	_, err = tx.ExecContext(ctx, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		VALUES(?,?,?,?,1,?,?,?,?,?,'applied',?,NULL,?,?)`,
+		command.EffectID, command.OperationID, start.InstallationID, settleRowStage, settleRowKind, command.PayloadSHA256,
+		start.TargetGeneration, start.ControllerEpoch, fence, string(encoded), now, now)
+	return err
+}
+
+// sweepNamespace removes the containers labeled for the namespace that no live resource accounts for. It runs after
+// the start is settled and its own target is gone, so what it finds is the leftover of a create that was still in
+// flight when the runner stopped. A container a live resource accounts for is left alone.
+func (s *Store) sweepNamespace(ctx context.Context, raw, signature []byte, facts settleStartFacts, inspector TargetInspector) (SettleUpdateStartReceipt, error) {
+	var zero SettleUpdateStartReceipt
+	start := facts.verified.Start().Command()
+	if facts.resource == nil || facts.resource.desired != "absent" || facts.resource.observed != "absent" {
+		return zero, fmt.Errorf("%w: the start's target is not removed", ErrUpdateStartNotOrphaned)
+	}
+	removed := 0
+	for round := 0; ; round++ {
+		listed, err := inspector.ListNamespaceContainers(ctx, start.Payload.NamespaceID)
+		if err != nil {
+			return zero, fmt.Errorf("%w: list the namespace: %v", ErrManagedRemovalUnavailable, err)
+		}
+		strays := 0
+		for _, container := range listed {
+			var accounted int
+			if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE kind='container' AND native_id=? AND NOT (desired_state='absent' AND observed_state='absent')`,
+				container.NativeID).Scan(&accounted); err != nil {
+				return zero, err
+			}
+			if accounted != 0 {
+				continue
+			}
+			strays++
+			if round == 1 {
+				return zero, fmt.Errorf("%w: a stray container is still there", ErrManagedRemovalUnavailable)
+			}
+			if err := inspector.RemoveStrayContainer(ctx, container.NativeID); err != nil {
+				return zero, fmt.Errorf("%w: remove a stray container: %v", ErrManagedRemovalUnavailable, err)
+			}
+			removed++
+		}
+		// One more listing proves they are gone.
+		if strays == 0 {
+			break
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	again, err := loadSettleStart(ctx, tx, raw, signature, "settle")
+	if err != nil {
+		return zero, err
+	}
+	if again.row.effectID != "" {
+		return zero, fmt.Errorf("%w: settle update-start row", ErrFenceReconciliation)
+	}
+	command := again.verified.Command()
+	now := time.Now().UTC().UnixMilli()
+	receipt := SettleUpdateStartReceipt{
+		Format: settleUpdateStartReceiptFormat, DeploymentID: start.DeploymentID, ControllerEpoch: start.ControllerEpoch,
+		InstallationID: start.InstallationID, OperationID: command.OperationID, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		StartOperationID: start.OperationID, StartEffectID: start.EffectID, ResourceID: start.Payload.ResourceID, NamespaceID: start.Payload.NamespaceID,
+		Outcome: "swept", Removed: strconv.Itoa(removed), NativeID: control.ReservedStartNativeID(start.Payload.ResourceID),
+		ObservedMS: strconv.FormatInt(now, 10), SettledMS: strconv.FormatInt(now, 10),
+	}
+	if err := insertSettleRow(ctx, tx, command, start, receipt, now); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return receipt, nil
 }
 
 // requirePendingTarget checks the resource is the start's own pending target, untouched.
@@ -244,8 +335,8 @@ func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observe
 		return zero, err
 	}
 	command, start := facts.verified.Command(), facts.verified.Start().Command()
-	// With the gate held, the state must still be what the inspection was asked about.
-	if facts.row.state != "unknown" || facts.start.state != "unknown" {
+	// With the gate held, the state must still be what the inspection was asked about, and nothing is recorded yet.
+	if facts.row.effectID != "" || facts.start.state != "unknown" {
 		return zero, fmt.Errorf("%w: the start is %s", ErrUpdateStartNotOrphaned, facts.start.state)
 	}
 	if err := requirePendingTarget(facts.resource, start, facts.start.fence); err != nil {
@@ -306,20 +397,8 @@ func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observe
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, fmt.Errorf("%w: settle update-start resource rows=%d err=%v", ErrFenceReconciliation, n, err)
 	}
-	if !validSettleUpdateStartReceipt(receipt) {
-		return zero, fmt.Errorf("%w: settle update-start receipt", ErrFenceReconciliation)
-	}
-	encoded, err := json.Marshal(receipt)
-	if err != nil {
+	if err := insertSettleRow(ctx, tx, command, start, receipt, now); err != nil {
 		return zero, err
-	}
-	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json='{}' AND ack_attempted_ms IS NULL`,
-		string(encoded), now, command.EffectID)
-	if err != nil {
-		return zero, err
-	}
-	if n, err := changed.RowsAffected(); err != nil || n != 1 {
-		return zero, fmt.Errorf("%w: settle update-start row=%d err=%v", ErrFenceReconciliation, n, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err

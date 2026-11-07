@@ -198,9 +198,10 @@ func killContainerHTTP(ctx context.Context, client *http.Client, nativeID string
 }
 
 type migrationListing struct {
-	ID    string `json:"Id"`
-	Names []string
-	State string `json:"State"`
+	ID     string `json:"Id"`
+	Names  []string
+	State  string            `json:"State"`
+	Labels map[string]string `json:"Labels"`
 }
 
 func listMigrationContainersHTTP(ctx context.Context, client *http.Client, filter map[string][]string) ([]migrationListing, error) {
@@ -238,6 +239,13 @@ func listMigrationContainersHTTP(ctx context.Context, client *http.Client, filte
 		result = append(result, listed)
 	}
 	return result, nil
+}
+
+// NamespaceContainer is a container labeled for a data namespace.
+type NamespaceContainer struct {
+	NativeID   string
+	State      string
+	ResourceID string
 }
 
 // TargetInspection is what exists for a resource's container, by name and by label.

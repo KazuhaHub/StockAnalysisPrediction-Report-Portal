@@ -16,6 +16,7 @@ import (
 // signed for a read, so no execute-capable start command is made to settle one.
 type SettleUpdateStartCommand struct {
 	Format             string `json:"format"`
+	Mode               string `json:"mode"`
 	EffectID           string `json:"effect_id"`
 	OperationID        string `json:"operation_id"`
 	InstallationFence  string `json:"installation_fence"`
@@ -25,6 +26,14 @@ type SettleUpdateStartCommand struct {
 	StartRaw           []byte `json:"start_raw"`
 	StartReadSignature []byte `json:"start_read_signature"`
 }
+
+// The two things a settle-update-start command can ask. Settle looks at the start's own container and records what is
+// there. Sweep, after the start is settled, removes any container labeled for the namespace that no live resource
+// accounts for: the leftover of a create that was still in flight.
+const (
+	SettleModeSettle = "settle"
+	SettleModeSweep  = "sweep"
+)
 
 const SettleUpdateStartFormat = "portal.runner.settle-update-start-command/1-dev.1"
 const settleUpdateStartSignaturePurpose = "portal.app/runner-settle-update-start/v1"
@@ -45,7 +54,7 @@ func (v VerifiedSettleUpdateStartCommand) Start() VerifiedUpdateStartCommand { r
 
 func SettleUpdateStartLogicalDigest(c SettleUpdateStartCommand) (string, error) {
 	start, err := parseUpdateStart(c.StartRaw)
-	if err != nil || c.Format != SettleUpdateStartFormat || start.Kind != "update-start" ||
+	if err != nil || c.Format != SettleUpdateStartFormat || start.Kind != "update-start" || (c.Mode != SettleModeSettle && c.Mode != SettleModeSweep) ||
 		!candidateUUID(c.EffectID) || !candidateUUID(c.OperationID) || len(c.StartReadSignature) != ed25519.SignatureSize {
 		return "", ErrInvalidCommand
 	}
@@ -59,6 +68,7 @@ func SettleUpdateStartLogicalDigest(c SettleUpdateStartCommand) (string, error) 
 	}
 	logical := struct {
 		Format             string `json:"format"`
+		Mode               string `json:"mode"`
 		OperationID        string `json:"operation_id"`
 		StartOperationID   string `json:"start_operation_id"`
 		StartEffectID      string `json:"start_effect_id"`
@@ -70,7 +80,7 @@ func SettleUpdateStartLogicalDigest(c SettleUpdateStartCommand) (string, error) 
 		Generation         string `json:"generation"`
 		ControllerEpoch    string `json:"controller_epoch"`
 	}{
-		"portal.runner.settle-update-start-effect/1-dev.1", c.OperationID, start.OperationID, start.EffectID, start.PayloadSHA256,
+		"portal.runner.settle-update-start-effect/1-dev.1", c.Mode, c.OperationID, start.OperationID, start.EffectID, start.PayloadSHA256,
 		c.InstallationFence, start.Payload.ResourceID, start.Payload.NamespaceID, start.Payload.TargetReleaseSHA256,
 		start.TargetGeneration, start.ControllerEpoch,
 	}
