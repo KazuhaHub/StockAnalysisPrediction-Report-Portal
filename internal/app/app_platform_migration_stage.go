@@ -89,6 +89,13 @@ func loadPlatformMigrateEvidence(e migExec, lease platformOperationLease, runtim
 		Scan(&effectID, &kind, &state, &receipt); err != nil || kind != "remove-code" || state != "applied" {
 		return zero, fmt.Errorf("%w: migration source removal", errAppPlatformStageEvidence)
 	}
+	// A retry's removal row is the portal's copy of the failed update's, under an identity of its own. The runner
+	// knows the removal only under the identity its receipt names, so that is the one the command carries.
+	removed, err := journal.ParseManagedRemovalReceipt([]byte(receipt))
+	if err != nil || !platformValidUUID(removed.EffectID) || (plan.RecoversOperationID == "" && removed.EffectID != effectID) {
+		return zero, fmt.Errorf("%w: migration source removal receipt", errAppPlatformStageEvidence)
+	}
+	effectID = removed.EffectID
 	return platformMigrateEvidence{
 		source: source, plan: plan, descriptor: descriptor, checkpoint: checkpoint, checkpointRaw: raw,
 		removeEffectID: effectID, removeReceiptSHA: platformDigest([]byte(receipt)),
@@ -118,6 +125,7 @@ func platformMigrateCommand(lease platformOperationLease, runtime platformRuntim
 			ProjectID:             ev.source.projectID, NamespaceInode: ev.source.namespaceInode, Device: ev.source.device,
 			QuotaBytes: ev.source.quotaBytes, QuotaInodes: ev.source.quotaInodes,
 			WallClockSeconds: strconv.FormatInt(m.WallClockSeconds, 10), EntrypointSHA256: m.EntrypointSHA256,
+			RecoversOperationID: p.RecoversOperationID,
 		},
 	}
 	digest, err := control.MigrateDataLogicalDigest(command)

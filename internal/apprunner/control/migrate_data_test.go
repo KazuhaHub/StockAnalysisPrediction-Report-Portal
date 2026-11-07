@@ -361,3 +361,45 @@ func TestRestoreReadPurposeRefusedAsExecute(t *testing.T) {
 		t.Fatal("a read signature was accepted as a settlement")
 	}
 }
+
+func TestVerifyMigrateDataRecoversOperationBound(t *testing.T) {
+	command, key, authority, now := migrateDataFixture(t)
+	const recovered = "f2000000-0000-4000-8000-0000000000f2"
+	command.Payload.RecoversOperationID = recovered
+	digest, err := MigrateDataLogicalDigest(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command.PayloadSHA256 = digest
+	raw, signature, err := SignMigrateData(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyMigrateData(raw, signature, authority, now)
+	if err != nil || verified.Command().Payload.RecoversOperationID != recovered {
+		t.Fatalf("a retry's recovery link was not carried: %v", err)
+	}
+	// The link is part of what is signed and of the effect identity.
+	ordinary := command
+	ordinary.Payload.RecoversOperationID = ""
+	other, err := MigrateDataLogicalDigest(ordinary)
+	if err != nil || other == digest {
+		t.Fatal("the recovery link does not change the command digest")
+	}
+	tampered := bytes.Replace(raw, []byte(recovered), []byte("f3000000-0000-4000-8000-0000000000f3"), 1)
+	if _, err := VerifyMigrateData(tampered, signature, authority, now); err == nil {
+		t.Fatal("a command with an altered recovery link verified")
+	}
+	for name, mutate := range map[string]func(*MigrateDataCommand){
+		"not an identifier":       func(c *MigrateDataCommand) { c.Payload.RecoversOperationID = "not-an-id" },
+		"the migrating operation": func(c *MigrateDataCommand) { c.Payload.RecoversOperationID = c.OperationID },
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := command
+			mutate(&changed)
+			if _, err := MigrateDataLogicalDigest(changed); err == nil {
+				t.Fatal("invalid recovery link admitted")
+			}
+		})
+	}
+}

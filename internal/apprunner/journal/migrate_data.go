@@ -102,6 +102,7 @@ type migrateClaimMarker struct {
 	Device                  string `json:"device"`
 	QuotaBytes              string `json:"quota_bytes"`
 	QuotaInodes             string `json:"quota_inodes"`
+	RecoversOperationID     string `json:"recovers_operation_id,omitempty"`
 }
 
 // MigrateDataClaim is the claim a receipt carries.
@@ -145,6 +146,9 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 		if !importID(id) {
 			return false
 		}
+	}
+	if m.RecoversOperationID != "" && !importID(m.RecoversOperationID) {
+		return false
 	}
 	for _, value := range []string{m.SourceSchema, m.TargetSchema, m.CheckpointWriterFence, m.WriterFence, m.StartWriterFence, m.ProjectID, m.QuotaBytes, m.QuotaInodes} {
 		if !dataNumber(value, true) {
@@ -219,7 +223,8 @@ func migrateMarkerMatchesCommand(m migrateClaimMarker, c control.MigrateDataComm
 		m.SourceReleaseSHA256 == p.SourceReleaseSHA256 && m.TargetReleaseSHA256 == p.TargetReleaseSHA256 &&
 		m.SourceSchema == p.SourceSchema && m.TargetSchema == p.TargetSchema && m.CheckpointWriterFence == p.CheckpointWriterFence &&
 		m.WriterFence == p.WriterFence && m.StartWriterFence == p.StartWriterFence && m.ProjectID == p.ProjectID &&
-		m.NamespaceInode == p.NamespaceInode && m.Device == p.Device && m.QuotaBytes == p.QuotaBytes && m.QuotaInodes == p.QuotaInodes && m.AdmittedFence == c.InstallationFence
+		m.NamespaceInode == p.NamespaceInode && m.Device == p.Device && m.QuotaBytes == p.QuotaBytes && m.QuotaInodes == p.QuotaInodes && m.AdmittedFence == c.InstallationFence &&
+		m.RecoversOperationID == p.RecoversOperationID
 }
 
 // MigrateDataReceiptMatchesCommand reports whether the receipt answers exactly this signed command.
@@ -337,20 +342,99 @@ type migrateIntent struct {
 // never stored: it is found by the name and labels derived from the resource id.
 func migrateJobNativeID(resource string) string { return "migration-job/" + resource }
 
+// maxMigrationRecoveryChain bounds how many failed updates a retry may have recovered in turn.
+const maxMigrationRecoveryChain = 16
+
+// requireRecoveredMigration proves, from the runner's own journal, that the update a retry names is a failed
+// update whose migration the runner settled and whose data it restored, and returns the operation that owns the
+// source removal the retry carries. A retry of a retry names the update it recovers; that update carried the same
+// removal evidence forward and recorded the link in its own claim, so the chain is followed to the update that
+// really removed the source. Every link must be settled, restored, and older than the checkpoint the retry took.
+func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand, checkpointCreated int64) (string, error) {
+	p := c.Payload
+	fail := func(reason string) (string, error) {
+		return "", fmt.Errorf("%w: migration recovery %s", ErrFenceReconciliation, reason)
+	}
+	seen := map[string]bool{c.OperationID: true}
+	current := p.RecoversOperationID
+	for range maxMigrationRecoveryChain {
+		if !importID(current) || seen[current] {
+			return fail("chain")
+		}
+		seen[current] = true
+		var migrations int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND kind='migrate-data'`,
+			current, c.InstallationID).Scan(&migrations); err != nil {
+			return "", err
+		}
+		if migrations != 1 {
+			return fail("update has no single migration")
+		}
+		var state, raw string
+		var settled int64
+		if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND kind='migrate-data'`,
+			current, c.InstallationID).Scan(&state, &raw, &settled); err != nil {
+			return "", err
+		}
+		migration, err := ParseMigrateDataReceipt([]byte(raw))
+		if state != "reverted" || err != nil || migration.OperationID != current || migration.InstallationID != c.InstallationID ||
+			migration.Claim.NamespaceID != p.NamespaceID || migration.Claim.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 ||
+			(migration.State != "failed" && migration.State != "discarded") {
+			return fail("migration is not settled")
+		}
+		var restores int
+		var restoreState, restoreRaw string
+		var restoredAt int64
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='restore_data' AND effect_number=1 AND kind='restore'`,
+			current, c.InstallationID).Scan(&restores); err != nil || restores != 1 {
+			return fail("data was not restored")
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='restore_data' AND effect_number=1 AND kind='restore'`,
+			current, c.InstallationID).Scan(&restoreState, &restoreRaw, &restoredAt); err != nil {
+			return "", err
+		}
+		restore, err := ParseRestoreReceipt([]byte(restoreRaw))
+		if restoreState != "applied" || err != nil || restore.OperationID != current || restore.InstallationID != c.InstallationID ||
+			restore.NamespaceID != p.NamespaceID || restoredAt < settled || checkpointCreated < restoredAt {
+			return fail("data was not restored before the new checkpoint")
+		}
+		if migration.Claim.RecoversOperationID == "" {
+			return current, nil
+		}
+		current = migration.Claim.RecoversOperationID
+	}
+	return fail("chain is too long")
+}
+
 // requireMigrationEvidence checks the applied source removal and the verified checkpoint the
-// migration follows, against the payload, inside the admission transaction.
+// migration follows, against the payload, inside the admission transaction. The checkpoint is
+// always the migrating operation's own. The removal is too, unless the operation is a retry: then
+// it is the removal of the failed update the retry recovers, proven by requireRecoveredMigration.
 func requireMigrationEvidence(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand) error {
 	p := c.Payload
+	removalOwner := c.OperationID
+	if p.RecoversOperationID != "" {
+		var checkpointCreated int64
+		if err := tx.QueryRowContext(ctx, `SELECT created_ms FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=?`,
+			p.CheckpointEffectID, c.OperationID, c.InstallationID).Scan(&checkpointCreated); err != nil {
+			return fmt.Errorf("%w: migration checkpoint", ErrFenceReconciliation)
+		}
+		owner, err := requireRecoveredMigration(ctx, tx, c, checkpointCreated)
+		if err != nil {
+			return err
+		}
+		removalOwner = owner
+	}
 	removal, err := loadImportRow(ctx, tx, p.RemoveCodeEffectID)
 	if err != nil || removal == nil || removal.state != "applied" || removal.kind != "remove-code" ||
-		removal.installation != c.InstallationID || removal.operation != c.OperationID ||
+		removal.installation != c.InstallationID || removal.operation != removalOwner ||
 		candidateHash([]byte(removal.receipt)) != p.RemoveCodeReceiptSHA256 {
 		return fmt.Errorf("%w: migration source removal", ErrFenceReconciliation)
 	}
 	removed, err := ParseManagedRemovalReceipt([]byte(removal.receipt))
 	if err != nil || removed.EffectID != p.RemoveCodeEffectID || removed.Stage != "remove_code" || removed.State != "absent" ||
 		removed.InstallationID != c.InstallationID || removed.DataNamespaceID != p.NamespaceID ||
-		removed.ReleaseSHA256 != p.SourceReleaseSHA256 || removed.DeploymentID != c.DeploymentID {
+		removed.ReleaseSHA256 != p.SourceReleaseSHA256 || removed.DeploymentID != c.DeploymentID || removed.OperationID != removalOwner {
 		return fmt.Errorf("%w: migration source removal receipt", ErrFenceReconciliation)
 	}
 	var observed, desired string
@@ -488,6 +572,7 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 		SourceSchema: p.SourceSchema, TargetSchema: p.TargetSchema, CheckpointWriterFence: p.CheckpointWriterFence,
 		WriterFence: p.WriterFence, StartWriterFence: p.StartWriterFence, ProjectID: p.ProjectID,
 		NamespaceInode: p.NamespaceInode, Device: p.Device, QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
+		RecoversOperationID: p.RecoversOperationID,
 	}
 	markerRaw, err := json.Marshal(marker)
 	if err != nil || len(markerRaw) > 16384 || !validMigrateMarker(marker) || !migrateMarkerMatchesCommand(marker, c) {

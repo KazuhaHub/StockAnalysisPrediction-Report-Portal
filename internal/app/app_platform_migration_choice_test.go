@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 func failedScript(fake *platformFakeMigrationRunner, endpoint platformRuntimeEndpoint) {
@@ -329,5 +330,45 @@ func TestSettingsProjectsMigrationRecovery(t *testing.T) {
 	mustExec(t, g.s.st, `UPDATE app_platform_installations SET phase='ready' WHERE id=?`, g.lease.installationID)
 	if settings, err = g.s.platformInstallationSettings(gs, g.lease.installationID); err != nil || settings.MigrationRecovery != nil {
 		t.Fatal("a recovered installation still offers choices", err)
+	}
+}
+
+// A retry's migrate-data names the failed update it recovers and the source removal that update really made: the
+// runner holds no row under the portal's own copy of that evidence, and admits only the removal of the update the
+// retry recovers. A retry of a retry names the update it recovers and still carries the root's removal.
+func TestRetryMigrateCommandNamesRecoveredUpdateAndRealRemoval(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := settledFixture(t, false)
+	fx := lastPlatformUpdateFixture
+	realRemoval := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate' AND effect_number=1 AND kind='remove-code'`, f.op)
+	var sent []control.MigrateDataPayload
+	answer := func(state, outcome string) {
+		f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+			sent = append(sent, i.command.Payload)
+			return platformMigrateAnswers(i, f.endpoint, state, outcome), nil
+		}
+	}
+	second := retryToMigrate(t, f, fx, platformFixtureID(7330), platformFixtureID(7331), f.op)
+	answer("failed", "exit_nonzero")
+	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), second, f.endpoint); !errors.Is(err, errPlatformMigrationEnded) {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0].RecoversOperationID != f.op || sent[0].RemoveCodeEffectID != realRemoval {
+		t.Fatalf("the first retry's migration: %+v (the real removal is %s)", sent, realRemoval)
+	}
+	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+		return restoreAnswer(i, f.endpoint), nil
+	}
+	retry := &settleFixture{s: f.s, lease: f.lease, endpoint: f.endpoint, fake: f.fake, op: second.id}
+	retry.step(t)
+	retry.step(t)
+	third := retryToMigrate(t, f, fx, platformFixtureID(7340), platformFixtureID(7341), second.id)
+	sent = nil
+	answer("migrated", "")
+	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), third, f.endpoint); err != nil {
+		t.Fatal(err)
+	}
+	if len(sent) != 1 || sent[0].RecoversOperationID != second.id || sent[0].RemoveCodeEffectID != realRemoval {
+		t.Fatalf("the second retry's migration: %+v (the real removal is %s)", sent, realRemoval)
 	}
 }

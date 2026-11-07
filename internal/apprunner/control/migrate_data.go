@@ -82,6 +82,10 @@ type MigrateDataPayload struct {
 	QuotaInodes             string `json:"quota_inodes"`
 	WallClockSeconds        string `json:"wall_clock_seconds"`
 	EntrypointSHA256        string `json:"entrypoint_sha256"`
+	// RecoversOperationID names the failed update a retry recovers. The retry's source removal is that
+	// update's (or the root of its chain), so the runner admits the removal of that operation and no other.
+	// Empty for an update that does not recover another.
+	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
 }
 
 type MigrateDataCommand struct {
@@ -145,6 +149,9 @@ func validMigrateDataLogical(c MigrateDataCommand) bool {
 		}
 	}
 	if p.ResourceID == p.NamespaceID || c.EffectID == p.ResourceID || c.EffectID == p.NamespaceID {
+		return false
+	}
+	if p.RecoversOperationID != "" && (!candidateUUID(p.RecoversOperationID) || p.RecoversOperationID == c.OperationID) {
 		return false
 	}
 	var numbers [9]int64

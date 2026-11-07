@@ -287,3 +287,40 @@ func TestMigrateTransportAbsenceReply(t *testing.T) {
 		t.Fatal("a restore execute was answered with a status")
 	}
 }
+
+// A retry's receipt must answer the command's recovery link: a reply whose claim names no recovered update, or
+// another one, is not an answer to that command.
+func TestMigrateTransportRetryReceiptCarriesRecoveryLink(t *testing.T) {
+	a, command, _, _, descriptor, receipt := migrateTransportFixture(t)
+	command.Payload.RecoversOperationID = migrateTransportID(50)
+	var err error
+	if command.PayloadSHA256, err = control.MigrateDataLogicalDigest(command); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	raw, sig, err := control.SignMigrateData(command, migrateTransportKey(), a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref, err := verifyWritableLifecycle(MigrateDataExecute, raw, sig, descriptor, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, received := time.Now().Add(-time.Second), time.Now()
+	answer := receipt
+	answer.PayloadSHA256, answer.Claim.RecoversOperationID = command.PayloadSHA256, migrateTransportID(50)
+	encoded, _ := json.Marshal(answer)
+	if !validWritableLifecycleReply(MigrateDataExecute, encoded, ref, started, received) {
+		t.Fatal("a retry's receipt carrying its recovery link was refused")
+	}
+	for name, link := range map[string]string{"missing": "", "other": migrateTransportID(51)} {
+		t.Run(name, func(t *testing.T) {
+			changed := answer
+			changed.Claim.RecoversOperationID = link
+			encoded, _ := json.Marshal(changed)
+			if validWritableLifecycleReply(MigrateDataExecute, encoded, ref, started, received) {
+				t.Fatal("a receipt without the command's recovery link was accepted")
+			}
+		})
+	}
+}

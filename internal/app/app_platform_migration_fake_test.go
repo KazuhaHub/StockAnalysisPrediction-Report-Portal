@@ -171,7 +171,7 @@ func platformMigrateReceiptFor(c control.MigrateDataCommand, state, outcome stri
 		RemoveCodeReceiptSHA256: p.RemoveCodeReceiptSHA256, SourceReleaseSHA256: p.SourceReleaseSHA256, TargetReleaseSHA256: p.TargetReleaseSHA256,
 		SourceSchema: p.SourceSchema, TargetSchema: p.TargetSchema, CheckpointWriterFence: p.CheckpointWriterFence, WriterFence: p.WriterFence,
 		StartWriterFence: p.StartWriterFence, ProjectID: p.ProjectID, NamespaceInode: p.NamespaceInode, Device: p.Device,
-		QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
+		QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes, RecoversOperationID: p.RecoversOperationID,
 	}
 	exit, marker := "0", p.TargetSchema
 	if state != "migrated" {
