@@ -42,9 +42,9 @@ const (
 )
 
 type platformSettleEffect struct {
-	exists                                bool
+	exists                                 bool
 	effectID, kind, digest, state, receipt string
-	admitted, observed                    int64
+	admitted, observed                     int64
 }
 
 func loadPlatformSettleEffect(e migExec, operation, stage string, number int) (platformSettleEffect, error) {

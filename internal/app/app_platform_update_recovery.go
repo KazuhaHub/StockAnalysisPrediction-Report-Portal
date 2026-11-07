@@ -67,7 +67,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 		policy_revision,controller_epoch FROM app_platform_installations
 		WHERE id=?`, expected.installationID).
 		Scan(&phase, &desired, &generation, &revision, &policy, &epoch); err != nil ||
-		phase != "ready" || desired != "enabled" ||
+		!platformRetryPhaseAllowed(phase, plan.RecoversOperationID) || desired != "enabled" ||
 		generation != plan.SourceGeneration || policy != plan.SourcePolicyRevision ||
 		revision != facts.installationRevision || epoch != expected.controllerEpoch {
 		return errAppPlatformStageEvidence
@@ -113,7 +113,7 @@ func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected p
 	}
 	changed, err = e.exec(`UPDATE app_platform_installations
 		SET phase='recovery_required',revision=revision+1,updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase='ready'
+		WHERE id=? AND desired_state='enabled' AND phase IN ('ready','recovery_required')
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=?`,
 		now, expected.installationID, plan.SourceGeneration,

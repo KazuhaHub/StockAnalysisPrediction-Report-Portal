@@ -158,5 +158,9 @@ func testMigratedLaunchAfterActivation(t *testing.T, pg bool) {
 	}
 }
 
-func TestMigratedLaunchAfterActivationSQLite(t *testing.T)   { testMigratedLaunchAfterActivation(t, false) }
-func TestMigratedLaunchAfterActivationPostgres(t *testing.T) { testMigratedLaunchAfterActivation(t, true) }
+func TestMigratedLaunchAfterActivationSQLite(t *testing.T) {
+	testMigratedLaunchAfterActivation(t, false)
+}
+func TestMigratedLaunchAfterActivationPostgres(t *testing.T) {
+	testMigratedLaunchAfterActivation(t, true)
+}

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"encoding/json"
+	"errors"
+
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
@@ -110,3 +113,40 @@ func platformRestorePendingReceipt(expected platformOperationLease, receipt stri
 	_, ok := platformImportSignedUntil(receipt)
 	return ok
 }
+
+// errAppPlatformMigrationUnsettled refuses a recovery choice while the failed update's data migration has not
+// been settled: the namespace may still hold migrated data.
+var errAppPlatformMigrationUnsettled = errors.New("application data migration is not settled")
+
+// platformRequireSettledMigration refuses when the operation carries a migration that is not settled. An
+// update with no migration has nothing to settle.
+func platformRequireSettledMigration(e migExec, operation string) error {
+	state, err := platformMigrationSettlementState(e, operation)
+	if err != nil {
+		return err
+	}
+	if state != "" && state != "settled" {
+		return errAppPlatformMigrationUnsettled
+	}
+	return nil
+}
+
+// platformRestoreSettledByMigration reports whether the restore operation's checkpoint belongs to a failed
+// update whose migration settlement already restored it. A checkpoint restores once, so the roll back takes
+// its restore stage on that evidence alone.
+func platformRestoreSettledByMigration(e migExec, lease platformOperationLease) (bool, error) {
+	if lease.snapshot.Action != appplatform.ActionRestore {
+		return false, nil
+	}
+	if resume, err := platformOperationIsResume(e, lease.id); err != nil || resume {
+		return false, err
+	}
+	_, _, checkpoint, _, err := loadPlatformRestoreCheckpoint(e, lease)
+	if err != nil {
+		return false, err
+	}
+	state, err := platformMigrationSettlementState(e, checkpoint.OperationID)
+	return state == "settled", err
+}
+
+func jsonUnmarshalString(raw string, v any) error { return json.Unmarshal([]byte(raw), v) }

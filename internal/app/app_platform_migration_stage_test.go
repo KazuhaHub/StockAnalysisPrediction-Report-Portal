@@ -171,7 +171,9 @@ func TestMigrateKnownFailureRecoveryRequiredPostgres(t *testing.T) {
 // waits for settlement with the effect unknown.
 func TestMigrateOrphanedReadBackEndsForSettlement(t *testing.T) {
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
-	fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errors.New("runner killed") }
+	fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errors.New("runner killed")
+	}
 	fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		return platformMigrateStatusAnswer(i, endpoint, "orphaned"), nil
 	}

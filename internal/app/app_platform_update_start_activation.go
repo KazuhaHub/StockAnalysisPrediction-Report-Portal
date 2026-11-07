@@ -227,6 +227,10 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		return zero, err
 	}
 	currentPhase := "ready"
+	if plan.RecoversOperationID != "" {
+		// A retry takes the installation out of the recovery the failed update left it in.
+		currentPhase = "recovery_required"
+	}
 	currentGeneration := plan.SourceGeneration
 	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		currentPhase = "pending"
@@ -296,6 +300,12 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 			e, lease.installationID)
 		if err != nil || audience != plan.AudienceSHA256 {
 			return zero, errAppPlatformStageEvidence
+		}
+	}
+	if plan.RecoversOperationID != "" {
+		// The retry resolves the failed update it recovers and every failed retry before it.
+		if err := markPlatformRecovered(e, lease, runtime.id, plan.RecoversOperationID, now); err != nil {
+			return zero, err
 		}
 	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)

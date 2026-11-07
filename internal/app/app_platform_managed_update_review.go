@@ -224,6 +224,7 @@ func loadPlatformCheckpointUpdateSourceModeState(e migExec, expected platformOpe
 		(phase == "ready" ||
 			(phase == "recovery_required" &&
 				(expected.snapshot.Action == appplatform.ActionRestore ||
+					expected.snapshot.Action == appplatform.ActionUpdate ||
 					expected.snapshot.Stage == appplatform.StageRecoveryRequired))) &&
 		installationGeneration == generation
 	if allowDisabled {
@@ -611,15 +612,21 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 }
 
 func (s *Server) createPlatformManagedUpdateReview(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
+	return s.createPlatformManagedUpdateReviewRecovering(ctx, session, installation, release, trustRevision, "", endpoint)
+}
+
+// createPlatformManagedUpdateReviewRecovering reviews an update that retries the failed update recovers (empty
+// for an ordinary update).
+func (s *Server) createPlatformManagedUpdateReviewRecovering(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, recovers string, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
 	facts, err := s.observePlatformManagedRuntime(ctx, session, endpoint)
 	if err != nil {
 		return platformRemovalReview{}, err
 	}
 	return s.createPlatformManagedUpdateReviewWithRuntime(
-		ctx, session, installation, release, trustRevision, &facts, endpoint)
+		ctx, session, installation, release, trustRevision, recovers, &facts, endpoint)
 }
 
-func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, facts *platformManagedRuntimeFacts, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
+func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, recovers string, facts *platformManagedRuntimeFacts, endpoint platformRuntimeEndpoint) (platformRemovalReview, error) {
 	if !platformValidUUID(installation) || !platformValidSHA(release) ||
 		trustRevision < 1 || facts == nil ||
 		!validPlatformInstallRuntimeFacts(*facts, endpoint) {
@@ -645,12 +652,18 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 				installation).
 				Scan(&appID, &publisher, &desired, &phase, &generation,
 					&revision, &policy, &epoch, &runtimeID); err != nil ||
-				desired != "enabled" || phase != "ready" ||
+				desired != "enabled" || !platformRetryPhaseAllowed(phase, recovers) ||
+				(recovers == "") != (phase == "ready") ||
 				epoch != control.epoch || runtimeID != target.RuntimeID ||
 				generation < 1 || generation == math.MaxInt64 ||
 				revision < 1 || revision == math.MaxInt64 ||
 				policy < 1 || policy == math.MaxInt64 {
 				return errAppPlatformPlanChanged
+			}
+			if recovers != "" {
+				if err := requirePlatformRetrySource(e, installation, recovers); err != nil {
+					return err
+				}
 			}
 			var activeRelease string
 			var activeFormat int64
@@ -681,6 +694,7 @@ func (s *Server) createPlatformManagedUpdateReviewWithRuntime(ctx context.Contex
 			if err != nil {
 				return err
 			}
+			projection.RecoversOperationID = recovers
 			control, err = platformRefreshActor(e, session, actor, control)
 			if err != nil {
 				return err
@@ -796,6 +810,12 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 			if err != nil {
 				return err
 			}
+			var probe struct {
+				Recovers string `json:"recovers_operation_id"`
+			}
+			if json.Unmarshal([]byte(raw), &probe) != nil {
+				return errAppPlatformPlanChanged
+			}
 			if consumed.Valid || expires <= control.nowMS ||
 				action != "update" || !installation.Valid ||
 				!source.Valid || !release.Valid || scope != actor.scope ||
@@ -842,12 +862,18 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 					&generation, &currentRevision, &currentPolicy,
 					&currentEpoch, &runtimeID); err != nil ||
 				currentApp != appID || currentPublisher != publisher ||
-				desired != "enabled" || phase != "ready" ||
+				desired != "enabled" || !platformRetryPhaseAllowed(phase, projection.RecoversOperationID) ||
+				(projection.RecoversOperationID == "") != (phase == "ready") ||
 				generation != projection.SourceGeneration ||
 				currentRevision != revision ||
 				currentPolicy != policy ||
 				currentEpoch != epoch || runtimeID != target.RuntimeID {
 				return errAppPlatformPlanChanged
+			}
+			if projection.RecoversOperationID != "" {
+				if err := requirePlatformRetrySource(e, installation.String, projection.RecoversOperationID); err != nil {
+					return err
+				}
 			}
 			var activeRelease string
 			var activeFormat int64
@@ -887,6 +913,7 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 			if err != nil {
 				return err
 			}
+			expected.RecoversOperationID = projection.RecoversOperationID
 			expectedRaw, marshalErr := json.Marshal(expected)
 			if marshalErr != nil || string(expectedRaw) != raw {
 				return errAppPlatformPlanChanged
@@ -949,6 +976,10 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 }
 
 func (s *Server) createPlatformUpdateReviewContext(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64) (platformRemovalReview, error) {
+	return s.createPlatformUpdateReviewRecovering(ctx, session, installation, release, trustRevision, "")
+}
+
+func (s *Server) createPlatformUpdateReviewRecovering(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, recovers string) (platformRemovalReview, error) {
 	var runtimeID sql.NullString
 	if err := s.st.queryRow(`SELECT runtime_id
 		FROM app_platform_installations WHERE id=?`,
@@ -956,6 +987,9 @@ func (s *Server) createPlatformUpdateReviewContext(ctx context.Context, session 
 		return platformRemovalReview{}, errAppPlatformPlanChanged
 	}
 	if !runtimeID.Valid {
+		if recovers != "" {
+			return platformRemovalReview{}, errAppPlatformPlanChanged
+		}
 		return s.createPlatformFrontendUpdateReviewContext(
 			ctx, session, installation, release, trustRevision)
 	}
@@ -963,8 +997,8 @@ func (s *Server) createPlatformUpdateReviewContext(ctx context.Context, session 
 	if !ok {
 		return platformRemovalReview{}, errAppPlatformRuntimeConflict
 	}
-	return s.createPlatformManagedUpdateReview(
-		ctx, session, installation, release, trustRevision, endpoint)
+	return s.createPlatformManagedUpdateReviewRecovering(
+		ctx, session, installation, release, trustRevision, recovers, endpoint)
 }
 
 func (s *Server) consumePlatformUpdateReviewContext(ctx context.Context, session platformActorSession, planID, planSHA, key string) (platformRemovalCommit, error) {

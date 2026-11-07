@@ -70,7 +70,9 @@ func settleAfterEnd(t *testing.T, pg bool, script func(f *platformFakeMigrationR
 }
 
 func orphanedScript(f *platformFakeMigrationRunner, endpoint platformRuntimeEndpoint) {
-	f.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errors.New("runner killed") }
+	f.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errors.New("runner killed")
+	}
 	f.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		return platformMigrateStatusAnswer(i, endpoint, "orphaned"), nil
 	}
@@ -97,7 +99,9 @@ func testSettleUnknownDiscardsThenRestores(t *testing.T, pg bool) {
 	if !f.step(t) || effectState(t, f.s, f.op, "migrate", 3) != "prepared" || effectState(t, f.s, f.op, "migrate", 2) != "unknown" {
 		t.Fatal("an orphaned migration did not open its discard")
 	}
-	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) { return nil, errPlatformMigrationAbsent }
+	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	f.fake.executeDiscard = func(i platformDiscardIntent) (platformDiscardObservation, error) {
 		if f.fake.count("execute-restore") != 0 {
 			t.Error("the checkpoint was restored before the migration was discarded")
@@ -316,7 +320,9 @@ func TestSettleAbsenceOnlyAfterSignedWindowPostgres(t *testing.T) {
 func TestSettleAbsentMigrationNeedsNoRestore(t *testing.T) {
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
 	fake.executeMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errors.New("lost") }
-	fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) { return nil, errPlatformMigrationAbsent }
+	fake.readMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	if _, err := s.dispatchPlatformMigrateData(context.Background(), lease, endpoint); !errors.Is(err, errPlatformMigrationBusy) {
 		t.Fatal(err)
 	}
@@ -326,7 +332,9 @@ func TestSettleAbsentMigrationNeedsNoRestore(t *testing.T) {
 	}
 	fake.calls = nil
 	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
-	f.fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errPlatformMigrationAbsent }
+	f.fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	if f.step(t) && effectState(t, f.s, f.op, "migrate", 2) != "reverted" {
 		t.Fatal("an absence inside the window was acted on")
 	}

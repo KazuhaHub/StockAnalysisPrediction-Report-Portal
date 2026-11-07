@@ -241,9 +241,20 @@ func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, plat
 	return platformManagedUpdateOperationFixtureWith(t, pg, nil)
 }
 
+// lastPlatformUpdateFixture is the review fixture the most recent update operation fixture was built from.
+var lastPlatformUpdateFixture platformManagedUpdateReviewFixture
+
 func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease) {
 	t.Helper()
 	fixture := platformManagedUpdateProjectionFixtureWith(t, pg, mutate)
+	lastPlatformUpdateFixture = fixture
+	return fixture.server, platformInsertManagedUpdateOperation(t, fixture, platformFixtureID(6110), platformFixtureID(6111), "")
+}
+
+// platformInsertManagedUpdateOperation admits a queued managed update for the fixture's release. A non-empty
+// recovers makes it the retry of that failed update.
+func platformInsertManagedUpdateOperation(t *testing.T, fixture platformManagedUpdateReviewFixture, planID, operationID, recovers string) platformOperationLease {
+	t.Helper()
 	projection, err := platformBuildManagedUpdateProjection(
 		fixture.server.st.poolExec(), fixture.installation, fixture.source,
 		fixture.revision, fixture.policy, fixture.format,
@@ -253,6 +264,7 @@ func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate fun
 	if err != nil {
 		t.Fatal(err)
 	}
+	projection.RecoversOperationID = recovers
 	raw, err := json.Marshal(projection)
 	if err != nil {
 		t.Fatal(err)
@@ -273,10 +285,9 @@ func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate fun
 			&now); err != nil {
 		t.Fatal(err)
 	}
-	planID, operationID := platformFixtureID(6110), platformFixtureID(6111)
 	digest := platformDigest(raw)
-	idempotency, request := platformDigest([]byte("managed-update-key")),
-		platformDigest([]byte("managed-update-request"))
+	idempotency, request := platformDigest([]byte("managed-update-key"+operationID)),
+		platformDigest([]byte("managed-update-request"+operationID))
 	mustExec(t, fixture.server.st, `INSERT INTO app_platform_review_plans(
 		id,installation_id,app_id,publisher_id,action,source_release_sha256,
 		target_release_sha256,installation_revision,policy_revision,
@@ -301,7 +312,7 @@ func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate fun
 		operationID, fixture.installation, planID, scope, idempotency,
 		request, projection.SourceGeneration, projection.TargetGeneration,
 		projection.ControllerEpoch, now, now)
-	return fixture.server, platformOperationLease{
+	return platformOperationLease{
 		id: operationID, installationID: fixture.installation,
 		controllerEpoch: projection.ControllerEpoch,
 	}

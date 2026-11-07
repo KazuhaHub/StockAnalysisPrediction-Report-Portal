@@ -180,13 +180,23 @@ func loadPlatformOperationLease(e migExec, id string) (platformLeaseFacts, error
 	if source < 0 || target < 1 || stateRevision < 1 || (managed != 0 && managed != 1) || installation != lease.installationID || epoch != lease.controllerEpoch || completed.Valid {
 		return zero, errAppPlatformLeaseConflict
 	}
+	// A retry of a failed update is the one update that runs while its installation waits in recovery.
+	retry := false
+	if phase == "recovery_required" && action == string(appplatform.ActionUpdate) {
+		var n int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+			WHERE o.id=? AND p.plan_json LIKE '%"recovers_operation_id":"%'`, id).Scan(&n); err != nil {
+			return zero, platformLeaseReadError(err)
+		}
+		retry = n == 1
+	}
 	if (phase == "review_required" &&
 		action != string(appplatform.ActionDeleteData) &&
 		action != string(appplatform.ActionRepair) &&
 		action != string(appplatform.ActionRestoreImport)) ||
 		(action == string(appplatform.ActionRestoreImport) && phase != "review_required") ||
 		phase == "quarantined" ||
-		(phase == "recovery_required" &&
+		(phase == "recovery_required" && !retry &&
 			action != string(appplatform.ActionRestore) &&
 			action != string(appplatform.ActionDeleteData) &&
 			action != string(appplatform.ActionRepair)) ||

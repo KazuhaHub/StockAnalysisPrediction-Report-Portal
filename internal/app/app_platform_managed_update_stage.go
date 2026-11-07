@@ -590,11 +590,17 @@ func (s *Server) runPlatformManagedUpdate(ctx context.Context, expected platform
 		appplatform.StageDownload, appplatform.StageStage:
 		return s.advancePlatformManagedUpdateStage(ctx, expected)
 	case appplatform.StageQuiesce:
+		if lease, handled, err := s.runPlatformRetryEvidenceStage(ctx, expected); handled || err != nil {
+			return lease, err
+		}
 		return s.executePlatformManagedUpdateQuiesce(
 			ctx, expected, endpoint)
 	case appplatform.StageSnapshot:
 		return s.dispatchPlatformCheckpoint(ctx, expected, endpoint)
 	case appplatform.StageMigrate:
+		if lease, handled, err := s.runPlatformRetryEvidenceStage(ctx, expected); handled || err != nil {
+			return lease, err
+		}
 		return s.runPlatformMigrateStage(ctx, expected, endpoint)
 	case appplatform.StageStart:
 		return s.executePlatformUpdateStart(ctx, expected, endpoint)
