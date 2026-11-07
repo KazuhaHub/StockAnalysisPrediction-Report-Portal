@@ -26,6 +26,8 @@ type platformRestoreIntent struct {
 	checkpoint              journal.CheckpointReceipt
 	source                  platformCheckpointSource
 	raw, signature          []byte
+	// readSignature signs raw as a read-receipt, under its own purpose.
+	readSignature []byte
 }
 
 const platformManagedRestoreFormat = "portal.managed-restore-review/1-dev.1"
@@ -391,6 +393,9 @@ func (s *Server) preparePlatformRestore(ctx context.Context, expected platformOp
 	defer clear(key)
 	result.raw, result.signature, err = control.SignRestore(result.command, key, result.authority, issued)
 	if err != nil {
+		return zero, err
+	}
+	if result.readSignature, err = control.SignRestoreRead(result.raw, key, result.authority, issued); err != nil {
 		return zero, err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {

@@ -23,7 +23,7 @@ func platformReadRestoreReceipt(ctx context.Context, endpoint platformRuntimeEnd
 		return transport.WritableLifecycleObservation{}, err
 	}
 	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
-		transport.RestoreRead, intent.raw, intent.signature, intent.authority, descriptor, nil)
+		transport.RestoreRead, intent.raw, intent.readSignature, intent.authority, descriptor, nil)
 }
 
 func platformRestoreDescriptor(intent platformRestoreIntent) ([]byte, error) {
