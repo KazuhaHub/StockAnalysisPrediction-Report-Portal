@@ -169,7 +169,8 @@ func loadPlatformCheckpointInstallSourceMode(e migExec, expected platformOperati
 	}
 	validInstallationState := desired == "enabled" &&
 		(phase == "ready" || (phase == "recovery_required" &&
-			expected.snapshot.Action == appplatform.ActionRestore)) &&
+			(expected.snapshot.Action == appplatform.ActionRestore ||
+				expected.snapshot.Stage == appplatform.StageRecoveryRequired))) &&
 		installationGeneration == sourceGeneration
 	if allowDisabled {
 		generationMatches := installationGeneration == sourceGeneration+1 ||

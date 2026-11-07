@@ -185,6 +185,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			return nil
 		}
 		if selected.lease.id == "" {
+			// Idle, in normal and in paused mode: a failed migration waiting for settlement needs no lease.
+			if w.endpoint.path != "" {
+				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
+					log.Printf("app-platform migration settlement: %v", settleErr)
+				}
+			}
 			w.publish("idle", "", "")
 			return nil
 		}

@@ -202,13 +202,18 @@ func loadPlatformMigrateIntent(e migExec, lease platformOperationLease, runtime 
 
 // signPlatformMigrateCommand records the new expiry on the effect before the command exists outside the
 // transaction, then signs the execute and read signatures.
-func signPlatformMigrateCommand(e migExec, leaseID string, seed []byte, intent *platformMigrateIntent, issued, expires int64) error {
+//
+// record is false for a command that will only be read with: a read is not bound by its signed window, so it
+// must not push out the moment an absence becomes final.
+func signPlatformMigrateCommand(e migExec, leaseID string, seed []byte, intent *platformMigrateIntent, issued, expires int64, record bool) error {
 	intent.command.IssuedMS, intent.command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(expires, 10)
-	changed, err := e.exec(`UPDATE app_platform_operation_effects SET receipt_json=?
-		WHERE operation_id=? AND stage='migrate' AND effect_number=2 AND effect_id=? AND state=? AND observed_fence=0 AND receipt_json=?`,
-		platformImportPendingReceipt(max(intent.priorSignedUntil, expires)), leaseID, intent.effectID, intent.effectState, intent.pendingReceipt)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return err
+	if record {
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET receipt_json=?
+			WHERE operation_id=? AND stage='migrate' AND effect_number=2 AND effect_id=? AND state=? AND observed_fence=0 AND receipt_json=?`,
+			platformImportPendingReceipt(max(intent.priorSignedUntil, expires)), leaseID, intent.effectID, intent.effectState, intent.pendingReceipt)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
 	}
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
@@ -284,7 +289,7 @@ func (s *Server) signPlatformMigrate(ctx context.Context, expected platformOpera
 	if expires <= issued {
 		return zero, errAppPlatformLeaseConflict
 	}
-	if err := signPlatformMigrateCommand(e, expected.id, seed, &intent, issued, expires); err != nil {
+	if err := signPlatformMigrateCommand(e, expected.id, seed, &intent, issued, expires, true); err != nil {
 		return zero, err
 	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
@@ -387,7 +392,8 @@ func (s *Server) readBackPlatformMigrate(ctx context.Context, expected platformO
 		observation, readErr := runner.ReadMigrate(ctx, endpoint, intent)
 		switch {
 		case errors.Is(readErr, errPlatformMigrationAbsent):
-			if time.Now().UnixMilli() <= intent.priorSignedUntil+platformImportAbsenceMarginMS {
+			// The command just signed for this attempt counts too: it may still be on its way.
+			if time.Now().UnixMilli() <= max(intent.priorSignedUntil, platformSignedUntilOf(intent.command))+platformImportAbsenceMarginMS {
 				return platformOperationLease{}, false, errPlatformMigrationBusy
 			}
 			return platformOperationLease{}, true, nil

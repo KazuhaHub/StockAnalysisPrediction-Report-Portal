@@ -96,3 +96,17 @@ func platformMigrationEffectCount(e migExec, operationID string) (int, error) {
 	err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='migrate-data' AND state='applied'`, operationID).Scan(&n)
 	return n, err
 }
+
+// platformRestorePendingReceipt accepts the receipt column of a restore effect that has not been observed:
+// empty for an ordinary restore, empty or the record of the latest signed expiry for the restore that
+// settles a migration.
+func platformRestorePendingReceipt(expected platformOperationLease, receipt string) bool {
+	if receipt == "{}" {
+		return true
+	}
+	if expected.snapshot.Action != appplatform.ActionUpdate {
+		return false
+	}
+	_, ok := platformImportSignedUntil(receipt)
+	return ok
+}

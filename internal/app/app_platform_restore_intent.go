@@ -28,6 +28,9 @@ type platformRestoreIntent struct {
 	raw, signature          []byte
 	// readSignature signs raw as a read-receipt, under its own purpose.
 	readSignature []byte
+	// signedUntilBefore is the latest expiry of any command signed for the effect before this one; only a
+	// settlement restore, whose absence must outlast its signed windows, records and reads it.
+	signedUntilBefore int64
 }
 
 const platformManagedRestoreFormat = "portal.managed-restore-review/1-dev.1"
@@ -74,6 +77,9 @@ func platformRestoreReceiptMatchesCommand(receipt journal.RestoreReceipt, comman
 }
 
 func loadPlatformRestoreCheckpoint(e migExec, expected platformOperationLease) (string, string, journal.CheckpointReceipt, int64, error) {
+	if expected.snapshot.Action == appplatform.ActionUpdate {
+		return loadPlatformSettlementRestoreCheckpoint(e, expected)
+	}
 	if resume, err := platformOperationIsResume(e, expected.id); err != nil {
 		return "", "", journal.CheckpointReceipt{}, 0, err
 	} else if resume {
@@ -298,7 +304,7 @@ func loadPlatformRestoreIntent(e migExec, expected platformOperationLease, runti
 		!storedManifest.Valid || storedManifest.String != checkpoint.ManifestSHA256 ||
 		storedBytes != mustPlatformCheckpointInt(checkpoint.ArchiveBytes) ||
 		kind != "restore" || effectEpoch != expected.controllerEpoch ||
-		admitted != expected.fence || observed != 0 || effectState != "prepared" || receipt != "{}" {
+		admitted != expected.fence || observed != 0 || effectState != "prepared" || !platformRestorePendingReceipt(expected, receipt) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	command, err := platformRestoreCommand(expected, runtime, source, checkpoint, recoverySetID, effectID)

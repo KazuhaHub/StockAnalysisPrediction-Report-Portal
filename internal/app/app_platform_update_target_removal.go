@@ -51,13 +51,20 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 		}
 		return start, start.plan, source, descriptor, nil
 	}
-	if lease.snapshot.Action != appplatform.ActionRestore ||
+	// Settlement removes the target of a failed update itself, from the update's own recovery_required lease.
+	settling := lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Stage == appplatform.StageRecoveryRequired &&
+		lease.id == checkpoint.OperationID
+	if !settling && (lease.snapshot.Action != appplatform.ActionRestore ||
 		!lease.snapshot.Managed ||
 		!((lease.snapshot.Stage == appplatform.StageQuiesce &&
 			checkpoint.OperationID != "") ||
 			lease.snapshot.Stage == appplatform.StageStart) ||
-		lease.snapshot.Generation < 2 {
+		lease.snapshot.Generation < 2) {
 		return zero, zeroPlan, zeroSource, nil, errAppPlatformStageEvidence
+	}
+	pendingOperations := 1
+	if settling {
+		pendingOperations = 0
 	}
 	var installation, stage, epoch string
 	var sourceGeneration, targetGeneration, sourceFence int64
@@ -87,8 +94,8 @@ func loadPlatformUpdateTargetRemovalPlan(e migExec, lease platformOperationLease
 			Revision:   1, Stage: appplatform.StageRecoveryRequired,
 		},
 	}
-	source, err := loadPlatformCheckpointSource(
-		e, lease, runtime, now)
+	source, err := loadPlatformCheckpointSourceMode(
+		e, lease, runtime, now, false, pendingOperations)
 	if err != nil {
 		return zero, zeroPlan, zeroSource, nil, fmt.Errorf(
 			"restore target checkpoint source: %w", err)
