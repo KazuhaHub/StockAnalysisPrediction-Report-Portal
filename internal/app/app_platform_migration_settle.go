@@ -15,6 +15,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -41,6 +42,17 @@ const (
 	platformSettleStopEffect   = 1
 	platformSettleRemoveEffect = 2
 	platformSettleHeldEffect   = 3
+	// Slots 4 and 5 are the removal of a target the runner reserved and never created. They are effects of their own,
+	// under their own operation identity, so a start that turns out to be running opens the ordinary removal (slots
+	// 1 and 2) as a new effect and never reuses or rewrites these.
+	platformSettleReservedStopEffect   = 4
+	platformSettleReservedRemoveEffect = 5
+	// Slot 6 is the sweep of containers labeled for the namespace that nothing accounts for.
+	platformSettleSweepEffect = 6
+	platformSweepKind         = "sweep"
+	// platformCreateGraceMS is how long after a start's last signed window a container create the runner gave up on
+	// may still be carried out by the Docker daemon: the driver's request timeout.
+	platformCreateGraceMS = int64(driver.DockerRequestTimeout / time.Millisecond)
 )
 
 type platformSettleEffect struct {
@@ -208,6 +220,12 @@ func (s *Server) settlePlatformMigration(ctx context.Context, endpoint platformR
 	}
 	// 1. A started target comes first: nothing may share the namespace with a restore.
 	if start.exists && start.state == "applied" {
+		// A removal of a reserved target that was begun before the start turned out to be running can never be
+		// carried out: the runner refuses it for a start that is not reserved. It is closed as not applied, and the
+		// target is then removed by the ordinary removal, which is a new effect with its own digest.
+		if closed, err := s.closeReservedRemovals(ctx, lease); err != nil || closed {
+			return closed, err
+		}
 		stop, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, platformSettleStopEffect)
 		if err != nil {
 			return false, err
@@ -221,6 +239,11 @@ func (s *Server) settlePlatformMigration(ctx context.Context, endpoint platformR
 		}
 		if remove.state != "applied" {
 			return s.removeSettlementTarget(ctx, endpoint, lease, "remove_code", platformSettleRemoveEffect)
+		}
+		// Nothing may share the namespace with a restore, and a create the runner gave up on may have left a
+		// container nothing accounts for. It is swept first, as an effect of its own.
+		if swept, err := s.sweepSettlementNamespace(ctx, endpoint, lease); err != nil || !swept.done {
+			return swept.progressed, err
 		}
 	} else if start.exists && start.state != "reverted" {
 		// A start the update ended with still open: the runner may or may not have run it. It is read back under its
@@ -763,8 +786,9 @@ type platformSettlementStartRead struct {
 	intent platformUpdateStartIntent
 	// reserved is set when the effect records the runner's reservation, which the runner cannot truthfully lack.
 	reserved bool
-	// definiteAfter is the time before which a command for the start may still be on its way: none was signed after
-	// the update ended.
+	// definiteAfter is the time before which a command for the start may still be on its way, or a container create it
+	// made may still be carried out: none was signed after the update ended, and the Docker daemon may finish a
+	// request the runner gave up on for the driver's request timeout after the command's window closed.
 	definiteAfter int64
 	admitted      int64
 }
@@ -784,11 +808,16 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		Scan(&effectID, &kind, &digest, &epoch, &admitted, &observed, &state, &receipt, &completed); err != nil {
 		return fail("effect")
 	}
-	if kind != "update-start" || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown") {
+	// An applied start is loaded only for the sweep, which names the start it follows and needs nothing else of it.
+	if kind != "update-start" || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown" && state != "applied") {
 		return fail("effect row")
 	}
 	var reservation *journal.UpdateStartReservation
-	if receipt != "{}" {
+	if state == "applied" {
+		if observed != admitted {
+			return fail("effect row")
+		}
+	} else if receipt != "{}" {
 		parsed, err := journal.ParseUpdateStartReservation([]byte(receipt))
 		if err != nil || observed != admitted {
 			return fail("reservation")
@@ -828,7 +857,7 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		command: command, checkpoint: checkpoint, checkpointRaw: checkpointRaw, source: source, plan: plan,
 		targetDescriptor: bytes.Clone(descriptor), reservation: reservation,
 	}
-	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformStartCommandWindowMS + platformImportAbsenceMarginMS}, nil
+	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformStartCommandWindowMS + platformImportAbsenceMarginMS + platformCreateGraceMS}, nil
 }
 
 // signPlatformSettlementStartRead signs the failed update's start for a read.
@@ -945,17 +974,34 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 	})
 }
 
+// Receipts of the held-start record (settle, slot 3): what the runner was last read to hold the start as.
+const (
+	platformHeldReservedReceipt = `{"state":"reserved"}`
+	platformHeldOrphanedReceipt = `{"state":"orphaned"}`
+	// platformNotAppliedReceipt closes a reserved-removal effect that the runner can no longer carry out.
+	platformNotAppliedReceipt = `{"state":"not_applied"}`
+)
+
 // settleHeldStart acts on what the runner says it holds for the open start. It is called every tick with a fresh
-// read, so nothing it records is final until the read itself is: the held-start record only notes that a reserved
-// removal began.
+// read.
+//
+// Nothing is done before the start's signed window has closed, plus the time a container create the runner gave up
+// on can still be carried out: until then a claim may arrive, and a start read as reserved is no more than that. Once
+// it has closed no claim can be admitted (the runner refuses an expired command), so a start read as reserved stays
+// reserved.
 //
 //   - pending: the start may be executing; wait.
 //   - orphaned: claimed with nothing executing it. A container may exist, so only the runner can say what happened:
-//     it is asked to settle the start, and the next read shows the result (running, or never run).
-//   - reserved: the runner holds a pending target and no claim was ever made; the target is removed bound to the
+//     it is asked to settle the start, and the next read shows the result (running, or never run). The record is
+//     marked orphaned first, which is what tells a later never_ran that the runner's settlement, not a removal,
+//     ended the start and that the target is already gone.
+//   - reserved: the runner holds a pending target and no claim can still be made; the target is removed bound to the
 //     reservation once the held-start record is in.
 //   - never_ran: the start is settled as not run. If a reserved removal began, it is finished first.
 func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease, read platformSettlementStartRead, state string) (bool, error) {
+	if time.Now().UnixMilli() <= read.definiteAfter {
+		return false, nil
+	}
 	pool := s.st.poolExec()
 	marker, err := loadPlatformSettleEffect(pool, lease.id, platformSettleStage, platformSettleHeldEffect)
 	if err != nil {
@@ -963,27 +1009,39 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 	}
 	switch state {
 	case "orphaned":
+		if marker.exists && marker.kind != platformHeldStartKind {
+			return false, errAppPlatformStageEvidence
+		}
+		if marker.receipt != platformHeldOrphanedReceipt {
+			return true, s.recordHeldStart(ctx, lease, read, platformHeldOrphanedReceipt, marker)
+		}
 		return s.settleOrphanedStart(ctx, endpoint, lease)
 	case "reserved":
 		if !marker.exists {
-			return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
-				_, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-					SELECT operation_id,'settle',3,?,?,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'applied',?,?,? FROM app_platform_operation_effects
-					WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state IN ('prepared','unknown')`,
-					platformDerivedUUID("held-start", read.intent.effectID), platformHeldStartKind, `{"state":"reserved"}`, now, now, lease.id, read.intent.effectID)
-				return err
-			})
+			return true, s.recordHeldStart(ctx, lease, read, platformHeldReservedReceipt, marker)
+		}
+		if marker.receipt != platformHeldReservedReceipt {
+			// A claimed start cannot become reserved again.
+			return false, errAppPlatformStageEvidence
 		}
 		return s.reservedStartStep(ctx, endpoint, lease)
 	case "never_ran":
-		if marker.exists {
+		if marker.exists && marker.receipt == platformHeldReservedReceipt {
 			return s.reservedStartStep(ctx, endpoint, lease)
+		}
+		// No removal of ours ended this start: the runner settled it, and its target is already gone. What is left to
+		// make sure of is that no container of the namespace survives, which is swept before the start is closed.
+		if swept, err := s.sweepSettlementNamespace(ctx, endpoint, lease); err != nil || !swept.done {
+			return swept.progressed, err
 		}
 		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
 				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
 				platformNeverRanReceipt, now, lease.id)
 			if err := platformLeaseCAS(changed, err); err != nil {
+				return err
+			}
+			if err := closeReservedRemovalRows(e, lease.id, now); err != nil {
 				return err
 			}
 			// Nothing ran and nothing was removed, so no settlement evidence stands for the candidate: drop it.
@@ -995,6 +1053,66 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 	return false, nil
 }
 
+// recordHeldStart records what the runner holds the start as. Recording a claimed start also closes any removal of a
+// reserved target that was begun: a claimed start is not reserved, so the runner refuses it for good.
+func (s *Server) recordHeldStart(ctx context.Context, lease platformOperationLease, read platformSettlementStartRead, receipt string, marker platformSettleEffect) error {
+	return s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+		if !marker.exists {
+			if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+				SELECT operation_id,'settle',3,?,?,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'applied',?,?,? FROM app_platform_operation_effects
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state IN ('prepared','unknown')`,
+				platformDerivedUUID("held-start", read.intent.effectID), platformHeldStartKind, receipt, now, now, lease.id, read.intent.effectID); err != nil {
+				return err
+			}
+		} else {
+			changed, err := e.exec(`UPDATE app_platform_operation_effects SET receipt_json=?,updated_ms=?
+				WHERE operation_id=? AND stage='settle' AND effect_number=3 AND kind=? AND state='applied' AND receipt_json=?`,
+				receipt, now, lease.id, platformHeldStartKind, marker.receipt)
+			if err := platformLeaseCAS(changed, err); err != nil {
+				return err
+			}
+		}
+		if receipt == platformHeldOrphanedReceipt {
+			return closeReservedRemovalRows(e, lease.id, now)
+		}
+		return nil
+	})
+}
+
+// closeReservedRemovalRows closes the reserved-removal effects that are still only prepared as not applied.
+func closeReservedRemovalRows(e migExec, operation string, now int64) error {
+	_, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+		WHERE operation_id=? AND stage='settle' AND effect_number IN (?,?) AND state='prepared'`,
+		platformNotAppliedReceipt, now, operation, platformSettleReservedStopEffect, platformSettleReservedRemoveEffect)
+	return err
+}
+
+// closeReservedRemovals closes the reserved-removal effects of an update whose start turned out to be running. The
+// running receipt was just read from the runner, which refuses a reserved removal for a start that is not reserved,
+// so such an effect is definitely not applied; one recorded as applied cannot coexist with a running start.
+func (s *Server) closeReservedRemovals(ctx context.Context, lease platformOperationLease) (bool, error) {
+	pool := s.st.poolExec()
+	open := false
+	for _, number := range []int{platformSettleReservedStopEffect, platformSettleReservedRemoveEffect} {
+		effect, err := loadPlatformSettleEffect(pool, lease.id, platformSettleStage, number)
+		if err != nil {
+			return false, err
+		}
+		switch effect.state {
+		case "prepared":
+			open = true
+		case "applied":
+			return false, errAppPlatformStageEvidence
+		}
+	}
+	if !open {
+		return false, nil
+	}
+	return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+		return closeReservedRemovalRows(e, lease.id, now)
+	})
+}
+
 // reservedStartStep takes the next step of removing a reserved target: stop, then remove, each bound to the
 // reservation; once both are applied the start is closed as never run.
 func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease) (bool, error) {
@@ -1002,7 +1120,7 @@ func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntime
 	for _, step := range []struct {
 		stage  string
 		number int
-	}{{"stop", platformSettleStopEffect}, {"remove_code", platformSettleRemoveEffect}} {
+	}{{"stop", platformSettleReservedStopEffect}, {"remove_code", platformSettleReservedRemoveEffect}} {
 		effect, err := loadPlatformSettleEffect(pool, lease.id, platformSettleStage, step.number)
 		if err != nil {
 			return false, err
@@ -1010,6 +1128,9 @@ func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntime
 		if effect.state != "applied" {
 			return s.removeSettlementTarget(ctx, endpoint, lease, step.stage, step.number)
 		}
+	}
+	if swept, err := s.sweepSettlementNamespace(ctx, endpoint, lease); err != nil || !swept.done {
+		return swept.progressed, err
 	}
 	return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
@@ -1025,6 +1146,10 @@ type platformSettleStartIntent struct {
 	authority      control.Authority
 	runtime        platformRuntimeRegistration
 	descriptor     []byte
+	// The identity the runner's receipt must carry.
+	mode                                         string
+	effectID, operationID, digest, startEffectID string
+	resourceID, namespaceID                      string
 }
 
 // platformSettleStartRunner sends the command to the runner and answers its receipt.
@@ -1041,6 +1166,13 @@ func (s *Server) platformSettleStartRun() platformSettleStartRunner {
 // a read, so nothing execute-capable is made for the start; its own effect and operation identities are derived from
 // the start's, so a command signed again names the same settlement.
 func (s *Server) signPlatformSettlementOrphan(ctx context.Context, lease platformOperationLease) (platformSettleStartIntent, error) {
+	return s.signPlatformSettlementStartCommand(ctx, lease, control.SettleModeSettle)
+}
+
+// signPlatformSettlementStartCommand signs the settle-update-start command of a mode. The sweep is an effect of the
+// update's own (slot 6), recorded as prepared in the transaction that signs it, so what is sent again is the same
+// effect, and its receipt is read back under its own identity.
+func (s *Server) signPlatformSettlementStartCommand(ctx context.Context, lease platformOperationLease, mode string) (platformSettleStartIntent, error) {
 	var zero platformSettleStartIntent
 	dek, err := s.dek()
 	if err != nil {
@@ -1087,9 +1219,13 @@ func (s *Server) signPlatformSettlementOrphan(ctx context.Context, lease platfor
 	if err != nil {
 		return zero, err
 	}
+	label := "settle-update-start"
+	if mode == control.SettleModeSweep {
+		label = "sweep-update-start"
+	}
 	command := control.SettleUpdateStartCommand{
-		Format: control.SettleUpdateStartFormat, EffectID: platformDerivedUUID("settle-update-start", read.intent.effectID),
-		OperationID: platformDerivedUUID("settle-update-start-operation", lease.id), InstallationFence: strconv.FormatInt(lease.fence, 10),
+		Format: control.SettleUpdateStartFormat, Mode: mode, EffectID: platformDerivedUUID(label, read.intent.effectID),
+		OperationID: platformDerivedUUID(label+"-operation", lease.id), InstallationFence: strconv.FormatInt(lease.fence, 10),
 		IssuedMS: strconv.FormatInt(issued, 10), ExpiresMS: strconv.FormatInt(issued+platformStartCommandWindowMS, 10),
 		StartRaw: startRaw, StartReadSignature: startRead,
 	}
@@ -1100,10 +1236,31 @@ func (s *Server) signPlatformSettlementOrphan(ctx context.Context, lease platfor
 	if err != nil {
 		return zero, err
 	}
+	if mode == control.SettleModeSweep {
+		existing, err := loadPlatformSettleEffect(e, lease.id, platformSettleStage, platformSettleSweepEffect)
+		if err != nil {
+			return zero, err
+		}
+		switch {
+		case !existing.exists:
+			if _, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+				VALUES(?,?,?,?,?,?,?,?,?,0,'prepared','{}',?,?)`,
+				lease.id, platformSettleStage, platformSettleSweepEffect, command.EffectID, platformSweepKind, command.PayloadSHA256, runtime.id, lease.controllerEpoch, lease.fence, now, now); err != nil {
+				return zero, err
+			}
+		case existing.kind != platformSweepKind || existing.state != "prepared" || existing.effectID != command.EffectID || existing.digest != command.PayloadSHA256 || existing.admitted != lease.fence:
+			return zero, errAppPlatformStageEvidence
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
-	return platformSettleStartIntent{raw: raw, signature: signature, authority: read.intent.authority, runtime: runtime, descriptor: bytes.Clone(read.intent.targetDescriptor)}, nil
+	start0 := read.intent.command
+	return platformSettleStartIntent{
+		raw: raw, signature: signature, authority: read.intent.authority, runtime: runtime, descriptor: bytes.Clone(read.intent.targetDescriptor),
+		mode: mode, effectID: command.EffectID, operationID: command.OperationID, digest: command.PayloadSHA256, startEffectID: start0.EffectID,
+		resourceID: start0.Payload.ResourceID, namespaceID: start0.Payload.NamespaceID,
+	}, nil
 }
 
 // settleOrphanedStart asks the runner to settle the orphaned start. Whatever it answers, the next tick reads the start
@@ -1121,6 +1278,51 @@ func (s *Server) settleOrphanedStart(ctx context.Context, endpoint platformRunti
 		return false, nil
 	}
 	return true, nil
+}
+
+// platformSweepStatus is the outcome of a sweep step: whether the sweep is not needed or finished, and whether the
+// step changed anything.
+type platformSweepStatus struct{ done, progressed bool }
+
+// sweepSettlementNamespace makes sure no container labeled for the namespace survives that nothing accounts for,
+// before the checkpoint is restored into it. A create the runner gave up on can still be carried out by the Docker
+// daemon after the start was settled, and the start's own removal cannot know of it. It runs once the start's own
+// target is gone and before the start is closed (or, for a start that ran, before anything else is done), so the
+// start it names is still the one the effect records.
+func (s *Server) sweepSettlementNamespace(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease) (platformSweepStatus, error) {
+	sweep, err := loadPlatformSettleEffect(s.st.poolExec(), lease.id, platformSettleStage, platformSettleSweepEffect)
+	if err != nil {
+		return platformSweepStatus{}, err
+	}
+	if sweep.state == "applied" {
+		return platformSweepStatus{done: true}, nil
+	}
+	intent, err := s.signPlatformSettlementStartCommand(ctx, lease, control.SettleModeSweep)
+	if err != nil {
+		return platformSweepStatus{}, err
+	}
+	if err := s.platformMigrationRunner().CheckRoot(ctx, lease.id, intent.runtime, intent.authority, endpoint); err != nil {
+		return platformSweepStatus{}, err
+	}
+	receipt, err := s.platformSettleStartRun()(ctx, endpoint, intent)
+	if err != nil {
+		return platformSweepStatus{}, nil
+	}
+	if receipt.Outcome != "swept" || receipt.EffectID != intent.effectID || receipt.OperationID != intent.operationID || receipt.PayloadSHA256 != intent.digest ||
+		receipt.StartEffectID != intent.startEffectID || receipt.ResourceID != intent.resourceID || receipt.NamespaceID != intent.namespaceID {
+		return platformSweepStatus{}, errAppPlatformStageEvidence
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil || len(encoded) > 16384 {
+		return platformSweepStatus{}, errAppPlatformStageEvidence
+	}
+	err = s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
+			WHERE operation_id=? AND stage=? AND effect_number=? AND effect_id=? AND kind=? AND payload_sha256=? AND state='prepared' AND receipt_json='{}'`,
+			lease.fence, string(encoded), now, lease.id, platformSettleStage, platformSettleSweepEffect, intent.effectID, platformSweepKind, intent.digest)
+		return platformLeaseCAS(changed, err)
+	})
+	return platformSweepStatus{progressed: err == nil}, err
 }
 
 // removeSettlementTarget stops, then removes, the started target of the failed update under an operation
@@ -1190,18 +1392,23 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	if err != nil {
 		return zero, err
 	}
-	held, err := loadPlatformSettleEffect(e, lease.id, platformSettleStage, platformSettleHeldEffect)
-	if err != nil {
-		return zero, err
-	}
-	startEffect, err := loadPlatformSettleEffect(e, lease.id, "start", 1)
-	if err != nil {
-		return zero, err
-	}
 	var start platformUpdateStartIntent
-	// The reserved-only removal is for a start that is still open. One that got its running receipt after the
-	// record was made is removed like any running target.
-	if held.exists && held.kind == platformHeldStartKind && held.state == "applied" && startEffect.state != "applied" {
+	// The reserved-only removal has slots of its own and is for a start that is still open. One that got its running
+	// receipt is removed like any running target, by an effect of the ordinary slots.
+	reservedOnly := number == platformSettleReservedStopEffect || number == platformSettleReservedRemoveEffect
+	if reservedOnly {
+		held, err := loadPlatformSettleEffect(e, lease.id, platformSettleStage, platformSettleHeldEffect)
+		if err != nil {
+			return zero, err
+		}
+		startEffect, err := loadPlatformSettleEffect(e, lease.id, "start", 1)
+		if err != nil {
+			return zero, err
+		}
+		if !held.exists || held.kind != platformHeldStartKind || held.receipt != platformHeldReservedReceipt || held.state != "applied" ||
+			(startEffect.state != "prepared" && startEffect.state != "unknown") {
+			return zero, errAppPlatformStageEvidence
+		}
 		// The target was reserved and never created: there is no running receipt, and the start is the one the
 		// effect row records, rebuilt from the evidence it was built from.
 		read, err := loadPlatformSettlementStart(e, lease, runtime, now)
@@ -1240,6 +1447,9 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	}
 	removalLease := lease
 	removalLease.id = platformDerivedUUID("settlement-removal", lease.id)
+	if reservedOnly {
+		removalLease.id = platformDerivedUUID("settlement-reserved-removal", lease.id)
+	}
 	command, err := platformUpdateTargetRemovalCommand(removalLease, start, effectID, stage)
 	if err != nil {
 		return zero, err

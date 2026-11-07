@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -157,14 +158,14 @@ func newHeldStartRunner(f *settleFixture, read func(h *heldStartRunner, i platfo
 	f.s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		return h.read(h, i)
 	}
-	f.s.platformSettleStart = func(_ context.Context, _ platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+	f.s.platformSettleStart = platformFakeSettleStart(f.fake, func(_ context.Context, _ platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
 		h.settled++
 		verified, err := control.VerifySettleUpdateStart(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli())
 		if err != nil || verified.Command().StartReadSignature == nil {
 			return journal.SettleUpdateStartReceipt{}, errors.New("the settlement was not a valid command over a read-signed start")
 		}
 		return journal.SettleUpdateStartReceipt{}, nil
-	}
+	})
 	return h
 }
 
@@ -220,6 +221,7 @@ func (h *heldStartRunner) settle(t *testing.T, ticks int) {
 func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *testing.T) {
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
 	h := newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		if len(h.removals) > 0 {
 			return nil, held("never_ran")
@@ -231,8 +233,9 @@ func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *
 	if len(h.removals) != 2 || h.removals[0] != "stop" || h.removals[1] != "remove_code" || h.settled != 0 {
 		t.Fatalf("a reserved start was not removed by the reserved-only removal alone: %v settlements=%d", h.removals, h.settled)
 	}
-	if effectState(t, f.s, f.op, "start", 1) != "reverted" || effectState(t, f.s, f.op, "settle", 1) != "applied" || effectState(t, f.s, f.op, "settle", 2) != "applied" {
-		t.Fatal("the start was not closed as never run after its target was removed")
+	if effectState(t, f.s, f.op, "start", 1) != "reverted" || effectState(t, f.s, f.op, "settle", 4) != "applied" || effectState(t, f.s, f.op, "settle", 5) != "applied" ||
+		effectState(t, f.s, f.op, "settle", 6) != "applied" || effectState(t, f.s, f.op, "settle", 1) != "" {
+		t.Fatal("the start was not closed as never run after its target was removed and its namespace swept")
 	}
 	h.retryLaunches(t)
 }
@@ -242,6 +245,7 @@ func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *
 func TestSettlementOfAnOrphanedStartWithNoContainerGoesThroughTheRunnersSettlement(t *testing.T) {
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
 	h := newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		if h.settled > 0 {
 			return nil, held("never_ran")
@@ -264,6 +268,7 @@ func TestSettlementOfAnOrphanedStartWithNoContainerGoesThroughTheRunnersSettleme
 func TestSettlementOfAnOrphanedStartWithAContainerRemovesItLikeARunningTarget(t *testing.T) {
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
 	h := newHeldStartRunner(f, func(h *heldStartRunner, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		if h.settled == 0 {
 			return nil, held("orphaned")
@@ -286,6 +291,7 @@ func TestSettlementOfAnOrphanedStartWithAContainerRemovesItLikeARunningTarget(t 
 func TestSettlementFollowsAStartThatBecameRunningAfterItWasHeld(t *testing.T) {
 	platformWritableUpdateFixtures(t)
 	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
 	h := newHeldStartRunner(f, func(h *heldStartRunner, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		h.reads = append(h.reads, "read")
 		if len(h.reads) == 1 {
@@ -354,5 +360,169 @@ func TestSettlementStartReadSignsOnlyTheReadPurpose(t *testing.T) {
 	command := verified.Command()
 	if _, err := control.VerifyUpdateStart(command.StartRaw, command.StartReadSignature, intent.authority, time.Now().UnixMilli()); err == nil {
 		t.Fatal("the settlement carries an execute-capable start")
+	}
+}
+
+// The window a command for the start was signed for, the margin, and the time a container create the runner gave up on
+// may still be carried out all have to pass before anything is done to a start the runner holds: until then a claim may
+// arrive, and a reserved start is not yet known to stay reserved.
+func TestSettlementDoesNotActOnAHeldStartBeforeItsWindowAndCreateGraceHavePassed(t *testing.T) {
+	if platformCreateGraceMS < driver.DockerRequestTimeout.Milliseconds() {
+		t.Fatalf("the create grace %dms is shorter than the driver's Docker request timeout", platformCreateGraceMS)
+	}
+	for _, state := range []string{"reserved", "orphaned", "never_ran"} {
+		t.Run(state, func(t *testing.T) {
+			f := startPendingFixture(t, true)
+			h := newHeldStartRunner(f, func(*heldStartRunner, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+				return nil, held(state)
+			})
+			h.scriptRemoval(t, true)
+			now := time.Now().UnixMilli()
+			// Past the window and the margin, but inside the create grace.
+			inside := now - platformStartCommandWindowMS - platformImportAbsenceMarginMS - platformCreateGraceMS/2
+			mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=? WHERE id=?`, inside, f.op)
+			for range 3 {
+				if f.step(t) {
+					t.Fatalf("a %s start was acted on before the create grace passed", state)
+				}
+			}
+			if len(h.removals) != 0 || h.settled != 0 || f.fake.count("sweep") != 0 ||
+				scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='settle'`, f.op) != 0 {
+				t.Fatalf("a %s start was touched early: removals=%v settlements=%d", state, h.removals, h.settled)
+			}
+			// Past the grace it is acted on.
+			mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=? WHERE id=?`, inside-platformCreateGraceMS, f.op)
+			if !f.step(t) {
+				t.Fatalf("a %s start was not acted on after the create grace passed", state)
+			}
+		})
+	}
+}
+
+// A claim that arrives after the reserved read turns the start into an orphan. The removal the Portal began is
+// refused by the runner, is closed as not applied, and the runner's own settlement of the orphan ends the start: its
+// target is already gone, so the reserved stop is never retried and the update settles.
+func TestSettlementOfAReservedStartClaimedAfterTheReadIsSettledAsAnOrphan(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
+	claimed := false
+	var h *heldStartRunner
+	h = newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		switch {
+		case h.settled > 0:
+			return nil, held("never_ran")
+		case claimed:
+			return nil, held("orphaned")
+		}
+		return nil, held("reserved")
+	})
+	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		if i.command.Stage != "stop" || i.command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 {
+			t.Errorf("a removal was sent after the claim: %+v", i.command)
+		}
+		h.removals = append(h.removals, i.command.Stage)
+		claimed = true
+		return nil, errors.New("the start is not reserved")
+	}
+	h.settle(t, 12)
+	if len(h.removals) != 1 || h.settled != 1 {
+		t.Fatalf("removals=%v settlements=%d", h.removals, h.settled)
+	}
+	if effectState(t, f.s, f.op, "settle", 4) != "reverted" || effectState(t, f.s, f.op, "settle", 5) != "" ||
+		effectState(t, f.s, f.op, "start", 1) != "reverted" || effectState(t, f.s, f.op, "settle", 6) != "applied" {
+		t.Fatal("the refused removal was not closed as not applied, or the start was not settled")
+	}
+	h.retryLaunches(t)
+}
+
+// A claim that arrives after the Portal wrote its reserved stop makes the start run. The stop is closed as not applied
+// and the running target is removed by the ordinary removal, a new effect bound to the running receipt.
+func TestSettlementOfAReservedStopThatTheStartOutranIsClosedAndTheTargetRemovedOrdinarily(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
+	running := false
+	h := newHeldStartRunner(f, func(h *heldStartRunner, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		if running {
+			return platformUpdateStartRunningFixture(i, *i.reservation, f.endpoint), nil
+		}
+		return nil, held("reserved")
+	})
+	var stopDigest string
+	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		if i.command.RunningReceiptSHA256 == control.ReservedStartReceiptSHA256 {
+			// The runner refuses the reserved stop: the start was claimed and ran meanwhile.
+			running = true
+			stopDigest = i.command.PayloadSHA256
+			return nil, errors.New("the start is not reserved")
+		}
+		h.removals = append(h.removals, i.command.Stage)
+		if i.command.PayloadSHA256 == stopDigest {
+			t.Error("the ordinary removal reused the digest of the reserved one")
+		}
+		result := "stopped"
+		if i.command.Stage == "remove_code" {
+			result = "absent"
+		}
+		return platformUpdateTargetRemovalObservationFixture(i, f.endpoint, result), nil
+	}
+	h.settle(t, 12)
+	if len(h.removals) != 2 || h.settled != 0 {
+		t.Fatalf("removals=%v settlements=%d", h.removals, h.settled)
+	}
+	if effectState(t, f.s, f.op, "settle", 4) != "reverted" || effectState(t, f.s, f.op, "settle", 1) != "applied" ||
+		effectState(t, f.s, f.op, "settle", 2) != "applied" || effectState(t, f.s, f.op, "start", 1) != "applied" {
+		t.Fatal("the reserved stop was not closed, or the ordinary removal did not follow")
+	}
+	if scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='settle' AND effect_number=4`, f.op) ==
+		scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='settle' AND effect_number=1`, f.op) {
+		t.Fatal("the ordinary removal is the reserved effect")
+	}
+	h.retryLaunches(t)
+}
+
+// The checkpoint is not restored while a container of the namespace may survive: the sweep is an effect of its own,
+// sent again under the same identity until the runner answers it.
+func TestSettlementSweepsTheNamespaceBeforeTheRestore(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := startPendingFixture(t, true)
+	makeStartWindowPassed(t, f)
+	h := newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		if len(h.removals) > 1 && h.f.fake.count("sweep") > 0 {
+			return nil, held("never_ran")
+		}
+		return nil, held("reserved")
+	})
+	h.scriptRemoval(t, true)
+	attempts := 0
+	var first string
+	f.s.platformSettleStart = platformFakeSettleStart(f.fake, nil)
+	inner := f.s.platformSettleStart
+	f.s.platformSettleStart = func(ctx context.Context, e platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+		if intent.mode == control.SettleModeSweep {
+			attempts++
+			if first == "" {
+				first = intent.effectID + intent.digest
+			} else if first != intent.effectID+intent.digest {
+				t.Error("a sweep sent again is not the same effect")
+			}
+			if attempts < 3 {
+				return journal.SettleUpdateStartReceipt{}, errors.New("the runner could not list the namespace")
+			}
+		}
+		return inner(ctx, e, intent)
+	}
+	for range 12 {
+		f.step(t)
+		if attempts > 0 && attempts < 3 && f.fake.count("execute-restore") != 0 {
+			t.Fatal("the checkpoint was restored before the namespace was swept")
+		}
+	}
+	if f.settleState(t) != "settled" || attempts != 3 || f.fake.count("sweep") != 1 {
+		t.Fatalf("state=%s attempts=%d calls=%v", f.settleState(t), attempts, f.fake.calls)
+	}
+	if effectState(t, f.s, f.op, "settle", 6) != "applied" {
+		t.Fatal("the sweep was not recorded")
 	}
 }

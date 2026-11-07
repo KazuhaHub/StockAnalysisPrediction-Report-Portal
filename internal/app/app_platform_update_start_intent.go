@@ -309,19 +309,22 @@ func platformRetryOwnsCandidate(e migExec, installation, recovers, activation, r
 		return false
 	}
 	for _, operation := range chain {
-		stop, err := loadPlatformSettleEffect(e, operation, platformSettleStage, platformSettleStopEffect)
-		if err != nil || stop.state != "applied" {
-			continue
-		}
-		remove, err := loadPlatformSettleEffect(e, operation, platformSettleStage, platformSettleRemoveEffect)
-		if err != nil || remove.state != "applied" {
-			continue
-		}
-		removed, err := journal.ParseManagedRemovalReceipt([]byte(remove.receipt))
-		if err == nil && removed.Stage == "remove_code" && removed.State == "absent" && removed.InstallationID == installation &&
-			removed.SourceOperationID == operation && removed.ResourceID == activation && removed.ReleaseSHA256 == release &&
-			removed.DataNamespaceID == namespace {
-			return true
+		// The ordinary removal of a running target, or the one of a target the runner reserved and never created.
+		for _, slots := range [][2]int{{platformSettleStopEffect, platformSettleRemoveEffect}, {platformSettleReservedStopEffect, platformSettleReservedRemoveEffect}} {
+			stop, err := loadPlatformSettleEffect(e, operation, platformSettleStage, slots[0])
+			if err != nil || stop.state != "applied" {
+				continue
+			}
+			remove, err := loadPlatformSettleEffect(e, operation, platformSettleStage, slots[1])
+			if err != nil || remove.state != "applied" {
+				continue
+			}
+			removed, err := journal.ParseManagedRemovalReceipt([]byte(remove.receipt))
+			if err == nil && removed.Stage == "remove_code" && removed.State == "absent" && removed.InstallationID == installation &&
+				removed.SourceOperationID == operation && removed.ResourceID == activation && removed.ReleaseSHA256 == release &&
+				removed.DataNamespaceID == namespace {
+				return true
+			}
 		}
 	}
 	return false

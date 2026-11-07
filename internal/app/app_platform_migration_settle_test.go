@@ -224,20 +224,18 @@ func testSettleReadinessFailureRemovesTargetFirst(t *testing.T, pg bool) {
 		return platformUpdateTargetRemovalObservationFixture(i, endpoint, state), nil
 	}
 	fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
-		if fake.count("remove-stop") != 1 || fake.count("remove-remove_code") != 1 {
-			t.Error("the checkpoint was restored while the target was still there")
+		if fake.count("remove-stop") != 1 || fake.count("remove-remove_code") != 1 || fake.count("sweep") != 1 {
+			t.Error("the checkpoint was restored while the target, or a stray container of the namespace, was still there")
 		}
 		return restoreAnswer(i, endpoint), nil
 	}
 	if f.settleState(t) != "settling" {
 		t.Fatalf("a failed readiness is %s", f.settleState(t))
 	}
-	for range 4 {
+	for range 5 {
 		f.step(t)
 	}
-	want := []string{"check-root", "remove-stop", "check-root", "remove-remove_code", "check-root", "execute-restore", "check-root", "execute-restore"}
-	_ = want
-	if f.settleState(t) != "settled" || fake.count("remove-stop") != 1 || fake.count("remove-remove_code") != 1 || fake.count("execute-discard") != 0 ||
+	if f.settleState(t) != "settled" || fake.count("sweep") != 1 || fake.count("remove-stop") != 1 || fake.count("remove-remove_code") != 1 || fake.count("execute-discard") != 0 ||
 		fake.count("read-migrate") != 0 || effectState(t, s, f.op, "migrate", 2) != "applied" {
 		t.Fatalf("readiness-failure settlement: %s %v", f.settleState(t), fake.calls)
 	}

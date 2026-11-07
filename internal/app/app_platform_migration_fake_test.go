@@ -256,7 +256,41 @@ func platformMigrationStageFixture(t *testing.T, pg, migrating bool) (*Server, p
 	}
 	fake := &platformFakeMigrationRunner{t: t}
 	s.platformMigration = fake
+	s.platformSettleStart = platformFakeSettleStart(fake, nil)
 	return s, after, endpoint, fake
+}
+
+// platformFakeSweepReceipt is the receipt of a sweep that found nothing to remove, built from the command it answers.
+func platformFakeSweepReceipt(intent platformSettleStartIntent, removed int) (journal.SettleUpdateStartReceipt, error) {
+	verified, err := control.VerifySettleUpdateStart(intent.raw, intent.signature, intent.authority, time.Now().UnixMilli())
+	if err != nil {
+		return journal.SettleUpdateStartReceipt{}, err
+	}
+	command, start := verified.Command(), verified.Start().Command()
+	at := strconv.FormatInt(time.Now().UnixMilli(), 10)
+	return journal.SettleUpdateStartReceipt{
+		Format: "portal.runner.settle-update-start-receipt/1-dev.1", DeploymentID: start.DeploymentID, ControllerEpoch: start.ControllerEpoch,
+		InstallationID: start.InstallationID, OperationID: command.OperationID, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+		StartOperationID: start.OperationID, StartEffectID: start.EffectID, ResourceID: start.Payload.ResourceID, NamespaceID: start.Payload.NamespaceID,
+		Outcome: "swept", Removed: strconv.Itoa(removed), NativeID: control.ReservedStartNativeID(start.Payload.ResourceID), ObservedMS: at, SettledMS: at,
+	}, nil
+}
+
+// platformFakeSettleStart answers a sweep as a runner with no stray container would, and hands a settlement of an
+// orphan to settle, which a test that does not expect one leaves nil.
+func platformFakeSettleStart(fake *platformFakeMigrationRunner, settle platformSettleStartRunner) platformSettleStartRunner {
+	return func(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+		if intent.mode == control.SettleModeSweep {
+			fake.calls = append(fake.calls, "sweep")
+			return platformFakeSweepReceipt(intent, 0)
+		}
+		if settle == nil {
+			fake.t.Errorf("unscripted settlement of an orphaned start")
+			return journal.SettleUpdateStartReceipt{}, errors.New("unscripted settle-update-start")
+		}
+		fake.calls = append(fake.calls, "settle-start")
+		return settle(ctx, endpoint, intent)
+	}
 }
 
 func jsonUnmarshalPlan(raw string, plan *platformManagedUpdatePlan) error {
