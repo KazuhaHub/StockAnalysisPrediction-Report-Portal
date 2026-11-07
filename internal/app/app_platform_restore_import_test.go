@@ -76,8 +76,10 @@ type platformImportTestExecutor struct {
 	absent  bool
 	// deadline is how long the context given to the last Execute had left.
 	deadline time.Duration
-	// block makes Execute wait until its context ends, as an import that is still running does.
-	block bool
+	// block makes Execute wait until its context ends, as an import that is still running does. onBlock, when set, is
+	// called once Execute is waiting, which is the moment a test ends the attempt.
+	block   bool
+	onBlock func()
 }
 
 func (f *platformImportTestExecutor) observe(endpoint platformRuntimeEndpoint, intent platformImportIntent) (platformImportObservation, error) {
@@ -101,6 +103,9 @@ func (f *platformImportTestExecutor) Execute(ctx context.Context, endpoint platf
 		f.deadline = time.Until(d)
 	}
 	if f.block {
+		if f.onBlock != nil {
+			f.onBlock()
+		}
 		<-ctx.Done()
 		return nil, ctx.Err()
 	}

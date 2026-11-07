@@ -23,6 +23,12 @@ const platformInstallAttemptTimeout = 20 * time.Second
 // lease, and the Portal polls: an attempt that ends because the runner is still working is not a
 // failure, and the next one reads the receipt of the same effect (platformBusyWaitLimit of them cover
 // the longest bound).
+// platformImportAttemptContext is the context a bulk attempt runs under: the parent bounded by the attempt timeout. Tests
+// replace it to end an attempt at a moment of their choosing instead of by the clock.
+var platformImportAttemptContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, platformImportAttemptTimeout)
+}
+
 var platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
 
 // platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy
@@ -103,7 +109,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	defer func() { <-w.gate }()
 	ctx, cancel := context.WithTimeout(parent, platformInstallAttemptTimeout)
 	defer cancel()
-	bulkCtx, bulkCancel := context.WithTimeout(parent, platformImportAttemptTimeout)
+	bulkCtx, bulkCancel := platformImportAttemptContext(parent)
 	defer bulkCancel()
 	if err := ctx.Err(); err != nil {
 		return err
