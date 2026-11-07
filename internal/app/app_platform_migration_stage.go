@@ -151,6 +151,9 @@ type platformMigrateIntent struct {
 	pendingReceipt   string
 	priorSignedUntil int64
 	effectState      string
+	// recorded is set when the command's own signed window was recorded on the effect, which is when it can be
+	// executed. A command signed only to read the effect back is never sent, so its window counts for nothing.
+	recorded bool
 }
 
 // loadPlatformMigrateIntent accepts either no effect (create, once) or the exact original one. It never
@@ -234,8 +237,9 @@ func signPlatformMigrateCommand(e migExec, leaseID string, seed []byte, intent *
 }
 
 // signPlatformMigrate signs the migrate-data effect of the leased operation, creating it only when create is
-// set and none exists.
-func (s *Server) signPlatformMigrate(ctx context.Context, expected platformOperationLease, create bool) (platformMigrateIntent, error) {
+// set and none exists. With send set the command is signed to be executed and its window is recorded; without it
+// an existing effect is signed for a read only.
+func (s *Server) signPlatformMigrate(ctx context.Context, expected platformOperationLease, create, send bool) (platformMigrateIntent, error) {
 	var zero platformMigrateIntent
 	if expected.snapshot.Action != appplatform.ActionUpdate || !expected.snapshot.Managed ||
 		expected.snapshot.Stage != appplatform.StageMigrate || ctx == nil || ctx.Err() != nil {
@@ -297,9 +301,13 @@ func (s *Server) signPlatformMigrate(ctx context.Context, expected platformOpera
 	if expires <= issued {
 		return zero, errAppPlatformLeaseConflict
 	}
-	if err := signPlatformMigrateCommand(e, expected.id, seed, &intent, issued, expires, true); err != nil {
+	// A new effect is about to be sent, so its window is recorded. An existing one is only read back first: its
+	// window is recorded when, and only when, a final absence lets it be sent again.
+	record := intent.fresh || send
+	if err := signPlatformMigrateCommand(e, expected.id, seed, &intent, issued, expires, record); err != nil {
 		return zero, err
 	}
+	intent.recorded = record
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 		return zero, err
 	}
@@ -365,7 +373,7 @@ func validPlatformMigrateStatus(o platformLifecycleProof, status journal.Migrate
 
 // dispatchPlatformMigrateData sends the migrate-data effect and settles it from the runner's receipt.
 func (s *Server) dispatchPlatformMigrateData(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
-	intent, err := s.signPlatformMigrate(ctx, expected, true)
+	intent, err := s.signPlatformMigrate(ctx, expected, true, false)
 	if err != nil {
 		return platformOperationLease{}, fmt.Errorf("migrate-data prepare: %w", err)
 	}
@@ -379,6 +387,11 @@ func (s *Server) dispatchPlatformMigrateData(ctx context.Context, expected platf
 		lease, sent, err := s.readBackPlatformMigrate(ctx, expected, endpoint, intent)
 		if err != nil || !sent {
 			return lease, err
+		}
+		// A final absence: every command signed for the effect has expired, so it is sent again under the same
+		// identity, with a window of its own recorded first.
+		if intent, err = s.signPlatformMigrate(ctx, expected, false, true); err != nil {
+			return platformOperationLease{}, fmt.Errorf("migrate-data resend: %w", err)
 		}
 	}
 	observation, err := runner.ExecuteMigrate(ctx, endpoint, intent)
@@ -405,7 +418,11 @@ func (s *Server) readBackPlatformMigrate(ctx context.Context, expected platformO
 		switch {
 		case errors.Is(readErr, errPlatformMigrationAbsent):
 			// The command just signed for this attempt counts too: it may still be on its way.
-			if time.Now().UnixMilli() <= max(intent.priorSignedUntil, platformSignedUntilOf(intent.command))+platformImportAbsenceMarginMS {
+			until := intent.priorSignedUntil
+			if intent.recorded {
+				until = max(until, platformSignedUntilOf(intent.command))
+			}
+			if time.Now().UnixMilli() <= until+platformImportAbsenceMarginMS {
 				return platformOperationLease{}, false, errPlatformMigrationBusy
 			}
 			return platformOperationLease{}, true, nil

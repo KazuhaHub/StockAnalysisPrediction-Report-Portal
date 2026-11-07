@@ -185,3 +185,34 @@ func TestSettlementRestoreStatusMustAnswerTheEffect(t *testing.T) {
 		})
 	}
 }
+
+// A migrate-data command lost in transit is read back as a typed absence. The absence is definite only once the
+// window the command was signed for has passed; then the same effect is sent again, and the update goes on.
+func TestMigrateCommandLostInTransitIsSentAgainAfterItsWindow(t *testing.T) {
+	s, lease, endpoint, fake := platformMigrationStageFixture(t, false, true)
+	var effects []string
+	fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		effects = append(effects, i.effectID)
+		if len(effects) == 1 {
+			return nil, errors.New("lost before it reached the runner")
+		}
+		return platformMigrateAnswers(i, endpoint, "migrated", ""), nil
+	}
+	fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errPlatformMigrationAbsent }
+	if _, err := s.dispatchPlatformMigrateData(context.Background(), lease, endpoint); !errors.Is(err, errPlatformMigrationBusy) {
+		t.Fatalf("a command that may still arrive was not waited for: %v", err)
+	}
+	if _, err := s.dispatchPlatformMigrateData(context.Background(), lease, endpoint); !errors.Is(err, errPlatformMigrationBusy) || len(effects) != 1 {
+		t.Fatalf("an absence inside the signed window was acted on: sends=%d err=%v", len(effects), err)
+	}
+	past := strconv.FormatInt(time.Now().Add(-time.Minute).UnixMilli(), 10)
+	mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='migrate' AND effect_number=2`,
+		`{"signed_until_ms":`+past+`}`, lease.id)
+	next, err := s.dispatchPlatformMigrateData(context.Background(), lease, endpoint)
+	if err != nil || next.snapshot.Stage != appplatform.StageStart {
+		t.Fatalf("a final absence did not let the command be sent again: %v", err)
+	}
+	if len(effects) != 2 || effects[0] != effects[1] || effectState(t, s, lease.id, "migrate", 2) != "applied" {
+		t.Fatalf("the resend was not the same effect: %v", effects)
+	}
+}
