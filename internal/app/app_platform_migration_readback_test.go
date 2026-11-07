@@ -45,7 +45,9 @@ func TestSettlementDiscardReadBackOfEarlierReceiptSettles(t *testing.T) {
 		return platformMigrateStatusAnswer(i, f.endpoint, "orphaned"), nil
 	}
 	f.step(t) // orphaned: the discard is opened
-	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) { return nil, errPlatformMigrationAbsent }
+	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	f.fake.executeDiscard = func(i platformDiscardIntent) (platformDiscardObservation, error) {
 		_ = discardAnswer(i, f.endpoint) // the runner discarded it and recorded the receipt
 		return nil, errors.New("acknowledgement lost")
@@ -55,7 +57,9 @@ func TestSettlementDiscardReadBackOfEarlierReceiptSettles(t *testing.T) {
 		t.Fatal("a lost discard acknowledgement was taken as done")
 	}
 	time.Sleep(5 * time.Millisecond)
-	f.fake.readDiscard = func(i platformDiscardIntent) (platformDiscardObservation, error) { return discardAnswer(i, f.endpoint), nil }
+	f.fake.readDiscard = func(i platformDiscardIntent) (platformDiscardObservation, error) {
+		return discardAnswer(i, f.endpoint), nil
+	}
 	if !f.step(t) || effectState(t, f.s, f.op, "migrate", 3) != "applied" || effectState(t, f.s, f.op, "migrate", 2) != "reverted" {
 		t.Fatal("the earlier discard receipt did not settle the discard")
 	}
