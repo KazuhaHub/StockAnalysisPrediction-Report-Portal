@@ -611,13 +611,14 @@ func loadAppliedMigration(ctx context.Context, tx *sql.Tx, c control.UpdateStart
 		m.ResourceID, p.NamespaceID).Scan(&desired, &observed, &revision); err != nil || desired != "absent" || observed != "absent" || revision < 2 {
 		return fail("job resource")
 	}
-	// A restore of the namespace after the migration took its data away: the migration is superseded and can
-	// never start.
-	var applied int64
-	if err := tx.QueryRowContext(ctx, `SELECT updated_ms FROM runner_commands WHERE effect_id=?`, p.MigrateEffectID).Scan(&applied); err != nil {
-		return fail("receipt time")
+	// A restore of the namespace admitted after the migration took its data away: the migration is superseded and
+	// can never start. "After" is the order the runner admitted the commands in, not the millisecond clock, which
+	// cannot separate two commands admitted together.
+	applied, err := rowOrder(ctx, tx, p.MigrateEffectID)
+	if err != nil {
+		return fail("receipt order")
 	}
-	restores, err := tx.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE installation_id=? AND kind='restore' AND state='applied' AND updated_ms>?`, c.InstallationID, applied)
+	restores, err := tx.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE installation_id=? AND kind='restore' AND state='applied' AND rowid>?`, c.InstallationID, applied)
 	if err != nil {
 		return zero, err
 	}

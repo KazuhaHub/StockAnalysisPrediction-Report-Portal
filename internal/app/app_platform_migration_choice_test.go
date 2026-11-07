@@ -360,7 +360,7 @@ func TestRetryMigrateCommandNamesRecoveredUpdateAndRealRemoval(t *testing.T) {
 	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), second, f.endpoint); !errors.Is(err, errPlatformMigrationEnded) {
 		t.Fatal(err)
 	}
-	if len(sent) != 1 || sent[0].RecoversOperationID != f.op || sent[0].RemoveCodeEffectID != realRemoval {
+	if len(sent) != 1 || sent[0].RecoversChain != f.op || sent[0].RemoveCodeEffectID != realRemoval {
 		t.Fatalf("the first retry's migration: %+v (the real removal is %s)", sent, realRemoval)
 	}
 	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
@@ -375,7 +375,7 @@ func TestRetryMigrateCommandNamesRecoveredUpdateAndRealRemoval(t *testing.T) {
 	if _, err := f.s.dispatchPlatformMigrateData(context.Background(), third, f.endpoint); err != nil {
 		t.Fatal(err)
 	}
-	if len(sent) != 1 || sent[0].RecoversOperationID != second.id || sent[0].RemoveCodeEffectID != realRemoval {
+	if len(sent) != 1 || sent[0].RecoversChain != f.op+","+second.id || sent[0].RemoveCodeEffectID != realRemoval {
 		t.Fatalf("the second retry's migration: %+v (the real removal is %s)", sent, realRemoval)
 	}
 }

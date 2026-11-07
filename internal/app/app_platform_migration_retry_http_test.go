@@ -203,7 +203,7 @@ func TestMigrationC5RetryReviewCommitLaunchHTTP(t *testing.T) {
 	operation := h.retryOverHTTP(platformFixtureID(7630))
 	lease := driveRetryToMigrate(t, f, operation)
 	sent := h.activateMigrated(t, lease, "migrated")
-	if len(sent) != 1 || sent[0].RecoversOperationID != f.op {
+	if len(sent) != 1 || sent[0].RecoversChain != f.op {
 		t.Fatalf("the retry's migration does not name the update it recovers: %v", sent)
 	}
 	if got := h.launch(); got != 200 {
@@ -254,7 +254,7 @@ func TestMigrationNeverClaimedRetryReviewCommitLaunchHTTP(t *testing.T) {
 	operation := h.retryOverHTTP(platformFixtureID(7640))
 	retry := driveRetryToMigrate(t, f, operation)
 	sent := h.activateMigrated(t, retry, "migrated")
-	if len(sent) != 1 || sent[0].RecoversOperationID != f.op {
+	if len(sent) != 1 || sent[0].RecoversChain != f.op {
 		t.Fatalf("the retry's migration does not name the update it recovers: %+v", sent)
 	}
 	if got := h.launch(); got != 200 {
@@ -282,7 +282,7 @@ func TestMigrationNeverClaimedRetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
 	second := h.retryOverHTTP(platformFixtureID(7660))
 	lease2 := driveRetryToMigrate(t, f, second)
 	sent := h.activateMigrated(t, lease2, "migrated")
-	if len(sent) != 1 || sent[0].RecoversOperationID != first {
+	if len(sent) != 1 || sent[0].RecoversChain != f.op+","+first {
 		t.Fatalf("the second retry's migration does not name the first: %+v", sent)
 	}
 	if got := h.launch(); got != 200 {

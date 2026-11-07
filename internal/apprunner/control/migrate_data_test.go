@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -366,10 +367,10 @@ func TestRestoreReadPurposeRefusedAsExecute(t *testing.T) {
 	}
 }
 
-func TestVerifyMigrateDataRecoversOperationBound(t *testing.T) {
+func TestVerifyMigrateDataRecoversChainBound(t *testing.T) {
 	command, key, authority, now := migrateDataFixture(t)
-	const recovered = "f2000000-0000-4000-8000-0000000000f2"
-	command.Payload.RecoversOperationID = recovered
+	const root, middle = "f2000000-0000-4000-8000-0000000000f2", "f3000000-0000-4000-8000-0000000000f3"
+	command.Payload.RecoversChain = root + "," + middle
 	digest, err := MigrateDataLogicalDigest(command)
 	if err != nil {
 		t.Fatal(err)
@@ -380,30 +381,46 @@ func TestVerifyMigrateDataRecoversOperationBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	verified, err := VerifyMigrateData(raw, signature, authority, now)
-	if err != nil || verified.Command().Payload.RecoversOperationID != recovered {
-		t.Fatalf("a retry's recovery link was not carried: %v", err)
+	if got := RecoversChainIDs(verified.Command().Payload.RecoversChain); err != nil || len(got) != 2 || got[0] != root || got[1] != middle {
+		t.Fatalf("a retry's recovery chain was not carried in order: %v %v", got, err)
 	}
-	// The link is part of what is signed and of the effect identity.
+	// The chain is part of what is signed, and its order is part of the effect identity.
 	ordinary := command
-	ordinary.Payload.RecoversOperationID = ""
-	other, err := MigrateDataLogicalDigest(ordinary)
-	if err != nil || other == digest {
-		t.Fatal("the recovery link does not change the command digest")
+	ordinary.Payload.RecoversChain = ""
+	reversed := command
+	reversed.Payload.RecoversChain = middle + "," + root
+	for name, other := range map[string]MigrateDataCommand{"absent": ordinary, "reordered": reversed} {
+		changed, err := MigrateDataLogicalDigest(other)
+		if err != nil || changed == digest {
+			t.Fatalf("a %s chain does not change the command digest", name)
+		}
 	}
-	tampered := bytes.Replace(raw, []byte(recovered), []byte("f3000000-0000-4000-8000-0000000000f3"), 1)
+	tampered := bytes.Replace(raw, []byte(root), []byte("f4000000-0000-4000-8000-0000000000f4"), 1)
 	if _, err := VerifyMigrateData(tampered, signature, authority, now); err == nil {
-		t.Fatal("a command with an altered recovery link verified")
+		t.Fatal("a command with an altered chain verified")
 	}
+	long := make([]string, MaxRecoversChain+1)
+	for i := range long {
+		long[i] = fmt.Sprintf("f5000000-0000-4000-8000-%012d", i+1)
+	}
+	joined := JoinRecoversChain(long)
 	for name, mutate := range map[string]func(*MigrateDataCommand){
-		"not an identifier":       func(c *MigrateDataCommand) { c.Payload.RecoversOperationID = "not-an-id" },
-		"the migrating operation": func(c *MigrateDataCommand) { c.Payload.RecoversOperationID = c.OperationID },
+		"not an identifier":       func(c *MigrateDataCommand) { c.Payload.RecoversChain = "not-an-id" },
+		"the migrating operation": func(c *MigrateDataCommand) { c.Payload.RecoversChain = root + "," + c.OperationID },
+		"a repeated link":         func(c *MigrateDataCommand) { c.Payload.RecoversChain = root + "," + middle + "," + root },
+		"too long":                func(c *MigrateDataCommand) { c.Payload.RecoversChain = joined },
 	} {
 		t.Run(name, func(t *testing.T) {
 			changed := command
 			mutate(&changed)
 			if _, err := MigrateDataLogicalDigest(changed); err == nil {
-				t.Fatal("invalid recovery link admitted")
+				t.Fatal("invalid recovery chain admitted")
 			}
 		})
+	}
+	longest := command
+	longest.Payload.RecoversChain = JoinRecoversChain(long[:MaxRecoversChain])
+	if _, err := MigrateDataLogicalDigest(longest); err != nil {
+		t.Fatal("a chain of the longest allowed length was refused", err)
 	}
 }

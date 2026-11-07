@@ -65,6 +65,8 @@ type platformMigrateEvidence struct {
 	checkpointRaw    []byte
 	removeEffectID   string
 	removeReceiptSHA string
+	// chain is the recovery chain a retry signs, root first; empty for an update that recovers nothing.
+	chain string
 }
 
 // loadPlatformMigrateEvidence gathers what a migrate-data command binds: the verified checkpoint, the
@@ -96,9 +98,13 @@ func loadPlatformMigrateEvidence(e migExec, lease platformOperationLease, runtim
 		return zero, fmt.Errorf("%w: migration source removal receipt", errAppPlatformStageEvidence)
 	}
 	effectID = removed.EffectID
+	chain, err := platformRecoveryChain(e, plan.RecoversOperationID)
+	if err != nil {
+		return zero, err
+	}
 	return platformMigrateEvidence{
 		source: source, plan: plan, descriptor: descriptor, checkpoint: checkpoint, checkpointRaw: raw,
-		removeEffectID: effectID, removeReceiptSHA: platformDigest([]byte(receipt)),
+		removeEffectID: effectID, removeReceiptSHA: platformDigest([]byte(receipt)), chain: chain,
 	}, nil
 }
 
@@ -125,7 +131,7 @@ func platformMigrateCommand(lease platformOperationLease, runtime platformRuntim
 			ProjectID:             ev.source.projectID, NamespaceInode: ev.source.namespaceInode, Device: ev.source.device,
 			QuotaBytes: ev.source.quotaBytes, QuotaInodes: ev.source.quotaInodes,
 			WallClockSeconds: strconv.FormatInt(m.WallClockSeconds, 10), EntrypointSHA256: m.EntrypointSHA256,
-			RecoversOperationID: p.RecoversOperationID,
+			RecoversChain: ev.chain,
 		},
 	}
 	digest, err := control.MigrateDataLogicalDigest(command)

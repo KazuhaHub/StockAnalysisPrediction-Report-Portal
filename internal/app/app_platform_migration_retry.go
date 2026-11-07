@@ -7,6 +7,7 @@ import (
 	"math"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -74,6 +75,26 @@ func platformRetryAncestors(e migExec, recovers string) ([]string, error) {
 		recovers = probe.Recovers
 	}
 	return chain, nil
+}
+
+// platformRecoveryChain is the chain a retry's migrate-data signs: the failed updates it recovers from the root to the
+// one it names, comma separated. Empty for an update that recovers nothing.
+func platformRecoveryChain(e migExec, recovers string) (string, error) {
+	if recovers == "" {
+		return "", nil
+	}
+	ancestors, err := platformRetryAncestors(e, recovers)
+	if err != nil {
+		return "", err
+	}
+	if len(ancestors) > control.MaxRecoversChain {
+		return "", errAppPlatformStageEvidence
+	}
+	// platformRetryAncestors runs from the update the retry names back to the root.
+	for i, j := 0, len(ancestors)-1; i < j; i, j = i+1, j-1 {
+		ancestors[i], ancestors[j] = ancestors[j], ancestors[i]
+	}
+	return control.JoinRecoversChain(ancestors), nil
 }
 
 // copyPlatformRecoveredRemoval gives a retry the source-removal evidence of the failed update it recovers: the

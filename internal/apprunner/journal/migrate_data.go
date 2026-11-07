@@ -102,7 +102,7 @@ type migrateClaimMarker struct {
 	Device                  string `json:"device"`
 	QuotaBytes              string `json:"quota_bytes"`
 	QuotaInodes             string `json:"quota_inodes"`
-	RecoversOperationID     string `json:"recovers_operation_id,omitempty"`
+	RecoversChain           string `json:"recovers_chain,omitempty"`
 }
 
 // MigrateDataClaim is the claim a receipt carries.
@@ -147,7 +147,12 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 			return false
 		}
 	}
-	if m.RecoversOperationID != "" && !importID(m.RecoversOperationID) {
+	for _, id := range control.RecoversChainIDs(m.RecoversChain) {
+		if !importID(id) {
+			return false
+		}
+	}
+	if !control.ValidRecoversChain(m.RecoversChain, m.ResourceID) {
 		return false
 	}
 	for _, value := range []string{m.SourceSchema, m.TargetSchema, m.CheckpointWriterFence, m.WriterFence, m.StartWriterFence, m.ProjectID, m.QuotaBytes, m.QuotaInodes} {
@@ -224,7 +229,7 @@ func migrateMarkerMatchesCommand(m migrateClaimMarker, c control.MigrateDataComm
 		m.SourceSchema == p.SourceSchema && m.TargetSchema == p.TargetSchema && m.CheckpointWriterFence == p.CheckpointWriterFence &&
 		m.WriterFence == p.WriterFence && m.StartWriterFence == p.StartWriterFence && m.ProjectID == p.ProjectID &&
 		m.NamespaceInode == p.NamespaceInode && m.Device == p.Device && m.QuotaBytes == p.QuotaBytes && m.QuotaInodes == p.QuotaInodes && m.AdmittedFence == c.InstallationFence &&
-		m.RecoversOperationID == p.RecoversOperationID
+		m.RecoversChain == p.RecoversChain
 }
 
 // MigrateDataReceiptMatchesCommand reports whether the receipt answers exactly this signed command.
@@ -342,9 +347,6 @@ type migrateIntent struct {
 // never stored: it is found by the name and labels derived from the resource id.
 func migrateJobNativeID(resource string) string { return "migration-job/" + resource }
 
-// maxMigrationRecoveryChain bounds how many failed updates a retry may have recovered in turn.
-const maxMigrationRecoveryChain = 16
-
 // migrateTombstoneFormat names the row that closes the migrate-data identity of an update whose migration the
 // runner never claimed.
 const migrateTombstoneFormat = "portal.runner.migrate-data-tombstone/1-dev.1"
@@ -352,7 +354,7 @@ const migrateTombstoneFormat = "portal.runner.migrate-data-tombstone/1-dev.1"
 // migrateTombstone stands in for the migrate-data row of an update the runner never saw claim one. A retry that
 // recovers such an update writes it in the transaction that admits the retry, so a late command of the original
 // update finds its operation already holding a migration and is refused. It records the removal evidence the retry
-// carried, so a later link in a chain can be held to the same evidence.
+// carried and the chain that leads to the update, so a later retry is held to the same evidence and the same links.
 type migrateTombstone struct {
 	Format                  string `json:"format"`
 	OperationID             string `json:"operation_id"`
@@ -360,6 +362,7 @@ type migrateTombstone struct {
 	NamespaceID             string `json:"namespace_id"`
 	RemoveCodeEffectID      string `json:"remove_code_effect_id"`
 	RemoveCodeReceiptSHA256 string `json:"remove_code_receipt_sha256"`
+	RecoversChain           string `json:"recovers_chain,omitempty"`
 	RecoveredBy             string `json:"recovered_by"`
 }
 
@@ -372,65 +375,72 @@ func migrateTombstoneEffectID(installation, operation string) string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-// requireRecoveredMigration proves, from the runner's own journal, that the update a retry names is a failed
-// update the runner settled, and returns the operation that owns the source removal the retry carries and the
-// recovered updates that still need a tombstone. A retry of a retry names the update it recovers; that update
-// carried the same removal evidence forward and recorded the link in its own claim, so the chain is followed to the
-// update that really removed the source.
+// rowOrder is a row's place in the order the runner admitted commands. rowid of the commands table grows with each
+// insert, and the runner never deletes a command row, so a row inserted later has a larger rowid: unlike the
+// millisecond clock, it separates two commands admitted in the same millisecond.
+func rowOrder(ctx context.Context, tx *sql.Tx, effect string) (int64, error) {
+	var order int64
+	err := tx.QueryRowContext(ctx, `SELECT rowid FROM runner_commands WHERE effect_id=?`, effect).Scan(&order)
+	return order, err
+}
+
+// requireRecoveredMigration proves, from the runner's own journal, that every update in the retry's signed chain is
+// settled, and returns the updates that need a tombstone. The chain runs from the root, the update that removed the
+// source, to the update directly before the retry; every link is walked and none is trusted for the next.
 //
 // A link can be settled three ways. Its migration was reverted (failed or discarded) and its data restored. Its
-// migration was applied (readiness failed on migrated data) and its data restored by a restore strictly newer than
-// the migration, with nothing the update started left in the namespace. Or the runner never claimed a migration for
-// it at all, which leaves nothing to undo: only the removal evidence the retry carries, with no live migration, is
-// asked of it, and the retry closes the identity with a tombstone. Every restore must be older than the checkpoint
-// the retry took.
-func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand, checkpointCreated int64) (owner string, tombstones []string, err error) {
+// migration was applied (readiness failed on migrated data) and its data restored by a restore admitted after the
+// migration. Or the runner never claimed a migration for it, which leaves nothing to undo: it only needs a tombstone.
+// A claimed link records the chain that led to it, and that must be the prefix of this chain. Every restore must be
+// older than the checkpoint the retry took, and every container in the namespace must be proven absent.
+func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand, checkpointCreated int64) ([]string, error) {
 	p := c.Payload
-	fail := func(reason string) (string, []string, error) {
-		return "", nil, fmt.Errorf("%w: migration recovery %s", ErrFenceReconciliation, reason)
+	fail := func(reason string) ([]string, error) {
+		return nil, fmt.Errorf("%w: migration recovery %s", ErrFenceReconciliation, reason)
 	}
-	seen := map[string]bool{c.OperationID: true}
-	current := p.RecoversOperationID
-	for range maxMigrationRecoveryChain {
-		if !importID(current) || seen[current] {
+	ids := control.RecoversChainIDs(p.RecoversChain)
+	if len(ids) == 0 || len(ids) > control.MaxRecoversChain {
+		return fail("chain")
+	}
+	var tombstones []string
+	for i := len(ids) - 1; i >= 0; i-- {
+		current, prefix := ids[i], control.JoinRecoversChain(ids[:i])
+		if !importID(current) || current == c.OperationID {
 			return fail("chain")
 		}
-		seen[current] = true
 		var migrations int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND kind='migrate-data'`,
 			current, c.InstallationID).Scan(&migrations); err != nil {
-			return "", nil, err
+			return nil, err
 		}
-		switch migrations {
-		case 0:
-			// The runner never saw this update claim a migration. The removal is checked by the caller.
-			return "", append(tombstones, current), nil
-		case 1:
-		default:
+		if migrations == 0 {
+			// The runner never saw this update claim a migration.
+			tombstones = append(tombstones, current)
+			continue
+		}
+		if migrations != 1 {
 			return fail("update has no single migration")
 		}
-		var state, raw string
+		var effect, state, raw string
 		var settled int64
-		if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND kind='migrate-data'`,
-			current, c.InstallationID).Scan(&state, &raw, &settled); err != nil {
-			return "", nil, err
+		if err := tx.QueryRowContext(ctx, `SELECT effect_id,state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND kind='migrate-data'`,
+			current, c.InstallationID).Scan(&effect, &state, &raw, &settled); err != nil {
+			return nil, err
 		}
 		var tomb migrateTombstone
 		if canonicalDataJSON(raw, &tomb) && tomb.Format == migrateTombstoneFormat {
 			if state != "reverted" || tomb.OperationID != current || tomb.InstallationID != c.InstallationID || tomb.NamespaceID != p.NamespaceID ||
-				tomb.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 {
+				tomb.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 || tomb.RecoversChain != prefix {
 				return fail("tombstone does not match")
 			}
-			return "", tombstones, nil
+			continue
 		}
 		migration, err := ParseMigrateDataReceipt([]byte(raw))
 		if err != nil || migration.OperationID != current || migration.InstallationID != c.InstallationID ||
-			migration.Claim.NamespaceID != p.NamespaceID || migration.Claim.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 {
+			migration.Claim.NamespaceID != p.NamespaceID || migration.Claim.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 ||
+			migration.Claim.RecoversChain != prefix {
 			return fail("migration is not settled")
 		}
-		// A reverted migration left nothing to undo but its job. An applied one stays applied in the journal: it is
-		// superseded only by a restore of the namespace that is strictly newer than the migration, and only once
-		// everything the failed update started is proven gone.
 		supersede := false
 		switch {
 		case state == "reverted" && (migration.State == "failed" || migration.State == "discarded"):
@@ -440,15 +450,15 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 			return fail("migration is not settled")
 		}
 		var restores int
-		var restoreState, restoreRaw string
+		var restoreEffect, restoreState, restoreRaw string
 		var restoredAt int64
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='restore_data' AND effect_number=1 AND kind='restore'`,
 			current, c.InstallationID).Scan(&restores); err != nil || restores != 1 {
 			return fail("data was not restored")
 		}
-		if err := tx.QueryRowContext(ctx, `SELECT state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='restore_data' AND effect_number=1 AND kind='restore'`,
-			current, c.InstallationID).Scan(&restoreState, &restoreRaw, &restoredAt); err != nil {
-			return "", nil, err
+		if err := tx.QueryRowContext(ctx, `SELECT effect_id,state,receipt_json,updated_ms FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='restore_data' AND effect_number=1 AND kind='restore'`,
+			current, c.InstallationID).Scan(&restoreEffect, &restoreState, &restoreRaw, &restoredAt); err != nil {
+			return nil, err
 		}
 		restore, err := ParseRestoreReceipt([]byte(restoreRaw))
 		if restoreState != "applied" || err != nil || restore.OperationID != current || restore.InstallationID != c.InstallationID ||
@@ -456,55 +466,55 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 			return fail("data was not restored before the new checkpoint")
 		}
 		if supersede {
-			if restoredAt <= settled {
-				return fail("applied migration is not superseded by a newer restore")
+			migrated, err := rowOrder(ctx, tx, effect)
+			if err != nil {
+				return nil, err
 			}
-			var surviving int
-			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND kind='container' AND NOT (desired_state='absent' AND observed_state='absent')`,
-				p.NamespaceID).Scan(&surviving); err != nil {
-				return "", nil, err
+			restored, err := rowOrder(ctx, tx, restoreEffect)
+			if err != nil {
+				return nil, err
 			}
-			if surviving != 0 {
-				return fail("the failed update's target is not proven absent")
+			if restored <= migrated {
+				return fail("applied migration is not superseded by a later restore")
 			}
 		}
-		if migration.Claim.RecoversOperationID == "" {
-			return current, tombstones, nil
-		}
-		current = migration.Claim.RecoversOperationID
 	}
-	return fail("chain is too long")
+	// Whatever the links were, nothing may be left in the namespace: not a running container, and not a stopped one.
+	var surviving int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND kind='container' AND NOT (desired_state='absent' AND observed_state='absent')`,
+		p.NamespaceID).Scan(&surviving); err != nil {
+		return nil, err
+	}
+	if surviving != 0 {
+		return fail("the namespace still holds a container")
+	}
+	return tombstones, nil
 }
 
 // requireMigrationEvidence checks the applied source removal and the verified checkpoint the
 // migration follows, against the payload, inside the admission transaction. The checkpoint is
 // always the migrating operation's own. The removal is too, unless the operation is a retry: then
-// it is the removal of the failed update the retry recovers, proven by requireRecoveredMigration.
-// It returns the recovered updates the caller must close with a tombstone.
+// it is the removal of the root of its recovery chain, and requireRecoveredMigration proves every
+// update on the way. It returns the recovered updates the caller must close with a tombstone.
 func requireMigrationEvidence(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand) ([]string, error) {
 	p := c.Payload
 	removalOwner := c.OperationID
 	var tombstones []string
-	if p.RecoversOperationID != "" {
+	if p.RecoversChain != "" {
 		var checkpointCreated int64
 		if err := tx.QueryRowContext(ctx, `SELECT created_ms FROM runner_commands WHERE effect_id=? AND operation_id=? AND installation_id=?`,
 			p.CheckpointEffectID, c.OperationID, c.InstallationID).Scan(&checkpointCreated); err != nil {
 			return nil, fmt.Errorf("%w: migration checkpoint", ErrFenceReconciliation)
 		}
-		owner, closed, err := requireRecoveredMigration(ctx, tx, c, checkpointCreated)
+		closed, err := requireRecoveredMigration(ctx, tx, c, checkpointCreated)
 		if err != nil {
 			return nil, err
 		}
-		removalOwner, tombstones = owner, closed
+		removalOwner, tombstones = control.RecoversChainIDs(p.RecoversChain)[0], closed
 	}
 	removal, err := loadImportRow(ctx, tx, p.RemoveCodeEffectID)
-	if err == nil && removal != nil && removalOwner == "" && removal.operation != c.OperationID {
-		// A link with nothing recorded about it names no owner of its own: the removal is whichever other update's
-		// the retry carries, still bound by its applied state and receipt below.
-		removalOwner = removal.operation
-	}
 	if err != nil || removal == nil || removal.state != "applied" || removal.kind != "remove-code" ||
-		removal.installation != c.InstallationID || removalOwner == "" || removal.operation != removalOwner ||
+		removal.installation != c.InstallationID || removal.operation != removalOwner ||
 		candidateHash([]byte(removal.receipt)) != p.RemoveCodeReceiptSHA256 {
 		return nil, fmt.Errorf("%w: migration source removal", ErrFenceReconciliation)
 	}
@@ -548,6 +558,13 @@ func writeMigrateTombstone(ctx context.Context, tx *sql.Tx, c control.MigrateDat
 	tomb := migrateTombstone{
 		Format: migrateTombstoneFormat, OperationID: operation, InstallationID: c.InstallationID, NamespaceID: c.Payload.NamespaceID,
 		RemoveCodeEffectID: c.Payload.RemoveCodeEffectID, RemoveCodeReceiptSHA256: c.Payload.RemoveCodeReceiptSHA256, RecoveredBy: c.OperationID,
+	}
+	// The chain that leads to the operation is the part of this one before it.
+	ids := control.RecoversChainIDs(c.Payload.RecoversChain)
+	for i, id := range ids {
+		if id == operation {
+			tomb.RecoversChain = control.JoinRecoversChain(ids[:i])
+		}
 	}
 	raw, err := json.Marshal(tomb)
 	if err != nil {
@@ -676,7 +693,7 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 		SourceSchema: p.SourceSchema, TargetSchema: p.TargetSchema, CheckpointWriterFence: p.CheckpointWriterFence,
 		WriterFence: p.WriterFence, StartWriterFence: p.StartWriterFence, ProjectID: p.ProjectID,
 		NamespaceInode: p.NamespaceInode, Device: p.Device, QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes,
-		RecoversOperationID: p.RecoversOperationID,
+		RecoversChain: p.RecoversChain,
 	}
 	markerRaw, err := json.Marshal(marker)
 	if err != nil || len(markerRaw) > 16384 || !validMigrateMarker(marker) || !migrateMarkerMatchesCommand(marker, c) {

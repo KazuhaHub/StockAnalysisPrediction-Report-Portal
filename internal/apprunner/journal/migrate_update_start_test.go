@@ -224,9 +224,27 @@ func TestUpdateStartRefusesMigrationSupersededByRestore(t *testing.T) {
 	if r, err := m.dispatch(t); err != nil || r.State != "migrated" {
 		t.Fatalf("migration: %+v %v", r, err)
 	}
-	m.insertRestore(t, m.command.OperationID, time.Now().UTC().UnixMilli()+1000)
+	var applied int64
+	if err := m.f.store.db.QueryRow(`SELECT updated_ms FROM runner_commands WHERE effect_id=?`, m.command.EffectID).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	// Admitted after the migration in the very same millisecond: the clock cannot tell, the order does.
+	m.insertRestore(t, m.command.OperationID, applied)
 	raw, sig := signUpdateStartCommand(t, migratedStartCommand(t, m))
 	if _, err := m.f.store.ReserveUpdateStart(context.Background(), raw, sig); err == nil {
 		t.Fatal("a start was bound to a migration whose namespace was restored after it")
+	}
+}
+
+// A restore admitted before the migration does not supersede it, whatever the clock says.
+func TestUpdateStartIgnoresARestoreAdmittedBeforeTheMigration(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	m.insertRestore(t, m.command.OperationID, time.Now().UTC().UnixMilli()+60000)
+	if r, err := m.dispatch(t); err != nil || r.State != "migrated" {
+		t.Fatalf("migration: %+v %v", r, err)
+	}
+	raw, sig := signUpdateStartCommand(t, migratedStartCommand(t, m))
+	if _, err := m.f.store.ReserveUpdateStart(context.Background(), raw, sig); err != nil {
+		t.Fatalf("an earlier restore with a later clock reading superseded the migration: %v", err)
 	}
 }

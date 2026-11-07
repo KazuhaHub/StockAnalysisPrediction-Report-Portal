@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"math"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -82,10 +83,11 @@ type MigrateDataPayload struct {
 	QuotaInodes             string `json:"quota_inodes"`
 	WallClockSeconds        string `json:"wall_clock_seconds"`
 	EntrypointSHA256        string `json:"entrypoint_sha256"`
-	// RecoversOperationID names the failed update a retry recovers. The retry's source removal is that
-	// update's (or the root of its chain), so the runner admits the removal of that operation and no other.
-	// Empty for an update that does not recover another.
-	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
+	// RecoversChain lists the failed updates a retry recovers, comma separated, from the root (the update that
+	// removed the source) to the one directly before it. The runner holds the retry's source removal to the root and
+	// walks every link, so no link can be skipped or invented. Empty for an update that does not recover another.
+	// It is a string because the command parser accepts objects and strings only.
+	RecoversChain string `json:"recovers_chain,omitempty"`
 }
 
 type MigrateDataCommand struct {
@@ -133,6 +135,37 @@ func validHeader(h CommandHeader, format, stage, kind, slot string) bool {
 	return true
 }
 
+// MaxRecoversChain bounds how many failed updates a retry may recover in turn.
+const MaxRecoversChain = 16
+
+// RecoversChainIDs splits a recovery chain into its operation identifiers, root first.
+func RecoversChainIDs(chain string) []string {
+	if chain == "" {
+		return nil
+	}
+	return strings.Split(chain, ",")
+}
+
+// JoinRecoversChain is the inverse of RecoversChainIDs.
+func JoinRecoversChain(ids []string) string { return strings.Join(ids, ",") }
+
+// ValidRecoversChain says whether chain is a well-formed recovery chain for the operation: at most MaxRecoversChain
+// identifiers, none repeated and none the operation itself.
+func ValidRecoversChain(chain, operation string) bool {
+	ids := RecoversChainIDs(chain)
+	if len(ids) > MaxRecoversChain {
+		return false
+	}
+	seen := map[string]bool{operation: true}
+	for _, id := range ids {
+		if !candidateUUID(id) || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
 func validMigrateDataLogical(c MigrateDataCommand) bool {
 	p := c.Payload
 	if !validHeader(c.CommandHeader, MigrateDataFormat, "migrate", "migrate-data", MigrateDataEffectNumber) {
@@ -151,7 +184,7 @@ func validMigrateDataLogical(c MigrateDataCommand) bool {
 	if p.ResourceID == p.NamespaceID || c.EffectID == p.ResourceID || c.EffectID == p.NamespaceID {
 		return false
 	}
-	if p.RecoversOperationID != "" && (!candidateUUID(p.RecoversOperationID) || p.RecoversOperationID == c.OperationID) {
+	if !ValidRecoversChain(p.RecoversChain, c.OperationID) {
 		return false
 	}
 	var numbers [9]int64

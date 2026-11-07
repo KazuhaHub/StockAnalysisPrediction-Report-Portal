@@ -39,7 +39,7 @@ func (m migrateFixture) insertSettledMigration(t *testing.T, operation, recovers
 		CheckpointID: p.CheckpointID, CheckpointReceiptSHA256: strings.Repeat("b", 64), RemoveCodeReceiptSHA256: p.RemoveCodeReceiptSHA256,
 		SourceReleaseSHA256: p.SourceReleaseSHA256, TargetReleaseSHA256: p.TargetReleaseSHA256, SourceSchema: p.SourceSchema, TargetSchema: p.TargetSchema,
 		CheckpointWriterFence: p.CheckpointWriterFence, WriterFence: p.WriterFence, StartWriterFence: p.StartWriterFence, ProjectID: p.ProjectID,
-		NamespaceInode: p.NamespaceInode, Device: p.Device, QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes, RecoversOperationID: recovers,
+		NamespaceInode: p.NamespaceInode, Device: p.Device, QuotaBytes: p.QuotaBytes, QuotaInodes: p.QuotaInodes, RecoversChain: recovers,
 	}
 	rowState, outcome := "failed", "exit_nonzero"
 	if state == "discarded" {
@@ -116,7 +116,7 @@ func retryJournalFixture(t *testing.T) retryFixture {
 	rewritten, _ := json.Marshal(removal)
 	mustJournalExec(t, m.f.store.db, `UPDATE runner_commands SET operation_id=?,receipt_json=? WHERE effect_id=?`, failed, string(rewritten), removal.EffectID)
 	m.command.Payload.RemoveCodeReceiptSHA256 = candidateHash(rewritten)
-	m.command.Payload.RecoversOperationID = failed
+	m.command.Payload.RecoversChain = failed
 	m.insertSettledMigration(t, failed, "", "discarded", now-20)
 	m.insertRestore(t, failed, now-10)
 	// The fixture's own checkpoint is the fresh one, taken after the restore.
@@ -142,7 +142,7 @@ func TestMigrateDataRetryAdmitsRecoveredOperationRemoval(t *testing.T) {
 		t.Fatal("the retry's migration was not claimed")
 	}
 	var receipt string
-	if err := r.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, r.command.EffectID).Scan(&receipt); err != nil || !strings.Contains(receipt, `"recovers_operation_id":"`+r.failed+`"`) {
+	if err := r.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, r.command.EffectID).Scan(&receipt); err != nil || !strings.Contains(receipt, `"recovers_chain":"`+r.failed+`"`) {
 		t.Fatalf("the claim does not record the update it recovers: %v %s", err, receipt)
 	}
 }
@@ -154,11 +154,11 @@ func TestMigrateDataRetryRefusesRemovalOfAnotherOperation(t *testing.T) {
 	now := time.Now().UTC().UnixMilli()
 	r.insertSettledMigration(t, other, "", "discarded", now-20)
 	r.insertRestore(t, other, now-10)
-	if err := r.admit(t, func(c *control.MigrateDataCommand) { c.Payload.RecoversOperationID = other }); err == nil {
+	if err := r.admit(t, func(c *control.MigrateDataCommand) { c.Payload.RecoversChain = other }); err == nil {
 		t.Fatal("a retry was admitted on the removal of an update it does not recover")
 	}
 	// Without a recovery link, another operation's removal is never accepted either.
-	if err := r.admit(t, func(c *control.MigrateDataCommand) { c.Payload.RecoversOperationID = "" }); err == nil {
+	if err := r.admit(t, func(c *control.MigrateDataCommand) { c.Payload.RecoversChain = "" }); err == nil {
 		t.Fatal("an ordinary update was admitted on another operation's removal")
 	}
 }
@@ -219,7 +219,7 @@ func retryOfRetryFixture(t *testing.T) retryFixture {
 	r.insertSettledMigration(t, middle, r.failed, "discarded", now-4)
 	r.insertRestore(t, middle, now-3)
 	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET created_ms=?,updated_ms=? WHERE effect_id=?`, now-2, now-2, r.command.Payload.CheckpointEffectID)
-	r.command.Payload.RecoversOperationID = middle
+	r.command.Payload.RecoversChain = r.failed + "," + middle
 	r.raw, r.sig = signMigrate(t, r.command)
 	r.command.PayloadSHA256, _ = control.MigrateDataLogicalDigest(r.command)
 	r.failed = middle
@@ -237,7 +237,7 @@ func TestMigrateDataRetryOfRetryRefusesBrokenChain(t *testing.T) {
 	for name, mutate := range map[string]func(r retryFixture){
 		"the middle update does not name the first": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET receipt_json=replace(receipt_json,?,'') WHERE operation_id=? AND kind='migrate-data'`,
-				`,"recovers_operation_id":"`+retryOperation(0)+`"`, r.failed)
+				`,"recovers_chain":"`+retryOperation(0)+`"`, r.failed)
 		},
 		"the middle update carried other removal evidence": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET receipt_json=replace(receipt_json,?,?) WHERE operation_id=? AND kind='migrate-data'`,
@@ -286,11 +286,8 @@ func TestMigrateDataRetryAfterAppliedMigrationNeedsNewerRestore(t *testing.T) {
 		"no restore": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='restore'`, r.failed)
 		},
-		"restore older than the migration": func(r retryFixture) {
-			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET created_ms=1,updated_ms=updated_ms-30 WHERE operation_id=? AND kind='restore'`, r.failed)
-		},
-		"restore as old as the migration": func(r retryFixture) {
-			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET updated_ms=(SELECT updated_ms FROM runner_commands WHERE operation_id=? AND kind='migrate-data') WHERE operation_id=? AND kind='restore'`, r.failed, r.failed)
+		"restore admitted before the migration": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET rowid=(SELECT MAX(rowid)+1 FROM runner_commands) WHERE operation_id=? AND kind='migrate-data'`, r.failed)
 		},
 		"the failed update's target is still there": func(r retryFixture) {
 			now := time.Now().UTC().UnixMilli()
@@ -374,7 +371,7 @@ func lateOriginalCommand(t *testing.T, r retryFixture) ([]byte, []byte) {
 	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET receipt_json=? WHERE effect_id=?`, string(rewritten), r.command.Payload.CheckpointEffectID)
 	return r.resign(t, func(c *control.MigrateDataCommand) {
 		c.OperationID, c.EffectID = r.failed, fixtureID(2300)
-		c.Payload.ResourceID, c.Payload.RecoversOperationID = fixtureID(2301), ""
+		c.Payload.ResourceID, c.Payload.RecoversChain = fixtureID(2301), ""
 		c.Payload.CheckpointReceiptSHA256 = candidateHash(rewritten)
 	})
 }
@@ -400,14 +397,129 @@ func TestMigrateDataLateOriginalCommandRefusedAfterRetry(t *testing.T) {
 
 func TestMigrateDataRetryOfRetryAfterNeverClaimedMigrationAdmitted(t *testing.T) {
 	r := neverClaimedRetryFixture(t)
-	// The second retry names the first, which the runner never saw: it only holds the shared source removal.
+	// The second retry names the whole chain: the root, whose removal it carries, and the first retry. The runner
+	// never saw either claim a migration, so both are closed.
 	middle := retryOperation(7)
-	r.command.Payload.RecoversOperationID = middle
+	r.command.Payload.RecoversChain = r.failed + "," + middle
 	r.raw, r.sig = signMigrate(t, r.command)
 	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
 		t.Fatalf("a retry of a never-claimed retry was refused: %v", err)
 	}
-	if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+middle+`' AND kind='migrate-data' AND state='reverted'`) != 1 {
-		t.Fatal("no tombstone for the recovered retry")
+	for _, operation := range []string{r.failed, middle} {
+		if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+operation+`' AND kind='migrate-data' AND state='reverted'`) != 1 {
+			t.Fatalf("no tombstone for %s", operation)
+		}
+	}
+}
+
+// The chain is anchored: its root must be the update that owns the removal the retry carries, however many links
+// the runner has no record of.
+func TestMigrateDataRetryRootMustOwnTheRemoval(t *testing.T) {
+	unknown := retryOperation(9)
+	for name, chain := range map[string]func(r retryFixture) string{
+		"an identifier the runner has never seen in place of the root": func(r retryFixture) string { return unknown },
+		"an unseen root before the real one":                           func(r retryFixture) string { return unknown + "," + r.failed },
+		"another settled update as the root": func(r retryFixture) string {
+			now := time.Now().UTC().UnixMilli()
+			r.insertSettledMigration(t, retryOperation(1), "", "discarded", now-20)
+			r.insertRestore(t, retryOperation(1), now-10)
+			return retryOperation(1) + "," + r.failed
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := neverClaimedRetryFixture(t)
+			if err := r.admit(t, func(c *control.MigrateDataCommand) { c.Payload.RecoversChain = chain(r) }); err == nil {
+				t.Fatal("a retry was admitted over a chain whose root does not own the removal")
+			}
+			if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE kind='migrate-data' AND receipt_json LIKE '%tombstone%'`) != 0 {
+				t.Fatal("a refused retry wrote a tombstone")
+			}
+		})
+	}
+}
+
+// F (claimed, reverted) -> R1 (never claimed) -> the migrating R2: the missing link does not end the walk, so the
+// root is still verified.
+func TestMigrateDataChainVerifiesTheRootBehindAnUnclaimedLink(t *testing.T) {
+	build := func(t *testing.T) retryFixture {
+		r := retryJournalFixture(t)
+		middle := retryOperation(4)
+		r.command.Payload.RecoversChain = r.failed + "," + middle
+		r.raw, r.sig = signMigrate(t, r.command)
+		return r
+	}
+	r := build(t)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatalf("a claimed root behind a never-claimed retry was refused: %v", err)
+	}
+	if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+retryOperation(4)+`' AND kind='migrate-data' AND state='reverted'`) != 1 {
+		t.Fatal("the never-claimed link was not closed")
+	}
+	for name, mutate := range map[string]func(r retryFixture){
+		"the root's migration is unsettled": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='unknown' WHERE operation_id=? AND kind='migrate-data'`, r.failed)
+		},
+		"the root's data was not restored": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='restore'`, r.failed)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := build(t)
+			mutate(r)
+			if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+				t.Fatal("the walk stopped at the never-claimed link")
+			}
+			if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+retryOperation(4)+`' AND kind='migrate-data'`) != 0 {
+				t.Fatal("a refused retry wrote a tombstone")
+			}
+		})
+	}
+}
+
+// Stopped is not absent: whatever the links are, a container left in the namespace refuses the retry.
+func TestMigrateDataRetryRefusesAStoppedLeftoverContainer(t *testing.T) {
+	leftover := func(r retryFixture) {
+		now := time.Now().UTC().UnixMilli()
+		mustJournalExec(t, r.f.store.db, `INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms) VALUES(?,?,?,'container',?,?,2,?,2,3,'present','stopped',?,2,?,?,?)`,
+			fixtureID(1996), r.command.InstallationID, r.command.Payload.NamespaceID, strings.Repeat("9", 64), r.command.Payload.TargetReleaseSHA256,
+			r.command.ControllerEpoch, strings.Repeat("8", 64), now, now, now)
+	}
+	for name, build := range map[string]func(t *testing.T) retryFixture{
+		"a reverted link":     retryJournalFixture,
+		"an applied link":     appliedRetryFixture,
+		"a never-claimed one": neverClaimedRetryFixture,
+		"a chain":             retryOfRetryFixture,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := build(t)
+			leftover(r)
+			if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+				t.Fatal("a retry was admitted beside a stopped container")
+			}
+		})
+	}
+}
+
+// Supersession follows the order the runner admitted the commands in. Two commands admitted in the same millisecond
+// are ordered all the same, and a later clock reading on an earlier command orders nothing.
+func TestMigrateDataSupersessionOrdersBySequenceNotClock(t *testing.T) {
+	same := func(r retryFixture) {
+		mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET updated_ms=(SELECT updated_ms FROM runner_commands WHERE operation_id=? AND kind='migrate-data') WHERE operation_id=? AND kind='restore'`, r.failed, r.failed)
+	}
+	r := appliedRetryFixture(t)
+	same(r)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatalf("a restore admitted after the migration in the same millisecond did not supersede it: %v", err)
+	}
+	r = appliedRetryFixture(t)
+	same(r)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET rowid=(SELECT MAX(rowid)+1 FROM runner_commands) WHERE operation_id=? AND kind='migrate-data'`, r.failed)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+		t.Fatal("a restore admitted before the migration in the same millisecond superseded it")
+	}
+	r = appliedRetryFixture(t)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET rowid=(SELECT MAX(rowid)+1 FROM runner_commands) WHERE operation_id=? AND kind='migrate-data'`, r.failed)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+		t.Fatal("a later clock reading ordered a restore before the migration it came first of")
 	}
 }
