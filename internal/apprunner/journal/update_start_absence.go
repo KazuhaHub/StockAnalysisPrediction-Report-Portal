@@ -12,7 +12,7 @@ import (
 
 const updateStartAbsenceFormat = "portal.runner.update-start-absence/1-dev.1"
 
-// UpdateStartAbsence is the runner's reply to a restore-start read-receipt for an effect it never
+// UpdateStartAbsence is the runner's reply to a restore-start or update-start read-receipt for an effect it never
 // admitted. It binds the effect identity of the signed command it answers.
 type UpdateStartAbsence struct {
 	Format           string `json:"format"`
@@ -62,14 +62,14 @@ func ParseUpdateStartAbsence(raw []byte) (UpdateStartAbsence, error) {
 
 // UpdateStartAbsenceMatchesCommand reports whether the reply answers exactly this signed restore-start.
 func UpdateStartAbsenceMatchesCommand(a UpdateStartAbsence, c control.UpdateStartCommand) bool {
-	return c.Kind == "restore-start" && a.DeploymentID == c.DeploymentID && a.ControllerEpoch == c.ControllerEpoch &&
+	return (c.Kind == "restore-start" || c.Kind == "update-start") && a.DeploymentID == c.DeploymentID && a.ControllerEpoch == c.ControllerEpoch &&
 		a.InstallationID == c.InstallationID && a.OperationID == c.OperationID &&
 		a.TargetGeneration == c.TargetGeneration && a.Stage == c.Stage && a.EffectNumber == c.EffectNumber &&
 		a.EffectID == c.EffectID && a.PayloadSHA256 == c.PayloadSHA256
 }
 
 // ReadUpdateStartRunningOrAbsence is the runner's read-receipt answer for a start effect: the applied
-// running receipt, or, for a restore-start only, an UpdateStartAbsence when the journal holds no command
+// running receipt, or, for a restore-start or an update-start, an UpdateStartAbsence when the journal holds no command
 // row for the effect identity. Every other outcome is the ordinary error of the running-receipt read.
 // The command is verified under the read purpose: a signature made for an execute is not a read.
 func (s *Store) ReadUpdateStartRunningOrAbsence(ctx context.Context, raw, signature []byte) (any, error) {
@@ -126,7 +126,7 @@ func (s *Store) restoreStartAbsent(ctx context.Context, raw, signature []byte, v
 		return nil, err
 	}
 	c := verified.Command()
-	if c.Kind != "restore-start" {
+	if c.Kind != "restore-start" && c.Kind != "update-start" {
 		return nil, nil
 	}
 	if _, err := loadAdmittedCommand(ctx, tx, c.EffectID); err == nil {

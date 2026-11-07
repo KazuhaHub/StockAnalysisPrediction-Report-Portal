@@ -88,14 +88,17 @@ func TestWritableLifecycleRestoreStartAbsenceReply(t *testing.T) {
 			}
 		})
 	}
-	// An update-start (not a restore-start) is never answered with an absence.
+	// An update-start is answered with an absence too, bound to its own effect; other start kinds are not.
 	_, updateCommand, updateRaw, updateSig, updateDescriptor, _ := updateStartTransportFixture(t)
 	updateRead, err := verifyWritableLifecycle(UpdateStartReceipt, updateRaw, lifecycleSignature(t, UpdateStartReceipt, a, updateRaw, updateSig), updateDescriptor, a, time.Now().UnixMilli())
 	if err != nil {
 		t.Fatal(err)
 	}
 	updateBody, _ := json.Marshal(updateStartAbsenceFor(updateCommand))
-	if validWritableLifecycleReply(UpdateStartReceipt, updateBody, updateRead, started, received) {
-		t.Fatal("an update-start receipt read was answered with an absence")
+	if !validWritableLifecycleReply(UpdateStartReceipt, updateBody, updateRead, started, received) {
+		t.Fatal("an update-start receipt read was not answered with an absence")
+	}
+	if validWritableLifecycleReply(UpdateStartReceipt, body, updateRead, started, received) {
+		t.Fatal("another start's absence answered an update-start read")
 	}
 }
