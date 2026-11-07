@@ -77,6 +77,26 @@ type platformInstallationSettings struct {
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
 	ControlPaused        bool                         `json:"control_paused"`
+	// MigrationRecovery is present while a failed data migration waits for a recovery choice.
+	MigrationRecovery *platformSettingsMigrationRecovery `json:"migration_recovery,omitempty"`
+}
+
+// platformSettingsMigrationRecovery projects the settlement of a failed data migration: settling or blocked
+// while the namespace is being brought back to the checkpoint, settled once both choices are offered.
+type platformSettingsMigrationRecovery struct {
+	State       string                            `json:"state"`
+	OperationID string                            `json:"operation_id"`
+	Choices     []platformSettingsMigrationChoice `json:"choices"`
+}
+
+// platformSettingsMigrationChoice is one recovery choice. Rollback carries the recovery set to restore the
+// source release from; retry carries the failed update it recovers and the release to try again.
+type platformSettingsMigrationChoice struct {
+	Kind                string `json:"kind"`
+	RecoverySetID       string `json:"recovery_set_id,omitempty"`
+	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
+	ReleaseSHA256       string `json:"release_sha256,omitempty"`
+	TrustRevision       string `json:"trust_revision,omitempty"`
 }
 
 func (s *Server) apiPlatformInstallationSettings(w http.ResponseWriter, r *http.Request, user string) {
@@ -397,9 +417,52 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 						result.Phase == "review_required"))) {
 			result.RepairEligible = true
 		}
+		recovery, err := platformMigrationRecoveryProjection(e, installation)
+		if err != nil {
+			return err
+		}
+		result.MigrationRecovery = recovery
 		_, err = platformRevalidateActorWithoutPause(
 			e, session, actor, control.nowMS)
 		return err
 	})
 	return result, err
+}
+
+// platformMigrationRecoveryProjection finds the installation's failed update whose data migration is still
+// waiting for a choice, and reports where its settlement stands. It returns nil when there is none.
+func platformMigrationRecoveryProjection(e migExec, installation string) (*platformSettingsMigrationRecovery, error) {
+	var operation, release string
+	if err := e.queryRow(`SELECT o.id,p.target_release_sha256 FROM app_platform_operations o
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.installation_id=? AND o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND i.phase='recovery_required'
+		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='migrate' AND f.effect_number=2)
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='recovered' AND f.state='applied')
+		ORDER BY o.completed_ms DESC,o.id DESC LIMIT 1`, installation).Scan(&operation, &release); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	state, err := platformMigrationSettlementState(e, operation)
+	if err != nil || state == "" {
+		return nil, err
+	}
+	result := &platformSettingsMigrationRecovery{State: state, OperationID: operation, Choices: []platformSettingsMigrationChoice{}}
+	if state != "settled" {
+		return result, nil
+	}
+	var recoverySet string
+	if err := e.queryRow(`SELECT id FROM app_platform_recovery_sets WHERE installation_id=? AND operation_id=? AND state='verified'`, installation, operation).Scan(&recoverySet); err != nil {
+		return nil, err
+	}
+	var trust int64
+	if err := e.queryRow(`SELECT p.revision FROM app_platform_publishers p JOIN app_platform_installations i ON i.publisher_id=p.id WHERE i.id=?`, installation).Scan(&trust); err != nil {
+		return nil, err
+	}
+	result.Choices = append(result.Choices,
+		platformSettingsMigrationChoice{Kind: "rollback", RecoverySetID: recoverySet},
+		platformSettingsMigrationChoice{Kind: "retry", RecoversOperationID: operation, ReleaseSHA256: release, TrustRevision: strconv.FormatInt(trust, 10)})
+	return result, nil
 }

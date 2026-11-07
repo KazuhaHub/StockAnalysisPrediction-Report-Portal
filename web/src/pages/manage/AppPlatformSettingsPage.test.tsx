@@ -342,4 +342,89 @@ describe('application installation settings', () => {
     expect(screen.getByText('appPlatform.settings.restorePaused')).toBeTruthy()
     expect((screen.getByRole('button', { name: 'appPlatform.settings.restore' }) as HTMLButtonElement).disabled).toBe(true)
   })
+  describe('data migration recovery', () => {
+    const recoverySet = '88888888-8888-4888-8888-888888888888'
+    const failedOperation = '77777777-7777-4777-8777-777777777777'
+    const plan = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+    const settled = {
+      state: 'settled',
+      operation_id: failedOperation,
+      choices: [
+        { kind: 'rollback', recovery_set_id: recoverySet },
+        { kind: 'retry', recovers_operation_id: failedOperation, release_sha256: 'c'.repeat(64), trust_revision: '9' },
+      ],
+    }
+    const withRecovery = (migration_recovery: unknown) => apiMock.get.mockImplementation(async (url: string) =>
+      url.endsWith('/settings') ? { ...settings, migration_recovery } : { bindings: [] })
+    const buttons = () => screen.queryAllByRole('button', { name: /appPlatform\.settings\.migrationRecovery\.(rollback|retry)$/ })
+
+    it('renders nothing when the field is absent', async () => {
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByText('appPlatform.settings.migrationRecovery.title')).toBeNull()
+    })
+
+    it.each(['settling', 'blocked'])('shows %s without action buttons', async (state) => {
+      withRecovery({ state, operation_id: failedOperation, choices: [] })
+      mount()
+      expect(await screen.findByText('appPlatform.settings.migrationRecovery.title')).toBeTruthy()
+      expect(screen.getByText(`appPlatform.settings.migrationRecovery.state.${state}`)).toBeTruthy()
+      expect(screen.getByText(`appPlatform.settings.migrationRecovery.detail.${state}`)).toBeTruthy()
+      expect(buttons()).toHaveLength(0)
+    })
+
+    it('shows both choices when settled', async () => {
+      withRecovery(settled)
+      mount()
+      expect(await screen.findByRole('button', { name: 'appPlatform.settings.migrationRecovery.rollback' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: 'appPlatform.settings.migrationRecovery.retry' })).toBeTruthy()
+      expect(buttons()).toHaveLength(2)
+    })
+
+    it('starts the restore plan for the rollback recovery set', async () => {
+      const user = userEvent.setup()
+      withRecovery(settled)
+      apiMock.post.mockRejectedValue(new Error('stop'))
+      mount()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.migrationRecovery.rollback' }))
+      expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+        action: 'restore',
+        recovery_set_id: recoverySet,
+        installation_id: installation,
+      })
+    })
+
+    it('reviews and admits the update retry', async () => {
+      const user = userEvent.setup()
+      const operation = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+      withRecovery(settled)
+      apiMock.post.mockImplementation(async (url: string) => url.endsWith('/plans')
+        ? { plan_id: plan, plan_sha256: 'e'.repeat(64), expires_ms: '1', review: { action: 'update', installation_id: installation, release_sha256: 'c'.repeat(64) } }
+        : { operation_id: operation })
+      mount()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.migrationRecovery.retry' }))
+      expect(apiMock.post).toHaveBeenCalledWith(`${root}/plans`, {
+        action: 'update',
+        installation_id: installation,
+        release_sha256: 'c'.repeat(64),
+        trust_revision: '9',
+        recovers_operation_id: failedOperation,
+      })
+      const dialog = await screen.findByRole('dialog')
+      expect(dialog.textContent).toContain('appPlatform.settings.migrationRecovery.retryWarning')
+      await user.click(screen.getByRole('button', { name: 'appPlatform.settings.migrationRecovery.retryAction' }))
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`${root}/operations`, expect.objectContaining({ plan_id: plan })))
+      expect(await screen.findByText('apps')).toBeTruthy()
+    })
+
+    it('refuses a review for another action', async () => {
+      const user = userEvent.setup()
+      withRecovery(settled)
+      apiMock.post.mockResolvedValue({ plan_id: plan, plan_sha256: 'e'.repeat(64), expires_ms: '1', review: { action: 'repair', installation_id: installation } })
+      mount()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.migrationRecovery.retry' }))
+      expect(await screen.findByText('appPlatform.invalidOperation')).toBeTruthy()
+      expect(screen.queryByRole('dialog')).toBeNull()
+    })
+  })
 })

@@ -42,6 +42,15 @@ type Settings = {
   configuration_gaps: string[]
   repair_eligible: boolean
   control_paused: boolean
+  migration_recovery?: MigrationRecovery | null
+}
+type MigrationChoice =
+  | { kind: 'rollback'; recovery_set_id: string }
+  | { kind: 'retry'; recovers_operation_id: string; release_sha256: string; trust_revision: string }
+type MigrationRecovery = {
+  state: 'settling' | 'settled' | 'blocked'
+  operation_id: string
+  choices: MigrationChoice[]
 }
 type Binding = {
   id: string
@@ -92,7 +101,15 @@ type RestoreReview = {
   target_generation: string
   data_effect: 'restore_checkpoint'
 }
-type RestorePlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: RestoreReview }
+type UpdateReview = {
+  action: 'update'
+  installation_id: string
+  release_sha256?: string
+  source_generation?: string
+  target_generation?: string
+}
+type RestorePlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: RestoreReview | UpdateReview }
+const migrationTone = { settling: 'processing', settled: 'success', blocked: 'error' } as const
 const root = '/api/admin/app-platform'
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
@@ -127,6 +144,7 @@ export default function AppPlatformSettingsPage() {
   const [restoreError, setRestoreError] = useState('')
   const [restoring, setRestoring] = useState(false)
   const [restorePointID, setRestorePointID] = useState('')
+  const [migrationBusy, setMigrationBusy] = useState('')
 
   useEffect(() => {
     setSettings(null)
@@ -283,19 +301,21 @@ export default function AppPlatformSettingsPage() {
     }
   }
   const prepareRestore = async (point: RecoveryPoint) => {
-    if (!point.restore_eligible || settings.control_paused || restoring) return
-    setRestoring(true); setRestoreError(''); setRestorePointID(point.id)
+    if (!point.restore_eligible) return
+    await requestRestorePlan(point.id, point.id, point)
+  }
+  // Shared review step for restore-shaped plans: posts the plan request, validates the
+  // echoed review against what was asked, and opens the common review modal.
+  const requestReviewPlan = async (busyKey: string, body: Record<string, string>, accept: (review: RestoreReview | UpdateReview) => boolean) => {
+    if (settings.control_paused || restoring) return
+    setRestoring(true); setRestoreError(''); setRestorePointID(busyKey)
     try {
-      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: RestoreReview }>(
+      const result = await api.post<{ plan_id: string; plan_sha256: string; expires_ms: string; review: RestoreReview | UpdateReview }>(
         `${root}/plans`,
-        { action: 'restore', installation_id: installation, recovery_set_id: point.id },
+        { ...body, installation_id: installation },
       )
-      if (result.review.action !== 'restore' ||
+      if (!accept(result.review) ||
         result.review.installation_id !== installation ||
-        result.review.recovery_set_id !== point.id ||
-        result.review.checkpoint_id !== point.checkpoint_id ||
-        result.review.release_sha256 !== point.release_sha256 ||
-        result.review.data_effect !== 'restore_checkpoint' ||
         !uuid.test(result.plan_id) || !/^[0-9a-f]{64}$/.test(result.plan_sha256)) {
         throw new Error(t('appPlatform.invalidOperation'))
       }
@@ -306,6 +326,26 @@ export default function AppPlatformSettingsPage() {
       setRestoring(false)
       setRestorePointID('')
     }
+  }
+  const requestRestorePlan = (recoverySetID: string, busyKey: string, point?: RecoveryPoint) =>
+    requestReviewPlan(busyKey, { action: 'restore', recovery_set_id: recoverySetID }, (review) =>
+      review.action === 'restore' &&
+      review.recovery_set_id === recoverySetID &&
+      (!point || (review.checkpoint_id === point.checkpoint_id && review.release_sha256 === point.release_sha256)) &&
+      review.data_effect === 'restore_checkpoint')
+  const rollbackMigration = (choice: Extract<MigrationChoice, { kind: 'rollback' }>) => {
+    setMigrationBusy('rollback')
+    const point = settings.recovery.points.find((candidate) => candidate.id === choice.recovery_set_id)
+    return requestRestorePlan(choice.recovery_set_id, 'migration-rollback', point).finally(() => setMigrationBusy(''))
+  }
+  const retryMigration = (choice: Extract<MigrationChoice, { kind: 'retry' }>) => {
+    setMigrationBusy('retry')
+    return requestReviewPlan('migration-retry', {
+      action: 'update',
+      release_sha256: choice.release_sha256,
+      trust_revision: choice.trust_revision,
+      recovers_operation_id: choice.recovers_operation_id,
+    }, (review) => review.action === 'update').finally(() => setMigrationBusy(''))
   }
   const confirmRestore = async () => {
     if (!restorePlan || restoring) return
@@ -429,6 +469,17 @@ export default function AppPlatformSettingsPage() {
         : <Typography.Text type="secondary">{t('appPlatform.settings.noRecovery')}</Typography.Text>}
     </Card>
 
+    {settings.migration_recovery && <Card title={t('appPlatform.settings.migrationRecovery.title')} extra={<Tag color={migrationTone[settings.migration_recovery.state]}>{t(`appPlatform.settings.migrationRecovery.state.${settings.migration_recovery.state}`)}</Tag>}>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        <Typography.Text>{t(`appPlatform.settings.migrationRecovery.detail.${settings.migration_recovery.state}`)}</Typography.Text>
+        {settings.migration_recovery.state === 'settled' && settings.migration_recovery.choices.length > 0 && <Space wrap>
+          {settings.migration_recovery.choices.map((choice) => choice.kind === 'rollback'
+            ? <Button key={`rollback-${choice.recovery_set_id}`} disabled={settings.control_paused || restoring} loading={migrationBusy === 'rollback'} onClick={() => void rollbackMigration(choice)}>{t('appPlatform.settings.migrationRecovery.rollback')}</Button>
+            : <Button key={`retry-${choice.recovers_operation_id}`} type="primary" disabled={settings.control_paused || restoring} loading={migrationBusy === 'retry'} onClick={() => void retryMigration(choice)}>{t('appPlatform.settings.migrationRecovery.retry')}</Button>)}
+        </Space>}
+      </Space>
+    </Card>}
+
     <Card title={t('appPlatform.settings.credentials')} extra={<Link to={`/manage/apps/${encodeURIComponent(settings.app_id)}/credentials`}><KeyOutlined aria-hidden="true" /> {t('appPlatform.settings.manageCredentials')}</Link>}>
       {bindingError && <Alert type="warning" showIcon title={bindingError} style={{ marginBottom: 12 }} />}
       {bindings.length ? <Space orientation="vertical" style={{ width: '100%' }}>
@@ -493,10 +544,10 @@ export default function AppPlatformSettingsPage() {
     <Modal
       className="rp-platform-review-modal"
       open={!!restorePlan}
-      title={t('appPlatform.settings.restoreTitle')}
-      okText={t('appPlatform.settings.restoreAction')}
+      title={restorePlan?.review.action === 'update' ? t('appPlatform.settings.migrationRecovery.retryTitle') : t('appPlatform.settings.restoreTitle')}
+      okText={restorePlan?.review.action === 'update' ? t('appPlatform.settings.migrationRecovery.retryAction') : t('appPlatform.settings.restoreAction')}
       cancelText={t('common.cancel')}
-      okButtonProps={{ danger: true }}
+      okButtonProps={{ danger: restorePlan?.review.action !== 'update' }}
       confirmLoading={restoring}
       closable={!restoring}
       mask={{ closable: false }}
@@ -505,9 +556,12 @@ export default function AppPlatformSettingsPage() {
     >
       {restorePlan && <div role="document" tabIndex={0} className="rp-platform-review-scroll">
         <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-          <Alert type="warning" showIcon title={t('appPlatform.settings.restoreWarning')} />
+          <Alert type="warning" showIcon title={restorePlan.review.action === 'update' ? t('appPlatform.settings.migrationRecovery.retryWarning') : t('appPlatform.settings.restoreWarning')} />
           {restoreError && <Alert type="error" showIcon title={restoreError} />}
-          <Descriptions column={1} size="small" items={[
+          {restorePlan.review.action === 'update' ? <Descriptions column={1} size="small" items={[
+            ...(restorePlan.review.release_sha256 ? [{ key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> }] : []),
+            ...(restorePlan.review.source_generation && restorePlan.review.target_generation ? [{ key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` }] : []),
+          ]} /> : <Descriptions column={1} size="small" items={[
             { key: 'recovery', label: t('appPlatform.settings.recoveryPoint'), children: <Typography.Text code>{restorePlan.review.recovery_set_id}</Typography.Text> },
             { key: 'checkpoint', label: t('appPlatform.settings.recoveryCheckpoint'), children: <Typography.Text code>{restorePlan.review.checkpoint_id}</Typography.Text> },
             { key: 'release', label: t('appPlatform.settings.currentRelease'), children: <Typography.Text code>{restorePlan.review.release_sha256}</Typography.Text> },
@@ -515,7 +569,7 @@ export default function AppPlatformSettingsPage() {
             { key: 'generation', label: t('appPlatform.settings.generation'), children: `${restorePlan.review.source_generation} → ${restorePlan.review.target_generation}` },
             { key: 'bytes', label: t('appPlatform.settings.recoveryBytes'), children: bytes(restorePlan.review.archive_bytes) },
             { key: 'scope', label: t('appPlatform.settings.restoreScope'), children: t('appPlatform.settings.restoreScopeValue') },
-          ]} />
+          ]} />}
         </Space>
       </div>}
     </Modal>
