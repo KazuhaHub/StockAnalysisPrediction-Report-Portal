@@ -198,7 +198,9 @@ func TestMigrateCommandLostInTransitIsSentAgainAfterItsWindow(t *testing.T) {
 		}
 		return platformMigrateAnswers(i, endpoint, "migrated", ""), nil
 	}
-	fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) { return nil, errPlatformMigrationAbsent }
+	fake.readMigrate = func(platformMigrateIntent) (platformMigrateObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	if _, err := s.dispatchPlatformMigrateData(context.Background(), lease, endpoint); !errors.Is(err, errPlatformMigrationBusy) {
 		t.Fatalf("a command that may still arrive was not waited for: %v", err)
 	}
