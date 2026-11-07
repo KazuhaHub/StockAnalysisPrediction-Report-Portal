@@ -384,6 +384,58 @@ func rowOrder(ctx context.Context, tx *sql.Tx, effect string) (int64, error) {
 	return order, err
 }
 
+// recoveredByAnotherChain returns an operation outside the chain that already recovered one of its links, or "". An
+// update is recovered by one retry: the retry that names it, and the retries after that one. A claimed migration
+// whose chain runs through a link, or a tombstone another operation wrote for it, belongs to a chain this one is not
+// part of, so a second retry of the same update is refused here whatever the portal signed.
+func recoveredByAnotherChain(ctx context.Context, tx *sql.Tx, c control.MigrateDataCommand, ids []string) (string, error) {
+	ours := map[string]bool{c.OperationID: true}
+	for _, id := range ids {
+		ours[id] = true
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT operation_id,receipt_json FROM runner_commands WHERE installation_id=? AND kind='migrate-data'`, c.InstallationID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var operation, raw string
+		if err := rows.Scan(&operation, &raw); err != nil {
+			return "", err
+		}
+		var tomb migrateTombstone
+		if canonicalDataJSON(raw, &tomb) && tomb.Format == migrateTombstoneFormat {
+			if ours[operation] && !ours[tomb.RecoveredBy] {
+				return tomb.RecoveredBy, nil
+			}
+			continue
+		}
+		if ours[operation] {
+			continue
+		}
+		// An unknown row holds the claim marker, a settled one the receipt that embeds it.
+		var probe struct {
+			RecoversChain string `json:"recovers_chain"`
+			Claim         struct {
+				RecoversChain string `json:"recovers_chain"`
+			} `json:"claim"`
+		}
+		if json.Unmarshal([]byte(raw), &probe) != nil {
+			continue
+		}
+		chain := probe.RecoversChain
+		if chain == "" {
+			chain = probe.Claim.RecoversChain
+		}
+		for _, link := range control.RecoversChainIDs(chain) {
+			if ours[link] && link != c.OperationID {
+				return operation, nil
+			}
+		}
+	}
+	return "", rows.Err()
+}
+
 // requireRecoveredMigration proves, from the runner's own journal, that every update in the retry's signed chain is
 // settled, and returns the updates that need a tombstone. The chain runs from the root, the update that removed the
 // source, to the update directly before the retry; every link is walked and none is trusted for the next.
@@ -401,6 +453,11 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 	ids := control.RecoversChainIDs(p.RecoversChain)
 	if len(ids) == 0 || len(ids) > control.MaxRecoversChain {
 		return fail("chain")
+	}
+	if rival, err := recoveredByAnotherChain(ctx, tx, c, ids); err != nil {
+		return nil, err
+	} else if rival != "" {
+		return fail("link already recovered by " + rival)
 	}
 	var tombstones []string
 	for i := len(ids) - 1; i >= 0; i-- {

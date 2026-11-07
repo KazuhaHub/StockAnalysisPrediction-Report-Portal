@@ -523,3 +523,56 @@ func TestMigrateDataSupersessionOrdersBySequenceNotClock(t *testing.T) {
 		t.Fatal("a later clock reading ordered a restore before the migration it came first of")
 	}
 }
+
+// insertTombstone records that an update's migration was closed by another retry.
+func (m migrateFixture) insertTombstone(t *testing.T, operation, recoveredBy, chain string) {
+	t.Helper()
+	p := m.command.Payload
+	raw, err := json.Marshal(migrateTombstone{
+		Format: migrateTombstoneFormat, OperationID: operation, InstallationID: m.command.InstallationID, NamespaceID: p.NamespaceID,
+		RemoveCodeEffectID: p.RemoveCodeEffectID, RemoveCodeReceiptSHA256: p.RemoveCodeReceiptSHA256, RecoversChain: chain, RecoveredBy: recoveredBy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	mustJournalExec(t, m.f.store.db, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,?,?,?,?,'reverted',?,NULL,?,?)`,
+		migrateTombstoneEffectID(m.command.InstallationID, operation), operation, m.command.InstallationID, "migrate", 2, "migrate-data", strings.Repeat("7", 64), 2,
+		m.command.ControllerEpoch, 2, string(raw), now, now)
+}
+
+// A failed update is recovered by one retry. A chain that runs through a link another chain already recovered is a
+// second retry of the same update, and the runner refuses it whatever the Portal sent.
+func TestMigrateDataRefusesALinkAnotherChainRecovered(t *testing.T) {
+	rival := retryOperation(6)
+	t.Run("a claimed retry of the same update", func(t *testing.T) {
+		r := retryJournalFixture(t)
+		now := time.Now().UTC().UnixMilli()
+		r.insertSettledMigration(t, rival, r.failed, "discarded", now-9)
+		r.insertRestore(t, rival, now-8)
+		mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET created_ms=?,updated_ms=? WHERE effect_id=?`, now-2, now-2, r.command.Payload.CheckpointEffectID)
+		if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+			t.Fatal("a second retry of an update another retry already recovered was admitted")
+		}
+	})
+	t.Run("a tombstone another retry wrote", func(t *testing.T) {
+		r := neverClaimedRetryFixture(t)
+		r.insertTombstone(t, r.failed, rival, "")
+		if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+			t.Fatal("a retry was admitted over a link another retry closed")
+		}
+	})
+	t.Run("the tombstone of its own chain is not a rival", func(t *testing.T) {
+		r := neverClaimedRetryFixture(t)
+		r.insertTombstone(t, r.failed, r.command.OperationID, "")
+		if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+			t.Fatalf("a link the retry itself closed was taken for a rival: %v", err)
+		}
+	})
+	t.Run("the retry before it in the same chain is not a rival", func(t *testing.T) {
+		r := retryOfRetryFixture(t)
+		if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+			t.Fatalf("a link recovered by an earlier retry of the same chain was taken for a rival: %v", err)
+		}
+	})
+}
