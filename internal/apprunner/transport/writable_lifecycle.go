@@ -479,11 +479,8 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			v.SourceCheckpointReceiptSHA != c.Payload.SourceCheckpointReceiptSHA {
 			return false
 		}
-		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
-		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
-		if observedErr != nil || issuedErr != nil || observed < issued {
-			return false
-		}
+		// A restored receipt is terminal and immutable: read back later it still carries the time it was
+		// observed, so freshness against the command's signing does not apply. Its binding to the effect is above.
 		settled = v.SettledMS
 	case action == ImportCheckpointExecute || action == ImportCheckpointRead:
 		if importAbsenceReply(action, body) {
@@ -521,20 +518,11 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 		if e != nil || !journal.MigrateDataReceiptMatchesCommand(v, r.migrate) {
 			return false
 		}
-		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
-		issued, issuedErr := strconv.ParseInt(r.migrate.IssuedMS, 10, 64)
-		if observedErr != nil || issuedErr != nil || observed < issued {
-			return false
-		}
+		// Terminal receipts are immutable, so a read-back is not held to the command's signing time.
 		settled = v.SettledMS
 	case action == DiscardMigrationExecute || action == DiscardMigrationRead:
 		v, e := journal.ParseDiscardMigrationReceipt(body)
 		if e != nil || !journal.DiscardMigrationReceiptMatchesCommand(v, r.discard) {
-			return false
-		}
-		observed, observedErr := strconv.ParseInt(v.ObservedMS, 10, 64)
-		issued, issuedErr := strconv.ParseInt(r.discard.IssuedMS, 10, 64)
-		if observedErr != nil || issuedErr != nil || observed < issued {
 			return false
 		}
 		settled = v.SettledMS

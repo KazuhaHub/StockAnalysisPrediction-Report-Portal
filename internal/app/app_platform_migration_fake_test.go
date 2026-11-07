@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -158,12 +159,23 @@ func (f *platformFakeMigrationRunner) RemoveTarget(_ context.Context, _ platform
 	return f.removeTarget(i)
 }
 
+// platformFakeObservedAt remembers when a runner first settled an effect. A terminal receipt is immutable, so a
+// read-back of it later returns the time it was first observed, not the time of the read.
+var platformFakeObservedAt sync.Map
+
+func platformFakeFirstObserved(effect string) string {
+	now := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
+	stored, _ := platformFakeObservedAt.LoadOrStore(effect, now)
+	return stored.(string)
+}
+
 // platformMigrateReceiptFor builds the receipt a runner would return for the command: a valid claim, the
 // state and outcome asked for, and the marker the job wrote.
 func platformMigrateReceiptFor(c control.MigrateDataCommand, state, outcome string) journal.MigrateDataReceipt {
 	p := c.Payload
-	now := strconv.FormatInt(time.Now().UTC().UnixMilli(), 10)
-	claimed := strconv.FormatInt(time.Now().UTC().UnixMilli()-1, 10)
+	now := platformFakeFirstObserved(c.EffectID)
+	observedAt, _ := strconv.ParseInt(now, 10, 64)
+	claimed := strconv.FormatInt(observedAt-1, 10)
 	claim := journal.MigrateDataClaim{
 		Format: "portal.runner.migrate-data-claim/1-dev.1", ClaimID: platformDerivedUUID("claim", c.EffectID), EffectID: c.EffectID,
 		ResourceID: p.ResourceID, OwnershipSHA256: platformDigest([]byte("ownership" + c.EffectID)), AdmittedFence: c.InstallationFence,

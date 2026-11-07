@@ -437,11 +437,12 @@ func validPlatformRestoreObservation(observation platformRestoreObservation, int
 	age := time.Since(observation.ReceivedAt())
 	observed, observedErr := strconv.ParseInt(receipt.ObservedMS, 10, 64)
 	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
-	issued, issuedErr := strconv.ParseInt(intent.command.IssuedMS, 10, 64)
+	// A restored receipt is terminal and immutable: read back on a later tick it carries the time it was first
+	// observed, so it is not held to the signing time of the command that read it.
 	if !peer.RootController || peer.Path != endpoint.path || peer.RunnerUID != 0 ||
 		peer.ControllerUID != endpoint.controllerUID || peer.ControllerGID != endpoint.controllerGID ||
-		age < 0 || age > 3*time.Second || observedErr != nil || settledErr != nil || issuedErr != nil ||
-		observed < issued || observed > settled || settled > observation.ReceivedAt().UnixMilli() {
+		age < 0 || age > 3*time.Second || observedErr != nil || settledErr != nil ||
+		observed > settled || settled > observation.ReceivedAt().UnixMilli() {
 		return journal.RestoreReceipt{}, false
 	}
 	return receipt, true

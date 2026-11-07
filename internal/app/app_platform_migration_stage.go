@@ -317,11 +317,15 @@ func platformMigrateReceiptForCommand(r journal.MigrateDataReceipt, c control.Mi
 	}
 	observed, observedErr := strconv.ParseInt(r.ObservedMS, 10, 64)
 	settled, settledErr := strconv.ParseInt(r.SettledMS, 10, 64)
-	issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
-	return observedErr == nil && settledErr == nil && issuedErr == nil && observed >= issued && settled >= observed
+	return observedErr == nil && settledErr == nil && settled >= observed
 }
 
-func validPlatformLifecycleProof(proof platformLifecycleProof, raw []byte, authority control.Authority, endpoint platformRuntimeEndpoint, observedMS, settledMS, issuedMS string) bool {
+// validPlatformLifecycleProof checks the provenance of a runner reply against the command it answers.
+//
+// A status describes the moment of the read, so it must have been observed after the command was signed. A
+// terminal receipt (applied, reverted, discarded) is immutable and bound to its effect, so read back on a later
+// tick it still carries the time it was first observed: fresh is false for it.
+func validPlatformLifecycleProof(proof platformLifecycleProof, raw []byte, authority control.Authority, endpoint platformRuntimeEndpoint, observedMS, settledMS, issuedMS string, fresh bool) bool {
 	if proof.CommandSHA256() != platformDigest(raw) || proof.ReceivedAt().IsZero() {
 		return false
 	}
@@ -340,13 +344,13 @@ func validPlatformLifecycleProof(proof platformLifecycleProof, raw []byte, autho
 	}
 	return peer.RootController && peer.Path == endpoint.path && peer.RunnerUID == 0 && peer.ControllerUID == endpoint.controllerUID &&
 		peer.ControllerGID == endpoint.controllerGID && age >= 0 && age <= 3*time.Second && observedErr == nil && settledErr == nil &&
-		issuedErr == nil && observed >= issued && observed <= settled && settled <= proof.ReceivedAt().UnixMilli()
+		(!fresh || (issuedErr == nil && observed >= issued)) && observed <= settled && settled <= proof.ReceivedAt().UnixMilli()
 }
 
 func validPlatformMigrateObservation(o platformMigrateObservation, intent platformMigrateIntent, endpoint platformRuntimeEndpoint) (journal.MigrateDataReceipt, bool) {
 	receipt, err := o.MigrateDataReceipt()
 	if err != nil || !platformMigrateReceiptForCommand(receipt, intent.command) ||
-		!validPlatformLifecycleProof(o, intent.raw, intent.authority, endpoint, receipt.ObservedMS, receipt.SettledMS, intent.command.IssuedMS) {
+		!validPlatformLifecycleProof(o, intent.raw, intent.authority, endpoint, receipt.ObservedMS, receipt.SettledMS, intent.command.IssuedMS, false) {
 		return journal.MigrateDataReceipt{}, false
 	}
 	return receipt, true
@@ -356,7 +360,7 @@ func validPlatformMigrateObservation(o platformMigrateObservation, intent platfo
 func validPlatformMigrateStatus(o platformLifecycleProof, status journal.MigrateDataStatus, header control.CommandHeader, raw []byte, authority control.Authority, endpoint platformRuntimeEndpoint) bool {
 	return status.Kind == header.Kind && status.EffectID == header.EffectID && status.PayloadSHA256 == header.PayloadSHA256 &&
 		status.OperationID == header.OperationID && status.InstallationID == header.InstallationID &&
-		validPlatformLifecycleProof(o, raw, authority, endpoint, status.ObservedMS, "", header.IssuedMS)
+		validPlatformLifecycleProof(o, raw, authority, endpoint, status.ObservedMS, "", header.IssuedMS, true)
 }
 
 // dispatchPlatformMigrateData sends the migrate-data effect and settles it from the runner's receipt.

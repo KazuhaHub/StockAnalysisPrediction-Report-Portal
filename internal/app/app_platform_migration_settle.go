@@ -545,7 +545,7 @@ func (s *Server) signPlatformSettlementDiscard(ctx context.Context, lease platfo
 func validPlatformDiscardObservation(o platformDiscardObservation, intent platformDiscardIntent, endpoint platformRuntimeEndpoint) (journal.DiscardMigrationReceipt, bool) {
 	receipt, err := o.DiscardMigrationReceipt()
 	if err != nil || !journal.DiscardMigrationReceiptMatchesCommand(receipt, intent.command) ||
-		!validPlatformLifecycleProof(o, intent.raw, intent.authority, endpoint, receipt.ObservedMS, receipt.SettledMS, intent.command.IssuedMS) {
+		!validPlatformLifecycleProof(o, intent.raw, intent.authority, endpoint, receipt.ObservedMS, receipt.SettledMS, intent.command.IssuedMS, false) {
 		return journal.DiscardMigrationReceipt{}, false
 	}
 	return receipt, true

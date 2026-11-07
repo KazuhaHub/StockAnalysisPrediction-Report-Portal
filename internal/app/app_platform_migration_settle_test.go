@@ -42,8 +42,25 @@ func restoreAnswer(i platformRestoreIntent, endpoint platformRuntimeEndpoint) pl
 	o := platformRestoreObservationFixture(i, endpoint)
 	obs := platformFakeProof(i.authority, endpoint, i.raw)
 	receipt := o.receipt
+	receipt.ObservedMS = platformFakeFirstObserved(i.effectID)
+	receipt.SettledMS = receipt.ObservedMS
 	obs.restore = &receipt
 	return obs
+}
+
+// discardAnswer is the receipt of a discard, with the time the runner first settled it.
+func discardAnswer(i platformDiscardIntent, endpoint platformRuntimeEndpoint) platformDiscardObservation {
+	o := platformFakeProof(i.authority, endpoint, i.raw)
+	c := i.command
+	at := platformFakeFirstObserved(c.EffectID)
+	o.discard = &journal.DiscardMigrationReceipt{
+		Format: "portal.runner.discard-migration-receipt/1-dev.1", DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
+		InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: "migrate", EffectID: c.EffectID,
+		PayloadSHA256: c.PayloadSHA256, NamespaceID: c.Payload.NamespaceID, ResourceID: c.Payload.ResourceID, MigrateEffectID: c.Payload.MigrateEffectID,
+		MigratePayloadSHA256: c.Payload.MigratePayloadSHA256, MigrateReceiptSHA256: platformDigest([]byte("migrate-receipt")), State: "discarded",
+		ObservedMS: at, SettledMS: at,
+	}
+	return o
 }
 
 func restoreStatus(i platformRestoreIntent, endpoint platformRuntimeEndpoint, state string) platformSettlingRestoreObservation {
