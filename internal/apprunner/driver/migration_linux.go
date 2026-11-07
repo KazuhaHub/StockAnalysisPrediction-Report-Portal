@@ -89,3 +89,32 @@ func (r *CandidateRuntime) ProveMigrationAbsent(ctx context.Context, request Mig
 	defer closeClient()
 	return discardMigrationJobHTTP(ctx, client, plan)
 }
+
+// ProveTargetAbsent finds no container by the name or the label a target's resource would have given it. A target
+// that was reserved and never created has none; one that exists is a conflict, never removed here: this proves an
+// absence and changes nothing.
+func (r *CandidateRuntime) ProveTargetAbsent(ctx context.Context, resourceID string) error {
+	if r == nil {
+		return ErrUnsupported
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || !containerUUID.MatchString(resourceID) || resourceID == "00000000-0000-0000-0000-000000000000" {
+		return ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	for _, filter := range []map[string][]string{
+		{"name": {"^/portal-app-" + resourceID + "$"}},
+		{"label": {containerLabelPrefix + "resource=" + resourceID}},
+	} {
+		found, err := listMigrationContainersHTTP(ctx, client, filter)
+		if err != nil {
+			return err
+		}
+		if len(found) != 0 {
+			return ErrContainerConflict
+		}
+	}
+	return ctx.Err()
+}

@@ -28,6 +28,27 @@ type UpdateStartRemovalCommand struct {
 	RunningReceiptSHA256 string `json:"running_receipt_sha256"`
 }
 
+// ReservedStartReceiptSHA256 stands in for the running receipt in a removal of a start the runner reserved and never
+// ran. There is no running receipt to bind, and the sentinel says so in the signed command, so a removal of a running
+// target can never be taken for one of a reservation or the other way round.
+var ReservedStartReceiptSHA256 = func() string {
+	sum := sha256.Sum256([]byte("portal.runner.update-start-removal/reserved-only"))
+	return hex.EncodeToString(sum[:])
+}()
+
+// ReservedStartNativeID is the identity a receipt names for a target that was reserved and never created. No
+// container ever had one, so it is derived from the resource.
+func ReservedStartNativeID(resourceID string) string {
+	sum := sha256.Sum256([]byte("portal.runner.update-start-reserved-native/" + resourceID))
+	return hex.EncodeToString(sum[:])
+}
+
+// IsReservedStartRemoval reports whether raw is a removal command of a reserved-only start.
+func IsReservedStartRemoval(raw []byte) bool {
+	command, err := parseUpdateStartRemoval(raw)
+	return err == nil && command.RunningReceiptSHA256 == ReservedStartReceiptSHA256
+}
+
 type VerifiedUpdateStartRemovalCommand struct {
 	command UpdateStartRemovalCommand
 	start   VerifiedUpdateStartCommand

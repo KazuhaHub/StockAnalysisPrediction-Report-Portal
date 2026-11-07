@@ -160,6 +160,12 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
+	if startAbsenceReply(action, body) {
+		if absence, err := journal.ParseUpdateStartAbsence(body); err == nil && absence.State != "absent" {
+			// The runner holds the start without a running receipt: not an observation, and not an absence.
+			return zero, &journal.UpdateStartHeldError{State: absence.State}
+		}
+	}
 	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.

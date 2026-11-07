@@ -100,8 +100,8 @@ func TestUpdateStartReadReportsAbsenceOnlyWhenNoRowExists(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err = f.store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
-	if _, absent := result.(UpdateStartAbsence); absent || err == nil {
-		t.Fatalf("a reserved update-start was reported absent: %#v %v", result, err)
+	if status, ok := result.(UpdateStartAbsence); !ok || err != nil || status.State != "reserved" {
+		t.Fatalf("a reserved update-start was not reported as reserved: %#v %v", result, err)
 	}
 }
 

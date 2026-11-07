@@ -102,3 +102,35 @@ func TestWritableLifecycleRestoreStartAbsenceReply(t *testing.T) {
 		t.Fatal("another start's absence answered an update-start read")
 	}
 }
+
+// An update-start the runner holds without a running receipt is reported with what it holds, to the receipt read only.
+func TestWritableLifecycleUpdateStartHeldReply(t *testing.T) {
+	a, _, _, _, _ := restoreStartTransportFixture(t)
+	_, command, raw, sig, descriptor, _ := updateStartTransportFixture(t)
+	read, err := verifyWritableLifecycle(UpdateStartReceipt, raw, lifecycleSignature(t, UpdateStartReceipt, a, raw, sig), descriptor, a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execute, err := verifyWritableLifecycle(UpdateStartExecute, raw, sig, descriptor, a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, received := time.Now().Add(-time.Second), time.Now().Add(time.Second)
+	for _, state := range []string{"reserved", "orphaned", "pending", "absent"} {
+		held := updateStartAbsenceFor(command)
+		held.State = state
+		body, _ := json.Marshal(held)
+		if !validWritableLifecycleReply(UpdateStartReceipt, body, read, started, received) || !startAbsenceReply(UpdateStartReceipt, body) {
+			t.Fatalf("a %s reply to the receipt read was refused", state)
+		}
+		if validWritableLifecycleReply(UpdateStartExecute, body, execute, started, received) {
+			t.Fatalf("an execute was answered with a %s reply", state)
+		}
+	}
+	other := updateStartAbsenceFor(command)
+	other.State = "running"
+	body, _ := json.Marshal(other)
+	if validWritableLifecycleReply(UpdateStartReceipt, body, read, started, received) {
+		t.Fatal("an unknown held state was accepted")
+	}
+}

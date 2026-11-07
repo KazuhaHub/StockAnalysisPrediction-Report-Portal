@@ -38,8 +38,22 @@ func updateStartAbsenceFor(c control.UpdateStartCommand, now int64) UpdateStartA
 	}
 }
 
+// An UpdateStartAbsence says what the journal holds for a start: nothing ("absent"), or a start it holds without a
+// running receipt: reserved (the pending target resource, no claim), orphaned (a claim nothing is executing) or
+// pending (the data execution gate is held, so it may be executing).
+func updateStartHeldState(state string) bool {
+	return state == "absent" || state == "reserved" || state == "orphaned" || state == "pending"
+}
+
+// UpdateStartHeldError is the transport's report that the runner holds the start without a running receipt.
+type UpdateStartHeldError struct{ State string }
+
+func (e *UpdateStartHeldError) Error() string {
+	return "runner holds the update-start without a running receipt: " + e.State
+}
+
 func validUpdateStartAbsence(a UpdateStartAbsence) bool {
-	if a.Format != updateStartAbsenceFormat || a.Stage != "start" || a.State != "absent" || !dataSHA(a.PayloadSHA256) ||
+	if a.Format != updateStartAbsenceFormat || a.Stage != "start" || !updateStartHeldState(a.State) || !dataSHA(a.PayloadSHA256) ||
 		!dataNumber(a.TargetGeneration, true) || !dataNumber(a.EffectNumber, true) || !dataNumber(a.ObservedMS, true) {
 		return false
 	}
@@ -81,7 +95,76 @@ func (s *Store) ReadUpdateStartRunningOrAbsence(ctx context.Context, raw, signat
 	if absenceErr == nil && absence != nil {
 		return *absence, nil
 	}
+	if held, heldErr := s.readUpdateStartHeld(ctx, raw, signature); heldErr == nil && held != nil {
+		return *held, nil
+	}
 	return nil, err
+}
+
+// readUpdateStartHeld answers for an update-start the journal holds without a running receipt. A start still
+// prepared holds its pending target resource and nothing has claimed it ("reserved"); a claimed one nothing is
+// executing is "orphaned". When the data execution gate is held the start may be running, which a read never
+// waits for: it is "pending". It answers nil, nil for any other state.
+func (s *Store) readUpdateStartHeld(ctx context.Context, raw, signature []byte) (*UpdateStartAbsence, error) {
+	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
+		return nil, ErrUpdateStartUnavailable
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return nil, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	authority := control.Authority{
+		DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch,
+		ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint,
+	}
+	now := time.Now().UTC().UnixMilli()
+	verified, err := control.VerifyUpdateStartRead(raw, signature, authority, now)
+	if err != nil {
+		return nil, err
+	}
+	c := verified.Command()
+	if c.Kind != "update-start" {
+		return nil, nil
+	}
+	row, err := loadAdmittedCommand(ctx, tx, c.EffectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !sameLogicalCommand(row, updateStartIndex(c)) {
+		return nil, ErrCommandConflict
+	}
+	state := ""
+	switch row.state {
+	case "prepared":
+		resource, err := existingCandidateResourcePrefix(ctx, tx, updateStartIndex(c), updateStartPendingPrefix, c.Payload.ResourceID)
+		if err != nil || resource == nil || resource.native != updateStartPendingPrefix+c.Payload.ResourceID {
+			return nil, err
+		}
+		state = "reserved"
+	case "unknown":
+		state = "orphaned"
+	default:
+		return nil, nil
+	}
+	if !s.tryAcquireDataExecution() {
+		state = "pending"
+	} else {
+		s.releaseDataExecution()
+	}
+	absence := updateStartAbsenceFor(c, time.Now().UTC().UnixMilli())
+	absence.State = state
+	return &absence, nil
 }
 
 // readRestoreStartAbsence finds a restore-start effect absent. A claim does not hold the data execution
