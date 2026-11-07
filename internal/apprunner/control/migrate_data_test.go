@@ -132,6 +132,8 @@ func TestVerifyMigrateDataFenceOrder(t *testing.T) {
 		"writer below checkpoint":  func(p *MigrateDataPayload) { p.WriterFence = "4" },
 		"start equals writer":      func(p *MigrateDataPayload) { p.StartWriterFence = "6" },
 		"start below writer":       func(p *MigrateDataPayload) { p.StartWriterFence = "5" },
+		"writer skips a fence":     func(p *MigrateDataPayload) { p.WriterFence, p.StartWriterFence = "7", "8" },
+		"start skips a fence":      func(p *MigrateDataPayload) { p.StartWriterFence = "8" },
 		"schema not increasing":    func(p *MigrateDataPayload) { p.TargetSchema = "2" },
 		"schema zero":              func(p *MigrateDataPayload) { p.SourceSchema = "0" },
 		"wall clock above 600":     func(p *MigrateDataPayload) { p.WallClockSeconds = "601" },
@@ -153,8 +155,10 @@ func TestVerifyMigrateDataFenceOrder(t *testing.T) {
 		"receipt":   func(p *MigrateDataPayload) { p.CheckpointReceiptSHA256 = strings.Repeat("1", 64) },
 		"target":    func(p *MigrateDataPayload) { p.TargetReleaseSHA256 = strings.Repeat("2", 64) },
 		"entry":     func(p *MigrateDataPayload) { p.EntrypointSHA256 = strings.Repeat("3", 64) },
-		"start":     func(p *MigrateDataPayload) { p.StartWriterFence = "9" },
-		"wall":      func(p *MigrateDataPayload) { p.WallClockSeconds = "60" },
+		"start": func(p *MigrateDataPayload) {
+			p.CheckpointWriterFence, p.WriterFence, p.StartWriterFence = "8", "9", "10"
+		},
+		"wall": func(p *MigrateDataPayload) { p.WallClockSeconds = "60" },
 	} {
 		changed := command
 		mutate(&changed.Payload)

@@ -163,7 +163,7 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 	checkpoint, _ := strconv.ParseInt(m.CheckpointWriterFence, 10, 64)
 	writer, _ := strconv.ParseInt(m.WriterFence, 10, 64)
 	start, _ := strconv.ParseInt(m.StartWriterFence, 10, 64)
-	return source < target && checkpoint < writer && writer < start && m.ResourceID != m.NamespaceID
+	return source < target && writer == checkpoint+1 && start == checkpoint+2 && m.ResourceID != m.NamespaceID
 }
 
 func validMigrateReceipt(r MigrateDataReceipt) bool {

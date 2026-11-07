@@ -482,3 +482,22 @@ func TestMigrateConnectionTimeoutJobContinues(t *testing.T) {
 		t.Fatalf("bound = %s", bound)
 	}
 }
+
+// The writer fences of a migration are exact: the job runs one above the checkpoint's and the target starts one above
+// that, so no other writer can hold a fence in between.
+func TestMigrateFencesAreExactlyConsecutive(t *testing.T) {
+	marker := migrateClaimMarker{
+		Format: migrateClaimFormat, ClaimID: fixtureID(1), EffectID: fixtureID(2), ResourceID: fixtureID(3), OwnershipSHA256: strings.Repeat("a", 64),
+		AdmittedFence: "2", ClaimedMS: "1", NamespaceID: fixtureID(4), CheckpointID: fixtureID(5), CheckpointReceiptSHA256: strings.Repeat("b", 64),
+		RemoveCodeReceiptSHA256: strings.Repeat("c", 64), SourceReleaseSHA256: strings.Repeat("d", 64), TargetReleaseSHA256: strings.Repeat("e", 64),
+		SourceSchema: "1", TargetSchema: "2", CheckpointWriterFence: "1", WriterFence: "2", StartWriterFence: "3", ProjectID: "1",
+		NamespaceInode: "1", Device: "1", QuotaBytes: "512", QuotaInodes: "1",
+	}
+	if !validMigrateMarker(marker) {
+		t.Fatal("consecutive fences refused")
+	}
+	marker.StartWriterFence = "4"
+	if validMigrateMarker(marker) {
+		t.Fatal("a claim with a skipped start fence is valid")
+	}
+}

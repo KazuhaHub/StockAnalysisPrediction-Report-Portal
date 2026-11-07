@@ -166,7 +166,7 @@ func validMigrateDataLogical(c MigrateDataCommand) bool {
 		return false
 	}
 	source, target, checkpoint, writer, start := numbers[0], numbers[1], numbers[2], numbers[3], numbers[4]
-	return source < target && checkpoint < writer && writer < start &&
+	return source < target && writer == checkpoint+1 && start == checkpoint+2 &&
 		numbers[5] <= math.MaxUint32 && numbers[6]%512 == 0 &&
 		numbers[8] <= MaxMigrationWallClockSeconds
 }
