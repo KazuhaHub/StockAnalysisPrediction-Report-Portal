@@ -218,3 +218,35 @@ func TestMigrateCommandLostInTransitIsSentAgainAfterItsWindow(t *testing.T) {
 		t.Fatalf("the resend was not the same effect: %v", effects)
 	}
 }
+
+// A reply cannot say it was observed after it was received. The fake runner stamped a reply's observation time after
+// it had taken the time the reply was received, so whenever the millisecond ticked over between the two the portal
+// rightly refused the reply as coming from the future: a failure of roughly one run in a few thousand, which only a
+// long suite or a repeated run ever met. The fake now receives a reply when it is asked, never before what it says.
+func TestFakeRunnerRepliesAreNeverObservedAfterTheyAreReceived(t *testing.T) {
+	f := settleAfterEnd(t, false, orphanedScript)
+	intent, err := f.s.signPlatformSettlementMigrate(context.Background(), mustSettlementLease(t, f))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 300000 {
+		answer := platformMigrateStatusAnswer(intent, f.endpoint, "orphaned")
+		status, err := answer.MigrationStatus()
+		if err != nil {
+			t.Fatal(err)
+		}
+		observed, _ := strconv.ParseInt(status.ObservedMS, 10, 64)
+		if received := answer.ReceivedAt().UnixMilli(); observed > received {
+			t.Fatalf("reply %d was observed at %d, after it was received at %d", i, observed, received)
+		}
+	}
+}
+
+func mustSettlementLease(t *testing.T, f *settleFixture) platformOperationLease {
+	t.Helper()
+	lease, err := platformSettlementLease(f.s.st.poolExec(), f.op)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return lease
+}

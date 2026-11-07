@@ -34,7 +34,9 @@ func (o platformFakeObservation) Controller() control.Authority { return o.autho
 func (o platformFakeObservation) Endpoint() transport.CandidateReceiptEndpoint {
 	return o.endpoint
 }
-func (o platformFakeObservation) ReceivedAt() time.Time { return o.receivedAt }
+// ReceivedAt is the time the reply is asked for, never earlier than what it says: a reply built after the proof was
+// taken would otherwise be observed in a later millisecond than it was received.
+func (o platformFakeObservation) ReceivedAt() time.Time { return time.Now().UTC() }
 func (o platformFakeObservation) CommandSHA256() string { return o.commandSHA }
 func (o platformFakeObservation) MigrateDataReceipt() (journal.MigrateDataReceipt, error) {
 	if o.migrate == nil {
@@ -223,6 +225,7 @@ func platformMigrateStatusAnswer(i platformMigrateIntent, endpoint platformRunti
 // stage with the source removal applied, using the real stage code and receipts the runner would return.
 func platformMigrationStageFixture(t *testing.T, pg, migrating bool) (*Server, platformOperationLease, platformRuntimeEndpoint, *platformFakeMigrationRunner) {
 	t.Helper()
+	platformFakeObservedAt.Clear()
 	var mutate func(*appplatform.Manifest)
 	if migrating {
 		mutate = platformMigrationManifest(nil)
