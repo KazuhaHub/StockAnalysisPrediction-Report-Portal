@@ -298,6 +298,10 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchDiscardMigration(ctx, raw, sig, descriptor, journal.NewMigrationNative(provider.native, provider.dataRoot), provider.dataPin)
 	case DiscardMigrationRead:
 		result, err = provider.store.ReadDiscardMigrationOrStatus(ctx, raw, sig)
+	case SettleUpdateStartExecute:
+		result, err = provider.store.SettleUpdateStart(ctx, raw, sig, provider.native)
+	case SettleUpdateStartRead:
+		result, err = provider.store.ReadSettleUpdateStartReceipt(ctx, raw, sig)
 	case ImportCheckpointExecute:
 		if provider.dataRoot == nil || provider.checkpointRoot == nil {
 			return

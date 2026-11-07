@@ -50,13 +50,15 @@ const (
 	MigrateDataRead
 	DiscardMigrationExecute
 	DiscardMigrationRead
+	SettleUpdateStartExecute
+	SettleUpdateStartRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= DiscardMigrationRead
+	return a >= WritableWriterExecute && a <= SettleUpdateStartRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -144,6 +146,13 @@ func (o WritableLifecycleObservation) MigrateDataReceipt() (journal.MigrateDataR
 	}
 	return journal.ParseMigrateDataReceipt([]byte(o.body))
 }
+func (o WritableLifecycleObservation) SettleUpdateStartReceipt() (journal.SettleUpdateStartReceipt, error) {
+	if o.action != SettleUpdateStartExecute && o.action != SettleUpdateStartRead {
+		return journal.SettleUpdateStartReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseSettleUpdateStartReceipt([]byte(o.body))
+}
+
 func (o WritableLifecycleObservation) DiscardMigrationReceipt() (journal.DiscardMigrationReceipt, error) {
 	if o.action != DiscardMigrationExecute && o.action != DiscardMigrationRead {
 		return journal.DiscardMigrationReceipt{}, driver.ErrContainerUncertain
@@ -206,6 +215,7 @@ type writableLifecycleReference struct {
 	importCheckpoint        control.ImportCheckpointCommand
 	migrate                 control.MigrateDataCommand
 	discard                 control.DiscardMigrationCommand
+	settleStart             control.SettleUpdateStartCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -341,6 +351,22 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.migrate = v.Command()
 		r.release = r.migrate.Payload.TargetReleaseSHA256
+	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
+		var v control.VerifiedSettleUpdateStartCommand
+		var err error
+		if action == SettleUpdateStartRead {
+			v, err = control.VerifySettleUpdateStartRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifySettleUpdateStartSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifySettleUpdateStart(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.settleStart = v.Command()
+		r.updateStart = v.Start().Command()
+		r.release = r.updateStart.Payload.TargetReleaseSHA256
 	case action == DiscardMigrationExecute || action == DiscardMigrationRead:
 		var v control.VerifiedDiscardMigrationCommand
 		var err error
@@ -519,6 +545,13 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return false
 		}
 		// Terminal receipts are immutable, so a read-back is not held to the command's signing time.
+		settled = v.SettledMS
+	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
+		v, e := journal.ParseSettleUpdateStartReceipt(body)
+		if e != nil || !journal.SettleUpdateStartReceiptMatchesCommand(v, r.settleStart, r.updateStart) {
+			return false
+		}
+		// A settled receipt is terminal and immutable, like the other receipts.
 		settled = v.SettledMS
 	case action == DiscardMigrationExecute || action == DiscardMigrationRead:
 		v, e := journal.ParseDiscardMigrationReceipt(body)
