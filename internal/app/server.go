@@ -58,6 +58,9 @@ type Server struct {
 	// platformReadStartReceipt is the runner seam for the restore-start read-receipt that recovery uses to
 	// settle an unknown resume start; nil selects the transport.
 	platformReadStartReceipt platformStartReceiptReader
+	// platformSettleStart is the runner seam of the settlement of an orphaned update-start; nil selects the
+	// transport.
+	platformSettleStart platformSettleStartRunner
 	// platformObserveRuntime and platformRecoveryTarget are the runner seams of recovery enrollment
 	// and of the resume review; nil selects the local socket. Neither accepts anything a request
 	// carries: both read what the runner itself reports.

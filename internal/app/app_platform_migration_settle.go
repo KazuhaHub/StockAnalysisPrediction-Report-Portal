@@ -225,33 +225,7 @@ func (s *Server) settlePlatformMigration(ctx context.Context, endpoint platformR
 	} else if start.exists && start.state != "reverted" {
 		// A start the update ended with still open: the runner may or may not have run it. It is read back under its
 		// own identity and never sent; what comes back decides which of the paths here the update takes next.
-		held, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, platformSettleHeldEffect)
-		if err != nil {
-			return false, err
-		}
-		if !held.exists || held.kind != platformHeldStartKind || held.state != "applied" {
-			return s.settleSettlementStart(ctx, endpoint, lease, start)
-		}
-		// Reserved and never created: the removal path is the ordinary one, bound to the reservation instead of a
-		// running receipt, and the start is closed as never run once the target is gone.
-		for _, step := range []struct {
-			stage  string
-			number int
-		}{{"stop", platformSettleStopEffect}, {"remove_code", platformSettleRemoveEffect}} {
-			effect, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, step.number)
-			if err != nil {
-				return false, err
-			}
-			if effect.state != "applied" {
-				return s.removeSettlementTarget(ctx, endpoint, lease, step.stage, step.number)
-			}
-		}
-		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
-			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
-				platformNeverRanReceipt, now, lease.id)
-			return platformLeaseCAS(changed, err)
-		})
+		return s.settleSettlementStart(ctx, endpoint, lease, start)
 	}
 	// 2. An unfinished migration is read back, and discarded once nothing is running it.
 	switch m.state {
@@ -894,11 +868,13 @@ func (s *Server) signPlatformSettlementStartRead(ctx context.Context, lease plat
 		return zero, errAppPlatformLeaseConflict
 	}
 	read.intent.command.IssuedMS, read.intent.command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
-	key := ed25519.NewKeyFromSeed(seed)
-	defer clear(key)
-	if read.intent.raw, read.intent.signature, err = control.SignUpdateStart(read.intent.command, key, read.intent.authority, issued); err != nil {
+	// A read is signed for a read and for nothing else: no execute-capable start command is made for a start that
+	// finished, so intent.signature stays empty.
+	if read.intent.raw, err = json.Marshal(read.intent.command); err != nil {
 		return zero, err
 	}
+	key := ed25519.NewKeyFromSeed(seed)
+	defer clear(key)
 	if read.intent.readSignature, err = control.SignUpdateStartRead(read.intent.raw, key, read.intent.authority, issued); err != nil {
 		return zero, err
 	}
@@ -946,20 +922,11 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 		})
 	case err != nil:
 		var held *journal.UpdateStartHeldError
-		if !errors.As(err, &held) || held.State == "pending" || held.State == "absent" {
-			// Unreachable, or the start may be executing: read again later.
+		if !errors.As(err, &held) {
+			// Unreachable: read again later.
 			return false, nil
 		}
-		// The runner holds the start with no running receipt and nothing executing it: its pending target resource
-		// was reserved and never created (reserved), or its claim has no executor (orphaned). Either way the target
-		// is removed by the ordinary removal path, bound to the reservation. Recording that is all this step does.
-		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
-			_, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-				SELECT operation_id,'settle',3,?,?,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'applied',?,?,? FROM app_platform_operation_effects
-				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state IN ('prepared','unknown')`,
-				platformDerivedUUID("held-start", read.intent.effectID), platformHeldStartKind, `{"state":"`+held.State+`"}`, now, now, lease.id, read.intent.effectID)
-			return err
-		})
+		return s.settleHeldStart(ctx, endpoint, lease, read, held.State)
 	}
 	running, ok := validPlatformUpdateStartRunningObservation(observation, read.intent, endpoint)
 	if !ok {
@@ -976,6 +943,184 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 			read.admitted, string(encoded), now, lease.id, read.intent.effectID, read.intent.command.PayloadSHA256, start.receipt)
 		return platformLeaseCAS(changed, err)
 	})
+}
+
+// settleHeldStart acts on what the runner says it holds for the open start. It is called every tick with a fresh
+// read, so nothing it records is final until the read itself is: the held-start record only notes that a reserved
+// removal began.
+//
+//   - pending: the start may be executing; wait.
+//   - orphaned: claimed with nothing executing it. A container may exist, so only the runner can say what happened:
+//     it is asked to settle the start, and the next read shows the result (running, or never run).
+//   - reserved: the runner holds a pending target and no claim was ever made; the target is removed bound to the
+//     reservation once the held-start record is in.
+//   - never_ran: the start is settled as not run. If a reserved removal began, it is finished first.
+func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease, read platformSettlementStartRead, state string) (bool, error) {
+	pool := s.st.poolExec()
+	marker, err := loadPlatformSettleEffect(pool, lease.id, platformSettleStage, platformSettleHeldEffect)
+	if err != nil {
+		return false, err
+	}
+	switch state {
+	case "orphaned":
+		return s.settleOrphanedStart(ctx, endpoint, lease)
+	case "reserved":
+		if !marker.exists {
+			return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+				_, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+					SELECT operation_id,'settle',3,?,?,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'applied',?,?,? FROM app_platform_operation_effects
+					WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state IN ('prepared','unknown')`,
+					platformDerivedUUID("held-start", read.intent.effectID), platformHeldStartKind, `{"state":"reserved"}`, now, now, lease.id, read.intent.effectID)
+				return err
+			})
+		}
+		return s.reservedStartStep(ctx, endpoint, lease)
+	case "never_ran":
+		if marker.exists {
+			return s.reservedStartStep(ctx, endpoint, lease)
+		}
+		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
+				platformNeverRanReceipt, now, lease.id)
+			if err := platformLeaseCAS(changed, err); err != nil {
+				return err
+			}
+			// Nothing ran and nothing was removed, so no settlement evidence stands for the candidate: drop it.
+			_, err = e.exec(`DELETE FROM app_platform_activations WHERE id=? AND installation_id=? AND generation=? AND state='candidate'`,
+				read.intent.resourceID, lease.installationID, lease.snapshot.Generation)
+			return err
+		})
+	}
+	return false, nil
+}
+
+// reservedStartStep takes the next step of removing a reserved target: stop, then remove, each bound to the
+// reservation; once both are applied the start is closed as never run.
+func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease) (bool, error) {
+	pool := s.st.poolExec()
+	for _, step := range []struct {
+		stage  string
+		number int
+	}{{"stop", platformSettleStopEffect}, {"remove_code", platformSettleRemoveEffect}} {
+		effect, err := loadPlatformSettleEffect(pool, lease.id, platformSettleStage, step.number)
+		if err != nil {
+			return false, err
+		}
+		if effect.state != "applied" {
+			return s.removeSettlementTarget(ctx, endpoint, lease, step.stage, step.number)
+		}
+	}
+	return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+			WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
+			platformNeverRanReceipt, now, lease.id)
+		return platformLeaseCAS(changed, err)
+	})
+}
+
+// platformSettleStartIntent is the signed settle-update-start command for an orphaned start.
+type platformSettleStartIntent struct {
+	raw, signature []byte
+	authority      control.Authority
+	runtime        platformRuntimeRegistration
+	descriptor     []byte
+}
+
+// platformSettleStartRunner sends the command to the runner and answers its receipt.
+type platformSettleStartRunner func(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error)
+
+func (s *Server) platformSettleStartRun() platformSettleStartRunner {
+	if s.platformSettleStart != nil {
+		return s.platformSettleStart
+	}
+	return platformRunSettleUpdateStart
+}
+
+// signPlatformSettlementOrphan signs the command that settles the orphaned start. Its start reference is signed for
+// a read, so nothing execute-capable is made for the start; its own effect and operation identities are derived from
+// the start's, so a command signed again names the same settlement.
+func (s *Server) signPlatformSettlementOrphan(ctx context.Context, lease platformOperationLease) (platformSettleStartIntent, error) {
+	var zero platformSettleStartIntent
+	dek, err := s.dek()
+	if err != nil {
+		return zero, err
+	}
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	runtime, seed, err := s.platformDataRuntime(e, lease.controllerEpoch, dek)
+	if err != nil {
+		return zero, err
+	}
+	defer clear(seed)
+	now, err := platformSettlementGuard(e, lease)
+	if err != nil {
+		return zero, err
+	}
+	read, err := loadPlatformSettlementStart(e, lease, runtime, now)
+	if err != nil {
+		return zero, err
+	}
+	issued := time.Now().UnixMilli()
+	if issued < now-1000 || issued > now+1000 || issued > math.MaxInt64-platformStartCommandWindowMS {
+		return zero, errAppPlatformLeaseConflict
+	}
+	start := read.intent.command
+	start.IssuedMS, start.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
+	startRaw, err := json.Marshal(start)
+	if err != nil {
+		return zero, err
+	}
+	key := ed25519.NewKeyFromSeed(seed)
+	defer clear(key)
+	startRead, err := control.SignUpdateStartRead(startRaw, key, read.intent.authority, issued)
+	if err != nil {
+		return zero, err
+	}
+	command := control.SettleUpdateStartCommand{
+		Format: control.SettleUpdateStartFormat, EffectID: platformDerivedUUID("settle-update-start", read.intent.effectID),
+		OperationID: platformDerivedUUID("settle-update-start-operation", lease.id), InstallationFence: strconv.FormatInt(lease.fence, 10),
+		IssuedMS: strconv.FormatInt(issued, 10), ExpiresMS: strconv.FormatInt(issued+platformStartCommandWindowMS, 10),
+		StartRaw: startRaw, StartReadSignature: startRead,
+	}
+	if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {
+		return zero, err
+	}
+	raw, signature, err := control.SignSettleUpdateStart(command, key, read.intent.authority, issued)
+	if err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	return platformSettleStartIntent{raw: raw, signature: signature, authority: read.intent.authority, runtime: runtime, descriptor: bytes.Clone(read.intent.targetDescriptor)}, nil
+}
+
+// settleOrphanedStart asks the runner to settle the orphaned start. Whatever it answers, the next tick reads the start
+// itself: the settled start reads as running or as never run, and a refusal (the start moved on meanwhile) reads as
+// whatever it has become.
+func (s *Server) settleOrphanedStart(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease) (bool, error) {
+	intent, err := s.signPlatformSettlementOrphan(ctx, lease)
+	if err != nil {
+		return false, err
+	}
+	if err := s.platformMigrationRunner().CheckRoot(ctx, lease.id, intent.runtime, intent.authority, endpoint); err != nil {
+		return false, err
+	}
+	if _, err := s.platformSettleStartRun()(ctx, endpoint, intent); err != nil {
+		return false, nil
+	}
+	return true, nil
 }
 
 // removeSettlementTarget stops, then removes, the started target of the failed update under an operation
@@ -1049,8 +1194,14 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	if err != nil {
 		return zero, err
 	}
+	startEffect, err := loadPlatformSettleEffect(e, lease.id, "start", 1)
+	if err != nil {
+		return zero, err
+	}
 	var start platformUpdateStartIntent
-	if held.exists && held.kind == platformHeldStartKind && held.state == "applied" {
+	// The reserved-only removal is for a start that is still open. One that got its running receipt after the
+	// record was made is removed like any running target.
+	if held.exists && held.kind == platformHeldStartKind && held.state == "applied" && startEffect.state != "applied" {
 		// The target was reserved and never created: there is no running receipt, and the start is the one the
 		// effect row records, rebuilt from the evidence it was built from.
 		read, err := loadPlatformSettlementStart(e, lease, runtime, now)
