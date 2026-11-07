@@ -88,3 +88,11 @@ func loadPlatformAppliedMigration(e migExec, operationID string, plan platformMa
 	}
 	return &platformMigrationEvidence{effectID: effectID, receiptSHA256: platformDigest([]byte(receipt))}, nil
 }
+
+// platformMigrationEffectCount counts the applied migrate-data effects of an operation: the one extra
+// effect a migrating update carries beside stop, snapshot, source removal and start.
+func platformMigrationEffectCount(e migExec, operationID string) (int, error) {
+	var n int
+	err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='migrate-data' AND state='applied'`, operationID).Scan(&n)
+	return n, err
+}

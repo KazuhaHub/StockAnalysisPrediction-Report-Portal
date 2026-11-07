@@ -97,6 +97,11 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	baseEffects := 2
 	if lease.snapshot.Action == appplatform.ActionUpdate {
 		baseEffects = 4
+		migrations, err := platformMigrationEffectCount(e, lease.id)
+		if err != nil {
+			return zero, false, err
+		}
+		baseEffects += migrations
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		baseEffects = 4

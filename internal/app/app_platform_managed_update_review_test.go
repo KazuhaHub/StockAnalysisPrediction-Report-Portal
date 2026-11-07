@@ -12,6 +12,16 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
+// platformUpdateFixtureWritable makes the update fixtures install a writable managed application, the kind that
+// can launch. A test sets it through platformWritableUpdateFixtures.
+var platformUpdateFixtureWritable bool
+
+func platformWritableUpdateFixtures(t *testing.T) {
+	t.Helper()
+	platformUpdateFixtureWritable = true
+	t.Cleanup(func() { platformUpdateFixtureWritable = false })
+}
+
 type platformManagedUpdateReviewFixture struct {
 	server       *Server
 	actor        platformActorSession
@@ -36,7 +46,11 @@ func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManag
 // returns, after the data schema was set to the installed one.
 func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) platformManagedUpdateReviewFixture {
 	t.Helper()
-	s, actor, lease := platformManagedAccessFixture(t, pg)
+	access := platformManagedAccessFixture
+	if platformUpdateFixtureWritable {
+		access = platformWritableAccessFixture
+	}
+	s, actor, lease := access(t, pg)
 	var planRaw string
 	var revision, policy, format int64
 	var active, epoch, runtimeID string
