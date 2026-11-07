@@ -611,5 +611,28 @@ func loadAppliedMigration(ctx context.Context, tx *sql.Tx, c control.UpdateStart
 		m.ResourceID, p.NamespaceID).Scan(&desired, &observed, &revision); err != nil || desired != "absent" || observed != "absent" || revision < 2 {
 		return fail("job resource")
 	}
+	// A restore of the namespace after the migration took its data away: the migration is superseded and can
+	// never start.
+	var applied int64
+	if err := tx.QueryRowContext(ctx, `SELECT updated_ms FROM runner_commands WHERE effect_id=?`, p.MigrateEffectID).Scan(&applied); err != nil {
+		return fail("receipt time")
+	}
+	restores, err := tx.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE installation_id=? AND kind='restore' AND state='applied' AND updated_ms>?`, c.InstallationID, applied)
+	if err != nil {
+		return zero, err
+	}
+	defer restores.Close()
+	for restores.Next() {
+		var raw string
+		if err := restores.Scan(&raw); err != nil {
+			return zero, err
+		}
+		if restored, err := ParseRestoreReceipt([]byte(raw)); err != nil || restored.NamespaceID == p.NamespaceID {
+			return fail("superseded by a restore")
+		}
+	}
+	if err := restores.Err(); err != nil {
+		return zero, err
+	}
 	return receipt, nil
 }

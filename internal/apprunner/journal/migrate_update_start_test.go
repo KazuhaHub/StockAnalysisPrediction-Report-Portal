@@ -216,3 +216,17 @@ func TestRestoreStartAfterSettledMigration(t *testing.T) {
 		t.Fatalf("rollback start refused after settlement: %+v %v", reservation, err)
 	}
 }
+
+// A migration whose namespace was restored afterwards is superseded: the data it produced is gone, so no start may be
+// bound to its receipt.
+func TestUpdateStartRefusesMigrationSupersededByRestore(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	if r, err := m.dispatch(t); err != nil || r.State != "migrated" {
+		t.Fatalf("migration: %+v %v", r, err)
+	}
+	m.insertRestore(t, m.command.OperationID, time.Now().UTC().UnixMilli()+1000)
+	raw, sig := signUpdateStartCommand(t, migratedStartCommand(t, m))
+	if _, err := m.f.store.ReserveUpdateStart(context.Background(), raw, sig); err == nil {
+		t.Fatal("a start was bound to a migration whose namespace was restored after it")
+	}
+}

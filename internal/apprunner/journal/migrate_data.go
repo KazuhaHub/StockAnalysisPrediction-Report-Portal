@@ -377,9 +377,19 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 			return "", err
 		}
 		migration, err := ParseMigrateDataReceipt([]byte(raw))
-		if state != "reverted" || err != nil || migration.OperationID != current || migration.InstallationID != c.InstallationID ||
-			migration.Claim.NamespaceID != p.NamespaceID || migration.Claim.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 ||
-			(migration.State != "failed" && migration.State != "discarded") {
+		if err != nil || migration.OperationID != current || migration.InstallationID != c.InstallationID ||
+			migration.Claim.NamespaceID != p.NamespaceID || migration.Claim.RemoveCodeReceiptSHA256 != p.RemoveCodeReceiptSHA256 {
+			return fail("migration is not settled")
+		}
+		// A reverted migration left nothing to undo but its job. An applied one (readiness failed on migrated
+		// data) stays applied in the journal: it is superseded only by a restore of the namespace that is strictly
+		// newer than the migration, and only once everything the failed update started is proven gone.
+		supersede := false
+		switch {
+		case state == "reverted" && (migration.State == "failed" || migration.State == "discarded"):
+		case state == "applied" && migration.State == "migrated":
+			supersede = true
+		default:
 			return fail("migration is not settled")
 		}
 		var restores int
@@ -397,6 +407,19 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 		if restoreState != "applied" || err != nil || restore.OperationID != current || restore.InstallationID != c.InstallationID ||
 			restore.NamespaceID != p.NamespaceID || restoredAt < settled || checkpointCreated < restoredAt {
 			return fail("data was not restored before the new checkpoint")
+		}
+		if supersede {
+			if restoredAt <= settled {
+				return fail("applied migration is not superseded by a newer restore")
+			}
+			var surviving int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND kind='container' AND NOT (desired_state='absent' AND observed_state='absent')`,
+				p.NamespaceID).Scan(&surviving); err != nil {
+				return "", err
+			}
+			if surviving != 0 {
+				return fail("the failed update's target is not proven absent")
+			}
 		}
 		if migration.Claim.RecoversOperationID == "" {
 			return current, nil

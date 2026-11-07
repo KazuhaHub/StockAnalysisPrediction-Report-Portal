@@ -45,6 +45,9 @@ func (m migrateFixture) insertSettledMigration(t *testing.T, operation, recovers
 	if state == "discarded" {
 		outcome = "discarded"
 	}
+	if state == "migrated" {
+		rowState, outcome = "migrated", ""
+	}
 	receipt := MigrateDataReceipt{
 		Format: migrateReceiptFormat, Claim: claim, DeploymentID: m.command.DeploymentID, ControllerEpoch: m.command.ControllerEpoch,
 		InstallationID: m.command.InstallationID, OperationID: operation, TargetGeneration: m.command.TargetGeneration, Stage: "migrate",
@@ -55,13 +58,19 @@ func (m migrateFixture) insertSettledMigration(t *testing.T, operation, recovers
 		rowState = "discarded"
 	}
 	receipt.State, receipt.Outcome = rowState, outcome
+	if state == "migrated" {
+		receipt.ExitCode, receipt.MarkerSchema = "0", claim.TargetSchema
+	}
 	raw, err := json.Marshal(receipt)
 	if err != nil {
 		t.Fatal(err)
 	}
 	commandState := "reverted"
-	if state == "unknown" || state == "applied" {
+	switch state {
+	case "unknown":
 		commandState = state
+	case "migrated":
+		commandState = "applied"
 	}
 	mustJournalExec(t, m.f.store.db, `INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`,
 		claim.EffectID, operation, m.command.InstallationID, "migrate", 2, "migrate-data", receipt.PayloadSHA256, 2, m.command.ControllerEpoch, 2, commandState, string(raw), at, at)
@@ -159,9 +168,6 @@ func TestMigrateDataRetryRefusesUnsettledRecoveredMigration(t *testing.T) {
 		"migration still unknown": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='unknown' WHERE operation_id=? AND kind='migrate-data'`, r.failed)
 		},
-		"migration applied": func(r retryFixture) {
-			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='applied' WHERE operation_id=? AND kind='migrate-data'`, r.failed)
-		},
 		"migration absent": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='migrate-data'`, r.failed)
 		},
@@ -255,6 +261,52 @@ func TestMigrateDataRetryOfRetryRefusesBrokenChain(t *testing.T) {
 			mutate(r)
 			if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
 				t.Fatal("a retry of a retry was admitted over a broken chain")
+			}
+		})
+	}
+}
+
+// C5: the migration was applied, readiness failed, and settlement removed the target and restored the checkpoint, so
+// the runner's migrate-data stays applied. A retry may follow it only when the restore is newer than the migration
+// and nothing of the failed update's target is left in the namespace.
+func appliedRetryFixture(t *testing.T) retryFixture {
+	t.Helper()
+	r := retryJournalFixture(t)
+	mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind IN ('migrate-data','restore')`, r.failed)
+	now := time.Now().UTC().UnixMilli()
+	r.insertSettledMigration(t, r.failed, "", "migrated", now-20)
+	r.insertRestore(t, r.failed, now-10)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET created_ms=?,updated_ms=? WHERE effect_id=?`, now-5, now-5, r.command.Payload.CheckpointEffectID)
+	return r
+}
+
+func TestMigrateDataRetryAfterAppliedMigrationNeedsNewerRestore(t *testing.T) {
+	r := appliedRetryFixture(t)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatalf("a retry after an applied migration that was restored away was refused: %v", err)
+	}
+	for name, mutate := range map[string]func(r retryFixture){
+		"no restore": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='restore'`, r.failed)
+		},
+		"restore older than the migration": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET created_ms=1,updated_ms=updated_ms-30 WHERE operation_id=? AND kind='restore'`, r.failed)
+		},
+		"restore as old as the migration": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET updated_ms=(SELECT updated_ms FROM runner_commands WHERE operation_id=? AND kind='migrate-data') WHERE operation_id=? AND kind='restore'`, r.failed, r.failed)
+		},
+		"the failed update's target is still there": func(r retryFixture) {
+			now := time.Now().UTC().UnixMilli()
+			mustJournalExec(t, r.f.store.db, `INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms) VALUES(?,?,?,'container',?,?,2,?,2,3,'present','stopped',?,2,?,?,?)`,
+				fixtureID(1990), r.command.InstallationID, r.command.Payload.NamespaceID, strings.Repeat("9", 64), r.command.Payload.TargetReleaseSHA256,
+				r.command.ControllerEpoch, strings.Repeat("8", 64), now, now, now)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := appliedRetryFixture(t)
+			mutate(r)
+			if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+				t.Fatal("a retry was admitted over an applied migration that was not restored away")
 			}
 		})
 	}
