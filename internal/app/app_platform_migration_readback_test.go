@@ -106,7 +106,9 @@ func testSettlementDiscardRefusedAfterMigrationSettled(t *testing.T, state, outc
 		sends++
 		return nil, errors.New("the runner refused: the migration is no longer unknown")
 	}
-	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) { return nil, errPlatformMigrationAbsent }
+	f.fake.readDiscard = func(platformDiscardIntent) (platformDiscardObservation, error) {
+		return nil, errPlatformMigrationAbsent
+	}
 	f.step(t)
 	if sends != 1 {
 		t.Fatalf("the discard was not sent once: %d", sends)
