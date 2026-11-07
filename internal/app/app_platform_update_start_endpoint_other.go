@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
@@ -28,4 +29,8 @@ func platformProbeUpdateStart(context.Context, platformRuntimeEndpoint, platform
 // Portal can never settle a start it did not read.
 func platformReadUpdateStartReceipt(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 	return nil, errAppPlatformRuntimeConflict
+}
+
+func platformRunSettleUpdateStart(context.Context, platformRuntimeEndpoint, platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+	return journal.SettleUpdateStartReceipt{}, errAppPlatformRuntimeConflict
 }

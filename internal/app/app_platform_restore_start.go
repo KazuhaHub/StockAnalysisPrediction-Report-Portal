@@ -206,6 +206,10 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 			return zero, err
 		}
 	}
+	settled, err := platformRestoreSettledByMigration(e, lease)
+	if err != nil {
+		return zero, err
+	}
 	var stopState, removeState string
 	if err := e.queryRow(`SELECT
 		COALESCE(MAX(CASE WHEN effect_number=1 THEN state END),''),
@@ -213,10 +217,32 @@ func (s *Server) preparePlatformRestoreStartMode(ctx context.Context, lease plat
 		FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='quiesce'`,
 		lease.id).Scan(&stopState, &removeState); err != nil ||
-		(!resume && (stopState != "applied" || removeState != "applied")) ||
+		(settled && (stopState != "" || removeState != "")) ||
+		(!resume && !settled && (stopState != "applied" || removeState != "applied")) ||
 		(resume && containerRequired && (stopState != "applied" || removeState != "applied")) ||
 		(resume && !containerRequired && (stopState != "" || removeState != "")) {
 		return zero, errAppPlatformStageEvidence
+	}
+	if settled && stage == appplatform.StageStart {
+		// The failed update never started a target, so there is no candidate activation to reuse: the
+		// roll back opens the one its start will run under.
+		var existing int
+		if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND generation=?`,
+			lease.installationID, lease.snapshot.Generation).Scan(&existing); err != nil {
+			return zero, err
+		}
+		if existing == 0 {
+			id, err := platformNewUUID()
+			if err != nil {
+				return zero, err
+			}
+			if _, err := e.exec(`INSERT INTO app_platform_activations(id,installation_id,release_sha256,generation,policy_revision,data_namespace_id,data_format,state,readiness_evidence,observed_ms,created_ms,updated_ms)
+				SELECT ?,?,?,?,i.policy_revision,?,?,'candidate','{}',NULL,?,? FROM app_platform_installations i WHERE i.id=?`,
+				id, lease.installationID, checkpoint.ReleaseSHA256, lease.snapshot.Generation, checkpoint.NamespaceID,
+				mustPlatformCheckpointInt(checkpoint.DataFormat), facts.now, facts.now, lease.installationID); err != nil {
+				return zero, err
+			}
+		}
 	}
 	var activation, namespace, activationState, readinessRaw string
 	var format int64

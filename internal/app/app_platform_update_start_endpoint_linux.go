@@ -44,3 +44,13 @@ func platformReadUpdateStartReceipt(ctx context.Context, endpoint platformRuntim
 	}
 	return observation, nil
 }
+
+// platformRunSettleUpdateStart sends the settlement of an orphaned start and answers the receipt it returns.
+func platformRunSettleUpdateStart(ctx context.Context, endpoint platformRuntimeEndpoint, intent platformSettleStartIntent) (journal.SettleUpdateStartReceipt, error) {
+	observation, err := platformRunLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
+		transport.SettleUpdateStartExecute, intent.raw, intent.signature, intent.authority, intent.descriptor, nil)
+	if err != nil {
+		return journal.SettleUpdateStartReceipt{}, err
+	}
+	return observation.SettleUpdateStartReceipt()
+}

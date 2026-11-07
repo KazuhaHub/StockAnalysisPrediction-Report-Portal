@@ -179,6 +179,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 409, "app_platform_plan_changed"
 	case errors.Is(err, errAppPlatformOperationConflict):
 		status, code = 409, "app_platform_operation_conflict"
+	case errors.Is(err, errAppPlatformMigrationUnsettled):
+		status, code = 409, "app_platform_migration_unsettled"
 	case errors.Is(err, errAppPlatformRecoveryUnsettled):
 		status, code = 409, "app_platform_recovery_unsettled"
 	case errors.Is(err, errAppPlatformCredentialUnavailable):
@@ -300,7 +302,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 	}
 	fields, err := platformManagementObject(raw, "action",
 		"release_sha256", "trust_revision", "audience",
-		"installation_id", "data_namespace_id", "recovery_set_id")
+		"installation_id", "data_namespace_id", "recovery_set_id", "recovers_operation_id")
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -401,7 +403,17 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 		}
 		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{"action": "install", "app_id": projection.AppID, "publisher_id": projection.PublisherID, "release_sha256": projection.ReleaseSHA256, "trust_revision": revision, "declined_capabilities": projection.DeclinedCapabilities, "data_quota_bytes": strconv.FormatInt(projection.DataQuotaBytes, 10), "audience": audience}})
 	case "update":
-		if len(fields) != 4 || fields["installation_id"] == nil || fields["audience"] != nil {
+		recovers := ""
+		want := 4
+		if fields["recovers_operation_id"] != nil {
+			want = 5
+			var recoversErr error
+			if recovers, recoversErr = platformManagementString(fields, "recovers_operation_id"); recoversErr != nil || !platformValidUUID(recovers) {
+				platformManagementError(w, errPlatformManagementInput)
+				return
+			}
+		}
+		if len(fields) != want || fields["installation_id"] == nil || fields["audience"] != nil {
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
@@ -410,8 +422,8 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, errPlatformManagementInput)
 			return
 		}
-		review, err := s.createPlatformUpdateReviewContext(
-			r.Context(), actor, installation, release, n)
+		review, err := s.createPlatformUpdateReviewRecovering(
+			r.Context(), actor, installation, release, n, recovers)
 		if err != nil {
 			platformManagementError(w, err)
 			return
@@ -421,7 +433,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
+		reviewBody := map[string]any{
 			"action": "update", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
 			"source_release_sha256": projection.SourceReleaseSHA256, "release_sha256": projection.Target.ReleaseSHA256,
 			"source_generation": strconv.FormatInt(projection.SourceGeneration, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
@@ -429,7 +441,17 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"trust_revision": revision, "declined_capabilities": projection.Target.DeclinedCapabilities,
 			"previous_capabilities": platformNonNilStrings(projection.PreviousCapabilities), "target_capabilities": platformNonNilStrings(projection.TargetCapabilities), "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
 			"grants_sha256": projection.GrantsSHA256, "audience": nil,
-		}})
+		}
+		if projection.RecoversOperationID != "" {
+			reviewBody["recovers_operation_id"] = projection.RecoversOperationID
+		}
+		if projection.Migration != nil {
+			reviewBody["data_migration"] = map[string]any{
+				"from": strconv.FormatInt(projection.Migration.From, 10), "to": strconv.FormatInt(projection.Migration.To, 10),
+				"wall_clock_seconds": strconv.FormatInt(projection.Migration.WallClockSeconds, 10),
+			}
+		}
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": reviewBody})
 	case "disable", "uninstall":
 		if len(fields) != 2 || fields["installation_id"] == nil {
 			platformManagementError(w, errPlatformManagementInput)

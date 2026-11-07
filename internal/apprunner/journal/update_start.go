@@ -79,6 +79,9 @@ type updateStartFacts struct {
 	updated        int64
 	raw, signature []byte
 	now            int64
+	// verify is the check the command was admitted under: the execute check, or the read check for a read-back. The
+	// final check repeats that one, since a signature made for a read is not one for an execute.
+	verify updateStartVerifier
 }
 
 func updateStartIndex(c control.UpdateStartCommand) control.Command {
@@ -131,6 +134,9 @@ func loadUpdateStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateStar
 func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, now int64, registrationEffect string) (updateStartSource, error) {
 	var zero updateStartSource
 	p := c.Payload
+	if err := requireUntaintedMigrationNamespace(ctx, tx, c); err != nil {
+		return zero, err
+	}
 	var sourceKind string
 	if err := tx.QueryRowContext(ctx, `SELECT kind FROM runner_commands WHERE effect_id=?`,
 		p.SourceCheckpointEffectID).Scan(&sourceKind); err == nil && sourceKind == "import-checkpoint" {
@@ -160,6 +166,22 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 	if p.CheckpointWriterFence != "" {
 		expectedCheckpointWriterFence = p.CheckpointWriterFence
 	}
+	// A migration changes the data format between the checkpoint (the source schema) and the start (the
+	// target schema); only an applied migrate-data receipt bound by the command may explain the difference.
+	expectedCheckpointFormat := p.DataFormat
+	if p.MigrateEffectID != "" {
+		migrated, err := loadAppliedMigration(ctx, tx, c, expectedCheckpointWriterFence)
+		if err != nil {
+			return zero, err
+		}
+		expectedCheckpointFormat = migrated.Claim.SourceSchema
+	} else if c.Kind == "update-start" {
+		var applied int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE kind='migrate-data' AND operation_id=? AND installation_id=? AND state='applied'`,
+			c.OperationID, c.InstallationID).Scan(&applied); err != nil || applied != 0 {
+			return zero, fmt.Errorf("%w: update-start ignores an applied migration", ErrFenceReconciliation)
+		}
+	}
 	checkpoint, err := ParseCheckpointReceipt([]byte(raw))
 	if err != nil || checkpoint.EffectID != p.SourceCheckpointEffectID ||
 		checkpoint.PayloadSHA256 != payload ||
@@ -174,7 +196,7 @@ func loadUpdateStartSourceExcludingRegistration(ctx context.Context, tx *sql.Tx,
 		checkpoint.ProjectID != p.ProjectID ||
 		checkpoint.NamespaceInode != p.NamespaceInode ||
 		checkpoint.Device != p.Device ||
-		checkpoint.DataFormat != p.DataFormat ||
+		checkpoint.DataFormat != expectedCheckpointFormat ||
 		checkpoint.WriterFence != expectedCheckpointWriterFence ||
 		checkpoint.SourceOperationID != p.SourceOperationID ||
 		checkpoint.SourceStartEffectID != p.SourceStartEffectID ||
@@ -330,7 +352,11 @@ func finalUpdateStartCheck(ctx context.Context, f updateStartFacts) error {
 	if now < f.now {
 		return control.ErrInvalidCommand
 	}
-	_, err := control.VerifyUpdateStart(f.raw, f.signature, f.authority, now)
+	verify := f.verify
+	if verify == nil {
+		verify = control.VerifyUpdateStart
+	}
+	_, err := verify(f.raw, f.signature, f.authority, now)
 	return err
 }
 
@@ -535,4 +561,88 @@ func (s *Store) ReadUpdateStartReservation(ctx context.Context, raw, signature [
 		return zero, err
 	}
 	return result, nil
+}
+
+// requireUntaintedMigrationNamespace refuses any start while a migration of the installation is
+// unsettled or a migration job resource of the namespace is not proven absent. A migration whose
+// outcome is unknown may still be writing, so no release may start beside it.
+func requireUntaintedMigrationNamespace(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand) error {
+	var unsettled, surviving int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind IN ('migrate-data','discard-migration') AND state IN ('prepared','unknown')`,
+		c.InstallationID).Scan(&unsettled); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND kind='container' AND native_id LIKE 'migration-job/%' AND NOT (desired_state='absent' AND observed_state='absent')`,
+		c.Payload.NamespaceID).Scan(&surviving); err != nil {
+		return err
+	}
+	if unsettled != 0 || surviving != 0 {
+		return fmt.Errorf("%w: namespace has an unsettled migration", ErrFenceReconciliation)
+	}
+	return nil
+}
+
+// loadAppliedMigration checks the migrate-data receipt an update-start names: applied, of the same
+// operation, bound to this checkpoint, namespace, schemas and target release, and with the writer fences
+// the start uses (checkpoint S, the migration's S+1 as the source fence, the reserved S+2 as the target).
+func loadAppliedMigration(ctx context.Context, tx *sql.Tx, c control.UpdateStartCommand, checkpointWriterFence string) (MigrateDataReceipt, error) {
+	var zero MigrateDataReceipt
+	p := c.Payload
+	fail := func(reason string) (MigrateDataReceipt, error) {
+		return zero, fmt.Errorf("%w: update-start migration %s", ErrFenceReconciliation, reason)
+	}
+	row, err := loadImportRow(ctx, tx, p.MigrateEffectID)
+	if err != nil || row == nil || row.kind != "migrate-data" || row.stage != "migrate" || row.state != "applied" ||
+		row.installation != c.InstallationID || row.operation != c.OperationID || row.epoch != c.ControllerEpoch ||
+		candidateHash([]byte(row.receipt)) != p.MigrateReceiptSHA256 {
+		return fail("receipt")
+	}
+	receipt, err := ParseMigrateDataReceipt([]byte(row.receipt))
+	if err != nil || receipt.State != "migrated" || receipt.EffectID != p.MigrateEffectID || receipt.PayloadSHA256 != row.payload ||
+		receipt.InstallationID != c.InstallationID || receipt.OperationID != c.OperationID ||
+		receipt.DeploymentID != c.DeploymentID || receipt.ControllerEpoch != c.ControllerEpoch {
+		return fail("receipt content")
+	}
+	m := receipt.Claim
+	if m.NamespaceID != p.NamespaceID || m.CheckpointID != p.CheckpointID || m.CheckpointReceiptSHA256 != p.SourceCheckpointReceiptSHA256 ||
+		m.SourceReleaseSHA256 != p.SourceReleaseSHA256 || m.TargetReleaseSHA256 != p.TargetReleaseSHA256 ||
+		m.TargetSchema != p.DataFormat || m.ProjectID != p.ProjectID || m.NamespaceInode != p.NamespaceInode || m.Device != p.Device {
+		return fail("binding")
+	}
+	if m.CheckpointWriterFence != checkpointWriterFence || m.WriterFence != p.SourceWriterFence || m.StartWriterFence != p.TargetWriterFence {
+		return fail("fences")
+	}
+	var observed, desired string
+	var revision int64
+	if err := tx.QueryRowContext(ctx, `SELECT desired_state,observed_state,revision FROM runner_resources WHERE id=? AND data_namespace_id=? AND kind='container'`,
+		m.ResourceID, p.NamespaceID).Scan(&desired, &observed, &revision); err != nil || desired != "absent" || observed != "absent" || revision < 2 {
+		return fail("job resource")
+	}
+	// A restore of the namespace admitted after the migration took its data away: the migration is superseded and
+	// can never start. "After" is the order the runner admitted the commands in, not the millisecond clock, which
+	// cannot separate two commands admitted together. That order is the commands table's rowid: rows are only ever
+	// inserted (nothing deletes, replaces or vacuums the table, and the v1 upgrade copies in rowid order), and the
+	// migration and the restore run one at a time under the data execution gate.
+	applied, err := rowOrder(ctx, tx, p.MigrateEffectID)
+	if err != nil {
+		return fail("receipt order")
+	}
+	restores, err := tx.QueryContext(ctx, `SELECT receipt_json FROM runner_commands WHERE installation_id=? AND kind='restore' AND state='applied' AND rowid>?`, c.InstallationID, applied)
+	if err != nil {
+		return zero, err
+	}
+	defer restores.Close()
+	for restores.Next() {
+		var raw string
+		if err := restores.Scan(&raw); err != nil {
+			return zero, err
+		}
+		if restored, err := ParseRestoreReceipt([]byte(raw)); err != nil || restored.NamespaceID == p.NamespaceID {
+			return fail("superseded by a restore")
+		}
+	}
+	if err := restores.Err(); err != nil {
+		return zero, err
+	}
+	return receipt, nil
 }

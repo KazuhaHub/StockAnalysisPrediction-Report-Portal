@@ -337,7 +337,7 @@ func (s *Server) commitPlatformUpdateStartReadiness(ctx context.Context, expecte
 		AND readiness_evidence='{}' AND observed_ms IS NULL`,
 		string(readinessRaw), observed, now, current.resourceID, expected.installationID,
 		current.command.Payload.TargetReleaseSHA256, expected.snapshot.Generation,
-		current.plan.TargetPolicyRevision, current.plan.DataNamespaceID, current.plan.DataFormat)
+		current.plan.TargetPolicyRevision, current.plan.DataNamespaceID, current.plan.targetDataFormat())
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, fmt.Errorf("update-start readiness activation: %w", err)
 	}

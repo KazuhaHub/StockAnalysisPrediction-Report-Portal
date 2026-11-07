@@ -13,7 +13,7 @@ func platformExecuteRestore(ctx context.Context, endpoint platformRuntimeEndpoin
 	if err != nil {
 		return transport.WritableLifecycleObservation{}, err
 	}
-	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
+	return platformRunLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
 		transport.RestoreExecute, intent.raw, intent.signature, intent.authority, descriptor, nil)
 }
 
@@ -22,8 +22,8 @@ func platformReadRestoreReceipt(ctx context.Context, endpoint platformRuntimeEnd
 	if err != nil {
 		return transport.WritableLifecycleObservation{}, err
 	}
-	return transport.RunControllerWritableLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
-		transport.RestoreRead, intent.raw, intent.signature, intent.authority, descriptor, nil)
+	return platformRunLifecycle(ctx, endpoint.path, endpoint.controllerUID, endpoint.controllerGID,
+		transport.RestoreRead, intent.raw, intent.readSignature, intent.authority, descriptor, nil)
 }
 
 func platformRestoreDescriptor(intent platformRestoreIntent) ([]byte, error) {

@@ -66,7 +66,8 @@ func (s *Server) claimNextPlatformManagedUpdate(ctx context.Context, worker stri
 		AND o.stage IN ('queued','validate','download','stage','quiesce',
 			'snapshot','migrate','start','probe','activate')
 		AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?)
-		AND i.phase='ready' AND i.desired_state='enabled'
+		AND (i.phase='ready' OR (i.phase='recovery_required' AND p.plan_json LIKE '%"recovers_operation_id":"%'))
+		AND i.desired_state='enabled'
 		AND i.runtime_id IS NOT NULL
 		AND i.generation=o.source_generation
 		AND o.target_generation=i.generation+1
@@ -246,7 +247,7 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 			&currentEpoch, &runtimeID); err != nil ||
 		currentApp != result.plan.AppID ||
 		currentPublisher != result.plan.PublisherID ||
-		desired != "enabled" || phase != "ready" ||
+		desired != "enabled" || !platformRetryPhaseAllowed(phase, result.plan.RecoversOperationID) ||
 		generation != result.plan.SourceGeneration ||
 		currentRevision < result.plan.InstallationRevision ||
 		currentPolicy != result.plan.PolicyRevision ||
@@ -303,6 +304,7 @@ func (s *Server) loadPlatformAdmittedManagedUpdate(e migExec, lease platformOper
 	if err != nil {
 		return result, errAppPlatformPlanChanged
 	}
+	expected.RecoversOperationID = result.plan.RecoversOperationID
 	expectedRaw, err := json.Marshal(expected)
 	if err != nil || string(expectedRaw) != raw {
 		return result, errAppPlatformPlanChanged
@@ -339,7 +341,7 @@ func (s *Server) loadPlatformFinalizedManagedUpdateAdmission(e migExec, lease pl
 			&currentEpoch, &runtimeID); err != nil ||
 		currentApp != finalized.AppID ||
 		currentPublisher != finalized.PublisherID ||
-		desired != "enabled" || phase != "ready" ||
+		desired != "enabled" || !platformRetryPhaseAllowed(phase, finalized.RecoversOperationID) ||
 		generation != finalized.SourceGeneration ||
 		currentPolicy != finalized.SourcePolicyRevision ||
 		currentEpoch != lease.controllerEpoch ||
@@ -428,7 +430,9 @@ func (s *Server) loadPlatformFinalizedManagedUpdateAdmission(e migExec, lease pl
 		TargetPolicyRevision: finalized.TargetPolicyRevision,
 		TrustRevision:        trustRevision,
 		ControllerEpoch:      epoch, ActorAuthority: authority,
-		CurrentDataFormat: finalized.DataFormat,
+		CurrentDataFormat:   finalized.DataFormat,
+		Migration:           finalized.Migration,
+		RecoversOperationID: finalized.RecoversOperationID,
 		Target: platformInstallProjection{
 			Format: sourcePlan.format, AppID: finalized.AppID,
 			PublisherID:     finalized.PublisherID,

@@ -26,6 +26,11 @@ type platformRestoreIntent struct {
 	checkpoint              journal.CheckpointReceipt
 	source                  platformCheckpointSource
 	raw, signature          []byte
+	// readSignature signs raw as a read-receipt, under its own purpose.
+	readSignature []byte
+	// signedUntilBefore is the latest expiry of any command signed for the effect before this one; only a
+	// settlement restore, whose absence must outlast its signed windows, records and reads it.
+	signedUntilBefore int64
 }
 
 const platformManagedRestoreFormat = "portal.managed-restore-review/1-dev.1"
@@ -72,6 +77,9 @@ func platformRestoreReceiptMatchesCommand(receipt journal.RestoreReceipt, comman
 }
 
 func loadPlatformRestoreCheckpoint(e migExec, expected platformOperationLease) (string, string, journal.CheckpointReceipt, int64, error) {
+	if expected.snapshot.Action == appplatform.ActionUpdate {
+		return loadPlatformSettlementRestoreCheckpoint(e, expected)
+	}
 	if resume, err := platformOperationIsResume(e, expected.id); err != nil {
 		return "", "", journal.CheckpointReceipt{}, 0, err
 	} else if resume {
@@ -296,7 +304,7 @@ func loadPlatformRestoreIntent(e migExec, expected platformOperationLease, runti
 		!storedManifest.Valid || storedManifest.String != checkpoint.ManifestSHA256 ||
 		storedBytes != mustPlatformCheckpointInt(checkpoint.ArchiveBytes) ||
 		kind != "restore" || effectEpoch != expected.controllerEpoch ||
-		admitted != expected.fence || observed != 0 || effectState != "prepared" || receipt != "{}" {
+		admitted != expected.fence || observed != 0 || effectState != "prepared" || !platformRestorePendingReceipt(expected, receipt) {
 		return zero, false, errAppPlatformStageEvidence
 	}
 	command, err := platformRestoreCommand(expected, runtime, source, checkpoint, recoverySetID, effectID)
@@ -393,6 +401,9 @@ func (s *Server) preparePlatformRestore(ctx context.Context, expected platformOp
 	if err != nil {
 		return zero, err
 	}
+	if result.readSignature, err = control.SignRestoreRead(result.raw, key, result.authority, issued); err != nil {
+		return zero, err
+	}
 	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
 		return zero, err
 	}
@@ -426,11 +437,12 @@ func validPlatformRestoreObservation(observation platformRestoreObservation, int
 	age := time.Since(observation.ReceivedAt())
 	observed, observedErr := strconv.ParseInt(receipt.ObservedMS, 10, 64)
 	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
-	issued, issuedErr := strconv.ParseInt(intent.command.IssuedMS, 10, 64)
+	// A restored receipt is terminal and immutable: read back on a later tick it carries the time it was first
+	// observed, so it is not held to the signing time of the command that read it.
 	if !peer.RootController || peer.Path != endpoint.path || peer.RunnerUID != 0 ||
 		peer.ControllerUID != endpoint.controllerUID || peer.ControllerGID != endpoint.controllerGID ||
-		age < 0 || age > 3*time.Second || observedErr != nil || settledErr != nil || issuedErr != nil ||
-		observed < issued || observed > settled || settled > observation.ReceivedAt().UnixMilli() {
+		age < 0 || age > 3*time.Second || observedErr != nil || settledErr != nil ||
+		observed > settled || settled > observation.ReceivedAt().UnixMilli() {
 		return journal.RestoreReceipt{}, false
 	}
 	return receipt, true

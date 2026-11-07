@@ -97,9 +97,20 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	baseEffects := 2
 	if lease.snapshot.Action == appplatform.ActionUpdate {
 		baseEffects = 4
+		migrations, err := platformMigrationEffectCount(e, lease.id)
+		if err != nil {
+			return zero, false, err
+		}
+		baseEffects += migrations
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
 		baseEffects = 4
+		if settled, err := platformRestoreSettledByMigration(e, lease); err != nil {
+			return zero, false, err
+		} else if settled {
+			// The failed update's settlement did the stop, removal and restore; this operation only starts.
+			baseEffects = 1
+		}
 		// A resume has only the start effect before this one: the import already ran the data
 		// stages, and nothing was stopped or removed on the new host.
 		if resume, err := platformOperationIsResume(e, lease.id); err != nil {

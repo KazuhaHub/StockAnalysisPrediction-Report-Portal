@@ -359,9 +359,9 @@ func (s *Store) beginRestore(ctx context.Context, raw, signature []byte) (restor
 	return source, false, nil
 }
 
-func (s *Store) settleRestore(ctx context.Context, source restoreSource, observation data.RestoreObservation) (RestoreReceipt, error) {
+func (s *Store) settleRestoreSnapshot(ctx context.Context, source restoreSource, snapshot data.RestoreSnapshot) (RestoreReceipt, error) {
 	var zero RestoreReceipt
-	snapshot, err := observation.Snapshot()
+	var err error
 	projectID, projectErr := checkpointProjectID(source.command.Payload.ProjectID)
 	if err != nil || snapshot.NamespaceID != source.command.Payload.NamespaceID ||
 		snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
@@ -484,9 +484,118 @@ func sameRestoreSource(a, b restoreSource) bool {
 		a.checkpoint == b.checkpoint && a.resource == b.resource
 }
 
+// restoreRunner performs the native replacement of the namespace from the verified checkpoint. It is
+// convergent: running it again over a partially restored namespace reaches the same verified end.
+type restoreRunner func(ctx context.Context, request data.RestoreRequest) (data.RestoreSnapshot, error)
+
+func restoreRequestFor(source restoreSource) (data.RestoreRequest, error) {
+	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
+	if err != nil {
+		return data.RestoreRequest{}, fmt.Errorf("restore project identity: %w", ErrFenceReconciliation)
+	}
+	p := source.command.Payload
+	return data.RestoreRequest{
+		CheckpointID: p.CheckpointID, NamespaceID: p.NamespaceID, ReleaseSHA256: p.ReleaseSHA256,
+		ManifestSHA256: p.ManifestSHA256, ProjectID: projectID, DataFormat: mustDataInt(p.DataFormat),
+		ArchiveBytes: mustDataInt(p.ArchiveBytes), MaxArchiveBytes: maxCheckpointArchiveBytes,
+		ExpectedDevice: mustDataUint(p.Device), ExpectedNamespaceInode: mustDataUint(p.NamespaceInode),
+		WriterFence: mustDataInt(p.WriterFence),
+	}, nil
+}
+
+// loadUnknownRestore rebuilds the source of a restore left unknown by an earlier attempt, from the
+// journal alone. The restore is completed under that same claim: the extraction from a verified
+// checkpoint is convergent, and finishing the claim is not a retry under a new identity. It writes
+// nothing; expiry governs dispatch, not settlement.
+func (s *Store) loadUnknownRestore(ctx context.Context, raw, signature []byte) (restoreSource, error) {
+	var zero restoreSource
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return zero, err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return zero, err
+	}
+	now := time.Now().UTC().UnixMilli()
+	verified, err := control.VerifyRestoreSettlement(raw, signature, importAuthorityFrom(deployment), now)
+	if err != nil {
+		return zero, err
+	}
+	command := verified.Command()
+	row, err := loadImportRow(ctx, tx, command.EffectID)
+	if err != nil || row == nil || row.state != "unknown" || row.receipt != "{}" || row.operation != command.OperationID ||
+		row.installation != command.InstallationID || row.stage != command.Stage || row.kind != command.Kind ||
+		row.payload != command.PayloadSHA256 || row.epoch != command.ControllerEpoch {
+		return zero, ErrFenceReconciliation
+	}
+	var checkpointState string
+	var checkpointRevision int64
+	if err := tx.QueryRowContext(ctx, `SELECT state,revision FROM runner_checkpoints WHERE id=?`, command.Payload.CheckpointID).
+		Scan(&checkpointState, &checkpointRevision); err != nil || checkpointState != "restoring" || checkpointRevision != 3 {
+		return zero, fmt.Errorf("unknown restore checkpoint state=%s revision=%d: %w", checkpointState, checkpointRevision, ErrFenceReconciliation)
+	}
+	source, err := loadRestoreSource(ctx, tx, command, now)
+	if err != nil {
+		return zero, fmt.Errorf("unknown restore source: %w", err)
+	}
+	source.raw, source.signature = bytes.Clone(raw), bytes.Clone(signature)
+	return source, nil
+}
+
+// restoreState classifies the effect without writing: "" when no row exists.
+func (s *Store) restoreState(ctx context.Context, raw, signature []byte) (string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_deployment SET revision=revision WHERE singleton=1`); err != nil {
+		return "", err
+	}
+	deployment, err := readControllerDeployment(ctx, tx)
+	if err != nil {
+		return "", err
+	}
+	verified, err := control.VerifyRestoreSettlement(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
+	if err != nil {
+		return "", err
+	}
+	command := verified.Command()
+	row, err := loadImportRow(ctx, tx, command.EffectID)
+	if err != nil || row == nil {
+		return "", err
+	}
+	if row.operation != command.OperationID || row.installation != command.InstallationID || row.stage != command.Stage ||
+		row.kind != command.Kind || row.payload != command.PayloadSHA256 || row.epoch != command.ControllerEpoch {
+		return "", ErrCommandConflict
+	}
+	return row.state, nil
+}
+
 func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, dataRoot *data.Root, dataPin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity) (RestoreReceipt, error) {
-	var zero RestoreReceipt
 	if dataRoot == nil || checkpointRoot == nil || s.closing.Load() {
+		return RestoreReceipt{}, ErrRestoreUnavailable
+	}
+	return s.dispatchRestore(ctx, raw, signature, func(ctx context.Context, request data.RestoreRequest) (data.RestoreSnapshot, error) {
+		observation, err := checkpointRoot.Restore(ctx, checkpointPin, dataRoot, dataPin, request)
+		if err != nil {
+			return data.RestoreSnapshot{}, err
+		}
+		return observation.Snapshot()
+	})
+}
+
+// dispatchRestore claims a restore once. A restore left unknown by an earlier attempt is completed under
+// that same claim, never claimed again. A claimed restore runs detached from the connection, to a
+// definite end bounded by the checkpoint's size, so a lost connection cannot leave it half done.
+func (s *Store) dispatchRestore(ctx context.Context, raw, signature []byte, run restoreRunner) (RestoreReceipt, error) {
+	var zero RestoreReceipt
+	if s.closing.Load() || run == nil {
 		return zero, ErrRestoreUnavailable
 	}
 	raw, signature = bytes.Clone(raw), bytes.Clone(signature)
@@ -494,45 +603,69 @@ func (s *Store) DispatchRestore(ctx context.Context, raw, signature []byte, data
 		return zero, err
 	}
 	defer s.releaseDataExecution()
-	source, replay, err := s.beginRestore(ctx, raw, signature)
+	state, err := s.restoreState(ctx, raw, signature)
 	if err != nil {
-		return zero, fmt.Errorf("begin restore: %w", err)
+		return zero, fmt.Errorf("restore state: %w", err)
 	}
-	source.raw, source.signature = raw, signature
-	if replay {
+	var source restoreSource
+	switch state {
+	case "applied":
 		return s.ReadRestoreReceipt(ctx, raw, signature)
+	case "unknown":
+		source, err = s.loadUnknownRestore(ctx, raw, signature)
+		if err != nil {
+			return zero, fmt.Errorf("reload unknown restore: %w", err)
+		}
+	default:
+		var replay bool
+		source, replay, err = s.beginRestore(ctx, raw, signature)
+		if err != nil {
+			return zero, fmt.Errorf("begin restore: %w", err)
+		}
+		source.raw, source.signature = raw, signature
+		if replay {
+			return s.ReadRestoreReceipt(ctx, raw, signature)
+		}
 	}
-	projectID, err := checkpointProjectID(source.command.Payload.ProjectID)
+	request, err := restoreRequestFor(source)
 	if err != nil {
-		return zero, fmt.Errorf(
-			"restore project identity: %w", ErrFenceReconciliation)
+		return zero, err
 	}
-	request := data.RestoreRequest{
-		CheckpointID:           source.command.Payload.CheckpointID,
-		NamespaceID:            source.command.Payload.NamespaceID,
-		ReleaseSHA256:          source.command.Payload.ReleaseSHA256,
-		ManifestSHA256:         source.command.Payload.ManifestSHA256,
-		ProjectID:              projectID,
-		DataFormat:             mustDataInt(source.command.Payload.DataFormat),
-		ArchiveBytes:           mustDataInt(source.command.Payload.ArchiveBytes),
-		MaxArchiveBytes:        maxCheckpointArchiveBytes,
-		ExpectedDevice:         mustDataUint(source.command.Payload.Device),
-		ExpectedNamespaceInode: mustDataUint(source.command.Payload.NamespaceInode),
-		WriterFence:            mustDataInt(source.command.Payload.WriterFence),
-	}
-	observation, err := checkpointRoot.Restore(ctx, checkpointPin, dataRoot, dataPin, request)
+	ctx, cancel := detachedImportContext(ctx, request.ArchiveBytes)
+	defer cancel()
+	snapshot, err := run(ctx, request)
 	if err != nil {
 		return zero, fmt.Errorf("restore data: %w", err)
 	}
-	receipt, err := s.settleRestore(ctx, source, observation)
+	receipt, err := s.settleRestoreSnapshot(ctx, source, snapshot)
 	if err != nil {
 		return zero, fmt.Errorf("settle restore: %w", err)
 	}
 	return receipt, nil
 }
 
+type restoreVerifier func(raw, signature []byte, authority control.Authority, nowMS int64) (control.VerifiedRestoreCommand, error)
+
 func (s *Store) ReadRestoreReceipt(ctx context.Context, raw, signature []byte) (RestoreReceipt, error) {
-	var zero RestoreReceipt
+	got, err := s.readRestore(ctx, raw, signature, control.VerifyRestore)
+	if err != nil {
+		return RestoreReceipt{}, err
+	}
+	if got.receipt == nil {
+		return RestoreReceipt{}, ErrRestoreUnavailable
+	}
+	return *got.receipt, nil
+}
+
+type restoreReadResult struct {
+	command control.RestoreCommand
+	receipt *RestoreReceipt
+	missing bool
+	unknown bool
+}
+
+func (s *Store) readRestore(ctx context.Context, raw, signature []byte, verify restoreVerifier) (restoreReadResult, error) {
+	var zero restoreReadResult
 	if s.closing.Load() {
 		return zero, ErrRestoreUnavailable
 	}
@@ -548,23 +681,37 @@ func (s *Store) ReadRestoreReceipt(ctx context.Context, raw, signature []byte) (
 	if err != nil {
 		return zero, err
 	}
-	authority := control.Authority{
-		DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch,
-		ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey,
-		Fingerprint: deployment.Fingerprint,
-	}
-	verified, err := control.VerifyRestore(raw, signature, authority, time.Now().UTC().UnixMilli())
+	verified, err := verify(raw, signature, importAuthorityFrom(deployment), time.Now().UTC().UnixMilli())
 	if err != nil {
 		return zero, err
 	}
 	command := verified.Command()
-	var receipt string
-	if err := tx.QueryRowContext(ctx, `SELECT receipt_json FROM runner_commands
-		WHERE effect_id=? AND operation_id=? AND installation_id=? AND state='applied'`,
-		command.EffectID, command.OperationID, command.InstallationID).Scan(&receipt); err != nil {
+	row, err := loadImportRow(ctx, tx, command.EffectID)
+	if err != nil {
+		return zero, err
+	}
+	if row == nil {
+		var siblings int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE effect_id=? OR (operation_id=? AND stage=? AND effect_number=?)`,
+			command.EffectID, command.OperationID, command.Stage, mustDataInt(command.EffectNumber)).Scan(&siblings); err != nil {
+			return zero, err
+		}
+		if siblings != 0 {
+			return zero, ErrCommandConflict
+		}
+		return restoreReadResult{command: command, missing: true}, nil
+	}
+	if row.operation != command.OperationID || row.installation != command.InstallationID || row.stage != command.Stage ||
+		row.kind != command.Kind || row.payload != command.PayloadSHA256 || row.epoch != command.ControllerEpoch {
+		return zero, ErrCommandConflict
+	}
+	if row.state == "unknown" {
+		return restoreReadResult{command: command, unknown: true}, nil
+	}
+	if row.state != "applied" {
 		return zero, ErrRestoreUnavailable
 	}
-	result, err := ParseRestoreReceipt([]byte(receipt))
+	result, err := ParseRestoreReceipt([]byte(row.receipt))
 	if err != nil || !restoreReceiptMatchesCommand(result, command) {
 		return zero, ErrFenceReconciliation
 	}
@@ -583,8 +730,72 @@ func (s *Store) ReadRestoreReceipt(ctx context.Context, raw, signature []byte) (
 		bytes != mustDataInt(result.ArchiveBytes) {
 		return zero, ErrFenceReconciliation
 	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
+	return restoreReadResult{command: command, receipt: &result}, nil
+}
+
+func restoreStatusFor(c control.RestoreCommand, state string, now int64) MigrateDataStatus {
+	return MigrateDataStatus{
+		Format: migrateStatusFormat, Kind: "restore", DeploymentID: c.DeploymentID, ControllerEpoch: c.ControllerEpoch,
+		InstallationID: c.InstallationID, OperationID: c.OperationID, TargetGeneration: c.TargetGeneration, Stage: c.Stage,
+		EffectNumber: c.EffectNumber, EffectID: c.EffectID, PayloadSHA256: c.PayloadSHA256, State: state,
+		ObservedMS: strconv.FormatInt(now, 10),
 	}
-	return result, nil
+}
+
+// RestoreStatusMatchesCommand reports whether the status answers exactly this signed restore command.
+func RestoreStatusMatchesCommand(s MigrateDataStatus, c control.RestoreCommand) bool {
+	return s.Kind == "restore" && s.DeploymentID == c.DeploymentID && s.ControllerEpoch == c.ControllerEpoch &&
+		s.InstallationID == c.InstallationID && s.OperationID == c.OperationID && s.TargetGeneration == c.TargetGeneration &&
+		s.Stage == c.Stage && s.EffectNumber == c.EffectNumber && s.EffectID == c.EffectID && s.PayloadSHA256 == c.PayloadSHA256
+}
+
+// ReadRestoreOrStatus is the runner's read-back answer for a restore: the receipt, or a typed status. The
+// command is verified under the restore read purpose and is not bound by the signed window. A status
+// never waits for a running dispatch: "pending" while the data execution gate is held, "orphaned" for an
+// unknown restore with the gate free, and "absent" only for no row at all, proven with the gate held by
+// this read. The Portal treats an absence as definite only after the signed window has passed.
+func (s *Store) ReadRestoreOrStatus(ctx context.Context, raw, signature []byte) (any, error) {
+	got, err := s.readRestore(ctx, raw, signature, control.VerifyRestoreRead)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC().UnixMilli()
+	switch {
+	case got.unknown:
+		if afterFirstRead != nil {
+			afterFirstRead()
+		}
+		if !s.tryAcquireDataExecution() {
+			return restoreStatusFor(got.command, "pending", now), nil
+		}
+		defer s.releaseDataExecution()
+		again, err := s.readRestore(ctx, raw, signature, control.VerifyRestoreRead)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case again.unknown:
+			return restoreStatusFor(again.command, "orphaned", time.Now().UTC().UnixMilli()), nil
+		case again.missing:
+			return nil, ErrFenceReconciliation
+		}
+		return *again.receipt, nil
+	case got.missing:
+		if !s.tryAcquireDataExecution() {
+			return restoreStatusFor(got.command, "pending", now), nil
+		}
+		defer s.releaseDataExecution()
+		again, err := s.readRestore(ctx, raw, signature, control.VerifyRestoreRead)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case again.missing:
+			return restoreStatusFor(again.command, "absent", time.Now().UTC().UnixMilli()), nil
+		case again.unknown:
+			return restoreStatusFor(again.command, "orphaned", time.Now().UTC().UnixMilli()), nil
+		}
+		return *again.receipt, nil
+	}
+	return *got.receipt, nil
 }

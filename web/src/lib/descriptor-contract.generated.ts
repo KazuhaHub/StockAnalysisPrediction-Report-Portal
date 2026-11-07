@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "e956d5b4a12ad4752892a1c6a426c8d3ba1f55770536e40eeaabbc4f9de935f8";
+export const DESCRIPTOR_SCHEMA_SHA256 = "189f99c6ff4d59d277797afad80718dd2a24214b63e62cb4f24e47d22cdc9479";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -54,6 +54,13 @@ export interface DataCompatibility {
  schema: number;
  readable_schemas: (number)[];
  writes_on_startup?: false | null;
+ migrations?: (DataMigration)[];
+}
+export interface DataMigration {
+ from: number;
+ to: number;
+ entrypoint: (string)[];
+ wall_clock_seconds?: number;
 }
 export interface AppDisplay {
  icon: "appstore" | "file-text" | "dashboard" | "calendar" | "bar-chart" | "cloud" | "tool" | "experiment";
@@ -83,6 +90,11 @@ export const DESCRIPTOR_LIMITS = {
   "maxRouteQueryValues": 16,
   "maxDescriptorRoutes": 32,
   "maxDescriptorReadableSchemas": 32,
+  "maxDescriptorMigrations": 8,
+  "maxMigrationEntrypointArgs": 16,
+  "maxMigrationEntrypointBytes": 256,
+  "minMigrationWallClockSeconds": 1,
+  "maxMigrationWallClockSeconds": 600,
   "minDescriptorDataSchema": 1,
   "maxDescriptorDataSchema": 1000000,
   "maxDescriptorPathBytes": 256,
@@ -202,7 +214,14 @@ export const DESCRIPTOR_FIELDS = {
   "DataCompatibility": [
     "schema",
     "readable_schemas",
-    "writes_on_startup"
+    "writes_on_startup",
+    "migrations"
+  ],
+  "DataMigration": [
+    "from",
+    "to",
+    "entrypoint",
+    "wall_clock_seconds"
   ],
   "AppDisplay": [
     "icon",

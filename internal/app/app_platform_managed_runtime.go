@@ -10,9 +10,19 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
+// platformManagedRuntimeObserved is what the portal reads from a runner's authenticated profile answer. The
+// transport's observation is the only production implementation; the interface is the seam a test stands a
+// runner behind, since the observation itself can be minted only by the local probe.
+type platformManagedRuntimeObserved interface {
+	Profile() transport.ManagedRuntimeProfile
+	Controller() control.Authority
+	Endpoint() transport.CandidateReceiptEndpoint
+	ReceivedAt() time.Time
+}
+
 type platformManagedRuntimeFacts struct {
 	runtime       platformRuntimeRegistration
-	observation   transport.ManagedRuntimeObservation
+	observation   platformManagedRuntimeObserved
 	network       *platformNetworkRuntimeFacts
 	networkPolicy string
 	streamPolicy  string
@@ -24,7 +34,10 @@ func platformRuntimeAuthority(r platformRuntimeRegistration) control.Authority {
 func samePlatformManagedRuntime(a, b platformRuntimeRegistration) bool {
 	return a.id == b.id && a.deploymentID == b.deploymentID && a.controllerEpoch == b.controllerEpoch && a.revision == b.revision && a.controlRevision == b.controlRevision && a.fingerprint == b.fingerprint && bytes.Equal(a.publicKey, b.publicKey)
 }
-func validPlatformManagedRuntimeObservation(o transport.ManagedRuntimeObservation, r platformRuntimeRegistration, e platformRuntimeEndpoint) bool {
+func validPlatformManagedRuntimeObservation(o platformManagedRuntimeObserved, r platformRuntimeRegistration, e platformRuntimeEndpoint) bool {
+	if o == nil {
+		return false
+	}
 	age := time.Since(o.ReceivedAt())
 	peer := o.Endpoint()
 	a := o.Controller()
@@ -73,7 +86,15 @@ func (s *Server) observePlatformManagedRuntimeMode(ctx context.Context, session 
 	if err := capture(true); err != nil {
 		return platformManagedRuntimeFacts{}, err
 	}
-	observation, err := platformReadManagedRuntime(ctx, endpoint, platformRuntimeAuthority(result.runtime))
+	var observation platformManagedRuntimeObserved
+	var err error
+	if s.platformReadManagedRuntime != nil {
+		observation, err = s.platformReadManagedRuntime(ctx, endpoint, platformRuntimeAuthority(result.runtime))
+	} else {
+		var probed transport.ManagedRuntimeObservation
+		probed, err = platformReadManagedRuntime(ctx, endpoint, platformRuntimeAuthority(result.runtime))
+		observation = probed
+	}
 	if err != nil {
 		return platformManagedRuntimeFacts{}, err
 	}

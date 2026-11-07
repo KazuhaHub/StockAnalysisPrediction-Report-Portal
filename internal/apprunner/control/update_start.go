@@ -19,6 +19,14 @@ const updateStartReadPurpose = "portal.app/runner-data-update-start-read/v1"
 const updateStartEffectPurpose = "portal.app/runner-data-update-start-effect/v1"
 const maxUpdateStartArchiveBytes int64 = 512 << 20
 
+// CommandClockSkewMS is extra margin the controller adds when it concludes that no command it signed can still be
+// accepted. The runner enforces no skew tolerance: it compares a command only with its own clock, refuses one issued
+// after that clock (zero tolerance), and accepts one until that clock reaches the expiry. A runner whose clock lags the
+// controller's therefore sees a fresh command's issued time in its own future and refuses it, so late acceptance because
+// of a lagging clock cannot occur. The margin is a conservative allowance on the controller's side only; it is not a
+// tolerance the runner applies.
+const CommandClockSkewMS = 5000
+
 type UpdateStartPayload struct {
 	ResourceID                    string `json:"resource_id"`
 	NamespaceID                   string `json:"namespace_id"`
@@ -48,6 +56,8 @@ type UpdateStartPayload struct {
 	SourceWriterFence             string `json:"source_writer_fence"`
 	TargetWriterFence             string `json:"target_writer_fence"`
 	CheckpointWriterFence         string `json:"checkpoint_writer_fence,omitempty"`
+	MigrateEffectID               string `json:"migrate_effect_id,omitempty"`
+	MigrateReceiptSHA256          string `json:"migrate_receipt_sha256,omitempty"`
 	Platform                      string `json:"platform"`
 	SandboxProfile                string `json:"sandbox_profile"`
 }
@@ -123,6 +133,15 @@ func validUpdateStartLogical(c UpdateStartCommand) bool {
 			return false
 		}
 		checkpointWriter = parsed
+	}
+	// A migration binds the update to its applied migrate-data receipt, and only an update-start
+	// can carry one: the checkpoint writer fence S, the migration's S+1 as the source fence and the
+	// target above it.
+	migrating := p.MigrateEffectID != "" || p.MigrateReceiptSHA256 != ""
+	if migrating && (c.Kind != "update-start" || p.MigrateEffectID == "" || p.MigrateReceiptSHA256 == "" ||
+		!candidateUUID(p.MigrateEffectID) || !shaPattern.MatchString(p.MigrateReceiptSHA256) ||
+		p.CheckpointWriterFence == "" || checkpointWriter >= sourceWriter) {
+		return false
 	}
 	project, _ := strconv.ParseInt(p.ProjectID, 10, 64)
 	archive, _ := strconv.ParseInt(p.CheckpointArchiveBytes, 10, 64)
