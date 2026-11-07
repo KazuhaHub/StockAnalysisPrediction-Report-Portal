@@ -81,12 +81,9 @@ func TestMigrationRollbackRefusedBeforeSettlementHTTP(t *testing.T) {
 	}
 }
 
-// C3 -> settle -> roll back, through the HTTP routes: the roll back is offered after settlement, takes its
-// restore on the settlement's evidence, and leaves nothing unresolved.
-func TestMigrationC3RollbackAfterSettlementHTTP(t *testing.T) {
-	platformWritableUpdateFixtures(t)
-	f := settleOrphaned(t, false)
-	h := newMigrationHTTP(t, f)
+// rollBackOverHTTP reviews and commits a roll back through the routes an administrator uses and drives it to completion.
+func rollBackOverHTTP(t *testing.T, f *settleFixture, h migrationHTTP) {
+	t.Helper()
 	const plans, operations = "/api/admin/app-platform/plans", "/api/admin/app-platform/operations"
 	set := recoverySetOf(t, f.s, f.op)
 	review := h.json(h.post(plans, `{"action":"restore","installation_id":"`+f.lease.installationID+`","recovery_set_id":"`+set+`"}`), 200)
@@ -141,20 +138,48 @@ func TestMigrationC3RollbackAfterSettlementHTTP(t *testing.T) {
 	if _, err := s.commitPlatformRestoreStartActivation(context.Background(), registered, applied, boot); err != nil {
 		t.Fatal(err)
 	}
-	// The roll back resolved the failed update: nothing unresolved is left to hold the launch gate shut. (Serving a
-	// writable application's later generation from a restore operation is outside this change: its backend
-	// history is built from updates, enables and repairs only.)
+}
+
+// C3 -> settle -> roll back, through the HTTP routes: the roll back is offered after settlement, takes its
+// restore on the settlement's evidence, and leaves nothing unresolved.
+func TestMigrationC3RollbackAfterSettlementHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := settleOrphaned(t, false)
+	h := newMigrationHTTP(t, f)
+	rollBackOverHTTP(t, f, h)
+	s := f.s
 	if n, err := platformUnresolvedOperationCount(s.st.poolExec(), f.lease.installationID); err != nil || n != 0 {
 		t.Fatalf("the roll back left %d unresolved operations: %v", n, err)
 	}
 	if n, err := platformUnresolvedOperationEffectCount(s.st.poolExec(), f.lease.installationID); err != nil || n != 0 {
 		t.Fatalf("the roll back left %d unsafe effects: %v", n, err)
 	}
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the roll back answered %d", got)
+	}
 	if scalar[string](t, s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, f.lease.installationID) != "ready" {
 		t.Fatal("the installation is not ready after the roll back")
 	}
 	if settings, err := s.platformInstallationSettings(platformManagedFixtureSession(t, s), f.lease.installationID); err != nil || settings.MigrationRecovery != nil {
 		t.Fatalf("a rolled back installation still offers choices: %v", err)
+	}
+}
+
+// A rolled back installation launches only on the evidence its roll back recorded: a start effect whose payload no
+// longer matches the command rebuilt from the checkpoint is not served.
+func TestMigrationRollbackLaunchRefusesAlteredStartEvidenceHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := settleOrphaned(t, false)
+	h := newMigrationHTTP(t, f)
+	rollBackOverHTTP(t, f, h)
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the roll back answered %d", got)
+	}
+	if _, err := f.s.st.db.Exec(f.s.st.bind(`UPDATE app_platform_operation_effects SET payload_sha256=? WHERE kind='restore-start'`), platformDigest([]byte("altered"))); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.launch(); got == 200 {
+		t.Fatal("a roll back with altered start evidence launched")
 	}
 }
 
