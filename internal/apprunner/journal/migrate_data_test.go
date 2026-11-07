@@ -538,3 +538,43 @@ func TestMigrateReadReopensAnUnknownRowAfterTakingTheGate(t *testing.T) {
 		t.Fatalf("a row settled after the first look was read as %#v (%v)", got, err)
 	}
 }
+
+// A claim's recovery chain is held against the operation it belongs to, not against its job resource: a chain that
+// names the claim's own operation is invalid in a receipt, and one that names its resource's identifier is only a
+// chain of other operations.
+func TestMigrateRecoveryChainIsCheckedAgainstTheOperation(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	other := fixtureID(2500)
+	marker := migrateClaimMarker{
+		Format: migrateClaimFormat, ClaimID: fixtureID(1), EffectID: fixtureID(2), ResourceID: fixtureID(3), OwnershipSHA256: strings.Repeat("a", 64),
+		AdmittedFence: "2", ClaimedMS: "1", NamespaceID: fixtureID(4), CheckpointID: fixtureID(5), CheckpointReceiptSHA256: strings.Repeat("b", 64),
+		RemoveCodeReceiptSHA256: strings.Repeat("c", 64), SourceReleaseSHA256: strings.Repeat("d", 64), TargetReleaseSHA256: strings.Repeat("e", 64),
+		SourceSchema: "1", TargetSchema: "2", CheckpointWriterFence: "1", WriterFence: "2", StartWriterFence: "3", ProjectID: "1",
+		NamespaceInode: "1", Device: "1", QuotaBytes: "512", QuotaInodes: "1", RecoversChain: other,
+	}
+	if !validMigrateMarker(marker) {
+		t.Fatal("a chain of other operations was refused")
+	}
+	marker.RecoversChain = marker.ResourceID
+	if !validMigrateMarker(marker) {
+		t.Fatal("the chain was held against the job resource's identifier")
+	}
+	marker.RecoversChain = other + "," + other
+	if validMigrateMarker(marker) {
+		t.Fatal("a chain naming a link twice is valid")
+	}
+	receipt := MigrateDataReceipt{
+		Format: migrateReceiptFormat, Claim: marker, DeploymentID: m.command.DeploymentID, ControllerEpoch: m.command.ControllerEpoch,
+		InstallationID: m.command.InstallationID, OperationID: m.command.OperationID, TargetGeneration: "2", Stage: "migrate",
+		EffectID: marker.EffectID, PayloadSHA256: strings.Repeat("f", 64), ExitCode: "1", MarkerSchema: "0", UsedBytes: "0", UsedInodes: "0",
+		State: "failed", Outcome: "exit_nonzero", ObservedMS: "1", SettledMS: "1",
+	}
+	receipt.Claim.RecoversChain = other
+	if !validMigrateReceipt(receipt) {
+		t.Fatal("a receipt with a chain of other operations was refused")
+	}
+	receipt.Claim.RecoversChain = other + "," + receipt.OperationID
+	if validMigrateReceipt(receipt) {
+		t.Fatal("a receipt whose chain names its own operation is valid")
+	}
+}

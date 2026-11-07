@@ -152,7 +152,8 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 			return false
 		}
 	}
-	if !control.ValidRecoversChain(m.RecoversChain, m.ResourceID) {
+	// The claim does not know its operation; the receipt that carries it does, and holds the chain against it.
+	if !control.ValidRecoversChain(m.RecoversChain, "") {
 		return false
 	}
 	for _, value := range []string{m.SourceSchema, m.TargetSchema, m.CheckpointWriterFence, m.WriterFence, m.StartWriterFence, m.ProjectID, m.QuotaBytes, m.QuotaInodes} {
@@ -173,7 +174,7 @@ func validMigrateMarker(m migrateClaimMarker) bool {
 
 func validMigrateReceipt(r MigrateDataReceipt) bool {
 	if r.Format != migrateReceiptFormat || r.Stage != "migrate" || !validMigrateMarker(r.Claim) || !dataSHA(r.PayloadSHA256) ||
-		!migrateOutcomes[r.Outcome] {
+		!control.ValidRecoversChain(r.Claim.RecoversChain, r.OperationID) || !migrateOutcomes[r.Outcome] {
 		return false
 	}
 	switch r.State {
