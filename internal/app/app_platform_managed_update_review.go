@@ -546,17 +546,16 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.ID != release.appID ||
 		parsed.Manifest.Publisher != release.publisherID ||
-		parsed.Manifest.Backend == nil ||
-		int64(parsed.Manifest.Data.Schema) != currentFormat {
+		parsed.Manifest.Backend == nil {
 		return platformUpdateProjection{}, errAppPlatformInstallUnavailable
+	}
+	migration, err := platformPlanMigration(currentFormat, parsed.Manifest.Data)
+	if err != nil {
+		return platformUpdateProjection{}, err
 	}
 	if err := installRequirementsForTarget(
 		parsed.Manifest, source.format, target); err != nil {
 		return platformUpdateProjection{}, err
-	}
-	if err := appplatform.RequireDataUpgrade(
-		int(currentFormat), parsed.Manifest.Data); err != nil {
-		return platformUpdateProjection{}, errAppPlatformInstallUnavailable
 	}
 	selection, err := platformInstallCapabilitySelection(
 		parsed.Manifest, target)
@@ -606,6 +605,7 @@ func platformBuildManagedUpdateProjection(e migExec, installation string, source
 		CurrentDataFormat:    currentFormat,
 		PreviousCapabilities: previous, TargetCapabilities: targetCapabilities,
 		GrantsSHA256: grants, Target: targetProjection,
+		Migration: migration,
 	}, nil
 }
 

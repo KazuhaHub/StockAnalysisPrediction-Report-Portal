@@ -29,6 +29,13 @@ type platformManagedUpdateReviewFixture struct {
 
 func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManagedUpdateReviewFixture {
 	t.Helper()
+	return platformManagedUpdateProjectionFixtureWith(t, pg, nil)
+}
+
+// platformManagedUpdateProjectionFixtureWith stages the update target with the manifest the mutation
+// returns, after the data schema was set to the installed one.
+func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) platformManagedUpdateReviewFixture {
+	t.Helper()
 	s, actor, lease := platformManagedAccessFixture(t, pg)
 	var planRaw string
 	var revision, policy, format int64
@@ -71,6 +78,9 @@ func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManag
 	manifest.Version = "1.0.0-beta.4"
 	manifest.Data.Schema = int(format)
 	manifest.Data.ReadableSchemas = []int{int(format)}
+	if mutate != nil {
+		mutate(&manifest)
+	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)

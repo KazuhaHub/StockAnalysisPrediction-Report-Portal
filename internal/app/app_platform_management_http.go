@@ -421,7 +421,7 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			platformManagementError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": map[string]any{
+		reviewBody := map[string]any{
 			"action": "update", "installation_id": projection.InstallationID, "app_id": projection.AppID, "publisher_id": projection.PublisherID,
 			"source_release_sha256": projection.SourceReleaseSHA256, "release_sha256": projection.Target.ReleaseSHA256,
 			"source_generation": strconv.FormatInt(projection.SourceGeneration, 10), "target_generation": strconv.FormatInt(projection.TargetGeneration, 10),
@@ -429,7 +429,14 @@ func (s *Server) apiPlatformInstallPlan(w http.ResponseWriter, r *http.Request, 
 			"trust_revision": revision, "declined_capabilities": projection.Target.DeclinedCapabilities,
 			"previous_capabilities": platformNonNilStrings(projection.PreviousCapabilities), "target_capabilities": platformNonNilStrings(projection.TargetCapabilities), "declared_data_schema": strconv.FormatInt(projection.CurrentDataFormat, 10),
 			"grants_sha256": projection.GrantsSHA256, "audience": nil,
-		}})
+		}
+		if projection.Migration != nil {
+			reviewBody["data_migration"] = map[string]any{
+				"from": strconv.FormatInt(projection.Migration.From, 10), "to": strconv.FormatInt(projection.Migration.To, 10),
+				"wall_clock_seconds": strconv.FormatInt(projection.Migration.WallClockSeconds, 10),
+			}
+		}
+		writeJSON(w, map[string]any{"plan_id": review.ID, "plan_sha256": review.SHA256, "expires_ms": strconv.FormatInt(review.ExpiresMS, 10), "review": reviewBody})
 	case "disable", "uninstall":
 		if len(fields) != 2 || fields["installation_id"] == nil {
 			platformManagementError(w, errPlatformManagementInput)
