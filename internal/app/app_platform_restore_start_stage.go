@@ -473,6 +473,19 @@ func (s *Server) commitPlatformRestoreStartActivation(ctx context.Context, lease
 			return zero, err
 		}
 	}
+	if !resume {
+		// A roll back finishes the chain of retries it follows: the failed update it restored is resolved by the
+		// restore itself, and every update that one recovered is resolved with it. Nothing is left to hold launch.
+		chain, err := platformRetryAncestors(e, current.start.plan.CheckpointOperationID)
+		if err != nil {
+			return zero, err
+		}
+		if len(chain) > 1 {
+			if err := markPlatformRecovered(e, lease, runtime.id, chain[1], now); err != nil {
+				return zero, err
+			}
+		}
+	}
 	activationPhase, err := platformReadyPhaseForInstallation(
 		e, lease.installationID, current.start.plan.TargetPolicyRevision)
 	if err != nil {

@@ -371,3 +371,55 @@ func TestRetryTakesOverTheCandidateOnlyWithSettlementEvidence(t *testing.T) {
 		})
 	}
 }
+
+// failRetryAndSettle sends the retry's migration, which fails, and settles it: its checkpoint is restored.
+func failRetryAndSettle(t *testing.T, f *settleFixture, h migrationHTTP, operation string) {
+	t.Helper()
+	lease := driveRetryToMigrate(t, f, operation)
+	h.activateMigrated(t, lease, "failed")
+	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+		return restoreAnswer(i, f.endpoint), nil
+	}
+	settled := &settleFixture{s: f.s, lease: f.lease, endpoint: f.endpoint, fake: f.fake, op: operation}
+	settled.step(t)
+	settled.step(t)
+	if settled.settleState(t) != "settled" {
+		t.Fatalf("the failed retry did not settle: %s", settled.settleState(t))
+	}
+}
+
+// Whichever recovery choice finishes a chain resolves the whole chain: rolling back the last retry resolves it and
+// every update it recovered, so the installation launches and nothing is left unresolved.
+func testRollbackOfAFailedRetryResolvesTheChain(t *testing.T, retries int) {
+	platformWritableUpdateFixtures(t)
+	f := settledFixture(t, false)
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	chain := []string{f.op}
+	for i := range retries {
+		operation := h.retryOverHTTP(platformFixtureID(7700 + 10*i))
+		failRetryAndSettle(t, f, h, operation)
+		chain = append(chain, operation)
+	}
+	if h.launch() == 200 {
+		t.Fatal("an application launched while its failed retry was unresolved")
+	}
+	rollBackFailedOverHTTP(t, f, h, chain[len(chain)-1])
+	if n, err := platformUnresolvedOperationCount(f.s.st.poolExec(), f.lease.installationID); err != nil || n != 0 {
+		t.Fatalf("the roll back left %d unresolved operations: %v", n, err)
+	}
+	if n, err := platformUnresolvedOperationEffectCount(f.s.st.poolExec(), f.lease.installationID); err != nil || n != 0 {
+		t.Fatalf("the roll back left %d unsafe effects: %v", n, err)
+	}
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the roll back of a failed retry answered %d", got)
+	}
+}
+
+func TestMigrationRollbackOfFailedRetryResolvesItsAncestorsHTTP(t *testing.T) {
+	testRollbackOfAFailedRetryResolvesTheChain(t, 1)
+}
+
+func TestMigrationRollbackOfFailedRetryOfRetryResolvesTheChainHTTP(t *testing.T) {
+	testRollbackOfAFailedRetryResolvesTheChain(t, 2)
+}

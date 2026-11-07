@@ -84,8 +84,14 @@ func TestMigrationRollbackRefusedBeforeSettlementHTTP(t *testing.T) {
 // rollBackOverHTTP reviews and commits a roll back through the routes an administrator uses and drives it to completion.
 func rollBackOverHTTP(t *testing.T, f *settleFixture, h migrationHTTP) {
 	t.Helper()
+	rollBackFailedOverHTTP(t, f, h, f.op)
+}
+
+// rollBackFailedOverHTTP rolls back the settled failed update, which need not be the installation's first.
+func rollBackFailedOverHTTP(t *testing.T, f *settleFixture, h migrationHTTP, failed string) {
+	t.Helper()
 	const plans, operations = "/api/admin/app-platform/plans", "/api/admin/app-platform/operations"
-	set := recoverySetOf(t, f.s, f.op)
+	set := recoverySetOf(t, f.s, failed)
 	review := h.json(h.post(plans, `{"action":"restore","installation_id":"`+f.lease.installationID+`","recovery_set_id":"`+set+`"}`), 200)
 	key := platformFixtureID(7400)
 	commit := h.json(h.post(operations, `{"plan_id":"`+h.str(review, "plan_id")+`","plan_sha256":"`+h.str(review, "plan_sha256")+`","idempotency_key":"`+key+`"}`), 202)
