@@ -118,3 +118,36 @@ func (r *CandidateRuntime) ProveTargetAbsent(ctx context.Context, resourceID str
 	}
 	return ctx.Err()
 }
+
+// InspectTarget reports the container a target's resource would own, found by name and by label. Both must agree: a
+// renamed container still carries the label, and neither is ever created, started, stopped or removed here.
+func (r *CandidateRuntime) InspectTarget(ctx context.Context, resourceID string) (TargetInspection, error) {
+	if r == nil {
+		return TargetInspection{}, ErrUnsupported
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || !containerUUID.MatchString(resourceID) || resourceID == "00000000-0000-0000-0000-000000000000" {
+		return TargetInspection{}, ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	byName, err := listMigrationContainersHTTP(ctx, client, map[string][]string{"name": {"^/portal-app-" + resourceID + "$"}})
+	if err != nil {
+		return TargetInspection{}, err
+	}
+	byLabel, err := listMigrationContainersHTTP(ctx, client, map[string][]string{"label": {containerLabelPrefix + "resource=" + resourceID}})
+	if err != nil {
+		return TargetInspection{}, err
+	}
+	if len(byName) != len(byLabel) || len(byName) > 1 || (len(byName) == 1 && byName[0].ID != byLabel[0].ID) {
+		return TargetInspection{}, ErrContainerConflict
+	}
+	if len(byName) == 0 {
+		return TargetInspection{}, ctx.Err()
+	}
+	if byName[0].State == "" || len(byName[0].State) > 24 {
+		return TargetInspection{}, ErrInvalidResponse
+	}
+	return TargetInspection{Found: true, NativeID: byName[0].ID, State: byName[0].State}, ctx.Err()
+}

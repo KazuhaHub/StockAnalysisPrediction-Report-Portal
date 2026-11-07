@@ -39,10 +39,10 @@ func updateStartAbsenceFor(c control.UpdateStartCommand, now int64) UpdateStartA
 }
 
 // An UpdateStartAbsence says what the journal holds for a start: nothing ("absent"), or a start it holds without a
-// running receipt: reserved (the pending target resource, no claim), orphaned (a claim nothing is executing) or
-// pending (the data execution gate is held, so it may be executing).
+// running receipt: reserved (the pending target resource, no claim), orphaned (a claim nothing is executing),
+// pending (the data execution gate is held, so it may be executing) or never_ran (settled as not run).
 func updateStartHeldState(state string) bool {
-	return state == "absent" || state == "reserved" || state == "orphaned" || state == "pending"
+	return state == "absent" || state == "reserved" || state == "orphaned" || state == "pending" || state == "never_ran"
 }
 
 // UpdateStartHeldError is the transport's report that the runner holds the start without a running receipt.
@@ -154,6 +154,18 @@ func (s *Store) readUpdateStartHeld(ctx context.Context, raw, signature []byte) 
 		state = "reserved"
 	case "unknown":
 		state = "orphaned"
+	case "reverted":
+		var raw string
+		var notRun updateStartNotRun
+		if err := tx.QueryRowContext(ctx, `SELECT receipt_json FROM runner_commands WHERE effect_id=?`, c.EffectID).Scan(&raw); err != nil {
+			return nil, err
+		}
+		if !canonicalDataJSON(raw, &notRun) || notRun.Format != updateStartNotRunFormat || notRun.Outcome != "never_ran" || notRun.EffectID != c.EffectID {
+			return nil, nil
+		}
+		absence := updateStartAbsenceFor(c, time.Now().UTC().UnixMilli())
+		absence.State = "never_ran"
+		return &absence, nil
 	default:
 		return nil, nil
 	}

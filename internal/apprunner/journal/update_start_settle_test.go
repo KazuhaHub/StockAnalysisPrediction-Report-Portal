@@ -1,0 +1,241 @@
+//go:build linux || darwin
+
+package journal
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+)
+
+type fakeInspector struct {
+	inspection driver.TargetInspection
+	err        error
+	calls      int
+}
+
+func (f *fakeInspector) InspectTarget(context.Context, string) (driver.TargetInspection, error) {
+	f.calls++
+	return f.inspection, f.err
+}
+
+func (r reservedStartFixture) settleCommand(t *testing.T, effect int) ([]byte, []byte) {
+	t.Helper()
+	now := time.Now().UTC().UnixMilli()
+	command := control.SettleUpdateStartCommand{
+		Format: control.SettleUpdateStartFormat, EffectID: fixtureID(2800 + effect), OperationID: fixtureID(2890),
+		InstallationFence: r.command.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+		StartRaw: r.raw, StartReadSignature: updateStartReadSignature(t, r.raw),
+	}
+	var err error
+	if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {
+		t.Fatal(err)
+	}
+	raw, sig, err := control.SignSettleUpdateStart(command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), importAuthority(), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, sig
+}
+
+// orphaned claims the reserved start and leaves it: the claim has no executor. When bound, the claim records the
+// preflight evidence a start that got as far as creating a container would have recorded.
+func (r reservedStartFixture) orphaned(t *testing.T, bound bool) {
+	t.Helper()
+	if _, err := r.f.store.ClaimUpdateStart(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatal(err)
+	}
+	if !bound {
+		return
+	}
+	var raw string
+	if err := r.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, r.command.EffectID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var marker UpdateStartClaimMarker
+	if err := json.Unmarshal([]byte(raw), &marker); err != nil {
+		t.Fatal(err)
+	}
+	command := r.command
+	marker.Preflight = &UpdateStartPreflightEvidence{
+		Format: "portal.runner.update-start-preflight/1-dev.1", ImageID: "sha256:" + strings.Repeat("a", 64), Platform: command.Payload.Platform,
+		PolicySHA256: strings.Repeat("b", 64), MountsSHA256: strings.Repeat("c", 64), RootFilesystemUUID: command.Payload.RootFilesystemUUID,
+		RootInode: command.Payload.RootInode, ProjectID: command.Payload.ProjectID, Device: command.Payload.Device, NamespaceInode: command.Payload.NamespaceInode,
+		QuotaBytes: command.Payload.QuotaBytes, QuotaInodes: command.Payload.QuotaInodes, SeccompSHA256: driver.UpdateStartSeccompSHA256(command.Payload.SandboxProfile),
+	}
+	marker.PreflightBoundMS = marker.ClaimedMS
+	encoded, _ := json.Marshal(marker)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET receipt_json=? WHERE effect_id=?`, string(encoded), r.command.EffectID)
+}
+
+func TestSettleOrphanedStartWithNoContainerIsNotRun(t *testing.T) {
+	r := reservedStart(t)
+	r.orphaned(t, false)
+	inspector := &fakeInspector{}
+	raw, sig := r.settleCommand(t, 1)
+	receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+	if err != nil || receipt.Outcome != "never_ran" || receipt.ContainerState != "" || receipt.StartEffectID != r.command.EffectID || receipt.NativeID != control.ReservedStartNativeID(r.command.Payload.ResourceID) {
+		t.Fatalf("receipt: %+v %v", receipt, err)
+	}
+	if r.startState(t) != "reverted" {
+		t.Fatalf("the start is %s", r.startState(t))
+	}
+	if desired, observed, revision := r.resource(t); desired != "absent" || observed != "absent" || revision != 4 {
+		t.Fatalf("resource: %s %s %d", desired, observed, revision)
+	}
+	held, err := r.f.store.ReadUpdateStartRunningOrAbsence(context.Background(), r.raw, updateStartReadSignature(t, r.raw))
+	if status, ok := held.(UpdateStartAbsence); err != nil || !ok || status.State != "never_ran" {
+		t.Fatalf("the settled start reads as %#v %v", held, err)
+	}
+	// A replay returns the same receipt and looks at nothing.
+	again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+	if err != nil || again != receipt || inspector.calls != 1 {
+		t.Fatalf("replay: %+v %v inspections=%d", again, err, inspector.calls)
+	}
+	readSig, err := control.SignSettleUpdateStartRead(raw, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), importAuthority(), time.Now().UTC().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read, err := r.f.store.ReadSettleUpdateStartReceipt(context.Background(), raw, readSig); err != nil || read != receipt {
+		t.Fatalf("read-back: %+v %v", read, err)
+	}
+}
+
+// A container in any state is a start that ran: it is settled as applied with a receipt that records the state, and
+// the ordinary removal takes it away. Nothing is created, started, stopped or removed by the settlement itself.
+func TestSettleOrphanedStartWithAContainerIsApplied(t *testing.T) {
+	for _, state := range []string{"created", "running", "exited"} {
+		t.Run(state, func(t *testing.T) {
+			r := reservedStart(t)
+			r.orphaned(t, true)
+			native := strings.Repeat("ab", 32)
+			inspector := &fakeInspector{inspection: driver.TargetInspection{Found: true, NativeID: native, State: state}}
+			raw, sig := r.settleCommand(t, 1)
+			receipt, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
+			if err != nil || receipt.Outcome != "applied" || receipt.ContainerState != state || receipt.NativeID != native {
+				t.Fatalf("receipt: %+v %v", receipt, err)
+			}
+			if r.startState(t) != "applied" {
+				t.Fatalf("the start is %s", r.startState(t))
+			}
+			var running string
+			if err := r.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, r.command.EffectID).Scan(&running); err != nil {
+				t.Fatal(err)
+			}
+			if parsed, err := ParseUpdateStartRunningReceipt([]byte(running)); err != nil || parsed.NativeID != native {
+				t.Fatalf("the start's running receipt: %+v %v", parsed, err)
+			}
+			if desired, observed, revision := r.resource(t); desired != "present" || observed != "running" || revision != 2 {
+				t.Fatalf("resource: %s %s %d", desired, observed, revision)
+			}
+			held, err := r.f.store.ReadUpdateStartRunningOrAbsence(context.Background(), r.raw, updateStartReadSignature(t, r.raw))
+			if _, ok := held.(UpdateStartRunningReceipt); err != nil || !ok {
+				t.Fatalf("the settled start does not read back as running: %#v %v", held, err)
+			}
+			if again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err != nil || again != receipt || inspector.calls != 1 {
+				t.Fatalf("replay: %+v %v inspections=%d", again, err, inspector.calls)
+			}
+		})
+	}
+}
+
+func TestSettleUpdateStartRefusals(t *testing.T) {
+	t.Run("a start that is still reserved", func(t *testing.T) {
+		r := reservedStart(t)
+		raw, sig := r.settleCommand(t, 1)
+		inspector := &fakeInspector{}
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); !errors.Is(err, ErrUpdateStartNotOrphaned) {
+			t.Fatalf("a reserved start was settled as an orphan: %v", err)
+		}
+		if inspector.calls != 0 || r.startState(t) != "prepared" {
+			t.Fatal("a refusal inspected or changed something")
+		}
+	})
+	t.Run("a start that is no longer unknown", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, true)
+		mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='applied' WHERE effect_id=?`, r.command.EffectID)
+		raw, sig := r.settleCommand(t, 1)
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, &fakeInspector{}); !errors.Is(err, ErrUpdateStartNotOrphaned) {
+			t.Fatalf("a start that is already applied was settled: %v", err)
+		}
+	})
+	t.Run("the gate is held", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, false)
+		if err := r.f.store.acquireDataExecution(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		defer r.f.store.releaseDataExecution()
+		inspector := &fakeInspector{}
+		raw, sig := r.settleCommand(t, 1)
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); !errors.Is(err, ErrManagedRemovalUnavailable) {
+			t.Fatalf("a start that may be executing was settled: %v", err)
+		}
+		if inspector.calls != 0 || r.startState(t) != "unknown" {
+			t.Fatal("a refusal inspected or changed something")
+		}
+	})
+	t.Run("an execute-purpose start is not a start reference", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, false)
+		now := time.Now().UTC().UnixMilli()
+		command := control.SettleUpdateStartCommand{
+			Format: control.SettleUpdateStartFormat, EffectID: fixtureID(2899), OperationID: fixtureID(2890), InstallationFence: r.command.InstallationFence,
+			IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10), StartRaw: r.raw, StartReadSignature: r.sig,
+		}
+		command.PayloadSHA256, _ = control.SettleUpdateStartLogicalDigest(command)
+		if _, _, err := control.SignSettleUpdateStart(command, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), importAuthority(), now); err == nil {
+			t.Fatal("a settlement was signed over an execute-capable start signature")
+		}
+	})
+	t.Run("a container the claim cannot account for", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, false) // no preflight bound: nothing could have created a container
+		raw, sig := r.settleCommand(t, 1)
+		inspector := &fakeInspector{inspection: driver.TargetInspection{Found: true, NativeID: strings.Repeat("ab", 32), State: "running"}}
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil {
+			t.Fatal("a container was accepted for a claim that never bound its preflight")
+		}
+		if r.startState(t) != "unknown" {
+			t.Fatal("the start changed")
+		}
+	})
+	t.Run("the native inspection fails", func(t *testing.T) {
+		r := reservedStart(t)
+		r.orphaned(t, false)
+		raw, sig := r.settleCommand(t, 1)
+		inspector := &fakeInspector{err: errTargetExists}
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err == nil || r.startState(t) != "unknown" {
+			t.Fatalf("an inspection that failed settled the start: %v", err)
+		}
+		inspector.err = nil
+		if _, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector); err != nil {
+			t.Fatalf("the settlement did not converge: %v", err)
+		}
+	})
+}
+
+// The reserved-only removal is for a start nothing ever claimed. An orphan may have a container, so it is refused with
+// the typed reason, and nothing changes.
+func TestReservedRemovalRefusesAClaimedStartWithATypedReason(t *testing.T) {
+	r := reservedStart(t)
+	r.orphaned(t, false)
+	prover := &fakeTargetProver{}
+	raw, sig := r.removal(t, "stop", 1)
+	if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, prover); !errors.Is(err, ErrUpdateStartNotReserved) {
+		t.Fatalf("an orphaned start was removed as if it were reserved: %v", err)
+	}
+	if len(prover.calls) != 0 || r.startState(t) != "unknown" {
+		t.Fatal("the refusal proved or changed something")
+	}
+}

@@ -146,30 +146,6 @@ func TestReservedStartRemovalRefusedWhileAClaimIsExecuting(t *testing.T) {
 	}
 }
 
-// A claim nothing is executing is an orphan. It is read back and never sent again; the absence of a container, proven
-// under the gate, settles it as not run, together with its resource.
-func TestOrphanedStartIsSettledByTheAbsenceProof(t *testing.T) {
-	r := reservedStart(t)
-	if _, err := r.f.store.ClaimUpdateStart(context.Background(), r.raw, r.sig); err != nil {
-		t.Fatal(err)
-	}
-	if r.startState(t) != "unknown" {
-		t.Fatalf("the claim left the start %s", r.startState(t))
-	}
-	held, err := r.f.store.ReadUpdateStartRunningOrAbsence(context.Background(), r.raw, updateStartReadSignature(t, r.raw))
-	if status, ok := held.(UpdateStartAbsence); err != nil || !ok || status.State != "orphaned" {
-		t.Fatalf("an orphaned start read as %#v %v", held, err)
-	}
-	prover := &fakeTargetProver{}
-	raw, sig := r.removal(t, "stop", 1)
-	if _, err := r.f.store.RemoveReservedUpdateStart(context.Background(), raw, sig, prover); err != nil {
-		t.Fatalf("an orphaned start was not settled: %v", err)
-	}
-	if r.startState(t) != "reverted" || len(prover.calls) != 1 {
-		t.Fatalf("start %s, proofs %d", r.startState(t), len(prover.calls))
-	}
-}
-
 func TestReservedStartRemovalRefusedWhenAContainerExists(t *testing.T) {
 	r := reservedStart(t)
 	prover := &fakeTargetProver{err: errTargetExists}

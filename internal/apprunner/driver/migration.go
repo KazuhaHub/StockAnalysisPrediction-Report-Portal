@@ -200,6 +200,7 @@ func killContainerHTTP(ctx context.Context, client *http.Client, nativeID string
 type migrationListing struct {
 	ID    string `json:"Id"`
 	Names []string
+	State string `json:"State"`
 }
 
 func listMigrationContainersHTTP(ctx context.Context, client *http.Client, filter map[string][]string) ([]migrationListing, error) {
@@ -237,6 +238,13 @@ func listMigrationContainersHTTP(ctx context.Context, client *http.Client, filte
 		result = append(result, listed)
 	}
 	return result, nil
+}
+
+// TargetInspection is what exists for a resource's container, by name and by label.
+type TargetInspection struct {
+	Found    bool
+	NativeID string
+	State    string
 }
 
 // proveMigrationAbsentHTTP finds no container, running or stopped, with the job's name and none with

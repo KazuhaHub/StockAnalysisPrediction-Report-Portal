@@ -79,6 +79,9 @@ type updateStartFacts struct {
 	updated        int64
 	raw, signature []byte
 	now            int64
+	// verify is the check the command was admitted under: the execute check, or the read check for a read-back. The
+	// final check repeats that one, since a signature made for a read is not one for an execute.
+	verify updateStartVerifier
 }
 
 func updateStartIndex(c control.UpdateStartCommand) control.Command {
@@ -349,7 +352,11 @@ func finalUpdateStartCheck(ctx context.Context, f updateStartFacts) error {
 	if now < f.now {
 		return control.ErrInvalidCommand
 	}
-	_, err := control.VerifyUpdateStart(f.raw, f.signature, f.authority, now)
+	verify := f.verify
+	if verify == nil {
+		verify = control.VerifyUpdateStart
+	}
+	_, err := verify(f.raw, f.signature, f.authority, now)
 	return err
 }
 

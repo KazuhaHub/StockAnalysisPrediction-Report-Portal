@@ -103,11 +103,15 @@ func loadReservedRemoval(ctx context.Context, tx *sql.Tx, raw, signature []byte)
 	}
 	switch command.Stage {
 	case "stop":
-		held := (start.state == "prepared" || start.state == "unknown") ||
-			(row.state == "applied" && start.state == "reverted")
+		// Only a start that was never claimed is reserved. A claimed one may have a container, which only the
+		// settlement of an orphan can account for.
+		held := start.state == "prepared" || (row.state == "applied" && start.state == "reverted")
 		pending := resource.desired == "present" && resource.observed == "unknown" && resource.revision == 1 && !resource.observedMS.Valid
 		stopped := row.state == "applied" && resource.desired == "stopped" && resource.observed == "stopped" && resource.revision == 3
 		if !held || !(pending || stopped) {
+			if row.state == "" && start.state != "prepared" {
+				return zero, fmt.Errorf("%w: the start is %s", ErrUpdateStartNotReserved, start.state)
+			}
 			return fail("start or resource state at stop")
 		}
 	case "remove_code":

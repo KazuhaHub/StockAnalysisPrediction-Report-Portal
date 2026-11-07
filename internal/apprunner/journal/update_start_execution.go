@@ -340,7 +340,7 @@ func (s *Store) beginUpdateStartExecutionVerified(ctx context.Context, raw, sign
 	facts := updateStartFacts{
 		command: command, stored: stored, authority: authority, source: source,
 		receipt: receipt, created: created, updated: updated,
-		raw: raw, signature: signature, now: now,
+		raw: raw, signature: signature, now: now, verify: verify,
 	}
 	switch state {
 	case "prepared":

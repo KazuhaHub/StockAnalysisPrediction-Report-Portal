@@ -74,3 +74,6 @@ func (*CandidateRuntime) ProveMigrationAbsent(context.Context, MigrationJobReque
 	return ErrUnsupported
 }
 func (*CandidateRuntime) ProveTargetAbsent(context.Context, string) error { return ErrUnsupported }
+func (*CandidateRuntime) InspectTarget(context.Context, string) (TargetInspection, error) {
+	return TargetInspection{}, ErrUnsupported
+}
