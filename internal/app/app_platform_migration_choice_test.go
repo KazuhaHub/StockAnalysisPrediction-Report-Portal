@@ -268,8 +268,12 @@ func testRetryOfRetryResolvesRoot(t *testing.T, pg bool) {
 	if retry.settleState(t) != "settled" {
 		t.Fatal("the failed retry did not settle", retry.settleState(t))
 	}
-	if err := requirePlatformRetrySource(f.s.st.poolExec(), f.lease.installationID, f.op); err != nil {
-		t.Fatal("the root failed update stopped being the root of a chain:", err)
+	// The root already has a retry, so it is no longer the head of the chain: only the failed retry can be recovered.
+	if err := requirePlatformRetrySource(f.s.st.poolExec(), f.lease.installationID, f.op); err == nil {
+		t.Fatal("an update that already has a retry could be recovered again")
+	}
+	if err := requirePlatformRetrySource(f.s.st.poolExec(), f.lease.installationID, second.id); err != nil {
+		t.Fatal("the head of the chain was refused:", err)
 	}
 	third := retryToMigrate(t, f, fx, platformFixtureID(7320), platformFixtureID(7321), second.id)
 	f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {

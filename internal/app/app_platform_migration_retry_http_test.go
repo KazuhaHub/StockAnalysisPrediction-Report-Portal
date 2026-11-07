@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -422,4 +423,69 @@ func TestMigrationRollbackOfFailedRetryResolvesItsAncestorsHTTP(t *testing.T) {
 
 func TestMigrationRollbackOfFailedRetryOfRetryResolvesTheChainHTTP(t *testing.T) {
 	testRollbackOfAFailedRetryResolvesTheChain(t, 2)
+}
+
+// reviewRetry asks for the review of a retry of the update, through the route, and answers the status.
+func (h migrationHTTP) reviewRetry(recovers string) (int, map[string]any) {
+	h.t.Helper()
+	choice := h.retryChoice()
+	rec := h.post("/api/admin/app-platform/plans", `{"action":"update","installation_id":"`+h.f.lease.installationID+
+		`","release_sha256":"`+h.str(choice, "release_sha256")+`","trust_revision":"`+h.str(choice, "trust_revision")+
+		`","recovers_operation_id":"`+recovers+`"}`)
+	var out map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
+func (h migrationHTTP) commitPlan(review map[string]any, key string) int {
+	h.t.Helper()
+	return h.post("/api/admin/app-platform/operations", `{"plan_id":"`+h.str(review, "plan_id")+`","plan_sha256":"`+h.str(review, "plan_sha256")+
+		`","idempotency_key":"`+key+`"}`).Code
+}
+
+// An update is recovered by one retry. A second retry naming it, whether reviewed before or after the first was
+// committed, is refused: only the head of a chain, the latest unresolved update, can be recovered.
+func TestMigrationOnlyOneRetryMayRecoverAnUpdateHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := settledFixture(t, false)
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	code, first := h.reviewRetry(f.op)
+	code2, second := h.reviewRetry(f.op)
+	if code != http.StatusOK || code2 != http.StatusOK {
+		t.Fatalf("reviews of an unrecovered update: %d %d", code, code2)
+	}
+	if got := h.commitPlan(first, platformFixtureID(7800)); got != http.StatusAccepted {
+		t.Fatalf("the first retry answered %d", got)
+	}
+	if got := h.commitPlan(second, platformFixtureID(7801)); got == http.StatusAccepted {
+		t.Fatal("a second retry of the same update was committed")
+	}
+	if code, _ := h.reviewRetry(f.op); code == http.StatusOK {
+		t.Fatal("a second retry of an update that already has one was reviewed")
+	}
+	if n := scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.action='update' AND p.plan_json LIKE ?`,
+		`%"recovers_operation_id":"`+f.op+`"%`); n != 1 {
+		t.Fatalf("%d retries recover the update", n)
+	}
+}
+
+// A chain holds at most 16 updates. The 17th retry is refused when it is reviewed, before anything can be committed.
+func TestMigrationSeventeenthRetryRefusedAtReviewHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := settledFixture(t, false)
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	head := f.op
+	for i := range 16 {
+		operation := h.retryOverHTTP(platformFixtureID(7900 + i))
+		failRetryAndSettle(t, f, h, operation)
+		head = operation
+	}
+	if code, _ := h.reviewRetry(head); code == http.StatusOK {
+		t.Fatal("a seventeenth retry was reviewed")
+	}
+	if n := scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_review_plans WHERE plan_json LIKE ?`, `%"recovers_operation_id":"`+head+`"%`); n != 0 {
+		t.Fatal("a refused review left a plan behind")
+	}
 }

@@ -50,6 +50,22 @@ func requirePlatformRetrySource(e migExec, installation, recovers string) error 
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='recovered' AND state='applied'`, recovers).Scan(&resolved); err != nil || resolved != 0 {
 		return errAppPlatformPlanChanged
 	}
+	// Only the head of a chain, the latest unresolved update, can be recovered: an update another retry already
+	// names has a successor, whatever state that retry is in. The plan's field is checked against the operations
+	// that exist, never taken as given.
+	var recoverers int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.action='update' AND p.plan_json LIKE ?`, installation, `%"recovers_operation_id":"`+recovers+`"%`).Scan(&recoverers); err != nil || recoverers != 0 {
+		return fmt.Errorf("%w: the update already has a retry", errAppPlatformPlanChanged)
+	}
+	// The retry signs the chain of the updates it recovers, and a chain holds at most control.MaxRecoversChain.
+	chain, err := platformRetryAncestors(e, recovers)
+	if err != nil {
+		return err
+	}
+	if len(chain) > control.MaxRecoversChain {
+		return fmt.Errorf("%w: the chain of retries is at its limit", errAppPlatformPlanChanged)
+	}
 	return nil
 }
 
