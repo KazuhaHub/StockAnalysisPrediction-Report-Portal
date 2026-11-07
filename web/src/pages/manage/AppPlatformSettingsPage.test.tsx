@@ -373,6 +373,28 @@ describe('application installation settings', () => {
       expect(buttons()).toHaveLength(0)
     })
 
+    it('says why a blocked settlement is stuck, with a sentence for a known reason', async () => {
+      withRecovery({ state: 'blocked', reason: 'foreign_container', operation_id: failedOperation, choices: [] })
+      mount()
+      expect(await screen.findByText('appPlatform.settings.migrationRecovery.reason.foreign_container')).toBeTruthy()
+      expect(buttons()).toHaveLength(0)
+    })
+
+    it('falls back to a generic sentence for a reason it does not know, without translating the value', async () => {
+      withRecovery({ state: 'blocked', reason: 'something_new', operation_id: failedOperation, choices: [] })
+      mount()
+      expect(await screen.findByTestId('migration-blocked-reason')).toBeTruthy()
+      expect(screen.queryByText('appPlatform.settings.migrationRecovery.reason.foreign_container')).toBeNull()
+      expect(screen.getByTestId('migration-blocked-reason').textContent).toContain('appPlatform.settings.migrationRecovery.reason.unknown')
+    })
+
+    it('shows no reason when the state is not blocked', async () => {
+      withRecovery({ state: 'settling', reason: 'foreign_container', operation_id: failedOperation, choices: [] })
+      mount()
+      await screen.findByText('appPlatform.settings.migrationRecovery.title')
+      expect(screen.queryByTestId('migration-blocked-reason')).toBeNull()
+    })
+
     it('shows both choices when settled', async () => {
       withRecovery(settled)
       mount()

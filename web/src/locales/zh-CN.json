@@ -3778,6 +3778,8 @@
   "appPlatform.settings.migrationRecovery.detail.settling": "数据迁移正在收尾。完成后，恢复选项会显示在这里。",
   "appPlatform.settings.migrationRecovery.detail.settled": "数据迁移未能完成。可以回滚到迁移前的检查点，或重试更新。",
   "appPlatform.settings.migrationRecovery.detail.blocked": "数据迁移无法自动恢复。管理员处理之前，恢复操作不可用。",
+  "appPlatform.settings.migrationRecovery.reason.foreign_container": "该应用数据命名空间中有一个容器不是由运行器创建的。运行器不会删除它。请在运行器主机上检查或移除该容器，恢复随后会自动继续。",
+  "appPlatform.settings.migrationRecovery.reason.unknown": "运行器报告了此版本无法识别的原因：{{reason}}。",
   "appPlatform.settings.migrationRecovery.rollback": "回滚",
   "appPlatform.settings.migrationRecovery.retry": "重试更新",
   "appPlatform.settings.migrationRecovery.retryTitle": "审核重试更新",

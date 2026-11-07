@@ -3778,6 +3778,8 @@
   "appPlatform.settings.migrationRecovery.detail.settling": "The data migration is being settled. Recovery choices appear here once it finishes.",
   "appPlatform.settings.migrationRecovery.detail.settled": "The data migration did not complete. Roll back to the checkpoint taken before it, or retry the update.",
   "appPlatform.settings.migrationRecovery.detail.blocked": "The data migration cannot be recovered automatically. Recovery actions are unavailable until an administrator resolves it.",
+  "appPlatform.settings.migrationRecovery.reason.foreign_container": "A container in this application's data namespace was not created by the runner. The runner will not remove it. Remove or inspect it on the runner host; the recovery then continues on its own.",
+  "appPlatform.settings.migrationRecovery.reason.unknown": "The runner reported a reason this version does not recognise: {{reason}}.",
   "appPlatform.settings.migrationRecovery.rollback": "Roll back",
   "appPlatform.settings.migrationRecovery.retry": "Retry update",
   "appPlatform.settings.migrationRecovery.retryTitle": "Review update retry",

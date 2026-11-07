@@ -50,6 +50,8 @@ type MigrationChoice =
 type MigrationRecovery = {
   state: 'settling' | 'settled' | 'blocked'
   operation_id: string
+  // Why a blocked settlement is stuck, when the runner said so. An open value: only known ones have their own sentence.
+  reason?: string
   choices: MigrationChoice[]
 }
 type Binding = {
@@ -109,6 +111,7 @@ type UpdateReview = {
   target_generation?: string
 }
 type RestorePlan = { plan_id: string; plan_sha256: string; idempotency_key: string; review: RestoreReview | UpdateReview }
+const knownMigrationReasons = ['foreign_container']
 const migrationTone = { settling: 'processing', settled: 'success', blocked: 'error' } as const
 const root = '/api/admin/app-platform'
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -472,6 +475,10 @@ export default function AppPlatformSettingsPage() {
     {settings.migration_recovery && <Card title={t('appPlatform.settings.migrationRecovery.title')} extra={<Tag color={migrationTone[settings.migration_recovery.state]}>{t(`appPlatform.settings.migrationRecovery.state.${settings.migration_recovery.state}`)}</Tag>}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>
         <Typography.Text>{t(`appPlatform.settings.migrationRecovery.detail.${settings.migration_recovery.state}`)}</Typography.Text>
+        {settings.migration_recovery.state === 'blocked' && settings.migration_recovery.reason && <Alert type="error" showIcon data-testid="migration-blocked-reason"
+          title={knownMigrationReasons.includes(settings.migration_recovery.reason)
+            ? t(`appPlatform.settings.migrationRecovery.reason.${settings.migration_recovery.reason}`)
+            : t('appPlatform.settings.migrationRecovery.reason.unknown', { reason: settings.migration_recovery.reason })} />}
         {settings.migration_recovery.state === 'settled' && settings.migration_recovery.choices.length > 0 && <Space wrap>
           {settings.migration_recovery.choices.map((choice) => choice.kind === 'rollback'
             ? <Button key={`rollback-${choice.recovery_set_id}`} disabled={settings.control_paused || restoring} loading={migrationBusy === 'rollback'} onClick={() => void rollbackMigration(choice)}>{t('appPlatform.settings.migrationRecovery.rollback')}</Button>

@@ -19,11 +19,12 @@ const updateStartReadPurpose = "portal.app/runner-data-update-start-read/v1"
 const updateStartEffectPurpose = "portal.app/runner-data-update-start-effect/v1"
 const maxUpdateStartArchiveBytes int64 = 512 << 20
 
-// CommandClockSkewMS is the lag of the runner's clock behind the controller's that the controller allows for when it
-// concludes that no command it signed can still be accepted. The runner compares a command only with its own clock: one
-// issued after that clock is refused, and one is accepted until that clock reaches its expiry. A runner whose clock
-// lags therefore accepts a command for exactly that long after the controller's expiry, and the runner does not bound
-// the lag itself.
+// CommandClockSkewMS is extra margin the controller adds when it concludes that no command it signed can still be
+// accepted. The runner enforces no skew tolerance: it compares a command only with its own clock, refuses one issued
+// after that clock (zero tolerance), and accepts one until that clock reaches the expiry. A runner whose clock lags the
+// controller's therefore sees a fresh command's issued time in its own future and refuses it, so late acceptance because
+// of a lagging clock cannot occur. The margin is a conservative allowance on the controller's side only; it is not a
+// tolerance the runner applies.
 const CommandClockSkewMS = 5000
 
 type UpdateStartPayload struct {
