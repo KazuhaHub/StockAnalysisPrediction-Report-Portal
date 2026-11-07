@@ -34,6 +34,7 @@ func (o platformFakeObservation) Controller() control.Authority { return o.autho
 func (o platformFakeObservation) Endpoint() transport.CandidateReceiptEndpoint {
 	return o.endpoint
 }
+
 // ReceivedAt is the time the reply is asked for, never earlier than what it says: a reply built after the proof was
 // taken would otherwise be observed in a later millisecond than it was received.
 func (o platformFakeObservation) ReceivedAt() time.Time { return time.Now().UTC() }
