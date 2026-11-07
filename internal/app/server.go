@@ -29,6 +29,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -62,6 +63,9 @@ type Server struct {
 	// carries: both read what the runner itself reports.
 	platformObserveRuntime func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error)
 	platformRecoveryTarget func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error)
+	// platformReadManagedRuntime is the runner seam of the profile read behind a managed review and commit;
+	// nil selects the local socket.
+	platformReadManagedRuntime func(context.Context, platformRuntimeEndpoint, control.Authority) (platformManagedRuntimeObserved, error)
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

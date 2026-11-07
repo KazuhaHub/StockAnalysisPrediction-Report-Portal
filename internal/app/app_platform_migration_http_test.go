@@ -183,41 +183,6 @@ func TestMigrationRollbackLaunchRefusesAlteredStartEvidenceHTTP(t *testing.T) {
 	}
 }
 
-// C1 -> settle -> retry -> launch. The retry is admitted behind a review of its own and takes its removal
-// evidence from the failed update.
-func TestMigrationC1SettleRetryLaunchHTTP(t *testing.T) {
-	platformWritableUpdateFixtures(t)
-	f := settledFixture(t, false)
-	h := newMigrationHTTP(t, f)
-	fx := lastPlatformUpdateFixture
-	// The review reads the runner's profile, which has no peer in a test; its precondition is the same one
-	// the admitted retry is held to.
-	if err := requirePlatformRetrySource(f.s.st.poolExec(), f.lease.installationID, f.op); err != nil {
-		t.Fatal(err)
-	}
-	lease := retryToMigrate(t, f, fx, platformFixtureID(7510), platformFixtureID(7511), f.op)
-	f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
-		return platformMigrateAnswers(i, f.endpoint, "migrated", ""), nil
-	}
-	start, err := f.s.dispatchPlatformMigrateData(context.Background(), lease, f.endpoint)
-	if err != nil {
-		t.Fatal(err)
-	}
-	activate, registration, observation, _ := platformMigratedUpdateToRegistration(t, f.s, start, f.endpoint)
-	registered, err := f.s.commitPlatformUpdateStartRegistration(context.Background(), activate, registration, f.endpoint, observation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	applied, boot := platformUpdateStartBootFixture(t, f.s, registered, f.endpoint)
-	defer applied.registration.Close()
-	if _, err := f.s.commitPlatformUpdateStartActivation(context.Background(), registered, applied, boot); err != nil {
-		t.Fatal(err)
-	}
-	if got := h.launch(); got != 200 {
-		t.Fatalf("launch after the retry answered %d", got)
-	}
-}
-
 // C7: once the migration has been discarded or has failed, no start can be built on it. The start binds an
 // applied migration receipt, and neither a reverted migration nor an absent one is that.
 func TestMigrationC7StartAfterDiscardRefused(t *testing.T) {

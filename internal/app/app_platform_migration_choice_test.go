@@ -161,6 +161,13 @@ func TestNoInOperationRetry(t *testing.T) {
 func retryToMigrate(t *testing.T, f *settleFixture, fx platformManagedUpdateReviewFixture, planID, operationID, recovers string) platformOperationLease {
 	t.Helper()
 	platformInsertManagedUpdateOperation(t, fx, planID, operationID, recovers)
+	return driveRetryToMigrate(t, f, operationID)
+}
+
+// driveRetryToMigrate claims the admitted retry and takes it, on the failed update's evidence and a fresh
+// checkpoint, to the point where migrate-data is sent.
+func driveRetryToMigrate(t *testing.T, f *settleFixture, operationID string) platformOperationLease {
+	t.Helper()
 	selected, err := f.s.claimNextPlatformManagedUpdate(context.Background(), platformFixtureID(7200))
 	if err != nil || selected.lease.id != operationID {
 		t.Fatal("the retry was not claimed", selected.lease.id, err)
