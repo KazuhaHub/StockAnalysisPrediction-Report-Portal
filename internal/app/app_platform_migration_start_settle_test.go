@@ -407,8 +407,7 @@ func TestSettlementOfAReservedStartClaimedAfterTheReadIsSettledAsAnOrphan(t *tes
 	f := startPendingFixture(t, true)
 	makeStartWindowPassed(t, f)
 	claimed := false
-	var h *heldStartRunner
-	h = newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+	h := newHeldStartRunner(f, func(h *heldStartRunner, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
 		switch {
 		case h.settled > 0:
 			return nil, held("never_ran")
