@@ -35,10 +35,10 @@ import (
 // the installation's fence has moved past the update's.
 
 const (
-	platformSettleStage       = "settle"
-	platformSettledStage      = "settled"
-	platformSettleStopEffect  = 1
-	platformSettleRemoveEffct = 2
+	platformSettleStage        = "settle"
+	platformSettledStage       = "settled"
+	platformSettleStopEffect   = 1
+	platformSettleRemoveEffect = 2
 )
 
 type platformSettleEffect struct {
@@ -135,12 +135,6 @@ func platformMigrationSettlementState(e migExec, operation string) (string, erro
 	return "settling", nil
 }
 
-// platformMigrationSettled reports whether the failed update's migration has been settled.
-func platformMigrationSettled(e migExec, operation string) (bool, error) {
-	state, err := platformMigrationSettlementState(e, operation)
-	return state == "settled", err
-}
-
 // platformMigrationSettlementCandidates lists the finished updates whose migration is not yet settled.
 func (s *Server) platformMigrationSettlementCandidates(ctx context.Context) ([]string, error) {
 	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id FROM app_platform_operations o
@@ -219,12 +213,12 @@ func (s *Server) settlePlatformMigration(ctx context.Context, endpoint platformR
 		if stop.state != "applied" {
 			return s.removeSettlementTarget(ctx, endpoint, lease, "stop", platformSettleStopEffect)
 		}
-		remove, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, platformSettleRemoveEffct)
+		remove, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, platformSettleRemoveEffect)
 		if err != nil {
 			return false, err
 		}
 		if remove.state != "applied" {
-			return s.removeSettlementTarget(ctx, endpoint, lease, "remove_code", platformSettleRemoveEffct)
+			return s.removeSettlementTarget(ctx, endpoint, lease, "remove_code", platformSettleRemoveEffect)
 		}
 	} else if start.exists && start.state != "reverted" {
 		return false, nil

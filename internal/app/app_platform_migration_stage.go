@@ -571,5 +571,4 @@ type platformDiscardIntent struct {
 	pendingReceipt                string
 	priorSignedUntil              int64
 	effectState                   string
-	fresh                         bool
 }

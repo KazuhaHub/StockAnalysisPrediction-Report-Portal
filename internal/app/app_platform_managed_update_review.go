@@ -975,10 +975,6 @@ func (s *Server) consumePlatformManagedUpdateReviewWithRuntime(ctx context.Conte
 	return result, nil
 }
 
-func (s *Server) createPlatformUpdateReviewContext(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64) (platformRemovalReview, error) {
-	return s.createPlatformUpdateReviewRecovering(ctx, session, installation, release, trustRevision, "")
-}
-
 func (s *Server) createPlatformUpdateReviewRecovering(ctx context.Context, session platformActorSession, installation, release string, trustRevision int64, recovers string) (platformRemovalReview, error) {
 	var runtimeID sql.NullString
 	if err := s.st.queryRow(`SELECT runtime_id
