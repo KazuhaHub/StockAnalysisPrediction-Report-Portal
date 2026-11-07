@@ -340,10 +340,15 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		policy == plan.TargetPolicyRevision &&
 		namespace == plan.DataNamespaceID && format == plan.DataFormat &&
 		state == "candidate" && readiness == "{}" && !observed.Valid
-	if activationMissing != effectMissing && !reuseRepairCandidate {
+	// The failed update a retry recovers started a target at this generation and left its candidate activation
+	// behind, and an installation holds one activation per generation. The retry takes that row over under an
+	// identity of its own: the runner knows the failed update's target resource under the old one.
+	reuseRetryCandidate := !activationMissing && effectMissing && plan.RecoversOperationID != "" &&
+		expected.snapshot.Action == appplatform.ActionUpdate && generation == int64(expected.snapshot.Generation) && state == "candidate"
+	if activationMissing != effectMissing && !reuseRepairCandidate && !reuseRetryCandidate {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	if activationMissing || reuseRepairCandidate {
+	if activationMissing || reuseRepairCandidate || reuseRetryCandidate {
 		if !create {
 			return zero, false, errAppPlatformStageEvidence
 		}
@@ -358,6 +363,20 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 				plan.TargetReleaseSHA256, expected.snapshot.Generation,
 				plan.TargetPolicyRevision, plan.DataNamespaceID,
 				plan.targetDataFormat(), now, now); err != nil {
+				return zero, false, err
+			}
+		}
+		if reuseRetryCandidate {
+			previous := activation
+			if activation, err = platformNewUUID(); err != nil {
+				return zero, false, err
+			}
+			changed, err := e.exec(`UPDATE app_platform_activations SET id=?,release_sha256=?,policy_revision=?,data_namespace_id=?,data_format=?,
+				readiness_evidence='{}',observed_ms=NULL,updated_ms=?
+				WHERE id=? AND installation_id=? AND generation=? AND state='candidate'`,
+				activation, plan.TargetReleaseSHA256, plan.TargetPolicyRevision, plan.DataNamespaceID, plan.targetDataFormat(), now,
+				previous, expected.installationID, expected.snapshot.Generation)
+			if err := platformLeaseCAS(changed, err); err != nil {
 				return zero, false, err
 			}
 		}

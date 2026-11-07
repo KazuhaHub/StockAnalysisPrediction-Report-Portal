@@ -173,7 +173,10 @@ func TestSettleUnknownDiscardsThenRestoresPostgres(t *testing.T) {
 
 // C5: readiness failed on migrated data. The started target is stopped and removed before anything else, and
 // the applied migration is restored away without a discard (the runner refuses one).
-func testSettleReadinessFailureRemovesTargetFirst(t *testing.T, pg bool) {
+// readinessFailedFixture is C5: the migration was applied, the target was started, and readiness failed, so the
+// update ended for review with an applied migration and a running target.
+func readinessFailedFixture(t *testing.T, pg bool) *settleFixture {
+	t.Helper()
 	s, lease, endpoint, fake := platformMigrationStageFixture(t, pg, true)
 	fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
 		return platformMigrateAnswers(i, endpoint, "migrated", ""), nil
@@ -204,7 +207,12 @@ func testSettleReadinessFailureRemovesTargetFirst(t *testing.T, pg bool) {
 		t.Fatal(err)
 	}
 	fake.calls = nil
-	f := &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
+	return &settleFixture{s: s, lease: lease, endpoint: endpoint, fake: fake, op: lease.id}
+}
+
+func testSettleReadinessFailureRemovesTargetFirst(t *testing.T, pg bool) {
+	f := readinessFailedFixture(t, pg)
+	s, endpoint, fake := f.s, f.endpoint, f.fake
 	fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
 		if i.command.OperationID == f.op {
 			t.Error("the removal names the operation of the start it removes")

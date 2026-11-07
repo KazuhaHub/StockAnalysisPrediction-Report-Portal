@@ -74,11 +74,14 @@ func (h migrationHTTP) retryOverHTTP(key string) string {
 	return h.str(commit, "operation_id")
 }
 
-// activateMigrated sends the retry's migration, then starts and activates its target.
-func (h migrationHTTP) activateMigrated(t *testing.T, lease platformOperationLease, state string) {
+// activateMigrated sends the retry's migration, then starts and activates its target. It returns the payloads the
+// migration was sent with.
+func (h migrationHTTP) activateMigrated(t *testing.T, lease platformOperationLease, state string) []control.MigrateDataPayload {
 	t.Helper()
 	f := h.f
+	var sent []control.MigrateDataPayload
 	f.fake.executeMigrate = func(i platformMigrateIntent) (platformMigrateObservation, error) {
+		sent = append(sent, i.command.Payload)
 		return platformMigrateAnswers(i, f.endpoint, state, map[string]string{"migrated": "", "failed": "exit_nonzero"}[state]), nil
 	}
 	start, err := f.s.dispatchPlatformMigrateData(context.Background(), lease, f.endpoint)
@@ -86,7 +89,7 @@ func (h migrationHTTP) activateMigrated(t *testing.T, lease platformOperationLea
 		if !errors.Is(err, errPlatformMigrationEnded) {
 			t.Fatal(err)
 		}
-		return
+		return sent
 	}
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +104,7 @@ func (h migrationHTTP) activateMigrated(t *testing.T, lease platformOperationLea
 	if _, err := f.s.commitPlatformUpdateStartActivation(context.Background(), registered, applied, boot); err != nil {
 		t.Fatal(err)
 	}
+	return sent
 }
 
 // C1 -> settle -> retry, all through the routes an administrator uses: the settings route offers the retry, its
@@ -164,5 +168,44 @@ func TestMigrationC1RetryOfRetryReviewCommitLaunchHTTP(t *testing.T) {
 		if effectState(t, f.s, failed, "recovered", 1) != "applied" {
 			t.Fatalf("%s was left unresolved", failed)
 		}
+	}
+}
+
+// C5 -> settle -> retry -> launch, through the routes: readiness failed on migrated data, so the runner's
+// migrate-data stays applied while settlement removes the target and restores the checkpoint. The retry that
+// follows must still be admitted by the runner's rule (checked in its journal) and the portal must carry it.
+func TestMigrationC5RetryReviewCommitLaunchHTTP(t *testing.T) {
+	platformWritableUpdateFixtures(t)
+	f := readinessFailedFixture(t, false)
+	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		state := "stopped"
+		if i.command.Stage == "remove_code" {
+			state = "absent"
+		}
+		return platformUpdateTargetRemovalObservationFixture(i, f.endpoint, state), nil
+	}
+	f.fake.executeRestore = func(i platformRestoreIntent) (platformSettlingRestoreObservation, error) {
+		return restoreAnswer(i, f.endpoint), nil
+	}
+	for range 5 {
+		f.step(t)
+	}
+	if f.settleState(t) != "settled" || effectState(t, f.s, f.op, "migrate", 2) != "applied" {
+		t.Fatalf("readiness failure did not settle with an applied migration: %s", f.settleState(t))
+	}
+	f.fake.calls = nil
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	if h.launch() == 200 {
+		t.Fatal("an application launched while its failed update was unresolved")
+	}
+	operation := h.retryOverHTTP(platformFixtureID(7630))
+	lease := driveRetryToMigrate(t, f, operation)
+	sent := h.activateMigrated(t, lease, "migrated")
+	if len(sent) != 1 || sent[0].RecoversOperationID != f.op {
+		t.Fatalf("the retry's migration does not name the update it recovers: %v", sent)
+	}
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the retry answered %d", got)
 	}
 }
