@@ -168,9 +168,6 @@ func TestMigrateDataRetryRefusesUnsettledRecoveredMigration(t *testing.T) {
 		"migration still unknown": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='unknown' WHERE operation_id=? AND kind='migrate-data'`, r.failed)
 		},
-		"migration absent": func(r retryFixture) {
-			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='migrate-data'`, r.failed)
-		},
 		"checkpoint never restored": func(r retryFixture) {
 			mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind='restore'`, r.failed)
 		},
@@ -309,5 +306,108 @@ func TestMigrateDataRetryAfterAppliedMigrationNeedsNewerRestore(t *testing.T) {
 				t.Fatal("a retry was admitted over an applied migration that was not restored away")
 			}
 		})
+	}
+}
+
+// C4/C2: settlement proved the runner never claimed the failed update's migration, so there is no migrate-data row and
+// no restore to follow. A retry may still recover it, and admitting it must close the identity: a late command of the
+// original update can never be claimed afterwards.
+func neverClaimedRetryFixture(t *testing.T) retryFixture {
+	t.Helper()
+	r := retryJournalFixture(t)
+	mustJournalExec(t, r.f.store.db, `DELETE FROM runner_commands WHERE operation_id=? AND kind IN ('migrate-data','restore')`, r.failed)
+	return r
+}
+
+func TestMigrateDataRetryAfterNeverClaimedMigrationAdmitted(t *testing.T) {
+	r := neverClaimedRetryFixture(t)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatalf("a retry of a migration the runner never claimed was refused: %v", err)
+	}
+	if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+r.failed+`' AND kind='migrate-data' AND state='reverted'`) != 1 {
+		t.Fatal("admitting the retry left no tombstone for the recovered update's migration")
+	}
+}
+
+func TestMigrateDataRetryOfNeverClaimedMigrationRefusals(t *testing.T) {
+	for name, mutate := range map[string]func(r retryFixture){
+		"no applied source removal": func(r retryFixture) {
+			mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET state='unknown' WHERE effect_id=?`, r.command.Payload.RemoveCodeEffectID)
+		},
+		"another migration is still unsettled": func(r retryFixture) {
+			r.insertSettledMigration(t, retryOperation(2), "", "unknown", time.Now().UTC().UnixMilli()-3)
+		},
+		"a container of the namespace is live": func(r retryFixture) {
+			now := time.Now().UTC().UnixMilli()
+			mustJournalExec(t, r.f.store.db, `INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms) VALUES(?,?,?,'container',?,?,2,?,2,1,'present','running',?,2,?,?,?)`,
+				fixtureID(1995), r.command.InstallationID, r.command.Payload.NamespaceID, strings.Repeat("9", 64), r.command.Payload.TargetReleaseSHA256,
+				r.command.ControllerEpoch, strings.Repeat("8", 64), now, now, now)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := neverClaimedRetryFixture(t)
+			mutate(r)
+			if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err == nil {
+				t.Fatal("a retry was admitted without the evidence a never-claimed link needs")
+			}
+		})
+	}
+}
+
+// lateOriginalCommand is the migration the failed update would have sent, arriving after the retry: the failed
+// update's own checkpoint and removal, its own effect and job, and no recovery link.
+func lateOriginalCommand(t *testing.T, r retryFixture) ([]byte, []byte) {
+	t.Helper()
+	// The failed update's checkpoint is the one the fixture's operation took; hand it over.
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET operation_id=? WHERE effect_id=?`, r.failed, r.command.Payload.CheckpointEffectID)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_checkpoints SET operation_id=? WHERE id=?`, r.failed, r.command.Payload.CheckpointID)
+	var checkpointRaw string
+	if err := r.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, r.command.Payload.CheckpointEffectID).Scan(&checkpointRaw); err != nil {
+		t.Fatal(err)
+	}
+	var checkpoint CheckpointReceipt
+	if err := json.Unmarshal([]byte(checkpointRaw), &checkpoint); err != nil {
+		t.Fatal(err)
+	}
+	checkpoint.OperationID = r.failed
+	rewritten, _ := json.Marshal(checkpoint)
+	mustJournalExec(t, r.f.store.db, `UPDATE runner_commands SET receipt_json=? WHERE effect_id=?`, string(rewritten), r.command.Payload.CheckpointEffectID)
+	return r.resign(t, func(c *control.MigrateDataCommand) {
+		c.OperationID, c.EffectID = r.failed, fixtureID(2300)
+		c.Payload.ResourceID, c.Payload.RecoversOperationID = fixtureID(2301), ""
+		c.Payload.CheckpointReceiptSHA256 = candidateHash(rewritten)
+	})
+}
+
+func TestMigrateDataLateOriginalCommandRefusedAfterRetry(t *testing.T) {
+	// Without a retry the original command is admissible, so the refusal below is the tombstone's doing.
+	alone := neverClaimedRetryFixture(t)
+	raw, sig := lateOriginalCommand(t, alone)
+	if _, _, err := alone.f.store.beginMigrateData(context.Background(), raw, sig); err != nil {
+		t.Fatalf("the original command is not admissible on its own, so the test proves nothing: %v", err)
+	}
+
+	r := neverClaimedRetryFixture(t)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatal(err)
+	}
+	settleUnknownByHand(t, r.migrateFixture)
+	raw, sig = lateOriginalCommand(t, r)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), raw, sig); err == nil {
+		t.Fatal("the original migration was admitted after the retry that recovers it")
+	}
+}
+
+func TestMigrateDataRetryOfRetryAfterNeverClaimedMigrationAdmitted(t *testing.T) {
+	r := neverClaimedRetryFixture(t)
+	// The second retry names the first, which the runner never saw: it only holds the shared source removal.
+	middle := retryOperation(7)
+	r.command.Payload.RecoversOperationID = middle
+	r.raw, r.sig = signMigrate(t, r.command)
+	if _, _, err := r.f.store.beginMigrateData(context.Background(), r.raw, r.sig); err != nil {
+		t.Fatalf("a retry of a never-claimed retry was refused: %v", err)
+	}
+	if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_commands WHERE operation_id='`+middle+`' AND kind='migrate-data' AND state='reverted'`) != 1 {
+		t.Fatal("no tombstone for the recovered retry")
 	}
 }
