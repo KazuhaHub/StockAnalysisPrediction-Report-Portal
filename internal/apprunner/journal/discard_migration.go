@@ -450,11 +450,24 @@ func (s *Store) ReadDiscardMigrationOrStatus(ctx context.Context, raw, signature
 	now := time.Now().UTC().UnixMilli()
 	switch {
 	case got.unknown:
+		if afterFirstRead != nil {
+			afterFirstRead()
+		}
 		if !s.tryAcquireDataExecution() {
 			return migrateStatusFor(got.command.CommandHeader, "pending", now), nil
 		}
-		s.releaseDataExecution()
-		return migrateStatusFor(got.command.CommandHeader, "orphaned", now), nil
+		defer s.releaseDataExecution()
+		again, err := s.readDiscardMigration(ctx, raw, signature, control.VerifyDiscardMigrationRead)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case again.unknown:
+			return migrateStatusFor(again.command.CommandHeader, "orphaned", time.Now().UTC().UnixMilli()), nil
+		case again.missing:
+			return nil, ErrFenceReconciliation
+		}
+		return again.row, nil
 	case got.missing:
 		if !s.tryAcquireDataExecution() {
 			return migrateStatusFor(got.command.CommandHeader, "pending", now), nil

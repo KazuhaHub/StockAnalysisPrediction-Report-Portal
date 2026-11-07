@@ -990,6 +990,10 @@ func (s *Store) readMigrateData(ctx context.Context, raw, signature []byte, veri
 	return migrateReadResult{command: c, row: receipt}, nil
 }
 
+// afterFirstRead is called by a read-back that found its effect unknown, before it takes the gate. A test uses it
+// to settle the effect in the window the read must not trust.
+var afterFirstRead func()
+
 // tryAcquireDataExecution takes the gate only if it is free.
 func (s *Store) tryAcquireDataExecution() bool {
 	s.executionOnce.Do(func() { s.executionGate = make(chan struct{}, 1) })
@@ -1013,11 +1017,25 @@ func (s *Store) ReadMigrateDataOrStatus(ctx context.Context, raw, signature []by
 	now := time.Now().UTC().UnixMilli()
 	switch {
 	case got.unknown:
+		if afterFirstRead != nil {
+			afterFirstRead()
+		}
 		if !s.tryAcquireDataExecution() {
 			return migrateStatusFor(got.command.CommandHeader, "pending", now), nil
 		}
-		s.releaseDataExecution()
-		return migrateStatusFor(got.command.CommandHeader, "orphaned", now), nil
+		defer s.releaseDataExecution()
+		// The dispatch that held the gate may have settled the effect since the first look.
+		again, err := s.readMigrateData(ctx, raw, signature, control.VerifyMigrateDataRead)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case again.unknown:
+			return migrateStatusFor(again.command.CommandHeader, "orphaned", time.Now().UTC().UnixMilli()), nil
+		case again.missing:
+			return nil, ErrFenceReconciliation
+		}
+		return again.row, nil
 	case got.missing:
 		if !s.tryAcquireDataExecution() {
 			return migrateStatusFor(got.command.CommandHeader, "pending", now), nil

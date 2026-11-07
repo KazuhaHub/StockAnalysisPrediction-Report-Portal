@@ -501,3 +501,40 @@ func TestMigrateFencesAreExactlyConsecutive(t *testing.T) {
 		t.Fatal("a claim with a skipped start fence is valid")
 	}
 }
+
+// settleUnknownByHand finishes an unknown migration the way a dispatch that outlived the first look would.
+func settleUnknownByHand(t *testing.T, m migrateFixture) {
+	t.Helper()
+	var raw string
+	if err := m.f.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, m.command.EffectID).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var marker migrateClaimMarker
+	if err := json.Unmarshal([]byte(raw), &marker); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().UnixMilli()
+	receipt := MigrateDataReceipt{
+		Format: migrateReceiptFormat, Claim: marker, DeploymentID: m.command.DeploymentID, ControllerEpoch: m.command.ControllerEpoch,
+		InstallationID: m.command.InstallationID, OperationID: m.command.OperationID, TargetGeneration: m.command.TargetGeneration, Stage: "migrate",
+		EffectID: m.command.EffectID, PayloadSHA256: m.command.PayloadSHA256, ExitCode: "1", MarkerSchema: "0", UsedBytes: "0", UsedInodes: "0",
+		State: "failed", Outcome: "exit_nonzero", ObservedMS: marker.ClaimedMS, SettledMS: strconv.FormatInt(now, 10),
+	}
+	encoded, _ := json.Marshal(receipt)
+	mustJournalExec(t, m.f.store.db, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=2,observed_ms=?,updated_ms=? WHERE id=?`, now, now, marker.ResourceID)
+	mustJournalExec(t, m.f.store.db, `UPDATE runner_commands SET state='reverted',receipt_json=?,updated_ms=? WHERE effect_id=?`, string(encoded), now, m.command.EffectID)
+}
+
+// A read that saw the effect unknown, and then took the gate, must look again: the dispatch that held the gate may
+// have settled it in between, and calling a settled effect orphaned would send the Portal to discard a finished job.
+func TestMigrateReadReopensAnUnknownRowAfterTakingTheGate(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	m.native.runErr = driver.ErrContainerUncertain
+	_, _ = m.dispatch(t)
+	afterFirstRead = func() { settleUnknownByHand(t, m) }
+	defer func() { afterFirstRead = nil }()
+	got, err := m.f.store.ReadMigrateDataOrStatus(context.Background(), m.raw, migrateRead(t, m.raw))
+	if receipt, ok := got.(MigrateDataReceipt); err != nil || !ok || receipt.State != "failed" {
+		t.Fatalf("a row settled after the first look was read as %#v (%v)", got, err)
+	}
+}

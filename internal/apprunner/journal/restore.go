@@ -762,11 +762,24 @@ func (s *Store) ReadRestoreOrStatus(ctx context.Context, raw, signature []byte) 
 	now := time.Now().UTC().UnixMilli()
 	switch {
 	case got.unknown:
+		if afterFirstRead != nil {
+			afterFirstRead()
+		}
 		if !s.tryAcquireDataExecution() {
 			return restoreStatusFor(got.command, "pending", now), nil
 		}
-		s.releaseDataExecution()
-		return restoreStatusFor(got.command, "orphaned", now), nil
+		defer s.releaseDataExecution()
+		again, err := s.readRestore(ctx, raw, signature, control.VerifyRestoreRead)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case again.unknown:
+			return restoreStatusFor(again.command, "orphaned", time.Now().UTC().UnixMilli()), nil
+		case again.missing:
+			return nil, ErrFenceReconciliation
+		}
+		return *again.receipt, nil
 	case got.missing:
 		if !s.tryAcquireDataExecution() {
 			return restoreStatusFor(got.command, "pending", now), nil
