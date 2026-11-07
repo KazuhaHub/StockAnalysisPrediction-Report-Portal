@@ -183,15 +183,29 @@ func platformResourceForUpdateStartEffect(e migExec, lease platformOperationLeas
 	return activation, nil
 }
 
+// platformRemovalNativeID is the container identity a removal receipt names: the running one, or, for a target that
+// was reserved and never created, the one derived from its resource.
+func platformRemovalNativeID(start platformUpdateStartIntent) string {
+	if start.running == nil {
+		return control.ReservedStartNativeID(start.resourceID)
+	}
+	return start.running.NativeID
+}
+
 func platformUpdateTargetRemovalCommand(lease platformOperationLease, start platformUpdateStartIntent, effectID, stage string) (control.UpdateStartRemovalCommand, error) {
-	runningRaw, _ := json.Marshal(*start.running)
+	// A start with no running receipt was reserved and never ran; the command says so with the sentinel.
+	runningDigest := control.ReservedStartReceiptSHA256
+	if start.running != nil {
+		runningRaw, _ := json.Marshal(*start.running)
+		runningDigest = platformDigest(runningRaw)
+	}
 	command := control.UpdateStartRemovalCommand{
 		Format: control.UpdateStartRemovalFormat, EffectID: effectID,
 		OperationID: lease.id, Stage: stage,
 		InstallationFence:    strconv.FormatInt(lease.fence, 10),
 		StartRaw:             bytes.Clone(start.raw),
 		StartSignature:       bytes.Clone(start.signature),
-		RunningReceiptSHA256: platformDigest(runningRaw),
+		RunningReceiptSHA256: runningDigest,
 	}
 	digest, err := control.UpdateStartRemovalLogicalDigest(command)
 	if err != nil {

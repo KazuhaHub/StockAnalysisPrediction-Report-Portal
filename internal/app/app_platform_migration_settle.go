@@ -40,6 +40,7 @@ const (
 	platformSettledStage       = "settled"
 	platformSettleStopEffect   = 1
 	platformSettleRemoveEffect = 2
+	platformSettleHeldEffect   = 3
 )
 
 type platformSettleEffect struct {
@@ -224,7 +225,33 @@ func (s *Server) settlePlatformMigration(ctx context.Context, endpoint platformR
 	} else if start.exists && start.state != "reverted" {
 		// A start the update ended with still open: the runner may or may not have run it. It is read back under its
 		// own identity and never sent; what comes back decides which of the paths here the update takes next.
-		return s.settleSettlementStart(ctx, endpoint, lease, start)
+		held, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, platformSettleHeldEffect)
+		if err != nil {
+			return false, err
+		}
+		if !held.exists || held.kind != platformHeldStartKind || held.state != "applied" {
+			return s.settleSettlementStart(ctx, endpoint, lease, start)
+		}
+		// Reserved and never created: the removal path is the ordinary one, bound to the reservation instead of a
+		// running receipt, and the start is closed as never run once the target is gone.
+		for _, step := range []struct {
+			stage  string
+			number int
+		}{{"stop", platformSettleStopEffect}, {"remove_code", platformSettleRemoveEffect}} {
+			effect, err := loadPlatformSettleEffect(pool, operation, platformSettleStage, step.number)
+			if err != nil {
+				return false, err
+			}
+			if effect.state != "applied" {
+				return s.removeSettlementTarget(ctx, endpoint, lease, step.stage, step.number)
+			}
+		}
+		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
+				platformNeverRanReceipt, now, lease.id)
+			return platformLeaseCAS(changed, err)
+		})
 	}
 	// 2. An unfinished migration is read back, and discarded once nothing is running it.
 	switch m.state {
@@ -275,6 +302,14 @@ func platformSettlementRestoreNeeded(m platformSettleEffect) (bool, error) {
 }
 
 const platformAbsentReceipt = `{"state":"absent"}`
+
+// platformHeldStartKind marks the settlement effect (settle, slot 3) that records the runner holds the failed update's
+// start with no running receipt: reserved and never created, or claimed with no executor. Its presence turns the target
+// removal into the reserved-only one.
+const platformHeldStartKind = "held-start"
+
+// platformNeverRanReceipt closes the Portal's start effect once its target was removed without ever having run.
+const platformNeverRanReceipt = `{"state":"never_ran"}`
 
 // readBackSettlementMigrate reads the unfinished migrate-data under its own identity. A receipt settles it, an
 // orphaned answer opens the discard, a pending one waits, and an absence settles it only once every command
@@ -760,35 +795,10 @@ type platformSettlementStartRead struct {
 	admitted      int64
 }
 
-// signPlatformSettlementStartRead rebuilds the failed update's start command at the fence it was admitted under,
-// proves it is the very command the effect row records, and signs it for a read.
-func (s *Server) signPlatformSettlementStartRead(ctx context.Context, lease platformOperationLease) (platformSettlementStartRead, error) {
+// loadPlatformSettlementStart rebuilds the failed update's start command at the fence it was admitted under and
+// proves it is the very command the effect row records. It signs and writes nothing.
+func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtime platformRuntimeRegistration, now int64) (platformSettlementStartRead, error) {
 	var zero platformSettlementStartRead
-	dek, err := s.dek()
-	if err != nil {
-		return zero, err
-	}
-	tx, err := s.st.db.BeginTx(ctx, nil)
-	if err != nil {
-		return zero, err
-	}
-	defer tx.Rollback()
-	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
-	if err := lockOUMutation(e); err != nil {
-		return zero, err
-	}
-	if err := lockPlatformPublisherTrust(e); err != nil {
-		return zero, err
-	}
-	runtime, seed, err := s.platformDataRuntime(e, lease.controllerEpoch, dek)
-	if err != nil {
-		return zero, err
-	}
-	defer clear(seed)
-	now, err := platformSettlementGuard(e, lease)
-	if err != nil {
-		return zero, err
-	}
 	fail := func(reason string) (platformSettlementStartRead, error) {
 		return zero, errors.Join(errAppPlatformStageEvidence, errors.New("settlement start "+reason))
 	}
@@ -839,28 +849,63 @@ func (s *Server) signPlatformSettlementStartRead(ctx context.Context, lease plat
 	if err != nil || command.PayloadSHA256 != digest || (reservation != nil && !platformUpdateStartReservationMatches(*reservation, command, activation, effectID)) {
 		return fail("command")
 	}
-	issued := time.Now().UnixMilli()
-	if issued < now-1000 || issued > now+1000 || issued > math.MaxInt64-platformStartCommandWindowMS {
-		return zero, errAppPlatformLeaseConflict
-	}
-	command.IssuedMS, command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
 	intent := platformUpdateStartIntent{
 		resourceID: activation, effectID: effectID, runtime: runtime, authority: platformImportAuthority(runtime),
 		command: command, checkpoint: checkpoint, checkpointRaw: checkpointRaw, source: source, plan: plan,
 		targetDescriptor: bytes.Clone(descriptor), reservation: reservation,
 	}
-	key := ed25519.NewKeyFromSeed(seed)
-	defer clear(key)
-	if intent.raw, intent.signature, err = control.SignUpdateStart(command, key, intent.authority, issued); err != nil {
+	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformStartCommandWindowMS + platformImportAbsenceMarginMS}, nil
+}
+
+// signPlatformSettlementStartRead signs the failed update's start for a read.
+func (s *Server) signPlatformSettlementStartRead(ctx context.Context, lease platformOperationLease) (platformSettlementStartRead, error) {
+	var zero platformSettlementStartRead
+	dek, err := s.dek()
+	if err != nil {
 		return zero, err
 	}
-	if intent.readSignature, err = control.SignUpdateStartRead(intent.raw, key, intent.authority, issued); err != nil {
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if err := lockOUMutation(e); err != nil {
+		return zero, err
+	}
+	if err := lockPlatformPublisherTrust(e); err != nil {
+		return zero, err
+	}
+	runtime, seed, err := s.platformDataRuntime(e, lease.controllerEpoch, dek)
+	if err != nil {
+		return zero, err
+	}
+	defer clear(seed)
+	now, err := platformSettlementGuard(e, lease)
+	if err != nil {
+		return zero, err
+	}
+	read, err := loadPlatformSettlementStart(e, lease, runtime, now)
+	if err != nil {
+		return zero, err
+	}
+	issued := time.Now().UnixMilli()
+	if issued < now-1000 || issued > now+1000 || issued > math.MaxInt64-platformStartCommandWindowMS {
+		return zero, errAppPlatformLeaseConflict
+	}
+	read.intent.command.IssuedMS, read.intent.command.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
+	key := ed25519.NewKeyFromSeed(seed)
+	defer clear(key)
+	if read.intent.raw, read.intent.signature, err = control.SignUpdateStart(read.intent.command, key, read.intent.authority, issued); err != nil {
+		return zero, err
+	}
+	if read.intent.readSignature, err = control.SignUpdateStartRead(read.intent.raw, key, read.intent.authority, issued); err != nil {
 		return zero, err
 	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
-	return platformSettlementStartRead{intent: intent, reserved: reservation != nil, admitted: admitted, definiteAfter: completed + platformStartCommandWindowMS + platformImportAbsenceMarginMS}, nil
+	return read, nil
 }
 
 // settleSettlementStart reads the open start effect of a failed update back from the runner and never sends it.
@@ -900,7 +945,21 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 			return err
 		})
 	case err != nil:
-		return false, nil
+		var held *journal.UpdateStartHeldError
+		if !errors.As(err, &held) || held.State == "pending" || held.State == "absent" {
+			// Unreachable, or the start may be executing: read again later.
+			return false, nil
+		}
+		// The runner holds the start with no running receipt and nothing executing it: its pending target resource
+		// was reserved and never created (reserved), or its claim has no executor (orphaned). Either way the target
+		// is removed by the ordinary removal path, bound to the reservation. Recording that is all this step does.
+		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+			_, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+				SELECT operation_id,'settle',3,?,?,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,'applied',?,?,? FROM app_platform_operation_effects
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND state IN ('prepared','unknown')`,
+				platformDerivedUUID("held-start", read.intent.effectID), platformHeldStartKind, `{"state":"`+held.State+`"}`, now, now, lease.id, read.intent.effectID)
+			return err
+		})
 	}
 	running, ok := validPlatformUpdateStartRunningObservation(observation, read.intent, endpoint)
 	if !ok {
@@ -986,9 +1045,24 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	if err != nil {
 		return zero, err
 	}
-	start, _, _, _, err := loadPlatformUpdateTargetRemovalPlan(e, lease, runtime, checkpoint, now)
-	if err != nil || start.running == nil {
-		return zero, fmt.Errorf("settlement target removal source: %w", errors.Join(errAppPlatformStageEvidence, err))
+	held, err := loadPlatformSettleEffect(e, lease.id, platformSettleStage, platformSettleHeldEffect)
+	if err != nil {
+		return zero, err
+	}
+	var start platformUpdateStartIntent
+	if held.exists && held.kind == platformHeldStartKind && held.state == "applied" {
+		// The target was reserved and never created: there is no running receipt, and the start is the one the
+		// effect row records, rebuilt from the evidence it was built from.
+		read, err := loadPlatformSettlementStart(e, lease, runtime, now)
+		if err != nil {
+			return zero, fmt.Errorf("settlement reserved removal source: %w", err)
+		}
+		start = read.intent
+	} else {
+		start, _, _, _, err = loadPlatformUpdateTargetRemovalPlan(e, lease, runtime, checkpoint, now)
+		if err != nil || start.running == nil {
+			return zero, fmt.Errorf("settlement target removal source: %w", errors.Join(errAppPlatformStageEvidence, err))
+		}
 	}
 	issue := time.Now().UnixMilli()
 	if issue < now-1000 || issue > now+1000 {
@@ -1040,7 +1114,7 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	}
 	return platformUpdateTargetRemovalIntent{
 		command: command, raw: raw, signature: signature, authority: start.authority, start: start, runtime: runtime,
-		sourceOperation: lease.id, nativeID: start.running.NativeID, effectStage: platformSettleStage, effectNumber: number,
+		sourceOperation: lease.id, nativeID: platformRemovalNativeID(start), effectStage: platformSettleStage, effectNumber: number,
 		created: now, updated: now,
 	}, nil
 }

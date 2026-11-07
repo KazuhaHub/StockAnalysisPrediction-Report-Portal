@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -139,3 +140,80 @@ func TestSettlementStartReadAnswerMustBeTheStartsOwn(t *testing.T) {
 }
 
 var _ = journal.UpdateStartReservation{}
+
+// held scripts the runner's answer to the start read: it holds the start with no running receipt.
+func holdStart(f *settleFixture, state string) {
+	f.s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		return nil, &journal.UpdateStartHeldError{State: state}
+	}
+}
+
+// The start was reserved and never ran, or was claimed and nothing executes it. Settlement removes the target through
+// the ordinary path, bound to the reservation instead of a running receipt, closes the start as never run, restores
+// the checkpoint and settles; it never sends the start. A retry then runs to a launching application.
+func testSettlementOfAHeldStart(t *testing.T, reserved bool, state string) {
+	platformWritableUpdateFixtures(t)
+	f := startPendingFixture(t, reserved)
+	holdStart(f, state)
+	var removals []string
+	f.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		if i.command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || i.nativeID != control.ReservedStartNativeID(i.start.resourceID) || i.start.running != nil {
+			t.Errorf("the removal is not bound to the reservation: %+v", i.command)
+		}
+		removals = append(removals, i.command.Stage)
+		result := "stopped"
+		if i.command.Stage == "remove_code" {
+			result = "absent"
+		}
+		return platformUpdateTargetRemovalObservationFixture(i, f.endpoint, result), nil
+	}
+	for range 8 {
+		f.step(t)
+	}
+	if f.settleState(t) != "settled" {
+		t.Fatalf("a held start did not settle: %s %v", f.settleState(t), f.fake.calls)
+	}
+	if len(removals) != 2 || removals[0] != "stop" || removals[1] != "remove_code" {
+		t.Fatalf("the reserved target was not stopped and removed in order: %v", removals)
+	}
+	if effectState(t, f.s, f.op, "start", 1) != "reverted" || effectState(t, f.s, f.op, "settle", 1) != "applied" || effectState(t, f.s, f.op, "settle", 2) != "applied" {
+		t.Fatal("the start was not closed as never run after its target was removed")
+	}
+	if f.fake.count("execute-start") != 0 || f.fake.count("execute-restore") != 1 {
+		t.Fatalf("settlement sent the start or skipped the restore: %v", f.fake.calls)
+	}
+	f.fake.calls = nil
+	h := newMigrationHTTP(t, f)
+	reportManagedRuntime(f, lastPlatformUpdateFixture.target.Profile)
+	if h.launch() == 200 {
+		t.Fatal("an application launched while its failed update was unresolved")
+	}
+	operation := h.retryOverHTTP(platformFixtureID(7680))
+	lease := driveRetryToMigrate(t, f, operation)
+	h.activateMigrated(t, lease, "migrated")
+	if got := h.launch(); got != 200 {
+		t.Fatalf("launch after the retry of a held start answered %d", got)
+	}
+}
+
+func TestSettlementOfAReservedStartThatNeverRanEndsSettledAndALaunchingRetry(t *testing.T) {
+	testSettlementOfAHeldStart(t, true, "reserved")
+}
+
+func TestSettlementOfAnOrphanedStartEndsSettledAndALaunchingRetry(t *testing.T) {
+	testSettlementOfAHeldStart(t, true, "orphaned")
+}
+
+// A start the runner may be executing is waited for: nothing is removed and nothing is recorded.
+func TestSettlementWaitsForAStartThatMayBeExecuting(t *testing.T) {
+	f := startPendingFixture(t, true)
+	holdStart(f, "pending")
+	for range 3 {
+		if f.step(t) {
+			t.Fatal("a pending start made progress")
+		}
+	}
+	if f.fake.count("remove-stop") != 0 || scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='settle'`, f.op) != 0 {
+		t.Fatal("a start that may be executing was removed")
+	}
+}
