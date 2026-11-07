@@ -524,6 +524,10 @@ func requireRecoveredMigration(ctx context.Context, tx *sql.Tx, c control.Migrat
 			return fail("data was not restored before the new checkpoint")
 		}
 		if supersede {
+			// Rowid order, not the clock: commands are only ever inserted (nothing deletes, replaces or vacuums the
+			// table, which TestNoRunnerCodeRenumbersTheCommandsTable enforces) and the upgrade copies in rowid order,
+			// so a row inserted later has a larger rowid. Both commands run under the data execution gate, one at a
+			// time, so a restore admitted after a migration was claimed also came after it settled.
 			migrated, err := rowOrder(ctx, tx, effect)
 			if err != nil {
 				return nil, err

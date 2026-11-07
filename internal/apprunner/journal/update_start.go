@@ -613,7 +613,9 @@ func loadAppliedMigration(ctx context.Context, tx *sql.Tx, c control.UpdateStart
 	}
 	// A restore of the namespace admitted after the migration took its data away: the migration is superseded and
 	// can never start. "After" is the order the runner admitted the commands in, not the millisecond clock, which
-	// cannot separate two commands admitted together.
+	// cannot separate two commands admitted together. That order is the commands table's rowid: rows are only ever
+	// inserted (nothing deletes, replaces or vacuums the table, and the v1 upgrade copies in rowid order), and the
+	// migration and the restore run one at a time under the data execution gate.
 	applied, err := rowOrder(ctx, tx, p.MigrateEffectID)
 	if err != nil {
 		return fail("receipt order")
