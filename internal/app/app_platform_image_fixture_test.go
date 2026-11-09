@@ -23,6 +23,16 @@ type platformManagedImageParts struct {
 	version                         string
 	// frontendName is the member name of the frontend archive; empty means "ui.zip".
 	frontendName string
+	// publisher is the publisher the descriptor names, when it is not the fixture publisher.
+	publisher string
+}
+
+// trustPublisher is the publisher identity a server must have registered to stage the parts.
+func (p platformManagedImageParts) trustPublisher() string {
+	if p.publisher != "" {
+		return p.publisher
+	}
+	return "fixture-publisher"
 }
 
 func platformImageLayer(t testing.TB, name, body string) (compressed []byte, diffID string, size int) {

@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -50,6 +51,7 @@ type imageDeliveryExpected struct {
 	Store          string   `json:"store"`
 	Layers         []string `json:"layers"`
 	Blobs          int      `json:"blobs"`
+	Publisher      string   `json:"publisher"`
 }
 
 type imageDeliveryChildEvidence struct {
@@ -63,6 +65,7 @@ type imageDeliveryChildEvidence struct {
 	LoadExecutes   int             `json:"load_executes"`
 	Receipt        json.RawMessage `json:"runner_receipt"`
 	ReceiptState   string          `json:"runner_receipt_state"`
+	StartNativeID  string          `json:"start_receipt_native_id"`
 	ReadinessSeen  bool            `json:"readiness_evidence_recorded"`
 	AppAnswered    bool            `json:"app_answered"`
 	Uninstalled    bool            `json:"uninstalled"`
@@ -180,18 +183,28 @@ func (d *imageDeliveryDocker) inspectImage(ctx context.Context, id string) (imag
 		RepoDigests: raw.RepoDigests, Layers: raw.RootFS.Layers}, status, err
 }
 
-// containerImage is the image the daemon recorded for a container: the image ID it was created from.
-func (d *imageDeliveryDocker) containerImage(ctx context.Context, id string) (image, configImage string, running bool, err error) {
+type imageDeliveryContainerDetail struct {
+	ID, Image, ConfigImage string
+	Running                bool
+	Labels                 map[string]string
+}
+
+// containerDetail is what the daemon recorded for a container: the image ID it was created from and its labels.
+func (d *imageDeliveryDocker) containerDetail(ctx context.Context, id string) (imageDeliveryContainerDetail, error) {
 	var raw struct {
+		ID     string `json:"Id"`
 		Image  string
-		Config struct{ Image string }
-		State  struct{ Running bool }
+		Config struct {
+			Image  string
+			Labels map[string]string
+		}
+		State struct{ Running bool }
 	}
 	status, err := d.call(ctx, http.MethodGet, "/containers/"+url.PathEscape(id)+"/json", &raw)
 	if err != nil || status != 200 {
-		return "", "", false, fmt.Errorf("inspect container %s: %d %v", id, status, err)
+		return imageDeliveryContainerDetail{}, fmt.Errorf("inspect container %s: %d %v", id, status, err)
 	}
-	return raw.Image, raw.Config.Image, raw.State.Running, nil
+	return imageDeliveryContainerDetail{ID: raw.ID, Image: raw.Image, ConfigImage: raw.Config.Image, Running: raw.State.Running, Labels: raw.Config.Labels}, nil
 }
 
 // removeTarget removes the containers created from the target image and then every name and copy of the image,
@@ -307,6 +320,12 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 		storeName = "containerd"
 	}
 	target := imageDeliveryExpectedID(containerd, entry.ManifestDigest, entry.ConfigDigest)
+	// "Exact" must not depend on a cache hit: the package was saved from the very image the job built and the
+	// exact-image step verified, so its ID must be that image's ID.
+	builtImageID := os.Getenv("APP_IMAGE_DELIVERY_BUILT_IMAGE_ID")
+	if builtImageID == "" || builtImageID != target {
+		t.Fatalf("the delivered image %s is not the image the job built and verified (%q)", target, builtImageID)
+	}
 	removedContainers, removedImage, err := docker.removeTarget(ctx, target)
 	if err != nil {
 		t.Fatal(err)
@@ -330,7 +349,7 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 	}
 	expected := imageDeliveryExpected{
 		ReleaseSHA256: platformDigest(parts.descriptor), ManifestDigest: entry.ManifestDigest, ConfigDigest: entry.ConfigDigest,
-		Platform: entry.Platform, ImageID: target, Store: storeName, Layers: layers, Blobs: len(parts.imageBlobList()),
+		Platform: entry.Platform, ImageID: target, Store: storeName, Layers: layers, Blobs: len(parts.imageBlobList()), Publisher: parts.trustPublisher(),
 	}
 
 	store, err := journal.Open(os.Getenv("APP_DATA_JOURNAL_CONTROL"))
@@ -376,8 +395,10 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 	}
 
 	// The production profile: no local reference images, a real image root (the fixture creates it).
+	allowLocalImages := true
 	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
 		c.AllowLocalReferenceImages = false
+		allowLocalImages = c.AllowLocalReferenceImages
 	})
 	defer func() {
 		runner.stop(t)
@@ -414,6 +435,20 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 	}
 	waited := make(chan error, 1)
 	go func() { waited <- child.Wait() }()
+	evidenceWritten := false
+	defer func() {
+		// A failed run still leaves a record: what the scenario had established and the child's output tail.
+		if path := os.Getenv("APP_IMAGE_DELIVERY_EVIDENCE"); t.Failed() && !evidenceWritten && path != "" {
+			tail := output.String()
+			if len(tail) > 16384 {
+				tail = tail[len(tail)-16384:]
+			}
+			failure := map[string]any{"format": imageDeliveryFormat, "passed": false, "expected_image_id": target, "child_output_tail": tail}
+			if raw, err := json.MarshalIndent(failure, "", "  "); err == nil {
+				_ = os.WriteFile(path, append(raw, '\n'), 0644)
+			}
+		}
+	}()
 	defer func() {
 		if child.ProcessState == nil {
 			_ = child.Process.Kill()
@@ -444,7 +479,12 @@ wait:
 				continue
 			}
 			inspected = true
-			inspection, inspectErr = inspectImageDeliveryRun(ctx, docker, expected, before)
+			var reported imageDeliveryChildEvidence
+			if raw, err := os.ReadFile(filepath.Join(childData, "child-evidence.json")); err != nil || json.Unmarshal(raw, &reported) != nil {
+				inspectErr = fmt.Errorf("child evidence unavailable: %v", err)
+			} else {
+				inspection, inspectErr = inspectImageDeliveryRun(ctx, docker, expected, before, reported)
+			}
 			if err := os.WriteFile(filepath.Join(childData, imageDeliveryDoneFile), []byte("done\n"), 0644); err != nil {
 				t.Fatal(err)
 			}
@@ -466,8 +506,18 @@ wait:
 		t.Log(marker)
 	}
 	stopWatcher()
-	if err := imageDeliveryCheckEvents(events); err != nil {
+	if err := imageDeliveryCheckEvents(events, target); err != nil {
 		t.Fatal(err)
+	}
+	// What the runner announced about itself is an observation, not an assumption: stop it (the child has
+	// finished) and read its captured output.
+	runner.stop(t)
+	runnerProfile, runnerPlatform, runnerImages, err := imageDeliveryParseRunnerReady(runner.output.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerImages != "production" || allowLocalImages || runnerPlatform != entry.Platform {
+		t.Fatalf("runner profile %s platform %s images %s (allow local reference images: %v), expected production on %s", runnerProfile, runnerPlatform, runnerImages, allowLocalImages, entry.Platform)
 	}
 	// The uninstall stopped and removed the container; leave no container of this image behind.
 	left, err := docker.containersOf(ctx, target)
@@ -502,18 +552,31 @@ wait:
 			creates++
 		}
 	}
+	var runnerReceipt journal.LoadImageReceipt
+	receiptBinds := json.Unmarshal(childEvidence.Receipt, &runnerReceipt) == nil &&
+		strings.TrimPrefix(runnerReceipt.Claim.ManifestDigest, "sha256:") == strings.TrimPrefix(entry.ManifestDigest, "sha256:") &&
+		strings.TrimPrefix(runnerReceipt.Claim.ConfigDigest, "sha256:") == strings.TrimPrefix(entry.ConfigDigest, "sha256:") &&
+		runnerReceipt.ImageID == target
 	report := map[string]any{
 		"format":                       imageDeliveryFormat,
-		"image_absent_before_load":     true,
-		"production_profile":           true,
-		"allow_local_reference_images": false,
-		"image_store":                  storeName,
-		"platform":                     entry.Platform,
-		"release_sha256":               expected.ReleaseSHA256,
-		"manifest_digest":              entry.ManifestDigest,
-		"config_digest":                entry.ConfigDigest,
-		"expected_image_id":            target,
-		"layer_diff_ids":               layers,
+		"image_absent_before_load":     imageDeliveryCheckAbsent(before, target) == nil,
+		"production_profile":           runnerImages == "production",
+		"allow_local_reference_images": allowLocalImages,
+		"runner": map[string]any{
+			"profile": runnerProfile, "platform": runnerPlatform, "images": runnerImages,
+		},
+		"built_image_id":                 builtImageID,
+		"delivered_image_id":             target,
+		"built_image_is_delivered_image": builtImageID == target,
+		"publisher":                      expected.Publisher,
+		"staged_descriptor_change":       "compatibility.runner_protocol only: >=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0",
+		"image_store":                    storeName,
+		"platform":                       entry.Platform,
+		"release_sha256":                 expected.ReleaseSHA256,
+		"manifest_digest":                entry.ManifestDigest,
+		"config_digest":                  entry.ConfigDigest,
+		"expected_image_id":              target,
+		"layer_diff_ids":                 layers,
 		"before_load": map[string]any{
 			"removed_image": removedImage, "removed_containers": removedContainers, "images_in_store": len(before),
 		},
@@ -528,13 +591,14 @@ wait:
 		},
 		"blobs_uploaded_over_control_socket":          childEvidence.BlobsStored == expected.Blobs,
 		"load_receipt_loaded":                         childEvidence.ReceiptState == "loaded",
-		"runner_started_container_uses_package_image": true,
-		"manifest_digest_bound_by_receipt":            true,
-		"layers_match":                                true,
+		"runner_started_container_uses_package_image": inspection.ContainersUsePackageImage,
+		"container_tied_to_start_receipt":             inspection.ContainerTiedToStartReceipt,
+		"manifest_digest_bound_by_receipt":            receiptBinds,
+		"layers_match":                                slices.Equal(inspection.Image.Layers, expected.Layers),
 		"readiness_reached":                           childEvidence.ReadinessSeen,
 		"app_answered":                                childEvidence.AppAnswered,
 		"no_pull_events":                              pulls == 0,
-		"no_names_added":                              true,
+		"no_names_added":                              len(inspection.Image.RepoTags) == 0 && len(inspection.Image.RepoDigests) == 0,
 		"not_proved": []string{
 			"the manifest digest is not retained by the classic store, so it is bound through the runner's signed claim and receipt, not read back from the daemon",
 			"the PKG-08 corrupt-blob scenario is proved by Portal-side tests only, not against a real runner",
@@ -548,6 +612,7 @@ wait:
 		if err := os.WriteFile(path, append(encoded, '\n'), 0644); err != nil {
 			t.Fatal(err)
 		}
+		evidenceWritten = true
 	}
 	t.Log("IMAGE_DELIVERY_REAL_RUNNER_LOADED_FROM_BLOBS")
 	t.Log("IMAGE_DELIVERY_REAL_RUNNER_CONTAINER_IMAGE_IS_PACKAGE_IMAGE")
@@ -565,23 +630,26 @@ func imageDeliveryJSON(t *testing.T, v any) []byte {
 }
 
 type imageDeliveryInspection struct {
-	Image      imageDeliveryInspect
-	Containers []map[string]any
+	Image                       imageDeliveryInspect
+	Containers                  []map[string]any
+	ContainersUsePackageImage   bool
+	ContainerTiedToStartReceipt bool
 }
 
 // inspectImageDeliveryRun is the daemon-side proof, taken while the app runs: the stored image is the package's
-// (ID, platform, layer chain, no name), the store changed by exactly that image, and every container the runner
-// created from it was created from the image ID and one of them is running.
-func inspectImageDeliveryRun(ctx context.Context, docker *imageDeliveryDocker, expected imageDeliveryExpected, before []imageDeliveryImage) (imageDeliveryInspection, error) {
+// (ID, platform, layer chain, no name), the store changed by exactly that image, every container created from it
+// was created from the image ID with one running, and that container is the one the runner's start receipt named,
+// carrying this installation, operation and release as its owner labels.
+func inspectImageDeliveryRun(ctx context.Context, docker *imageDeliveryDocker, expected imageDeliveryExpected, before []imageDeliveryImage, child imageDeliveryChildEvidence) (imageDeliveryInspection, error) {
 	var out imageDeliveryInspection
 	stored, status, err := docker.inspectImage(ctx, expected.ImageID)
 	if err != nil || status != 200 {
 		return out, fmt.Errorf("inspect the loaded image: %d %v", status, err)
 	}
+	out.Image = stored
 	if err := imageDeliveryCheckInspect(stored, expected.ImageID, expected.Platform, expected.Layers); err != nil {
 		return out, err
 	}
-	out.Image = stored
 	after, err := docker.images(ctx)
 	if err != nil {
 		return out, err
@@ -596,15 +664,24 @@ func inspectImageDeliveryRun(ctx context.Context, docker *imageDeliveryDocker, e
 	if err := imageDeliveryCheckContainers(containers, expected.ImageID); err != nil {
 		return out, err
 	}
+	var ownerErr error
 	for _, c := range containers {
-		image, configImage, running, err := docker.containerImage(ctx, c.ID)
+		detail, err := docker.containerDetail(ctx, c.ID)
 		if err != nil {
 			return out, err
 		}
-		if image != expected.ImageID {
-			return out, fmt.Errorf("container %s was created from %s, not the package's image %s", c.ID, image, expected.ImageID)
+		if detail.Image != expected.ImageID {
+			return out, fmt.Errorf("container %s was created from %s, not the package's image %s", c.ID, detail.Image, expected.ImageID)
 		}
-		out.Containers = append(out.Containers, map[string]any{"id": c.ID, "image_id": image, "configured_image": configImage, "running": running})
+		out.Containers = append(out.Containers, map[string]any{"id": detail.ID, "image_id": detail.Image, "configured_image": detail.ConfigImage, "running": detail.Running, "labels": detail.Labels})
+		if detail.ID == child.StartNativeID {
+			ownerErr = imageDeliveryCheckContainerOwner(detail.ID, detail.Labels, child.StartNativeID, child.InstallationID, child.OperationID, expected.ReleaseSHA256)
+			out.ContainerTiedToStartReceipt = ownerErr == nil && detail.Running
+		}
+	}
+	out.ContainersUsePackageImage = true
+	if !out.ContainerTiedToStartReceipt {
+		return out, fmt.Errorf("no running container is the one the runner's start receipt named (%q): %v", child.StartNativeID, ownerErr)
 	}
 	return out, nil
 }
@@ -688,7 +765,7 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	}
 
 	s, session := platformTrustTestServer(t, false)
-	platformRegisterTestPublisher(t, s, session)
+	platformRegisterTestPublisherAs(t, s, session, expected.Publisher)
 	s.platformImageDir = t.TempDir()
 	bindPlatformFixtureRuntime(t, s, session, enrollment)
 	endpoint := platformRuntimeEndpoint{path: os.Getenv("PORTAL_DATA_SOCKET"), controllerUID: 41001, controllerGID: 41001}
@@ -786,6 +863,24 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	}
 	t.Logf("IMAGE_DELIVERY_CHILD_LOAD_RECEIPT state=%s image=%s store=%s blobs_stored=%d", receipt.State, receipt.ImageID, receipt.Store, evidence.BlobsStored)
 
+	// The runner's own start receipt names the container it started; the parent ties the daemon's container to it.
+	rows, err := s.st.query(`SELECT stage,receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image' ORDER BY stage`, committed.OperationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var stage, raw string
+		if err := rows.Scan(&stage, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if id := imageDeliveryNativeID(raw); stage == "start" && id != "" && evidence.StartNativeID == "" {
+			evidence.StartNativeID = id
+		}
+	}
+	rows.Close()
+	if evidence.StartNativeID == "" {
+		t.Fatal("no start effect of the operation carries a native ID")
+	}
 	// Readiness was reached (the backend answered its probe) and the app answers through the platform path.
 	evidence.ReadinessSeen = scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state='active' AND readiness_evidence<>'{}' AND observed_ms IS NOT NULL`, committed.InstallationID) == 1
 	if !evidence.ReadinessSeen {

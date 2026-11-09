@@ -253,12 +253,14 @@ class ImageDeliveryProbeTests(unittest.TestCase):
     ENV = {
         "APP_IMAGE_DELIVERY_CANDIDATE": "/tmp/image-delivery/candidate",
         "APP_IMAGE_DELIVERY_BLOBS": "/tmp/image-delivery/export/blobs",
+        "APP_IMAGE_DELIVERY_BUILT_IMAGE_ID": "sha256:" + "a" * 64,
     }
 
     def evidence(self, **changed):
         good = {name: True for name in probe.IMAGE_DELIVERY_EVIDENCE_TRUE}
         good["format"] = probe.IMAGE_DELIVERY_EVIDENCE_FORMAT
         good["allow_local_reference_images"] = False
+        good["runner"] = {"profile": "p", "platform": "linux/amd64", "images": "production"}
         good.update(changed)
         return good
 
@@ -273,7 +275,9 @@ class ImageDeliveryProbeTests(unittest.TestCase):
         with patch.dict(probe.os.environ, self.ENV, clear=True):
             self.assertEqual(probe.image_delivery_configuration(), tuple(self.ENV.values()))
         for changed in ({"APP_IMAGE_DELIVERY_CANDIDATE": "relative"}, {"APP_IMAGE_DELIVERY_BLOBS": "relative"},
-                        {"APP_IMAGE_DELIVERY_BLOBS": ""}, {"APP_IMAGE_DELIVERY_CANDIDATE": ""}):
+                        {"APP_IMAGE_DELIVERY_BLOBS": ""}, {"APP_IMAGE_DELIVERY_CANDIDATE": ""},
+                        {"APP_IMAGE_DELIVERY_BUILT_IMAGE_ID": ""}, {"APP_IMAGE_DELIVERY_BUILT_IMAGE_ID": "a" * 64},
+                        {"APP_IMAGE_DELIVERY_BUILT_IMAGE_ID": "sha256:short"}):
             with patch.dict(probe.os.environ, dict(self.ENV, **changed), clear=True):
                 with self.assertRaisesRegex(RuntimeError, "image delivery"):
                     probe.image_delivery_configuration()
@@ -297,7 +301,8 @@ class ImageDeliveryProbeTests(unittest.TestCase):
                 path.write_text(json.dumps(self.evidence(**{name: False})))
                 with self.assertRaisesRegex(RuntimeError, "image delivery"):
                     probe.verify_image_delivery(self.stdout(), path)
-            for changed in ({"allow_local_reference_images": True}, {"format": "other"}):
+            for changed in ({"allow_local_reference_images": True}, {"format": "other"},
+                            {"runner": {"images": "local"}}, {"runner": {}}):
                 path.write_text(json.dumps(self.evidence(**changed)))
                 with self.assertRaisesRegex(RuntimeError, "image delivery"):
                     probe.verify_image_delivery(self.stdout(), path)
@@ -308,6 +313,32 @@ class ImageDeliveryProbeTests(unittest.TestCase):
                 probe.verify_image_delivery(self.stdout(), path)
             with self.assertRaisesRegex(RuntimeError, "image delivery"):
                 probe.verify_image_delivery(self.stdout(), Path(directory) / "absent.json")
+
+    def test_the_scenario_is_required_when_the_job_expects_it(self):
+        report = {"managed_image_delivery_real_runner": {}}
+        with patch.dict(probe.os.environ, {}, clear=True):
+            self.assertFalse(probe.image_delivery_required())
+            probe.require_image_delivery({}, None)
+        with patch.dict(probe.os.environ, {"APP_IMAGE_DELIVERY_REQUIRED": "1"}, clear=True):
+            self.assertTrue(probe.image_delivery_required())
+            probe.require_image_delivery(report, tuple(self.ENV.values()))
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.require_image_delivery({}, tuple(self.ENV.values()))
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.require_image_delivery(report, None)
+        with patch.dict(probe.os.environ, {"APP_IMAGE_DELIVERY_REQUIRED": "yes"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.image_delivery_required()
+
+    def test_a_failed_run_still_keeps_its_evidence_file(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            source, target = Path(directory) / "evidence.json", Path(directory) / "kept.json"
+            probe.keep_image_delivery_evidence(source, target)
+            self.assertFalse(target.exists())
+            source.write_text(json.dumps({"x": 1}))
+            probe.keep_image_delivery_evidence(source, target)
+            self.assertEqual(json.loads(target.read_text()), {"x": 1})
 
 
 if __name__ == "__main__":

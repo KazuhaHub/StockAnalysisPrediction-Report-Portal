@@ -41,6 +41,8 @@ on:
       - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
+      - 'internal/apprunner/service/**'
+      - 'internal/apprunner/imagestore/**'
       - 'internal/app/app_platform_network_request*'
       - 'internal/app/app_platform_network_http*'
       - 'internal/app/app_platform_network_install*'
@@ -78,6 +80,8 @@ on:
       - 'internal/app/app_platform_market*'
       - 'internal/appplatform/offline*'
       - 'internal/appplatform/image*'
+      - 'internal/appplatform/catalogue*'
+      - 'internal/app/app_platform_catalogue*'
       - 'internal/app/app_platform_actor*'
       - 'internal/app/app_platform_trust*'
       - 'internal/app/app_platform_install_audience*'
@@ -125,6 +129,8 @@ on:
       - 'internal/apprunner/driver/**'
       - 'internal/apprunner/journal/**'
       - 'internal/apprunner/transport/**'
+      - 'internal/apprunner/service/**'
+      - 'internal/apprunner/imagestore/**'
       - 'internal/app/app_platform_network_request*'
       - 'internal/app/app_platform_network_http*'
       - 'internal/app/app_platform_network_install*'
@@ -162,6 +168,8 @@ on:
       - 'internal/app/app_platform_market*'
       - 'internal/appplatform/offline*'
       - 'internal/appplatform/image*'
+      - 'internal/appplatform/catalogue*'
+      - 'internal/app/app_platform_catalogue*'
       - 'internal/app/app_platform_actor*'
       - 'internal/app/app_platform_trust*'
       - 'internal/app/app_platform_install_audience*'
@@ -335,19 +343,25 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/image-delivery-real"
           mkdir -p "$out"
-          # Same commands as the package delivery job: default builder, then docker save writes an OCI layout.
-          docker build --file "$APPS/apps/scheduled-digest/service/Dockerfile" \
-            --tag scheduled-digest-delivery:build "$APPS"
-          image_id=$(docker image inspect scheduled-digest-delivery:build --format '{{.Id}}')
+          # The package is saved from the very image the build step produced and the next step verifies (its ID
+          # is recorded on the second line), not from a rebuild, so "exact" cannot depend on a cache hit.
+          image_id=$(sed -n 2p "$RUNNER_TEMP/scheduled-digest-exact-image.txt")
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$image_id" --format '{{.Id}}')" = "$image_id"
+          # docker save of an image ID writes an OCI layout on Docker 25+.
           docker save "$image_id" --output "$out/image.tar"
           python3 "$APPS/scripts/export-image-oci.py" "$out/image.tar" \
             --platform linux/amd64 --output "$out/export"
           python3 "$APPS/scripts/build-app-v2.py" scheduled-digest \
             --images "$out/export/images.json" --output "$out/candidate"
           rm -f "$out/image.tar"
+          # The package's config digest is the image's ID on the classic store; fail here if it is not.
+          config=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[0]['config_digest'])" "$out/export/images.json")
+          test "sha256:${config#sha256:}" = "$image_id"
           {
             echo "APP_IMAGE_DELIVERY_CANDIDATE=$out/candidate"
             echo "APP_IMAGE_DELIVERY_BLOBS=$out/export/blobs"
+            echo "APP_IMAGE_DELIVERY_BUILT_IMAGE_ID=$image_id"
           } >> "$GITHUB_ENV"
       - name: Verify exact Scheduled Digest image runtime
         env:
@@ -370,9 +384,10 @@ jobs:
         env:
           PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && inputs.event_only && '1' || '0' }}
           APP_SCHEDULED_DIGEST_CANDIDATE: ${{ runner.temp }}/scheduled-digest-candidate
+          APP_IMAGE_DELIVERY_REQUIRED: '1'
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_CANDIDATE,APP_SCHEDULED_DIGEST_NATIVE_IMAGE,APP_IMAGE_DELIVERY_CANDIDATE,APP_IMAGE_DELIVERY_BLOBS,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_CANDIDATE,APP_SCHEDULED_DIGEST_NATIVE_IMAGE,APP_IMAGE_DELIVERY_CANDIDATE,APP_IMAGE_DELIVERY_BLOBS,APP_IMAGE_DELIVERY_BUILT_IMAGE_ID,APP_IMAGE_DELIVERY_REQUIRED,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
       - name: Preserve real-runner managed image delivery evidence
         if: always()
         uses: actions/upload-artifact@v7

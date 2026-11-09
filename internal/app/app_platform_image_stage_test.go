@@ -15,6 +15,7 @@ type platformImageHTTP struct {
 	s      *Server
 	mux    *http.ServeMux
 	cookie string
+	actor  platformActorSession
 }
 
 func newPlatformImageHTTP(t *testing.T, registerPublisher bool) *platformImageHTTP {
@@ -26,7 +27,7 @@ func newPlatformImageHTTP(t *testing.T, registerPublisher bool) *platformImageHT
 	s.platformImageDir = t.TempDir()
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
-	return &platformImageHTTP{t: t, s: s, mux: mux, cookie: s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())}
+	return &platformImageHTTP{t: t, s: s, mux: mux, actor: actor, cookie: s.managedCookie(*s.st.GetUser(actor.username), actor.sessionID, actor.expires.Unix())}
 }
 
 func (h *platformImageHTTP) upload(body []byte) (int, string) {

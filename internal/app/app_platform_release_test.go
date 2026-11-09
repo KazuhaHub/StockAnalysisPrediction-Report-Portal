@@ -58,6 +58,12 @@ func platformSignedReleaseFixture(t *testing.T, version string) (raw, signature,
 }
 func platformSignTestDescriptor(t *testing.T, raw []byte) []byte {
 	t.Helper()
+	return platformSignTestDescriptorAs(t, raw, "fixture-publisher")
+}
+
+// platformSignTestDescriptorAs signs the descriptor bytes unchanged under the test key registered for a publisher.
+func platformSignTestDescriptorAs(t *testing.T, raw []byte, publisher string) []byte {
+	t.Helper()
 	prefix := []byte("portal.app/descriptor/v2\x00")
 	frame := append([]byte{}, prefix...)
 	length := make([]byte, 8)
@@ -65,7 +71,7 @@ func platformSignTestDescriptor(t *testing.T, raw []byte) []byte {
 	frame = append(frame, length...)
 	frame = append(frame, raw...)
 	private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, ed25519.SeedSize))
-	envelope, err := json.Marshal(map[string]string{"format": "portal.app.signature/1-dev.1", "algorithm": "Ed25519", "publisher": "fixture-publisher", "key_id": "first-key", "descriptor_sha256": platformDigest(raw), "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, frame))})
+	envelope, err := json.Marshal(map[string]string{"format": "portal.app.signature/1-dev.1", "algorithm": "Ed25519", "publisher": publisher, "key_id": "first-key", "descriptor_sha256": platformDigest(raw), "signature": base64.RawURLEncoding.EncodeToString(ed25519.Sign(private, frame))})
 	if err != nil {
 		t.Fatal(err)
 	}

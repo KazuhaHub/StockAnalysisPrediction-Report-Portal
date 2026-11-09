@@ -28,7 +28,14 @@
         "no_names_added_to_the_image": true,
         "install_path": "offline import route, then the install worker",
         "catalogue_path_with_real_runner": false,
-        "containerd_store": false
+        "containerd_store": false,
+        "descriptor_rewrite": "compatibility.runner_protocol only (>=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0): the built range cannot match the runner's pre-release protocol 1.0.0-dev.1; asserted that nothing else differs; frontend and blobs are the builder's bytes",
+        "publisher": "development-publisher (as built), registered with the test key",
+        "admin_http_route": "package import only",
+        "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
+        "container_tied_to_runner_start_receipt": true,
+        "delivered_image_equals_built_and_verified_image": true,
+        "exactly_one_image_load_event": true
       }
     },
     "PKG-08": {
@@ -69,7 +76,7 @@
     "workflow": ".github/workflows/app-project-quota-probe.yml",
     "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42716037743",
     "artifact": "managed-image-real-runner",
-    "note": "Workflow dispatch on feat/app-platform-image-delivery-real-runner; both jobs passed."
+    "note": "Run 42716037743 predates the review follow-ups; see 06-acceptance.md for the run that covers them."
   },
   "limits": [
     "Native paths run in CI only; the development host has no Docker.",

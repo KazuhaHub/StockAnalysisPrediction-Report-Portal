@@ -1,7 +1,10 @@
 package app
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -79,7 +82,8 @@ func imageDeliveryCheckAfterLoad(before, after []imageDeliveryImage, target stri
 		if !ok {
 			return fmt.Errorf("an unexpected image appeared: %s", image.ID)
 		}
-		if !slices.Equal(imageDeliverySorted(old.RepoTags), imageDeliverySorted(image.RepoTags)) {
+		if !slices.Equal(imageDeliverySorted(old.RepoTags), imageDeliverySorted(image.RepoTags)) ||
+			!slices.Equal(imageDeliverySorted(old.RepoDigests), imageDeliverySorted(image.RepoDigests)) {
 			return fmt.Errorf("the names of image %s changed", image.ID)
 		}
 		delete(prior, image.ID)
@@ -93,10 +97,10 @@ func imageDeliveryCheckAfterLoad(before, after []imageDeliveryImage, target stri
 	return nil
 }
 
-// imageDeliveryCheckEvents requires a live watcher (a container event was seen) and no pull, tag, untag, push or
-// import of an image while the scenario ran.
-func imageDeliveryCheckEvents(events []imageDeliveryEvent) error {
-	live := false
+// imageDeliveryCheckEvents requires a live watcher (a container event was seen), exactly one image load, on the
+// target, and no pull, tag, untag, push or import of an image while the scenario ran.
+func imageDeliveryCheckEvents(events []imageDeliveryEvent, target string) error {
+	live, loads := false, 0
 	for _, e := range events {
 		if e.Type == "container" && e.Action == "create" {
 			live = true
@@ -107,10 +111,18 @@ func imageDeliveryCheckEvents(events []imageDeliveryEvent) error {
 		switch e.Action {
 		case "pull", "tag", "untag", "push", "import":
 			return fmt.Errorf("image event %q on %s", e.Action, e.ID)
+		case "load":
+			loads++
+			if e.ID != "" && e.ID != target {
+				return fmt.Errorf("image load event on %s, not the package's image %s", e.ID, target)
+			}
 		}
 	}
 	if !live {
 		return fmt.Errorf("the event watcher saw no container creation, so its silence proves nothing")
+	}
+	if loads != 1 {
+		return fmt.Errorf("%d image load events, expected exactly one", loads)
 	}
 	return nil
 }
@@ -145,6 +157,89 @@ func imageDeliveryCheckInspect(got imageDeliveryInspect, target, platform string
 	}
 	if len(got.RepoTags) != 0 || len(got.RepoDigests) != 0 {
 		return fmt.Errorf("stored image carries names: tags %v digests %v", got.RepoTags, got.RepoDigests)
+	}
+	return nil
+}
+
+var runnerReadyLine = regexp.MustCompile(`app-runner ready profile=(\S+) platform=(\S+) images=(\S+)`)
+
+// imageDeliveryParseRunnerReady reads the profile, platform and image mode the runner announced on startup.
+func imageDeliveryParseRunnerReady(output string) (profile, platform, images string, err error) {
+	m := runnerReadyLine.FindStringSubmatch(output)
+	if m == nil {
+		return "", "", "", fmt.Errorf("the runner's ready line is missing from its output")
+	}
+	return m[1], m[2], m[3], nil
+}
+
+// imageDeliveryNativeID finds the first non-empty native_id anywhere in a receipt.
+func imageDeliveryNativeID(receipt string) string {
+	var v any
+	if json.Unmarshal([]byte(receipt), &v) != nil {
+		return ""
+	}
+	var find func(any) string
+	find = func(v any) string {
+		switch x := v.(type) {
+		case map[string]any:
+			if id, ok := x["native_id"].(string); ok && id != "" {
+				return id
+			}
+			keys := make([]string, 0, len(x))
+			for k := range x {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				if id := find(x[k]); id != "" {
+					return id
+				}
+			}
+		case []any:
+			for _, e := range x {
+				if id := find(e); id != "" {
+					return id
+				}
+			}
+		}
+		return ""
+	}
+	return find(v)
+}
+
+// imageDeliveryCheckContainerOwner ties a container to the runner's start: its ID is the native ID the start
+// receipt recorded, and its owner labels name this installation, operation and release.
+func imageDeliveryCheckContainerOwner(containerID string, labels map[string]string, nativeID, installation, operation, release string) error {
+	if nativeID == "" || containerID != nativeID {
+		return fmt.Errorf("container %s is not the native ID %q of the runner's start receipt", containerID, nativeID)
+	}
+	for label, want := range map[string]string{"installation": installation, "operation": operation, "release": release} {
+		if got := labels["org.portal.app."+label]; got != want || want == "" {
+			return fmt.Errorf("container label %s is %q, expected %q", label, got, want)
+		}
+	}
+	return nil
+}
+
+// imageDeliveryOnlyRunnerRangeDiffers proves the staged descriptor is the built one with exactly one field
+// changed: compatibility.runner_protocol.
+func imageDeliveryOnlyRunnerRangeDiffers(built, staged []byte) error {
+	var a, b map[string]any
+	if err := json.Unmarshal(built, &a); err != nil {
+		return fmt.Errorf("built descriptor: %w", err)
+	}
+	if err := json.Unmarshal(staged, &b); err != nil {
+		return fmt.Errorf("staged descriptor: %w", err)
+	}
+	ca, _ := a["compatibility"].(map[string]any)
+	cb, _ := b["compatibility"].(map[string]any)
+	if ca == nil || cb == nil || ca["runner_protocol"] == cb["runner_protocol"] {
+		return fmt.Errorf("the staged descriptor does not change the runner protocol range")
+	}
+	delete(ca, "runner_protocol")
+	delete(cb, "runner_protocol")
+	if !reflect.DeepEqual(a, b) {
+		return fmt.Errorf("the staged descriptor differs from the built one in more than the runner protocol range")
 	}
 	return nil
 }
