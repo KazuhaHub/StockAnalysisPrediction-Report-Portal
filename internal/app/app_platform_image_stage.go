@@ -116,13 +116,38 @@ func (s *Server) platformPinnedBlobSet(ctx context.Context, p *platformImageStor
 		}
 		digests, err := p.releaseBlobs(descriptor)
 		if err != nil {
-			return nil, fmt.Errorf("pinned release %s: %w", sha, err)
+			return nil, fmt.Errorf("pinned release %s (installations %s): %w", sha, s.platformReleaseInstallations(ctx, sha), err)
 		}
 		for _, d := range digests {
 			pinned[d] = true
 		}
 	}
 	return pinned, ctx.Err()
+}
+
+// platformReleaseInstallations names the installations a release belongs to, for a log line.
+func (s *Server) platformReleaseInstallations(ctx context.Context, sha string) string {
+	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT DISTINCT installation_id FROM app_platform_activations WHERE release_sha256=?
+		UNION SELECT DISTINCT o.installation_id FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE p.source_release_sha256=? OR p.target_release_sha256=?`), sha, sha, sha)
+	if err != nil {
+		return "unknown"
+	}
+	defer rows.Close()
+	out := ""
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			if out != "" {
+				out += ","
+			}
+			out += id
+		}
+	}
+	if out == "" {
+		return "none"
+	}
+	return out
 }
 
 // sweepPlatformImages removes the blobs nothing pins. It runs on start and after an operation ends, and a
@@ -134,7 +159,7 @@ func (s *Server) sweepPlatformImages(ctx context.Context) {
 	}
 	pinned, err := s.platformPinnedBlobSet(ctx, store)
 	if err != nil {
-		log.Printf("app-platform image sweep: %v", err)
+		log.Printf("app-platform image sweep stopped, nothing removed; upload the package of the named release again: %v", err)
 		return
 	}
 	store.sweep(pinned)

@@ -79,6 +79,18 @@ type platformInstallationSettings struct {
 	ControlPaused        bool                         `json:"control_paused"`
 	// MigrationRecovery is present while a failed data migration waits for a recovery choice.
 	MigrationRecovery *platformSettingsMigrationRecovery `json:"migration_recovery,omitempty"`
+	// ImageDelivery is present while a release the installation needs has image blobs that are gone or unreadable,
+	// so the package must be uploaded again.
+	ImageDelivery *platformSettingsImageDelivery `json:"image_delivery,omitempty"`
+}
+
+// platformSettingsImageDelivery says which release needs its package again, and why.
+type platformSettingsImageDelivery struct {
+	State         string `json:"state"`
+	ReleaseSHA256 string `json:"release_sha256"`
+	// Reason is "manifest_unreadable" (the stored manifest or config cannot be read, so the layers cannot be
+	// named) or "blobs_missing" (a blob is absent).
+	Reason string `json:"reason"`
 }
 
 // platformSettingsMigrationRecovery projects the settlement of a failed data migration: settling or blocked
@@ -424,6 +436,9 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 			return err
 		}
 		result.MigrationRecovery = recovery
+		if result.ImageDelivery, err = s.platformImageDeliveryProjection(e, installation, result.CurrentReleaseSHA256); err != nil {
+			return err
+		}
 		_, err = platformRevalidateActorWithoutPause(
 			e, session, actor, control.nowMS)
 		return err

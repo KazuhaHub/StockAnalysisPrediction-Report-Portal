@@ -116,6 +116,43 @@ type platformImageTarget struct {
 // returns nil for a release with no managed image to load: a static release, or the development form that names
 // a registry reference, which the runner's inspection handles.
 func (s *Server) loadPlatformImageTarget(ctx context.Context, lease platformOperationLease) (*platformImageTarget, error) {
+	target, err := s.loadPlatformImageDescriptorTarget(ctx, lease)
+	if err != nil || target == nil {
+		return target, err
+	}
+	// Every blob is hashed again before anything is sent to the runner: a release whose blobs fail the check
+	// causes no runner effect at all, and the operation fails definitely.
+	if err := s.verifyPlatformImageBlobs(target); err != nil {
+		return nil, err
+	}
+	return target, nil
+}
+
+// verifyPlatformImageBlobs reads the stored manifest and config into the target's plan and hashes every blob
+// against its name.
+func (s *Server) verifyPlatformImageBlobs(target *platformImageTarget) error {
+	store, err := s.platformImages()
+	if err != nil {
+		return err
+	}
+	plan, err := store.planFor(target.entry)
+	if err != nil {
+		return fmt.Errorf("%w: %v", errPlatformImageBlobs, err)
+	}
+	for _, blob := range plan.Blobs() {
+		file, err := store.openBlob(blob)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errPlatformImageBlobs, err)
+		}
+		file.Close()
+	}
+	target.plan = plan
+	return nil
+}
+
+// loadPlatformImageDescriptorTarget is loadPlatformImageTarget without any blob: the command of a load names the
+// release and the descriptor's image entry only, so a read-back needs no bytes.
+func (s *Server) loadPlatformImageDescriptorTarget(ctx context.Context, lease platformOperationLease) (*platformImageTarget, error) {
 	var sha string
 	var descriptor []byte
 	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT r.sha256,r.descriptor FROM app_platform_operations o
@@ -147,24 +184,7 @@ func (s *Server) loadPlatformImageTarget(ctx context.Context, lease platformOper
 	if entry == nil {
 		return nil, errPlatformImagePlatform
 	}
-	store, err := s.platformImages()
-	if err != nil {
-		return nil, err
-	}
-	plan, err := store.planFor(*entry)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobs, err)
-	}
-	// Every blob is hashed again before anything is sent to the runner: a release whose blobs fail the check
-	// causes no runner effect at all, and the operation fails definitely.
-	for _, blob := range plan.Blobs() {
-		file, err := store.openBlob(blob)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %v", errPlatformImageBlobs, err)
-		}
-		file.Close()
-	}
-	return &platformImageTarget{releaseSHA: sha, descriptor: bytes.Clone(descriptor), entry: *entry, plan: plan}, nil
+	return &platformImageTarget{releaseSHA: sha, descriptor: bytes.Clone(descriptor), entry: *entry}, nil
 }
 
 // platformImageSigner signs the commands of one ensure. It holds the control key for the length of the call and
@@ -351,18 +371,7 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 		}
 		receipt, missing, err := s.interpretPlatformImageReply(reply, call, endpoint)
 		if receipt != nil {
-			state := "applied"
-			if receipt.State != "loaded" && receipt.State != "present" {
-				state = "reverted"
-			}
-			raw, _ := json.Marshal(receipt)
-			if werr := rows.settle(ctx, call.command, state, string(raw)); werr != nil {
-				return werr
-			}
-			if state == "applied" {
-				s.auditPlatformImageLoad(ctx, signer.lease, call.command)
-			}
-			return err
+			return s.recordPlatformImageReceipt(ctx, signer, rows, call, receipt, err)
 		}
 		if err != nil {
 			if !errors.Is(err, errPlatformImageBusy) {
@@ -382,6 +391,23 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 		_ = rows.unknown(ctx, call.command)
 	}
 	return errPlatformImageUncertain
+}
+
+// recordPlatformImageReceipt writes a verified receipt on the effect row: applied for a load, reverted for a
+// rejection. It returns the definite-failure error of a rejection, or nil.
+func (s *Server) recordPlatformImageReceipt(ctx context.Context, signer *platformImageSigner, rows platformImageRows, call platformLoadImageCall, receipt *journal.LoadImageReceipt, verdict error) error {
+	state := "applied"
+	if receipt.State != "loaded" && receipt.State != "present" {
+		state = "reverted"
+	}
+	raw, _ := json.Marshal(receipt)
+	if err := rows.settle(ctx, call.command, state, string(raw)); err != nil {
+		return err
+	}
+	if state == "applied" {
+		s.auditPlatformImageLoad(ctx, signer.lease, call.command)
+	}
+	return verdict
 }
 
 // interpretPlatformImageReply turns a reply into a verified receipt (loaded, present or rejected), the digests to

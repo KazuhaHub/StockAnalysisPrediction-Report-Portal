@@ -599,7 +599,7 @@ The adversarial review failed PR 3b at `09291a62`. Everything below is fixed, te
    `runner_commands` (the writer, candidate, registration, update-start, checkpoint, removal, reservation,
    import, migrate and delete-data readers, their `unknown` guards, and the fence, generation and epoch floors)
    now ignores kind `load-image` in any state. A load touches only the daemon's image storage, never data,
-   fences or containers. The start gate itself still requires an applied load for the exact release. Tests on the
+   fences or containers. The start gate itself does not read the journal row: it checks that the image with the expected content ID is present in the daemon. Tests on the
    real SQLite journal: `TestEveryCommandFamilyAdmitsAfterAnAppliedOrUnknownLoadImageRow` (writer chain through
    candidate claim, data reservation, registration, checkpoint, update start, managed removal, legacy
    candidate, each with an applied and with an unknown load) and the source guard
@@ -659,3 +659,49 @@ The adversarial review failed PR 3b at `09291a62`. Everything below is fixed, te
      that are exempt, each with its reason.
    - `staticcheck` findings from CI (`openStaged`, `readBlob`, an unused test field) are removed.
    - `06-acceptance.md` now separates what ran against fakes, against the real journal, and natively in CI.
+
+## PR 3b second-round review follow-ups
+
+The review failed PR 3b again at `1baa9470`. Fixed, test-first.
+
+1. **Blocker: an unsettled load lost its pin.** `loadPlatformReleasePins` pinned operations only while they were
+   not completed, so an update whose load ended unknown (it completes as `recovery_required`) lost its target
+   release to the sweep, and settlement then failed on every tick. It now also pins the source and target of every
+   operation that is `recovery_required`, and of every operation holding a `load_image` row that is `prepared` or
+   `unknown`, completed or not
+   (`TestAnUnsettledLoadKeepsItsReleaseBlobsPinnedAcrossASweepAndTheNextTickSettlesIt`).
+   - Settlement now reads the load back first, with no blob and no hashing. A receipt settles the row as it is
+     (`TestSettlementAppliesThroughTheReadBackWhenTheBlobsAreGoneButTheImageIsOnTheHost`). Only when the runner
+     says the bytes are needed (`blobs_missing`, `orphaned`, `blob_refused`, or no row at all) are the blobs hashed
+     again and the same effect sent under its own id.
+   - A settlement that truly needs gone blobs is surfaced, not looped silently: the installation settings gain
+     `image_delivery` (`reupload_required`, the release, and the reason `blobs_missing` or `manifest_unreadable`),
+     the page shows "Package re-upload required" (three locales, `t()`), and the driver logs the release
+     (`TestSettlementThatNeedsGoneBlobsIsSurfacedAsAPackageReuploadRequirement`, and two page tests). The
+     projection reads the stored manifest, so a manifest it proves corrupt is deleted by that read, the same as on
+     any other use.
+2. **Major: one central admission check.** `migExec.exec` runs `platformRefuseWhileLoadUnsettled` for every
+   `INSERT INTO app_platform_operations(`, so no operation kind (install, update, enable, disable, repair,
+   uninstall, delete data, restore, restore import, and the recovery actions) is admitted for an installation
+   that holds a load with no verdict, and nothing can move the fence meanwhile. It replaces the two partial call
+   sites. It finds the installation among the statement's arguments, because the columns differ between the
+   admission paths; `TestEveryOperationInsertGoesThroughTheCentralAdmissionCheck` fails if an insert bypasses
+   `migExec.exec`, and `TestEveryOperationKindIsRefusedWhileALoadIsUnsettled` covers each kind.
+   - The settlement candidates query leaves out a row it cannot settle (the installation's fence or the
+     controller epoch moved), logs it, and the driver rotates through the rest in windows of eight, so one
+     such row cannot starve the others (`TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow`: nine rows, one
+     unsettleable, the other eight settle). Operations of any finished stage are candidates, not only
+     `recovery_required`.
+3. **Minor: wording.** The comment in `journal/commands.go` and item 1 of the first-round follow-ups said the
+   start gate requires an applied load. It checks that the image with the expected content ID is present in the
+   daemon. The behaviour is unchanged.
+4. **Minor: one unreadable manifest stops every sweep.** Still fail-closed. The sweep now logs the release and the
+   installations it belongs to, and the same fact is the `manifest_unreadable` status of item 1.
+5. **Minor: abandon and the load.** The abandon lists and reverts the unsettled effects of the runtime without
+   asking the runner; it now excludes `load_image` rows from that list, from the finished-operation selection
+   and from the check that an operation has no unsettled effect (`settlePlatformRecoveryOperation`): a load never
+   hides an effect the runner applied to data. It does not insert an operation, so the central admission check
+   does not refuse it. The rows are left to the settlement driver, which settles as reverted every load issued to
+   a runtime binding that was retired (`revertLoadsOfRetiredRuntimes`), since nothing could read such a load back.
+   Without that, the abandoned installation would stay blocked for ever
+   (`TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRuntime`).

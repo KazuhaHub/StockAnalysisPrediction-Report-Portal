@@ -77,6 +77,8 @@ type Server struct {
 	platformImageOnce   sync.Mutex
 	platformImageStore  *platformImageStore
 	platformImageRunner platformImageRunner
+	// platformLoadCursor rotates the window of the load-image settlement driver.
+	platformLoadCursor int
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

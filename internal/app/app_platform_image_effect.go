@@ -121,14 +121,14 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,action,completed_ms,lease_owner
 		FROM app_platform_operations WHERE id=? AND managed=1`, operation).
 		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &action, &completed, &owner); err != nil ||
-		stage != "recovery_required" || !completed.Valid || owner.Valid || generation < 1 {
+		!completed.Valid || owner.Valid || generation < 1 {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
 	return platformOperationLease{
 		id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,
 		leaseUntilMS: time.Now().Add(5 * time.Minute).UnixMilli(),
 		snapshot: appplatform.OperationSnapshot{Action: appplatform.Action(action), Managed: true, Generation: uint64(generation),
-			Revision: uint64(stateRevision), Stage: appplatform.StageRecoveryRequired},
+			Revision: uint64(stateRevision), Stage: appplatform.Stage(stage)},
 	}, nil
 }
 
@@ -152,37 +152,80 @@ func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64
 	return platformDatabaseNow(e)
 }
 
-// platformLoadSettlementCandidates lists the finished operations that hold a load with no verdict.
-func (s *Server) platformLoadSettlementCandidates(ctx context.Context) ([]string, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id FROM app_platform_operations o
+// platformLoadSettlementCandidates lists the finished operations that hold a load with no verdict and that
+// this Portal can still settle: the installation's fence and epoch are the ones the operation was admitted under.
+// A row it cannot settle (a fence that moved, an epoch that was rotated) is left out of the window, so it cannot
+// starve the others, and is returned in skipped so the caller can say so.
+func (s *Server) platformLoadSettlementCandidates(ctx context.Context) (ids, skipped []string, err error) {
+	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id,
+		CASE WHEN i.control_fence=o.fence AND i.controller_epoch=o.controller_epoch
+		AND o.controller_epoch=COALESCE((SELECT v FROM meta WHERE k='app_platform_controller_epoch'),'') THEN 1 ELSE 0 END
+		FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='stage' AND f.effect_number=1 AND f.kind='load_image'
-		WHERE o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
-		AND f.state IN ('prepared','unknown') ORDER BY o.completed_ms,o.id LIMIT 8`))
+		JOIN app_platform_installations i ON i.id=o.installation_id
+		WHERE o.managed=1 AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+		AND f.state IN ('prepared','unknown') ORDER BY o.completed_ms,o.id LIMIT 256`))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
-	var ids []string
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
+		var ok int
+		if err := rows.Scan(&id, &ok); err != nil {
+			return nil, nil, err
 		}
-		ids = append(ids, id)
+		if ok == 1 {
+			ids = append(ids, id)
+		} else {
+			skipped = append(skipped, id)
+		}
 	}
-	return ids, rows.Err()
+	return ids, skipped, rows.Err()
 }
 
-// settlePlatformLoadImages takes one settlement step for each finished operation that holds an unknown load:
-// the same effect is read back and, while the runner reports nothing running it, sent again under the same id,
-// with its blobs uploaded when the runner names them. It returns how many loads settled.
+// platformLoadSettlementWindow is how many loads one tick settles.
+const platformLoadSettlementWindow = 8
+
+// revertLoadsOfRetiredRuntimes settles, as reverted, the loads issued to a runtime binding that was retired
+// (abandoned). A load to a runtime that no longer exists cannot happen, and nothing could read it back. The
+// abandon itself leaves these rows to this driver (it reverts every other unsettled effect of the runtime).
+func (s *Server) revertLoadsOfRetiredRuntimes(ctx context.Context) error {
+	return s.st.withOUMutation(func(e migExec) error {
+		now, err := platformDatabaseNow(e)
+		if err != nil {
+			return err
+		}
+		_, err = e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json='{"reason":"runtime_abandoned"}',updated_ms=?
+			WHERE kind='load_image' AND state IN ('prepared','unknown')
+			AND runtime_id IN (SELECT id FROM app_platform_runtime_bindings WHERE enabled=0)
+			AND operation_id IN (SELECT id FROM app_platform_operations WHERE completed_ms IS NOT NULL)`, now)
+		return err
+	})
+}
+
+// settlePlatformLoadImages takes one settlement step for up to platformLoadSettlementWindow finished operations
+// that hold an unknown load, rotating through them so one that cannot settle does not starve the rest. Each
+// load is read back first and, while the runner reports nothing running it, sent again under the same id, with
+// its blobs uploaded when the runner needs them. It returns how many loads settled.
 func (s *Server) settlePlatformLoadImages(ctx context.Context, endpoint platformRuntimeEndpoint) (int, error) {
+	if err := s.revertLoadsOfRetiredRuntimes(ctx); err != nil {
+		return 0, err
+	}
 	if endpoint.path == "" {
 		return 0, nil
 	}
-	ids, err := s.platformLoadSettlementCandidates(ctx)
+	ids, skipped, err := s.platformLoadSettlementCandidates(ctx)
 	if err != nil {
 		return 0, err
+	}
+	for _, id := range skipped {
+		log.Printf("app-platform load-image settlement %s: skipped, the installation's fence or the controller epoch has moved", id)
+	}
+	if len(ids) > platformLoadSettlementWindow {
+		start := s.platformLoadCursor % len(ids)
+		ids = append(append([]string{}, ids[start:]...), ids[:start]...)[:platformLoadSettlementWindow]
+		s.platformLoadCursor += platformLoadSettlementWindow
 	}
 	settled := 0
 	for _, id := range ids {
@@ -204,8 +247,11 @@ func (s *Server) settlePlatformLoadImages(ctx context.Context, endpoint platform
 	return settled, nil
 }
 
+// settlePlatformLoadImage reads the load back first. That needs no blob, so it does not hash any: a receipt
+// settles the row as it is. Only when the runner reports that the bytes are needed (blobs_missing, orphaned,
+// blob_refused, or no row at all) are the blobs hashed again and the same effect sent under its own id.
 func (s *Server) settlePlatformLoadImage(ctx context.Context, endpoint platformRuntimeEndpoint, lease platformOperationLease) error {
-	target, err := s.loadPlatformImageTarget(ctx, lease)
+	target, err := s.loadPlatformImageDescriptorTarget(ctx, lease)
 	if err != nil {
 		return err
 	}
@@ -219,19 +265,115 @@ func (s *Server) settlePlatformLoadImage(ctx context.Context, endpoint platformR
 	}
 	defer signer.close()
 	rows := platformImageRows{s: s, lease: lease, runtimeID: signer.runtime.id, guard: guard}
+	call, err := signer.loadCall(target)
+	if err != nil {
+		return err
+	}
+	reply, readErr := s.platformImageRunnerSeam().ReadLoadImage(ctx, endpoint, call)
+	switch {
+	case readErr == nil:
+		receipt, _, verdict := s.interpretPlatformImageReply(reply, call, endpoint)
+		if receipt != nil {
+			// A rejection is a settled verdict too: the load is over, whichever way it ended.
+			_ = s.recordPlatformImageReceipt(ctx, signer, rows, call, receipt, verdict)
+			return nil
+		}
+		if verdict != nil {
+			return verdict
+		}
+	case errors.Is(readErr, errPlatformMigrationAbsent):
+	default:
+		return readErr
+	}
+	// The runner needs the bytes. Hash them again now; if they are gone the load cannot settle until the package is
+	// uploaded again, which the settings status says.
+	if err := s.verifyPlatformImageBlobs(target); err != nil {
+		log.Printf("app-platform load-image settlement %s: package re-upload required for release %s: %v", lease.id, target.releaseSHA, err)
+		return err
+	}
 	return s.runPlatformImageLoad(ctx, endpoint, signer, target, rows)
 }
 
-// platformRequireSettledLoad refuses a recovery choice while the failed operation holds a load with no verdict:
-// the runner may still be loading, or may load later, under that id. It is lifted when the settlement driver
-// has read the load back (or sent it again) and it is applied or reverted.
-func platformRequireSettledLoad(e migExec, operation string) error {
+// platformRefuseWhileLoadUnsettled is the central admission check of application operations: no operation of any
+// kind (install, update, enable, repair, retry, roll back, restore, uninstall, delete data, recovery action) is
+// admitted for an installation while it holds a load-image effect with no verdict. The load may still be running
+// on the runner or may run later under its id, and any new operation would move the installation's fence past the
+// one the settlement is bound to. migExec.exec calls it for every INSERT into the operations table, so no
+// admission path can skip it; it finds the installation among the statement's arguments, because the columns
+// differ between the admission paths. The settlement driver lifts it by settling the load.
+func platformRefuseWhileLoadUnsettled(e migExec, args []any) error {
+	var ids []any
+	marks := ""
+	for _, a := range args {
+		if id, ok := a.(string); ok && platformValidUUID(id) {
+			ids = append(ids, id)
+			marks += ",?"
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
 	var open int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind='load_image' AND state IN ('prepared','unknown')`, operation).Scan(&open); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
+		WHERE f.kind='load_image' AND f.state IN ('prepared','unknown') AND o.installation_id IN (`+marks[1:]+`)`, ids...).Scan(&open); err != nil {
 		return err
 	}
 	if open != 0 {
-		return errAppPlatformMigrationUnsettled
+		return fmt.Errorf("%w: a load of the application image has no verdict yet", errAppPlatformOperationConflict)
 	}
 	return nil
+}
+
+// platformImageDeliveryProjection reports the first release this installation needs whose image blobs cannot be
+// used: the current release, or the target of an operation that ended recovery_required or holds a load with no
+// verdict. It checks presence and the stored manifest, not hashes. The same fact makes the sweep stop (fail
+// closed), so it is surfaced here for the operator: upload the package of that release again.
+func (s *Server) platformImageDeliveryProjection(e migExec, installation, current string) (*platformSettingsImageDelivery, error) {
+	releases := []string{}
+	if platformValidSHA(current) {
+		releases = append(releases, current)
+	}
+	rows, err := e.query(`SELECT DISTINCT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.installation_id=? AND o.managed=1 AND p.target_release_sha256 IS NOT NULL
+		AND (o.stage='recovery_required' OR EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown')))`, installation)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var sha string
+		if err := rows.Scan(&sha); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		releases = append(releases, sha)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	store, err := s.platformImages()
+	if err != nil {
+		return nil, nil
+	}
+	for _, sha := range releases {
+		var descriptor []byte
+		if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, sha).Scan(&descriptor); err != nil {
+			continue
+		}
+		parsed, err := appplatform.ParseDescriptor(descriptor)
+		if err != nil || parsed.Manifest.Backend == nil {
+			continue
+		}
+		for _, entry := range parsed.Manifest.Backend.Images {
+			plan, err := store.planFor(entry)
+			if err != nil {
+				return &platformSettingsImageDelivery{State: "reupload_required", ReleaseSHA256: sha, Reason: "manifest_unreadable"}, nil
+			}
+			if len(store.missingBlobs(plan.Blobs())) != 0 {
+				return &platformSettingsImageDelivery{State: "reupload_required", ReleaseSHA256: sha, Reason: "blobs_missing"}, nil
+			}
+		}
+	}
+	return nil, nil
 }

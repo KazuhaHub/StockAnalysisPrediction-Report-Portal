@@ -3771,6 +3771,8 @@
   "appPlatform.settings.restoreWarning": "Restoring replaces the current application data with the selected verified checkpoint. Writes after that checkpoint may be lost. The app remains unavailable until the current writer stops, data is restored, health checks pass and a new generation activates.",
   "appPlatform.settings.restoreScope": "Restore boundary",
   "appPlatform.settings.restoreScopeValue": "The selected recovery set, checkpoint operation, data namespace, release and writer fence are revalidated at plan and confirmation. Grants and audience remain explicit review inputs.",
+  "appPlatform.settings.imageDelivery.reuploadRequired": "Package re-upload required",
+  "appPlatform.settings.imageDelivery.reuploadDetail": "The image of release {{release}} is no longer stored on this server, so the application cannot be started or recovered. Upload the package of that release again.",
   "appPlatform.settings.migrationRecovery.title": "Data migration recovery",
   "appPlatform.settings.migrationRecovery.state.settling": "In progress",
   "appPlatform.settings.migrationRecovery.state.settled": "Needs a decision",

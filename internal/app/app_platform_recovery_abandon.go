@@ -290,7 +290,7 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 		return p, err
 	}
 	if p.Effects, err = platformIDList(e, `SELECT f.effect_id FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
-		WHERE f.runtime_id=? AND o.action IN ('restore_import','restore') AND f.state IN ('prepared','unknown') ORDER BY f.effect_id`, runtime.id); err != nil {
+		WHERE f.runtime_id=? AND o.action IN ('restore_import','restore') AND f.kind<>'load_image' AND f.state IN ('prepared','unknown') ORDER BY f.effect_id`, runtime.id); err != nil {
 		return p, err
 	}
 	if p.Operations, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
@@ -302,8 +302,8 @@ func loadPlatformAbandonRuntimePlan(e migExec, runtimeID string, control platfor
 	}
 	if p.Finished, err = platformIDList(e, `SELECT o.id FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE i.runtime_id=? AND o.action IN ('restore_import','restore') AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
-		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id=? AND f.state IN ('prepared','unknown'))
-		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id<>? AND f.state IN ('prepared','unknown'))
+		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id=? AND f.kind<>'load_image' AND f.state IN ('prepared','unknown'))
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.runtime_id<>? AND f.kind<>'load_image' AND f.state IN ('prepared','unknown'))
 		ORDER BY o.id`, runtime.id, runtime.id, runtime.id); err != nil {
 		return p, err
 	}

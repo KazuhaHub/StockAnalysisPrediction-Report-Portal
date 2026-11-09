@@ -421,7 +421,8 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 //   - pinned: a retained recovery set restores it (the bundle's rule);
 //   - candidate: it has a candidate or active activation, at any generation;
 //   - recovery_set: a recovery set that is not deleted names it, retained or still being cut;
-//   - operation: a non-terminal operation moves from or to it;
+//   - operation: a non-terminal operation, one that ended recovery_required, or one holding a load with no
+//     verdict moves from or to it;
 //   - plan: an open review plan names it.
 //
 // The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
@@ -463,6 +464,14 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted'`},
 		{"operation", `SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`},
 		{"operation", `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`},
+	}
+	// An operation that ended recovery_required, or that holds a load with no verdict, is still unsettled work
+	// whether or not it completed: its releases stay pinned until the work is settled.
+	for _, column := range []string{"source_release_sha256", "target_release_sha256"} {
+		steps = append(steps,
+			struct{ reason, query string }{"operation", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.stage='recovery_required' AND p.` + column + ` IS NOT NULL`},
+			struct{ reason, query string }{"operation", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+				JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown') WHERE p.` + column + ` IS NOT NULL`})
 	}
 	for _, step := range steps {
 		if err := collect(step.reason, step.query); err != nil {

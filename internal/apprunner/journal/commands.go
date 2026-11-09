@@ -199,5 +199,5 @@ func commandFenceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (int6
 // Rows of kind load-image are ignored, in any state, by every reader that counts, pending-checks or takes a
 // floor over an installation's command rows (writer, candidate, registration, update-start, checkpoint, removal,
 // reservation, import, migrate and delete-data readers). A load touches only the daemon's image storage, never
-// data, fences or containers, so its history must not block those commands. The start gate itself requires an
-// applied load for the exact release. TestInstallationWideCommandReadersIgnoreLoadImageRows keeps this true.
+// data, fences or containers, so its history must not block those commands. The start gate does not read the
+// journal row either: it checks that the image with the expected content ID is present in the daemon. TestInstallationWideCommandReadersIgnoreLoadImageRows keeps this true.
