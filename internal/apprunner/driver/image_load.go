@@ -429,3 +429,25 @@ func readImagePlan(entry appplatform.BackendImage, source ImageBlobSource) (appp
 	}
 	return appplatform.PlanImage(entry, manifest, config)
 }
+
+// loadedImagePresentHTTP is the read-only question a read-back asks: is the image a descriptor entry implies
+// already in the daemon, and valid? It loads nothing and removes nothing.
+func loadedImagePresentHTTP(ctx context.Context, client *http.Client, descriptor []byte, releaseSHA256, platform, arch string) (bool, error) {
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.SHA256 != releaseSHA256 || parsed.Manifest.Backend == nil || "linux/"+arch != platform {
+		return false, ErrInvalidResponse
+	}
+	entry, ok := backendImageEntry(parsed.Manifest.Backend, platform)
+	if !ok {
+		return false, ErrUnsupported
+	}
+	var info infoResponse
+	infoCtx, cancel := probeContext(ctx)
+	err = readJSON(infoCtx, client, "/v"+APIVersion+"/info", &info)
+	cancel()
+	if err != nil {
+		return false, err
+	}
+	state, err := inspectLoadedImage(ctx, client, ExpectedImageID(imageStoreFromInfo(info), entry), arch)
+	return state == imageValid, err
+}

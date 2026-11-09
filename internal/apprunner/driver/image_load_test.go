@@ -406,3 +406,20 @@ func TestLoadImageIssuesOnlyAllowListedRequests(t *testing.T) {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestLoadedImagePresentIsReadOnly(t *testing.T) {
+	f, d := newLoadFixture(t), newFakeDaemon(t, ImageStoreClassic)
+	client := d.client(f)
+	present, err := loadedImagePresentHTTP(context.Background(), client, f.raw, f.parsed.SHA256, "linux/amd64", "amd64")
+	if err != nil || present {
+		t.Fatalf("absent image: %v %v", present, err)
+	}
+	d.images[ExpectedImageID(ImageStoreClassic, f.entry)] = nil
+	present, err = loadedImagePresentHTTP(context.Background(), client, f.raw, f.parsed.SHA256, "linux/amd64", "amd64")
+	if err != nil || !present || d.loads != 0 || len(d.deletes) != 0 {
+		t.Fatalf("present image: %v %v loads=%d deletes=%v", present, err, d.loads, d.deletes)
+	}
+	if _, err := loadedImagePresentHTTP(context.Background(), client, f.raw, strings.Repeat("0", 64), "linux/amd64", "amd64"); !errors.Is(err, ErrInvalidResponse) {
+		t.Fatal(err)
+	}
+}

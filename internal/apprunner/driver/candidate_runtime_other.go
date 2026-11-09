@@ -84,3 +84,6 @@ func (*CandidateRuntime) InspectTarget(context.Context, string) (TargetInspectio
 func (*CandidateRuntime) LoadImage(context.Context, LoadImageRequest) (LoadImageSnapshot, error) {
 	return LoadImageSnapshot{}, ErrUnsupported
 }
+func (*CandidateRuntime) LoadedImagePresent(context.Context, []byte, string, string) (bool, error) {
+	return false, ErrUnsupported
+}

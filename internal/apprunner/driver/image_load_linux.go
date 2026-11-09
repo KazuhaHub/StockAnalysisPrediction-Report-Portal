@@ -29,3 +29,20 @@ func (r *CandidateRuntime) LoadImage(ctx context.Context, request LoadImageReque
 	client := &http.Client{Transport: allowListTransport{next: transport}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return loadImageHTTP(ctx, client, request, runtime.GOARCH)
 }
+
+// LoadedImagePresent reports whether the managed image a descriptor implies is already in the daemon and valid. It
+// is read-only, so a read-back may ask it.
+func (r *CandidateRuntime) LoadedImagePresent(ctx context.Context, descriptor []byte, releaseSHA256, platform string) (bool, error) {
+	if r == nil {
+		return false, ErrUnsupported
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return false, ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	return loadedImagePresentHTTP(ctx, client, descriptor, releaseSHA256, platform, runtime.GOARCH)
+}
