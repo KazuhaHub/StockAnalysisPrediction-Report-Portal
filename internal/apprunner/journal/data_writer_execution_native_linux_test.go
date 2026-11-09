@@ -54,7 +54,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sockets)
-	native, err := driver.OpenCandidateRuntime(context.Background(), socket, rootPath, sockets, root, pin)
+	native, err := driver.OpenCandidateRuntime(context.Background(), socket, rootPath, sockets, root, pin, driver.WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestNativeJournalDataWriterExecution(t *testing.T) {
 			if err := native.Close(); err != nil {
 				t.Fatal(err)
 			}
-			native, err = driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
+			native, err = driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin, driver.WithLocalReferenceImages())
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -41,6 +41,8 @@ type Store struct {
 	closing       atomic.Bool
 	executionOnce sync.Once
 	executionGate chan struct{}
+	loadOnce      sync.Once
+	loadGate      chan struct{}
 }
 
 func init() {

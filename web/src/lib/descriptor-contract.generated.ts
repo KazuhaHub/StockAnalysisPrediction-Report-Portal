@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "189f99c6ff4d59d277797afad80718dd2a24214b63e62cb4f24e47d22cdc9479";
+export const DESCRIPTOR_SCHEMA_SHA256 = "776619608942d190cdda4e4926475bd413a8dbadf6513bc7ae66a10a79d9d3e9";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -36,10 +36,21 @@ export interface Artifact {
 }
 export interface Backend {
  kind: "oci";
- image: string;
+ image?: string;
+ images?: (BackendImage)[];
  platforms: ("linux/amd64" | "linux/arm64")[];
  protocol: "portal.backend/1";
  resources: Resources;
+}
+export interface BackendImage {
+ platform: "linux/amd64" | "linux/arm64";
+ manifest_digest: string;
+ config_digest: string;
+ layers: (ImageLayer)[];
+}
+export interface ImageLayer {
+ diff_id: string;
+ uncompressed_bytes: number;
 }
 export interface Resources {
  memory_mib: number;
@@ -99,6 +110,9 @@ export const DESCRIPTOR_LIMITS = {
   "maxDescriptorDataSchema": 1000000,
   "maxDescriptorPathBytes": 256,
   "maxBackendImageBytes": 512,
+  "maxBackendImagePlatforms": 2,
+  "maxImageLayers": 32,
+  "maxImageLayerUncompressedBytes": 1073741824,
   "maxDescriptorVersionBytes": 128,
   "minBackendMemoryMiB": 16,
   "maxBackendMemoryMiB": 4096,
@@ -198,9 +212,20 @@ export const DESCRIPTOR_FIELDS = {
   "Backend": [
     "kind",
     "image",
+    "images",
     "platforms",
     "protocol",
     "resources"
+  ],
+  "BackendImage": [
+    "platform",
+    "manifest_digest",
+    "config_digest",
+    "layers"
+  ],
+  "ImageLayer": [
+    "diff_id",
+    "uncompressed_bytes"
   ],
   "Resources": [
     "memory_mib",

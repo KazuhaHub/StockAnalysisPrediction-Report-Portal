@@ -21,21 +21,23 @@ import (
 )
 
 type fakeMigrationNative struct {
-	t          *testing.T
-	runs       int
-	absents    int
-	onRun      func(driver.MigrationJobRequest)
-	exit       int
-	killed     bool
-	runErr     error
-	absentErr  error
-	marker     data.SchemaMarkerSnapshot
-	markerErr  error
-	markers    int
-	lastRun    driver.MigrationJobRequest
-	absentHook func()
-	runCtx     func(context.Context)
-	absentIDs  []driver.MigrationJobRequest
+	t           *testing.T
+	runs        int
+	absents     int
+	onRun       func(driver.MigrationJobRequest)
+	exit        int
+	killed      bool
+	runErr      error
+	absentErr   error
+	marker      data.SchemaMarkerSnapshot
+	markerErr   error
+	markers     int
+	lastRun     driver.MigrationJobRequest
+	absentHook  func()
+	runCtx      func(context.Context)
+	absentIDs   []driver.MigrationJobRequest
+	imageChecks int
+	imageErr    error
 }
 
 func (n *fakeMigrationNative) RunMigrationJob(ctx context.Context, r driver.MigrationJobRequest) (driver.MigrationJobSnapshot, error) {
@@ -55,6 +57,10 @@ func (n *fakeMigrationNative) RunMigrationJob(ctx context.Context, r driver.Migr
 		ImageID: "sha256:" + strings.Repeat("b", 64), Platform: r.Platform,
 		ExitCode: n.exit, Killed: n.killed, ObservedMS: time.Now().UnixMilli(),
 	}, nil
+}
+func (n *fakeMigrationNative) CheckBackendImage(context.Context, []byte, string) error {
+	n.imageChecks++
+	return n.imageErr
 }
 func (n *fakeMigrationNative) ProveMigrationAbsent(_ context.Context, r driver.MigrationJobRequest) error {
 	n.absents++

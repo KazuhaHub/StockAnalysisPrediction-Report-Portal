@@ -3,6 +3,7 @@ package appplatform
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -17,6 +18,12 @@ const (
 		MaxDescriptorSignatureBytes + MaxFrontendArchiveBytes + (1 << 20)
 	MaxOfflineEnvelopeEntries = 64
 )
+
+// refusedImageMemberNames are the layout names a publisher must never supply:
+// the runner writes its own index and the daemon never sees a publisher layout.
+var refusedImageMemberNames = map[string]bool{
+	"manifest.json": true, "repositories": true, "index.json": true, "oci-layout": true,
+}
 
 var (
 	ErrInvalidOfflineEnvelope = errors.New("invalid application offline envelope")
@@ -33,6 +40,8 @@ type OfflineEnvelopeInspection struct {
 	SignatureBytes   int64              `json:"signature_bytes"`
 	FrontendBlob     string             `json:"frontend_blob"`
 	Frontend         FrontendInspection `json:"frontend"`
+	Platforms        []string           `json:"platforms,omitempty"`
+	ImageBlobs       int                `json:"image_blobs,omitempty"`
 }
 
 // OfflineEnvelope contains the exact signed declaration and frontend bytes.
@@ -42,31 +51,48 @@ type OfflineEnvelope struct {
 	Signature  []byte
 	Frontend   []byte
 	Inspection OfflineEnvelopeInspection
+	// Images holds the verified plan of every declared platform. It is empty
+	// for a frontend-only envelope.
+	Images []ImagePlan
+	blobs  map[string]*zip.File
+}
+
+// OpenBlob streams one verified image blob member. Only digests of Images are
+// available.
+func (e OfflineEnvelope) OpenBlob(digest string) (io.ReadCloser, error) {
+	file, ok := e.blobs[digest]
+	if !ok {
+		return nil, ErrInvalidOfflineEnvelope
+	}
+	return file.Open()
 }
 
 // InspectOfflineEnvelope validates a bounded development .portalapp archive.
-// The current initial format contains only descriptor.json, descriptor.sig and
-// blobs/<frontend-sha256>/<declared-frontend-name>. Managed image payloads are
-// refused until their exact OCI layout is implemented and verified.
+// Version 1 contains only descriptor.json, descriptor.sig and
+// blobs/<frontend-sha256>/<declared-frontend-name>. Version 2 adds one flat,
+// stored blobs/<sha256> member per image manifest, config and layer, and is
+// required by a managed descriptor (doc 170 resolution 5).
 func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 	var zero OfflineEnvelope
-	if len(raw) == 0 || len(raw) > MaxOfflineEnvelopeBytes ||
-		!boundedFrontendDirectory(raw, MaxOfflineEnvelopeEntries) {
+	if len(raw) == 0 || len(raw) > MaxManagedOfflineEnvelopeBytes ||
+		!boundedFrontendDirectory(raw, MaxManagedOfflineEntries) {
 		return zero, ErrInvalidOfflineEnvelope
 	}
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil || len(reader.File) != 3 {
+	if err != nil || len(reader.File) < 3 {
 		return zero, ErrInvalidOfflineEnvelope
 	}
-	files := make(map[string]*zip.File, 3)
-	seen := make(map[string]bool, 3)
+	files := make(map[string]*zip.File, len(reader.File))
+	seen := make(map[string]bool, len(reader.File))
 	var compressed uint64
 	for _, file := range reader.File {
 		name := file.Name
 		mode := file.Mode()
 		if !safeRelativePath(name) || strings.HasSuffix(name, "/") ||
+			refusedImageMemberNames[strings.ToLower(path.Base(name))] ||
 			file.Flags&^uint16(0x080e) != 0 ||
 			(file.Method != zip.Store && file.Method != zip.Deflate) ||
+			(isImageBlobMember(name) && file.Method != zip.Store) ||
 			!mode.IsRegular() || mode.Type() != 0 || mode.Perm()&0111 != 0 ||
 			mode&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 ||
 			file.CompressedSize64 > uint64(len(raw))-compressed {
@@ -102,8 +128,13 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 	if err != nil {
 		return zero, ErrInvalidOfflineEnvelope
 	}
-	if parsed.Manifest.Backend != nil {
+	backend := parsed.Manifest.Backend
+	if backend != nil && len(backend.Images) == 0 {
+		// A registry reference cannot travel in a package.
 		return zero, ErrManagedOfflineNotReady
+	}
+	if backend == nil && (len(raw) > MaxOfflineEnvelopeBytes || len(files) != 3) {
+		return zero, ErrInvalidOfflineEnvelope
 	}
 	artifactName := path.Base(parsed.Manifest.Frontend.Artifact)
 	frontendBlob := "blobs/" + parsed.Manifest.Frontend.SHA256 + "/" + artifactName
@@ -111,7 +142,7 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 		return zero, ErrInvalidOfflineEnvelope
 	}
 	frontendFile, ok := files[frontendBlob]
-	if !ok || len(files) != 3 {
+	if !ok {
 		return zero, ErrInvalidOfflineEnvelope
 	}
 	frontend, err := readOfflineEntry(
@@ -123,8 +154,16 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 	if err != nil {
 		return zero, ErrInvalidOfflineEnvelope
 	}
+	var plans []ImagePlan
+	var blobs map[string]*zip.File
+	if backend != nil {
+		plans, blobs, err = inspectOfflineImages(backend.Images, files, 3)
+		if err != nil {
+			return zero, err
+		}
+	}
 	sum := sha256.Sum256(descriptor)
-	return OfflineEnvelope{
+	result := OfflineEnvelope{
 		Descriptor: append([]byte(nil), descriptor...),
 		Signature:  append([]byte(nil), signature...),
 		Frontend:   append([]byte(nil), frontend...),
@@ -139,7 +178,131 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 			FrontendBlob:     frontendBlob,
 			Frontend:         inspection,
 		},
-	}, nil
+		Images: plans,
+		blobs:  blobs,
+	}
+	if backend != nil {
+		result.Inspection.Format = "portal.offline-envelope/2-dev.1"
+		result.Inspection.Execution = "managed"
+		result.Inspection.Platforms = append([]string(nil), backend.Platforms...)
+		result.Inspection.ImageBlobs = len(blobs)
+	}
+	return result, nil
+}
+
+// isImageBlobMember reports whether a member name has the flat image blob form
+// blobs/<sha256>. The frontend member has a further path segment.
+func isImageBlobMember(name string) bool {
+	digest, ok := strings.CutPrefix(name, "blobs/")
+	return ok && digestPattern.MatchString(digest)
+}
+
+// inspectOfflineImages verifies every platform image against its signed entry
+// and requires the archive's image members to equal the referenced blob set:
+// an extra member and a missing one are both refused. fixed is the count of
+// non-image members (descriptor, signature, frontend).
+func inspectOfflineImages(images []BackendImage, files map[string]*zip.File, fixed int) ([]ImagePlan, map[string]*zip.File, error) {
+	plans := make([]ImagePlan, 0, len(images))
+	blobs := map[string]*zip.File{}
+	known := map[string]ImageBlob{}
+	remember := func(blob ImageBlob) bool {
+		if prior, ok := known[blob.Digest]; ok {
+			return prior == blob
+		}
+		known[blob.Digest] = blob
+		return true
+	}
+	for _, image := range images {
+		manifestFile, configFile := files["blobs/"+image.ManifestDigest], files["blobs/"+image.ConfigDigest]
+		if manifestFile == nil || configFile == nil {
+			return nil, nil, ErrInvalidOfflineEnvelope
+		}
+		manifestRaw, err := readOfflineEntry(manifestFile, MaxImageMetadataBytes)
+		if err != nil {
+			return nil, nil, err
+		}
+		configRaw, err := readOfflineEntry(configFile, MaxImageMetadataBytes)
+		if err != nil {
+			return nil, nil, err
+		}
+		plan, err := PlanImage(image, manifestRaw, configRaw)
+		if err != nil {
+			return nil, nil, ErrInvalidOfflineEnvelope
+		}
+		for _, blob := range plan.Blobs() {
+			file := files["blobs/"+blob.Digest]
+			if file == nil || !remember(blob) || int64(file.UncompressedSize64) != blob.Size {
+				return nil, nil, ErrInvalidOfflineEnvelope
+			}
+			if blob.Kind == ImageBlobLayer {
+				if err := verifyOfflineBlob(file, blob); err != nil {
+					return nil, nil, err
+				}
+			}
+			blobs[blob.Digest] = file
+		}
+		plans = append(plans, plan)
+	}
+	if len(files) != fixed+len(blobs) {
+		return nil, nil, ErrInvalidOfflineEnvelope
+	}
+	return plans, blobs, nil
+}
+
+// verifyOfflineBlob hashes a stored member against the digest its name and the
+// manifest declare, without holding the blob in memory.
+func verifyOfflineBlob(file *zip.File, blob ImageBlob) error {
+	if blob.Size > MaxImageBlobBytes {
+		return ErrInvalidOfflineEnvelope
+	}
+	stream, err := file.Open()
+	if err != nil {
+		return ErrInvalidOfflineEnvelope
+	}
+	defer stream.Close()
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(stream, blob.Size+1))
+	if err != nil || n != blob.Size || hex.EncodeToString(hash.Sum(nil)) != blob.Digest {
+		return ErrInvalidOfflineEnvelope
+	}
+	if blob.Kind != ImageBlobLayer {
+		return nil
+	}
+	// The layer is also decompressed, exactly as the runner will, so Portal never stages a package whose layer
+	// the runner would refuse: the tar must hash to the declared diff_id and stop at the declared size.
+	again, err := file.Open()
+	if err != nil {
+		return ErrInvalidOfflineEnvelope
+	}
+	defer again.Close()
+	if err := verifyLayerContent(again, blob); err != nil {
+		return ErrInvalidOfflineEnvelope
+	}
+	return nil
+}
+
+// verifyLayerContent decompresses a layer stream (when its media type is compressed) while hashing it, and checks
+// the diff_id and the exact uncompressed size. It reads at most UncompressedBytes+1 bytes of tar.
+func verifyLayerContent(stream io.Reader, blob ImageBlob) error {
+	compressed, ok := ImageBlobCompressed(blob.MediaType)
+	if !ok || blob.UncompressedBytes < 1 {
+		return ErrInvalidImage
+	}
+	reader := stream
+	if compressed {
+		zr, err := gzip.NewReader(stream)
+		if err != nil {
+			return ErrInvalidImage
+		}
+		defer zr.Close()
+		reader = zr
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(reader, blob.UncompressedBytes+1))
+	if err != nil || n != blob.UncompressedBytes || hex.EncodeToString(hash.Sum(nil)) != blob.DiffID {
+		return ErrInvalidImage
+	}
+	return nil
 }
 
 func readOfflineEntry(file *zip.File, limit int64) ([]byte, error) {

@@ -15,7 +15,7 @@ import (
 const migrationPollInterval = 500 * time.Millisecond
 
 func (r *CandidateRuntime) migrationPlan(ctx context.Context, request MigrationJobRequest) (containerPlan, error) {
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil || image.Platform != request.Platform {
 		return containerPlan{}, errors.Join(ErrInvalidResponse, err)
 	}

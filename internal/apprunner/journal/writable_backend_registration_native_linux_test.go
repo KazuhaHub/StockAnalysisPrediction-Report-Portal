@@ -113,7 +113,7 @@ func assertWritableRegistrationNativeDelivery(t *testing.T, s *Store, native *dr
 	if err != nil {
 		t.Fatal(err)
 	}
-	native, err = driver.OpenCandidateRuntime(ctx, dockerSocket, rootPath, sockets, root, pin)
+	native, err = driver.OpenCandidateRuntime(ctx, dockerSocket, rootPath, sockets, root, pin, driver.WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}

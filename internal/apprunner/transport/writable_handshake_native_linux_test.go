@@ -86,7 +86,7 @@ func TestNativeWritableHandshakeTransport(t *testing.T) {
 	if err := os.Mkdir(sockets, 0700); err != nil {
 		t.Fatal(err)
 	}
-	native, err := driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
+	native, err := driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin, driver.WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}

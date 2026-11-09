@@ -34,7 +34,7 @@ func (r *CandidateRuntime) ObserveDataWriter(ctx context.Context, request DataWr
 			return zero, ErrContainerConflict
 		}
 	}
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil || image.Platform != request.Platform {
 		return zero, errors.Join(ErrInvalidResponse, err)
 	}

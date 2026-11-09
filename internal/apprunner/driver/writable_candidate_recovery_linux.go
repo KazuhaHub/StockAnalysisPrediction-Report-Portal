@@ -116,7 +116,7 @@ func (r *CandidateRuntime) withVerifiedWritableCandidate(ctx context.Context, re
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, true); err != nil {
 		return zero, err
 	}
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil || image.Platform != request.Platform {
 		return zero, errors.Join(ErrInvalidResponse, err)
 	}

@@ -32,7 +32,7 @@ func (r *CandidateRuntime) provisionCandidateSocketsProfile(ctx context.Context,
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
 		return err
 	}
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil {
 		return err
 	}

@@ -45,6 +45,9 @@ func (s *Store) DispatchDataWriter(ctx context.Context, raw, signature, descript
 	}
 	switch admitted.State {
 	case "prepared":
+		if err := requireBackendImage(ctx, native, descriptor, parsed.SHA256); err != nil {
+			return zero, err
+		}
 		claim, err := s.ClaimDataWriter(ctx, raw, signature)
 		if err != nil {
 			return zero, err
@@ -84,6 +87,9 @@ func (s *Store) DispatchWritableCandidate(ctx context.Context, raw, signature, d
 		return receipt, nil
 	}
 	if _, err := s.ReadWritableCandidateReservation(ctx, raw, signature); err == nil {
+		if err := requireBackendImage(ctx, native, descriptor, parsed.SHA256); err != nil {
+			return zero, err
+		}
 		claim, err := s.ClaimWritableCandidate(ctx, raw, signature)
 		if err != nil {
 			return zero, err
@@ -99,6 +105,9 @@ func (s *Store) DispatchWritableCandidate(ctx context.Context, raw, signature, d
 	}
 	switch admitted.State {
 	case "prepared":
+		if err := requireBackendImage(ctx, native, descriptor, parsed.SHA256); err != nil {
+			return zero, err
+		}
 		if _, err := s.ReserveWritableCandidate(ctx, raw, signature); err != nil {
 			return zero, err
 		}

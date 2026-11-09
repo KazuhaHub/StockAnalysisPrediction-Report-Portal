@@ -221,11 +221,57 @@ func uniqueMembers(values []string, allowed map[string]bool) bool {
 	return true
 }
 
+// maxBackendImageUncompressedBytes bounds the sum of declared layer sizes per
+// platform, so a descriptor cannot declare an image that expands beyond what
+// the runner will ever unpack.
+const maxBackendImageUncompressedBytes = 4 << 30
+
+// MaxBackendImageUncompressedBytes is the per-platform total the runner enforces again when it loads.
+const MaxBackendImageUncompressedBytes = maxBackendImageUncompressedBytes
+
 func validBackend(b Backend) bool {
-	return b.Kind == descriptorBackendKind && b.Protocol == descriptorBackendProtocol && len(b.Image) <= maxBackendImageBytes && imagePattern.MatchString(b.Image) &&
-		!strings.Contains(b.Image, "..") && !strings.Contains(b.Image, "//") &&
-		uniqueMembers(b.Platforms, descriptorPlatformNames) &&
-		b.Resources.MemoryMiB >= minBackendMemoryMiB && b.Resources.MemoryMiB <= maxBackendMemoryMiB && b.Resources.CPUMillis >= minBackendCPUMillis && b.Resources.CPUMillis <= maxBackendCPUMillis && b.Resources.PIDs >= minBackendPIDs && b.Resources.PIDs <= maxBackendPIDs
+	if b.Kind != descriptorBackendKind || b.Protocol != descriptorBackendProtocol || !uniqueMembers(b.Platforms, descriptorPlatformNames) ||
+		b.Resources.MemoryMiB < minBackendMemoryMiB || b.Resources.MemoryMiB > maxBackendMemoryMiB || b.Resources.CPUMillis < minBackendCPUMillis || b.Resources.CPUMillis > maxBackendCPUMillis || b.Resources.PIDs < minBackendPIDs || b.Resources.PIDs > maxBackendPIDs {
+		return false
+	}
+	// Exactly one image form: a registry reference or managed content.
+	if (b.Image != "") == (len(b.Images) != 0) {
+		return false
+	}
+	if b.Image != "" {
+		return len(b.Image) <= maxBackendImageBytes && imagePattern.MatchString(b.Image) && !strings.Contains(b.Image, "..") && !strings.Contains(b.Image, "//")
+	}
+	return validBackendImages(b.Images, b.Platforms)
+}
+
+// validBackendImages requires one entry per declared platform and no other.
+func validBackendImages(images []BackendImage, platforms []string) bool {
+	if len(images) > maxBackendImagePlatforms || len(images) != len(platforms) {
+		return false
+	}
+	declared := map[string]bool{}
+	for _, platform := range platforms {
+		declared[platform] = true
+	}
+	seen := map[string]bool{}
+	for _, image := range images {
+		if !declared[image.Platform] || seen[image.Platform] || !digestPattern.MatchString(image.ManifestDigest) || !digestPattern.MatchString(image.ConfigDigest) ||
+			len(image.Layers) == 0 || len(image.Layers) > maxImageLayers {
+			return false
+		}
+		seen[image.Platform] = true
+		var total int64
+		for _, layer := range image.Layers {
+			if !digestPattern.MatchString(layer.DiffID) || layer.UncompressedBytes < 1 || layer.UncompressedBytes > maxImageLayerUncompressedBytes {
+				return false
+			}
+			total += int64(layer.UncompressedBytes)
+		}
+		if total > maxBackendImageUncompressedBytes {
+			return false
+		}
+	}
+	return true
 }
 
 func validCapabilities(c Capabilities, hasBackend bool) bool {

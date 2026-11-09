@@ -33,6 +33,12 @@ func apiMinor(value string) (int, bool) {
 }
 
 func readJSON(ctx context.Context, client *http.Client, path string, out any) error {
+	return readJSONOrMissing(ctx, client, path, out, ErrUnavailable)
+}
+
+// readJSONOrMissing is readJSON with a chosen error for a 404, so a caller can tell an absent object from an
+// unavailable daemon.
+func readJSONOrMissing(ctx context.Context, client *http.Client, path string, out any, missing error) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://app-runner-docker.invalid"+path, nil)
 	if err != nil {
 		return ErrUnavailable
@@ -52,6 +58,9 @@ func readJSON(ctx context.Context, client *http.Client, path string, out any) er
 		return ErrUnavailable
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return missing
+	}
 	if response.StatusCode != http.StatusOK {
 		return ErrUnavailable
 	}

@@ -162,7 +162,7 @@ func TestDockerAcceptanceCandidateInventoryReconciliation(
 	owner.WriterFence = "1"
 	owner.ReleaseSHA256 = containerHash(raw)
 	image, err := InspectBackendImage(
-		context.Background(), socket, raw, owner.ReleaseSHA256)
+		context.Background(), socket, raw, owner.ReleaseSHA256, ImagePolicy{AllowLocalReference: true})
 	if err != nil {
 		t.Fatal(err)
 	}

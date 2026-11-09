@@ -81,7 +81,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	native, err := OpenCandidateRuntime(ctx, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, sockets, root, pin)
+	native, err := OpenCandidateRuntime(ctx, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, sockets, root, pin, WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +116,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		}
 		storageReleased = true
 	})
-	image, err := InspectBackendImage(ctx, native.socket, raw, owner.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, native.socket, raw, owner.ReleaseSHA256, ImagePolicy{AllowLocalReference: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin)
+	other, err := OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if _, err := native.StartWritableCandidate(ctx, writableLaunch); err == nil {
 		t.Fatal("native writable start repeated")
 	}
-	other, err = OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin)
+	other, err = OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}

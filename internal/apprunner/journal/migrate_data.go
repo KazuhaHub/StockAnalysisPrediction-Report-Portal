@@ -36,6 +36,8 @@ type MigrationNative interface {
 	RunMigrationJob(context.Context, driver.MigrationJobRequest) (driver.MigrationJobSnapshot, error)
 	ProveMigrationAbsent(context.Context, driver.MigrationJobRequest) error
 	ReadSchemaMarker(context.Context, data.RootIdentity, string, uint32) (data.SchemaMarkerSnapshot, error)
+	// CheckBackendImage is the pre-claim image gate every container start runs.
+	CheckBackendImage(ctx context.Context, descriptor []byte, releaseSHA256 string) error
 }
 
 type nativeMigration struct {
@@ -57,6 +59,12 @@ func (n nativeMigration) RunMigrationJob(ctx context.Context, r driver.Migration
 		return driver.MigrationJobSnapshot{}, err
 	}
 	return observation.Snapshot()
+}
+func (n nativeMigration) CheckBackendImage(ctx context.Context, descriptor []byte, releaseSHA256 string) error {
+	if n.runtime == nil {
+		return ErrMigrateDataUnavailable
+	}
+	return n.runtime.CheckBackendImage(ctx, descriptor, releaseSHA256)
 }
 func (n nativeMigration) ProveMigrationAbsent(ctx context.Context, r driver.MigrationJobRequest) error {
 	if n.runtime == nil {
@@ -983,6 +991,10 @@ func (s *Store) DispatchMigrateData(ctx context.Context, raw, signature, descrip
 	}
 	if before.Present && before.Schema != int(mustDataInt(command.Payload.SourceSchema)) {
 		return zero, fmt.Errorf("%w: namespace schema marker %d is not the source schema", ErrFenceReconciliation, before.Schema)
+	}
+	// A target image that is no longer in the daemon refuses the job before its claim.
+	if err := native.CheckBackendImage(ctx, descriptor, command.Payload.TargetReleaseSHA256); err != nil {
+		return zero, fmt.Errorf("migration image: %w", err)
 	}
 	intent, replay, err := s.beginMigrateData(ctx, raw, signature)
 	if err != nil {

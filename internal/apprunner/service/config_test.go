@@ -23,7 +23,7 @@ func controllerFixture() Controller {
 func configFixture(canonical string) Config {
 	return Config{
 		Format: ConfigFormat, DockerSocket: "/run/docker.sock", JournalDir: filepath.Join(canonical, "journal"),
-		DataRoot: filepath.Join(canonical, "data"), CheckpointRoot: filepath.Join(canonical, "checkpoints"),
+		DataRoot: filepath.Join(canonical, "data"), CheckpointRoot: filepath.Join(canonical, "checkpoints"), ImageRoot: filepath.Join(canonical, "images"),
 		IPCRoot: filepath.Join(canonical, "ipc"), ControlRoot: filepath.Join(canonical, "control"),
 		ControlSocket: filepath.Join(canonical, "control", "runner.sock"), ControllerUID: 41001, ControllerGID: 41001,
 		NetworkActive: 4, NetworkEntries: 1024, MinimumCPUs: 2, MinimumMemory: 2 << 30, Controller: controllerFixture(),
@@ -92,10 +92,15 @@ func TestConfigRefusesExposureAndOverlappingRoots(t *testing.T) {
 		"checkpoint_overlap": func(c *Config) {
 			c.CheckpointRoot = c.DataRoot
 		},
-		"missing_checkpoint": func(c *Config) { c.CheckpointRoot = "" },
-		"zero_controller":    func(c *Config) { c.ControllerUID = 0 },
-		"network_overflow":   func(c *Config) { c.NetworkEntries = 4097 },
-		"relative":           func(c *Config) { c.DataRoot = "relative" },
+		"missing_checkpoint":                   func(c *Config) { c.CheckpointRoot = "" },
+		"missing_image_root_refused":           func(c *Config) { c.ImageRoot = "" },
+		"relative_image_root_refused":          func(c *Config) { c.ImageRoot = "images" },
+		"image_root_inside_data_refused":       func(c *Config) { c.ImageRoot = filepath.Join(c.DataRoot, "images") },
+		"image_root_equals_checkpoint_refused": func(c *Config) { c.ImageRoot = c.CheckpointRoot },
+		"image_root_equals_journal_refused":    func(c *Config) { c.ImageRoot = c.JournalDir },
+		"zero_controller":                      func(c *Config) { c.ControllerUID = 0 },
+		"network_overflow":                     func(c *Config) { c.NetworkEntries = 4097 },
+		"relative":                             func(c *Config) { c.DataRoot = "relative" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := configFixture(dir)
@@ -187,4 +192,39 @@ func TestBootstrapIsExplicitAndIdempotent(t *testing.T) {
 	if _, err := Bootstrap(t.Context(), cfg); err == nil {
 		t.Fatal("bootstrap replaced enrolled revision")
 	}
+}
+
+// The production profile is the zero value: a config that never mentions the
+// development flag must refuse registry references.
+func TestConfigDevelopmentProfileDefaultsToProduction(t *testing.T) {
+	dir := canonicalTempDir(t)
+	path := filepath.Join(dir, "service.json")
+	cfg := configFixture(dir)
+	writePrivate(t, path, cfg)
+	loaded, err := LoadConfig(path)
+	if err != nil || loaded.AllowLocalReferenceImages {
+		t.Fatalf("default profile is not production: %+v %v", loaded, err)
+	}
+	cfg.AllowLocalReferenceImages = true
+	writePrivate(t, path, cfg)
+	loaded, err = LoadConfig(path)
+	if err != nil || !loaded.AllowLocalReferenceImages {
+		t.Fatalf("development profile not honoured: %+v %v", loaded, err)
+	}
+	raw := strings.Replace(string(mustMarshal(t, cfg)), `"allow_local_reference_images":true`, `"allow_local_reference_images":"yes"`, 1)
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadConfig(path); err == nil {
+		t.Fatal("non-boolean profile flag accepted")
+	}
+}
+
+func mustMarshal(t *testing.T, value any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

@@ -68,15 +68,13 @@ func InspectDaemon(ctx context.Context, socket string) (Report, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: time.Second,
-		DialContext: dockerDialer(socket)}
-	defer transport.CloseIdleConnections()
-	client := daemonClient(transport)
+	client, closeClient := newDockerClient(socket, time.Second, probeTimeout)
+	defer closeClient()
 	return inspectHTTP(ctx, client, runtime.GOARCH)
 }
 
 func daemonClient(transport http.RoundTripper) *http.Client {
-	return &http.Client{Transport: transport, Timeout: probeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	return &http.Client{Transport: allowListTransport{next: transport}, Timeout: probeTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }
 
 type versionResponse struct {
@@ -92,6 +90,7 @@ type infoResponse struct {
 	NCPU                                                                     int
 	MemTotal                                                                 int64
 	SecurityOptions                                                          []string
+	DriverStatus                                                             [][]string
 }
 
 func canonicalArch(value string) string {

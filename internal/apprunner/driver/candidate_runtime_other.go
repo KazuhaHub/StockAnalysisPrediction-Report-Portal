@@ -10,7 +10,7 @@ import (
 type CandidateRuntime struct{}
 type candidateLaunchState struct{}
 
-func OpenCandidateRuntime(context.Context, string, string, string, *data.Root, data.RootIdentity) (*CandidateRuntime, error) {
+func OpenCandidateRuntime(context.Context, string, string, string, *data.Root, data.RootIdentity, ...RuntimeOption) (*CandidateRuntime, error) {
 	return nil, ErrUnsupported
 }
 func (*CandidateRuntime) Close() error { return nil }
@@ -80,4 +80,13 @@ func (*CandidateRuntime) ListNamespaceContainers(context.Context, string) ([]Nam
 func (*CandidateRuntime) RemoveStrayContainer(context.Context, string) error { return ErrUnsupported }
 func (*CandidateRuntime) InspectTarget(context.Context, string) (TargetInspection, error) {
 	return TargetInspection{}, ErrUnsupported
+}
+func (*CandidateRuntime) LoadImage(context.Context, LoadImageRequest) (LoadImageSnapshot, error) {
+	return LoadImageSnapshot{}, ErrUnsupported
+}
+func (*CandidateRuntime) LoadedImagePresent(context.Context, []byte, string, string) (bool, error) {
+	return false, ErrUnsupported
+}
+func (*CandidateRuntime) CheckBackendImage(context.Context, []byte, string) error {
+	return ErrUnsupported
 }

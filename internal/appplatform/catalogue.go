@@ -27,6 +27,10 @@ type CatalogueRelease struct {
 	DescriptorSHA256 string `json:"descriptor_sha256"`
 	DescriptorURL    string `json:"descriptor_url"`
 	SignatureURL     string `json:"signature_url"`
+	// PackageURL names the .portalapp (offline envelope version 2) of a managed
+	// release. Online install downloads it and then runs the offline path, so the
+	// descriptor and signature must be byte-equal to the package's.
+	PackageURL string `json:"package_url,omitempty"`
 }
 
 type ParsedCatalogue struct {
@@ -63,13 +67,28 @@ func ParseCatalogue(raw []byte) (ParsedCatalogue, error) {
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
-	if d.Decode(&doc) != nil || doc.Format != "portal.catalogue/2-dev.1" || doc.Releases == nil || len(doc.Releases) > MaxCatalogueReleases {
+	if d.Decode(&doc) != nil || (doc.Format != "portal.catalogue/2-dev.1" && doc.Format != "portal.catalogue/2-dev.2") || doc.Releases == nil || len(doc.Releases) > MaxCatalogueReleases {
 		return zero, ErrInvalidCatalogue
+	}
+	// An explicit empty package_url is ambiguous with an absent one; refuse it.
+	var keys struct {
+		Releases []map[string]json.RawMessage `json:"releases"`
+	}
+	if json.Unmarshal(raw, &keys) != nil || len(keys.Releases) != len(doc.Releases) {
+		return zero, ErrInvalidCatalogue
+	}
+	for _, r := range keys.Releases {
+		if value, present := r["package_url"]; present && string(value) == `""` {
+			return zero, ErrInvalidCatalogue
+		}
 	}
 	seen := map[string]bool{}
 	for _, r := range doc.Releases {
 		identity := r.PublisherID + "/" + r.AppID + "/" + r.Version
 		if !slugPattern.MatchString(r.AppID) || !slugPattern.MatchString(r.PublisherID) || !validVersion(r.Version) || !digestPattern.MatchString(r.DescriptorSHA256) || seen[identity] || seen[r.DescriptorSHA256] || ValidateCatalogueURL(r.DescriptorURL) != nil || ValidateCatalogueURL(r.SignatureURL) != nil {
+			return zero, ErrInvalidCatalogue
+		}
+		if r.PackageURL != "" && (doc.Format == "portal.catalogue/2-dev.1" || ValidateCatalogueURL(r.PackageURL) != nil) {
 			return zero, ErrInvalidCatalogue
 		}
 		seen[identity], seen[r.DescriptorSHA256] = true, true

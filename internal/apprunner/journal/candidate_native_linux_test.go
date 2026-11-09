@@ -117,7 +117,7 @@ func TestNativeJournalCandidateExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(socketRoot)
-	native, err := driver.OpenCandidateRuntime(context.Background(), socket, rootPath, socketRoot, root, pin)
+	native, err := driver.OpenCandidateRuntime(context.Background(), socket, rootPath, socketRoot, root, pin, driver.WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}

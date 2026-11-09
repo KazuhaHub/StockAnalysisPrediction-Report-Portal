@@ -183,7 +183,10 @@ func validContainerPlan(plan containerPlan) bool {
 func planCandidateContainer(raw []byte, image BackendImageInspection, owner containerOwner, roots containerRoots) (containerPlan, error) {
 	empty := containerPlan{}
 	parsed, err := appplatform.ParseDescriptor(raw)
-	if candidateSeccompError != nil || err != nil || parsed.Manifest.Backend == nil || !validContainerOwner(owner) || parsed.SHA256 != owner.ReleaseSHA256 || image.ReleaseSHA256 != owner.ReleaseSHA256 || image.Reference != parsed.Manifest.Backend.Image || !nativeImageID.MatchString(image.ImageID) {
+	if candidateSeccompError != nil || err != nil || parsed.Manifest.Backend == nil || !validContainerOwner(owner) || parsed.SHA256 != owner.ReleaseSHA256 || image.ReleaseSHA256 != owner.ReleaseSHA256 || !nativeImageID.MatchString(image.ImageID) {
+		return empty, ErrInvalidResponse
+	}
+	if reference, ok := backendImageReference(parsed.Manifest.Backend, image.Platform); !ok || image.Reference != reference {
 		return empty, ErrInvalidResponse
 	}
 	declared := false

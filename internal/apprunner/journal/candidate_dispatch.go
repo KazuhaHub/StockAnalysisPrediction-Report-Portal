@@ -45,6 +45,9 @@ func (s *Store) DispatchCandidate(ctx context.Context, raw, signature []byte, na
 		if native == nil {
 			return zero, ErrCandidateClaimUnavailable
 		}
+		if err := requireBackendImage(ctx, native, descriptor, parsed.SHA256); err != nil {
+			return zero, err
+		}
 		if _, err := s.ReserveCandidate(ctx, raw, signature); err != nil {
 			return zero, err
 		}

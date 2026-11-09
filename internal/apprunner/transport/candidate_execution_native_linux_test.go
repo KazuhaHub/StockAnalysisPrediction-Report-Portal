@@ -122,7 +122,7 @@ func TestNativeCandidateExecutionTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(sockets)
-	native, err := driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin)
+	native, err := driver.OpenCandidateRuntime(ctx, socket, rootPath, sockets, root, pin, driver.WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}
