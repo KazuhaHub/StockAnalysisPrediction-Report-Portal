@@ -328,6 +328,9 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 	if !platformValidSHA(digest) || appplatform.ValidateCatalogueURL(catalogueURL) != nil {
 		return zero, errPlatformManagementInput
 	}
+	// A package download is resumable and bounded by its own timeout, so it takes the caller's context, not the
+	// short one the small documents share.
+	requestCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
 	var trust appplatform.PublisherTrust
@@ -394,6 +397,15 @@ func (s *Server) fetchAndStagePlatformMarketRelease(ctx context.Context, actor p
 	}
 	if platformPackageRequirements(manifest) != nil {
 		return zero, errAppPlatformInstallUnavailable
+	}
+	// A managed release with image content installs from its package: the same bytes, and so the same release,
+	// digests and image, as an offline install. Its descriptor and signature are checked equal to the package's.
+	managedImages := manifest.Backend != nil && len(manifest.Backend.Images) > 0
+	if managedImages != (entry.PackageURL != "") {
+		return zero, errAppPlatformInstallUnavailable
+	}
+	if managedImages {
+		return s.fetchAndStagePlatformPackage(requestCtx, actor, client, entry.PackageURL, descriptor, signature)
 	}
 	// Resolve only the signed relative artifact path against the descriptor's
 	// original directory. Redirect URLs never redefine artifact authority/base.

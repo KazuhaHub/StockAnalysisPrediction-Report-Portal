@@ -36,7 +36,7 @@ func (s *Server) apiPlatformMarketOffline(
 		return
 	}
 	defer file.Close()
-	staged, err := s.stagePlatformPackageFile(r.Context(), actor, file, size)
+	staged, err := s.stagePlatformPackageFile(r.Context(), actor, file, size, nil)
 	if err != nil {
 		store.discardPartial(key)
 		platformManagementError(w, err)

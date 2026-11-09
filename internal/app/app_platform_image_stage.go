@@ -156,11 +156,16 @@ type platformPackageStaged struct {
 // stagePlatformPackageFile stages a package that already sits on disk. A static package stages as before. A
 // managed one first proves its blobs fit under the cap and stores them, and only then writes the release row, so
 // a refusal for space leaves no release behind and a release row always finds its blobs.
-func (s *Server) stagePlatformPackageFile(ctx context.Context, actor platformActorSession, file *os.File, size int64) (platformPackageStaged, error) {
+func (s *Server) stagePlatformPackageFile(ctx context.Context, actor platformActorSession, file *os.File, size int64, expect func(appplatform.OfflineEnvelope) error) (platformPackageStaged, error) {
 	var zero platformPackageStaged
 	envelope, err := appplatform.InspectOfflineEnvelopeAt(file, size)
 	if err != nil {
 		return zero, err
+	}
+	if expect != nil {
+		if err := expect(envelope); err != nil {
+			return zero, err
+		}
 	}
 	var added []string
 	var store *platformImageStore

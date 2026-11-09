@@ -85,6 +85,8 @@ func newPlatformManagedImageParts(t *testing.T, version, seed string) platformMa
 	encoded, _ := json.Marshal(entry)
 	_ = json.Unmarshal(encoded, &generic)
 	backend["images"] = []any{generic}
+	d["compatibility"] = map[string]any{"platform_api": ">=2.0.0-0 <3.0.0", "runner_protocol": ">=1.0.0-0 <2.0.0"}
+	d["capabilities"] = map[string]any{"required": []any{}, "optional": []any{}}
 	d["frontend"].(map[string]any)["sha256"] = platformDigest(frontend)
 	d["frontend"].(map[string]any)["artifact"] = "ui.zip"
 	descriptor, err := json.Marshal(d)

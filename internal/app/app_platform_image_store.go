@@ -239,6 +239,9 @@ func (p *platformImageStore) partialPath(key string) string {
 	return filepath.Join(p.staging, platformHexOf(key)+".partial")
 }
 
+// partialName is the file name of the in-flight download of key.
+func (p *platformImageStore) partialName(key string) string { return platformHexOf(key) + ".partial" }
+
 func (p *platformImageStore) validatorPath(key string) string {
 	return filepath.Join(p.staging, platformHexOf(key)+".validator.partial")
 }
