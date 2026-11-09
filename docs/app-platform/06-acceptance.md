@@ -58,6 +58,31 @@ complete screen-reader certification from an automated result.
 | PKG-09 | Publish actual release, download externally and inspect both image architectures | Every public artifact matches descriptor/source/released executable identity |
 | PKG-10 | Revoke a running package; make trust source temporarily unreachable | Defined quarantine/deny-new-install behavior; no trust bypass or silent data deletion |
 
+### Managed image delivery status (PKG-01, PKG-08, SEC-01, DATA-05)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 3 and
+[doc 170](170-image-delivery-plan.md). Claims are limited to what the named tests prove, and each says against
+what.
+
+- **Against fakes (the general suite, no runner):** the load-image sender and its start gate run against a fake
+  runner model, so they prove Portal's behaviour (one effect id, read-back, resume, busy versus rejected, nothing
+  sent for blobs that fail their hash, an unknown load left for the settlement driver), not the runner's. The
+  storage scenarios use real files and the real SQLite database: offline and catalogue staging of the same
+  package, crafted layouts refused with no row or blob, resume after a restart with `Range` and `If-Range`,
+  corrupt blob healed by a new download, both caps, the pinned set across sweeps, recovery-bundle carry and
+  restore of blobs.
+- **Against the real runner journal (SQLite, no Docker):** every command family's admission (writer through
+  candidate claim, data reservation, registration, checkpoint, update start, managed removal) succeeds with an
+  applied and with an unknown load-image row in the installation's history.
+- **Natively, in CI only (not run on the development host):** the real Scheduled Digest image, saved with
+  `docker save`, exported by the Apps tooling and put through the offline, catalogue, corruption and cap
+  scenarios at its real size (`deliver-managed-image-package`); the daemon's image list unchanged around those
+  runs; the SEC-01 negatives in the driver tests that job runs; and the 3a native test that loads a two-layer
+  image on the real daemon.
+- **Not proven anywhere:** a managed install driven end to end against the real runner from blobs (the exact
+  Scheduled Digest image started by the runner after a real load-image), a restore of a bundle onto a new Linux
+  host with the managed app resumed natively, and the new Portal tests on PostgreSQL.
+
 ## 4. Authorization and isolation
 
 | ID | Steps | Required result |

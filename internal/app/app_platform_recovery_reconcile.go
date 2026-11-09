@@ -336,7 +336,7 @@ func settlePlatformRecoveryOperation(e migExec, operation, code string, now int6
 		return errAppPlatformStageEvidence
 	}
 	var unsettled int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown')`, operation).Scan(&unsettled); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image' AND state IN ('prepared','unknown')`, operation).Scan(&unsettled); err != nil {
 		return err
 	}
 	if unsettled != 0 {

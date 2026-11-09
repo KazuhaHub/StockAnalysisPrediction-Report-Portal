@@ -358,6 +358,19 @@ describe('application installation settings', () => {
       url.endsWith('/settings') ? { ...settings, migration_recovery } : { bindings: [] })
     const buttons = () => screen.queryAllByRole('button', { name: /appPlatform\.settings\.migrationRecovery\.(rollback|retry)$/ })
 
+    it('says the package must be uploaded again when the image blobs are gone, and names the release', async () => {
+      apiMock.get.mockImplementation(async (url: string) =>
+        url.endsWith('/settings') ? { ...settings, image_delivery: { state: 'reupload_required', release_sha256: 'd'.repeat(64), reason: 'blobs_missing' } } : { bindings: [] })
+      mount()
+      expect((await screen.findByTestId('image-delivery-reupload')).textContent).toContain('appPlatform.settings.imageDelivery.reuploadRequired')
+    })
+
+    it('shows no re-upload notice when the image is intact', async () => {
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByTestId('image-delivery-reupload')).toBeNull()
+    })
+
     it('renders nothing when the field is absent', async () => {
       mount()
       await screen.findByText('notes')

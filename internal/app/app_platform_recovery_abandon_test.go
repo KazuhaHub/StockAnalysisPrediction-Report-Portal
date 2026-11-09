@@ -462,3 +462,30 @@ func TestAbandonedRuntimeRootDoesNotRefuseADifferentRoot(t *testing.T) {
 		t.Fatalf("a replacement on a different data root was refused: %v", err)
 	}
 }
+
+// The abandon reverts the runtime's unsettled effects without asking the runner, but it leaves a load-image row
+// to the settlement driver. Fails if the abandon is refused or blocked by the load, if it reverts the load itself,
+// or if the driver then leaves the row of a retired runtime unsettled, which would block the installation for ever.
+func TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRuntime(t *testing.T) {
+	f, operation := unknownImportFixture(t)
+	mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		SELECT o.id,'stage',1,?,'load_image',?,?,o.controller_epoch,1,0,'unknown','{}',o.created_ms,o.updated_ms FROM app_platform_operations o WHERE o.id=?`,
+		platformFixtureID(8701), platformDigest([]byte("load")), f.replacement.id, operation)
+	got, err := f.abandon(t)
+	if err != nil || got.Effects != 1 {
+		t.Fatalf("the abandon was refused or listed the load: %+v %v", got, err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE effect_id=?`, platformFixtureID(8701)) != "unknown" {
+		t.Fatal("the abandon reverted a load without a runner verdict")
+	}
+	if err := f.s.revertLoadsOfRetiredRuntimes(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE effect_id=?`, platformFixtureID(8701)) != "reverted" {
+		t.Fatal("the driver left the load of a retired runtime unsettled")
+	}
+	// Portal has no runner verdict for it, so it says so instead of recording one.
+	if scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=?`, platformFixtureID(8701)) != `{"outcome":"abandoned_outcome_unknown"}` {
+		t.Fatal("the settled load does not carry the abandoned_outcome_unknown outcome")
+	}
+}

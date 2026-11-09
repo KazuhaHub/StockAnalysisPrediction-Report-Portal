@@ -21,6 +21,7 @@ func reservedClaimFixture(t *testing.T) (*Store, string, []byte, []byte) {
 	if _, err := s.AdmitControlCommand(context.Background(), raw, sig); err != nil {
 		t.Fatal(err)
 	}
+	injectLoadImageRow(t, s)
 	if _, err := s.ReservePrepareData(context.Background(), raw, sig); err != nil {
 		t.Fatal(err)
 	}

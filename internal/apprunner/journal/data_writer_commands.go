@@ -44,7 +44,7 @@ func loadDataWriterSource(ctx context.Context, tx *sql.Tx, v control.VerifiedDat
 	var zero DataPreparationReceipt
 	var conflicts int
 	if err := tx.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND effect_id<>?)+
+ (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND effect_id<>? AND effect_id<>?)+
  (SELECT COUNT(*) FROM runner_resources WHERE id=? OR (data_namespace_id=? AND id<>?))`, ref.InstallationID, ref.EffectID, c.EffectID, c.ResourceID, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID).Scan(&conflicts); err != nil {
 		return zero, err
 	}

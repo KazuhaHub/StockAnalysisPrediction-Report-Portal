@@ -577,6 +577,9 @@ func testPlatformManagedEnableSecondCycle(t *testing.T, pg bool) {
 		t.Fatal("second enable claim", selected, err)
 	}
 	snapshotLease := selected.lease
+	if platformTestAfterEnableClaim != nil {
+		platformTestAfterEnableClaim(t, s, selected.lease)
+	}
 	for snapshotLease.snapshot.Stage == appplatform.StageQueued ||
 		snapshotLease.snapshot.Stage == appplatform.StageValidate {
 		snapshotLease, err = s.advancePlatformManagedEnableStage(
@@ -1398,3 +1401,6 @@ func TestPlatformManagedEnableReviewAfterRestoredDisableUsesCurrentGeneration(t 
 			access.intent.generation, generation)
 	}
 }
+
+// platformTestAfterEnableClaim, when set, runs right after the second enable of the cycle test is claimed.
+var platformTestAfterEnableClaim func(*testing.T, *Server, platformOperationLease)

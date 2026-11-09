@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"time"
@@ -29,6 +30,9 @@ func validPlatformCandidateObservation(proof transport.CandidateReceiptObservati
 }
 
 func (s *Server) dispatchPlatformInstallCandidate(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	if err := s.ensurePlatformReleaseImage(ctx, expected, endpoint); err != nil {
+		return platformOperationLease{}, fmt.Errorf("image load: %w", err)
+	}
 	intent, err := s.preparePlatformInstallCandidate(ctx, expected)
 	if err != nil {
 		return platformOperationLease{}, err

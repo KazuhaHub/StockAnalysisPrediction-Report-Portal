@@ -13,6 +13,7 @@ import (
 func appliedReceiptFixture(t *testing.T) (*Store, []byte, []byte, DataPreparationReceipt) {
 	t.Helper()
 	s, _, claim, pin := boundRecoveryFixture(t)
+	injectLoadImageRow(t, s)
 	var receipt DataPreparationReceipt
 	// Synthetic observation tests journal validation only; native acceptance is separate.
 	tx, facts, err := s.beginDataCommand(context.Background(), claim.state.raw, claim.state.signature, "unknown", claim.state.marker)

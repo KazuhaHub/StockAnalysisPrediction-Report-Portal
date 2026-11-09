@@ -456,10 +456,11 @@ func (s *Server) consumePlatformRestoreResumeReview(ctx context.Context, session
 		if err != nil {
 			return err
 		}
-		if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
-			source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,'restore',1,?,?,'revoke',3,1,NULL,NULL,0,?,NULL,NULL,?,?)`,
-			operationID, installation.String, planID, actor.scope, keyDigest, requestDigest, plan.SourceGeneration, plan.TargetGeneration, epoch, now, now); err != nil {
+		if err := insertPlatformOperation(e, platformOperationRow{
+			ID: operationID, InstallationID: installation.String, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: "restore", Managed: true,
+			SourceGeneration: plan.SourceGeneration, TargetGeneration: plan.TargetGeneration, Stage: "revoke", StateRevision: 3,
+			ControllerEpoch: epoch, NowMS: now}); err != nil {
 			return err
 		}
 		changed, err = e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND expires_ms>? AND plan_sha256=?`,
@@ -840,7 +841,7 @@ func requirePlatformResumeStagedForData(e migExec, lease platformOperationLease,
 	}
 	// The quiesce stage's stop and remove effects of an earlier container are the only native work a resume
 	// may carry before restore-data.
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'quiesce'`, lease.id).Scan(&effects); err != nil || effects != 0 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'quiesce' AND kind<>'load_image'`, lease.id).Scan(&effects); err != nil || effects != 0 {
 		return fmt.Errorf("%w: resume stage carries native work", errAppPlatformStageEvidence)
 	}
 	if err := e.queryRow(`SELECT state,owner_installation_id FROM app_platform_data_namespaces WHERE id=?`, ev.plan.NamespaceID).Scan(&namespaceState, &owner); err != nil ||
@@ -1023,7 +1024,7 @@ func (s *Server) finishPlatformRestoreResumeForReview(ctx context.Context, expec
 		return errAppPlatformStageEvidence
 	}
 	var effects int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, expected.id).Scan(&effects); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, expected.id).Scan(&effects); err != nil {
 		return err
 	}
 	var unsettled int

@@ -92,7 +92,7 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, b.installation, b.installation).Scan(&count); err != nil || count != 1 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, source.operationID).Scan(&count); err != nil || count != 4 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, source.operationID).Scan(&count); err != nil || count != 4 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	if err := e.queryRow(`SELECT created_ms,updated_ms FROM app_platform_activations WHERE id=? AND installation_id=? AND release_sha256=? AND data_namespace_id=? AND generation=1 AND data_format=? AND state='active' AND readiness_evidence=? AND observed_ms=?`, b.activation, b.installation, b.release, b.namespace, b.format, b.readiness, b.observed).Scan(&w.activationCreated, &w.activationUpdated); err != nil {

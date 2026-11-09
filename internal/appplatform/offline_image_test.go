@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"testing"
 )
 
@@ -372,5 +373,48 @@ func TestOfflineEnvelopeV2RefusesALayerWhoseContentBreaksItsDeclaration(t *testi
 				t.Fatalf("a layer that breaks its declaration was staged: %v", err)
 			}
 		})
+	}
+}
+
+// Fails open if the file-backed inspection accepted what the buffered one refuses, or opened different blobs.
+func TestOfflineEnvelopeAtOnAFileMatchesTheBufferedInspectionAndRefusesTheSameDamage(t *testing.T) {
+	parts := newManagedOfflineParts(t)
+	raw := parts.archive(t)
+	file, err := os.CreateTemp(t.TempDir(), "package")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	if _, err := file.Write(raw); err != nil {
+		t.Fatal(err)
+	}
+	buffered, err := InspectOfflineEnvelope(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk, err := InspectOfflineEnvelopeAt(file, int64(len(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if onDisk.Inspection.DescriptorSHA256 != buffered.Inspection.DescriptorSHA256 || onDisk.Inspection.ImageBlobs != buffered.Inspection.ImageBlobs {
+		t.Fatal("file-backed inspection differs from the buffered one")
+	}
+	for _, blob := range onDisk.Images[0].Blobs() {
+		stream, err := onDisk.OpenBlob(blob.Digest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(stream)
+		stream.Close()
+		if platformTestDigest(body) != blob.Digest {
+			t.Fatal("blob opened from the file does not hash to its name")
+		}
+	}
+	// A truncated file and a wrong declared size are refused, as the buffered form refuses them.
+	if _, err := InspectOfflineEnvelopeAt(file, int64(len(raw))-1); err == nil {
+		t.Fatal("a package one byte short was accepted")
+	}
+	if _, err := InspectOfflineEnvelopeAt(file, 0); err == nil {
+		t.Fatal("an empty package was accepted")
 	}
 }

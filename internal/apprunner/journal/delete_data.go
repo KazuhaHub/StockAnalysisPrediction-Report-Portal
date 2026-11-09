@@ -302,7 +302,7 @@ func loadDeleteDataSource(
 	var pending int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
 		FROM runner_commands WHERE installation_id=? AND effect_id<>?
-		AND state IN ('prepared','unknown')`,
+		AND kind<>'load-image' AND state IN ('prepared','unknown')`,
 		c.InstallationID, c.EffectID).Scan(&pending); err != nil ||
 		pending != 0 {
 		return result, fmt.Errorf(

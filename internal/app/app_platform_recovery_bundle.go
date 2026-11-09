@@ -35,10 +35,15 @@ const (
 const (
 	// A static frontend is stored in the Portal's database and travels in the dump.
 	platformBlobInDump = "in_dump"
-	// A managed backend's content is outside the database. Until the blob store of doc 167 section 3
-	// exists nothing carries it, and the inventory says so instead of leaving it out.
+	// A managed backend's content is outside the database. The inventory marks it pending until the writer
+	// resolves it: carried in the bundle, or a development reference that names no content.
 	platformBlobPending = "pending"
 	platformBlobNone    = "none"
+	// The image blobs of a managed release travel in the bundle under app-blobs/<sha256>.
+	platformBlobInBundle = "in_bundle"
+	// A development release names a registry reference: there is no content to carry, and the image must
+	// already exist on the new host.
+	platformBlobReference = "reference"
 )
 
 type platformBundleFile struct {
@@ -62,6 +67,8 @@ type platformReleaseBlob struct {
 	FrontendSHA256 string   `json:"frontend_sha256"`
 	Frontend       string   `json:"frontend"`
 	Backend        string   `json:"backend"`
+	// ImageBlobs names the blobs of an in-bundle backend, by digest.
+	ImageBlobs []string `json:"image_blobs,omitempty"`
 }
 
 type platformRecoveryBundleManifest struct {
@@ -71,6 +78,8 @@ type platformRecoveryBundleManifest struct {
 	Checkpoints   []platformBundleCheckpoint `json:"checkpoints"`
 	RunnerJournal *platformBundleFile        `json:"runner_journal,omitempty"`
 	Releases      []platformReleaseBlob      `json:"required_releases"`
+	// ImageBlobs are the managed image blobs of the required releases, one file per digest.
+	ImageBlobs []platformBundleFile `json:"image_blobs,omitempty"`
 }
 
 type platformRecoveryBundleInput struct {
@@ -113,39 +122,20 @@ func loadPlatformRetainedSets(e migExec) ([]platformRetainedSet, error) {
 // activation of every installation that still exists, and every release a retained recovery set pins
 // (restoring that set re-activates its release).
 func platformRequiredReleaseBlobs(e migExec) ([]platformReleaseBlob, error) {
+	pins, err := loadPlatformReleasePins(e, 0)
+	if err != nil {
+		return nil, err
+	}
 	reasons := map[string]map[string]bool{}
-	add := func(release, reason string) {
-		if reasons[release] == nil {
-			reasons[release] = map[string]bool{}
+	for release, why := range pins {
+		for _, reason := range []string{"active", "pinned"} {
+			if why[reason] {
+				if reasons[release] == nil {
+					reasons[release] = map[string]bool{}
+				}
+				reasons[release][reason] = true
+			}
 		}
-		reasons[release][reason] = true
-	}
-	rows, err := e.query(`SELECT a.release_sha256 FROM app_platform_activations a
-		JOIN app_platform_installations i ON i.id=a.installation_id
-		WHERE i.desired_state<>'removed'
-		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var release string
-		if err := rows.Scan(&release); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		add(release, "active")
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	sets, err := loadPlatformRetainedSets(e)
-	if err != nil {
-		return nil, err
-	}
-	for _, set := range sets {
-		add(set.release, "pinned")
 	}
 	blobs := make([]platformReleaseBlob, 0, len(reasons))
 	for release, set := range reasons {
@@ -335,6 +325,9 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 	if manifest.Releases, err = platformRequiredReleaseBlobs(pool); err != nil {
 		return manifest, err
 	}
+	if manifest.ImageBlobs, err = s.bundlePlatformImageBlobs(dir, manifest.Releases); err != nil {
+		return manifest, err
+	}
 	after, err := loadPlatformRetainedSets(pool)
 	if err != nil || !samePlatformRetainedSets(before, after) {
 		return manifest, fmt.Errorf("%w: the retained recovery sets changed while the bundle was written", errPlatformBundle)
@@ -382,6 +375,25 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 	if manifest.RunnerJournal != nil {
 		files = append(files, *manifest.RunnerJournal)
 	}
+	carried := map[string]bool{}
+	for _, blob := range manifest.ImageBlobs {
+		// The name of a blob is its digest, so a file cannot be listed under another content's name.
+		if blob.Path != "app-blobs/"+blob.SHA256 || !platformValidSHA(blob.SHA256) {
+			return manifest, fmt.Errorf("%w: %q is not an image blob entry", errPlatformBundle, blob.Path)
+		}
+		carried[blob.SHA256] = true
+		files = append(files, blob)
+	}
+	for _, release := range manifest.Releases {
+		if release.Backend == platformBlobPending {
+			return manifest, fmt.Errorf("%w: release %s names backend content nothing carries", errPlatformBundle, release.ReleaseSHA256)
+		}
+		for _, digest := range release.ImageBlobs {
+			if !carried[digest] {
+				return manifest, fmt.Errorf("%w: release %s needs blob %s the bundle does not list", errPlatformBundle, release.ReleaseSHA256, digest)
+			}
+		}
+	}
 	for _, file := range files {
 		clean := filepath.Clean(filepath.FromSlash(file.Path))
 		if file.Path == "" || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
@@ -399,4 +411,89 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 		}
 	}
 	return manifest, nil
+}
+
+// loadPlatformReleasePins is the one computation of which releases must keep their content. The recovery bundle
+// and the image blob sweep both use it, so the sweep can never remove what the bundle would need. It returns each
+// release with the reasons that pin it:
+//
+//   - active: the last activation of every installation that still exists (the bundle's rule);
+//   - pinned: a retained recovery set restores it (the bundle's rule);
+//   - candidate: it has a candidate or active activation, at any generation;
+//   - recovery_set: a recovery set that is not deleted names it, retained or still being cut;
+//   - operation: a non-terminal operation moves from or to it;
+//   - unsettled_load: an operation (completed or not) holds a load with no verdict;
+//   - unrecovered: an operation ended recovery_required and no later start-bearing operation of the installation
+//     completed;
+//   - plan: an open review plan names it.
+//
+// The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
+// plans, which the bundle does not need.
+func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool, error) {
+	pins := map[string]map[string]bool{}
+	collect := func(reason, query string, args ...any) error {
+		rows, err := e.query(query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var release string
+			if err := rows.Scan(&release); err != nil {
+				return err
+			}
+			if pins[release] == nil {
+				pins[release] = map[string]bool{}
+			}
+			pins[release][reason] = true
+		}
+		return rows.Err()
+	}
+	if err := collect("active", `SELECT a.release_sha256 FROM app_platform_activations a
+		JOIN app_platform_installations i ON i.id=a.installation_id
+		WHERE i.desired_state<>'removed'
+		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`); err != nil {
+		return nil, err
+	}
+	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+platformRetainedRecoverySets); err != nil {
+		return nil, err
+	}
+	if nowMS == 0 {
+		return pins, nil
+	}
+	// Unsettled work only. An installation that was removed pins nothing here: whatever its recovery sets still
+	// hold is pinned by the bundle's own rule above.
+	live := `installation_id IN (SELECT id FROM app_platform_installations WHERE desired_state<>'removed')`
+	steps := []struct{ reason, query string }{
+		{"candidate", `SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active') AND ` + live},
+		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted' AND ` + live},
+		{"operation", `SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`},
+		{"operation", `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`},
+	}
+	for _, column := range []string{"source_release_sha256", "target_release_sha256"} {
+		steps = append(steps,
+			// (a) any operation holding a load with no verdict, completed or not.
+			struct{ reason, query string }{"unsettled_load", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+				JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown') WHERE p.` + column + ` IS NOT NULL`},
+			// (b) an operation that ended recovery_required of an installation that is not removed, until a later
+			// start-bearing operation of the same installation completed successfully. A later disable, uninstall or
+			// delete_data does not recover it: the failed start still needs its release.
+			struct{ reason, query string }{"unrecovered", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+				JOIN app_platform_installations i ON i.id=o.installation_id
+				WHERE o.stage='recovery_required' AND i.desired_state<>'removed' AND p.` + column + ` IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM app_platform_operations o2 WHERE o2.installation_id=o.installation_id AND o2.id<>o.id
+					AND (o2.created_ms>o.created_ms OR (o2.created_ms=o.created_ms AND o2.id>o.id))
+					AND o2.action IN ` + platformStartBearingSQL() + ` AND o2.stage='complete' AND o2.completed_ms IS NOT NULL)`})
+	}
+	for _, step := range steps {
+		if err := collect(step.reason, step.query); err != nil {
+			return nil, err
+		}
+	}
+	for _, column := range []string{"source_release_sha256", "target_release_sha256"} {
+		if err := collect("plan", `SELECT `+column+` FROM app_platform_review_plans WHERE consumed_ms IS NULL AND expires_ms>? AND `+column+` IS NOT NULL`, nowMS); err != nil {
+			return nil, err
+		}
+	}
+	return pins, nil
 }

@@ -379,6 +379,9 @@ func validPlatformMigrateStatus(o platformLifecycleProof, status journal.Migrate
 
 // dispatchPlatformMigrateData sends the migrate-data effect and settles it from the runner's receipt.
 func (s *Server) dispatchPlatformMigrateData(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	if err := s.ensurePlatformReleaseImage(ctx, expected, endpoint); err != nil {
+		return platformOperationLease{}, fmt.Errorf("image load: %w", err)
+	}
 	intent, err := s.signPlatformMigrate(ctx, expected, true, false)
 	if err != nil {
 		return platformOperationLease{}, fmt.Errorf("migrate-data prepare: %w", err)

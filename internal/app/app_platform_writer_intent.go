@@ -77,7 +77,7 @@ func loadPlatformWriterIntentSource(e migExec, lease platformOperationLease, run
 	var schema, quota, used, writer, revision, created, updated int64
 	var retained, deleted sql.NullInt64
 	var namespaces, effects, candidates, grants int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?),(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID, lease.installationID).Scan(&namespaces, &effects, &candidates, &grants); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?),(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID, lease.installationID).Scan(&namespaces, &effects, &candidates, &grants); err != nil {
 		return zero, false, err
 	}
 	if namespaces != 1 || grants != 0 {

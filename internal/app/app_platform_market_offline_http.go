@@ -1,7 +1,6 @@
 package app
 
 import (
-	"io"
 	"net/http"
 	"strconv"
 
@@ -23,44 +22,36 @@ func (s *Server) apiPlatformMarketOffline(
 		return
 	}
 	defer releaseSlot()
-	raw, err := io.ReadAll(http.MaxBytesReader(
-		w, r.Body, appplatform.MaxOfflineEnvelopeBytes))
-	if err != nil {
-		platformManagementError(w, appplatform.ErrInvalidOfflineEnvelope)
-		return
-	}
-	envelope, err := appplatform.InspectOfflineEnvelope(raw)
-	if err == nil {
-		err = platformOfflineStageable(envelope)
-	}
+	store, err := s.platformImages()
 	if err != nil {
 		platformManagementError(w, err)
 		return
 	}
-	result, err := s.stagePlatformReleaseContext(
-		r.Context(), actor, envelope.Descriptor,
-		envelope.Signature, envelope.Frontend)
+	// The body streams to a staging file under the package bound; it is never held in memory.
+	file, size, key, err := store.streamUpload(
+		http.MaxBytesReader(w, r.Body, appplatform.MaxManagedOfflineEnvelopeBytes),
+		appplatform.MaxManagedOfflineEnvelopeBytes)
 	if err != nil {
 		platformManagementError(w, err)
 		return
 	}
+	defer file.Close()
+	staged, err := s.stagePlatformPackageFile(r.Context(), actor, file, size, nil)
+	if err != nil {
+		store.discardPartial(key)
+		platformManagementError(w, err)
+		return
+	}
+	// A staged package stays in the cache under its digest until the least-recently-used rule needs the room.
+	_, _, _ = store.finishPartial(key)
 	writeJSON(w, map[string]any{
-		"release_sha256":  result.sha256,
-		"app_id":          result.appID,
-		"publisher_id":    result.publisherID,
-		"trust_revision":  strconv.FormatInt(result.trustRevision, 10),
-		"reused":          result.reused,
-		"envelope_format": envelope.Inspection.Format,
-		"execution":       envelope.Inspection.Execution,
+		"release_sha256":  staged.release.sha256,
+		"app_id":          staged.release.appID,
+		"publisher_id":    staged.release.publisherID,
+		"trust_revision":  strconv.FormatInt(staged.release.trustRevision, 10),
+		"reused":          staged.release.reused,
+		"envelope_format": staged.inspection.Format,
+		"execution":       staged.inspection.Execution,
+		"image_blobs":     staged.inspection.ImageBlobs,
 	})
-}
-
-// platformOfflineStageable refuses a managed package until Portal stores its
-// image blobs: staging only the descriptor would create a release whose image
-// can never reach a runner.
-func platformOfflineStageable(envelope appplatform.OfflineEnvelope) error {
-	if envelope.Inspection.Execution == "managed" {
-		return appplatform.ErrManagedOfflineNotReady
-	}
-	return nil
 }

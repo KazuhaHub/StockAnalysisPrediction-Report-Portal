@@ -43,7 +43,10 @@ type Settings = {
   repair_eligible: boolean
   control_paused: boolean
   migration_recovery?: MigrationRecovery | null
+  // Present while a release this installation needs has image blobs that are gone or unreadable.
+  image_delivery?: ImageDelivery | null
 }
+type ImageDelivery = { state: 'reupload_required'; release_sha256: string; reason: string }
 type MigrationChoice =
   | { kind: 'rollback'; recovery_set_id: string }
   | { kind: 'retry'; recovers_operation_id: string; release_sha256: string; trust_revision: string }
@@ -471,6 +474,10 @@ export default function AppPlatformSettingsPage() {
         ]} />
         : <Typography.Text type="secondary">{t('appPlatform.settings.noRecovery')}</Typography.Text>}
     </Card>
+
+    {settings.image_delivery && <Alert type="warning" showIcon data-testid="image-delivery-reupload"
+      title={t('appPlatform.settings.imageDelivery.reuploadRequired')}
+      description={t('appPlatform.settings.imageDelivery.reuploadDetail', { release: settings.image_delivery.release_sha256.slice(0, 12) })} />}
 
     {settings.migration_recovery && <Card title={t('appPlatform.settings.migrationRecovery.title')} extra={<Tag color={migrationTone[settings.migration_recovery.state]}>{t(`appPlatform.settings.migrationRecovery.state.${settings.migration_recovery.state}`)}</Tag>}>
       <Space orientation="vertical" size={12} style={{ width: '100%' }}>

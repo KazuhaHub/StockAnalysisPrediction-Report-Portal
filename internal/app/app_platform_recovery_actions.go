@@ -327,11 +327,11 @@ func (s *Server) consumePlatformRecoveryReview(ctx context.Context, session plat
 		if err != nil {
 			return err
 		}
-		if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
-			source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,?,?,?,'complete',?,1,NULL,NULL,0,?,NULL,?,?,?)`,
-			operationID, installation.String, planID, actor.scope, keyDigest, requestDigest, string(kind.action), boolInt(facts.managed),
-			facts.sourceGen, facts.targetGeneration, int64(snapshot.Revision), epoch, now, now, now); err != nil {
+		if err := insertPlatformOperation(e, platformOperationRow{
+			ID: operationID, InstallationID: installation.String, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: string(kind.action), Managed: facts.managed,
+			SourceGeneration: facts.sourceGen, TargetGeneration: facts.targetGeneration, Stage: "complete", StateRevision: int64(snapshot.Revision),
+			ControllerEpoch: epoch, Completed: true, NowMS: now}); err != nil {
 			return err
 		}
 		detail, _ := json.Marshal(struct {

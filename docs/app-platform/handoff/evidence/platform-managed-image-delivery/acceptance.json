@@ -1,0 +1,57 @@
+{
+  "format": "portal.managed-image-delivery-acceptance/1-dev.1",
+  "status": "partial-development",
+  "plan": "docs/app-platform/170-image-delivery-plan.md",
+  "branches": {
+    "portal": "feat/app-platform-image-delivery-portal",
+    "apps": "feat/offline-envelope-v2-images"
+  },
+  "requirements": {
+    "PKG-01": {
+      "offline_and_catalogue_stage_the_same_release_and_blobs": "unit-tested",
+      "crafted_layouts_refused_without_release_or_blob": "unit-tested",
+      "real_image_through_apps_tooling": "ci-native-pending",
+      "exact_image_started_by_real_runner_from_blobs": false,
+      "status": "partial"
+    },
+    "PKG-08": {
+      "download_resumes_after_portal_restart_with_range_and_if_range": "unit-tested",
+      "corrupt_cached_blob_deleted_and_redownloaded": "unit-tested",
+      "staging_cap_refuses_before_download": "unit-tested",
+      "blob_cap_refuses_without_partial_release_or_eviction": "unit-tested",
+      "active_and_retained_release_blobs_survive_sweeps": "unit-tested",
+      "real_size_scenarios": "ci-native-pending",
+      "postgresql": false,
+      "status": "partial"
+    },
+    "SEC-01": {
+      "no_image_pull_possible": "unit-tested",
+      "no_docker_credential_file_or_helper_read": "unit-tested",
+      "closed_docker_request_set": "unit-tested",
+      "source_guard_resolves_aliases_dot_imports_and_raw_unix_connect": "unit-tested",
+      "production_profile_refuses_registry_reference": "unit-tested",
+      "retag_detection_on_docker_28_0_4": false,
+      "status": "partial"
+    },
+    "DATA-05": {
+      "bundle_carries_and_verifies_pinned_blobs": "unit-tested",
+      "restore_places_only_blobs_that_hash_to_their_names": "unit-tested",
+      "restored_release_loaded_before_start": "unit-tested",
+      "production_restore_command": false,
+      "fresh_linux_host_native_resume": false,
+      "status": "partial"
+    }
+  },
+  "ci": {
+    "job": "deliver-managed-image-package",
+    "workflow": ".github/workflows/app-project-quota-probe.yml",
+    "run": null,
+    "note": "Not run when this record was written; the job runs on the pull request."
+  },
+  "limits": [
+    "No Docker on the development host: the CI job, docker save output through the Apps exporter and every native Linux path were not run.",
+    "The new Portal tests use the SQLite test server only.",
+    "The real daemon load is proven by the native test of a two-layer image built in the test, not by the exact Scheduled Digest image.",
+    "Retag detection could not be demonstrated: Docker 28.0.4 ignored the name annotation."
+  ]
+}

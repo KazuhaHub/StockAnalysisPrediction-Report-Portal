@@ -719,19 +719,19 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 		return zero, false, fmt.Errorf("%w: namespace container is live", ErrFenceReconciliation)
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND state IN ('prepared','unknown')`, c.InstallationID).Scan(&pending); err != nil || pending != 0 {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND state IN ('prepared','unknown')`, c.InstallationID).Scan(&pending); err != nil || pending != 0 {
 		return zero, false, fmt.Errorf("%w: installation has pending commands", ErrFenceReconciliation)
 	}
 	var foreign int
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`,
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`,
 		c.InstallationID, c.ControllerEpoch, c.InstallationID, p.NamespaceID, c.ControllerEpoch).Scan(&foreign); err != nil || foreign != 0 {
 		return zero, false, ErrFenceReconciliation
 	}
 	var fenceFloor, generationFloor, writerFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
 		return zero, false, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
 		return zero, false, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=? AND NOT (desired_state='absent' AND observed_state='absent')`, p.NamespaceID).Scan(&writerFloor); err != nil {

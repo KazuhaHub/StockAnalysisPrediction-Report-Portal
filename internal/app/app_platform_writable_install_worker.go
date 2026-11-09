@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -111,6 +112,9 @@ func (s *Server) runPlatformWritableInstallMode(ctx context.Context, expected pl
 }
 
 func (s *Server) startPlatformWritableInstall(ctx context.Context, lease platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	if err := s.ensurePlatformReleaseImage(ctx, lease, endpoint); err != nil {
+		return platformOperationLease{}, fmt.Errorf("image load: %w", err)
+	}
 	// Routing hint only: a prepared start follows an already applied writer.
 	// Re-entering the original two-effect writer reader would reject that third
 	// effect. The start path independently verifies the complete current writer

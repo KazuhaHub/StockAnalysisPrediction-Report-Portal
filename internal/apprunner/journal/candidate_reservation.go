@@ -113,7 +113,7 @@ func (s *Store) beginCandidateCommandReceipt(ctx context.Context, raw, signature
 		return nil, zero, ErrFenceReconciliation
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>? AND kind<>'load-image' AND state IN ('prepared','unknown')`, c.InstallationID, c.EffectID).Scan(&pending); err != nil {
 		return nil, zero, err
 	}
 	if pending != 0 {

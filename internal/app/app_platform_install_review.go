@@ -371,7 +371,11 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if err := platformLeaseCAS(updated, err); err != nil {
 			return err
 		}
-		if _, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms) VALUES(?,?,?,?,?,?,'install',?,0,1,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, operationID, installationID, planID, actor.scope, keyDigest, requestDigest, platformManagedInstallFlag(projection), control.epoch, control.nowMS, control.nowMS); err != nil {
+		if err = insertPlatformOperation(e, platformOperationRow{
+			ID: operationID, InstallationID: installationID, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: "install", Managed: platformManagedInstallFlag(projection) == 1,
+			SourceGeneration: 0, TargetGeneration: 1, Stage: "queued", StateRevision: 1,
+			ControllerEpoch: control.epoch, NowMS: control.nowMS}); err != nil {
 			return err
 		}
 		var descriptor []byte

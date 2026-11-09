@@ -358,16 +358,11 @@ func admitPlatformTrustQuarantine(
 			return err
 		}
 	}
-	if _, err := e.exec(`INSERT INTO app_platform_operations(
-		id,installation_id,review_plan_id,actor_scope,idempotency_sha256,
-		request_sha256,action,managed,source_generation,target_generation,
-		stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,
-		controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-		VALUES(?,?,?,?,?,?,'disable',?,?,?,'queued',1,1,NULL,NULL,0,
-		?,NULL,NULL,?,?)`,
-		operationID, p.InstallationID, planID, actor.scope, idempotency,
-		request, boolInt(p.Managed), p.Generation, p.TargetGeneration,
-		control.epoch, control.nowMS, control.nowMS); err != nil {
+	if err := insertPlatformOperation(e, platformOperationRow{
+		ID: operationID, InstallationID: p.InstallationID, ReviewPlanID: planID, ActorScope: actor.scope,
+		IdempotencySHA: idempotency, RequestSHA: request, Action: "disable", Managed: p.Managed,
+		SourceGeneration: p.Generation, TargetGeneration: p.TargetGeneration, Stage: "queued", StateRevision: 1,
+		ControllerEpoch: control.epoch, NowMS: control.nowMS}); err != nil {
 		return err
 	}
 	detail, _ := json.Marshal(struct {

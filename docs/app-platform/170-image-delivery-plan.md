@@ -426,3 +426,364 @@ The fourth review round passed. These minor findings are carried into the first 
 - **Config without a `config` section.** The envelope parser accepts it, and the runner refuses it only after loading. Staging should refuse it, because a backend start uses the image's own entrypoint and command.
 - **`DaemonDetail` is not logged.** The runner never logs it, despite the note above. Either log it, bounded, or correct the note.
 - **Retag detection is unproven on Docker 28.0.4.** The daemon ignored the name annotation, so `TestNativeRetagByAPublisherLayoutIsDetected` could only log that there was nothing to detect. Retag protection rests on the runner writing its own archive with no names, and on the before/after comparison.
+
+## PR 3b implementation notes
+
+Where the plan was silent, or the code made a different choice the safer one, the choice is recorded here.
+
+1. **The load-image effect has a Portal row, with kind `load_image` (reversed in the first review round; see
+   "PR 3b first-round review follow-ups").** The row is `app_platform_operation_effects`, stage `stage`, number
+   1, kind `load_image`, and the id derived from the operation and release, so it is the same on every attempt,
+   restart and lease takeover: `platformDerivedUUID("load-image", <operation id> "/" <release sha256>)`. The
+   kind column has no enum check, so no DDL is needed. The runner's `sameLoadCommand` does not bind the fence, so
+   a command signed again at a later lease fence is the same command.
+2. **`enable` and `restore` have no `stage` stage (resolves 3a note 3).** No stage is added to the action's
+   stage list and the journal enum is untouched. The row carries stage `stage` whatever stage the Portal
+   operation is in, and the command's journal stage is `stage` too. The guards that count an operation's
+   effects exclude kind `load_image`, and the advance rules tolerate a row of stage `stage` on an operation that
+   never passes through it (`TestEnableOperationCompletesWithALoadImageRowOfStageStage`).
+3. **Where the load runs.** The gate `ensurePlatformReleaseImage` is the first statement of
+   `startPlatformWritableInstall` (install writer and writable start), `dispatchPlatformInstallCandidate`,
+   `dispatchPlatformMigrateData` (the migration job runs the target image), `executePlatformUpdateStart` (update,
+   enable, repair, retry and roll back, which are all updates or same-release lifecycles) and
+   `executePlatformRestoreStart` (restore launch and the restore resume of a paused Portal). It is idempotent:
+   an applied effect answers a receipt and uploads nothing. `TestEveryStartPathEnsuresTheImageBeforeAnythingElse`
+   fails if a start path loses its gate; since the first review round it finds every call to a runner start
+   sender instead of a fixed list (`TestEveryStartSenderIsPrecededByTheImageGate`).
+4. **The release and platform.** The target release is the plan's `target_release_sha256` (every plan carries
+   it). The host platform is the one the review recorded in the managed runtime profile. A release with no
+   `backend.images` (a static release, or the development form that names a registry reference) is skipped and
+   the runner's inspection handles it.
+5. **Every blob is hashed again before anything is sent.** `loadPlatformImageTarget` re-hashes the manifest, the
+   config and each layer. A failure deletes the blob and fails the call with `errPlatformImageBlobs` before any
+   runner call, which is how "no runner effect for a release whose blobs failed re-hash" holds. The cost is one
+   pass over at most 384 MiB per start; a cheaper check would put a corrupt blob into an uncertain effect.
+6. **Failure semantics reuse the scheduler.** The gate returns an error; the scheduler already counts an error
+   as an attempt and ends the operation for review after three. A load the runner still holds, a `scratch_full`
+   or `busy` refusal, and a wait that ran out are `errPlatformImageBusy`, which waits without counting (the
+   migration pattern). A start stage of a managed operation now gets the long attempt timeout, because a load
+   uploads blobs and the daemon may take minutes. A typed rejection (`errPlatformImageRejected`) and a blob
+   failure are definite, but the operation ends through the existing `finish...ForReview` path, whose outcome
+   depends on the stage (effects none before `prepare_data`, unknown after). No new failure kind is added.
+7. **Storage layout.** `<data>/app-staging/` and `<data>/app-blobs/`. Every name is a 64-hex digest or ends in
+   `.partial`; anything else is removed on start. Two deviations, both to keep the rule "the filesystem is the
+   index" workable:
+   - A download's validator (ETag or Last-Modified, for `If-Range`) is kept in `<hex>.validator.partial`, so a
+     restart resumes with `If-Range` as a retry does. It follows the `.partial` rules, so orphans are removed
+     with the partial.
+   - Unpinned blobs younger than 24 hours survive a sweep. A package is uploaded before the review plan that
+     pins it exists, and a sweep after an unrelated operation must not take it. Blobs the failed staging wrote
+     itself are removed at once when nothing pins them.
+8. **Order of staging.** The offline route streams the body to a staging `.partial` under the 384 MiB bound,
+   inspects it in place (`InspectOfflineEnvelopeAt`, a random-access variant of the parser), checks that the
+   blobs not yet stored would fit under the 8 GiB cap, writes the blobs, and only then writes the release row.
+   A cap refusal leaves no row and no blob; a stored blob that no longer hashes is replaced from the package
+   being staged, which is how a re-upload heals PKG-08's corrupt cache. A finished package stays in staging
+   under its digest as least-recently-used cache.
+9. **Pinned set.** Releases of active and candidate activations, of every recovery set that is not deleted, of
+   non-terminal operations (source and target) and of open review plans, expanded to blob digests through the
+   stored manifests. It is computed on each sweep; no table exists. A sweep runs on start and when an operation
+   ends.
+10. **Catalogue.** `fetchToFile` streams into the staging partial with `Range` and `If-Range`. A `200` to a
+    ranged request truncates and starts again; a `416` or an oversize file discards the prefix. The package is
+    fetched under the request's context with a 10 minute bound, not the 45 second one of the small documents.
+    The descriptor and signature of the package must be byte-equal to the catalogue's, or the install refuses
+    before any blob is stored. A prefix of another version of the file is caught by that verification and the
+    download restarts once from nothing. A catalogue release with `backend.images` and no `package_url`, or the
+    reverse, is refused.
+11. **Recovery bundle.** The manifest gains `image_blobs` (one file per digest under `app-blobs/<sha256>`) and a
+    release's `backend` becomes `in_bundle` (with the digests it needs) or `reference` (a development release
+    that names no content). The inventory still reports `pending` until the writer resolves it, and a bundle
+    that lists `pending` does not verify. The writer refuses, and removes what it wrote, when a pinned managed
+    release is missing a blob or has one that fails its hash. `restorePlatformBundleBlobs` writes each blob to a
+    partial and gives it its name only when it hashes to that name. The repository has no production command
+    that restores a bundle yet, so this is a library function exercised by tests, like the writer and verifier.
+12. **Carried items from the PR 3a final review.**
+    - The SEC-01 guard walks every file including the allow-listed ones and `driver/preflight.go`, resolves
+      aliased and dot imports, detects `unix.Connect` and `net.FileConn`, and the self-test calls the guard's
+      own matcher.
+    - A refused manifest now settles `blob_refused`. The signed command binds only the manifest digest, so a
+      manifest refusal counts when it matches the digest, the kind, a manifest media type and a size within 1
+      MiB. One behaviour changed: a real manifest declared one byte too long used to count for nothing and now
+      counts, because the runner cannot tell it from any other wrong bytes without the true size. Portal always
+      declares the true size, so only a defective sender is affected.
+    - `PlanImage` refuses a config without a `config` object (`ErrImageConfigSectionMissing`), so staging
+      refuses it instead of the runner after loading.
+    - The runner logs `DaemonDetail`, bounded to 512 bytes and printable ASCII, when it settles a load. It never
+      enters a receipt, a row or a reply.
+    - Retag detection is unproven on Docker 28.0.4: the daemon ignored the name annotation in a
+      publisher-supplied `index.json`, so `TestNativeRetagByAPublisherLayoutIsDetected` could only log that there
+      was nothing to detect. Retag protection therefore rests on the runner writing its own archive with no
+      names, plus the before/after image-list comparison.
+13. **Apps repository.** Branch `feat/offline-envelope-v2-images` (stacked on the contract sync of Apps PR 38):
+    `export-image-oci.py` derives `backend.images` and the flat blobs from an OCI layout, `build-app-v2.py
+    --images` switches a descriptor to the managed form, `pack-offline-envelope.py --image-blobs` writes version
+    2 envelopes, and the descriptor validator accepts `backend.images`. The workflow pin moved to that branch's
+    head.
+14. **CI.** A new job `deliver-managed-image-package` in `app-project-quota-probe.yml` builds the exact Scheduled
+    Digest image with the daemon's default builder, runs `docker save <image-id>` (Docker 25 and later writes an
+    OCI layout into the tar), exports it with the Apps tooling (which resolves a manifest named directly by
+    `index.json` or reached through a nested index, and gzips layers deterministically when a blob or the package
+    would be too large), packs it, runs the real-image acceptance test, diffs the daemon's image list before
+    and after, and runs the SEC-01 negatives. No BuildKit builder is created, so there is no new registry pull.
+
+Not verified here (no Docker on the development host, and no CI run yet): the CI job itself, the real `docker save`
+output shape through the Apps exporter, every native Linux path, the new Portal tests on PostgreSQL (they
+use the SQLite test server and standard SQL through `bind`), and a start of the exact Scheduled Digest image
+through the real runner from blobs. The managed image is therefore proven loadable on the real daemon only by the
+3a native test of a two-layer image built in the test, not by the exact image.
+
+## PR 3b review record
+
+Named tests per step. Each failure direction is in the test name or its comment.
+
+11. **Stores:** `TestImageStoreRecoverRemovesEveryNameThatIsNotADigestOrPartial`,
+    `TestImageStoreRecoverKeepsAFreshPartialAndRemovesAnOldOne`,
+    `TestImageStoreBlobThatDoesNotHashToItsNameIsNeverPlaced`,
+    `TestImageStoreCorruptBlobIsRefusedAndDeletedOnUse`,
+    `TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials`,
+    `TestImageStoreBlobCapRefusesWhatWouldNotFitAndCountsStoredBlobsOnce`,
+    `TestImageStoreSweepKeepsPinnedHeldAndYoungBlobsOnly`,
+    `TestPinnedBlobsOfActiveAndRetainedReleasesSurviveEverySweepAndOthersDoNot`.
+12. **Offline route:** `TestImageStoreUploadStreamsToDiskAndDiscardsWhatExceedsItsBound`,
+    `TestOfflineEnvelopeAtOnAFileMatchesTheBufferedInspectionAndRefusesTheSameDamage`,
+    `TestOfflineManagedPackageStoresEveryBlobAndLeavesNoPartialFile`,
+    `TestOfflineManagedPackageOverTheBlobCapLeavesNoReleaseRowAndNoBlob`,
+    `TestOfflineManagedPackageCapRefusalNeverEvictsAnotherReleasesBlobs`,
+    `TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing` (tag annotation, `manifest.json`,
+    `oci-layout`, `repositories`, an extra member, a missing member),
+    `TestOfflineManagedPackageFromAnUntrustedPublisherLeavesNoBlobs`,
+    `TestOfflineReuploadReplacesACorruptedBlobAndTheReleaseIsReused`. The old
+    `TestPlatformOfflineRefusesManagedPackageUntilBlobsAreStored` was removed: its premise is what this step
+    replaces.
+13. **Catalogue:** `TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall`,
+    `TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndIfRange`,
+    `TestCataloguePackageStartsAgainWhenTheFileChangedUpstreamSinceThePartial`,
+    `TestCataloguePackageWithAnotherDescriptorIsRefusedAndStoresNothing`,
+    `TestCataloguePackageOverTheStagingCapIsRefusedBeforeAnyDownload`,
+    `TestCatalogueManagedReleaseNeedsItsPackageURL`.
+14. **Sender and start gate:** `TestEnsureImageLoadsAMissingImageByUploadingExactlyTheBlobsTheRunnerNamedUnderOneEffect`,
+    `TestEnsureImageUploadsNothingWhenTheImageIsAlreadyOnTheHost`,
+    `TestEnsureImageSendsTheSameEffectIdOnEveryAttemptAndNeverUploadsAgainOnceApplied`,
+    `TestEnsureImageReadsBackAnUncertainExecuteUnderItsOwnIdentityAndTakesItsReceipt`,
+    `TestEnsureImageReportsABusyRunnerAsBusyNotAsAFailure`,
+    `TestEnsureImageSurfacesARunnerRejectionAsADefiniteFailure`,
+    `TestEnsureImageStopsOnTheRunnersTypedRefusalOfABlob`,
+    `TestEnsureImageResumesALostUploadWithoutANewEffect`,
+    `TestEnsureImageSendsNothingToTheRunnerWhenAStoredBlobFailsItsHashCheck`,
+    `TestEnsureImageDoesNothingForAReleaseThatCarriesNoManagedImage`,
+    `TestEnsureImageDoesNotBelieveAReceiptForAnotherEffect`,
+    `TestMigrateDataIsNotSentWhenTheReleaseImageCannotBeLoaded`, `TestMigrateDataRunsAfterTheImageIsLoaded`,
+    `TestUpdateStartIsNotReservedWhenTheReleaseImageCannotBeLoaded`,
+    `TestEveryStartSenderIsPrecededByTheImageGate`. The gates of the restore start, the writable install
+    start and the candidate start are covered by the structural test only; their behaviour is the same call.
+15. **Recovery:** `TestRecoveryBundleCarriesTheBlobsOfEveryActiveAndPinnedManagedRelease`,
+    `TestRecoveryBundleIsRefusedAndRemovedWhenAPinnedManagedReleaseHasLostABlob`,
+    `TestRecoveryBundleVerificationRefusesDamagedRenamedAndUnresolvedBlobs`,
+    `TestRestoreOfBundleBlobsPlacesOnlyBlobsThatHashToTheirNames`,
+    `TestRestoredManagedReleaseIsLoadedFromThePlacedBlobsBeforeItsStart`.
+16. **Acceptance:** `TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios` (CI only, skips without an
+    exported image) and the `deliver-managed-image-package` job.
+    Carried items: `TestDockerGuard*` and `TestOnlyTheDockerClientConstructorDialsTheSocket`,
+    `TestAManifestRefusedUnderTheExactRoleCountsAgainstTheImage` and the other manifest refusal tests,
+    `TestPlanImageRefusesAConfigWithoutAConfigSection`,
+    `TestLoadImageLogsTheBoundedSanitizedDaemonDetailAndKeepsItOutOfTheReceipt`.
+
+## PR 3b first-round review follow-ups
+
+The adversarial review failed PR 3b at `09291a62`. Everything below is fixed, test-first.
+
+1. **Blocker: the runner's exact-history readers counted the load-image row.** The first managed install from a
+   version 2 package could not start on a real runner, because the writer, candidate and registration readers
+   refuse when any other command row of the installation exists. Every installation-wide reader of
+   `runner_commands` (the writer, candidate, registration, update-start, checkpoint, removal, reservation,
+   import, migrate and delete-data readers, their `unknown` guards, and the fence, generation and epoch floors)
+   now ignores kind `load-image` in any state. A load touches only the daemon's image storage, never data,
+   fences or containers. The start gate itself does not read the journal row: it checks that the image with the expected content ID is present in the daemon. Tests on the
+   real SQLite journal: `TestEveryCommandFamilyAdmitsAfterAnAppliedOrUnknownLoadImageRow` (writer chain through
+   candidate claim, data reservation, registration, checkpoint, update start, managed removal, legacy
+   candidate, each with an applied and with an unknown load) and the source guard
+   `TestInstallationWideCommandReadersIgnoreLoadImageRows`, which fails if a new installation-wide reader omits
+   the exclusion. Not done: a Portal test that drives a writable install against the real runner journal in
+   process. The seam does not exist: Portal's runner calls go through `platformRunLifecycle` over the control
+   socket, which only the Linux native tests (run in CI) can stand up with a real journal and transport.
+2. **Major: an unknown load was invisible to the Portal (reverses the earlier "no Portal row" deviation).** The
+   load now has the row described in note 1 above. It is written `prepared` before the first command leaves
+   Portal, ends `applied` with the runner's receipt or `reverted` with a rejection, and is left `unknown` when
+   the gate gives up with no verdict. The existing model then applies: the scheduler ends the operation for
+   review (`recovery_required`), `platformRequireSettledLoad` refuses every recovery choice while the load is
+   `prepared` or `unknown`, and the idle driver `settlePlatformLoadImages` (beside the migration settlement
+   driver) reads the load back and sends it again under the same id, uploading the blobs the runner names, until
+   it settles. The guards that count an operation's effects exclude kind `load_image`: the candidate intent
+   (`effects == 1`), the managed history (`count != 3`), the install admission (`resources == 0`), the removal
+   advance rule (`platformRemovalAdvanceRule`), and the writer, writable start, registration, update-start
+   registration, activation, data, restore-resume and installation-wide first-install counts. Tests:
+   `TestEnsureImageWritesALoadImageRowThatEndsAppliedWithTheReceiptAndIsNotSentAgain`,
+   `TestEnsureImageLeavesTheRowUnknownWhenTheOutcomeIsNotKnown`,
+   `TestEnsureImageRecordsARejectionAsRevertedAndRefusesWithoutAskingAgain`,
+   `TestAnUnknownLoadKeepsTheOperationRecoveryRequiredUntilTheDriverSettlesItUnderTheSameId`, and one test per
+   named guard that proves it still refuses another kind
+   (`TestManagedAccessHistoryCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestCandidateIntentEffectCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestInstallAdmissionResourceCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestRemovalSelectionAdvanceRuleToleratesALoadImageRowOfStageStageButNotAnotherKind`). Not exercised end to
+   end: a restore operation carrying the row. The restore-resume counts exclude it, which a test does not prove.
+3. **Blocker: the pinned set dropped retired activations.** A disabled, revoked or repair-pending app lost its
+   blobs to the sweep, so enable and repair failed and every recovery bundle was refused. One function,
+   `loadPlatformReleasePins`, now computes the pins for both the sweep and `platformRequiredReleaseBlobs`: the
+   last activation of every installation that is not removed, retained recovery sets, candidate and active
+   activations, recovery sets not deleted, open operations and open plans. The bundle uses the first two
+   reasons, the sweep all of them, so the sweep's set is a superset of the bundle's. Test:
+   `TestSweepKeepsTheBlobsOfARetiredActivationOfADisabledInstallationAndTheBundleStillWrites`.
+4. **Major: a failed descriptor query let the sweep run on a partial set.** Any error computing the pinned set
+   (a cancelled context, a descriptor query, a manifest that cannot be read to name its layers) aborts the sweep,
+   which removes nothing. Test: `TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed`. A pinned release with
+   an unreadable manifest therefore stops sweeps until its package is uploaded again.
+5. **Minors.**
+   - Cap checks are atomic: room is promised under the store's lock before any write and given back when the
+     write ends (`reserveBlobs`, `reserveStaging`). `TestImageStoreCapReservationsAreAtomicUnderConcurrency`.
+   - Concurrent puts of one digest are serialized by a per-digest lock, and the partial is created `O_EXCL`
+     after removing a stale one. `TestImageStoreConcurrentPutsOfOneDigestAllSucceedAndLeaveOneValidBlob`.
+   - A blob write that fails part-way removes the unpinned blobs the staging call already wrote.
+     `TestOfflineManagedPackageWhoseLaterBlobWriteFailsLeavesNoBlobsAndNoRelease`.
+   - A read error (EIO, EMFILE) fails the attempt and deletes nothing; only a proven size or hash mismatch
+     deletes. `TestImageStoreAReadErrorFailsTheAttemptAndKeepsTheBlob`.
+   - Opens use `O_NOFOLLOW`, store directories are checked for type and owner and tightened to 0700.
+     `TestImageStoreNeverFollowsALinkInPlaceOfABlob`, `TestImageStoreTightensDirectoryModesAndRefusesALinkedDirectory`.
+   - A server with no configuration falls back to a temporary directory, never the working directory. The
+     staged file that was committed under `internal/app/data/` is removed, and a `TestMain` fails the run if
+     the stores appear there.
+   - `dispatchPlatformInstallCandidate` is not reached by production code, but native and unit tests drive it, so
+     it stays, gated. The AST test now finds every call to a runner start sender (`startSenders`) and requires
+     the gate before it in the same function or in every caller; `readOnlyStartPaths` names the read-back paths
+     that are exempt, each with its reason.
+   - `staticcheck` findings from CI (`openStaged`, `readBlob`, an unused test field) are removed.
+   - `06-acceptance.md` now separates what ran against fakes, against the real journal, and natively in CI.
+
+## PR 3b second-round review follow-ups
+
+The review failed PR 3b again at `1baa9470`. Fixed, test-first.
+
+1. **Blocker: an unsettled load lost its pin.** `loadPlatformReleasePins` pinned operations only while they were
+   not completed, so an update whose load ended unknown (it completes as `recovery_required`) lost its target
+   release to the sweep, and settlement then failed on every tick. It now also pins the source and target of every
+   operation that is `recovery_required`, and of every operation holding a `load_image` row that is `prepared` or
+   `unknown`, completed or not
+   (`TestAnUnsettledLoadKeepsItsReleaseBlobsPinnedAcrossASweepAndTheNextTickSettlesIt`).
+   - Settlement now reads the load back first, with no blob and no hashing. A receipt settles the row as it is
+     (`TestSettlementAppliesThroughTheReadBackWhenTheBlobsAreGoneButTheImageIsOnTheHost`). Only when the runner
+     says the bytes are needed (`blobs_missing`, `orphaned`, `blob_refused`, or no row at all) are the blobs hashed
+     again and the same effect sent under its own id.
+   - A settlement that truly needs gone blobs is surfaced, not looped silently: the installation settings gain
+     `image_delivery` (`reupload_required`, the release, and the reason `blobs_missing` or `manifest_unreadable`),
+     the page shows "Package re-upload required" (three locales, `t()`), and the driver logs the release
+     (`TestSettlementThatNeedsGoneBlobsIsSurfacedAsAPackageReuploadRequirement`, and two page tests). The
+     projection reads the stored manifest, so a manifest it proves corrupt is deleted by that read, the same as on
+     any other use.
+2. **Major: one central admission check.** `migExec.exec` runs `platformRefuseWhileLoadUnsettled` for every
+   `INSERT INTO app_platform_operations(`, so no operation kind (install, update, enable, disable, repair,
+   uninstall, delete data, restore, restore import, and the recovery actions) is admitted for an installation
+   that holds a load with no verdict, and nothing can move the fence meanwhile. It replaces the two partial call
+   sites. It finds the installation among the statement's arguments, because the columns differ between the
+   admission paths; `TestEveryOperationInsertGoesThroughTheCentralAdmissionCheck` fails if an insert bypasses
+   `migExec.exec`, and `TestEveryOperationKindIsRefusedWhileALoadIsUnsettled` covers each kind.
+   - The settlement candidates query leaves out a row it cannot settle (the installation's fence or the
+     controller epoch moved), logs it, and the driver rotates through the rest in windows of eight, so one
+     such row cannot starve the others (`TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow`: nine rows, one
+     unsettleable, the other eight settle). Operations of any finished stage are candidates, not only
+     `recovery_required`.
+3. **Minor: wording.** The comment in `journal/commands.go` and item 1 of the first-round follow-ups said the
+   start gate requires an applied load. It checks that the image with the expected content ID is present in the
+   daemon. The behaviour is unchanged.
+4. **Minor: one unreadable manifest stops every sweep.** Still fail-closed. The sweep now logs the release and the
+   installations it belongs to, and the same fact is the `manifest_unreadable` status of item 1.
+5. **Minor: abandon and the load.** The abandon lists and reverts the unsettled effects of the runtime without
+   asking the runner; it now excludes `load_image` rows from that list, from the finished-operation selection
+   and from the check that an operation has no unsettled effect (`settlePlatformRecoveryOperation`): a load never
+   hides an effect the runner applied to data. It does not insert an operation, so the central admission check
+   does not refuse it. The rows are left to the settlement driver, which settles as reverted every load issued to
+   a runtime binding that was retired (`revertLoadsOfRetiredRuntimes`), since nothing could read such a load back.
+   Without that, the abandoned installation would stay blocked for ever
+   (`TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRuntime`).
+
+## PR 3b third-round review follow-ups
+
+The review failed PR 3b a third time at `8cc0ea0e`. Fixed, test-first. Item 2 of the second-round section (the
+check inside `migExec.exec`) is replaced by item 3 here.
+
+1. **Blocker: pins never released.** `loadPlatformReleasePins` pinned every operation that ever ended
+   `recovery_required`, and operations never leave that stage, so storage would have grown until the 8 GiB cap
+   returned 507 for every install. The pin rule is now unsettled work only: (a) the source and target of any
+   operation holding a `load_image` row that is `prepared` or `unknown`, and (b) those of an installation's
+   latest operation, while it is `recovery_required`, the installation is not removed, and no `recovered` marker
+   was written for it. Candidate activations and recovery sets that are not deleted pin only for installations
+   that are not removed. The bundle's own rule already excluded a removed installation's active release; a
+   retained recovery set of a removed installation could pin, but uninstall deletes every set
+   (`settlePlatformPortalSideUninstall`), so nothing stays pinned. Tests:
+   `TestOnlyTheLatestUnrecoveredFailurePinsItsReleaseAndAStreamOfFailuresStaysBounded` (a stream of five failed
+   updates leaves one target pinned, and a successful retry releases it) and `TestAfterAnUninstallNothingStaysPinned`.
+2. **Major: unreadable manifest visibility.** The sweep stays fail-closed, and only for manifests of releases that
+   are pinned, which item 1 bounds. A global status, `GET /api/admin/app-platform/storage-status`, lists every
+   pinned release whose manifest cannot be read or whose blobs are missing, by release, app and version. The
+   apps administration page shows "Package re-upload required" for each (three locales, `t()`, a vitest file).
+   `TestGlobalStorageStatusListsAnUnreadablePinnedManifestAndTheSweepResumesAfterAReupload`.
+3. **Major: the SQL interception is gone.** `insertPlatformOperation(e, platformOperationRow)` is the only writer
+   of `app_platform_operations`. It takes the installation explicitly and runs `platformRefuseWhileLoadUnsettled`
+   in the same transaction. All 13 admission sites use it. `TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper`
+   parses every non-test Go file, joins and normalises every string literal and constant (lower case, whitespace
+   collapsed), and fails on an insert, an insert or ignore, a replace, or a rewrite of an operation's installation
+   anywhere but the helper's file. A trust revocation no longer aborts because of one installation: it checks the
+   same refusal before it admits that installation's disable, skips it, and records
+   `app_platform.trust_quarantine_deferred` with the reason; launches stay fenced by current trust, as for an
+   operation that is already pending (`TestTrustRevocationSkipsAnInstallationWithAnUnsettledLoadAndRecordsWhy`).
+4. **Minor: reads never write.** The settings read and the storage status use `peekPlan` and `peekMetadata`, which
+   remove nothing. Deleting what is proven wrong now happens only on the write paths and in the sweep, through
+   `removeProven`, which takes the digest lock and removes the file only if it is still the one that was examined
+   (same inode, size and modification time). `TestStatusReadsNeverRemoveAndAProvenWrongRemovalSparesAReplacedFile`.
+5. **Minor: no invented runner verdict.** The load of a retired runtime is settled `reverted` with the receipt
+   `{"outcome":"abandoned_outcome_unknown"}`. The receipt column is free JSON text, so no CHECK or DDL change is
+   needed (the test writes it under the existing constraints).
+
+## PR 3b fourth-round review follow-ups
+
+The review failed PR 3b a fourth time at `121e878b`. Fixed, test-first. Items 2 and 3 of the third-round section are
+amended by items 1 and 3 here.
+
+1. **Major: a deferred trust quarantine was lost.** Skipping an installation dropped the whole quarantine, and
+   nothing retried it, so the backend kept running with its service identities, tasks and subscriptions. The
+   refusal is redesigned.
+   - It applies only to operations that start a backend, named in one list: `platformStartBearingActions`
+     (install, update, which also carries retry and roll back, enable, repair, restore). `platformNonStartActions`
+     (disable, uninstall, delete_data, restore_import) are always admitted. That is safe because the runner's
+     readers ignore load rows and a load touches only the daemon's image storage, never data, fences or
+     containers. `TestEveryOperationKindIsClassifiedAsStartBearingOrNot` requires every kind to be in exactly one
+     list, and `TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled` covers both sides.
+   - Trust revocation never skips: the deferral and `trust_quarantine_deferred` are removed. A quarantine is a
+     disable, which is always admitted. `TestTrustRevocationFullyQuarantinesAnInstallationWithAnUnsettledLoad`
+     shows, with an unsettled load present, the activation retired, the installation disabled, the fence and the
+     data writer fence bumped, the stop queued, launch and service facts refused, a start-bearing operation
+     refused, and, after the driver settles the load, admitted. Tasks and event subscriptions are invalidated by
+     the same unchanged quarantine code path that runs for every installation; the test fixture cannot reach them,
+     so that part is not asserted separately.
+   - Liveness: a load whose operation's fence or epoch has moved (the quarantine moves it) can never settle
+     under its lease. The settlement driver now settles it as `reverted` with `{"outcome":"abandoned_outcome_unknown"}`,
+     as for a retired runtime, so the installation is never blocked for ever
+     (`TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow`).
+   - Service identity now re-verifies the publisher's trust (`VerifyPublisherDescriptor`), as the launch path does.
+     It was cheap and consistent: one read of the trust and the stored signature already in the facts query.
+     `TestServiceIdentityReverifiesPublisherTrust`. The service-identity fixture cannot run a revocation
+     (its installation is not a complete managed one), so refusal after a quarantine is asserted through the
+     service facts of the managed fixture instead.
+2. **Minor: the pin rule's "later operation".** A `recovery_required` failure releases its pin only when a later
+   start-bearing operation of the same installation completed successfully, or the installation was removed. A
+   later disable, uninstall or delete_data releases nothing. A failure that is not the latest still pins until a
+   success follows it, so consecutive failures all pin until then.
+   `TestAFailureStaysPinnedUntilALaterStartBearingOperationCompletesAndAStreamStaysBounded` (failed update, disable,
+   blobs kept; enable completes, blobs released; a stream of failures each followed by a success stays bounded).
+3. **Minor: the guard's scope.** `TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper` now walks every
+   non-test Go file of the module, not only the application package, and it also fails when a computed SQL string
+   (not literals, package constants, the row-lock suffix or `bind` of a constant) is passed to an exec or query call
+   in a function that mentions the operations table, unless the function is on a short allow-list with a reason.
+   What it cannot catch, also in the test's comment: SQL assembled in a function that never mentions the table and
+   handed to a helper elsewhere, text read at run time, a name supplied through `fmt.Sprintf` in another function,
+   and anything reached by reflection. It is a tripwire for the ordinary ways of adding a writer, not a proof.

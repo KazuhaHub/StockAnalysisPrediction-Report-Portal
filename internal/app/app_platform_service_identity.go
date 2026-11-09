@@ -57,8 +57,21 @@ func loadPlatformServiceFacts(e migExec, installation string, resources []string
 	if err := e.queryRow(`SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND generation=? AND policy_revision=? AND state='active'`, installation, generation, policyRevision).Scan(&facts.release); err != nil || !platformValidSHA(facts.release) {
 		return facts, errAppPlatformServiceUnavailable
 	}
-	var descriptor []byte
-	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, facts.release).Scan(&descriptor); err != nil {
+	var descriptor, signature []byte
+	if err := e.queryRow(`SELECT descriptor,signature FROM app_platform_releases WHERE sha256=?`, facts.release).Scan(&descriptor, &signature); err != nil {
+		return facts, errAppPlatformServiceUnavailable
+	}
+	// As the launch path does: a release whose publisher or key is no longer trusted gets no service identity, even
+	// before the quarantine has retired its activation.
+	trust, err := loadPlatformPublisherTrust(e)
+	if err != nil {
+		return facts, errAppPlatformServiceUnavailable
+	}
+	checkedAt, err := platformDatabaseNow(e)
+	if err != nil {
+		return facts, errAppPlatformServiceUnavailable
+	}
+	if _, err := appplatform.VerifyPublisherDescriptor(descriptor, signature, trust, strconv.FormatInt(checkedAt, 10)); err != nil {
 		return facts, errAppPlatformServiceUnavailable
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)

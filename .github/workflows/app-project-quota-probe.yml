@@ -74,6 +74,10 @@ on:
       - 'internal/app/app_platform_lease*'
       - 'internal/app/app_platform_install_review*'
       - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_image*'
+      - 'internal/app/app_platform_market*'
+      - 'internal/appplatform/offline*'
+      - 'internal/appplatform/image*'
       - 'internal/app/app_platform_actor*'
       - 'internal/app/app_platform_trust*'
       - 'internal/app/app_platform_install_audience*'
@@ -154,6 +158,10 @@ on:
       - 'internal/app/app_platform_lease*'
       - 'internal/app/app_platform_install_review*'
       - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_image*'
+      - 'internal/app/app_platform_market*'
+      - 'internal/appplatform/offline*'
+      - 'internal/appplatform/image*'
       - 'internal/app/app_platform_actor*'
       - 'internal/app/app_platform_trust*'
       - 'internal/app/app_platform_install_audience*'
@@ -187,7 +195,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: ceccc469071e3d576d88aa6e9aea899469940e5a
+          ref: a08330a24c75c57016b191d490e4b19173aec240
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -366,5 +374,77 @@ jobs:
         with:
           name: app-platform-lifecycle-browser
           path: ${{ runner.temp }}/app-platform-lifecycle-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+  deliver-managed-image-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check out the Apps repository tooling
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
+          ref: a08330a24c75c57016b191d490e4b19173aec240
+          path: .sdk-browser-apps
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Export the exact Scheduled Digest image as OCI content
+        env:
+          APPS: ${{ github.workspace }}/.sdk-browser-apps
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/image-delivery"
+          mkdir -p "$out"
+          npm ci --prefix "$APPS"
+          # Default builder, as the exact-image probe does; docker save writes an OCI layout on Docker 25+.
+          docker build --file "$APPS/apps/scheduled-digest/service/Dockerfile" \
+            --tag scheduled-digest-delivery:build "$APPS"
+          image_id=$(docker image inspect scheduled-digest-delivery:build --format '{{.Id}}')
+          docker save "$image_id" --output "$out/image.tar"
+          python3 "$APPS/scripts/export-image-oci.py" "$out/image.tar" \
+            --platform linux/amd64 --output "$out/export"
+          python3 "$APPS/scripts/build-app-v2.py" scheduled-digest \
+            --images "$out/export/images.json" --output "$out/candidate"
+      - name: Install the exact image offline and from the catalogue, then run the storage scenarios
+        env:
+          APP_IMAGE_DELIVERY_CANDIDATE: ${{ runner.temp }}/image-delivery/candidate
+          APP_IMAGE_DELIVERY_BLOBS: ${{ runner.temp }}/image-delivery/export/blobs
+          APP_IMAGE_DELIVERY_EVIDENCE: ${{ runner.temp }}/image-delivery/evidence.json
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          docker image ls --all --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' | sort > "$RUNNER_TEMP/image-delivery/images-before.txt"
+          go test ./internal/app -count=1 -v \
+            -run '^(TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios|TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing|TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall|TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndIfRange)$'
+          docker image ls --all --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' | sort > "$RUNNER_TEMP/image-delivery/images-after.txt"
+          diff "$RUNNER_TEMP/image-delivery/images-before.txt" "$RUNNER_TEMP/image-delivery/images-after.txt"
+      - name: Prove the SEC-01 negatives
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          go test ./internal/apprunner/driver -count=1 -v \
+            -run '^(TestDockerRequestAllowListIsClosed|TestAllowListTransportStopsAPullBeforeTheSocket|TestRunnerSourceNeverPullsOrReadsDockerCredentials|TestOnlyTheDockerClientConstructorDialsTheSocket|TestDockerGuard.*)$' \
+            | tee "$RUNNER_TEMP/image-delivery/sec01.txt"
+          grep -q '^ok' "$RUNNER_TEMP/image-delivery/sec01.txt"
+      - name: Preserve managed image delivery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: managed-image-delivery
+          path: |
+            ${{ runner.temp }}/image-delivery/evidence.json
+            ${{ runner.temp }}/image-delivery/images-before.txt
+            ${{ runner.temp }}/image-delivery/images-after.txt
+            ${{ runner.temp }}/image-delivery/sec01.txt
           if-no-files-found: warn
           retention-days: 14

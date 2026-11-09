@@ -464,17 +464,11 @@ func (s *Server) consumePlatformManagedSameReleaseReviewWithRuntimeContext(
 		if err != nil {
 			return err
 		}
-		_, err = e.exec(`INSERT INTO app_platform_operations(
-			id,installation_id,review_plan_id,actor_scope,idempotency_sha256,
-			request_sha256,action,managed,source_generation,target_generation,
-			stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,
-			controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,?,1,?,?,'queued',1,1,NULL,NULL,0,?,
-			NULL,NULL,?,?)`,
-			id, installation.String, planID, actor.scope, keyDigest,
-			requestDigest, string(action),
-			current.SourceGeneration, current.TargetGeneration,
-			control.epoch, control.nowMS, control.nowMS)
+		err = insertPlatformOperation(e, platformOperationRow{
+			ID: id, InstallationID: installation.String, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: string(action), Managed: true,
+			SourceGeneration: current.SourceGeneration, TargetGeneration: current.TargetGeneration, Stage: "queued", StateRevision: 1,
+			ControllerEpoch: control.epoch, NowMS: control.nowMS})
 		if err != nil {
 			return err
 		}
