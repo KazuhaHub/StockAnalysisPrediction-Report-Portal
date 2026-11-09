@@ -104,7 +104,7 @@ func loadPlatformDataIntent(e migExec, lease platformOperationLease, runtime pla
 	if forbidden != 0 {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=?`, lease.id).Scan(&effects); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, lease.id).Scan(&effects); err != nil {
 		return zero, false, err
 	}
 	lock := ""

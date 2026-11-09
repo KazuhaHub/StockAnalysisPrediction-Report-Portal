@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -179,6 +180,19 @@ func (g *platformImageSigner) close() { clear(g.key) }
 
 // newPlatformImageSigner checks that the lease still holds and takes the runtime's control key.
 func (s *Server) newPlatformImageSigner(ctx context.Context, expected platformOperationLease) (*platformImageSigner, error) {
+	return s.newPlatformImageSignerGuarded(ctx, expected, func(e migExec) error {
+		facts, err := loadPlatformBoundOperationLease(e, expected)
+		if err != nil {
+			return err
+		}
+		_, err = finalPlatformOperationLeaseCheck(e, facts)
+		return err
+	})
+}
+
+// newPlatformImageSignerGuarded takes the runtime's control key after guard has confirmed, in the same
+// transaction, that the caller may still act for the operation.
+func (s *Server) newPlatformImageSignerGuarded(ctx context.Context, expected platformOperationLease, guard func(migExec) error) (*platformImageSigner, error) {
 	dek, err := s.dek()
 	if err != nil {
 		return nil, err
@@ -200,11 +214,7 @@ func (s *Server) newPlatformImageSigner(ctx context.Context, expected platformOp
 		return nil, fmt.Errorf("image runtime: %w", err)
 	}
 	defer clear(seed)
-	facts, err := loadPlatformBoundOperationLease(e, expected)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
+	if err := guard(e); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -281,12 +291,30 @@ func (g *platformImageSigner) blobCall(blob appplatform.ImageBlob, offset int64,
 
 // ensurePlatformReleaseImage makes the image of the operation's target release present on the host before the
 // operation sends a start. It returns nil when the image is loaded (or was present), and when there is no managed
-// image to load.
+// image to load. The effect has a Portal row (kind load_image, stage "stage", number 1) so a load the gate gives
+// up on stays visible: the row is left unknown, and the idle settlement driver finishes it under the same id.
 func (s *Server) ensurePlatformReleaseImage(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) error {
 	target, err := s.loadPlatformImageTarget(ctx, expected)
 	if err != nil || target == nil {
 		return err
 	}
+	signer, err := s.newPlatformImageSigner(ctx, expected)
+	if err != nil {
+		return err
+	}
+	defer signer.close()
+	rows := platformImageRows{s: s, lease: expected, runtimeID: signer.runtime.id, guard: func(e migExec) (int64, error) {
+		facts, err := loadPlatformBoundOperationLease(e, expected)
+		if err != nil {
+			return 0, err
+		}
+		return finalPlatformOperationLeaseCheck(e, facts)
+	}}
+	return s.runPlatformImageLoad(ctx, endpoint, signer, target, rows)
+}
+
+// runPlatformImageLoad drives one load to a verdict. rows records the effect on the operation.
+func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRuntimeEndpoint, signer *platformImageSigner, target *platformImageTarget, rows platformImageRows) error {
 	store, err := s.platformImages()
 	if err != nil {
 		return err
@@ -297,72 +325,94 @@ func (s *Server) ensurePlatformReleaseImage(ctx context.Context, expected platfo
 	}
 	release := store.hold(names...)
 	defer release()
-	signer, err := s.newPlatformImageSigner(ctx, expected)
-	if err != nil {
-		return err
-	}
-	defer signer.close()
 	runner := s.platformImageRunnerSeam()
+	sent := false
 	for round := 0; round < 4; round++ {
 		call, err := signer.loadCall(target)
 		if err != nil {
 			return err
 		}
+		applied, err := rows.prepare(ctx, call.command)
+		if err != nil || applied {
+			return err
+		}
+		sent = true
 		reply, err := runner.LoadImage(ctx, endpoint, call)
 		if err != nil {
 			// An uncertain execute is read back under its own identity. It is never sent again under another.
 			var readErr error
 			if reply, readErr = runner.ReadLoadImage(ctx, endpoint, call); readErr != nil || reply == nil {
+				_ = rows.unknown(ctx, call.command)
 				if ctx.Err() != nil {
 					return fmt.Errorf("%w: %v", errPlatformImageBusy, err)
 				}
 				return fmt.Errorf("%w: %v", errPlatformImageUncertain, err)
 			}
 		}
-		done, missing, err := s.interpretPlatformImageReply(reply, call, endpoint)
-		if err != nil || done {
-			if err == nil {
-				s.auditPlatformImageLoad(ctx, expected, call.command)
+		receipt, missing, err := s.interpretPlatformImageReply(reply, call, endpoint)
+		if receipt != nil {
+			state := "applied"
+			if receipt.State != "loaded" && receipt.State != "present" {
+				state = "reverted"
+			}
+			raw, _ := json.Marshal(receipt)
+			if werr := rows.settle(ctx, call.command, state, string(raw)); werr != nil {
+				return werr
+			}
+			if state == "applied" {
+				s.auditPlatformImageLoad(ctx, signer.lease, call.command)
+			}
+			return err
+		}
+		if err != nil {
+			if !errors.Is(err, errPlatformImageBusy) {
+				_ = rows.unknown(ctx, call.command)
 			}
 			return err
 		}
 		if len(missing) > 0 {
 			if err := s.uploadPlatformImageBlobs(ctx, signer, runner, endpoint, store, target, missing); err != nil {
+				_ = rows.unknown(ctx, call.command)
 				return err
 			}
 		}
 	}
+	if sent {
+		call, _ := signer.loadCall(target)
+		_ = rows.unknown(ctx, call.command)
+	}
 	return errPlatformImageUncertain
 }
 
-// interpretPlatformImageReply turns a reply into done, the digests to upload, or an error. A reply is believed
-// only when it answers exactly the command that was signed.
-func (s *Server) interpretPlatformImageReply(reply platformImageReply, call platformLoadImageCall, endpoint platformRuntimeEndpoint) (done bool, missing []string, err error) {
-	if receipt, rerr := reply.LoadImageReceipt(); rerr == nil {
-		if !journal.LoadImageReceiptMatchesCommand(receipt, call.command) ||
-			!validPlatformLifecycleProof(reply, call.raw, call.authority, endpoint, receipt.ObservedMS, receipt.SettledMS, call.command.IssuedMS, false) {
-			return false, nil, errAppPlatformStageEvidence
+// interpretPlatformImageReply turns a reply into a verified receipt (loaded, present or rejected), the digests to
+// upload, or an error. A reply is believed only when it answers exactly the command that was signed. A rejected
+// receipt returns both the receipt and the definite-failure error.
+func (s *Server) interpretPlatformImageReply(reply platformImageReply, call platformLoadImageCall, endpoint platformRuntimeEndpoint) (receipt *journal.LoadImageReceipt, missing []string, err error) {
+	if r, rerr := reply.LoadImageReceipt(); rerr == nil {
+		if !journal.LoadImageReceiptMatchesCommand(r, call.command) ||
+			!validPlatformLifecycleProof(reply, call.raw, call.authority, endpoint, r.ObservedMS, r.SettledMS, call.command.IssuedMS, false) {
+			return nil, nil, errAppPlatformStageEvidence
 		}
-		if receipt.State == "loaded" || receipt.State == "present" {
-			return true, nil, nil
+		if r.State == "loaded" || r.State == "present" {
+			return &r, nil, nil
 		}
-		return false, nil, fmt.Errorf("%w: %s", errPlatformImageRejected, receipt.Outcome)
+		return &r, nil, fmt.Errorf("%w: %s", errPlatformImageRejected, r.Outcome)
 	}
 	status, serr := reply.LoadImageStatus()
 	if serr != nil || !journal.LoadImageStatusMatchesCommand(status, call.command) ||
 		!validPlatformLifecycleProof(reply, call.raw, call.authority, endpoint, status.ObservedMS, "", call.command.IssuedMS, true) {
-		return false, nil, errAppPlatformStageEvidence
+		return nil, nil, errAppPlatformStageEvidence
 	}
 	switch status.State {
 	case "pending":
-		return false, nil, errPlatformImageBusy
+		return nil, nil, errPlatformImageBusy
 	case "orphaned", "blob_refused":
 		// Nothing is working on it: the same effect is sent again and the runner completes it under its claim.
-		return false, nil, nil
+		return nil, nil, nil
 	case "blobs_missing":
-		return false, status.Missing, nil
+		return nil, status.Missing, nil
 	}
-	return false, nil, errPlatformImageUncertain
+	return nil, nil, errPlatformImageUncertain
 }
 
 // uploadPlatformImageBlobs sends the blobs the runner named, one at a time, each re-hashed on open.

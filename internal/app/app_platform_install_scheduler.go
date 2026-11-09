@@ -200,6 +200,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
 					log.Printf("app-platform migration settlement: %v", settleErr)
 				}
+				if _, settleErr := w.server.settlePlatformLoadImages(bulkCtx, w.endpoint); settleErr != nil {
+					log.Printf("app-platform load-image settlement: %v", settleErr)
+				}
 			}
 			w.publish("idle", "", "")
 			return nil

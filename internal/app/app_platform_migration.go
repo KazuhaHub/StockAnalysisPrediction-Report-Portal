@@ -121,6 +121,9 @@ var errAppPlatformMigrationUnsettled = errors.New("application data migration is
 // platformRequireSettledMigration refuses when the operation carries a migration that is not settled. An
 // update with no migration has nothing to settle.
 func platformRequireSettledMigration(e migExec, operation string) error {
+	if err := platformRequireSettledLoad(e, operation); err != nil {
+		return err
+	}
 	state, err := platformMigrationSettlementState(e, operation)
 	if err != nil {
 		return err

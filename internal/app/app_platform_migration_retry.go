@@ -35,6 +35,9 @@ func requirePlatformRetrySource(e migExec, installation, recovers string) error 
 		code != "update_recovery_required" || owner != installation {
 		return errAppPlatformPlanChanged
 	}
+	if err := platformRequireSettledLoad(e, recovers); err != nil {
+		return err
+	}
 	state, err := platformMigrationSettlementState(e, recovers)
 	if err != nil {
 		return err

@@ -625,6 +625,11 @@ func (s *Server) settlePlatformManagedRemoval(ctx context.Context, expected plat
 	return result, nil
 }
 
+// platformRemovalAdvanceRule holds an in-progress disable or uninstall back while an effect of another stage is
+// not applied. A load_image row (stage "stage", which an enable or restore operation never passes through) is
+// not such an effect: the load touches only daemon image storage.
+const platformRemovalAdvanceRule = `NOT EXISTS(SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage<>o.stage AND f.kind<>'load_image' AND f.state<>'applied')`
+
 func (s *Server) claimNextPlatformManagedUninstall(ctx context.Context, worker string) (platformInstallSelection, error) {
 	var zero platformInstallSelection
 	if !platformValidUUID(worker) {
@@ -659,7 +664,7 @@ func (s *Server) claimNextPlatformManagedUninstall(ctx context.Context, worker s
           AND (o.lease_until_ms IS NULL OR o.lease_until_ms<=?) AND i.runtime_id IS NOT NULL
           AND ((o.action='disable' AND i.desired_state='disabled' AND i.phase='disabled') OR (o.action='uninstall' AND i.desired_state='removed' AND i.phase='pending'))
           AND i.generation=o.target_generation AND i.controller_epoch=? AND o.controller_epoch=?
-          AND NOT EXISTS(SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage<>o.stage AND f.state<>'applied')
+          AND `+platformRemovalAdvanceRule+`
         ORDER BY o.created_ms,o.id LIMIT 32`, now, epoch, epoch)
 	if err != nil {
 		return zero, err

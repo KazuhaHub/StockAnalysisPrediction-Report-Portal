@@ -61,6 +61,8 @@ type platformFakeImageRunner struct {
 	effectIDs  map[string]bool
 	needed     []string
 	failUpload error
+	// readFails makes every read-back fail on the wire.
+	readFails bool
 }
 
 func newPlatformFakeImageRunner(t *testing.T, endpoint platformRuntimeEndpoint, parts platformManagedImageParts) *platformFakeImageRunner {
@@ -171,6 +173,9 @@ func (f *platformFakeImageRunner) ReadLoadImage(_ context.Context, _ platformRun
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "read")
+	if f.readFails {
+		return nil, errors.New("read-back lost on the wire")
+	}
 	if _, err := control.VerifyLoadImageRead(call.raw, call.readSignature, call.authority, time.Now().UnixMilli()); err != nil {
 		f.t.Errorf("the runner would refuse the read: %v", err)
 		return nil, err
