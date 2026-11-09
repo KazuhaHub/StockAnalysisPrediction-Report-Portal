@@ -58,6 +58,30 @@ complete screen-reader certification from an automated result.
 | PKG-09 | Publish actual release, download externally and inspect both image architectures | Every public artifact matches descriptor/source/released executable identity |
 | PKG-10 | Revoke a running package; make trust source temporarily unreachable | Defined quarantine/deny-new-install behavior; no trust bypass or silent data deletion |
 
+### Managed image delivery status (PKG-01, PKG-08, SEC-01, DATA-05)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 3 and
+[doc 170](170-image-delivery-plan.md). Claims are limited to what the named tests prove.
+
+- **Proven by tests that run in the general suite:** a managed `.portalapp` version 2 stages offline and from the
+  catalogue as the same release with the same blobs; crafted packages (tag annotation, `manifest.json`,
+  `oci-layout`, `repositories`, an extra or missing member) are refused with no release row and no blob; the
+  download resumes from the `.partial` after a Portal restart with `Range` and `If-Range`; a corrupted cached blob
+  is found on use, deleted and healed by a new download; the blob cap and the staging cap refuse without a
+  partial release and without evicting another release's blobs; blobs of active and retained releases survive
+  sweeps; no runner effect is sent for a release whose blobs fail their hash; the load-image effect keeps one
+  identity across attempts and is read back, never re-sent under another; the recovery bundle carries and
+  verifies the pinned blobs and a restored host loads the image before its start.
+- **Proven only in CI-native jobs (not run on the development host):** the real Scheduled Digest image exported
+  with `docker buildx --output type=oci` parses under the Portal's strict parser and passes the same
+  offline, catalogue, corruption and cap scenarios at its real size
+  (`deliver-managed-image-package`); the daemon's image list is unchanged around those runs; the SEC-01
+  negatives (no image pull, no credential file or helper, a closed Docker request set) hold in the driver tests
+  that job runs.
+- **Not proven:** starting the exact Scheduled Digest image through the real runner from blobs (the real daemon
+  load is proven by the native test of a two-layer image built in the test), and a restore of a bundle onto a new
+  Linux host with the managed app resumed natively.
+
 ## 4. Authorization and isolation
 
 | ID | Steps | Required result |

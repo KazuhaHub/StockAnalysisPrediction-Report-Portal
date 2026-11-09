@@ -426,3 +426,168 @@ The fourth review round passed. These minor findings are carried into the first 
 - **Config without a `config` section.** The envelope parser accepts it, and the runner refuses it only after loading. Staging should refuse it, because a backend start uses the image's own entrypoint and command.
 - **`DaemonDetail` is not logged.** The runner never logs it, despite the note above. Either log it, bounded, or correct the note.
 - **Retag detection is unproven on Docker 28.0.4.** The daemon ignored the name annotation, so `TestNativeRetagByAPublisherLayoutIsDetected` could only log that there was nothing to detect. Retag protection rests on the runner writing its own archive with no names, and on the before/after comparison.
+
+## PR 3b implementation notes
+
+Where the plan was silent, or the code made a different choice the safer one, the choice is recorded here.
+
+1. **The load-image effect has no Portal row (deviation).** The plan asks for effect number 1 in stage `stage`
+   for every operation. Portal keeps no `app_platform_operation_effects` row for it. Four existing guards
+   count the effect rows of an operation and would refuse the extra row: the candidate and data intents
+   (`effects == 1`), the managed history read (`count != 3`), the install admission (`resources == 0`) and the
+   removal advance rule (`f.stage<>o.stage AND f.state<>'applied'`). Relaxing them would loosen evidence checks
+   that exist to refuse exactly an unexpected row. The effect identity is instead derived, so it is the same on
+   every attempt, restart and lease takeover:
+   `platformDerivedUUID("load-image", <operation id> "/" <release sha256>)`. The runner's journal is the record
+   of the effect, under journal stage `stage`, number 1; Portal writes an audit entry when a load settles
+   applied. The runner's `sameLoadCommand` does not bind the fence, so a command signed again at a later lease
+   fence is the same command. An unknown effect is therefore settled under its own id by the next attempt, and
+   no attempt can mint another one.
+2. **`enable` and `restore` have no `stage` stage (resolves 3a note 3).** Because there is no Portal row, no
+   stage is added to the action's stage list and the journal enum is untouched. The command's journal stage is
+   `stage` whatever stage the Portal operation is in, which the runner accepts for any operation. The fail-closed
+   part is the gate order, not the stage name: the load runs before the start's own effect row exists.
+3. **Where the load runs.** The gate `ensurePlatformReleaseImage` is the first statement of
+   `startPlatformWritableInstall` (install writer and writable start), `dispatchPlatformInstallCandidate`,
+   `dispatchPlatformMigrateData` (the migration job runs the target image), `executePlatformUpdateStart` (update,
+   enable, repair, retry and roll back, which are all updates or same-release lifecycles) and
+   `executePlatformRestoreStart` (restore launch and the restore resume of a paused Portal). It is idempotent:
+   an applied effect answers a receipt and uploads nothing. `TestEveryStartPathEnsuresTheImageBeforeAnythingElse`
+   fails if a start path loses its gate.
+4. **The release and platform.** The target release is the plan's `target_release_sha256` (every plan carries
+   it). The host platform is the one the review recorded in the managed runtime profile. A release with no
+   `backend.images` (a static release, or the development form that names a registry reference) is skipped and
+   the runner's inspection handles it.
+5. **Every blob is hashed again before anything is sent.** `loadPlatformImageTarget` re-hashes the manifest, the
+   config and each layer. A failure deletes the blob and fails the call with `errPlatformImageBlobs` before any
+   runner call, which is how "no runner effect for a release whose blobs failed re-hash" holds. The cost is one
+   pass over at most 384 MiB per start; a cheaper check would put a corrupt blob into an uncertain effect.
+6. **Failure semantics reuse the scheduler.** The gate returns an error; the scheduler already counts an error
+   as an attempt and ends the operation for review after three. A load the runner still holds, a `scratch_full`
+   or `busy` refusal, and a wait that ran out are `errPlatformImageBusy`, which waits without counting (the
+   migration pattern). A start stage of a managed operation now gets the long attempt timeout, because a load
+   uploads blobs and the daemon may take minutes. A typed rejection (`errPlatformImageRejected`) and a blob
+   failure are definite, but the operation ends through the existing `finish...ForReview` path, whose outcome
+   depends on the stage (effects none before `prepare_data`, unknown after). No new failure kind is added.
+7. **Storage layout.** `<data>/app-staging/` and `<data>/app-blobs/`. Every name is a 64-hex digest or ends in
+   `.partial`; anything else is removed on start. Two deviations, both to keep the rule "the filesystem is the
+   index" workable:
+   - A download's validator (ETag or Last-Modified, for `If-Range`) is kept in `<hex>.validator.partial`, so a
+     restart resumes with `If-Range` as a retry does. It follows the `.partial` rules, so orphans are removed
+     with the partial.
+   - Unpinned blobs younger than 24 hours survive a sweep. A package is uploaded before the review plan that
+     pins it exists, and a sweep after an unrelated operation must not take it. Blobs the failed staging wrote
+     itself are removed at once when nothing pins them.
+8. **Order of staging.** The offline route streams the body to a staging `.partial` under the 384 MiB bound,
+   inspects it in place (`InspectOfflineEnvelopeAt`, a random-access variant of the parser), checks that the
+   blobs not yet stored would fit under the 8 GiB cap, writes the blobs, and only then writes the release row.
+   A cap refusal leaves no row and no blob; a stored blob that no longer hashes is replaced from the package
+   being staged, which is how a re-upload heals PKG-08's corrupt cache. A finished package stays in staging
+   under its digest as least-recently-used cache.
+9. **Pinned set.** Releases of active and candidate activations, of every recovery set that is not deleted, of
+   non-terminal operations (source and target) and of open review plans, expanded to blob digests through the
+   stored manifests. It is computed on each sweep; no table exists. A sweep runs on start and when an operation
+   ends.
+10. **Catalogue.** `fetchToFile` streams into the staging partial with `Range` and `If-Range`. A `200` to a
+    ranged request truncates and starts again; a `416` or an oversize file discards the prefix. The package is
+    fetched under the request's context with a 10 minute bound, not the 45 second one of the small documents.
+    The descriptor and signature of the package must be byte-equal to the catalogue's, or the install refuses
+    before any blob is stored. A prefix of another version of the file is caught by that verification and the
+    download restarts once from nothing. A catalogue release with `backend.images` and no `package_url`, or the
+    reverse, is refused.
+11. **Recovery bundle.** The manifest gains `image_blobs` (one file per digest under `app-blobs/<sha256>`) and a
+    release's `backend` becomes `in_bundle` (with the digests it needs) or `reference` (a development release
+    that names no content). The inventory still reports `pending` until the writer resolves it, and a bundle
+    that lists `pending` does not verify. The writer refuses, and removes what it wrote, when a pinned managed
+    release is missing a blob or has one that fails its hash. `restorePlatformBundleBlobs` writes each blob to a
+    partial and gives it its name only when it hashes to that name. The repository has no production command
+    that restores a bundle yet, so this is a library function exercised by tests, like the writer and verifier.
+12. **Carried items from the PR 3a final review.**
+    - The SEC-01 guard walks every file including the allow-listed ones and `driver/preflight.go`, resolves
+      aliased and dot imports, detects `unix.Connect` and `net.FileConn`, and the self-test calls the guard's
+      own matcher.
+    - A refused manifest now settles `blob_refused`. The signed command binds only the manifest digest, so a
+      manifest refusal counts when it matches the digest, the kind, a manifest media type and a size within 1
+      MiB. One behaviour changed: a real manifest declared one byte too long used to count for nothing and now
+      counts, because the runner cannot tell it from any other wrong bytes without the true size. Portal always
+      declares the true size, so only a defective sender is affected.
+    - `PlanImage` refuses a config without a `config` object (`ErrImageConfigSectionMissing`), so staging
+      refuses it instead of the runner after loading.
+    - The runner logs `DaemonDetail`, bounded to 512 bytes and printable ASCII, when it settles a load. It never
+      enters a receipt, a row or a reply.
+    - Retag detection is unproven on Docker 28.0.4: the daemon ignored the name annotation in a
+      publisher-supplied `index.json`, so `TestNativeRetagByAPublisherLayoutIsDetected` could only log that there
+      was nothing to detect. Retag protection therefore rests on the runner writing its own archive with no
+      names, plus the before/after image-list comparison.
+13. **Apps repository.** Branch `feat/offline-envelope-v2-images` (stacked on the contract sync of Apps PR 38):
+    `export-image-oci.py` derives `backend.images` and the flat blobs from an OCI layout, `build-app-v2.py
+    --images` switches a descriptor to the managed form, `pack-offline-envelope.py --image-blobs` writes version
+    2 envelopes, and the descriptor validator accepts `backend.images`. The workflow pin moved to that branch's
+    head.
+14. **CI.** A new job `deliver-managed-image-package` in `app-project-quota-probe.yml` builds the exact Scheduled
+    Digest image with `docker buildx build --output type=oci` (a `docker-container` builder, which pulls the
+    BuildKit image from the same registry the Dockerfile's base image already comes from), exports and packs it
+    with the Apps tooling, runs the real-image acceptance test, diffs the daemon's image list before and after,
+    and runs the SEC-01 negatives.
+
+Not verified here (no Docker on the development host, and no CI run yet): the CI job itself, `docker buildx`'s
+real output shape through the Apps exporter, every native Linux path, the new Portal tests on PostgreSQL (they
+use the SQLite test server and standard SQL through `bind`), and a start of the exact Scheduled Digest image
+through the real runner from blobs. The managed image is therefore proven loadable on the real daemon only by the
+3a native test of a two-layer image built in the test, not by the exact image.
+
+## PR 3b review record
+
+Named tests per step. Each failure direction is in the test name or its comment.
+
+11. **Stores:** `TestImageStoreRecoverRemovesEveryNameThatIsNotADigestOrPartial`,
+    `TestImageStoreRecoverKeepsAFreshPartialAndRemovesAnOldOne`,
+    `TestImageStoreBlobThatDoesNotHashToItsNameIsNeverPlaced`,
+    `TestImageStoreCorruptBlobIsRefusedAndDeletedOnUse`,
+    `TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials`,
+    `TestImageStoreBlobCapRefusesWhatWouldNotFitAndCountsStoredBlobsOnce`,
+    `TestImageStoreSweepKeepsPinnedHeldAndYoungBlobsOnly`,
+    `TestPinnedBlobsOfActiveAndRetainedReleasesSurviveEverySweepAndOthersDoNot`.
+12. **Offline route:** `TestImageStoreUploadStreamsToDiskAndDiscardsWhatExceedsItsBound`,
+    `TestOfflineEnvelopeAtOnAFileMatchesTheBufferedInspectionAndRefusesTheSameDamage`,
+    `TestOfflineManagedPackageStoresEveryBlobAndLeavesNoPartialFile`,
+    `TestOfflineManagedPackageOverTheBlobCapLeavesNoReleaseRowAndNoBlob`,
+    `TestOfflineManagedPackageCapRefusalNeverEvictsAnotherReleasesBlobs`,
+    `TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing` (tag annotation, `manifest.json`,
+    `oci-layout`, `repositories`, an extra member, a missing member),
+    `TestOfflineManagedPackageFromAnUntrustedPublisherLeavesNoBlobs`,
+    `TestOfflineReuploadReplacesACorruptedBlobAndTheReleaseIsReused`. The old
+    `TestPlatformOfflineRefusesManagedPackageUntilBlobsAreStored` was removed: its premise is what this step
+    replaces.
+13. **Catalogue:** `TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall`,
+    `TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndIfRange`,
+    `TestCataloguePackageStartsAgainWhenTheFileChangedUpstreamSinceThePartial`,
+    `TestCataloguePackageWithAnotherDescriptorIsRefusedAndStoresNothing`,
+    `TestCataloguePackageOverTheStagingCapIsRefusedBeforeAnyDownload`,
+    `TestCatalogueManagedReleaseNeedsItsPackageURL`.
+14. **Sender and start gate:** `TestEnsureImageLoadsAMissingImageByUploadingExactlyTheBlobsTheRunnerNamedUnderOneEffect`,
+    `TestEnsureImageUploadsNothingWhenTheImageIsAlreadyOnTheHost`,
+    `TestEnsureImageSendsTheSameEffectIdOnEveryAttemptAndNeverUploadsAgainOnceApplied`,
+    `TestEnsureImageReadsBackAnUncertainExecuteUnderItsOwnIdentityAndTakesItsReceipt`,
+    `TestEnsureImageReportsABusyRunnerAsBusyNotAsAFailure`,
+    `TestEnsureImageSurfacesARunnerRejectionAsADefiniteFailure`,
+    `TestEnsureImageStopsOnTheRunnersTypedRefusalOfABlob`,
+    `TestEnsureImageResumesALostUploadWithoutANewEffect`,
+    `TestEnsureImageSendsNothingToTheRunnerWhenAStoredBlobFailsItsHashCheck`,
+    `TestEnsureImageDoesNothingForAReleaseThatCarriesNoManagedImage`,
+    `TestEnsureImageDoesNotBelieveAReceiptForAnotherEffect`,
+    `TestMigrateDataIsNotSentWhenTheReleaseImageCannotBeLoaded`, `TestMigrateDataRunsAfterTheImageIsLoaded`,
+    `TestUpdateStartIsNotReservedWhenTheReleaseImageCannotBeLoaded`,
+    `TestEveryStartPathEnsuresTheImageBeforeAnythingElse`. The gates of the restore start, the writable install
+    start and the candidate start are covered by the structural test only; their behaviour is the same call.
+15. **Recovery:** `TestRecoveryBundleCarriesTheBlobsOfEveryActiveAndPinnedManagedRelease`,
+    `TestRecoveryBundleIsRefusedAndRemovedWhenAPinnedManagedReleaseHasLostABlob`,
+    `TestRecoveryBundleVerificationRefusesDamagedRenamedAndUnresolvedBlobs`,
+    `TestRestoreOfBundleBlobsPlacesOnlyBlobsThatHashToTheirNames`,
+    `TestRestoredManagedReleaseIsLoadedFromThePlacedBlobsBeforeItsStart`.
+16. **Acceptance:** `TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios` (CI only, skips without an
+    exported image) and the `deliver-managed-image-package` job.
+    Carried items: `TestDockerGuard*` and `TestOnlyTheDockerClientConstructorDialsTheSocket`,
+    `TestAManifestRefusedUnderTheExactRoleCountsAgainstTheImage` and the other manifest refusal tests,
+    `TestPlanImageRefusesAConfigWithoutAConfigSection`,
+    `TestLoadImageLogsTheBoundedSanitizedDaemonDetailAndKeepsItOutOfTheReceipt`.
