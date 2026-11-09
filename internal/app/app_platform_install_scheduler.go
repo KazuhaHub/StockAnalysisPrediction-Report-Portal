@@ -43,6 +43,10 @@ func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageMigrate {
 		return platformImportAttemptTimeout
 	}
+	// A start first loads the release image: blobs may be uploaded and the daemon may take minutes to load.
+	if lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageStart {
+		return platformImportAttemptTimeout
+	}
 	return platformInstallAttemptTimeout
 }
 
@@ -280,6 +284,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		}
 		w.publish("complete", w.active.id, appplatform.StageComplete)
 		w.active, w.attempts = platformOperationLease{}, 0
+		// An operation ended: blobs no release pins any more may go.
+		w.server.sweepPlatformImages(ctx)
 		return nil
 	}
 	if result.lease.id == "" {
@@ -290,8 +296,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
-	if ((w.active.snapshot.Action == appplatform.ActionRestoreImport &&
-		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
+	if (errors.Is(err, errPlatformImageBusy) ||
+		(w.active.snapshot.Action == appplatform.ActionRestoreImport &&
+			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
 		(w.active.snapshot.Action == appplatform.ActionUpdate && w.active.snapshot.Stage == appplatform.StageMigrate &&
 			(errors.Is(err, errPlatformMigrationBusy) ||
 				(errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)))) &&
@@ -350,6 +357,7 @@ func (w *platformInstallScheduler) finish(ctx context.Context) error {
 	}
 	w.publish("review_required", operation, "")
 	w.active, w.attempts = platformOperationLease{}, 0
+	w.server.sweepPlatformImages(ctx)
 	return nil
 }
 

@@ -35,10 +35,15 @@ const (
 const (
 	// A static frontend is stored in the Portal's database and travels in the dump.
 	platformBlobInDump = "in_dump"
-	// A managed backend's content is outside the database. Until the blob store of doc 167 section 3
-	// exists nothing carries it, and the inventory says so instead of leaving it out.
+	// A managed backend's content is outside the database. The inventory marks it pending until the writer
+	// resolves it: carried in the bundle, or a development reference that names no content.
 	platformBlobPending = "pending"
 	platformBlobNone    = "none"
+	// The image blobs of a managed release travel in the bundle under app-blobs/<sha256>.
+	platformBlobInBundle = "in_bundle"
+	// A development release names a registry reference: there is no content to carry, and the image must
+	// already exist on the new host.
+	platformBlobReference = "reference"
 )
 
 type platformBundleFile struct {
@@ -62,6 +67,8 @@ type platformReleaseBlob struct {
 	FrontendSHA256 string   `json:"frontend_sha256"`
 	Frontend       string   `json:"frontend"`
 	Backend        string   `json:"backend"`
+	// ImageBlobs names the blobs of an in-bundle backend, by digest.
+	ImageBlobs []string `json:"image_blobs,omitempty"`
 }
 
 type platformRecoveryBundleManifest struct {
@@ -71,6 +78,8 @@ type platformRecoveryBundleManifest struct {
 	Checkpoints   []platformBundleCheckpoint `json:"checkpoints"`
 	RunnerJournal *platformBundleFile        `json:"runner_journal,omitempty"`
 	Releases      []platformReleaseBlob      `json:"required_releases"`
+	// ImageBlobs are the managed image blobs of the required releases, one file per digest.
+	ImageBlobs []platformBundleFile `json:"image_blobs,omitempty"`
 }
 
 type platformRecoveryBundleInput struct {
@@ -335,6 +344,9 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 	if manifest.Releases, err = platformRequiredReleaseBlobs(pool); err != nil {
 		return manifest, err
 	}
+	if manifest.ImageBlobs, err = s.bundlePlatformImageBlobs(dir, manifest.Releases); err != nil {
+		return manifest, err
+	}
 	after, err := loadPlatformRetainedSets(pool)
 	if err != nil || !samePlatformRetainedSets(before, after) {
 		return manifest, fmt.Errorf("%w: the retained recovery sets changed while the bundle was written", errPlatformBundle)
@@ -381,6 +393,25 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 	}
 	if manifest.RunnerJournal != nil {
 		files = append(files, *manifest.RunnerJournal)
+	}
+	carried := map[string]bool{}
+	for _, blob := range manifest.ImageBlobs {
+		// The name of a blob is its digest, so a file cannot be listed under another content's name.
+		if blob.Path != "app-blobs/"+blob.SHA256 || !platformValidSHA(blob.SHA256) {
+			return manifest, fmt.Errorf("%w: %q is not an image blob entry", errPlatformBundle, blob.Path)
+		}
+		carried[blob.SHA256] = true
+		files = append(files, blob)
+	}
+	for _, release := range manifest.Releases {
+		if release.Backend == platformBlobPending {
+			return manifest, fmt.Errorf("%w: release %s names backend content nothing carries", errPlatformBundle, release.ReleaseSHA256)
+		}
+		for _, digest := range release.ImageBlobs {
+			if !carried[digest] {
+				return manifest, fmt.Errorf("%w: release %s needs blob %s the bundle does not list", errPlatformBundle, release.ReleaseSHA256, digest)
+			}
+		}
 	}
 	for _, file := range files {
 		clean := filepath.Clean(filepath.FromSlash(file.Path))

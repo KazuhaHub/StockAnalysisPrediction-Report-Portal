@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"io"
@@ -73,12 +74,20 @@ func (e OfflineEnvelope) OpenBlob(digest string) (io.ReadCloser, error) {
 // stored blobs/<sha256> member per image manifest, config and layer, and is
 // required by a managed descriptor (doc 170 resolution 5).
 func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
+	return InspectOfflineEnvelopeAt(bytes.NewReader(raw), int64(len(raw)))
+}
+
+// InspectOfflineEnvelopeAt is InspectOfflineEnvelope over a random-access
+// source of a known size, so a package staged on disk is inspected without
+// being held in memory. The returned envelope keeps reading from source: the
+// caller must keep it open while it uses OpenBlob.
+func InspectOfflineEnvelopeAt(source io.ReaderAt, size int64) (OfflineEnvelope, error) {
 	var zero OfflineEnvelope
-	if len(raw) == 0 || len(raw) > MaxManagedOfflineEnvelopeBytes ||
-		!boundedFrontendDirectory(raw, MaxManagedOfflineEntries) {
+	if source == nil || size <= 0 || size > MaxManagedOfflineEnvelopeBytes ||
+		!boundedZipDirectoryAt(source, size, MaxManagedOfflineEntries) {
 		return zero, ErrInvalidOfflineEnvelope
 	}
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	reader, err := zip.NewReader(source, size)
 	if err != nil || len(reader.File) < 3 {
 		return zero, ErrInvalidOfflineEnvelope
 	}
@@ -95,7 +104,7 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 			(isImageBlobMember(name) && file.Method != zip.Store) ||
 			!mode.IsRegular() || mode.Type() != 0 || mode.Perm()&0111 != 0 ||
 			mode&(fs.ModeSetuid|fs.ModeSetgid|fs.ModeSticky) != 0 ||
-			file.CompressedSize64 > uint64(len(raw))-compressed {
+			file.CompressedSize64 > uint64(size)-compressed {
 			return zero, ErrInvalidOfflineEnvelope
 		}
 		compressed += file.CompressedSize64
@@ -133,7 +142,7 @@ func InspectOfflineEnvelope(raw []byte) (OfflineEnvelope, error) {
 		// A registry reference cannot travel in a package.
 		return zero, ErrManagedOfflineNotReady
 	}
-	if backend == nil && (len(raw) > MaxOfflineEnvelopeBytes || len(files) != 3) {
+	if backend == nil && (size > MaxOfflineEnvelopeBytes || len(files) != 3) {
 		return zero, ErrInvalidOfflineEnvelope
 	}
 	artifactName := path.Base(parsed.Manifest.Frontend.Artifact)
@@ -320,4 +329,71 @@ func readOfflineEntry(file *zip.File, limit int64) ([]byte, error) {
 		return nil, ErrInvalidOfflineEnvelope
 	}
 	return raw, nil
+}
+
+// boundedZipDirectoryAt is boundedFrontendDirectory over a random-access
+// source: it reads the first four bytes, the end-of-central-directory window
+// and the central directory itself, never the member data.
+func boundedZipDirectoryAt(source io.ReaderAt, size int64, maxEntries int) bool {
+	var head [4]byte
+	if size < 22 || size > MaxManagedOfflineEnvelopeBytes {
+		return false
+	}
+	if n, err := source.ReadAt(head[:], 0); (err != nil && err != io.EOF) || n != 4 || head != [4]byte{'P', 'K', 3, 4} {
+		return false
+	}
+	window := int64(22 + 65535)
+	if window > size {
+		window = size
+	}
+	tail := make([]byte, window)
+	if n, err := source.ReadAt(tail, size-window); (err != nil && err != io.EOF) || int64(n) != window {
+		return false
+	}
+	tailStart := size - window
+	for end := len(tail) - 22; end >= 0; end-- {
+		if !bytes.Equal(tail[end:end+4], []byte{'P', 'K', 5, 6}) {
+			continue
+		}
+		h := tail[end:]
+		eocd := tailStart + int64(end)
+		if eocd+22+int64(binary.LittleEndian.Uint16(h[20:22])) != size {
+			continue
+		}
+		count := int(binary.LittleEndian.Uint16(h[10:12]))
+		if binary.LittleEndian.Uint16(h[4:6]) != 0 || binary.LittleEndian.Uint16(h[6:8]) != 0 ||
+			int(binary.LittleEndian.Uint16(h[8:10])) != count || count == 0 || count > maxEntries {
+			return false
+		}
+		dirSize := int64(binary.LittleEndian.Uint32(h[12:16]))
+		dirOffset := int64(binary.LittleEndian.Uint32(h[16:20]))
+		if dirOffset+dirSize != eocd || dirSize > 4<<20 {
+			return false
+		}
+		directory := make([]byte, dirSize)
+		if n, err := source.ReadAt(directory, dirOffset); (err != nil && err != io.EOF) || int64(n) != dirSize {
+			return false
+		}
+		records := 0
+		for cursor := 0; cursor < len(directory); {
+			if len(directory)-cursor < 46 || !bytes.Equal(directory[cursor:cursor+4], []byte{'P', 'K', 1, 2}) {
+				return false
+			}
+			record := directory[cursor:]
+			if binary.LittleEndian.Uint16(record[34:36]) != 0 {
+				return false
+			}
+			length := 46 + int(binary.LittleEndian.Uint16(record[28:30])) + int(binary.LittleEndian.Uint16(record[30:32])) + int(binary.LittleEndian.Uint16(record[32:34]))
+			if length > len(directory)-cursor {
+				return false
+			}
+			records++
+			if records > maxEntries {
+				return false
+			}
+			cursor += length
+		}
+		return records == count
+	}
+	return false
 }

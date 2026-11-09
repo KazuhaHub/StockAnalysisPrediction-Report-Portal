@@ -37,6 +37,9 @@ func (s *Server) reservePlatformRestoreStart(ctx context.Context, expected platf
 }
 
 func (s *Server) executePlatformRestoreStart(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	if err := s.ensurePlatformReleaseImage(ctx, expected, endpoint); err != nil {
+		return platformOperationLease{}, fmt.Errorf("image load: %w", err)
+	}
 	admission, err := s.reservePlatformRestoreStart(
 		ctx, expected, endpoint)
 	if err != nil {

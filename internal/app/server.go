@@ -70,6 +70,14 @@ type Server struct {
 	// nil selects the local socket.
 	platformReadManagedRuntime func(context.Context, platformRuntimeEndpoint, control.Authority) (platformManagedRuntimeObserved, error)
 
+	// platformImageDir overrides the directory the managed image stores live under; empty selects the data
+	// directory next to the database. platformImageRunner is the runner seam of the blob channel and the
+	// load-image effect; nil selects the transport.
+	platformImageDir    string
+	platformImageOnce   sync.Mutex
+	platformImageStore  *platformImageStore
+	platformImageRunner platformImageRunner
+
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
@@ -322,8 +330,9 @@ func RunServer(cfgPath string) {
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
 	s.wireExportCleanup()
-	s.exportRecover() // return jobs a restart interrupted to the queue before the worker starts
-	go s.exportLoop() // the data-export task worker and its hourly expiry sweep (ADR 0045)
+	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
+	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
+	go s.exportLoop()        // the data-export task worker and its hourly expiry sweep (ADR 0045)
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)

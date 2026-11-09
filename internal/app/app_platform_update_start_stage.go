@@ -63,6 +63,9 @@ func (s *Server) readPlatformUpdateStartReservation(ctx context.Context, expecte
 }
 
 func (s *Server) executePlatformUpdateStart(ctx context.Context, expected platformOperationLease, endpoint platformRuntimeEndpoint) (platformOperationLease, error) {
+	if err := s.ensurePlatformReleaseImage(ctx, expected, endpoint); err != nil {
+		return platformOperationLease{}, fmt.Errorf("image load: %w", err)
+	}
 	admission, err := s.reservePlatformUpdateStart(ctx, expected, endpoint)
 	if err != nil {
 		return platformOperationLease{}, err
