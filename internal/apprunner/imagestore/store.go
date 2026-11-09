@@ -402,8 +402,9 @@ func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
 	// Every role is matched on its full declaration. Before the manifest is stored and verified none of them is
 	// known (the config's media type and size come from it), so nothing counts; a manifest that passed verification
 	// has no refusal that matters. The Portal staged the manifest through the envelope parser, which verifies it.
+	// The manifest itself is the exception: it is judged when it is absent (see manifestRefused).
 	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) {
-		return false
+		return s.manifestRefused(operation, entry.ManifestDigest)
 	}
 	read := func(digest string) []byte {
 		file, err := s.Open(operation, digest)
@@ -430,6 +431,30 @@ func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
 		if s.refusedAs(operation, layer, true) {
 			return true
 		}
+	}
+	return false
+}
+
+// manifestRefused reports a definite refusal of the manifest. The signed command binds the manifest's digest and kind
+// but not its size or media type (both live inside the manifest, which is not here), so the declaration cannot be
+// matched in full as the other roles are. A record counts when it names exactly the command's digest, the manifest
+// kind and the digest_mismatch verdict on a complete stream, under a manifest media type and a size within the
+// metadata bound. Whatever the declared size was, those bytes were offered as the manifest and do not hash to its
+// digest; a record under another digest, kind or non-manifest media type says nothing, and a correct upload clears
+// every record of the role.
+func (s *Store) manifestRefused(operation, digest string) bool {
+	if !uuidPattern.MatchString(operation) || !digestPattern.MatchString(digest) {
+		return false
+	}
+	matches, _ := filepath.Glob(s.refusalGlob(operation, digest, appplatform.ImageBlobManifest))
+	for _, path := range matches {
+		r, ok := readRefusalFile(path)
+		if !ok || r.Digest != digest || r.Kind != string(appplatform.ImageBlobManifest) || r.Reason != string(RefusalDigestMismatch) ||
+			(r.MediaType != appplatform.MediaTypeOCIManifest && r.MediaType != appplatform.MediaTypeDockerManifest) ||
+			r.Size < 1 || r.Size > appplatform.MaxImageMetadataBytes {
+			continue
+		}
+		return true
 	}
 	return false
 }

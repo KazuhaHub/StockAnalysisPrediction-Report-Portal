@@ -741,16 +741,110 @@ func TestAMetadataRefusalUnderAWrongSizeDoesNotCountAgainstTheRole(t *testing.T)
 func TestAManifestDeclaredTooLongNeverPoisonsAnything(t *testing.T) {
 	s := newStore(t)
 	f := newImageFixture(t)
+	// Declared past the metadata bound: refused before a byte is read, and nothing is recorded.
 	bad := f.manifest
-	bad.Size++
-	if r := uploadTo(t, s, operation, bad, append(append([]byte(nil), f.manifestBytes...), '\n')); r != RefusalDigestMismatch {
-		t.Fatal(r)
+	bad.Size = appplatform.MaxImageMetadataBytes + 1
+	if _, _, _, r, _ := s.Begin(operation, bad, 0); r != RefusalSizeBound {
+		t.Fatalf("an over-long manifest declaration: %q", r)
 	}
 	if s.Refused(operation, f.entry) {
-		t.Fatal("a manifest refusal counted before the manifest is known")
+		t.Fatal("a manifest declared past the bound counted as a refusal")
 	}
 	if r := uploadTo(t, s, operation, f.manifest, f.manifestBytes); r != RefusalNone {
 		t.Fatalf("correct manifest: %q", r)
+	}
+	// Config and layer refusals still wait for a verified manifest: none counts before it is stored.
+	s2 := newStore(t)
+	badConfig := f.config
+	badConfig.Size++
+	if r := uploadTo(t, s2, operation, badConfig, append(append([]byte(nil), f.configBytes...), '\n')); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	if s2.Refused(operation, f.entry) {
+		t.Fatal("a config refusal counted before the manifest is known")
+	}
+}
+
+// A manifest stream that completed and did not hash to the digest the signed command names is a definite fact about
+// those bytes. The command binds the digest and the kind, but not the manifest's size, so the record is bound to
+// those two, the manifest media types and the metadata size bound.
+func TestAManifestRefusedUnderTheExactRoleCountsAgainstTheImage(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	if r := uploadTo(t, s, operation, f.manifest, flipped(f.manifestBytes)); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("a refused manifest did not end the load")
+	}
+	// A refusal never crosses operations.
+	if s.Refused(operation2, f.entry) {
+		t.Fatal("a refusal in one operation counted in another")
+	}
+	// A correct re-upload clears it and proceeds.
+	if r := uploadTo(t, s, operation, f.manifest, f.manifestBytes); r != RefusalNone {
+		t.Fatalf("correct manifest: %q", r)
+	}
+	if s.Refused(operation, f.entry) {
+		t.Fatal("a correct manifest left the refusal")
+	}
+}
+
+func TestAManifestRefusalSurvivesEviction(t *testing.T) {
+	s := newStore(t)
+	s.idle = 0
+	f := newImageFixture(t)
+	if r := uploadTo(t, s, operation, f.manifest, flipped(f.manifestBytes)); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	s.limit = 1
+	_ = uploadTo(t, s, operation2, f.layers[1].blob, f.layers[1].compressed)
+	s.limit = MaxScratchBytes
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("eviction lost the manifest refusal")
+	}
+}
+
+// A refusal made under another declaration than the role's never counts: a different digest, or a media type that
+// is not a manifest media type.
+func TestAManifestRefusalUnderAWrongDeclarationDoesNotCountAgainstTheRole(t *testing.T) {
+	f := newImageFixture(t)
+	cases := map[string]func(*appplatform.ImageBlob, *[]byte){
+		"wrong digest":      func(b *appplatform.ImageBlob, body *[]byte) { b.Digest = sum([]byte("some other manifest")) },
+		"config media type": func(b *appplatform.ImageBlob, _ *[]byte) { b.MediaType = appplatform.MediaTypeOCIConfig },
+		"layer media type":  func(b *appplatform.ImageBlob, _ *[]byte) { b.MediaType = "application/vnd.oci.image.layer.v1.tar+gzip" },
+		"empty media type":  func(b *appplatform.ImageBlob, _ *[]byte) { b.MediaType = "" },
+	}
+	for name, wrong := range cases {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			bad := f.manifest
+			body := flipped(f.manifestBytes)
+			wrong(&bad, &body)
+			if r := uploadTo(t, s, operation, bad, body); r != RefusalDigestMismatch {
+				t.Fatalf("wrong declaration: %q", r)
+			}
+			if s.Refused(operation, f.entry) {
+				t.Fatalf("%s poisoned the manifest role", name)
+			}
+			if r := uploadTo(t, s, operation, f.manifest, f.manifestBytes); r != RefusalNone {
+				t.Fatalf("correct manifest after the wrong declaration: %q", r)
+			}
+		})
+	}
+}
+
+// The Docker manifest media type is a manifest media type too.
+func TestADockerManifestRefusalCountsAgainstTheImage(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	docker := f.manifest
+	docker.MediaType = appplatform.MediaTypeDockerManifest
+	if r := uploadTo(t, s, operation, docker, flipped(f.manifestBytes)); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("a refused Docker-typed manifest did not end the load")
 	}
 }
 
