@@ -411,3 +411,18 @@ Named tests per step. Each failure direction is in the test name or its comment.
 - `inspect_mismatch` now carries a bounded detail naming the failed check (not found under the expected ID, ID differs, platform, projection, volumes), in the snapshot for logs and tests only.
 - This daemon ignored a name annotation in a publisher-supplied `index.json`, so the retag test logs that there was nothing to detect; the runner still writes its own index and compares the image list before and after.
 - The two web failures seen on this branch (`AdminOverviewPage.test.tsx`, `site.test.tsx`) are in code this branch does not touch; `AdminOverviewPage.test.tsx` also failed in CI on `integration/app-platform`'s base at `c3840350` (run 42169362721), so they are pre-existing flakes and were left alone.
+
+## PR 3a final review: carried into PR 3b
+
+The fourth review round passed. These minor findings are carried into the first steps of PR 3b:
+
+- **SEC-01 guard gaps.**
+  - Allow-listed files are skipped entirely, except for a check on the host string.
+  - `driver/preflight.go` is not walked.
+  - An aliased import of `net/http` or `net` passes the rules.
+  - A raw `unix.Connect` plus `net.FileConn` dial is not detected.
+  - The self-test re-implements looser rules instead of exercising the guard's own matcher.
+- **No terminal outcome when the manifest itself is refused.** The effect answers `blobs_missing` until the package is staged again. That is the intended recovery, but it never ends as `blob_refused`.
+- **Config without a `config` section.** The envelope parser accepts it, and the runner refuses it only after loading. Staging should refuse it, because a backend start uses the image's own entrypoint and command.
+- **`DaemonDetail` is not logged.** The runner never logs it, despite the note above. Either log it, bounded, or correct the note.
+- **Retag detection is unproven on Docker 28.0.4.** The daemon ignored the name annotation, so `TestNativeRetagByAPublisherLayoutIsDetected` could only log that there was nothing to detect. Retag protection rests on the runner writing its own archive with no names, and on the before/after comparison.
