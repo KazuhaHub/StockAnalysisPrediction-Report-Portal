@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"runtime"
 	"strconv"
 	"time"
@@ -430,9 +431,38 @@ func loadIntentFromRow(row *importRow, c control.LoadImageCommand, raw, signatur
 	return loadImageIntent{full: c, raw: bytes.Clone(raw), signature: bytes.Clone(signature), marker: marker, markerRaw: row.receipt, entry: entry}, nil
 }
 
+// maxLoggedDaemonDetail bounds the daemon's error text in the log.
+const maxLoggedDaemonDetail = 512
+
+// printableDaemonDetail makes the daemon's text safe for one log line: at most 512 bytes, every byte outside
+// printable ASCII replaced, so it cannot forge a line or smuggle control sequences.
+func printableDaemonDetail(text string) string {
+	if len(text) > maxLoggedDaemonDetail {
+		text = text[:maxLoggedDaemonDetail]
+	}
+	out := []byte(text)
+	for i, b := range out {
+		if b < 0x20 || b > 0x7e {
+			out[i] = '?'
+		}
+	}
+	return string(out)
+}
+
+// logLoadDaemonDetail writes the daemon's own status and error text for a load to the operator's log when the load
+// is settled. It is a log line only: the detail never enters a receipt, a journal row or a reply.
+func logLoadDaemonDetail(intent loadImageIntent, snapshot driver.LoadImageSnapshot) {
+	if snapshot.DaemonDetail == "" {
+		return
+	}
+	log.Printf("load-image %s: state=%s outcome=%s daemon detail: %s",
+		intent.full.EffectID, snapshot.State, snapshot.Outcome, printableDaemonDetail(snapshot.DaemonDetail))
+}
+
 // settleLoadImage records a definite end in one transaction: the receipt on the command row, applied or reverted.
 func (s *Store) settleLoadImage(ctx context.Context, intent loadImageIntent, snapshot driver.LoadImageSnapshot, verify loadVerifier) (LoadImageReceipt, error) {
 	var zero LoadImageReceipt
+	logLoadDaemonDetail(intent, snapshot)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return zero, err
