@@ -838,3 +838,33 @@ func TestLoadImageReadBackRefusesADescriptorThatDoesNotBindTheCommand(t *testing
 		t.Fatalf("an unbound descriptor was answered with %v", err)
 	}
 }
+
+// If the presence check fails (Docker unavailable) an existing refusal must not settle the effect: the answer is an
+// error and the row stays unknown, on execute and on read-back alike.
+func TestLoadImageRefusalDoesNotSettleWhenThePresenceCheckFails(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	f.native.err = driver.ErrImageBlobUnavailable
+	_, _ = f.dispatch()
+	f.refuseALayerUpload(t)
+	f.native.presentErr = driver.ErrUnavailable
+	if _, err := f.dispatch(); !errors.Is(err, driver.ErrUnavailable) {
+		t.Fatalf("execute with a failing presence check: %v", err)
+	}
+	if state, _ := f.rowState(t); state != "unknown" {
+		t.Fatalf("execute settled the row as %q", state)
+	}
+	if _, err := f.store.ReadLoadImageOrStatus(context.Background(), f.raw, f.readSig(t, f.raw), f.descriptor, f.native, f.scratch); !errors.Is(err, driver.ErrUnavailable) {
+		t.Fatalf("read-back with a failing presence check: %v", err)
+	}
+	if state, _ := f.rowState(t); state != "unknown" {
+		t.Fatalf("read-back changed the row: %q", state)
+	}
+	// Once the daemon answers, the refusal settles.
+	f.native.presentErr = nil
+	if got, err := f.dispatch(); err != nil || got.(LoadImageReceipt).Outcome != driver.LoadOutcomeBlobRefused {
+		t.Fatalf("after the daemon answered: %+v %v", got, err)
+	}
+}

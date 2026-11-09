@@ -712,3 +712,107 @@ func TestOpenRemovesLeftoverTrash(t *testing.T) {
 		t.Fatal("trash survived a start")
 	}
 }
+
+const operation3 = "40000000-0000-4000-8000-000000000006"
+
+// A config declared one byte too long, with valid bytes plus one extra, is refused under that declaration; it
+// never counts against the config the manifest declares.
+func TestAMetadataRefusalUnderAWrongSizeDoesNotCountAgainstTheRole(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	uploadTo(t, s, operation, f.manifest, f.manifestBytes)
+	bad := f.config
+	bad.Size++
+	if r := uploadTo(t, s, operation, bad, append(append([]byte(nil), f.configBytes...), '\n')); r != RefusalDigestMismatch {
+		t.Fatalf("wrong size declaration: %q", r)
+	}
+	if s.Refused(operation, f.entry) {
+		t.Fatal("a config declared too long poisoned valid bytes")
+	}
+	// The same refusal under the manifest's own declaration (bytes that do not hash to the digest) does count.
+	if r := uploadTo(t, s, operation, f.config, flipped(f.configBytes)); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("a refusal under the exact declaration was ignored")
+	}
+}
+
+func TestAManifestDeclaredTooLongNeverPoisonsAnything(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	bad := f.manifest
+	bad.Size++
+	if r := uploadTo(t, s, operation, bad, append(append([]byte(nil), f.manifestBytes...), '\n')); r != RefusalDigestMismatch {
+		t.Fatal(r)
+	}
+	if s.Refused(operation, f.entry) {
+		t.Fatal("a manifest refusal counted before the manifest is known")
+	}
+	if r := uploadTo(t, s, operation, f.manifest, f.manifestBytes); r != RefusalNone {
+		t.Fatalf("correct manifest: %q", r)
+	}
+}
+
+// Reads (Open, Missing) never refresh the idle clock; only upload sessions and load holds do. Three operations whose
+// serialized uploads exceed the cap each eventually load, by evicting whichever was idle longest.
+func TestThreeSerializedOperationsEachLoadUnderAnInjectedClock(t *testing.T) {
+	s := newStore(t)
+	clock := time.Unix(1_000_000, 0)
+	s.now = func() time.Time { return clock }
+	ops := []string{operation, operation2, operation3}
+	layers := []testLayer{newLayer(t, strings.Repeat("a", 400)), newLayer(t, strings.Repeat("b", 400)), newLayer(t, strings.Repeat("c", 400))}
+	s.limit = layers[0].blob.Size*2 + 10
+	loaded := map[string]bool{}
+	for round := 0; round < 12 && len(loaded) < 3; round++ {
+		for i, op := range ops {
+			if loaded[op] {
+				continue
+			}
+			r := uploadTo(t, s, op, layers[i].blob, layers[i].compressed)
+			clock = clock.Add(time.Minute)
+			if r == RefusalScratchFull {
+				// Reading the others must not make them look busy.
+				for _, other := range ops {
+					_ = s.Missing(other, appplatform.BackendImage{})
+					_, _ = s.Open(other, layers[0].blob.Digest)
+				}
+				clock = clock.Add(EvictIdle)
+				continue
+			}
+			if r != RefusalNone {
+				t.Fatalf("upload %d: %q", i, r)
+			}
+			release := s.Hold(op)
+			ok := s.Verified(op, layers[i].blob)
+			release()
+			if !ok {
+				continue // evicted between upload and load: it retries
+			}
+			if err := s.RemoveOperation(op); err != nil {
+				t.Fatal(err)
+			}
+			loaded[op] = true
+		}
+	}
+	if len(loaded) != 3 {
+		t.Fatalf("only %d of 3 operations loaded", len(loaded))
+	}
+}
+
+func TestReadsNeverRefreshTheIdleClock(t *testing.T) {
+	s := newStore(t)
+	clock := time.Unix(2_000_000, 0)
+	s.now = func() time.Time { return clock }
+	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
+	s.limit = a.blob.Size + 10
+	uploadTo(t, s, operation, a.blob, a.compressed)
+	clock = clock.Add(EvictIdle + time.Minute)
+	_ = s.Missing(operation, appplatform.BackendImage{})
+	if rc, err := s.Open(operation, a.blob.Digest); err == nil {
+		rc.Close()
+	}
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalNone {
+		t.Fatalf("reads kept an idle operation alive: %q", r)
+	}
+}

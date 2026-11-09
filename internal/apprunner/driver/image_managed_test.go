@@ -309,68 +309,128 @@ func TestRunnerSourceNeverPullsOrReadsDockerCredentials(t *testing.T) {
 }
 
 // Every Docker socket client comes from newDockerClient, which wraps the allow-list. The check is structural, over
-// the syntax of the non-test runner code: it fails on any reference to dockerDialer outside the constructor and the
-// dialer's own definition, on any unix-network dial outside them (the one app-socket readiness dialer is named), and
-// on any http.Transport or http.Client literal that is not the constructor and not an app-socket client.
+// the syntax (package-level declarations included) of every non-test file under internal/apprunner and
+// cmd/app-runner. Outside the files below it fails on:
+//   - any net.Dial*, net.Dialer, or .Dial / .DialContext use, whatever the network argument;
+//   - any http.Transport or http.Client composite literal, and new(http.Transport);
+//   - http.DefaultTransport or http.DefaultClient;
+//   - any reference to dockerDialer.
 //
-// The unix-dial and literal rules are scoped to the driver and journal packages, the only ones that can reach the
-// Docker daemon; the broker's outbound HTTP clients and the transport's control-socket dial are unrelated to Docker
-// and are not scanned by them. An app-socket client is recognised by its function naming the app host and never a
-// Docker host.
+// Explicit allow-list, each entry for a reason, and none may mention the Docker host:
+//   - driver/docker_client.go: newDockerClient, the one Docker client constructor;
+//   - driver/socket_linux.go, driver/socket_other.go: dockerDialer, called only by it;
+//   - driver/preflight.go: daemonClient, which wraps a given transport in the allow-list;
+//   - broker/http.go, broker/http_stream.go: the broker's own reviewed network egress for apps;
+//   - driver/backend_handshake_linux.go, backend_request_linux.go, candidate_readiness_linux.go and
+//     service_backend_task_linux.go: clients to an app's own private socket (host portal-app.invalid);
+//   - transport/transport_linux.go: the dial to the runner's own control socket.
 func TestOnlyTheDockerClientConstructorDialsTheSocket(t *testing.T) {
-	appSocketDialers := map[string]bool{"readinessSocketDialer": true}
+	allowed := map[string]bool{
+		"driver/docker_client.go": true, "driver/socket_linux.go": true, "driver/socket_other.go": true, "driver/preflight.go": true,
+		"broker/http.go": true, "broker/http_stream.go": true,
+		"driver/backend_handshake_linux.go": true, "driver/backend_request_linux.go": true, "driver/candidate_readiness_linux.go": true,
+		"driver/service_backend_task_linux.go": true, "transport/transport_linux.go": true,
+	}
+	dockerOnly := map[string]bool{"driver/docker_client.go": true, "driver/socket_linux.go": true, "driver/socket_other.go": true, "driver/preflight.go": true}
 	fset := token.NewFileSet()
-	err := filepath.Walk("..", func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-			return err
-		}
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			return err
-		}
-		scoped := strings.HasPrefix(path, "../driver/") || strings.HasPrefix(path, "../journal/")
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok {
-				continue
+	scanned := 0
+	for _, root := range []string{"..", "../../../cmd/app-runner"} {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return err
 			}
-			name := fn.Name.Name
-			hosts := map[string]bool{}
-			ast.Inspect(fn, func(n ast.Node) bool {
-				if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-					hosts["docker"] = hosts["docker"] || strings.Contains(lit.Value, "docker.invalid")
-					hosts["app"] = hosts["app"] || strings.Contains(lit.Value, "portal-app.invalid")
+			file, err := parser.ParseFile(fset, path, nil, 0)
+			if err != nil {
+				return err
+			}
+			scanned++
+			rel := strings.TrimPrefix(filepath.ToSlash(path), "../")
+			if allowed[rel] {
+				if !dockerOnly[rel] {
+					raw, _ := os.ReadFile(path)
+					if strings.Contains(string(raw), "docker.invalid") {
+						t.Errorf("%s is allow-listed for non-Docker traffic yet names the Docker host", rel)
+					}
 				}
-				return true
-			})
-			inConstructor := name == "newDockerClient" || name == "dockerDialer"
-			ast.Inspect(fn, func(n ast.Node) bool {
+				return nil
+			}
+			ast.Inspect(file, func(n ast.Node) bool {
 				switch x := n.(type) {
 				case *ast.Ident:
-					if x.Name == "dockerDialer" && !inConstructor {
-						t.Errorf("%s: %s references dockerDialer outside the client constructor", path, name)
+					if x.Name == "dockerDialer" {
+						t.Errorf("%s: references dockerDialer outside the client constructor", rel)
 					}
-				case *ast.CallExpr:
-					for _, arg := range x.Args {
-						if lit, ok := arg.(*ast.BasicLit); ok && lit.Value == `"unix"` && scoped && !inConstructor && !appSocketDialers[name] {
-							t.Errorf("%s: %s dials a unix socket outside the Docker client constructor", path, name)
-						}
+				case *ast.SelectorExpr:
+					pkg, _ := x.X.(*ast.Ident)
+					switch {
+					case pkg != nil && pkg.Name == "net" && (strings.HasPrefix(x.Sel.Name, "Dial") || x.Sel.Name == "Dialer"):
+						t.Errorf("%s: uses net.%s", rel, x.Sel.Name)
+					case x.Sel.Name == "DialContext" || x.Sel.Name == "Dial":
+						t.Errorf("%s: calls .%s", rel, x.Sel.Name)
+					case pkg != nil && pkg.Name == "http" && (x.Sel.Name == "DefaultTransport" || x.Sel.Name == "DefaultClient"):
+						t.Errorf("%s: uses http.%s", rel, x.Sel.Name)
 					}
 				case *ast.CompositeLit:
-					sel, ok := x.Type.(*ast.SelectorExpr)
-					if !ok || !scoped || inConstructor || name == "daemonClient" {
-						return true
+					if sel, ok := x.Type.(*ast.SelectorExpr); ok {
+						if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "http" && (sel.Sel.Name == "Transport" || sel.Sel.Name == "Client") {
+							t.Errorf("%s: builds its own http.%s", rel, sel.Sel.Name)
+						}
 					}
-					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "http" && (sel.Sel.Name == "Transport" || sel.Sel.Name == "Client") && !(hosts["app"] && !hosts["docker"]) {
-						t.Errorf("%s: %s builds its own http.%s outside the Docker client constructor", path, name, sel.Sel.Name)
+				case *ast.CallExpr:
+					if id, ok := x.Fun.(*ast.Ident); ok && id.Name == "new" && len(x.Args) == 1 {
+						if sel, ok := x.Args[0].(*ast.SelectorExpr); ok {
+							if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "http" && (sel.Sel.Name == "Transport" || sel.Sel.Name == "Client") {
+								t.Errorf("%s: new(http.%s)", rel, sel.Sel.Name)
+							}
+						}
 					}
 				}
 				return true
 			})
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	}
+	if scanned < 100 {
+		t.Fatalf("guard scanned only %d files", scanned)
+	}
+}
+
+// The guard itself must see violations: run its rules over source that breaks each one.
+func TestDockerGuardRulesDetectViolations(t *testing.T) {
+	for name, src := range map[string]string{
+		"dial":       `package x; import "net"; var _, _ = net.Dial("tcp", "a")`,
+		"dialer":     `package x; import "net"; var d = net.Dialer{}`,
+		"transport":  `package x; import "net/http"; var t = &http.Transport{}`,
+		"client":     `package x; import "net/http"; var c = &http.Client{}`,
+		"new":        `package x; import "net/http"; var t = new(http.Transport)`,
+		"default":    `package x; import "net/http"; var c = http.DefaultClient`,
+		"dockerdial": `package x; var d = dockerDialer("s")`,
+	} {
+		f, err := parser.ParseFile(token.NewFileSet(), "x.go", src, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hit := false
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.Ident:
+				hit = hit || x.Name == "dockerDialer"
+			case *ast.SelectorExpr:
+				pkg, _ := x.X.(*ast.Ident)
+				hit = hit || pkg != nil && (pkg.Name == "net" && (strings.HasPrefix(x.Sel.Name, "Dial") || x.Sel.Name == "Dialer") || pkg.Name == "http" && strings.HasPrefix(x.Sel.Name, "Default"))
+			case *ast.CompositeLit:
+				hit = hit || x.Type != nil
+			case *ast.CallExpr:
+				id, ok := x.Fun.(*ast.Ident)
+				hit = hit || ok && id.Name == "new"
+			}
+			return true
+		})
+		if !hit {
+			t.Errorf("rule %s does not fire", name)
+		}
 	}
 }

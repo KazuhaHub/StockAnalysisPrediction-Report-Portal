@@ -164,6 +164,21 @@ func PlanImage(entry BackendImage, manifestRaw, configRaw []byte) (ImagePlan, er
 	return plan, nil
 }
 
+// ManifestConfigDescriptor reads the config descriptor (media type and size) a manifest declares, so a caller can
+// tell what the config blob must look like before the config itself has arrived. The manifest bytes must already
+// hash to the entry's digest.
+func ManifestConfigDescriptor(entry BackendImage, manifestRaw []byte) (mediaType string, size int64, ok bool) {
+	if len(manifestRaw) == 0 || len(manifestRaw) > MaxImageMetadataBytes || sha256Hex(manifestRaw) != entry.ManifestDigest {
+		return "", 0, false
+	}
+	var manifest ociManifest
+	if !decodeStrictImageJSON(manifestRaw, &manifest, true) || manifest.SchemaVersion != 2 {
+		return "", 0, false
+	}
+	digest, valid := imageDigestHex(manifest.Config.Digest)
+	return manifest.Config.MediaType, manifest.Config.Size, valid && digest == entry.ConfigDigest
+}
+
 func platformArchitecture(platform string) string { return strings.TrimPrefix(platform, "linux/") }
 
 // imageDigestHex accepts only the "sha256:<hex>" form and returns the hex.

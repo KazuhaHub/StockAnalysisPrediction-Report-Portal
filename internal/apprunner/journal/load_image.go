@@ -537,14 +537,20 @@ func (s *Store) DispatchLoadImage(ctx context.Context, raw, signature, descripto
 	// A blob this image needs failed verification for good: the load can never complete, so it ends here, with no
 	// Docker call, instead of answering blobs_missing for ever.
 	// An image that is already in the daemon settles as present whatever was once refused: check that first.
-	present, presentErr := native.LoadedImagePresent(ctx, descriptor, intent.full.Payload.ReleaseSHA256, intent.full.Payload.Platform)
-	if !(presentErr == nil && present) && scratch.Refused(intent.full.OperationID, entry) {
-		receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageSettlement)
-		if err != nil {
-			return nil, fmt.Errorf("settle refused blob: %w", err)
+	// If the daemon cannot be asked, nothing is settled: the effect stays unknown and the same command is sent again.
+	if scratch.Refused(intent.full.OperationID, entry) {
+		present, presentErr := native.LoadedImagePresent(ctx, descriptor, intent.full.Payload.ReleaseSHA256, intent.full.Payload.Platform)
+		if presentErr != nil {
+			return nil, fmt.Errorf("presence check before refusing a blob: %w", presentErr)
 		}
-		_ = scratch.RemoveOperation(intent.full.OperationID)
-		return receipt, nil
+		if !present {
+			receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageSettlement)
+			if err != nil {
+				return nil, fmt.Errorf("settle refused blob: %w", err)
+			}
+			_ = scratch.RemoveOperation(intent.full.OperationID)
+			return receipt, nil
+		}
 	}
 	// The claim is committed: the load runs to a definite end whatever happens to the connection.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), driver.ImageLoadTimeout)
@@ -710,10 +716,16 @@ func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, descr
 	if scratch.Refused(got.command.OperationID, entry) {
 		// An image already in the daemon wins over a refusal; otherwise tell the sender the load can never finish.
 		// This read writes nothing: the execute that follows settles the effect.
-		if native != nil {
-			if present, err := native.LoadedImagePresent(ctx, descriptor, got.command.Payload.ReleaseSHA256, got.command.Payload.Platform); err == nil && present {
-				return loadStatusFor(got.command, "orphaned", nil, now), nil
-			}
+		if native == nil {
+			return nil, ErrLoadImageUnavailable
+		}
+		present, err := native.LoadedImagePresent(ctx, descriptor, got.command.Payload.ReleaseSHA256, got.command.Payload.Platform)
+		if err != nil {
+			// Fail closed: a state that tells the sender to give up must not rest on a failed check.
+			return nil, fmt.Errorf("presence check before refusing a blob: %w", err)
+		}
+		if present {
+			return loadStatusFor(got.command, "orphaned", nil, now), nil
 		}
 		return loadStatusFor(got.command, "blob_refused", nil, now), nil
 	}

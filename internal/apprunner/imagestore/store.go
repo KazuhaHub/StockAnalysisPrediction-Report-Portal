@@ -70,6 +70,8 @@ type Store struct {
 	lastUse map[string]time.Time
 	idle    time.Duration
 	trashN  int
+	// now is the clock the idle rule reads; a test injects its own.
+	now func() time.Time
 }
 
 // EvictIdle is how long an operation must have had no upload session and no load hold before its scratch may be
@@ -110,7 +112,7 @@ func Open(root string) (*Store, error) {
 		return nil, ErrUnsafeRoot
 	}
 	return &Store{root: root, limit: MaxScratchBytes, active: map[string]bool{}, opBytes: map[string]int64{},
-		opSessions: map[string]int{}, pins: map[string]int{}, lastUse: map[string]time.Time{}, idle: EvictIdle}, nil
+		opSessions: map[string]int{}, pins: map[string]int{}, lastUse: map[string]time.Time{}, idle: EvictIdle, now: time.Now}, nil
 }
 
 // charge and refund are the only places the accounting changes.
@@ -135,17 +137,11 @@ func (s *Store) refundLocked(operation string, n int64) {
 	s.used -= n
 }
 
-func (s *Store) touch(operation string) {
-	s.mu.Lock()
-	s.lastUse[operation] = time.Now()
-	s.mu.Unlock()
-}
-
 // Hold keeps an operation's scratch from being evicted while a load reads it.
 func (s *Store) Hold(operation string) (release func()) {
 	s.mu.Lock()
 	s.pins[operation]++
-	s.lastUse[operation] = time.Now()
+	s.lastUse[operation] = s.now()
 	s.mu.Unlock()
 	var once sync.Once
 	return func() {
@@ -154,7 +150,7 @@ func (s *Store) Hold(operation string) (release func()) {
 			if s.pins[operation]--; s.pins[operation] <= 0 {
 				delete(s.pins, operation)
 			}
-			s.lastUse[operation] = time.Now()
+			s.lastUse[operation] = s.now()
 			s.mu.Unlock()
 		})
 	}
@@ -176,7 +172,7 @@ func (s *Store) reserve(operation string, n int64) error {
 	defer s.mu.Unlock()
 	for s.used+n > s.limit {
 		var victims []string
-		now := time.Now()
+		now := s.now()
 		for op := range s.opBytes {
 			if op != operation && s.opSessions[op] == 0 && s.pins[op] == 0 && now.Sub(s.lastUse[op]) >= s.idle {
 				victims = append(victims, op)
@@ -322,7 +318,6 @@ func (s *Store) Open(operation, digest string) (io.ReadCloser, error) {
 	if err != nil || !digestPattern.MatchString(digest) {
 		return nil, ErrInvalidBlob
 	}
-	s.touch(operation)
 	file, err := os.OpenFile(filepath.Join(dir, digest), os.O_RDONLY|noFollow, 0)
 	if err != nil {
 		return nil, err
@@ -359,7 +354,6 @@ func (o OperationSource) Verified(expected appplatform.ImageBlob) bool {
 // config first, then, once the manifest is readable, the layers it names. A blob stored under another kind, or whose
 // record differs from what the plan says, is missing for that role and must be uploaded again under the right kind.
 func (s *Store) Missing(operation string, entry appplatform.BackendImage) []string {
-	s.touch(operation)
 	var missing []string
 	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) {
 		missing = append(missing, entry.ManifestDigest)
@@ -405,11 +399,10 @@ func (s *Store) Missing(operation string, entry appplatform.BackendImage) []stri
 // that failed verification on a complete stream. Such a blob can never pass, so a load that waits for it would
 // wait for ever.
 func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
-	if s.refusedAs(operation, appplatform.ImageBlob{Digest: entry.ManifestDigest, Kind: appplatform.ImageBlobManifest}, false) ||
-		s.refusedAs(operation, appplatform.ImageBlob{Digest: entry.ConfigDigest, Kind: appplatform.ImageBlobConfig}, false) {
-		return true
-	}
-	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) || !s.hasKind(operation, entry.ConfigDigest, appplatform.ImageBlobConfig) {
+	// Every role is matched on its full declaration. Before the manifest is stored and verified none of them is
+	// known (the config's media type and size come from it), so nothing counts; a manifest that passed verification
+	// has no refusal that matters. The Portal staged the manifest through the envelope parser, which verifies it.
+	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) {
 		return false
 	}
 	read := func(digest string) []byte {
@@ -421,7 +414,15 @@ func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
 		raw, _ := io.ReadAll(io.LimitReader(file, appplatform.MaxImageMetadataBytes+1))
 		return raw
 	}
-	plan, err := appplatform.PlanImage(entry, read(entry.ManifestDigest), read(entry.ConfigDigest))
+	manifest := read(entry.ManifestDigest)
+	if mediaType, size, ok := appplatform.ManifestConfigDescriptor(entry, manifest); ok &&
+		s.refusedAs(operation, appplatform.ImageBlob{Digest: entry.ConfigDigest, Kind: appplatform.ImageBlobConfig, MediaType: mediaType, Size: size}, true) {
+		return true
+	}
+	if !s.hasKind(operation, entry.ConfigDigest, appplatform.ImageBlobConfig) {
+		return false
+	}
+	plan, err := appplatform.PlanImage(entry, manifest, read(entry.ConfigDigest))
 	if err != nil {
 		return false
 	}
@@ -433,8 +434,6 @@ func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
 	return false
 }
 
-// refusalPath names a refusal by operation, digest, kind and a hash of the declaration, so a refusal made under
-// one declaration is never overwritten by (or mistaken for) one made under another.
 func (s *Store) refusalPath(operation string, blob appplatform.ImageBlob) string {
 	decl := sha256.Sum256([]byte(blob.MediaType + "|" + blob.DiffID + "|" + strconv.FormatInt(blob.UncompressedBytes, 10) + "|" + strconv.FormatInt(blob.Size, 10)))
 	return filepath.Join(s.root, refusalsDir, operation+"."+blob.Digest+"."+string(blob.Kind)+"."+hex.EncodeToString(decl[:6]))
@@ -466,24 +465,15 @@ func readRefusalFile(path string) (refusalRecord, bool) {
 	return r, true
 }
 
-// refusedAs reports a refusal whose declaration equals the expected role. For the manifest and config the media
-// type and size are not known before the manifest is read, so any refusal of that digest and kind counts there.
-func (s *Store) refusedAs(operation string, expected appplatform.ImageBlob, exact bool) bool {
+// refusedAs reports a refusal whose declaration equals the expected role exactly: kind, media type, diff_id,
+// uncompressed size, size and digest.
+func (s *Store) refusedAs(operation string, expected appplatform.ImageBlob, _ bool) bool {
 	if !uuidPattern.MatchString(operation) || !digestPattern.MatchString(expected.Digest) {
 		return false
 	}
-	if exact {
-		r, ok := readRefusalFile(s.refusalPath(operation, expected))
-		return ok && r.Digest == expected.Digest && r.Kind == string(expected.Kind) && r.MediaType == expected.MediaType &&
-			r.DiffID == expected.DiffID && r.UncompressedBytes == expected.UncompressedBytes && r.Size == expected.Size
-	}
-	matches, _ := filepath.Glob(s.refusalGlob(operation, expected.Digest, expected.Kind))
-	for _, m := range matches {
-		if r, ok := readRefusalFile(m); ok && r.Digest == expected.Digest && r.Kind == string(expected.Kind) {
-			return true
-		}
-	}
-	return false
+	r, ok := readRefusalFile(s.refusalPath(operation, expected))
+	return ok && r.Digest == expected.Digest && r.Kind == string(expected.Kind) && r.MediaType == expected.MediaType &&
+		r.DiffID == expected.DiffID && r.UncompressedBytes == expected.UncompressedBytes && r.Size == expected.Size
 }
 
 // recordRefusal stores the typed reason a blob can never pass, outside the evictable scratch.
@@ -583,7 +573,7 @@ func (s *Store) Begin(operation string, blob appplatform.ImageBlob, resume int64
 	s.active[key] = true
 	s.sessions++
 	s.opSessions[operation]++
-	s.lastUse[operation] = time.Now()
+	s.lastUse[operation] = s.now()
 	s.mu.Unlock()
 	u := &Upload{store: s, key: key, operation: operation, blob: blob, final: filepath.Join(dir, blob.Digest), partial: filepath.Join(dir, blob.Digest+".partial")}
 	fail := func(err error) (*Upload, int64, bool, Refusal, error) {
@@ -707,7 +697,7 @@ func (u *Upload) release() {
 	if u.store.opSessions[u.operation]--; u.store.opSessions[u.operation] <= 0 {
 		delete(u.store.opSessions, u.operation)
 	}
-	u.store.lastUse[u.operation] = time.Now()
+	u.store.lastUse[u.operation] = u.store.now()
 	u.store.mu.Unlock()
 }
 
