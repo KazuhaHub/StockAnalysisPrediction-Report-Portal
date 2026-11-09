@@ -234,6 +234,7 @@ type Upload struct {
 	whole      hash.Hash
 	layer      *layerSink
 	released   bool
+	closed     bool
 	chargedAdd int64
 }
 
@@ -433,12 +434,17 @@ func (u *Upload) Commit(wholeSHA256 string, total int64) Refusal {
 		u.discard()
 		return RefusalScratchFull
 	}
+	u.closed = true
 	u.release()
 	return RefusalNone
 }
 
 // Abort keeps a partial for a later resume: a lost connection is not a verdict on the bytes already stored.
 func (u *Upload) Abort() {
+	if u.closed {
+		return
+	}
+	u.closed = true
 	if u.layer != nil {
 		u.layer.abort()
 	}
@@ -451,7 +457,14 @@ func (u *Upload) Abort() {
 	u.release()
 }
 
+// Discard drops the partial and closes the upload: the sender broke a declared bound, which no resume can repair.
+func (u *Upload) Discard() { u.discard() }
+
 func (u *Upload) discard() {
+	if u.closed {
+		return
+	}
+	u.closed = true
 	if u.layer != nil {
 		u.layer.abort()
 	}

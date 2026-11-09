@@ -12,6 +12,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/imagestore"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 	"golang.org/x/sys/unix"
@@ -75,17 +76,26 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady
 	}
-	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.IPCRoot, root, pin)
+	// The scratch is opened first: it removes any blobs an earlier run left, before anything can read them.
+	images, err := imagestore.Open(cfg.ImageRoot)
+	if err != nil {
+		return ErrNotReady
+	}
+	var options []driver.RuntimeOption
+	if cfg.AllowLocalReferenceImages {
+		options = append(options, driver.WithLocalReferenceImages())
+	}
+	native, err := driver.OpenCandidateRuntime(ctx, cfg.DockerSocket, cfg.DataRoot, cfg.IPCRoot, root, pin, options...)
 	if err != nil {
 		return ErrNotReady
 	}
 	defer native.Close()
-	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, cfg.NetworkActive, cfg.NetworkEntries)
+	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries)
 	if err != nil {
 		return ErrNotReady
 	}
 	defer server.Close()
-	logger.Printf("app-runner ready profile=%s platform=linux/%s", driver.Profile, runtime.GOARCH)
+	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg))
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
@@ -110,4 +120,11 @@ func openRootDirectory(path string) (*os.File, error) {
 		return nil, ErrNotReady
 	}
 	return os.NewFile(uintptr(fd), "app-runner-data-root"), nil
+}
+
+func imageProfile(cfg Config) string {
+	if cfg.AllowLocalReferenceImages {
+		return "development"
+	}
+	return "production"
 }

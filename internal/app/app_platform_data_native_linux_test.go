@@ -27,6 +27,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/imagestore"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/service"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
@@ -199,14 +200,26 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer native.Close()
+		scratch, scratchErr := os.MkdirTemp(filepath.Dir(os.Getenv("APP_DATA_JOURNAL_ROOT")), "managed-images-")
+		if scratchErr != nil {
+			t.Fatal(scratchErr)
+		}
+		defer os.RemoveAll(scratch)
+		if err := os.Chmod(scratch, 0700); err != nil {
+			t.Fatal(err)
+		}
+		images, scratchErr := imagestore.Open(scratch)
+		if scratchErr != nil {
+			t.Fatal(scratchErr)
+		}
 		badPath := filepath.Join(endpoint, "invalid-network.sock")
-		if _, err := transport.ListenNetworkManagedController(context.Background(), badPath, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, 0, 4); err == nil {
+		if _, err := transport.ListenNetworkManagedController(context.Background(), badPath, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, images, 0, 4); err == nil {
 			t.Fatal("invalid network pool silently started managed listener")
 		}
 		if _, err := os.Stat(badPath); !os.IsNotExist(err) {
 			t.Fatal("invalid network bootstrap left an endpoint")
 		}
-		server, err = transport.ListenNetworkManagedController(context.Background(), path, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, 2, 4)
+		server, err = transport.ListenNetworkManagedController(context.Background(), path, 41001, 41001, store, root, pin, checkpointRoot, checkpointPin, native, images, 2, 4)
 	} else {
 		server, err = transport.ListenDataController(context.Background(), path, 41001, 41001, store, root, pin)
 	}

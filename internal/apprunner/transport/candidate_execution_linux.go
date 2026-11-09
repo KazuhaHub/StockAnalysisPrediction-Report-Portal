@@ -15,6 +15,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/imagestore"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -29,6 +30,7 @@ type candidateExecutionProvider struct {
 	dataPin        data.RootIdentity
 	checkpointRoot *data.Root
 	checkpointPin  data.RootIdentity
+	images         *imagestore.Store
 }
 
 // ListenCandidateController explicitly enables signed native candidate dispatch.

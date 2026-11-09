@@ -30,28 +30,28 @@ type Controller struct {
 }
 
 type Config struct {
-	Format         string     `json:"format"`
-	DockerSocket   string     `json:"docker_socket"`
-	JournalDir     string     `json:"journal_dir"`
-	DataRoot       string     `json:"data_root"`
-	CheckpointRoot string     `json:"checkpoint_root"`
+	Format         string `json:"format"`
+	DockerSocket   string `json:"docker_socket"`
+	JournalDir     string `json:"journal_dir"`
+	DataRoot       string `json:"data_root"`
+	CheckpointRoot string `json:"checkpoint_root"`
 	// ImageRoot is the runner-private scratch for image blobs in transit.
 	// Nothing in it outlives an operation, and orphans are removed on start.
 	ImageRoot string `json:"image_root"`
 	// AllowLocalReferenceImages is the development profile: a descriptor with a
 	// registry reference is inspected in the local daemon instead of refused.
 	// The default, false, is the production profile (doc 170 resolution 3).
-	AllowLocalReferenceImages bool `json:"allow_local_reference_images"`
-	IPCRoot        string     `json:"ipc_root"`
-	ControlRoot    string     `json:"control_root"`
-	ControlSocket  string     `json:"control_socket"`
-	ControllerUID  uint32     `json:"controller_uid"`
-	ControllerGID  uint32     `json:"controller_gid"`
-	NetworkActive  int        `json:"network_active"`
-	NetworkEntries int        `json:"network_entries"`
-	MinimumCPUs    int        `json:"minimum_reported_cpus"`
-	MinimumMemory  int64      `json:"minimum_reported_memory_bytes"`
-	Controller     Controller `json:"controller"`
+	AllowLocalReferenceImages bool       `json:"allow_local_reference_images"`
+	IPCRoot                   string     `json:"ipc_root"`
+	ControlRoot               string     `json:"control_root"`
+	ControlSocket             string     `json:"control_socket"`
+	ControllerUID             uint32     `json:"controller_uid"`
+	ControllerGID             uint32     `json:"controller_gid"`
+	NetworkActive             int        `json:"network_active"`
+	NetworkEntries            int        `json:"network_entries"`
+	MinimumCPUs               int        `json:"minimum_reported_cpus"`
+	MinimumMemory             int64      `json:"minimum_reported_memory_bytes"`
+	Controller                Controller `json:"controller"`
 }
 
 type BootstrapConfig struct {

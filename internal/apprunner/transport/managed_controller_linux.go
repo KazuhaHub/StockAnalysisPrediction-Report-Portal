@@ -6,8 +6,10 @@ import (
 	"context"
 	"os"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/imagestore"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
@@ -35,8 +37,8 @@ func ListenManagedController(ctx context.Context, path string, controllerUID, co
 // bounded network pool on the same checked root, journal and protected endpoint.
 // The caller owns all providers until Serve stops; enrollment is never created
 // here. Existing constructors retain their original narrower capability sets.
-func ListenNetworkManagedController(ctx context.Context, path string, uid, gid uint32, store *journal.Store, root *data.Root, pin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity, native *driver.CandidateRuntime, active, entries int) (*Server, error) {
-	if ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || store == nil || root == nil || checkpointRoot == nil || native == nil {
+func ListenNetworkManagedController(ctx context.Context, path string, uid, gid uint32, store *journal.Store, root *data.Root, pin data.RootIdentity, checkpointRoot *data.Root, checkpointPin data.RootIdentity, native *driver.CandidateRuntime, images *imagestore.Store, active, entries int) (*Server, error) {
+	if ctx == nil || ctx.Err() != nil || os.Geteuid() != 0 || store == nil || root == nil || checkpointRoot == nil || native == nil || images == nil {
 		return nil, ErrUnsafeEndpoint
 	}
 	if _, err := store.ControllerDeployment(ctx); err != nil {
@@ -57,5 +59,13 @@ func ListenNetworkManagedController(ctx context.Context, path string, uid, gid u
 	server.candidateExecution.checkpointRoot = checkpointRoot
 	server.candidateExecution.checkpointPin = checkpointPin
 	server.network = network
+	server.candidateExecution.images = images
+	server.imageBlobs = &imageBlobProvider{store: images, enrollment: func(ctx context.Context) (control.Authority, error) {
+		enrollment, err := store.ControllerDeployment(ctx)
+		if err != nil {
+			return control.Authority{}, err
+		}
+		return control.Authority{DeploymentID: enrollment.DeploymentID, ControllerEpoch: enrollment.ControllerEpoch, ControlRevision: enrollment.ControlRevision, PublicKey: enrollment.PublicKey, Fingerprint: enrollment.Fingerprint}, nil
+	}}
 	return server, nil
 }

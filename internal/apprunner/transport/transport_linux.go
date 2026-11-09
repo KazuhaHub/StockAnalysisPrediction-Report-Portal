@@ -47,6 +47,7 @@ type Server struct {
 	dataExecution      *dataExecutionProvider
 	candidateExecution *candidateExecutionProvider
 	network            *networkProvider
+	imageBlobs         *imageBlobProvider
 }
 
 type endpointProfile struct {
@@ -266,6 +267,15 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(networkStreamSessionTimeout))
 		defer executionCancel()
 		s.network.serveStream(executionCtx, conn, true)
+		return
+	case imageBlobRequestMagic:
+		if s.imageBlobs == nil || ctx.Err() != nil || !stop() {
+			return
+		}
+		cancel()
+		executionCtx, executionCancel := context.WithDeadline(parent, started.Add(imageBlobSessionTimeout))
+		defer executionCancel()
+		s.imageBlobs.serve(executionCtx, conn)
 		return
 	case backendRequestQueryMagic, writableBackendRequestQueryMagic, serviceBackendTaskQueryMagic:
 		if s.candidateExecution == nil || ctx.Err() != nil || !stop() {
