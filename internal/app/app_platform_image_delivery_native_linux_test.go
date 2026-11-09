@@ -463,6 +463,7 @@ wait:
 		if !bytes.Contains(output.Bytes(), []byte(marker)) {
 			t.Fatal("child assertion missing: "+marker, output.String())
 		}
+		t.Log(marker)
 	}
 	stopWatcher()
 	if err := imageDeliveryCheckEvents(events); err != nil {
