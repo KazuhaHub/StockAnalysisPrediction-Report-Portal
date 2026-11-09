@@ -86,12 +86,30 @@ func TestRestoreStartReadNeverReportsAbsenceForAnyRow(t *testing.T) {
 	}
 }
 
-// Only restore-start has the typed absence. An update-start (or enable-start) keeps its old behaviour.
-func TestUpdateStartReadHasNoAbsenceForOtherKinds(t *testing.T) {
-	f, _, _, raw, _ := updateStartJournalFixture(t)
+// An update-start read is answered with a typed absence exactly like a restore-start: settlement of a failed update
+// needs to know that a start it prepared never reached the runner. An effect the journal holds in any state is still
+// an ordinary error, and the other start kinds keep their old behaviour.
+func TestUpdateStartReadReportsAbsenceOnlyWhenNoRowExists(t *testing.T) {
+	f, _, command, raw, sig := updateStartJournalFixture(t)
 	result, err := f.store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
-	if _, absent := result.(UpdateStartAbsence); absent || err == nil {
-		t.Fatalf("an update-start read was answered with an absence: %#v %v", result, err)
+	absence, ok := result.(UpdateStartAbsence)
+	if err != nil || !ok || absence.EffectID != command.EffectID || !UpdateStartAbsenceMatchesCommand(absence, command) {
+		t.Fatalf("an update-start the runner never admitted was not reported absent: %#v %v", result, err)
+	}
+	if _, err := f.store.ReserveUpdateStart(context.Background(), raw, sig); err != nil {
+		t.Fatal(err)
+	}
+	result, err = f.store.ReadUpdateStartRunningOrAbsence(context.Background(), raw, updateStartReadSignature(t, raw))
+	if status, ok := result.(UpdateStartAbsence); !ok || err != nil || status.State != "reserved" {
+		t.Fatalf("a reserved update-start was not reported as reserved: %#v %v", result, err)
+	}
+}
+
+func TestUpdateStartReadHasNoAbsenceForOtherKinds(t *testing.T) {
+	_, _, command, _, _ := updateStartJournalFixture(t)
+	command.Kind = "enable-start"
+	if UpdateStartAbsenceMatchesCommand(UpdateStartAbsence{}, command) {
+		t.Fatal("an enable-start can be answered with an absence")
 	}
 }
 

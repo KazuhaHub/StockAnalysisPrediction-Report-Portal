@@ -12,6 +12,13 @@ import (
 // have mounted data. The source remains the active generation, the installation
 // enters review-only recovery, and a separate reviewed restore is required.
 func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expected platformOperationLease) error {
+	return s.finishPlatformManagedUpdateWith(ctx, expected, nil)
+}
+
+// finishPlatformManagedUpdateWith ends the operation for review. effects, when set, settles the effect rows
+// the reason for ending belongs to in the same transaction. A migrate-data effect still in flight becomes
+// unknown: it is never sent again, and only a discard settles it.
+func (s *Server) finishPlatformManagedUpdateWith(ctx context.Context, expected platformOperationLease, effects func(e migExec, now int64) error) error {
 	if expected.snapshot.Action != appplatform.ActionUpdate ||
 		!expected.snapshot.Managed || expected.id == "" ||
 		expected.snapshot.Stage == appplatform.StageComplete ||
@@ -60,13 +67,22 @@ func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expec
 		policy_revision,controller_epoch FROM app_platform_installations
 		WHERE id=?`, expected.installationID).
 		Scan(&phase, &desired, &generation, &revision, &policy, &epoch); err != nil ||
-		phase != "ready" || desired != "enabled" ||
+		!platformRetryPhaseAllowed(phase, plan.RecoversOperationID) || desired != "enabled" ||
 		generation != plan.SourceGeneration || policy != plan.SourcePolicyRevision ||
 		revision != facts.installationRevision || epoch != expected.controllerEpoch {
 		return errAppPlatformStageEvidence
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
 	if err != nil {
+		return err
+	}
+	if effects != nil {
+		if err := effects(e, now); err != nil {
+			return err
+		}
+	}
+	if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',updated_ms=?
+		WHERE operation_id=? AND kind='migrate-data' AND state='prepared'`, now, expected.id); err != nil {
 		return err
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
@@ -97,7 +113,7 @@ func (s *Server) finishPlatformManagedUpdateForReview(ctx context.Context, expec
 	}
 	changed, err = e.exec(`UPDATE app_platform_installations
 		SET phase='recovery_required',revision=revision+1,updated_ms=?
-		WHERE id=? AND desired_state='enabled' AND phase='ready'
+		WHERE id=? AND desired_state='enabled' AND phase IN ('ready','recovery_required')
 		AND generation=? AND policy_revision=? AND revision=?
 		AND control_fence=? AND controller_epoch=?`,
 		now, expected.installationID, plan.SourceGeneration,

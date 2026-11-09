@@ -30,6 +30,10 @@ type platformUpdateProjection struct {
 	TargetCapabilities   []string                  `json:"target_capabilities"`
 	GrantsSHA256         string                    `json:"grants_sha256"`
 	Target               platformInstallProjection `json:"target"`
+	// Migration is the declared data migration the update runs, absent when the data needs none.
+	Migration *platformMigrationStep `json:"migration,omitempty"`
+	// RecoversOperationID names the failed update this one retries, empty for an ordinary update.
+	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
 }
 
 func platformCurrentCapabilities(e migExec, installation string) ([]string, error) {

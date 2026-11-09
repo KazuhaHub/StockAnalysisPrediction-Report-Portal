@@ -462,8 +462,9 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 	if err != nil {
 		return zero, err
 	}
-	if _, err := s.loadPlatformAdmittedManagedUpdate(
-		e, expected, trust, facts.now); err != nil {
+	admitted, err := s.loadPlatformAdmittedManagedUpdate(
+		e, expected, trust, facts.now)
+	if err != nil {
 		return zero, err
 	}
 	now, err := finalPlatformOperationLeaseCheck(e, facts)
@@ -482,6 +483,27 @@ func (s *Server) commitPlatformManagedUpdateQuiesce(ctx context.Context, expecte
 		expected.fence)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
+	}
+	if expected.snapshot.Stage == appplatform.StageMigrate && admitted.plan.Migration != nil {
+		// The source is gone; the migration is still to run, so the operation stays at this stage.
+		detail, _ := json.Marshal(struct {
+			ResourceID string `json:"resource_id"`
+			NativeID   string `json:"native_id"`
+			Release    string `json:"release_sha256"`
+		}{intent.command.Payload.ResourceID, receipt.NativeID, intent.command.Payload.ReleaseSHA256})
+		if _, err := e.exec(`INSERT INTO audit_log(
+			at,actor,actor_ou,action,target_type,target_id,detail,ip)
+			VALUES(?,'system',0,'app_platform.managed_update_source_removed','app_platform_operation',?,?,'')`,
+			time.UnixMilli(now).UTC().Format(time.RFC3339), expected.id, string(detail)); err != nil {
+			return zero, err
+		}
+		if _, err := finalPlatformOperationLeaseCheck(e, facts); err != nil {
+			return zero, err
+		}
+		if err := tx.Commit(); err != nil {
+			return zero, err
+		}
+		return expected, nil
 	}
 	model, err := appplatform.OperationFromSnapshot(expected.snapshot)
 	if err != nil {
@@ -568,13 +590,18 @@ func (s *Server) runPlatformManagedUpdate(ctx context.Context, expected platform
 		appplatform.StageDownload, appplatform.StageStage:
 		return s.advancePlatformManagedUpdateStage(ctx, expected)
 	case appplatform.StageQuiesce:
+		if lease, handled, err := s.runPlatformRetryEvidenceStage(ctx, expected); handled || err != nil {
+			return lease, err
+		}
 		return s.executePlatformManagedUpdateQuiesce(
 			ctx, expected, endpoint)
 	case appplatform.StageSnapshot:
 		return s.dispatchPlatformCheckpoint(ctx, expected, endpoint)
 	case appplatform.StageMigrate:
-		return s.executePlatformManagedUpdateMigrate(
-			ctx, expected, endpoint)
+		if lease, handled, err := s.runPlatformRetryEvidenceStage(ctx, expected); handled || err != nil {
+			return lease, err
+		}
+		return s.runPlatformMigrateStage(ctx, expected, endpoint)
 	case appplatform.StageStart:
 		return s.executePlatformUpdateStart(ctx, expected, endpoint)
 	case appplatform.StageProbe:

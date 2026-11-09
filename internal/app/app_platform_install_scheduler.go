@@ -23,6 +23,12 @@ const platformInstallAttemptTimeout = 20 * time.Second
 // lease, and the Portal polls: an attempt that ends because the runner is still working is not a
 // failure, and the next one reads the receipt of the same effect (platformBusyWaitLimit of them cover
 // the longest bound).
+// platformImportAttemptContext is the context a bulk attempt runs under: the parent bounded by the attempt timeout. Tests
+// replace it to end an attempt at a moment of their choosing instead of by the clock.
+var platformImportAttemptContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, platformImportAttemptTimeout)
+}
+
 var platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
 
 // platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy
@@ -31,6 +37,10 @@ const platformBusyWaitLimit = 20
 
 func platformAttemptTimeout(lease platformOperationLease) time.Duration {
 	if lease.snapshot.Action == appplatform.ActionRestoreImport && lease.snapshot.Stage == appplatform.StageRestoreData {
+		return platformImportAttemptTimeout
+	}
+	// A migration job runs on, detached, for up to its wall clock; the attempt waits like an import's.
+	if lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageMigrate {
 		return platformImportAttemptTimeout
 	}
 	return platformInstallAttemptTimeout
@@ -99,7 +109,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	defer func() { <-w.gate }()
 	ctx, cancel := context.WithTimeout(parent, platformInstallAttemptTimeout)
 	defer cancel()
-	bulkCtx, bulkCancel := context.WithTimeout(parent, platformImportAttemptTimeout)
+	bulkCtx, bulkCancel := platformImportAttemptContext(parent)
 	defer bulkCancel()
 	if err := ctx.Err(); err != nil {
 		return err
@@ -181,6 +191,12 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			return nil
 		}
 		if selected.lease.id == "" {
+			// Idle, in normal and in paused mode: a failed migration waiting for settlement needs no lease.
+			if w.endpoint.path != "" {
+				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
+					log.Printf("app-platform migration settlement: %v", settleErr)
+				}
+			}
 			w.publish("idle", "", "")
 			return nil
 		}
@@ -249,7 +265,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	} else {
 		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
 	}
-	if errors.Is(err, errPlatformImportEnded) {
+	if errors.Is(err, errPlatformImportEnded) || errors.Is(err, errPlatformMigrationEnded) {
 		w.publish("review_required", w.active.id, "")
 		w.active, w.attempts = platformOperationLease{}, 0
 		return nil
@@ -274,8 +290,11 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
-	if w.active.snapshot.Action == appplatform.ActionRestoreImport &&
-		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil &&
+	if ((w.active.snapshot.Action == appplatform.ActionRestoreImport &&
+		errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
+		(w.active.snapshot.Action == appplatform.ActionUpdate && w.active.snapshot.Stage == appplatform.StageMigrate &&
+			(errors.Is(err, errPlatformMigrationBusy) ||
+				(errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)))) &&
 		w.waits < platformBusyWaitLimit {
 		// The wait for the runner ran out while it was still working on the import: it has not failed.
 		// The same effect is read again on the next attempt; nothing is sent under a new identity.

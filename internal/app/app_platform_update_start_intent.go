@@ -50,6 +50,10 @@ type platformManagedUpdatePlan struct {
 	GrantsSHA256               string                        `json:"grants_sha256,omitempty"`
 	AudienceSHA256             string                        `json:"audience_sha256,omitempty"`
 	TargetRuntime              *platformManagedInstallTarget `json:"target_runtime,omitempty"`
+	// Migration is the reviewed data migration the update runs between the source removal and the start.
+	Migration *platformMigrationStep `json:"migration,omitempty"`
+	// RecoversOperationID names the failed update this one retries; empty for an ordinary update.
+	RecoversOperationID string `json:"recovers_operation_id,omitempty"`
 }
 
 type platformUpdateStartIntent struct {
@@ -155,7 +159,12 @@ func loadPlatformManagedUpdatePlan(e migExec, expected platformOperationLease, s
 	if err != nil || parsed.SHA256 != plan.TargetReleaseSHA256 ||
 		appID != plan.AppID || publisher != plan.PublisherID ||
 		parsed.Manifest.ID != plan.AppID || parsed.Manifest.Publisher != plan.PublisherID ||
-		parsed.Manifest.Backend == nil || int64(parsed.Manifest.Data.Schema) != plan.DataFormat {
+		parsed.Manifest.Backend == nil {
+		return zero, nil, errAppPlatformStageEvidence
+	}
+	// The descriptor must still declare exactly the migration (or none) the review bound.
+	if step, stepErr := platformPlanMigration(plan.DataFormat, parsed.Manifest.Data); stepErr != nil || !samePlatformMigration(step, plan.Migration) ||
+		(plan.Migration != nil && action != appplatform.ActionUpdate) {
 		return zero, nil, errAppPlatformStageEvidence
 	}
 	platformFound := false
@@ -224,7 +233,7 @@ func loadPlatformUpdateStartCheckpoint(e migExec, expected platformOperationLeas
 	return receipt, []byte(receiptRaw), nil
 }
 
-func platformUpdateStartCommand(expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, resourceID, effectID string) (control.UpdateStartCommand, error) {
+func platformUpdateStartCommand(expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, resourceID, effectID string, migration *platformMigrationEvidence) (control.UpdateStartCommand, error) {
 	kind := "update-start"
 	if platformSameReleaseLifecycle(expected.snapshot.Action) {
 		kind = platformSameReleaseStartKind(expected.snapshot.Action)
@@ -233,6 +242,17 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 	if platformSameReleaseLifecycle(plan.Action) {
 		checkpointWriterFence = strconv.FormatInt(
 			plan.CheckpointWriterFence, 10)
+	}
+	sourceWriterFence, targetWriterFence := plan.SourceWriterFence, plan.SourceWriterFence+1
+	migrateEffectID, migrateReceiptSHA := "", ""
+	if plan.Migration != nil {
+		// The migration holds the fence above the checkpoint's and the start is fenced above the migration.
+		checkpointWriterFence = strconv.FormatInt(plan.SourceWriterFence, 10)
+		sourceWriterFence, targetWriterFence = plan.SourceWriterFence+1, plan.SourceWriterFence+2
+		if migration == nil {
+			return control.UpdateStartCommand{}, errAppPlatformStageEvidence
+		}
+		migrateEffectID, migrateReceiptSHA = migration.effectID, migration.receiptSHA256
 	}
 	command := control.UpdateStartCommand{
 		Format: control.UpdateStartFormat, DeploymentID: runtime.deploymentID,
@@ -261,10 +281,12 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 			ProjectID:                     source.projectID, NamespaceInode: source.namespaceInode,
 			Device: source.device, QuotaBytes: source.quotaBytes,
 			QuotaInodes: source.quotaInodes, RootFilesystemUUID: source.rootFilesystemUUID,
-			RootInode: source.rootInode, DataFormat: source.dataFormat,
-			SourceWriterFence:     strconv.FormatInt(plan.SourceWriterFence, 10),
-			TargetWriterFence:     strconv.FormatInt(plan.SourceWriterFence+1, 10),
+			RootInode: source.rootInode, DataFormat: strconv.FormatInt(plan.targetDataFormat(), 10),
+			SourceWriterFence:     strconv.FormatInt(sourceWriterFence, 10),
+			TargetWriterFence:     strconv.FormatInt(targetWriterFence, 10),
 			CheckpointWriterFence: checkpointWriterFence,
+			MigrateEffectID:       migrateEffectID,
+			MigrateReceiptSHA256:  migrateReceiptSHA,
 			Platform:              source.platform,
 			SandboxProfile:        source.sandboxProfile,
 		},
@@ -275,6 +297,37 @@ func platformUpdateStartCommand(expected platformOperationLease, runtime platfor
 	}
 	command.PayloadSHA256 = digest
 	return command, nil
+}
+
+// platformRetryOwnsCandidate says whether the candidate activation at the retry's generation is the leftover of a failed
+// update the retry recovers, whose target settlement proved removed. The row carries no operation of its own, so the
+// evidence is the settlement's: one of the recovered updates removed a target whose resource, release and namespace
+// are this row's, and stopped it first. Anything else is not the retry's to take over.
+func platformRetryOwnsCandidate(e migExec, installation, recovers, activation, release, namespace string) bool {
+	chain, err := platformRetryAncestors(e, recovers)
+	if err != nil {
+		return false
+	}
+	for _, operation := range chain {
+		// The ordinary removal of a running target, or the one of a target the runner reserved and never created.
+		for _, slots := range [][2]int{{platformSettleStopEffect, platformSettleRemoveEffect}, {platformSettleReservedStopEffect, platformSettleReservedRemoveEffect}} {
+			stop, err := loadPlatformSettleEffect(e, operation, platformSettleStage, slots[0])
+			if err != nil || stop.state != "applied" {
+				continue
+			}
+			remove, err := loadPlatformSettleEffect(e, operation, platformSettleStage, slots[1])
+			if err != nil || remove.state != "applied" {
+				continue
+			}
+			removed, err := journal.ParseManagedRemovalReceipt([]byte(remove.receipt))
+			if err == nil && removed.Stage == "remove_code" && removed.State == "absent" && removed.InstallationID == installation &&
+				removed.SourceOperationID == operation && removed.ResourceID == activation && removed.ReleaseSHA256 == release &&
+				removed.DataNamespaceID == namespace {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, runtime platformRuntimeRegistration, source platformCheckpointSource, checkpoint journal.CheckpointReceipt, plan platformManagedUpdatePlan, now int64, create bool) (platformUpdateStartIntent, bool, error) {
@@ -318,10 +371,16 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		policy == plan.TargetPolicyRevision &&
 		namespace == plan.DataNamespaceID && format == plan.DataFormat &&
 		state == "candidate" && readiness == "{}" && !observed.Valid
-	if activationMissing != effectMissing && !reuseRepairCandidate {
+	// The failed update a retry recovers started a target at this generation and left its candidate activation
+	// behind, and an installation holds one activation per generation. The retry takes that row over under an
+	// identity of its own: the runner knows the failed update's target resource under the old one.
+	reuseRetryCandidate := !activationMissing && effectMissing && plan.RecoversOperationID != "" &&
+		expected.snapshot.Action == appplatform.ActionUpdate && generation == int64(expected.snapshot.Generation) && state == "candidate" &&
+		namespace == plan.DataNamespaceID && platformRetryOwnsCandidate(e, expected.installationID, plan.RecoversOperationID, activation, release, namespace)
+	if activationMissing != effectMissing && !reuseRepairCandidate && !reuseRetryCandidate {
 		return zero, false, errAppPlatformStageEvidence
 	}
-	if activationMissing || reuseRepairCandidate {
+	if activationMissing || reuseRepairCandidate || reuseRetryCandidate {
 		if !create {
 			return zero, false, errAppPlatformStageEvidence
 		}
@@ -335,7 +394,21 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 				activation, expected.installationID,
 				plan.TargetReleaseSHA256, expected.snapshot.Generation,
 				plan.TargetPolicyRevision, plan.DataNamespaceID,
-				plan.DataFormat, now, now); err != nil {
+				plan.targetDataFormat(), now, now); err != nil {
+				return zero, false, err
+			}
+		}
+		if reuseRetryCandidate {
+			previous := activation
+			if activation, err = platformNewUUID(); err != nil {
+				return zero, false, err
+			}
+			changed, err := e.exec(`UPDATE app_platform_activations SET id=?,release_sha256=?,policy_revision=?,data_namespace_id=?,data_format=?,
+				readiness_evidence='{}',observed_ms=NULL,updated_ms=?
+				WHERE id=? AND installation_id=? AND generation=? AND state='candidate'`,
+				activation, plan.TargetReleaseSHA256, plan.TargetPolicyRevision, plan.DataNamespaceID, plan.targetDataFormat(), now,
+				previous, expected.installationID, expected.snapshot.Generation)
+			if err := platformLeaseCAS(changed, err); err != nil {
 				return zero, false, err
 			}
 		}
@@ -343,7 +416,11 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		if err != nil {
 			return zero, false, err
 		}
-		command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID)
+		migration, err := loadPlatformAppliedMigration(e, expected.id, plan)
+		if err != nil {
+			return zero, false, err
+		}
+		command, err := platformUpdateStartCommand(expected, runtime, source, checkpoint, plan, activation, effectID, migration)
 		if err != nil {
 			return zero, false, err
 		}
@@ -376,7 +453,7 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 		return invalidActivation("policy")
 	case namespace != plan.DataNamespaceID:
 		return invalidActivation("namespace")
-	case format != plan.DataFormat:
+	case format != plan.targetDataFormat():
 		return invalidActivation("format")
 	case state != "candidate":
 		return invalidActivation("state")
@@ -395,7 +472,11 @@ func loadPlatformUpdateStartIntent(e migExec, expected platformOperationLease, r
 	}
 	effectLease := expected
 	effectLease.fence = admitted
-	command, err := platformUpdateStartCommand(effectLease, runtime, source, checkpoint, plan, activation, effectID)
+	migration, err := loadPlatformAppliedMigration(e, expected.id, plan)
+	if err != nil {
+		return zero, false, err
+	}
+	command, err := platformUpdateStartCommand(effectLease, runtime, source, checkpoint, plan, activation, effectID, migration)
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, false, fmt.Errorf(
 			"update-start activation command: %w",
@@ -506,7 +587,7 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 	if release != plan.TargetReleaseSHA256 ||
 		generation != int64(expected.snapshot.Generation) ||
 		policy != plan.TargetPolicyRevision || namespace != plan.DataNamespaceID ||
-		format != plan.DataFormat || state != activationState ||
+		format != plan.targetDataFormat() || state != activationState ||
 		readinessRaw == "{}" || observed <= 0 {
 		return zero, fmt.Errorf(
 			"update-start activation tuple: %w",
@@ -542,8 +623,11 @@ func loadPlatformUpdateStartActivationState(e migExec, expected platformOperatio
 			effectLease, runtime, source, checkpoint, checkpointRaw,
 			activation, effectID, plan.TargetPolicyRevision)
 	} else {
-		command, err = platformUpdateStartCommand(
-			effectLease, runtime, source, checkpoint, plan, activation, effectID)
+		var migration *platformMigrationEvidence
+		if migration, err = loadPlatformAppliedMigration(e, expected.id, plan); err == nil {
+			command, err = platformUpdateStartCommand(
+				effectLease, runtime, source, checkpoint, plan, activation, effectID, migration)
+		}
 	}
 	if err != nil || command.PayloadSHA256 != digest {
 		return zero, fmt.Errorf(

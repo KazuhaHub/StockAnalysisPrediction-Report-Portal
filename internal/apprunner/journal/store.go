@@ -361,8 +361,10 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 
 // upgrade moves a verified older journal to the current schema in one
 // transaction. The v1 table is renamed aside, the current table is created from
-// its exact product SQL, rows are copied by explicit column name and counted,
-// and only then is the old table dropped; nothing is created by renaming.
+// its exact product SQL, rows are copied by explicit column name in rowid order
+// and counted, and only then is the old table dropped; nothing is created by
+// renaming. The order matters: the rowid of a command row is the order the
+// runner admitted it in, and later checks rely on it (see rowOrder).
 func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	if from != 1 {
 		return ErrIncompatible
@@ -386,7 +388,7 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	if _, err := tx.ExecContext(ctx, products["runner_commands"].sql); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(`+runnerCommandColumns+`) SELECT `+runnerCommandColumns+` FROM runner_commands_v1`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO runner_commands(`+runnerCommandColumns+`) SELECT `+runnerCommandColumns+` FROM runner_commands_v1 ORDER BY rowid`); err != nil {
 		return err
 	}
 	var after int

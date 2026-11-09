@@ -82,6 +82,10 @@ func loadPlatformManagedRestoreReviewCandidate(
 		installationEpoch != runtime.controllerEpoch {
 		return result, errAppPlatformStageEvidence
 	}
+	// A migration that has not been settled may have left migrated data in the namespace.
+	if err := platformRequireSettledMigration(e, updateOperation); err != nil {
+		return result, err
+	}
 	var sourceOperationID string
 	if err := e.queryRow(`SELECT id FROM app_platform_operations
 		WHERE installation_id=? AND action IN ('install','update','restore')

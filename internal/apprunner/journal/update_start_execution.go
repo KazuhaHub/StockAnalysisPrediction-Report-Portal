@@ -265,6 +265,10 @@ func (s *Store) beginUpdateStartExecution(ctx context.Context, raw, signature []
 // the read check for a read-receipt.
 type updateStartVerifier func(raw, signature []byte, authority control.Authority, nowMS int64) (control.VerifiedUpdateStartCommand, error)
 
+// updateStartExecutionClock is the clock the execution window is judged by. Tests replace it to cross the signed
+// expiry deterministically.
+var updateStartExecutionClock = time.Now
+
 func (s *Store) beginUpdateStartExecutionVerified(ctx context.Context, raw, signature []byte, state string, verify updateStartVerifier) (*sql.Tx, updateStartFacts, error) {
 	var zero updateStartFacts
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes ||
@@ -294,7 +298,7 @@ func (s *Store) beginUpdateStartExecutionVerified(ctx context.Context, raw, sign
 		ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey,
 		Fingerprint: deployment.Fingerprint,
 	}
-	started := time.Now()
+	started := updateStartExecutionClock()
 	now := started.UnixMilli()
 	verified, err := verify(raw, signature, authority, now)
 	if err != nil {
@@ -340,7 +344,7 @@ func (s *Store) beginUpdateStartExecutionVerified(ctx context.Context, raw, sign
 	facts := updateStartFacts{
 		command: command, stored: stored, authority: authority, source: source,
 		receipt: receipt, created: created, updated: updated,
-		raw: raw, signature: signature, now: now,
+		raw: raw, signature: signature, now: now, verify: verify,
 	}
 	switch state {
 	case "prepared":

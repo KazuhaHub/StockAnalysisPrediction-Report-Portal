@@ -66,3 +66,18 @@ func (*CandidateRuntime) ExchangeCandidateHandshake(context.Context, CandidateLa
 func (*CandidateRuntime) ForwardCandidateRequest(context.Context, CandidateLaunch, BackendRegistrationSnapshot, string, string, []byte, string) (BackendRequestObservation, error) {
 	return BackendRequestObservation{}, ErrUnsupported
 }
+
+func (*CandidateRuntime) RunMigrationJob(context.Context, MigrationJobRequest) (MigrationJobObservation, error) {
+	return MigrationJobObservation{}, ErrUnsupported
+}
+func (*CandidateRuntime) ProveMigrationAbsent(context.Context, MigrationJobRequest) error {
+	return ErrUnsupported
+}
+func (*CandidateRuntime) ProveTargetAbsent(context.Context, string) error { return ErrUnsupported }
+func (*CandidateRuntime) ListNamespaceContainers(context.Context, string) ([]NamespaceContainer, error) {
+	return nil, ErrUnsupported
+}
+func (*CandidateRuntime) RemoveStrayContainer(context.Context, string) error { return ErrUnsupported }
+func (*CandidateRuntime) InspectTarget(context.Context, string) (TargetInspection, error) {
+	return TargetInspection{}, ErrUnsupported
+}

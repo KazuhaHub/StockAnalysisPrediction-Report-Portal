@@ -232,3 +232,56 @@ func TestUpgradeFailingInspectionLeavesAV1Journal(t *testing.T) {
 	}
 	store.Close()
 }
+
+// The rowid of a command row is the order the runner admitted it in, and the supersession checks rely on it. The
+// upgrade must not reorder rows: they are copied in rowid order, so two rows keep their relative order even when
+// their effect identifiers sort the other way.
+func TestUpgradePreservesCommandRowOrder(t *testing.T) {
+	directory, db := newV1Journal(t)
+	if err := insertDeployment(db); err != nil {
+		t.Fatal(err)
+	}
+	// Inserted in descending identifier order: insertion order and primary key order are opposite.
+	for number := range 6 {
+		if _, err := db.Exec(`INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+            VALUES(?,?,?,'stage',?,'stage',?,1,?,1,'prepared','{}',NULL,1,1)`, fixtureID(900-number), fixtureID(4), fixtureID(5), number+1, strings.Repeat("a", 64), fixtureID(2)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	order := func(db *sql.DB) []string {
+		rows, err := db.Query(`SELECT effect_id FROM runner_commands ORDER BY rowid`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var ids []string
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	before := order(db)
+	db.Close()
+	store, err := Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	after := order(store.db)
+	if len(after) != len(before) {
+		t.Fatalf("the upgrade changed the row count: %d to %d", len(before), len(after))
+	}
+	for i := range before {
+		if before[i] != after[i] {
+			t.Fatalf("the upgrade reordered the command rows: %v became %v", before, after)
+		}
+	}
+	var later int64
+	if err := store.db.QueryRow(`SELECT MAX(rowid) FROM runner_commands`).Scan(&later); err != nil || later != int64(len(before)) {
+		t.Fatalf("the copied rows are not numbered from one in order: max rowid %d %v", later, err)
+	}
+}

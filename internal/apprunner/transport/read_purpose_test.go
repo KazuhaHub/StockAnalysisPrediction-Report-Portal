@@ -22,6 +22,24 @@ func lifecycleSignature(t *testing.T, action WritableLifecycleAction, a control.
 			t.Fatal(err)
 		}
 		return signature
+	case MigrateDataRead:
+		signature, err := control.SignMigrateDataRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
+	case DiscardMigrationRead:
+		signature, err := control.SignDiscardMigrationRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
+	case RestoreRead:
+		signature, err := control.SignRestoreRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
 	case UpdateStartReceipt:
 		signature, err := control.SignUpdateStartRead(raw, key, a, now)
 		if err != nil {

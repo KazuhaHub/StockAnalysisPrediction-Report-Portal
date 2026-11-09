@@ -25,7 +25,9 @@ func platformResolvedRecoveryPredicate(e migExec) string {
 	// runtime advanced the installation's generation in between. The review plan's checkpoint
 	// reference below is what binds the resume to the operation.
 	generation := `(r.target_generation=o.target_generation OR (` + planFormat + `='` + platformRestoreResumeFormat + `' AND r.source_generation>=o.target_generation))`
-	return `EXISTS (
+	// A failed update a completed retry recovered carries a marker effect, written when the retry activated.
+	recovered := `EXISTS (SELECT 1 FROM app_platform_operation_effects rf WHERE rf.operation_id=o.id AND rf.stage='recovered' AND rf.state='applied') OR `
+	return `(` + recovered + `EXISTS (
 		SELECT 1
 		FROM app_platform_operations r
 		JOIN app_platform_review_plans rp ON rp.id=r.review_plan_id
@@ -44,7 +46,7 @@ func platformResolvedRecoveryPredicate(e migExec) string {
 			AND f.state='applied'
 		)
 		AND ` + restoreReference + `
-	)`
+	))`
 }
 
 func platformUnresolvedOperationPredicate(e migExec) string {

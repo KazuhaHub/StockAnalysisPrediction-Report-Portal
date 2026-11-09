@@ -202,6 +202,9 @@ func (store *Store) DispatchUpdateStartRemoval(
 	if native == nil || store.closing.Load() {
 		return zero, ErrManagedRemovalUnavailable
 	}
+	if control.IsReservedStartRemoval(raw) {
+		return store.RemoveReservedUpdateStart(ctx, raw, signature, native)
+	}
 	tx, facts, err := beginUpdateStartRemoval(
 		ctx, store, raw, signature, descriptor)
 	if err != nil {
@@ -419,6 +422,9 @@ func (store *Store) ReadUpdateStartRemovalReceipt(
 	ctx context.Context,
 	raw, signature, descriptor []byte,
 ) (ManagedRemovalReceipt, error) {
+	if control.IsReservedStartRemoval(raw) {
+		return store.ReadReservedUpdateStartRemovalReceipt(ctx, raw, signature)
+	}
 	tx, facts, err := beginUpdateStartRemoval(
 		ctx, store, raw, signature, descriptor)
 	if err != nil {

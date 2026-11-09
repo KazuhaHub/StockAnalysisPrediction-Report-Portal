@@ -161,7 +161,7 @@ func platformWritableHistoryFromStart(e migExec, b platformBackendHistoryBinding
 	readiness, _ := json.Marshal(start.readiness)
 	if start.plan.TargetReleaseSHA256 != b.release ||
 		start.plan.DataNamespaceID != b.namespace ||
-		start.plan.DataFormat != b.format ||
+		start.plan.targetDataFormat() != b.format ||
 		start.activationObserved != b.observed ||
 		string(readiness) != b.readiness {
 		return zero, fmt.Errorf(
@@ -249,7 +249,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		activeGeneration != plan.TargetGeneration ||
 		activePolicy != plan.TargetPolicyRevision ||
 		activeNamespace != plan.DataNamespaceID ||
-		activeFormat != plan.DataFormat {
+		activeFormat != plan.targetDataFormat() {
 		return zero, fmt.Errorf(
 			"update history active activation release=%s/%s generation=%d/%d policy=%d/%d namespace=%s/%s format=%d/%d: %w",
 			activeRelease, plan.TargetReleaseSHA256, activeGeneration,
@@ -264,8 +264,8 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		WHERE id=? AND origin_installation_id=? AND owner_installation_id=?`,
 		plan.DataNamespaceID, expected.installationID, expected.installationID).
 		Scan(&namespaceState, &namespaceFormat, &writerFence); err != nil ||
-		namespaceState != "active" || namespaceFormat != plan.DataFormat ||
-		writerFence != plan.SourceWriterFence+1 ||
+		namespaceState != "active" || namespaceFormat != plan.targetDataFormat() ||
+		writerFence != plan.activationWriterFence() ||
 		mustPlatformCheckpointInt(running.TargetWriterFence) != writerFence {
 		return zero, fmt.Errorf(
 			"update history namespace state=%s format=%d/%d writer=%d/%d target=%s: %w",
@@ -397,7 +397,7 @@ func loadCompletedUpdateHistorySource(e migExec, expected platformOperationLease
 		projectID:               data.ProjectID,
 		namespaceInode:          data.NamespaceInode,
 		device:                  data.Device,
-		dataFormat:              running.DataFormat,
+		dataFormat:              checkpoint.DataFormat,
 		quotaBytes:              data.QuotaBytes,
 		quotaInodes:             data.QuotaInodes,
 		rootFilesystemUUID:      data.Claim.RootFilesystemUUID,

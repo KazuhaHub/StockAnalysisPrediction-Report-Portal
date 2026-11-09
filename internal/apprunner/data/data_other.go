@@ -47,3 +47,7 @@ func (*Root) ImportCheckpoint(context.Context, RootIdentity, *Root, RootIdentity
 func (*Root) VerifyImportedCheckpoint(context.Context, RootIdentity, *Root, RootIdentity, ImportRequest) (ImportObservation, error) {
 	return ImportObservation{}, ErrUnsupported
 }
+
+func (*Root) ReadSchemaMarker(context.Context, RootIdentity, string, uint32) (SchemaMarkerObservation, error) {
+	return SchemaMarkerObservation{}, ErrMigrationUnsupported
+}

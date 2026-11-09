@@ -12,6 +12,16 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
+// platformUpdateFixtureWritable makes the update fixtures install a writable managed application, the kind that
+// can launch. A test sets it through platformWritableUpdateFixtures.
+var platformUpdateFixtureWritable bool
+
+func platformWritableUpdateFixtures(t *testing.T) {
+	t.Helper()
+	platformUpdateFixtureWritable = true
+	t.Cleanup(func() { platformUpdateFixtureWritable = false })
+}
+
 type platformManagedUpdateReviewFixture struct {
 	server       *Server
 	actor        platformActorSession
@@ -29,7 +39,18 @@ type platformManagedUpdateReviewFixture struct {
 
 func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManagedUpdateReviewFixture {
 	t.Helper()
-	s, actor, lease := platformManagedAccessFixture(t, pg)
+	return platformManagedUpdateProjectionFixtureWith(t, pg, nil)
+}
+
+// platformManagedUpdateProjectionFixtureWith stages the update target with the manifest the mutation
+// returns, after the data schema was set to the installed one.
+func platformManagedUpdateProjectionFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) platformManagedUpdateReviewFixture {
+	t.Helper()
+	access := platformManagedAccessFixture
+	if platformUpdateFixtureWritable {
+		access = platformWritableAccessFixture
+	}
+	s, actor, lease := access(t, pg)
 	var planRaw string
 	var revision, policy, format int64
 	var active, epoch, runtimeID string
@@ -71,6 +92,9 @@ func platformManagedUpdateProjectionFixture(t *testing.T, pg bool) platformManag
 	manifest.Version = "1.0.0-beta.4"
 	manifest.Data.Schema = int(format)
 	manifest.Data.ReadableSchemas = []int{int(format)}
+	if mutate != nil {
+		mutate(&manifest)
+	}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +238,23 @@ func TestManagedRestoreRootResolvesUpdateRuntime(t *testing.T) {
 
 func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
-	fixture := platformManagedUpdateProjectionFixture(t, pg)
+	return platformManagedUpdateOperationFixtureWith(t, pg, nil)
+}
+
+// lastPlatformUpdateFixture is the review fixture the most recent update operation fixture was built from.
+var lastPlatformUpdateFixture platformManagedUpdateReviewFixture
+
+func platformManagedUpdateOperationFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease) {
+	t.Helper()
+	fixture := platformManagedUpdateProjectionFixtureWith(t, pg, mutate)
+	lastPlatformUpdateFixture = fixture
+	return fixture.server, platformInsertManagedUpdateOperation(t, fixture, platformFixtureID(6110), platformFixtureID(6111), "")
+}
+
+// platformInsertManagedUpdateOperation admits a queued managed update for the fixture's release. A non-empty
+// recovers makes it the retry of that failed update.
+func platformInsertManagedUpdateOperation(t *testing.T, fixture platformManagedUpdateReviewFixture, planID, operationID, recovers string) platformOperationLease {
+	t.Helper()
 	projection, err := platformBuildManagedUpdateProjection(
 		fixture.server.st.poolExec(), fixture.installation, fixture.source,
 		fixture.revision, fixture.policy, fixture.format,
@@ -224,6 +264,7 @@ func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, plat
 	if err != nil {
 		t.Fatal(err)
 	}
+	projection.RecoversOperationID = recovers
 	raw, err := json.Marshal(projection)
 	if err != nil {
 		t.Fatal(err)
@@ -244,10 +285,9 @@ func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, plat
 			&now); err != nil {
 		t.Fatal(err)
 	}
-	planID, operationID := platformFixtureID(6110), platformFixtureID(6111)
 	digest := platformDigest(raw)
-	idempotency, request := platformDigest([]byte("managed-update-key")),
-		platformDigest([]byte("managed-update-request"))
+	idempotency, request := platformDigest([]byte("managed-update-key"+operationID)),
+		platformDigest([]byte("managed-update-request"+operationID))
 	mustExec(t, fixture.server.st, `INSERT INTO app_platform_review_plans(
 		id,installation_id,app_id,publisher_id,action,source_release_sha256,
 		target_release_sha256,installation_revision,policy_revision,
@@ -272,7 +312,7 @@ func platformManagedUpdateOperationFixture(t *testing.T, pg bool) (*Server, plat
 		operationID, fixture.installation, planID, scope, idempotency,
 		request, projection.SourceGeneration, projection.TargetGeneration,
 		projection.ControllerEpoch, now, now)
-	return fixture.server, platformOperationLease{
+	return platformOperationLease{
 		id: operationID, installationID: fixture.installation,
 		controllerEpoch: projection.ControllerEpoch,
 	}
@@ -391,7 +431,12 @@ func TestPlatformManagedUpdateSchedulerClaimsBeforeRemoval(t *testing.T) {
 
 func platformManagedUpdateQuiesceFixture(t *testing.T, pg bool) (*Server, platformOperationLease, platformManagedUpdateQuiesceIntent, platformRuntimeEndpoint) {
 	t.Helper()
-	s, operation := platformManagedUpdateOperationFixture(t, pg)
+	return platformManagedUpdateQuiesceFixtureWith(t, pg, nil)
+}
+
+func platformManagedUpdateQuiesceFixtureWith(t *testing.T, pg bool, mutate func(*appplatform.Manifest)) (*Server, platformOperationLease, platformManagedUpdateQuiesceIntent, platformRuntimeEndpoint) {
+	t.Helper()
+	s, operation := platformManagedUpdateOperationFixtureWith(t, pg, mutate)
 	selected, err := s.claimNextPlatformManagedUpdate(
 		context.Background(), platformFixtureID(6120))
 	if err != nil || selected.lease.id != operation.id {

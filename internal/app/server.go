@@ -29,6 +29,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -52,14 +53,22 @@ type Server struct {
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
 	// transport.
 	platformImportCheckpoint platformImportCheckpointExecutor
+	// platformMigration is the runner seam for the migration lifecycle; nil selects the transport.
+	platformMigration platformMigrationRunner
 	// platformReadStartReceipt is the runner seam for the restore-start read-receipt that recovery uses to
 	// settle an unknown resume start; nil selects the transport.
 	platformReadStartReceipt platformStartReceiptReader
+	// platformSettleStart is the runner seam of the settlement of an orphaned update-start; nil selects the
+	// transport.
+	platformSettleStart platformSettleStartRunner
 	// platformObserveRuntime and platformRecoveryTarget are the runner seams of recovery enrollment
 	// and of the resume review; nil selects the local socket. Neither accepts anything a request
 	// carries: both read what the runner itself reports.
 	platformObserveRuntime func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error)
 	platformRecoveryTarget func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error)
+	// platformReadManagedRuntime is the runner seam of the profile read behind a managed review and commit;
+	// nil selects the local socket.
+	platformReadManagedRuntime func(context.Context, platformRuntimeEndpoint, control.Authority) (platformManagedRuntimeObserved, error)
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

@@ -128,7 +128,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 	manifest, err := appplatform.ParseDescriptor(targetDescriptor)
 	if err != nil || manifest.SHA256 != plan.TargetReleaseSHA256 ||
 		manifest.Manifest.Backend == nil ||
-		int64(manifest.Manifest.Data.Schema) != plan.DataFormat {
+		int64(manifest.Manifest.Data.Schema) != plan.targetDataFormat() {
 		return zero, errAppPlatformStageEvidence
 	}
 	if source.runtimeTarget == nil {
@@ -202,7 +202,7 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		AND readiness_evidence=? AND observed_ms=?`,
 		now, current.start.resourceID, lease.installationID,
 		plan.TargetReleaseSHA256, lease.snapshot.Generation,
-		plan.TargetPolicyRevision, plan.DataNamespaceID, plan.DataFormat,
+		plan.TargetPolicyRevision, plan.DataNamespaceID, plan.targetDataFormat(),
 		mustMarshalString(current.start.readiness), current.start.activationObserved)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
@@ -214,16 +214,23 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 		targetWriterFence != plan.SourceWriterFence {
 		return zero, errAppPlatformStageEvidence
 	}
+	// The namespace takes the fence the target started under and, when the data was migrated, the format
+	// the migration produced.
 	changed, err = e.exec(`UPDATE app_platform_data_namespaces
-		SET writer_fence=writer_fence+1,revision=revision+1,updated_ms=?
+		SET writer_fence=?,data_format=?,revision=revision+1,updated_ms=?
 		WHERE id=? AND owner_installation_id=? AND state='active'
-		AND writer_fence=?`,
-		now, plan.DataNamespaceID, lease.installationID,
-		plan.SourceWriterFence)
+		AND writer_fence=? AND data_format=?`,
+		plan.activationWriterFence(), plan.targetDataFormat(), now,
+		plan.DataNamespaceID, lease.installationID,
+		plan.SourceWriterFence, plan.DataFormat)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
 	currentPhase := "ready"
+	if plan.RecoversOperationID != "" {
+		// A retry takes the installation out of the recovery the failed update left it in.
+		currentPhase = "recovery_required"
+	}
 	currentGeneration := plan.SourceGeneration
 	if platformSameReleaseLifecycle(lease.snapshot.Action) {
 		currentPhase = "pending"
@@ -293,6 +300,12 @@ func (s *Server) commitPlatformUpdateStartActivation(ctx context.Context, lease 
 			e, lease.installationID)
 		if err != nil || audience != plan.AudienceSHA256 {
 			return zero, errAppPlatformStageEvidence
+		}
+	}
+	if plan.RecoversOperationID != "" {
+		// The retry resolves the failed update it recovers and every failed retry before it.
+		if err := markPlatformRecovered(e, lease, runtime.id, plan.RecoversOperationID, now); err != nil {
+			return zero, err
 		}
 	}
 	model, err := appplatform.OperationFromSnapshot(lease.snapshot)

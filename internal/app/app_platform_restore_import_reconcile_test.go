@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -154,11 +155,43 @@ func TestRestoreImportAttemptOutlivesTheRunnerBound(t *testing.T) {
 	_ = commit
 }
 
-// An attempt whose wait ran out while the runner was still working on the import has not failed.
+// expiringContext ends with context.DeadlineExceeded when the test says so, not when a clock does.
+type expiringContext struct {
+	context.Context
+	done chan struct{}
+	once sync.Once
+}
+
+func newExpiringContext(parent context.Context) (*expiringContext, context.CancelFunc) {
+	c := &expiringContext{Context: parent, done: make(chan struct{})}
+	stop := context.AfterFunc(parent, func() { c.once.Do(func() { close(c.done) }) })
+	return c, func() { stop() }
+}
+func (c *expiringContext) expire()               { c.once.Do(func() { close(c.done) }) }
+func (c *expiringContext) Done() <-chan struct{} { return c.done }
+func (c *expiringContext) Err() error {
+	select {
+	case <-c.done:
+		if err := c.Context.Err(); err != nil {
+			return err
+		}
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
+// An attempt whose wait ran out while the runner was still working on the import has not failed. The attempt is ended
+// by the test at the moment the import is blocked in the runner, so no clock decides whether the work before it fit.
 func TestRestoreImportAttemptThatRunsOutOfTimeIsNotAFailedAttempt(t *testing.T) {
-	previous := platformImportAttemptTimeout
-	platformImportAttemptTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { platformImportAttemptTimeout = previous })
+	previous := platformImportAttemptContext
+	var current *expiringContext
+	platformImportAttemptContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+		var cancel context.CancelFunc
+		current, cancel = newExpiringContext(parent)
+		return current, cancel
+	}
+	t.Cleanup(func() { platformImportAttemptContext = previous })
 	f := platformRestoreImportFixture(t, false)
 	commit := f.reviewAndConsume(t)
 	worker, err := newPlatformWritableInstallScheduler(f.s, platformRestoreEndpointFixture(), platformFixtureID(5303), time.Second)
@@ -166,6 +199,7 @@ func TestRestoreImportAttemptThatRunsOutOfTimeIsNotAFailedAttempt(t *testing.T) 
 		t.Fatal(err)
 	}
 	f.executor.block, f.executor.readErr = true, errors.New("import still running")
+	f.executor.onBlock = func() { current.expire() }
 	for i := 0; i < platformInstallAttemptLimit*3; i++ {
 		_ = worker.tick(context.Background())
 	}

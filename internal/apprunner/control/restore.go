@@ -14,6 +14,7 @@ import (
 
 const RestoreFormat = "portal.runner.data-restore-command/1-dev.1"
 const restoreSignaturePurpose = "portal.app/runner-data-restore-command/v1"
+const restoreReadPurpose = "portal.app/runner-data-restore-read/v1"
 const restoreEffectPurpose = "portal.app/runner-data-restore-effect/v1"
 const maxRestoreArchiveBytes int64 = 512 << 20
 
@@ -154,7 +155,30 @@ func VerifyRestoreSettlement(raw, signature []byte, authority Authority, nowMS i
 	return verifyRestore(raw, signature, authority, nowMS, true)
 }
 
+// VerifyRestoreRead checks a read-back command. A read is signed under its own purpose, so a captured
+// read cannot be submitted as an execute and an execute signature is not a read. It is not bound by the
+// expiry that governs dispatch.
+func VerifyRestoreRead(raw, signature []byte, authority Authority, nowMS int64) (VerifiedRestoreCommand, error) {
+	return verifyRestorePurpose(raw, signature, authority, nowMS, true, restoreReadPurpose)
+}
+
+// SignRestoreRead signs the exact bytes of a restore command for a read-back.
+func SignRestoreRead(raw []byte, key ed25519.PrivateKey, authority Authority, nowMS int64) ([]byte, error) {
+	if len(key) != ed25519.PrivateKeySize {
+		return nil, ErrInvalidCommand
+	}
+	signature := ed25519.Sign(key, frame(restoreReadPurpose, raw))
+	if _, err := VerifyRestoreRead(raw, signature, authority, nowMS); err != nil {
+		return nil, err
+	}
+	return signature, nil
+}
+
 func verifyRestore(raw, signature []byte, authority Authority, nowMS int64, settling bool) (VerifiedRestoreCommand, error) {
+	return verifyRestorePurpose(raw, signature, authority, nowMS, settling, restoreSignaturePurpose)
+}
+
+func verifyRestorePurpose(raw, signature []byte, authority Authority, nowMS int64, settling bool, purpose string) (VerifiedRestoreCommand, error) {
 	fail := func() (VerifiedRestoreCommand, error) { return VerifiedRestoreCommand{}, ErrInvalidCommand }
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 || nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return fail()
@@ -184,7 +208,7 @@ func verifyRestore(raw, signature []byte, authority Authority, nowMS int64, sett
 	if err != nil || digest != c.PayloadSHA256 {
 		return fail()
 	}
-	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(restoreSignaturePurpose, raw), signature) {
+	if !ed25519.Verify(ed25519.PublicKey(authority.PublicKey), frame(purpose, raw), signature) {
 		return fail()
 	}
 	return VerifiedRestoreCommand{command: c}, nil

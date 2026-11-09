@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "e956d5b4a12ad4752892a1c6a426c8d3ba1f55770536e40eeaabbc4f9de935f8"
+const descriptorContractSHA256 = "189f99c6ff4d59d277797afad80718dd2a24214b63e62cb4f24e47d22cdc9479"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -56,9 +56,16 @@ type Capabilities struct {
 	Optional []string `json:"optional"`
 }
 type DataCompatibility struct {
-	Schema          int   `json:"schema"`
-	ReadableSchemas []int `json:"readable_schemas"`
-	WritesOnStartup bool  `json:"writes_on_startup"`
+	Schema          int             `json:"schema"`
+	ReadableSchemas []int           `json:"readable_schemas"`
+	WritesOnStartup bool            `json:"writes_on_startup"`
+	Migrations      []DataMigration `json:"migrations,omitempty"`
+}
+type DataMigration struct {
+	From             int      `json:"from"`
+	To               int      `json:"to"`
+	Entrypoint       []string `json:"entrypoint"`
+	WallClockSeconds *int     `json:"wall_clock_seconds,omitempty"`
 }
 type AppDisplay struct {
 	Icon  string           `json:"icon"`
@@ -88,6 +95,11 @@ const maxRouteQueryInteger = 1000000000
 const maxRouteQueryValues = 16
 const maxDescriptorRoutes = 32
 const maxDescriptorReadableSchemas = 32
+const maxDescriptorMigrations = 8
+const maxMigrationEntrypointArgs = 16
+const maxMigrationEntrypointBytes = 256
+const minMigrationWallClockSeconds = 1
+const maxMigrationWallClockSeconds = 600
 const minDescriptorDataSchema = 1
 const maxDescriptorDataSchema = 1000000
 const maxDescriptorPathBytes = 256
