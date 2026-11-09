@@ -18,6 +18,12 @@ const (
 	MaxImageMetadataBytes          = 1 << 20
 )
 
+// Descriptor bounds, exported for the runner that enforces them.
+const (
+	MaxImageLayers                 = maxImageLayers
+	MaxImageLayerUncompressedBytes = maxImageLayerUncompressedBytes
+)
+
 var ErrInvalidImage = errors.New("invalid managed image content")
 
 // ImageBlobKind names the role a blob plays in an image. It is carried by the
