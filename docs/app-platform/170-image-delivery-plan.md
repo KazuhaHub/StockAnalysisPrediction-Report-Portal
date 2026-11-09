@@ -813,8 +813,8 @@ run had started the exact Scheduled Digest image through a real root runner afte
    - while the app runs, the parent inspects the daemon and then releases the child, which uninstalls the app.
 3. **Asserted:** the effect row and the runner's receipt (`loaded`, not `present`, so the image was absent), image
    ID, store and the claim's manifest and config digests against the package; every blob stored over the control
-   socket; readiness evidence on the activation; the Scheduled Digest task answered through the platform path
-   that the exact-image test already uses; on the daemon, the stored image's ID, platform, layer chain and the
+   socket; readiness evidence on the activation; the running app answering through the platform (as built, a signed
+   session request, see the implementation notes; the plan had a scheduled digest task); on the daemon, the stored image's ID, platform, layer chain and the
    absence of any name; the store changed by exactly that image; every container created from it created from
    the image ID, one running; no image `pull`, `tag`, `untag`, `push` or `import` event while the scenario ran,
    with a watcher proven live by a container creation event.
@@ -851,10 +851,36 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   (`app_platform_image_delivery_evidence_unit_test.go`), and the probe's own acceptance of the run (markers and
   true-valued evidence, production profile required) has python unit tests. The refactor of the runtime binding
   seeding into `bindPlatformFixtureRuntime` is shared with the existing child.
-- **Not proven by this scenario:** PKG-08 against a real runner (above); the containerd store (CI uses the
-  classic store, so that branch stays covered by unit tests and the 3a native tests); a prune between the load
-  and the start; the fresh-host managed restore of `DATA-05`; PostgreSQL.
-- **No production change, no schema change.** The scenario exercised existing code only.
+- **Result.** Run [42716037743](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42716037743)
+  (workflow dispatch on the branch; both jobs passed; the quota job's probe step took about three minutes, the job
+  about nine). Artifact `managed-image-real-runner`. The evidence for that run: the package's image (config digest
+  `cb98d4d3...`, one 6 MiB layer, three blobs) was removed from a store of nine images; the production-profile
+  runner reported `images=production`; Portal stored the package (HTTP 200), uploaded three blobs, executed
+  `load-image` three times (the first answered `blobs_missing`, as designed), and the runner's receipt was `loaded`
+  with store `classic`; the activation carried readiness evidence; the daemon then held exactly one new image, with
+  no tag and no digest reference, its `RootFS.Layers` equal to the descriptor's `diff_id` list, and one running
+  container created from that image ID; the event stream showed one image `load`, one container `create` and no
+  pull; the app answered `GET /v1/digest` with status 200; the uninstall removed the container.
+- **Deviation from the plan: the answer is a session request, not a task.** The first design ran the exact-image test's
+  Scheduled Digest task. It failed with `backend_preflight_unavailable`. For generation 1, `preparePlatformServiceTask`
+  reads the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
+  `portal.managed-install-review` and exactly three non-load effects. An app installed by the install worker uses
+  `portal.writable-install-review`, so no service task (digest, event or backend) can run for it at generation 1;
+  the update acceptance runs them at generation 2. This is an existing property of the code, not something the
+  image delivery changed, and it was not touched. It is reported as a finding: a freshly installed Scheduled Digest
+  cannot run its scheduled task until it is updated, unless that is intended. The scenario answers instead with
+  `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair acceptances use.
+- **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
+  API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
+  "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker
+  accepts the bare form). Every daemon-side comparison now goes through `imageDeliveryDaemonID`, with a unit test
+  that fails if a bare digest hides a present image.
+- **Not proven by this scenario:** PKG-08 against a real runner (above); the same scenario through the catalogue
+  (the catalogue install is the offline install by construction, and is proven on real bytes with fakes); the
+  containerd store (CI uses the classic store, so that branch stays covered by unit tests and the 3a native
+  tests); a prune between the load and the start; the fresh-host managed restore of `DATA-05`; PostgreSQL.
+- **No production change, no schema change.** The scenario exercised existing code only. The test-side changes are
+  an options parameter on the service fixture and `bindPlatformFixtureRuntime`, shared with the existing child.
 
 CI status of this section is recorded in `06-acceptance.md` and the evidence file; neither claims more than the run
 named there.
