@@ -127,9 +127,9 @@ func InspectBackendImage(ctx context.Context, socket string, raw []byte, release
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: probeTimeout, DialContext: dockerDialer(socket)}
-	defer transport.CloseIdleConnections()
-	return inspectBackendImageHTTP(ctx, daemonClient(transport), raw, releaseSHA256, runtime.GOARCH, policy)
+	client, closeClient := newDockerClient(socket, probeTimeout, probeTimeout)
+	defer closeClient()
+	return inspectBackendImageHTTP(ctx, client, raw, releaseSHA256, runtime.GOARCH, policy)
 }
 
 func inspectBackendImageHTTP(ctx context.Context, client *http.Client, raw []byte, releaseSHA256, arch string, policy ImagePolicy) (BackendImageInspection, error) {

@@ -4,7 +4,6 @@ package driver
 
 import (
 	"context"
-	"net/http"
 	"runtime"
 )
 
@@ -24,9 +23,8 @@ func (r *CandidateRuntime) LoadImage(ctx context.Context, request LoadImageReque
 		return LoadImageSnapshot{}, ErrInvalidResponse
 	}
 	// The load streams a large body, so the client has no overall timeout: the context bounds it.
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: ImageLoadTimeout, DialContext: dockerDialer(socket)}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: allowListTransport{next: transport}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	client, closeClient := newDockerClient(socket, ImageLoadTimeout, 0)
+	defer closeClient()
 	return loadImageHTTP(ctx, client, request, runtime.GOARCH)
 }
 

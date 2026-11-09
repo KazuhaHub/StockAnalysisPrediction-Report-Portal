@@ -23,9 +23,9 @@ func nativeLoadClient(t *testing.T) *http.Client {
 	if socket == "" {
 		t.Skip("explicit disposable Linux Docker acceptance socket not set")
 	}
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: ImageLoadTimeout, DialContext: dockerDialer(socket)}
-	t.Cleanup(transport.CloseIdleConnections)
-	return &http.Client{Transport: allowListTransport{next: transport}}
+	client, closeClient := newDockerClient(socket, ImageLoadTimeout, 0)
+	t.Cleanup(closeClient)
+	return client
 }
 
 // TestNativeLoadImageTwoLayerImageOnTheDaemonStore loads a real two-layer image built by the test into the
@@ -43,7 +43,11 @@ func TestNativeLoadImageTwoLayerImageOnTheDaemonStore(t *testing.T) {
 	}
 	store := imageStoreFromInfo(info)
 	expected := ExpectedImageID(store, f.entry)
-	t.Logf("daemon image store: %s, expected image ID %s", store, expected)
+	var version versionResponse
+	if err := readJSON(ctx, client, "/version", &version); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("daemon version %s (API %s), image store %s, driver %s, expected image ID %s", version.Version, version.APIVersion, store, info.Driver, expected)
 	t.Cleanup(func() { _ = removeLoadedImage(context.Background(), client, expected) })
 	before, err := readImageList(ctx, client)
 	if err != nil {
@@ -51,7 +55,7 @@ func TestNativeLoadImageTwoLayerImageOnTheDaemonStore(t *testing.T) {
 	}
 	got, err := loadImageHTTP(ctx, client, f.request(), runtime.GOARCH)
 	if err != nil || got.State != LoadStateLoaded || got.ImageID != expected || got.Store != store {
-		t.Fatalf("native load: %+v %v", got, err)
+		t.Fatalf("native load: %+v %v (daemon said: %s)", got, err, got.DaemonDetail)
 	}
 	after, err := readImageList(ctx, client)
 	if err != nil || !sameImagesExcept(before, after, expected) {
@@ -60,7 +64,7 @@ func TestNativeLoadImageTwoLayerImageOnTheDaemonStore(t *testing.T) {
 	if tags := after[expected]; tags != "[]" && tags != "null" {
 		t.Fatalf("a loaded image carries names: %s", tags)
 	}
-	inspected, err := inspectBackendImageHTTP(ctx, daemonClient(allowListTransport{next: client.Transport.(allowListTransport).next}), f.raw, f.parsed.SHA256, runtime.GOARCH, ImagePolicy{})
+	inspected, err := inspectBackendImageHTTP(ctx, client, f.raw, f.parsed.SHA256, runtime.GOARCH, ImagePolicy{})
 	if err != nil || inspected.ImageID != expected {
 		t.Fatalf("production inspection of the loaded image: %+v %v", inspected, err)
 	}
@@ -82,7 +86,7 @@ func TestNativeRetagByAPublisherLayoutIsDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 	var archive bytes.Buffer
-	if err := writeLoadArchive(&archive, plan, f.source); err != nil {
+	if err := writeLoadArchive(&archive, plan, f.source, ImageStoreContainerd); err != nil {
 		t.Fatal(err)
 	}
 	// Rewrite the runner-written index with a name annotation, as a hostile publisher layout would carry.

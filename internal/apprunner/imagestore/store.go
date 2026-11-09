@@ -7,13 +7,16 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"hash"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -56,7 +59,18 @@ type Store struct {
 	used     int64
 	active   map[string]bool // operation/digest pairs with an upload in flight
 	sessions int
+	// opBytes is the single owner of the byte accounting: used is always the sum of it. Every charge and refund
+	// goes through charge and refund, keyed by operation.
+	opBytes    map[string]int64
+	opSessions map[string]int
+	pins       map[string]int
+	lastUse    map[string]time.Time
 }
+
+const refusalsDir = ".refusals"
+
+// MaxRefusalRecords bounds the durable refusal records. They are tiny and exempt from eviction.
+const MaxRefusalRecords = 1024
 
 // Open validates the scratch root and removes everything left in it: scratch never outlives the runner process,
 // and a load that was interrupted learns of the loss through its read-back and re-uploads.
@@ -73,11 +87,95 @@ func Open(root string) (*Store, error) {
 		return nil, ErrUnsafeRoot
 	}
 	for _, entry := range entries {
+		// Refusal records outlive eviction and a restart: they name a blob that can never pass, which is a fact
+		// about the bytes the sender holds, not about scratch.
+		if entry.Name() == refusalsDir {
+			continue
+		}
 		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
 			return nil, ErrUnsafeRoot
 		}
 	}
-	return &Store{root: root, limit: MaxScratchBytes, active: map[string]bool{}}, nil
+	if err := os.Mkdir(filepath.Join(root, refusalsDir), 0700); err != nil && !os.IsExist(err) {
+		return nil, ErrUnsafeRoot
+	}
+	return &Store{root: root, limit: MaxScratchBytes, active: map[string]bool{}, opBytes: map[string]int64{},
+		opSessions: map[string]int{}, pins: map[string]int{}, lastUse: map[string]time.Time{}}, nil
+}
+
+// charge and refund are the only places the accounting changes.
+func (s *Store) charge(operation string, n int64) {
+	s.mu.Lock()
+	s.opBytes[operation] += n
+	s.used += n
+	s.mu.Unlock()
+}
+
+func (s *Store) refund(operation string, n int64) {
+	s.mu.Lock()
+	s.refundLocked(operation, n)
+	s.mu.Unlock()
+}
+
+func (s *Store) refundLocked(operation string, n int64) {
+	if n > s.opBytes[operation] {
+		n = s.opBytes[operation]
+	}
+	s.opBytes[operation] -= n
+	s.used -= n
+}
+
+func (s *Store) touch(operation string) {
+	s.mu.Lock()
+	s.lastUse[operation] = time.Now()
+	s.mu.Unlock()
+}
+
+// Hold keeps an operation's scratch from being evicted while a load reads it.
+func (s *Store) Hold(operation string) (release func()) {
+	s.mu.Lock()
+	s.pins[operation]++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			if s.pins[operation]--; s.pins[operation] <= 0 {
+				delete(s.pins, operation)
+			}
+			s.mu.Unlock()
+		})
+	}
+}
+
+// reserve charges n bytes to an operation. When the cap would be exceeded it first evicts whole operation
+// directories, least recently used first, that have no upload session and are not held by a load. Eviction is safe
+// because an unknown load can always re-upload what it lost through blobs_missing.
+func (s *Store) reserve(operation string, n int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.used+n > s.limit {
+		var victims []string
+		for op := range s.opBytes {
+			if op != operation && s.opSessions[op] == 0 && s.pins[op] == 0 {
+				victims = append(victims, op)
+			}
+		}
+		if len(victims) == 0 {
+			return errors.New("scratch full")
+		}
+		sort.Slice(victims, func(i, j int) bool { return s.lastUse[victims[i]].Before(s.lastUse[victims[j]]) })
+		victim := victims[0]
+		if err := os.RemoveAll(filepath.Join(s.root, victim)); err != nil {
+			return errors.New("scratch full")
+		}
+		s.used -= s.opBytes[victim]
+		delete(s.opBytes, victim)
+		delete(s.lastUse, victim)
+	}
+	s.opBytes[operation] += n
+	s.used += n
+	return nil
 }
 
 func (s *Store) operationDir(operation string) (string, error) {
@@ -109,7 +207,82 @@ func (s *Store) Used() int64 {
 	return s.used
 }
 
-// Has reports whether a complete, verified blob is stored for the operation.
+// record is the verification record written next to a blob after it passed its checks. A blob counts for a role
+// only when its record equals that role.
+type record struct {
+	Kind              string `json:"kind"`
+	MediaType         string `json:"media_type"`
+	DiffID            string `json:"diff_id"`
+	UncompressedBytes int64  `json:"uncompressed_bytes"`
+	SHA256            string `json:"sha256"`
+}
+
+func recordFor(blob appplatform.ImageBlob) record {
+	return record{Kind: string(blob.Kind), MediaType: blob.MediaType, DiffID: blob.DiffID, UncompressedBytes: blob.UncompressedBytes, SHA256: blob.Digest}
+}
+
+func (s *Store) readRecord(operation, digest string) (record, bool) {
+	dir, err := s.operationDir(operation)
+	if err != nil || !digestPattern.MatchString(digest) {
+		return record{}, false
+	}
+	file, err := os.OpenFile(filepath.Join(dir, digest+".rec"), os.O_RDONLY|noFollow, 0)
+	if err != nil {
+		return record{}, false
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, 4097))
+	var r record
+	if err != nil || len(raw) > 4096 || json.Unmarshal(raw, &r) != nil {
+		return record{}, false
+	}
+	return r, true
+}
+
+// Verified reports whether the operation holds this blob in exactly this role: the file is there and its
+// verification record equals the expected kind, media type, diff_id, uncompressed size and digest.
+func (s *Store) Verified(operation string, expected appplatform.ImageBlob) bool {
+	if !s.Has(operation, expected.Digest) {
+		return false
+	}
+	r, ok := s.readRecord(operation, expected.Digest)
+	return ok && r == recordFor(expected)
+}
+
+// hasKind is Verified for a role whose media type is not yet known (the manifest and the config).
+func (s *Store) hasKind(operation, digest string, kind appplatform.ImageBlobKind) bool {
+	if !s.Has(operation, digest) {
+		return false
+	}
+	r, ok := s.readRecord(operation, digest)
+	return ok && r.Kind == string(kind) && r.SHA256 == digest
+}
+
+func writeRecord(dir string, blob appplatform.ImageBlob) error {
+	raw, err := json.Marshal(recordFor(blob))
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, blob.Digest+".rec.tmp")
+	file, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|noFollow, 0600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(raw); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, blob.Digest+".rec"))
+}
+
+// Has reports whether a complete blob file is stored for the operation. It says nothing about its role.
 func (s *Store) Has(operation, digest string) bool {
 	dir, err := s.operationDir(operation)
 	if err != nil || !digestPattern.MatchString(digest) {
@@ -125,6 +298,7 @@ func (s *Store) Open(operation, digest string) (io.ReadCloser, error) {
 	if err != nil || !digestPattern.MatchString(digest) {
 		return nil, ErrInvalidBlob
 	}
+	s.touch(operation)
 	file, err := os.OpenFile(filepath.Join(dir, digest), os.O_RDONLY|noFollow, 0)
 	if err != nil {
 		return nil, err
@@ -152,14 +326,22 @@ func (o OperationSource) Open(digest string) (io.ReadCloser, error) {
 	return o.store.Open(o.operation, digest)
 }
 
-// Missing lists the blobs of an image entry the operation's scratch does not yet hold: the manifest and config
-// first, then, once the manifest is readable, the layers it names.
+// Verified tells the driver whether a blob is held in exactly the role the plan gives it.
+func (o OperationSource) Verified(expected appplatform.ImageBlob) bool {
+	return o.store.Verified(o.operation, expected)
+}
+
+// Missing lists the blobs of an image entry the operation's scratch does not hold in their role: the manifest and
+// config first, then, once the manifest is readable, the layers it names. A blob stored under another kind, or whose
+// record differs from what the plan says, is missing for that role and must be uploaded again under the right kind.
 func (s *Store) Missing(operation string, entry appplatform.BackendImage) []string {
+	s.touch(operation)
 	var missing []string
-	for _, digest := range []string{entry.ManifestDigest, entry.ConfigDigest} {
-		if !s.Has(operation, digest) {
-			missing = append(missing, digest)
-		}
+	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) {
+		missing = append(missing, entry.ManifestDigest)
+	}
+	if !s.hasKind(operation, entry.ConfigDigest, appplatform.ImageBlobConfig) {
+		missing = append(missing, entry.ConfigDigest)
 	}
 	if len(missing) != 0 {
 		return missing
@@ -181,61 +363,128 @@ func (s *Store) Missing(operation string, entry appplatform.BackendImage) []stri
 		// A stored manifest or config that no longer matches the entry is as good as absent.
 		return []string{entry.ManifestDigest, entry.ConfigDigest}
 	}
+	if !s.Verified(operation, plan.Manifest) {
+		missing = append(missing, entry.ManifestDigest)
+	}
+	if !s.Verified(operation, plan.Config) {
+		missing = append(missing, entry.ConfigDigest)
+	}
 	for _, layer := range plan.Layers {
-		if !s.Has(operation, layer.Digest) {
+		if !s.Verified(operation, layer) {
 			missing = append(missing, layer.Digest)
 		}
 	}
 	return missing
 }
 
-// RemoveOperation deletes an operation's scratch once its load has settled. Removing nothing is not an error.
+// Refused reports whether the runner already refused, for good, a blob this image needs in its role: an upload
+// that failed verification on a complete stream. Such a blob can never pass, so a load that waits for it would
+// wait for ever.
+func (s *Store) Refused(operation string, entry appplatform.BackendImage) bool {
+	if s.refusedBlob(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) || s.refusedBlob(operation, entry.ConfigDigest, appplatform.ImageBlobConfig) {
+		return true
+	}
+	if !s.hasKind(operation, entry.ManifestDigest, appplatform.ImageBlobManifest) || !s.hasKind(operation, entry.ConfigDigest, appplatform.ImageBlobConfig) {
+		return false
+	}
+	read := func(digest string) []byte {
+		file, err := s.Open(operation, digest)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+		raw, _ := io.ReadAll(io.LimitReader(file, appplatform.MaxImageMetadataBytes+1))
+		return raw
+	}
+	plan, err := appplatform.PlanImage(entry, read(entry.ManifestDigest), read(entry.ConfigDigest))
+	if err != nil {
+		return false
+	}
+	for _, layer := range plan.Layers {
+		if s.refusedBlob(operation, layer.Digest, appplatform.ImageBlobLayer) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) refusalPath(operation, digest string, kind appplatform.ImageBlobKind) string {
+	return filepath.Join(s.root, refusalsDir, operation+"."+digest+"."+string(kind))
+}
+
+func (s *Store) refusedBlob(operation, digest string, kind appplatform.ImageBlobKind) bool {
+	if !uuidPattern.MatchString(operation) || !digestPattern.MatchString(digest) {
+		return false
+	}
+	info, err := os.Lstat(s.refusalPath(operation, digest, kind))
+	return err == nil && info.Mode().IsRegular()
+}
+
+// recordRefusal stores the typed reason a blob can never pass, outside the evictable scratch.
+func (s *Store) recordRefusal(operation string, blob appplatform.ImageBlob, reason Refusal) {
+	switch reason {
+	case RefusalDigestMismatch, RefusalDiffIDMismatch, RefusalUncompressedBound, RefusalMediaType:
+	default:
+		return
+	}
+	dir := filepath.Join(s.root, refusalsDir)
+	if entries, err := os.ReadDir(dir); err == nil && len(entries) >= MaxRefusalRecords {
+		sort.Slice(entries, func(i, j int) bool {
+			a, _ := entries[i].Info()
+			b, _ := entries[j].Info()
+			return a != nil && b != nil && a.ModTime().Before(b.ModTime())
+		})
+		_ = os.Remove(filepath.Join(dir, entries[0].Name()))
+	}
+	_ = os.WriteFile(s.refusalPath(operation, blob.Digest, blob.Kind), []byte(reason), 0600)
+}
+
+func (s *Store) clearRefusals(operation string) {
+	matches, _ := filepath.Glob(filepath.Join(s.root, refusalsDir, operation+".*"))
+	for _, m := range matches {
+		_ = os.Remove(m)
+	}
+}
+
+// RemoveOperation deletes an operation's scratch once its load has settled. Removing nothing is not an error. An
+// operation with an upload in flight is left alone: the upload owns its bytes until it ends.
 func (s *Store) RemoveOperation(operation string) error {
 	dir, err := s.operationDir(operation)
 	if err != nil {
 		return err
 	}
-	size := dirSize(dir)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.opSessions[operation] > 0 {
+		return ErrScratchBusy
+	}
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	s.used -= size
-	if s.used < 0 {
-		s.used = 0
-	}
-	s.mu.Unlock()
+	s.refundLocked(operation, s.opBytes[operation])
+	delete(s.opBytes, operation)
+	delete(s.lastUse, operation)
+	s.clearRefusals(operation)
 	return nil
-}
-
-func dirSize(dir string) int64 {
-	var total int64
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return 0
-	}
-	for _, entry := range entries {
-		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() {
-			total += info.Size()
-		}
-	}
-	return total
 }
 
 // Upload is one blob being received. It is not safe for concurrent use.
 type Upload struct {
-	store      *Store
-	key        string
-	blob       appplatform.ImageBlob
-	final      string
-	partial    string
-	file       *os.File
-	written    int64
-	whole      hash.Hash
-	layer      *layerSink
-	released   bool
-	closed     bool
-	chargedAdd int64
+	store     *Store
+	key       string
+	blob      appplatform.ImageBlob
+	final     string
+	partial   string
+	file      *os.File
+	written   int64
+	whole     hash.Hash
+	layer     *layerSink
+	operation string
+	released  bool
+	closed    bool
+	// reservedLeft is the part of the reservation not yet written: the only thing an abort or a discard returns
+	// beyond the bytes the partial holds, so a refund can never exceed what was charged.
+	reservedLeft int64
 }
 
 // Begin starts or resumes an upload. A blob already stored is reported as complete. A resume offset must equal the
@@ -246,6 +495,9 @@ func (s *Store) Begin(operation string, blob appplatform.ImageBlob, resume int64
 		return nil, 0, false, RefusalNone, ErrInvalidBlob
 	}
 	if refusal := boundsRefusal(blob); refusal != RefusalNone {
+		if uuidPattern.MatchString(operation) {
+			s.recordRefusal(operation, blob, refusal)
+		}
 		return nil, 0, false, refusal, nil
 	}
 	dir, err := s.ensureOperationDir(operation)
@@ -260,15 +512,23 @@ func (s *Store) Begin(operation string, blob appplatform.ImageBlob, resume int64
 	}
 	s.active[key] = true
 	s.sessions++
+	s.opSessions[operation]++
+	s.lastUse[operation] = time.Now()
 	s.mu.Unlock()
-	u := &Upload{store: s, key: key, blob: blob, final: filepath.Join(dir, blob.Digest), partial: filepath.Join(dir, blob.Digest+".partial")}
+	u := &Upload{store: s, key: key, operation: operation, blob: blob, final: filepath.Join(dir, blob.Digest), partial: filepath.Join(dir, blob.Digest+".partial")}
 	fail := func(err error) (*Upload, int64, bool, Refusal, error) {
 		u.release()
 		return nil, 0, false, RefusalNone, err
 	}
-	if info, err := os.Lstat(u.final); err == nil && info.Mode().IsRegular() && info.Size() == blob.Size {
-		u.release()
-		return nil, blob.Size, true, RefusalNone, nil
+	if info, err := os.Lstat(u.final); err == nil && info.Mode().IsRegular() {
+		if info.Size() == blob.Size && s.Verified(operation, blob) {
+			u.release()
+			return nil, blob.Size, true, RefusalNone, nil
+		}
+		// Stored under another role (or damaged): it does not count for this one. Replace it.
+		_ = os.Remove(u.final)
+		_ = os.Remove(filepath.Join(dir, blob.Digest+".rec"))
+		s.refund(operation, info.Size())
 	}
 	length := int64(0)
 	if info, err := os.Lstat(u.partial); err == nil {
@@ -279,21 +539,23 @@ func (s *Store) Begin(operation string, blob appplatform.ImageBlob, resume int64
 	}
 	if length > blob.Size || resume == 0 && length != 0 {
 		// A restart (or an oversized leftover) discards the partial.
-		s.discardPartial(u.partial, length)
+		s.discardPartial(operation, u.partial, length)
 		length = 0
 	}
 	if resume != 0 && resume != length {
 		u.release()
 		return nil, length, false, RefusalNone, nil
 	}
-	if err := s.reserve(blob.Size - length); err != nil {
+	if err := s.reserve(operation, blob.Size-length); err != nil {
 		u.release()
 		return nil, 0, false, RefusalScratchFull, nil
 	}
-	u.chargedAdd = blob.Size - length
+	u.reservedLeft = blob.Size - length
+	// From here the partial's existing bytes are this upload's to refund too.
+	u.written = length
 	file, err := os.OpenFile(u.partial, os.O_RDWR|os.O_CREATE|noFollow, 0600)
 	if err != nil {
-		s.unreserve(u.chargedAdd)
+		u.refundAll()
 		return fail(err)
 	}
 	u.file = file
@@ -311,10 +573,10 @@ func (s *Store) Begin(operation string, blob appplatform.ImageBlob, resume int64
 				u.Abort()
 				return nil, 0, false, RefusalNone, err
 			}
+			u.refuse(refusal)
 			u.discard()
 			return nil, 0, false, refusal, nil
 		}
-		u.written = length
 	}
 	if _, err := file.Seek(length, io.SeekStart); err != nil {
 		u.Abort()
@@ -345,29 +607,20 @@ func boundsRefusal(blob appplatform.ImageBlob) Refusal {
 	return RefusalNone
 }
 
-func (s *Store) reserve(n int64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.used+n > s.limit {
-		return errors.New("scratch full")
-	}
-	s.used += n
-	return nil
-}
-
-func (s *Store) unreserve(n int64) {
-	s.mu.Lock()
-	s.used -= n
-	if s.used < 0 {
-		s.used = 0
-	}
-	s.mu.Unlock()
-}
-
-func (s *Store) discardPartial(path string, length int64) {
+func (s *Store) discardPartial(operation, path string, length int64) {
 	_ = os.Remove(path)
-	s.unreserve(length)
+	s.refund(operation, length)
 }
+
+// refundAll returns everything this upload accounts: the partial's bytes and the unwritten reservation.
+func (u *Upload) refundAll() { u.store.refund(u.operation, u.written+u.reservedLeft) }
+
+func (u *Upload) refusalPath() string {
+	return u.store.refusalPath(u.operation, u.blob.Digest, u.blob.Kind)
+}
+
+// refuse records a definite verification refusal for this blob in its role.
+func (u *Upload) refuse(reason Refusal) { u.store.recordRefusal(u.operation, u.blob, reason) }
 
 func (u *Upload) release() {
 	if u.released {
@@ -377,6 +630,9 @@ func (u *Upload) release() {
 	u.store.mu.Lock()
 	delete(u.store.active, u.key)
 	u.store.sessions--
+	if u.store.opSessions[u.operation]--; u.store.opSessions[u.operation] <= 0 {
+		delete(u.store.opSessions, u.operation)
+	}
 	u.store.mu.Unlock()
 }
 
@@ -393,11 +649,13 @@ func (u *Upload) Write(chunk []byte) Refusal {
 	_, _ = u.whole.Write(chunk)
 	if u.layer != nil {
 		if refusal := u.layer.write(chunk); refusal != RefusalNone {
+			u.refuse(refusal)
 			u.discard()
 			return refusal
 		}
 	}
 	u.written += int64(len(chunk))
+	u.reservedLeft -= int64(len(chunk))
 	return RefusalNone
 }
 
@@ -412,11 +670,13 @@ func (u *Upload) Commit(wholeSHA256 string, total int64) Refusal {
 	}
 	sum := hex.EncodeToString(u.whole.Sum(nil))
 	if sum != u.blob.Digest || sum != wholeSHA256 {
+		u.refuse(RefusalDigestMismatch)
 		u.discard()
 		return RefusalDigestMismatch
 	}
 	if u.layer != nil {
 		if refusal := u.layer.finish(); refusal != RefusalNone {
+			u.refuse(refusal)
 			u.discard()
 			return refusal
 		}
@@ -430,10 +690,17 @@ func (u *Upload) Commit(wholeSHA256 string, total int64) Refusal {
 		return RefusalScratchFull
 	}
 	u.file = nil
+	// The record is written atomically before the blob takes its final name, so a blob without a record never
+	// counts for any role.
+	if err := writeRecord(filepath.Dir(u.final), u.blob); err != nil {
+		u.discard()
+		return RefusalScratchFull
+	}
 	if err := os.Rename(u.partial, u.final); err != nil {
 		u.discard()
 		return RefusalScratchFull
 	}
+	_ = os.Remove(u.refusalPath())
 	u.closed = true
 	u.release()
 	return RefusalNone
@@ -453,7 +720,7 @@ func (u *Upload) Abort() {
 		u.file = nil
 	}
 	// Bytes the partial already holds stay accounted; the unwritten remainder of the reservation is returned.
-	u.store.unreserve(u.blob.Size - u.written)
+	u.store.refund(u.operation, u.reservedLeft)
 	u.release()
 }
 
@@ -473,8 +740,7 @@ func (u *Upload) discard() {
 		u.file = nil
 	}
 	_ = os.Remove(u.partial)
-	u.store.unreserve(u.written)
-	u.store.unreserve(u.blob.Size - u.written)
+	u.refundAll()
 	u.release()
 }
 

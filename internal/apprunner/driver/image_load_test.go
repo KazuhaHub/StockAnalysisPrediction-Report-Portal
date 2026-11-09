@@ -26,6 +26,9 @@ func hexSum(raw []byte) string {
 
 type memorySource map[string][]byte
 
+// Verified trusts the in-memory fixture, whose blobs are the plan's by construction.
+func (m memorySource) Verified(appplatform.ImageBlob) bool { return true }
+
 func (m memorySource) Open(digest string) (io.ReadCloser, error) {
 	body, ok := m[digest]
 	if !ok {
@@ -140,6 +143,9 @@ func (d *fakeDaemon) client(f loadFixture) *http.Client {
 		case r.Method == "GET" && path == "/v1.47/info":
 			return reply(200, infoFor(d.store))
 		case r.Method == "GET" && path == "/v1.47/images/json":
+			if r.URL.RawQuery != "all=1" {
+				d.t.Fatalf("image list without all=1: %q", r.URL.RawQuery)
+			}
 			var list []map[string]any
 			ids := make([]string, 0, len(d.images))
 			for id := range d.images {
@@ -213,6 +219,16 @@ func TestLoadImageBuildsARunnerOwnedLayoutAndAcceptsTheExpectedImage(t *testing.
 			}
 			sort.Strings(names)
 			want := []string{"blobs/sha256/" + hexSum(f.config), "blobs/sha256/" + hexSum(f.manifest), "blobs/sha256/" + hexSum(f.layers[0]), "blobs/sha256/" + hexSum(f.layers[1]), "index.json", "oci-layout"}
+			if store == ImageStoreClassic {
+				// The classic loader reads the legacy layout: the runner writes it, with no tag.
+				want = append(want, "manifest.json")
+				var legacy []map[string]any
+				if err := json.Unmarshal(d.archive["manifest.json"], &legacy); err != nil || len(legacy) != 1 || legacy[0]["RepoTags"] != nil ||
+					legacy[0]["Config"] != "blobs/sha256/"+hexSum(f.config) || len(legacy[0]["Layers"].([]any)) != 2 ||
+					legacy[0]["Layers"].([]any)[0] != "blobs/sha256/"+hexSum(f.layers[0]) {
+					t.Fatalf("legacy manifest: %s %v", d.archive["manifest.json"], err)
+				}
+			}
 			sort.Strings(want)
 			if strings.Join(names, ",") != strings.Join(want, ",") {
 				t.Fatalf("archive members %v", names)
@@ -224,10 +240,11 @@ func TestLoadImageBuildsARunnerOwnedLayoutAndAcceptsTheExpectedImage(t *testing.
 			if _, has := index["annotations"]; has || strings.Contains(string(d.archive["index.json"]), "annotations") || strings.Contains(string(d.archive["index.json"]), "name") {
 				t.Fatalf("the runner-written index carries naming: %s", d.archive["index.json"])
 			}
-			for _, name := range []string{"manifest.json", "repositories"} {
-				if _, has := d.archive[name]; has {
-					t.Fatalf("archive carries %s", name)
-				}
+			if _, has := d.archive["repositories"]; has {
+				t.Fatal("archive carries repositories")
+			}
+			if _, has := d.archive["manifest.json"]; has == (store == ImageStoreContainerd) {
+				t.Fatalf("manifest.json presence wrong for %s", store)
 			}
 			for digest, body := range f.source {
 				if !bytes.Equal(d.archive["blobs/sha256/"+digest], body) {
@@ -424,5 +441,45 @@ func TestLoadedImagePresentIsReadOnly(t *testing.T) {
 	}
 	if _, err := loadedImagePresentHTTP(context.Background(), client, f.raw, strings.Repeat("0", 64), "linux/amd64", "amd64"); !errors.Is(err, ErrInvalidResponse) {
 		t.Fatal(err)
+	}
+}
+
+// The daemon's own error text is kept (bounded) for logs and tests; it is not part of the receipt.
+func TestLoadImageKeepsTheDaemonsErrorText(t *testing.T) {
+	f, d := newLoadFixture(t), newFakeDaemon(t, ImageStoreClassic)
+	d.onLoad = func(d *fakeDaemon, expected string) (int, string) {
+		return 500, `{"message":"` + strings.Repeat("x", 2000) + `"}`
+	}
+	got, err := loadImageHTTP(context.Background(), d.client(f), f.request(), "amd64")
+	if err != nil || got.Outcome != LoadOutcomeLoadRejected || !strings.HasPrefix(got.DaemonDetail, "status 500:") || len(got.DaemonDetail) > maxDaemonDetail {
+		t.Fatalf("detail: %q %v", got.DaemonDetail, err)
+	}
+	d2 := newFakeDaemon(t, ImageStoreClassic)
+	d2.onLoad = func(d *fakeDaemon, expected string) (int, string) {
+		return 200, `{"errorDetail":{"message":"bad layout"},"error":"bad layout"}`
+	}
+	got, _ = loadImageHTTP(context.Background(), d2.client(f), f.request(), "amd64")
+	if !strings.Contains(got.DaemonDetail, "bad layout") {
+		t.Fatalf("stream error not kept: %q", got.DaemonDetail)
+	}
+}
+
+// A blob held in another role than the plan gives it never reaches the daemon: the load treats it as missing.
+type roleSource struct {
+	memorySource
+	verified func(appplatform.ImageBlob) bool
+}
+
+func (r roleSource) Verified(b appplatform.ImageBlob) bool { return r.verified(b) }
+
+func TestLoadImageTreatsABlobOfAnotherRoleAsMissing(t *testing.T) {
+	f, d := newLoadFixture(t), newFakeDaemon(t, ImageStoreClassic)
+	request := f.request()
+	request.Source = roleSource{memorySource: f.source, verified: func(b appplatform.ImageBlob) bool {
+		return b.Kind != appplatform.ImageBlobLayer || b.Digest != hexSum(f.layers[1])
+	}}
+	got, err := loadImageHTTP(context.Background(), d.client(f), request, "amd64")
+	if !errors.Is(err, ErrImageBlobUnavailable) || got != (LoadImageSnapshot{}) || d.loads != 0 && d.archiveOK {
+		t.Fatalf("wrong-role blob: %+v %v loads=%d complete=%v", got, err, d.loads, d.archiveOK)
 	}
 }

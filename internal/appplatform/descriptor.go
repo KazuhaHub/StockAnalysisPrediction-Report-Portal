@@ -226,6 +226,9 @@ func uniqueMembers(values []string, allowed map[string]bool) bool {
 // the runner will ever unpack.
 const maxBackendImageUncompressedBytes = 4 << 30
 
+// MaxBackendImageUncompressedBytes is the per-platform total the runner enforces again when it loads.
+const MaxBackendImageUncompressedBytes = maxBackendImageUncompressedBytes
+
 func validBackend(b Backend) bool {
 	if b.Kind != descriptorBackendKind || b.Protocol != descriptorBackendProtocol || !uniqueMembers(b.Platforms, descriptorPlatformNames) ||
 		b.Resources.MemoryMiB < minBackendMemoryMiB || b.Resources.MemoryMiB > maxBackendMemoryMiB || b.Resources.CPUMillis < minBackendCPUMillis || b.Resources.CPUMillis > maxBackendCPUMillis || b.Resources.PIDs < minBackendPIDs || b.Resources.PIDs > maxBackendPIDs {

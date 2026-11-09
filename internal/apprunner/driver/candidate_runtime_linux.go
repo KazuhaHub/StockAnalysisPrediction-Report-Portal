@@ -151,8 +151,7 @@ func (r *CandidateRuntime) checkData(ctx context.Context, identity CandidateIden
 	return nil
 }
 func (r *CandidateRuntime) client() (*http.Client, func()) {
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: probeTimeout, DialContext: dockerDialer(r.socket)}
-	return daemonClient(transport), transport.CloseIdleConnections
+	return newDockerClient(r.socket, probeTimeout, probeTimeout)
 }
 
 // PrepareCandidate is read-only. It verifies the concrete quota/data root,

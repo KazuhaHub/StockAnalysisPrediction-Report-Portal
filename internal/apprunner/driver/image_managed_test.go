@@ -226,10 +226,6 @@ func TestPlanCandidateContainerBindsManagedImageByManifestIdentity(t *testing.T)
 func TestDockerRequestAllowListIsClosed(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	image := "sha256:" + strings.Repeat("b", 64)
-	allowed := map[string]string{
-		"GET": "/version",
-	}
-	_ = allowed
 	for _, ok := range []struct{ method, path string }{
 		{"GET", "/version"}, {"GET", "/v1.47/info"}, {"GET", "/v1.47/images/json"}, {"GET", "/v1.47/images/" + image + "/json"},
 		{"GET", "/v1.47/images/ghcr.io%2Fexample%2Fapp@sha256:" + strings.Repeat("a", 64) + "/json"},
@@ -306,5 +302,31 @@ func TestRunnerSourceNeverPullsOrReadsDockerCredentials(t *testing.T) {
 	}
 	if scanned < 50 {
 		t.Fatalf("source guard scanned %d files; the walk is not covering the runner", scanned)
+	}
+}
+
+// Every Docker socket client comes from newDockerClient, which wraps the allow-list. The dialer to the socket is
+// referenced nowhere else, so no code can reach the daemon without passing the allow-list.
+func TestOnlyTheDockerClientConstructorDialsTheSocket(t *testing.T) {
+	allowed := map[string]bool{"docker_client.go": true, "socket_linux.go": true, "socket_other.go": true}
+	err := filepath.Walk("..", func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), "dockerDialer") && !(allowed[filepath.Base(path)] && strings.Contains(path, "driver")) {
+			t.Errorf("%s dials the Docker socket outside the client constructor", path)
+		}
+		if strings.Contains(string(body), "http.Transport{") && strings.Contains(path, "driver") && !allowed[filepath.Base(path)] &&
+			strings.Contains(string(body), "docker.invalid") && !strings.Contains(string(body), "portal-app.invalid") {
+			t.Errorf("%s builds its own transport for the Docker host", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

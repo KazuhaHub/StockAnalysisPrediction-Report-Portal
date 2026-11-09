@@ -68,10 +68,8 @@ func InspectDaemon(ctx context.Context, socket string) (Report, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: time.Second,
-		DialContext: dockerDialer(socket)}
-	defer transport.CloseIdleConnections()
-	client := daemonClient(transport)
+	client, closeClient := newDockerClient(socket, time.Second, probeTimeout)
+	defer closeClient()
 	return inspectHTTP(ctx, client, runtime.GOARCH)
 }
 

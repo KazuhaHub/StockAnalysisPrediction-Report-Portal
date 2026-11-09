@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -20,6 +22,10 @@ import (
 // re-hashes every byte it writes into the load archive.
 type ImageBlobSource interface {
 	Open(digest string) (io.ReadCloser, error)
+	// Verified reports whether the blob is held in exactly this role: the upload-time verification record equals
+	// the plan's kind, media type, diff_id and uncompressed size for it. A blob verified for another role is not
+	// the blob this load needs.
+	Verified(expected appplatform.ImageBlob) bool
 }
 
 // Typed outcomes of a rejected load. Docker cannot undo a load, so "rejected" means the image was not accepted.
@@ -28,6 +34,9 @@ const (
 	LoadOutcomeRetagDetected   = "retag_detected"
 	LoadOutcomeInspectMismatch = "inspect_mismatch"
 	LoadOutcomeLoadRejected    = "load_rejected"
+	// LoadOutcomeBlobRefused: an upload for a blob this image needs failed verification for good, so the load can
+	// never complete. It is set by the journal, with no Docker call.
+	LoadOutcomeBlobRefused = "blob_refused"
 )
 
 const (
@@ -59,7 +68,12 @@ type LoadImageSnapshot struct {
 	Outcome       string
 	Removed       bool
 	ObservedMS    int64
+	// DaemonDetail is the daemon's own HTTP status and error text for a rejected load, bounded. It is for logs
+	// and tests only; it never reaches a receipt or the wire.
+	DaemonDetail string
 }
+
+const maxDaemonDetail = 512
 
 type listedImage struct {
 	ID       string   `json:"Id"`
@@ -79,7 +93,7 @@ func probeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 func readImageList(ctx context.Context, client *http.Client) (map[string]string, error) {
 	ctx, cancel := probeContext(ctx)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/v"+APIVersion+"/images/json", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+dockerRequestHost+"/v"+APIVersion+"/images/json?all=1", nil)
 	if err != nil {
 		return nil, ErrInvalidResponse
 	}
@@ -203,7 +217,7 @@ func buildOCIIndex(plan appplatform.ImagePlan) ([]byte, error) {
 // writeLoadArchive writes the OCI layout archive from verified scratch blobs. It hashes the exact bytes it writes
 // and aborts before the tar is closed on the first mismatch, so Docker never sees a complete archive containing
 // bytes that were not checked as they were written.
-func writeLoadArchive(w io.Writer, plan appplatform.ImagePlan, source ImageBlobSource) error {
+func writeLoadArchive(w io.Writer, plan appplatform.ImagePlan, source ImageBlobSource, store ImageStore) error {
 	index, err := buildOCIIndex(plan)
 	if err != nil {
 		return err
@@ -222,8 +236,22 @@ func writeLoadArchive(w io.Writer, plan appplatform.ImagePlan, source ImageBlobS
 	if err := put("index.json", index); err != nil {
 		return err
 	}
+	if store == ImageStoreClassic {
+		// The classic store reads only the legacy layout. The runner writes it itself, from the verified blobs,
+		// with no repository tag, so a load can never name an image. The OCI files stay for daemons that read them.
+		manifest, err := buildLegacyManifest(plan)
+		if err != nil {
+			return err
+		}
+		if err := put("manifest.json", manifest); err != nil {
+			return err
+		}
+	}
 	written := map[string]bool{}
 	for _, blob := range plan.Blobs() {
+		if !source.Verified(blob) {
+			return errors.Join(ErrImageBlobUnavailable, errors.New("blob is not verified for its role"))
+		}
 		if written[blob.Digest] {
 			continue
 		}
@@ -239,6 +267,20 @@ func writeLoadArchive(w io.Writer, plan appplatform.ImagePlan, source ImageBlobS
 		}
 	}
 	return tw.Close()
+}
+
+// buildLegacyManifest is the runner-generated manifest.json of the classic store's loader: the config and the
+// layers by their exact archive paths, and RepoTags null so no tag is ever created.
+func buildLegacyManifest(plan appplatform.ImagePlan) ([]byte, error) {
+	layers := make([]string, 0, len(plan.Layers))
+	for _, layer := range plan.Layers {
+		layers = append(layers, "blobs/sha256/"+layer.Digest)
+	}
+	return json.Marshal([]struct {
+		Config   string   `json:"Config"`
+		RepoTags []string `json:"RepoTags"`
+		Layers   []string `json:"Layers"`
+	}{{Config: "blobs/sha256/" + plan.Config.Digest, RepoTags: nil, Layers: layers}})
 }
 
 func copyVerifiedBlob(tw *tar.Writer, file io.Reader, blob appplatform.ImageBlob) error {
@@ -261,16 +303,17 @@ type loadPost struct {
 	archiveErr error
 	status     int
 	daemonErr  bool
+	detail     string
 }
 
 // postLoadArchive streams the archive to the daemon. The returned error is uncertain: the daemon may have
 // accepted any part of the stream.
-func postLoadArchive(ctx context.Context, client *http.Client, plan appplatform.ImagePlan, source ImageBlobSource) (loadPost, error) {
+func postLoadArchive(ctx context.Context, client *http.Client, plan appplatform.ImagePlan, source ImageBlobSource, store ImageStore) (loadPost, error) {
 	var result loadPost
 	reader, writer := io.Pipe()
 	writeDone := make(chan error, 1)
 	go func() {
-		err := writeLoadArchive(writer, plan, source)
+		err := writeLoadArchive(writer, plan, source, store)
 		writer.CloseWithError(err)
 		writeDone <- err
 	}()
@@ -302,6 +345,9 @@ func postLoadArchive(ctx context.Context, client *http.Client, plan appplatform.
 	if readErr != nil {
 		return result, errors.Join(ErrContainerUncertain, readErr)
 	}
+	if response.StatusCode != http.StatusOK {
+		result.detail = boundedDetail("status " + strconv.Itoa(response.StatusCode) + ": " + string(raw))
+	}
 	for _, line := range bytes.Split(raw, []byte("\n")) {
 		var message struct {
 			Error       string          `json:"error"`
@@ -309,9 +355,19 @@ func postLoadArchive(ctx context.Context, client *http.Client, plan appplatform.
 		}
 		if len(bytes.TrimSpace(line)) != 0 && json.Unmarshal(line, &message) == nil && (message.Error != "" || len(message.ErrorDetail) != 0) {
 			result.daemonErr = true
+			if result.detail == "" {
+				result.detail = boundedDetail(string(bytes.TrimSpace(line)))
+			}
 		}
 	}
 	return result, nil
+}
+
+func boundedDetail(text string) string {
+	if len(text) > maxDaemonDetail {
+		text = text[:maxDaemonDetail]
+	}
+	return strings.ToValidUTF8(text, "?")
 }
 
 // loadImageHTTP loads one verified image and observes the result. The caller holds the runner's load lock and the
@@ -326,6 +382,13 @@ func loadImageHTTP(ctx context.Context, client *http.Client, request LoadImageRe
 	entry, ok := backendImageEntry(parsed.Manifest.Backend, request.Platform)
 	if !ok {
 		return zero, ErrUnsupported
+	}
+	var total int64
+	for _, layer := range entry.Layers {
+		total += int64(layer.UncompressedBytes)
+	}
+	if total > appplatform.MaxBackendImageUncompressedBytes {
+		return zero, ErrInvalidResponse
 	}
 	var info infoResponse
 	infoCtx, cancel := probeContext(ctx)
@@ -366,7 +429,7 @@ func loadImageHTTP(ctx context.Context, client *http.Client, request LoadImageRe
 	if err != nil {
 		return zero, err
 	}
-	post, err := postLoadArchive(ctx, client, plan, request.Source)
+	post, err := postLoadArchive(ctx, client, plan, request.Source, store)
 	if err != nil {
 		return zero, err
 	}
@@ -376,6 +439,7 @@ func loadImageHTTP(ctx context.Context, client *http.Client, request LoadImageRe
 	}
 	reject := func(outcome string) (LoadImageSnapshot, error) {
 		snapshot.State, snapshot.Outcome, snapshot.ObservedMS = LoadStateRejected, outcome, time.Now().UnixMilli()
+		snapshot.DaemonDetail = post.detail
 		// Docker cannot undo a load. The image is removed by ID only when this load introduced it.
 		if _, present := after[expected]; present && !wasPresent {
 			if err := removeLoadedImage(ctx, client, expected); err != nil {

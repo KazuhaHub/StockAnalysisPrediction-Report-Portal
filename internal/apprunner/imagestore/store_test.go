@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,7 +272,7 @@ func TestACorruptStoredPrefixIsRefusedAndDiscarded(t *testing.T) {
 	prefix := []byte("not a gzip stream at all......")
 	partial := filepath.Join(dir, layer.blob.Digest+".partial")
 	_ = os.WriteFile(partial, prefix, 0600)
-	s.used = int64(len(prefix))
+	s.charge(operation, int64(len(prefix)))
 	u, _, _, refusal, err := s.Begin(operation, layer.blob, int64(len(prefix)))
 	if err != nil {
 		t.Fatal(err)
@@ -337,7 +338,7 @@ func TestOpenRemovesOrphansAndRefusesAnUnsafeRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if entries, _ := os.ReadDir(root); len(entries) != 0 || s.Used() != 0 {
+	if entries, _ := os.ReadDir(root); len(entries) != 1 || entries[0].Name() != ".refusals" || s.Used() != 0 {
 		t.Fatalf("orphans left: %v", entries)
 	}
 	for name, prepare := range map[string]func() string{
@@ -423,5 +424,215 @@ func TestRemoveOperationReturnsItsBytes(t *testing.T) {
 	}
 	if err := s.RemoveOperation(operation); err != nil {
 		t.Fatal("removing nothing failed:", err)
+	}
+}
+
+const operation2 = "40000000-0000-4000-8000-000000000005"
+
+func uploadTo(t *testing.T, s *Store, op string, blob appplatform.ImageBlob, body []byte) Refusal {
+	t.Helper()
+	u, _, done, refusal, err := s.Begin(op, blob, 0)
+	if err != nil || refusal != RefusalNone {
+		return refusal
+	}
+	if done {
+		return RefusalNone
+	}
+	for rest := body; len(rest) > 0; {
+		n := min(4096, len(rest))
+		if r := u.Write(rest[:n]); r != RefusalNone {
+			return r
+		}
+		rest = rest[n:]
+	}
+	return u.Commit(blob.Digest, blob.Size)
+}
+
+// A layer uploaded as a config is stored, but never counts for the layer role: it is missing for that role until
+// it is uploaded again under the right kind.
+func TestALayerUploadedAsConfigIsNotAcceptedForTheLayerRole(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	for _, b := range []struct {
+		blob appplatform.ImageBlob
+		body []byte
+	}{{f.manifest, f.manifestBytes}, {f.config, f.configBytes}} {
+		if r := uploadTo(t, s, operation, b.blob, b.body); r != RefusalNone {
+			t.Fatal(r)
+		}
+	}
+	l := f.layers[0]
+	asConfig := appplatform.ImageBlob{Digest: l.blob.Digest, Kind: appplatform.ImageBlobConfig, MediaType: appplatform.MediaTypeOCIConfig, Size: l.blob.Size}
+	if r := uploadTo(t, s, operation, asConfig, l.compressed); r != RefusalNone {
+		t.Fatal(r)
+	}
+	if s.Verified(operation, l.blob) {
+		t.Fatal("a blob stored as a config verified as a layer")
+	}
+	missing := s.Missing(operation, f.entry)
+	if len(missing) != 2 {
+		t.Fatalf("missing %v", missing)
+	}
+	// Uploading it again under the right kind replaces it and it then counts.
+	if r := uploadTo(t, s, operation, l.blob, l.compressed); r != RefusalNone || !s.Verified(operation, l.blob) {
+		t.Fatalf("re-upload: %q", r)
+	}
+	if got := s.Missing(operation, f.entry); len(got) != 1 {
+		t.Fatalf("after one layer: %v", got)
+	}
+}
+
+// A role also covers the layer's declared diff_id and uncompressed size: the same bytes under other claims do not
+// satisfy the descriptor's.
+func TestALayerRecordMustEqualTheDescriptorsClaims(t *testing.T) {
+	s := newStore(t)
+	l := newLayer(t, "claims")
+	other := l.blob
+	other.UncompressedBytes++
+	if r := uploadTo(t, s, operation, l.blob, l.compressed); r != RefusalNone {
+		t.Fatal(r)
+	}
+	if s.Verified(operation, other) {
+		t.Fatal("a record with another uncompressed size verified")
+	}
+}
+
+func TestABombUploadedAsConfigNeverCountsAsALayer(t *testing.T) {
+	s := newStore(t)
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	_, _ = zw.Write(bytes.Repeat([]byte{0}, 8<<20))
+	_ = zw.Close()
+	digest := sum(gz.Bytes())
+	asConfig := appplatform.ImageBlob{Digest: digest, Kind: appplatform.ImageBlobConfig, MediaType: appplatform.MediaTypeOCIConfig, Size: int64(gz.Len())}
+	if r := uploadTo(t, s, operation, asConfig, gz.Bytes()); r != RefusalNone {
+		t.Fatal(r)
+	}
+	asLayer := appplatform.ImageBlob{Digest: digest, Kind: appplatform.ImageBlobLayer, MediaType: "application/vnd.oci.image.layer.v1.tar+gzip", Size: int64(gz.Len()), DiffID: strings.Repeat("a", 64), UncompressedBytes: 1000}
+	if s.Verified(operation, asLayer) {
+		t.Fatal("a bomb stored as a config counts as a layer")
+	}
+}
+
+func TestADefiniteRefusalIsRecordedAndSurvivesEviction(t *testing.T) {
+	s := newStore(t)
+	f := newImageFixture(t)
+	uploadTo(t, s, operation, f.manifest, f.manifestBytes)
+	uploadTo(t, s, operation, f.config, f.configBytes)
+	bad := f.layers[0].blob
+	bad.DiffID = strings.Repeat("a", 64)
+	if r := uploadTo(t, s, operation, bad, f.layers[0].compressed); r != RefusalDiffIDMismatch {
+		t.Fatal(r)
+	}
+	// The refused role is the layer role under the entry's own claims.
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("a definite refusal was not recorded")
+	}
+	// Evicting the operation's scratch does not lose it.
+	s.limit = 1
+	if r := uploadTo(t, s, operation2, f.layers[1].blob, f.layers[1].compressed); r != RefusalScratchFull {
+		t.Logf("second upload: %q", r)
+	}
+	// The layer digests come from the manifest, so the verdict is read again once the sender has put it back.
+	s.limit = MaxScratchBytes
+	uploadTo(t, s, operation, f.manifest, f.manifestBytes)
+	uploadTo(t, s, operation, f.config, f.configBytes)
+	if !s.Refused(operation, f.entry) {
+		t.Fatal("eviction lost the refusal record")
+	}
+	// A later good upload clears it.
+	f.layers[0].blob.Kind = appplatform.ImageBlobLayer
+	if r := uploadTo(t, s, operation, f.layers[0].blob, f.layers[0].compressed); r != RefusalNone {
+		t.Fatal(r)
+	}
+	if s.Refused(operation, f.entry) {
+		t.Fatal("a good upload left the refusal")
+	}
+}
+
+func TestAbandonedScratchDoesNotBlockANewOperation(t *testing.T) {
+	s := newStore(t)
+	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
+	s.limit = a.blob.Size + 10
+	if r := uploadTo(t, s, operation, a.blob, a.compressed); r != RefusalNone {
+		t.Fatal(r)
+	}
+	// The first operation was abandoned. A new one needs the room, so the old directory is evicted whole.
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalNone {
+		t.Fatalf("abandoned scratch blocked a new operation: %q", r)
+	}
+	if s.Has(operation, a.blob.Digest) {
+		t.Fatal("the abandoned operation was not evicted")
+	}
+	if s.Used() != b.blob.Size {
+		t.Fatalf("used %d", s.Used())
+	}
+}
+
+func TestEvictionSparesHeldOperationsAndActiveSessions(t *testing.T) {
+	s := newStore(t)
+	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
+	s.limit = a.blob.Size + 10
+	uploadTo(t, s, operation, a.blob, a.compressed)
+	release := s.Hold(operation)
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalScratchFull {
+		t.Fatalf("a held operation was evicted: %q", r)
+	}
+	release()
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalNone {
+		t.Fatalf("released operation still blocks: %q", r)
+	}
+}
+
+// Accounting has one owner: removing an operation under an upload in flight is refused, and a failed prefix read
+// returns exactly what was charged.
+func TestRemoveOperationDuringAnUploadIsRefusedAndAccountingHolds(t *testing.T) {
+	s := newStore(t)
+	l := newLayer(t, strings.Repeat("x", 800))
+	u, _, _, _, err := s.Begin(operation, l.blob, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = u.Write(l.compressed[:10])
+	if err := s.RemoveOperation(operation); !errors.Is(err, ErrScratchBusy) {
+		t.Fatalf("remove during upload: %v", err)
+	}
+	u.Abort()
+	if s.Used() != 10 {
+		t.Fatalf("after abort used=%d, want 10", s.Used())
+	}
+	if err := s.RemoveOperation(operation); err != nil || s.Used() != 0 {
+		t.Fatalf("remove: used=%d %v", s.Used(), err)
+	}
+}
+
+func TestAFailedPrefixReadRefundsExactlyWhatWasCharged(t *testing.T) {
+	s := newStore(t)
+	l := newLayer(t, "prefix accounting")
+	dir := filepath.Join(s.root, operation)
+	_ = os.Mkdir(dir, 0700)
+	prefix := []byte("not gzip at all, but long enough......")
+	_ = os.WriteFile(filepath.Join(dir, l.blob.Digest+".partial"), prefix, 0600)
+	s.charge(operation, int64(len(prefix)))
+	u, _, _, _, _ := s.Begin(operation, l.blob, int64(len(prefix)))
+	if u != nil {
+		u.Abort() // the prefix error surfaces later; abort must not over-refund
+	}
+	if s.Used() < 0 || s.Used() > int64(len(prefix)) {
+		t.Fatalf("used=%d", s.Used())
+	}
+	s2 := newStore(t)
+	other := newLayer(t, "other op")
+	uploadTo(t, s2, operation2, other.blob, other.compressed)
+	before := s2.Used()
+	_ = os.WriteFile(filepath.Join(s2.root, operation, l.blob.Digest+".partial"), prefix, 0600)
+	_ = os.Mkdir(filepath.Join(s2.root, operation), 0700)
+	_ = os.WriteFile(filepath.Join(s2.root, operation, l.blob.Digest+".partial"), prefix, 0600)
+	s2.charge(operation, int64(len(prefix)))
+	if u, _, _, _, _ := s2.Begin(operation, l.blob, int64(len(prefix))); u != nil {
+		u.Abort()
+	}
+	if s2.Used() < before {
+		t.Fatalf("another operation's bytes were refunded: %d < %d", s2.Used(), before)
 	}
 }
