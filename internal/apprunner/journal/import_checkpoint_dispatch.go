@@ -536,7 +536,7 @@ func loadImportedStartSource(ctx context.Context, tx *sql.Tx, c control.UpdateSt
 	}
 	var pending, running int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND effect_id<>?
-		AND (?='' OR effect_id<>?) AND state IN ('prepared','unknown')`,
+		AND (?='' OR effect_id<>?) AND kind<>'load-image' AND state IN ('prepared','unknown')`,
 		c.InstallationID, c.EffectID, registrationEffect, registrationEffect).Scan(&pending); err != nil || pending != 0 {
 		return fail("pending command")
 	}

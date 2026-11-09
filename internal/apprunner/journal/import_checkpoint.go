@@ -287,7 +287,7 @@ func importHistoryMarker(effect, state, raw string) (importClaimMarker, error) {
 // admission applies to other effects, using the rows this journal holds.
 func requireImportFloor(ctx context.Context, tx *sql.Tx, c control.ImportCheckpointCommand) error {
 	var foreign int
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`,
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`,
 		c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.NamespaceID, c.ControllerEpoch).Scan(&foreign); err != nil {
 		return err
 	}
@@ -295,10 +295,10 @@ func requireImportFloor(ctx context.Context, tx *sql.Tx, c control.ImportCheckpo
 		return ErrFenceReconciliation
 	}
 	var fenceFloor, generationFloor, writerFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
 		return err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
 		return err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.NamespaceID).Scan(&writerFloor); err != nil {
@@ -375,7 +375,7 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 		return zero, false, ErrDataReservationConflict
 	}
 	var pending int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND state IN ('prepared','unknown')`, c.InstallationID).Scan(&pending); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND state IN ('prepared','unknown')`, c.InstallationID).Scan(&pending); err != nil {
 		return zero, false, err
 	}
 	if pending != 0 {
