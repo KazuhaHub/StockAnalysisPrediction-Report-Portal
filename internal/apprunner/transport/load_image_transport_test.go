@@ -189,3 +189,21 @@ func TestLoadImageTransportStatusReplies(t *testing.T) {
 		t.Fatal("a status for another effect was accepted")
 	}
 }
+
+func TestLoadImageTransportAcceptsABlobRefusedReceiptWithNoImage(t *testing.T) {
+	a, _, raw, sig, descriptor, receipt := loadImageTransportFixture(t)
+	ref, err := verifyWritableLifecycle(LoadImageExecute, raw, sig, descriptor, a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt.State, receipt.Outcome, receipt.ImageID, receipt.Store = "rejected", "blob_refused", "", ""
+	body, _ := json.Marshal(receipt)
+	if !validWritableLifecycleReply(LoadImageExecute, body, ref, time.Now().Add(-time.Second), time.Now()) {
+		t.Fatal("a blob_refused receipt was refused")
+	}
+	receipt.ImageID = "sha256:" + strings.Repeat("2", 64)
+	body, _ = json.Marshal(receipt)
+	if validWritableLifecycleReply(LoadImageExecute, body, ref, time.Now().Add(-time.Second), time.Now()) {
+		t.Fatal("a blob_refused receipt that names an image was accepted")
+	}
+}

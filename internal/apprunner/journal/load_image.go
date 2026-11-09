@@ -74,7 +74,7 @@ type LoadImageReceipt struct {
 
 var loadOutcomes = map[string]bool{
 	"": true, driver.LoadOutcomeArchiveMismatch: true, driver.LoadOutcomeRetagDetected: true,
-	driver.LoadOutcomeInspectMismatch: true, driver.LoadOutcomeLoadRejected: true,
+	driver.LoadOutcomeInspectMismatch: true, driver.LoadOutcomeLoadRejected: true, driver.LoadOutcomeBlobRefused: true,
 }
 
 func validLoadClaim(c loadImageClaim) bool {
@@ -87,8 +87,15 @@ func validLoadClaim(c loadImageClaim) bool {
 }
 
 func validLoadReceipt(r LoadImageReceipt) bool {
-	if r.Format != loadReceiptFormat || r.Stage != control.LoadImageStage || !validLoadClaim(r.Claim) || !dataSHA(r.PayloadSHA256) ||
-		!nativeImageIDPattern(r.ImageID) || (r.Store != string(driver.ImageStoreClassic) && r.Store != string(driver.ImageStoreContainerd)) || !loadOutcomes[r.Outcome] {
+	if r.Format != loadReceiptFormat || r.Stage != control.LoadImageStage || !validLoadClaim(r.Claim) || !dataSHA(r.PayloadSHA256) || !loadOutcomes[r.Outcome] {
+		return false
+	}
+	if r.Outcome == driver.LoadOutcomeBlobRefused {
+		// Settled without a Docker call, so no image and no store were ever observed.
+		if r.ImageID != "" || r.Store != "" || r.State != driver.LoadStateRejected || r.Removed {
+			return false
+		}
+	} else if !nativeImageIDPattern(r.ImageID) || (r.Store != string(driver.ImageStoreClassic) && r.Store != string(driver.ImageStoreContainerd)) {
 		return false
 	}
 	switch r.State {
@@ -422,7 +429,7 @@ func loadIntentFromRow(row *importRow, c control.LoadImageCommand, raw, signatur
 }
 
 // settleLoadImage records a definite end in one transaction: the receipt on the command row, applied or reverted.
-func (s *Store) settleLoadImage(ctx context.Context, intent loadImageIntent, snapshot driver.LoadImageSnapshot) (LoadImageReceipt, error) {
+func (s *Store) settleLoadImage(ctx context.Context, intent loadImageIntent, snapshot driver.LoadImageSnapshot, verify loadVerifier) (LoadImageReceipt, error) {
 	var zero LoadImageReceipt
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -437,7 +444,7 @@ func (s *Store) settleLoadImage(ctx context.Context, intent loadImageIntent, sna
 		return zero, err
 	}
 	now := time.Now().UTC().UnixMilli()
-	verified, err := control.VerifyLoadImageSettlement(intent.raw, intent.signature, importAuthorityFrom(deployment), now)
+	verified, err := verify(intent.raw, intent.signature, importAuthorityFrom(deployment), now)
 	if err != nil || verified.Command() != intent.full {
 		return zero, ErrFenceReconciliation
 	}
@@ -523,6 +530,18 @@ func (s *Store) DispatchLoadImage(ctx context.Context, raw, signature, descripto
 	} else if intent, err = s.beginLoadImage(ctx, raw, signature, entry); err != nil {
 		return nil, fmt.Errorf("begin load: %w", err)
 	}
+	// The scratch is held from eviction while this load needs it.
+	defer scratch.Hold(intent.full.OperationID)()
+	// A blob this image needs failed verification for good: the load can never complete, so it ends here, with no
+	// Docker call, instead of answering blobs_missing for ever.
+	if scratch.Refused(intent.full.OperationID, entry) {
+		receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageSettlement)
+		if err != nil {
+			return nil, fmt.Errorf("settle refused blob: %w", err)
+		}
+		_ = scratch.RemoveOperation(intent.full.OperationID)
+		return receipt, nil
+	}
 	// The claim is committed: the load runs to a definite end whatever happens to the connection.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), driver.ImageLoadTimeout)
 	defer cancel()
@@ -544,7 +563,7 @@ func (s *Store) DispatchLoadImage(ctx context.Context, raw, signature, descripto
 	if !bindLoadSnapshot(intent, snapshot) {
 		return nil, fmt.Errorf("load snapshot binding: %w", ErrFenceReconciliation)
 	}
-	receipt, err := s.settleLoadImage(ctx, intent, snapshot)
+	receipt, err := s.settleLoadImage(ctx, intent, snapshot, control.VerifyLoadImageSettlement)
 	if err != nil {
 		return nil, fmt.Errorf("settle load: %w", err)
 	}
@@ -564,12 +583,20 @@ func (s *Store) readLoadReceiptHeld(ctx context.Context, raw, signature []byte) 
 	return *got.receipt, nil
 }
 
+// blobRefusedSnapshot is the receipt content of a load that can never complete: rejected, with the typed outcome,
+// and no image or store because Docker was never asked.
+func blobRefusedSnapshot(intent loadImageIntent) driver.LoadImageSnapshot {
+	return driver.LoadImageSnapshot{ReleaseSHA256: intent.full.Payload.ReleaseSHA256, Platform: intent.full.Payload.Platform,
+		State: driver.LoadStateRejected, Outcome: driver.LoadOutcomeBlobRefused, ObservedMS: time.Now().UnixMilli()}
+}
+
 type loadReadResult struct {
-	receipt *LoadImageReceipt
-	command control.LoadImageCommand
-	claim   loadImageClaim
-	missing bool
-	unknown bool
+	receipt   *LoadImageReceipt
+	markerRaw string
+	command   control.LoadImageCommand
+	claim     loadImageClaim
+	missing   bool
+	unknown   bool
 }
 
 type loadVerifier func(raw, signature []byte, authority control.Authority, nowMS int64) (control.VerifiedLoadImageCommand, error)
@@ -619,7 +646,7 @@ func (s *Store) readLoadImage(ctx context.Context, raw, signature []byte, verify
 		if !canonicalDataJSON(row.receipt, &claim) || !validLoadClaim(claim) || !loadClaimMatchesCommand(claim, c) {
 			return zero, ErrFenceReconciliation
 		}
-		return loadReadResult{command: c, claim: claim, unknown: true}, nil
+		return loadReadResult{command: c, claim: claim, unknown: true, markerRaw: row.receipt}, nil
 	}
 	if row.state != "applied" && row.state != "reverted" {
 		return zero, ErrLoadImageUnavailable
@@ -660,16 +687,31 @@ func (s *Store) ReadLoadImageOrStatus(ctx context.Context, raw, signature, descr
 	case again.missing:
 		return loadStatusFor(again.command, "absent", nil, time.Now().UTC().UnixMilli()), nil
 	}
-	return s.unknownLoadStatus(ctx, again, descriptor, native, scratch)
+	return s.unknownLoadStatus(ctx, again, raw, signature, descriptor, native, scratch)
 }
 
 // unknownLoadStatus says what an unknown load needs: nothing the sender cannot give by resending (orphaned), or
 // the blobs scratch lost.
-func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, descriptor []byte, native LoadImageNative, scratch *imagestore.Store) (any, error) {
+func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, raw, signature, descriptor []byte, native LoadImageNative, scratch *imagestore.Store) (any, error) {
 	now := time.Now().UTC().UnixMilli()
 	entry, err := bindLoadImageDescriptor(got.command, descriptor)
-	if err != nil || scratch == nil {
+	if err != nil {
+		// A descriptor that does not bind to the command is refused, as the execute refuses it. Answering
+		// "orphaned" would send the sender into a resend loop that can never succeed.
+		return nil, err
+	}
+	if scratch == nil {
 		return loadStatusFor(got.command, "orphaned", nil, now), nil
+	}
+	if scratch.Refused(got.command.OperationID, entry) {
+		// The next read-back after a definite refusal ends the effect: reverted with the typed outcome.
+		intent := loadImageIntent{full: got.command, raw: bytes.Clone(raw), signature: bytes.Clone(signature), marker: got.claim, markerRaw: got.markerRaw, entry: entry}
+		receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageRead)
+		if err != nil {
+			return nil, fmt.Errorf("settle refused blob: %w", err)
+		}
+		_ = scratch.RemoveOperation(got.command.OperationID)
+		return receipt, nil
 	}
 	missing := scratch.Missing(got.command.OperationID, entry)
 	if len(missing) == 0 {

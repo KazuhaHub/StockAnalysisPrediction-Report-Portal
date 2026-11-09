@@ -3,6 +3,7 @@ package appplatform
 import (
 	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -263,6 +264,43 @@ func verifyOfflineBlob(file *zip.File, blob ImageBlob) error {
 	n, err := io.Copy(hash, io.LimitReader(stream, blob.Size+1))
 	if err != nil || n != blob.Size || hex.EncodeToString(hash.Sum(nil)) != blob.Digest {
 		return ErrInvalidOfflineEnvelope
+	}
+	if blob.Kind != ImageBlobLayer {
+		return nil
+	}
+	// The layer is also decompressed, exactly as the runner will, so Portal never stages a package whose layer
+	// the runner would refuse: the tar must hash to the declared diff_id and stop at the declared size.
+	again, err := file.Open()
+	if err != nil {
+		return ErrInvalidOfflineEnvelope
+	}
+	defer again.Close()
+	if err := verifyLayerContent(again, blob); err != nil {
+		return ErrInvalidOfflineEnvelope
+	}
+	return nil
+}
+
+// verifyLayerContent decompresses a layer stream (when its media type is compressed) while hashing it, and checks
+// the diff_id and the exact uncompressed size. It reads at most UncompressedBytes+1 bytes of tar.
+func verifyLayerContent(stream io.Reader, blob ImageBlob) error {
+	compressed, ok := ImageBlobCompressed(blob.MediaType)
+	if !ok || blob.UncompressedBytes < 1 {
+		return ErrInvalidImage
+	}
+	reader := stream
+	if compressed {
+		zr, err := gzip.NewReader(stream)
+		if err != nil {
+			return ErrInvalidImage
+		}
+		defer zr.Close()
+		reader = zr
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(reader, blob.UncompressedBytes+1))
+	if err != nil || n != blob.UncompressedBytes || hex.EncodeToString(hash.Sum(nil)) != blob.DiffID {
+		return ErrInvalidImage
 	}
 	return nil
 }

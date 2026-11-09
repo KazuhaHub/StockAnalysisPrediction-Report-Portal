@@ -346,3 +346,31 @@ func (p *managedOfflineParts) replaceMetadata(t testing.TB, build func() ([]byte
 	p.blobs["blobs/"+p.entry.ManifestDigest], p.blobs["blobs/"+p.entry.ConfigDigest] = p.manifest, p.config
 	p.rewriteDescriptor(t)
 }
+
+// The parser decompresses every layer, so a package whose layer the runner would refuse is never staged: the
+// descriptor and the config agree with each other and the blob hashes, but the tar inside does not match.
+func TestOfflineEnvelopeV2RefusesALayerWhoseContentBreaksItsDeclaration(t *testing.T) {
+	for name, damage := range map[string]func(p *managedOfflineParts){
+		"diff id that is not the tar's": func(p *managedOfflineParts) {
+			p.layers[1].diffID = platformTestDigest([]byte("another tar"))
+			p.entry.Layers[1].DiffID = p.layers[1].diffID
+		},
+		"expands beyond the declared size": func(p *managedOfflineParts) {
+			p.layers[1].size--
+			p.entry.Layers[1].UncompressedBytes = p.layers[1].size
+		},
+		"declared larger than the tar": func(p *managedOfflineParts) {
+			p.layers[1].size++
+			p.entry.Layers[1].UncompressedBytes = p.layers[1].size
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			parts := newManagedOfflineParts(t)
+			damage(&parts)
+			parts.useMetadata(t, "linux/amd64", "application/vnd.oci.image.layer.v1.tar+gzip")
+			if _, err := InspectOfflineEnvelope(parts.archive(t)); !errors.Is(err, ErrInvalidOfflineEnvelope) {
+				t.Fatalf("a layer that breaks its declaration was staged: %v", err)
+			}
+		})
+	}
+}

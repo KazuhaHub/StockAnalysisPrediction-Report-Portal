@@ -674,3 +674,101 @@ func TestMigrateDataRefusesBeforeItsClaimWhenTheTargetImageIsMissing(t *testing.
 		t.Fatalf("after the image returned: %+v %v", receipt, err)
 	}
 }
+
+// refuseALayerUpload uploads the second layer under a diff_id that is not its tar's: a definite verification
+// refusal for a blob this image needs, in the layer role.
+func (f *loadFixtureT) refuseALayerUpload(t *testing.T) {
+	t.Helper()
+	bad := f.blobs[3].blob
+	bad.DiffID = strings.Repeat("a", 64)
+	u, _, _, refusal, err := f.scratch.Begin(f.command.OperationID, bad, 0)
+	if err != nil || refusal != imagestore.RefusalNone {
+		t.Fatalf("begin: %v %v", refusal, err)
+	}
+	if r := u.Write(f.blobs[3].body); r != imagestore.RefusalNone {
+		t.Logf("refused while writing: %v", r)
+		return
+	}
+	if r := u.Commit(bad.Digest, bad.Size); r != imagestore.RefusalDiffIDMismatch {
+		t.Fatalf("commit: %q", r)
+	}
+}
+
+// A load waiting for a blob that can never pass ends, with no Docker call, as reverted with blob_refused.
+func TestLoadImageExecuteAfterARefusedUploadSettlesBlobRefusedWithoutDocker(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	f.native.err = driver.ErrImageBlobUnavailable
+	if got, err := f.dispatch(); err != nil || got.(LoadImageStatus).State != "blobs_missing" {
+		t.Fatalf("claim: %+v %v", got, err)
+	}
+	calls := f.native.calls
+	f.refuseALayerUpload(t)
+	got, err := f.dispatch()
+	receipt, ok := got.(LoadImageReceipt)
+	if err != nil || !ok || receipt.State != driver.LoadStateRejected || receipt.Outcome != driver.LoadOutcomeBlobRefused || receipt.ImageID != "" {
+		t.Fatalf("settlement: %+v %v", got, err)
+	}
+	if f.native.calls != calls {
+		t.Fatal("a refused blob reached Docker")
+	}
+	if state, _ := f.rowState(t); state != "reverted" {
+		t.Fatalf("row %q", state)
+	}
+	if !LoadImageReceiptMatchesCommand(receipt, f.command) {
+		t.Fatal("receipt does not answer the command")
+	}
+	if again, err := f.dispatch(); err != nil || again.(LoadImageReceipt).Outcome != driver.LoadOutcomeBlobRefused {
+		t.Fatalf("replay: %+v %v", again, err)
+	}
+}
+
+func TestLoadImageReadBackAfterARefusedUploadSettlesBlobRefused(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	f.native.err = driver.ErrImageBlobUnavailable
+	_, _ = f.dispatch()
+	calls := f.native.calls
+	f.refuseALayerUpload(t)
+	got, err := f.store.ReadLoadImageOrStatus(context.Background(), f.raw, f.readSig(t, f.raw), f.descriptor, f.native, f.scratch)
+	receipt, ok := got.(LoadImageReceipt)
+	if err != nil || !ok || receipt.Outcome != driver.LoadOutcomeBlobRefused || f.native.calls != calls {
+		t.Fatalf("read-back: %+v %v calls=%d", got, err, f.native.calls)
+	}
+	if state, _ := f.rowState(t); state != "reverted" {
+		t.Fatalf("row %q", state)
+	}
+}
+
+// A bomb uploaded under the wrong kind never reaches Docker: the load asks for the layer in the layer role and is
+// told it is missing.
+func TestLoadImageNeverSendsABlobStoredUnderAnotherKind(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	asConfig := loadTestBlob{blob: appplatform.ImageBlob{Digest: f.blobs[3].blob.Digest, Kind: appplatform.ImageBlobConfig, MediaType: appplatform.MediaTypeOCIConfig, Size: f.blobs[3].blob.Size}, body: f.blobs[3].body}
+	uploadLoadBlob(t, f.scratch, f.command.OperationID, asConfig)
+	missing := f.scratch.Missing(f.command.OperationID, f.entry)
+	if len(missing) != 1 || missing[0] != f.blobs[3].blob.Digest {
+		t.Fatalf("missing %v", missing)
+	}
+	if f.scratch.Source(f.command.OperationID).Verified(f.blobs[3].blob) {
+		t.Fatal("the driver would accept a config-kind blob as a layer")
+	}
+}
+
+func TestLoadImageReadBackRefusesADescriptorThatDoesNotBindTheCommand(t *testing.T) {
+	f := newLoadFixture(t)
+	f.uploadAll(t)
+	f.native.err = driver.ErrContainerUncertain
+	_, _ = f.dispatch()
+	_, err := f.store.ReadLoadImageOrStatus(context.Background(), f.raw, f.readSig(t, f.raw), append([]byte(" "), f.descriptor...), f.native, f.scratch)
+	if !errors.Is(err, ErrLoadImageRefused) {
+		t.Fatalf("an unbound descriptor was answered with %v", err)
+	}
+}

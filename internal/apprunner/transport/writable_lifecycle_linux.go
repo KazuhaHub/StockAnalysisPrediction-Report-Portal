@@ -34,10 +34,31 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute || action == LoadImageExecute
+	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
+}
+
+// loadImageExecutionTimeout bounds the connection of a load-image execute: the longest a claimed load may run
+// (driver.ImageLoadTimeout) plus a margin for the settlement, so the sender normally gets the receipt on the
+// connection instead of having to poll a read-back.
+const loadImageExecutionTimeout = driver.ImageLoadTimeout + 2*time.Minute
+
+// writableLifecycleTimeout is the connection bound of an action, used by the runner and the sender alike.
+func writableLifecycleTimeout(action WritableLifecycleAction) time.Duration {
+	switch {
+	case action == LoadImageExecute:
+		return loadImageExecutionTimeout
+	case bulkDataAction(action):
+		return restoreExecutionTimeout
+	case action.mutating():
+		return candidateExecutionTimeout
+	}
+	return sessionTimeout
 }
 
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
+	if action == LoadImageExecute {
+		return loadImageExecutionTimeout
+	}
 	if bulkDataAction(action) {
 		return restoreExecutionTimeout
 	}
@@ -90,13 +111,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		}
 		private.Close()
 	}
-	timeout := sessionTimeout
-	if bulkDataAction(action) {
-		timeout = restoreExecutionTimeout
-	} else if action.mutating() {
-		timeout = candidateExecutionTimeout
-	}
-	ctx, cancel := context.WithTimeout(parent, timeout)
+	ctx, cancel := context.WithTimeout(parent, writableLifecycleTimeout(action))
 	defer cancel()
 	conn, err := connectEndpoint(ctx, path, profile)
 	if err != nil {
