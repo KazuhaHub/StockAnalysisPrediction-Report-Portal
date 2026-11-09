@@ -45,3 +45,38 @@ func TestDevelopmentCatalogueContract(t *testing.T) {
 		t.Fatal("too many catalogue releases accepted")
 	}
 }
+
+func catalogueEntryJSON(extra string) string {
+	return `{"app_id":"notes-sample","publisher_id":"example-publisher","version":"1.0.0-beta.1","descriptor_sha256":"` + strings.Repeat("a", 64) + `","descriptor_url":"https://example.org/releases/app.json","signature_url":"https://example.org/releases/app.sig"` + extra + `}`
+}
+
+func TestCatalogueV2Dev2CarriesPackageURL(t *testing.T) {
+	managed := `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON(`,"package_url":"https://example.org/releases/app.portalapp"`) + `]}`
+	parsed, err := ParseCatalogue([]byte(managed))
+	if err != nil || parsed.Releases[0].PackageURL != "https://example.org/releases/app.portalapp" {
+		t.Fatal("managed catalogue refused", err)
+	}
+	staticOnly := `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON("") + `]}`
+	if _, err := ParseCatalogue([]byte(staticOnly)); err != nil {
+		t.Fatal("frontend-only release without a package refused", err)
+	}
+}
+
+// Each case fails closed: the package URL is fetched and trusted as an exact
+// byte source, so it follows the same URL policy as the descriptor.
+func TestCatalogueV2Dev2RefusesUnsafePackageURLAndOldFormatPackage(t *testing.T) {
+	for name, raw := range map[string]string{
+		"2-dev.1 carrying a package url refused": `{"format":"portal.catalogue/2-dev.1","releases":[` + catalogueEntryJSON(`,"package_url":"https://example.org/a.portalapp"`) + `]}`,
+		"plain http package url refused":         `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON(`,"package_url":"http://example.org/a.portalapp"`) + `]}`,
+		"credentialed package url refused":       `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON(`,"package_url":"https://u:p@example.org/a.portalapp"`) + `]}`,
+		"query package url refused":              `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON(`,"package_url":"https://example.org/a.portalapp?x=1"`) + `]}`,
+		"empty package url refused":              `{"format":"portal.catalogue/2-dev.2","releases":[` + catalogueEntryJSON(`,"package_url":""`) + `]}`,
+		"unknown format refused":                 `{"format":"portal.catalogue/2-dev.3","releases":[` + catalogueEntryJSON("") + `]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseCatalogue([]byte(raw)); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
