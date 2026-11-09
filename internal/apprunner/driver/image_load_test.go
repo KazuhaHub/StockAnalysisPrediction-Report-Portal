@@ -73,7 +73,7 @@ func newLoadFixtureFor(t *testing.T, arch string) loadFixture {
 		layerDescriptors = append(layerDescriptors, map[string]any{"mediaType": appplatform.MediaTypeOCIManifest[:0] + "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + hexSum(gz.Bytes()), "size": gz.Len()})
 		entryLayers = append(entryLayers, map[string]any{"diff_id": hexSum(tarball.Bytes()), "uncompressed_bytes": tarball.Len()})
 	}
-	config, _ := json.Marshal(map[string]any{"architecture": arch, "os": "linux", "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
+	config, _ := json.Marshal(map[string]any{"architecture": arch, "os": "linux", "config": map[string]any{}, "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
 	manifest, _ := json.Marshal(map[string]any{
 		"schemaVersion": 2, "mediaType": appplatform.MediaTypeOCIManifest,
 		"config": map[string]any{"mediaType": appplatform.MediaTypeOCIConfig, "digest": "sha256:" + hexSum(config), "size": len(config)},
