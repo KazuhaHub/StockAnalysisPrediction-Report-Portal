@@ -69,7 +69,7 @@ func TestLoadImageTransportActionsAndSignaturePurposes(t *testing.T) {
 			t.Fatal("exact load-image reply refused", action)
 		}
 	}
-	if !LoadImageExecute.mutating() || LoadImageRead.mutating() || !bulkDataAction(LoadImageExecute) && false {
+	if !LoadImageExecute.mutating() || LoadImageRead.mutating() {
 		t.Fatal("only the execute action may mutate")
 	}
 	read := lifecycleSignature(t, LoadImageRead, a, raw, sig)
