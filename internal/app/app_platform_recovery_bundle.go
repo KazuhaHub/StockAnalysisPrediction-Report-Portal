@@ -122,39 +122,20 @@ func loadPlatformRetainedSets(e migExec) ([]platformRetainedSet, error) {
 // activation of every installation that still exists, and every release a retained recovery set pins
 // (restoring that set re-activates its release).
 func platformRequiredReleaseBlobs(e migExec) ([]platformReleaseBlob, error) {
+	pins, err := loadPlatformReleasePins(e, 0)
+	if err != nil {
+		return nil, err
+	}
 	reasons := map[string]map[string]bool{}
-	add := func(release, reason string) {
-		if reasons[release] == nil {
-			reasons[release] = map[string]bool{}
+	for release, why := range pins {
+		for _, reason := range []string{"active", "pinned"} {
+			if why[reason] {
+				if reasons[release] == nil {
+					reasons[release] = map[string]bool{}
+				}
+				reasons[release][reason] = true
+			}
 		}
-		reasons[release][reason] = true
-	}
-	rows, err := e.query(`SELECT a.release_sha256 FROM app_platform_activations a
-		JOIN app_platform_installations i ON i.id=a.installation_id
-		WHERE i.desired_state<>'removed'
-		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`)
-	if err != nil {
-		return nil, err
-	}
-	for rows.Next() {
-		var release string
-		if err := rows.Scan(&release); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		add(release, "active")
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	sets, err := loadPlatformRetainedSets(e)
-	if err != nil {
-		return nil, err
-	}
-	for _, set := range sets {
-		add(set.release, "pinned")
 	}
 	blobs := make([]platformReleaseBlob, 0, len(reasons))
 	for release, set := range reasons {
@@ -430,4 +411,68 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 		}
 	}
 	return manifest, nil
+}
+
+// loadPlatformReleasePins is the one computation of which releases must keep their content. The recovery bundle
+// and the image blob sweep both use it, so the sweep can never remove what the bundle would need. It returns each
+// release with the reasons that pin it:
+//
+//   - active: the last activation of every installation that still exists (the bundle's rule);
+//   - pinned: a retained recovery set restores it (the bundle's rule);
+//   - candidate: it has a candidate or active activation, at any generation;
+//   - recovery_set: a recovery set that is not deleted names it, retained or still being cut;
+//   - operation: a non-terminal operation moves from or to it;
+//   - plan: an open review plan names it.
+//
+// The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
+// plans, which the bundle does not need.
+func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool, error) {
+	pins := map[string]map[string]bool{}
+	collect := func(reason, query string, args ...any) error {
+		rows, err := e.query(query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var release string
+			if err := rows.Scan(&release); err != nil {
+				return err
+			}
+			if pins[release] == nil {
+				pins[release] = map[string]bool{}
+			}
+			pins[release][reason] = true
+		}
+		return rows.Err()
+	}
+	if err := collect("active", `SELECT a.release_sha256 FROM app_platform_activations a
+		JOIN app_platform_installations i ON i.id=a.installation_id
+		WHERE i.desired_state<>'removed'
+		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`); err != nil {
+		return nil, err
+	}
+	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+platformRetainedRecoverySets); err != nil {
+		return nil, err
+	}
+	if nowMS == 0 {
+		return pins, nil
+	}
+	steps := []struct{ reason, query string }{
+		{"candidate", `SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active')`},
+		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted'`},
+		{"operation", `SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`},
+		{"operation", `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`},
+	}
+	for _, step := range steps {
+		if err := collect(step.reason, step.query); err != nil {
+			return nil, err
+		}
+	}
+	for _, column := range []string{"source_release_sha256", "target_release_sha256"} {
+		if err := collect("plan", `SELECT `+column+` FROM app_platform_review_plans WHERE consumed_ms IS NULL AND expires_ms>? AND `+column+` IS NOT NULL`, nowMS); err != nil {
+			return nil, err
+		}
+	}
+	return pins, nil
 }

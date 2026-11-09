@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -12,23 +14,40 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// readMetadata returns a manifest or config blob after hashing it against its name.
+// readMetadata returns a manifest or config blob after hashing it against its name. It deletes the blob only
+// when it is proven wrong; a failed read leaves it.
 func (p *platformImageStore) readMetadata(digest string) ([]byte, error) {
 	if !platformValidSHA(digest) {
 		return nil, errPlatformImageBlobMissing
 	}
-	info, err := os.Lstat(p.blobPath(digest))
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, errPlatformImageBlobMissing
+	path := p.blobPath(digest)
+	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errPlatformImageBlobMissing
+		}
+		if platformIsLinkRefusal(err) {
+			_ = os.Remove(path)
+			return nil, errPlatformImageBlobCorrupt
+		}
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
-	if info.Size() < 1 || info.Size() > appplatform.MaxImageMetadataBytes {
-		_ = os.Remove(p.blobPath(digest))
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+	}
+	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > appplatform.MaxImageMetadataBytes {
+		_ = os.Remove(path)
 		return nil, errPlatformImageBlobCorrupt
 	}
-	raw, err := os.ReadFile(p.blobPath(digest))
+	raw, err := io.ReadAll(io.LimitReader(file, appplatform.MaxImageMetadataBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+	}
 	sum := sha256.Sum256(raw)
-	if err != nil || hex.EncodeToString(sum[:]) != digest {
-		_ = os.Remove(p.blobPath(digest))
+	if hex.EncodeToString(sum[:]) != digest {
+		_ = os.Remove(path)
 		return nil, errPlatformImageBlobCorrupt
 	}
 	return raw, nil
@@ -53,72 +72,57 @@ func (p *platformImageStore) planFor(entry appplatform.BackendImage) (appplatfor
 	return plan, nil
 }
 
-// platformReleaseBlobs lists the blobs a stored release's image entries name, as far as the stored manifests
-// say. A release whose manifest is gone names only what the descriptor does.
-func (p *platformImageStore) releaseBlobs(descriptor []byte) []string {
+// releaseBlobs lists the blobs a stored release's image entries name. A release whose descriptor does not parse,
+// or whose manifest cannot be read to name its layers, is an error: the caller cannot know what to keep.
+func (p *platformImageStore) releaseBlobs(descriptor []byte) ([]string, error) {
 	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || parsed.Manifest.Backend == nil {
-		return nil
+	if err != nil {
+		return nil, err
+	}
+	if parsed.Manifest.Backend == nil {
+		return nil, nil
 	}
 	var digests []string
 	for _, entry := range parsed.Manifest.Backend.Images {
 		digests = append(digests, entry.ManifestDigest, entry.ConfigDigest)
-		if plan, err := p.planFor(entry); err == nil {
-			for _, layer := range plan.Layers {
-				digests = append(digests, layer.Digest)
-			}
-		}
-	}
-	return digests
-}
-
-// platformPinnedBlobSet computes, from the existing rows, the blobs no sweep may remove: those of a release
-// that is active or a candidate, that a retained recovery set restores, that a non-terminal operation moves
-// between, or that an open review plan targets.
-func (s *Server) platformPinnedBlobSet(ctx context.Context, p *platformImageStore) (map[string]bool, error) {
-	nowMS := time.Now().UnixMilli()
-	queries := []struct {
-		query string
-		args  []any
-	}{
-		{`SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active')`, nil},
-		{`SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted'`, nil},
-		{`SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`, nil},
-		{`SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`, nil},
-		{`SELECT source_release_sha256 FROM app_platform_review_plans WHERE consumed_ms IS NULL AND expires_ms>? AND source_release_sha256 IS NOT NULL`, []any{nowMS}},
-		{`SELECT target_release_sha256 FROM app_platform_review_plans WHERE consumed_ms IS NULL AND expires_ms>? AND target_release_sha256 IS NOT NULL`, []any{nowMS}},
-	}
-	releases := map[string]bool{}
-	for _, q := range queries {
-		rows, err := s.st.db.QueryContext(ctx, s.st.bind(q.query), q.args...)
+		plan, err := p.planFor(entry)
 		if err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			var sha string
-			if err := rows.Scan(&sha); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			releases[sha] = true
+		for _, layer := range plan.Layers {
+			digests = append(digests, layer.Digest)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		rows.Close()
+	}
+	return digests, nil
+}
+
+// platformPinnedBlobSet expands the shared release pins (loadPlatformReleasePins) to blob digests through the
+// stored descriptors and manifests. Any failure, a cancelled context included, returns an error and no set: a
+// sweep must never run on a partial set.
+func (s *Server) platformPinnedBlobSet(ctx context.Context, p *platformImageStore) (map[string]bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
+	pins, err := loadPlatformReleasePins(pool, time.Now().UnixMilli())
+	if err != nil {
+		return nil, err
 	}
 	pinned := map[string]bool{}
-	for sha := range releases {
+	for sha := range pins {
 		var descriptor []byte
 		if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), sha).Scan(&descriptor); err != nil {
-			continue
+			return nil, fmt.Errorf("pinned release %s: %w", sha, err)
 		}
-		for _, d := range p.releaseBlobs(descriptor) {
+		digests, err := p.releaseBlobs(descriptor)
+		if err != nil {
+			return nil, fmt.Errorf("pinned release %s: %w", sha, err)
+		}
+		for _, d := range digests {
 			pinned[d] = true
 		}
 	}
-	return pinned, nil
+	return pinned, ctx.Err()
 }
 
 // sweepPlatformImages removes the blobs nothing pins. It runs on start and after an operation ends, and a
@@ -174,6 +178,10 @@ func (s *Server) stagePlatformPackageFile(ctx context.Context, actor platformAct
 			return zero, err
 		}
 		if added, err = s.storePlatformImageBlobs(store, envelope); err != nil {
+			// A write that failed part-way leaves the blobs this call already wrote: remove the unpinned ones.
+			if pinned, pinErr := s.platformPinnedBlobSet(ctx, store); pinErr == nil {
+				store.removeUnpinned(added, pinned)
+			}
 			return zero, err
 		}
 	}
@@ -197,9 +205,12 @@ func (s *Server) storePlatformImageBlobs(store *platformImageStore, envelope app
 		blobs = append(blobs, plan.Blobs()...)
 	}
 	// A blob that is present but fails its hash is replaced from this package, so only a missing one is new space.
-	if !store.fitsBlobs(blobs) {
-		return nil, errPlatformImageStoreFull
+	// The room is promised under the store's lock before any byte is written, and given back when staging ends.
+	unreserve, err := store.reserveBlobs(blobs)
+	if err != nil {
+		return nil, err
 	}
+	defer unreserve()
 	names := make([]string, 0, len(blobs))
 	for _, b := range blobs {
 		names = append(names, b.Digest)
@@ -233,9 +244,11 @@ func (s *Server) storePlatformImageBlobs(store *platformImageStore, envelope app
 
 // streamUpload copies a request body into a fresh staging file, bounded, and returns the open file.
 func (p *platformImageStore) streamUpload(body io.Reader, limit int64) (*os.File, int64, string, error) {
-	if err := p.reserveStaging(limit, ""); err != nil {
+	release, err := p.reserveStaging(limit, "")
+	if err != nil {
 		return nil, 0, "", err
 	}
+	defer release()
 	key := newPlatformUploadKey()
 	file, _, err := p.openPartial(key)
 	if err != nil {

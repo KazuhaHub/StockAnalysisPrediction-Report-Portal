@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -65,54 +66,125 @@ func TestUpdateStartIsNotReservedWhenTheReleaseImageCannotBeLoaded(t *testing.T)
 	}
 }
 
-// Fails if a start path can be reached without the image gate, which is how a pruned or never-loaded image
-// would reach a start. Each listed function must open with the ensure call.
-func TestEveryStartPathEnsuresTheImageBeforeAnythingElse(t *testing.T) {
-	want := map[string]string{
-		"app_platform_update_start_stage.go":      "executePlatformUpdateStart",
-		"app_platform_restore_start_stage.go":     "executePlatformRestoreStart",
-		"app_platform_migration_stage.go":         "dispatchPlatformMigrateData",
-		"app_platform_writable_install_worker.go": "startPlatformWritableInstall",
-		"app_platform_candidate_stage.go":         "dispatchPlatformInstallCandidate",
+// startSenders are the calls that put a start-class command on the runner: they claim or reserve a container
+// (candidate, update start, writable start), run the data writer or the migration job. Each needs the release
+// image on the host first.
+var startSenders = map[string]bool{
+	"platformStartCandidate": true, "platformReserveUpdateStart": true, "platformExecuteUpdateStart": true,
+	"platformRunWritableStart": true, "platformRunWriter": true, "ExecuteMigrate": true,
+}
+
+// readOnlyStartPaths are functions that reach a sender only to read an effect back or to reconcile one an earlier
+// gated attempt sent; they send nothing new, so the gate is not theirs. Each is named with the reason.
+var readOnlyStartPaths = map[string]string{
+	"completePlatformInstallWriter":  "reads the writer receipt back",
+	"reconcilePlatformInstallWriter": "reconciles a writer an earlier gated attempt sent",
+	"runPlatformInstallWriter":       "dispatch, complete and reconcile share it; only dispatch sends, and it is gated by its caller",
+	"runPlatformWritableStart":       "dispatch, complete and reconcile share it; only dispatch sends, and it is gated by its caller",
+	"completePlatformWritableStart":  "reads the start back",
+	"reconcilePlatformWritableStart": "reconciles a start an earlier gated attempt sent",
+	"settlePlatformMigration":        "settlement reads back and discards; it never sends a migration",
+	"waitPlatformWritableCandidate":  "polls readiness of a start an earlier gated attempt sent",
+	"probePlatformWritableCandidate": "probes readiness of a start an earlier gated attempt sent",
+}
+
+// Fails if any function that calls a start sender can run without the image gate before it: the gate must precede
+// the sender in the same function, or every non-test caller of the function must itself be gated. A new start
+// path is found by its sender call, so it cannot be added without the gate.
+func TestEveryStartSenderIsPrecededByTheImageGate(t *testing.T) {
+	fset := token.NewFileSet()
+	files, _ := filepath.Glob("*.go")
+	type fn struct {
+		name    string
+		senders []token.Pos
+		gate    token.Pos
+		calls   map[string][]token.Pos
+		file    string
 	}
-	for file, name := range want {
-		fset := token.NewFileSet()
-		parsed, err := parser.ParseFile(fset, file, nil, 0)
+	funcs := map[string]*fn{}
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, f, nil, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		found := false
 		for _, decl := range parsed.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name != name {
+			d, ok := decl.(*ast.FuncDecl)
+			if !ok || d.Body == nil {
 				continue
 			}
-			found = true
-			first, ok := fn.Body.List[0].(*ast.IfStmt)
-			if !ok {
-				t.Fatalf("%s does not open with the image gate", name)
-			}
-			init, ok := first.Init.(*ast.AssignStmt)
-			if !ok || len(init.Rhs) != 1 {
-				t.Fatalf("%s does not open with the image gate", name)
-			}
-			call, ok := init.Rhs[0].(*ast.CallExpr)
-			if !ok || !strings.HasSuffix(exprString(call.Fun), "ensurePlatformReleaseImage") {
-				t.Fatalf("%s does not open with the image gate", name)
-			}
-		}
-		if !found {
-			t.Fatalf("%s: %s is gone; update the start paths", file, name)
+			info := &fn{name: d.Name.Name, calls: map[string][]token.Pos{}, file: f}
+			ast.Inspect(d.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				name := ""
+				switch v := call.Fun.(type) {
+				case *ast.Ident:
+					name = v.Name
+				case *ast.SelectorExpr:
+					name = v.Sel.Name
+				}
+				switch {
+				case name == "ensurePlatformReleaseImage":
+					if info.gate == 0 || call.Pos() < info.gate {
+						info.gate = call.Pos()
+					}
+				case startSenders[name]:
+					info.senders = append(info.senders, call.Pos())
+				}
+				info.calls[name] = append(info.calls[name], call.Pos())
+				return true
+			})
+			funcs[d.Name.Name] = info
 		}
 	}
-}
-
-func exprString(e ast.Expr) string {
-	switch v := e.(type) {
-	case *ast.SelectorExpr:
-		return exprString(v.X) + "." + v.Sel.Name
-	case *ast.Ident:
-		return v.Name
+	// entryGated: every non-test call site of the function is itself preceded by the gate, or sits in a function
+	// whose own entry is gated. A function nothing calls is not gated.
+	var entryGated func(name string, seen map[string]bool) bool
+	entryGated = func(name string, seen map[string]bool) bool {
+		if seen[name] {
+			return false
+		}
+		seen[name] = true
+		defer delete(seen, name)
+		callers := 0
+		for cname, caller := range funcs {
+			for _, at := range caller.calls[name] {
+				callers++
+				if !(caller.gate != 0 && caller.gate < at) && !entryGated(cname, seen) {
+					return false
+				}
+			}
+		}
+		return callers > 0
 	}
-	return ""
+	gated := func(name string) bool {
+		f := funcs[name]
+		for _, sender := range f.senders {
+			if !(f.gate != 0 && f.gate < sender) && !entryGated(name, map[string]bool{}) {
+				return false
+			}
+		}
+		return true
+	}
+	checked := 0
+	for name, f := range funcs {
+		if len(f.senders) == 0 {
+			continue
+		}
+		checked++
+		if _, ok := readOnlyStartPaths[name]; ok {
+			continue
+		}
+		if !gated(name) {
+			t.Errorf("%s (%s) calls a start sender without the image gate before it, and not every caller is gated", name, f.file)
+		}
+	}
+	if checked < 6 {
+		t.Fatalf("only %d functions call a start sender; the sender list is stale", checked)
+	}
 }

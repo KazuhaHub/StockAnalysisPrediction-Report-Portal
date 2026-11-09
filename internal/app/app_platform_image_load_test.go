@@ -55,8 +55,6 @@ type platformFakeImageRunner struct {
 	loseExecuteReplyOnce bool
 	// refuseBlob answers an upload with a typed refusal.
 	refuseBlob imagestore.Refusal
-	// dropBlobOnce ends the first upload session of a blob after the prefix: the runner reports where it stands.
-	resumeAt   int64
 	uploads    map[string][]int64 // digest -> resume offsets of its sessions
 	effectIDs  map[string]bool
 	needed     []string

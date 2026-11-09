@@ -2,9 +2,12 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,7 +139,7 @@ func TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials(t *tes
 	partial := write(strings.Repeat("4", 64)+".partial", 10, 5*time.Hour)
 	release := store.hold(held)
 	defer release()
-	if err := store.reserveStaging(25, ""); err != nil {
+	if _, err := store.reserveStaging(25, ""); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]bool{oldest: false, held: true, recent: true, partial: true} {
@@ -146,7 +149,7 @@ func TestImageStoreStagingEvictsLeastRecentlyUsedAndSparesHeldAndPartials(t *tes
 		}
 	}
 	// Nothing left that may be evicted: the reservation is refused instead of crossing the cap.
-	if err := store.reserveStaging(75, ""); err != errPlatformImageStoreFull {
+	if _, err := store.reserveStaging(75, ""); err != errPlatformImageStoreFull {
 		t.Fatalf("over-cap reservation: %v", err)
 	}
 }
@@ -221,3 +224,190 @@ func TestImageStoreUploadStreamsToDiskAndDiscardsWhatExceedsItsBound(t *testing.
 func bytesReader(b []byte) *bytes.Reader { return bytes.NewReader(b) }
 
 func writeFileForTest(path string, body []byte) error { return os.WriteFile(path, body, 0o600) }
+
+// Fails if two concurrent reservations both pass the cap on the same free space.
+func TestImageStoreCapReservationsAreAtomicUnderConcurrency(t *testing.T) {
+	store := newTestImageStore(t)
+	store.blobCap, store.stagingCap = 100, 100
+	for _, kind := range []string{"blobs", "staging"} {
+		var wins, refusals atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for i := range 16 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+				var err error
+				if kind == "blobs" {
+					blob, _ := testBlob(strings.Repeat("c", 60) + string(rune('a'+i)))
+					_, err = store.reserveBlobs([]appplatform.ImageBlob{blob})
+				} else {
+					_, err = store.reserveStaging(60, "")
+				}
+				if err == nil {
+					wins.Add(1)
+				} else {
+					refusals.Add(1)
+				}
+			}()
+		}
+		close(start)
+		wg.Wait()
+		if wins.Load() != 1 || refusals.Load() != 15 {
+			t.Fatalf("%s: %d reservations fit a cap that holds one", kind, wins.Load())
+		}
+	}
+}
+
+// Fails if a released reservation keeps holding room, or an unreleased one does not.
+func TestImageStoreReleasedReservationGivesTheRoomBack(t *testing.T) {
+	store := newTestImageStore(t)
+	store.blobCap = 100
+	blob, _ := testBlob(strings.Repeat("r", 80))
+	release, err := store.reserveBlobs([]appplatform.ImageBlob{blob})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := testBlob(strings.Repeat("s", 80))
+	if _, err := store.reserveBlobs([]appplatform.ImageBlob{other}); err == nil {
+		t.Fatal("a held reservation gave its room away")
+	}
+	release()
+	release()
+	if _, err := store.reserveBlobs([]appplatform.ImageBlob{other}); err != nil {
+		t.Fatal("a released reservation kept its room:", err)
+	}
+}
+
+// Fails if concurrent puts of one digest corrupt each other's partial file, leave one behind, or fail.
+func TestImageStoreConcurrentPutsOfOneDigestAllSucceedAndLeaveOneValidBlob(t *testing.T) {
+	store := newTestImageStore(t)
+	blob, raw := testBlob(strings.Repeat("shared layer ", 5000))
+	var wg sync.WaitGroup
+	errs := make(chan error, 24)
+	for range 24 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- store.putBlob(blob, bytes.NewReader(raw))
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal("a concurrent put failed:", err)
+		}
+	}
+	file, err := store.openBlob(blob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file.Close()
+	entries, _ := os.ReadDir(store.blobs)
+	if len(entries) != 1 {
+		t.Fatalf("concurrent puts left %v", entries)
+	}
+}
+
+// Fails if a read error deletes a good blob. The blob is made unreadable, not wrong.
+func TestImageStoreAReadErrorFailsTheAttemptAndKeepsTheBlob(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a mode 0 file")
+	}
+	store := newTestImageStore(t)
+	blob, raw := testBlob("a blob that cannot be read right now")
+	if err := store.putBlob(blob, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(store.blobPath(blob.Digest), 0)
+	if _, err := store.openBlob(blob); !errors.Is(err, errPlatformImageBlobRead) {
+		t.Fatalf("unreadable blob: %v", err)
+	}
+	if _, err := store.readMetadata(blob.Digest); !errors.Is(err, errPlatformImageBlobRead) {
+		t.Fatalf("unreadable metadata blob: %v", err)
+	}
+	if _, err := os.Lstat(store.blobPath(blob.Digest)); err != nil {
+		t.Fatal("a good blob was deleted over a read error")
+	}
+	os.Chmod(store.blobPath(blob.Digest), 0o600)
+	if file, err := store.openBlob(blob); err != nil {
+		t.Fatal(err)
+	} else {
+		file.Close()
+	}
+}
+
+// Fails if a symbolic link in a blob's place is followed, or its target is touched.
+func TestImageStoreNeverFollowsALinkInPlaceOfABlob(t *testing.T) {
+	store := newTestImageStore(t)
+	blob, raw := testBlob("the real bytes of the blob")
+	outside := filepath.Join(t.TempDir(), "outside")
+	os.WriteFile(outside, raw, 0o600)
+	if err := os.Symlink(outside, store.blobPath(blob.Digest)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.openBlob(blob); err == nil {
+		t.Fatal("a linked blob was opened")
+	}
+	if _, err := store.readMetadata(blob.Digest); err == nil {
+		t.Fatal("a linked metadata blob was read")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatal("the link's target was removed")
+	}
+	// A link planted where a write would go is replaced, not followed.
+	os.Remove(store.blobPath(blob.Digest))
+	os.Symlink(outside, store.blobPath(blob.Digest)+".partial")
+	if err := store.putBlob(blob, bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(outside); !bytes.Equal(got, raw) {
+		t.Fatal("the link target was written through")
+	}
+}
+
+// Fails if an existing store directory is left open to others, owned by another user's link, or a link.
+func TestImageStoreTightensDirectoryModesAndRefusesALinkedDirectory(t *testing.T) {
+	root := t.TempDir()
+	os.MkdirAll(filepath.Join(root, "app-staging"), 0o777)
+	os.Chmod(filepath.Join(root, "app-staging"), 0o777)
+	if _, err := newPlatformImageStore(root); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(filepath.Join(root, "app-staging"))
+	if info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("directory left at %v", info.Mode().Perm())
+	}
+	linked := t.TempDir()
+	os.Symlink(t.TempDir(), filepath.Join(linked, "app-staging"))
+	if _, err := newPlatformImageStore(linked); err == nil {
+		t.Fatal("a linked store directory was accepted")
+	}
+}
+
+// Fails if blobs a staging call already wrote stay behind when a later write fails.
+func TestOfflineManagedPackageWhoseLaterBlobWriteFailsLeavesNoBlobsAndNoRelease(t *testing.T) {
+	h := newPlatformImageHTTP(t, true)
+	store, _ := h.s.platformImages()
+	parts := newPlatformManagedImageParts(t, "6.0.0", "midway")
+	var written int
+	store.putFault = func(appplatform.ImageBlob) error {
+		written++
+		if written == 3 {
+			return errors.New("disk write failed")
+		}
+		return nil
+	}
+	if code, _ := h.upload(parts.packageBytes(t, nil, "")); code == 200 {
+		t.Fatal("a failed write was reported as staged")
+	}
+	if h.releases() != 0 || len(h.blobNames()) != 0 {
+		t.Fatalf("a failed staging left %d releases and blobs %v", h.releases(), h.blobNames())
+	}
+	store.putFault = nil
+	if code, body := h.upload(parts.packageBytes(t, nil, "")); code != 200 {
+		t.Fatal("the same package did not stage afterwards:", code, body)
+	}
+}

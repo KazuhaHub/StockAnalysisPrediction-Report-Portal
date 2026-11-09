@@ -150,11 +150,13 @@ func (s *Server) fetchAndStagePlatformPackage(ctx context.Context, actor platfor
 	}
 	for fresh := 0; fresh < 2; fresh++ {
 		download, cancel := context.WithTimeout(ctx, platformPackageDownloadTimeout)
-		if err := store.reserveStaging(appplatform.MaxManagedOfflineEnvelopeBytes, store.partialName(key)); err != nil {
+		unreserve, err := store.reserveStaging(appplatform.MaxManagedOfflineEnvelopeBytes, store.partialName(key))
+		if err != nil {
 			cancel()
 			return zero, err
 		}
 		size, err := client.fetchToFile(download, packageURL, appplatform.MaxManagedOfflineEnvelopeBytes, store, key, 3)
+		unreserve()
 		cancel()
 		if err != nil {
 			// The partial stays: the next call resumes it.

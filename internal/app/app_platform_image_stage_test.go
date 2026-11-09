@@ -224,7 +224,7 @@ func TestPinnedBlobsOfActiveAndRetainedReleasesSurviveEverySweepAndOthersDoNot(t
 	b.retain(t, 1, "verified", heldSHA, []byte("archive"))
 	// Cache pressure on the staging area must not touch the blob store.
 	store.stagingCap = 1
-	_ = store.reserveStaging(1<<20, "")
+	_, _ = store.reserveStaging(1<<20, "")
 	b.s.platformImageRecover()
 	b.s.sweepPlatformImages(t.Context())
 	present := func(p platformManagedImageParts) int {

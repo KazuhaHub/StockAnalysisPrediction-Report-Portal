@@ -212,3 +212,89 @@ func writeManifestForTest(dir string, m platformRecoveryBundleManifest) error {
 }
 
 func jsonMarshalIndent(v any) ([]byte, error) { return json.MarshalIndent(v, "", "  ") }
+
+// A retired activation of a disabled installation is still the installation's last activation: enable and repair
+// need its blobs and the recovery bundle must carry them. Fails if a sweep with no grace removes them, or if the
+// pinned set is smaller than the bundle's own rule.
+func TestSweepKeepsTheBlobsOfARetiredActivationOfADisabledInstallationAndTheBundleStillWrites(t *testing.T) {
+	b, active, pinned := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	store.grace = 0
+	mustExec(t, b.s.st, `UPDATE app_platform_activations SET state='retired' WHERE installation_id=?`, b.installation)
+	mustExec(t, b.s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='disabled' WHERE id=?`, b.installation)
+	b.s.sweepPlatformImages(context.Background())
+	for _, p := range []platformManagedImageParts{active, pinned} {
+		for _, blob := range p.imageBlobList() {
+			if _, err := os.Stat(store.blobPath(blob.Digest)); err != nil {
+				t.Fatalf("a sweep removed blob %s of a release the bundle needs", blob.Digest[:8])
+			}
+		}
+	}
+	if _, err := b.s.writePlatformRecoveryBundle(t.TempDir(), platformRecoveryBundleInput{Archives: b.archives}); err != nil {
+		t.Fatal("the bundle no longer writes:", err)
+	}
+	// The sweep's pins are a superset of the bundle's.
+	set, err := b.s.platformPinnedBlobSet(context.Background(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	required, err := platformRequiredReleaseBlobs(b.s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range required {
+		var descriptor []byte
+		if err := b.s.st.db.QueryRow(b.s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), r.ReleaseSHA256).Scan(&descriptor); err != nil {
+			t.Fatal(err)
+		}
+		digests, err := store.releaseBlobs(descriptor)
+		if err != nil {
+			continue
+		}
+		for _, d := range digests {
+			if !set[d] {
+				t.Fatalf("the bundle needs blob %s that the sweep does not pin", d[:8])
+			}
+		}
+	}
+}
+
+// Fails if any error while computing the pinned set, a cancelled context included, lets the sweep run on what it
+// had so far.
+func TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed(t *testing.T) {
+	b, active, _ := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	store.grace = 0
+	stray := newPlatformManagedImageParts(t, "5.9.9", "stray-failclosed")
+	for _, blob := range stray.imageBlobList() {
+		store.putBlob(blob, bytes.NewReader(stray.blobs[blob.Digest]))
+	}
+	strays := func() int {
+		n := 0
+		for _, blob := range stray.imageBlobList() {
+			if _, err := os.Stat(store.blobPath(blob.Digest)); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	b.s.sweepPlatformImages(cancelled)
+	if strays() != 4 {
+		t.Fatal("a cancelled sweep removed blobs")
+	}
+	// A pinned release whose manifest can no longer be read: the layers cannot be named, so nothing is removed.
+	os.Remove(store.blobPath(active.entry.ManifestDigest))
+	b.s.sweepPlatformImages(context.Background())
+	if strays() != 4 {
+		t.Fatal("a sweep ran with a pinned release it could not expand")
+	}
+	// A pinned release whose descriptor row is gone: the query fails, nothing is removed.
+	mustExec(t, b.s.st, `PRAGMA foreign_keys=OFF`)
+	mustExec(t, b.s.st, `DELETE FROM app_platform_releases WHERE sha256=?`, platformDigest(active.descriptor))
+	b.s.sweepPlatformImages(context.Background())
+	if strays() != 4 {
+		t.Fatal("a sweep ran after a pinned release's descriptor query failed")
+	}
+}

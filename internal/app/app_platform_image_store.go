@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -38,6 +40,8 @@ var (
 	errPlatformImageStoreFull   = errors.New("application image storage is full")
 	errPlatformImageBlobCorrupt = errors.New("a stored application image blob failed its hash check")
 	errPlatformImageBlobMissing = errors.New("a stored application image blob is missing")
+	// errPlatformImageBlobRead is a read that failed without proving the blob wrong; nothing was deleted.
+	errPlatformImageBlobRead = errors.New("a stored application image blob could not be read")
 )
 
 var platformStoreName = regexp.MustCompile(`^[0-9a-f]{64}(\.partial|\.validator\.partial)?$`)
@@ -49,20 +53,31 @@ type platformImageStore struct {
 	now                 func() time.Time
 	mu                  sync.Mutex
 	held                map[string]int
+	// reservedBlobs and reservedStaging are bytes promised to writes in flight, so two concurrent checks cannot
+	// both pass the cap on the same free space.
+	reservedBlobs, reservedStaging int64
+	digestLocks                    map[string]*platformDigestLock
+	// putFault, when set, is consulted before each blob write; a test uses it to fail a write part-way.
+	putFault func(appplatform.ImageBlob) error
+}
+
+type platformDigestLock struct {
+	mu   sync.Mutex
+	refs int
 }
 
 func newPlatformImageStore(root string) (*platformImageStore, error) {
 	p := &platformImageStore{
 		staging: filepath.Join(root, "app-staging"), blobs: filepath.Join(root, "app-blobs"),
 		stagingCap: platformStagingCapBytes, blobCap: platformBlobCapBytes, grace: platformBlobGrace,
-		now: time.Now, held: map[string]int{},
+		now: time.Now, held: map[string]int{}, digestLocks: map[string]*platformDigestLock{},
 	}
 	for _, dir := range []string{p.staging, p.blobs} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
 		}
-		if info, err := os.Lstat(dir); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, errPlatformImageStoreFull
+		if err := platformCheckStoreDir(dir); err != nil {
+			return nil, err
 		}
 	}
 	return p, nil
@@ -76,8 +91,17 @@ func (s *Server) platformImageRoot() string {
 	if s.cfg != nil && s.cfg.DBPath != "" {
 		return config.DirOf(s.cfg.DBPath)
 	}
-	return "data"
+	// Only a server without a configuration (a test) gets here; it must not write into the working directory.
+	platformImageFallback.Do(func() {
+		platformImageFallbackDir, _ = os.MkdirTemp("", "portal-app-images-")
+	})
+	return platformImageFallbackDir
 }
+
+var (
+	platformImageFallback    sync.Once
+	platformImageFallbackDir string
+)
 
 // platformImages returns the image stores, created on first use.
 func (s *Server) platformImages() (*platformImageStore, error) {
@@ -192,28 +216,82 @@ func platformEntriesBytes(entries []platformStoreEntry) int64 {
 
 // reserveStaging makes room for a package of at most extra bytes, evicting the least recently used finished
 // packages that nothing holds. It refuses when the cap still would not hold the package.
-func (p *platformImageStore) reserveStaging(extra int64, keep string) error {
+func (p *platformImageStore) reserveStaging(extra int64, keep string) (release func(), err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	entries := p.list(p.staging)
-	used := platformEntriesBytes(entries)
-	if used+extra <= p.stagingCap {
-		return nil
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].mod.Before(entries[j].mod) })
-	for _, e := range entries {
-		if used+extra <= p.stagingCap {
-			break
-		}
-		if e.part || e.name == keep || p.isHeld(e.name) {
-			continue
-		}
-		if os.Remove(filepath.Join(p.staging, e.name)) == nil {
-			used -= e.size
+	used := platformEntriesBytes(entries) + p.reservedStaging
+	if used+extra > p.stagingCap {
+		sort.Slice(entries, func(i, j int) bool { return entries[i].mod.Before(entries[j].mod) })
+		for _, e := range entries {
+			if used+extra <= p.stagingCap {
+				break
+			}
+			if e.part || e.name == keep || p.held[e.name] > 0 {
+				continue
+			}
+			if os.Remove(filepath.Join(p.staging, e.name)) == nil {
+				used -= e.size
+			}
 		}
 	}
 	if used+extra > p.stagingCap {
-		return errPlatformImageStoreFull
+		return nil, errPlatformImageStoreFull
 	}
-	return nil
+	p.reservedStaging += extra
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.reservedStaging -= extra
+			p.mu.Unlock()
+		})
+	}, nil
+}
+
+// reserveBlobs promises room under the blob cap for the blobs of one release that are not stored yet. The check
+// and the promise happen under one lock, so two staging calls cannot both fit in the same free space.
+func (p *platformImageStore) reserveBlobs(blobs []appplatform.ImageBlob) (release func(), err error) {
+	missing := p.missingBlobs(blobs)
+	var need int64
+	for _, b := range missing {
+		need += b.Size
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.blobBytes()+p.reservedBlobs+need > p.blobCap {
+		return nil, errPlatformImageStoreFull
+	}
+	p.reservedBlobs += need
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			p.mu.Lock()
+			p.reservedBlobs -= need
+			p.mu.Unlock()
+		})
+	}, nil
+}
+
+// lockDigest serializes writers of one blob name, so two puts of the same digest never share a partial file.
+func (p *platformImageStore) lockDigest(digest string) (unlock func()) {
+	p.mu.Lock()
+	l := p.digestLocks[digest]
+	if l == nil {
+		l = &platformDigestLock{}
+		p.digestLocks[digest] = l
+	}
+	l.refs++
+	p.mu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		p.mu.Lock()
+		if l.refs--; l.refs == 0 {
+			delete(p.digestLocks, digest)
+		}
+		p.mu.Unlock()
+	}
 }
 
 // openPartial opens the in-flight file of key for appending and returns what it already holds. The name is the
@@ -223,7 +301,7 @@ func (p *platformImageStore) openPartial(key string) (*os.File, int64, error) {
 	if info, err := os.Lstat(path); err == nil && !info.Mode().IsRegular() {
 		return nil, 0, errPlatformImageStoreFull
 	}
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|platformNoFollow, 0o600)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -255,7 +333,7 @@ func (p *platformImageStore) discardPartial(key string) {
 // finishPartial hashes the finished file, names it by its digest and drops its validator.
 func (p *platformImageStore) finishPartial(key string) (string, int64, error) {
 	path := p.partialPath(key)
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
 	if err != nil {
 		return "", 0, err
 	}
@@ -274,29 +352,6 @@ func (p *platformImageStore) finishPartial(key string) (string, int64, error) {
 	now := p.now()
 	_ = os.Chtimes(final, now, now)
 	return digest, size, nil
-}
-
-// openStaged opens a finished package after hashing it again; a package that no longer hashes to its name is
-// deleted.
-func (p *platformImageStore) openStaged(digest string) (*os.File, int64, error) {
-	if !platformValidSHA(digest) {
-		return nil, 0, errPlatformImageBlobMissing
-	}
-	path := filepath.Join(p.staging, digest)
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, 0, errPlatformImageBlobMissing
-	}
-	hash := sha256.New()
-	size, err := io.Copy(hash, file)
-	if err != nil || hex.EncodeToString(hash.Sum(nil)) != digest {
-		file.Close()
-		_ = os.Remove(path)
-		return nil, 0, errPlatformImageBlobCorrupt
-	}
-	now := p.now()
-	_ = os.Chtimes(path, now, now)
-	return file, size, nil
 }
 
 // ---------- blobs ----------
@@ -345,11 +400,20 @@ func (p *platformImageStore) fitsBlobs(blobs []appplatform.ImageBlob) bool {
 func (p *platformImageStore) putBlob(blob appplatform.ImageBlob, source io.Reader) error {
 	release := p.hold(blob.Digest)
 	defer release()
+	defer p.lockDigest(blob.Digest)()
+	if p.putFault != nil {
+		if err := p.putFault(blob); err != nil {
+			return err
+		}
+	}
 	if blob.Size < 1 || blob.Size > appplatform.MaxImageBlobBytes || !platformValidSHA(blob.Digest) {
 		return errPlatformImageBlobCorrupt
 	}
 	temp := p.blobPath(blob.Digest) + ".partial"
-	file, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	// Under the digest lock nothing else owns this name; a stale file (or a link planted in its place) is removed
+	// and the file is created new, never followed.
+	_ = os.Remove(temp)
+	file, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|platformNoFollow, 0o600)
 	if err != nil {
 		return err
 	}
@@ -368,44 +432,54 @@ func (p *platformImageStore) putBlob(blob appplatform.ImageBlob, source io.Reade
 	return nil
 }
 
-// openBlob hashes a stored blob against its name and size and returns it open at offset zero. A blob that fails
-// is deleted, so the release needs its package again.
+// openBlob hashes a stored blob against its name and size and returns it open at offset zero. A blob that is
+// proven wrong (a different size, or a complete read that does not hash to its name) is deleted, so the release
+// needs its package again. A read that merely fails (EIO, EMFILE) deletes nothing: the attempt fails and the blob
+// stays for the next one.
 func (p *platformImageStore) openBlob(blob appplatform.ImageBlob) (*os.File, error) {
 	path := p.blobPath(blob.Digest)
-	file, err := os.Open(path)
+	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
 	if err != nil {
-		return nil, errPlatformImageBlobMissing
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, errPlatformImageBlobMissing
+		}
+		if platformIsLinkRefusal(err) {
+			_ = os.Remove(path)
+			return nil, errPlatformImageBlobCorrupt
+		}
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
 	info, err := file.Stat()
-	hash := sha256.New()
-	if err == nil && info.Mode().IsRegular() && info.Size() == blob.Size {
-		var n int64
-		if n, err = io.Copy(hash, file); err == nil && n == blob.Size && hex.EncodeToString(hash.Sum(nil)) == blob.Digest {
-			if _, err = file.Seek(0, io.SeekStart); err == nil {
-				return file, nil
-			}
-		}
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
-	file.Close()
-	_ = os.Remove(path)
-	return nil, errPlatformImageBlobCorrupt
+	if !info.Mode().IsRegular() || info.Size() != blob.Size {
+		file.Close()
+		_ = os.Remove(path)
+		return nil, errPlatformImageBlobCorrupt
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, file)
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+	}
+	if n != blob.Size || hex.EncodeToString(hash.Sum(nil)) != blob.Digest {
+		file.Close()
+		_ = os.Remove(path)
+		return nil, errPlatformImageBlobCorrupt
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		file.Close()
+		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+	}
+	return file, nil
 }
 
-// readBlob returns the bytes of a small verified blob.
-func (p *platformImageStore) readBlob(blob appplatform.ImageBlob, limit int64) ([]byte, error) {
-	if blob.Size > limit {
-		return nil, errPlatformImageBlobCorrupt
-	}
-	file, err := p.openBlob(blob)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
-	if err != nil || int64(len(raw)) != blob.Size {
-		return nil, errPlatformImageBlobCorrupt
-	}
-	return raw, nil
+// platformIsLinkRefusal reports the error an O_NOFOLLOW open returns for a symbolic link.
+func platformIsLinkRefusal(err error) bool {
+	return errors.Is(err, syscall.ELOOP)
 }
 
 // sweep removes the blobs nothing pins. A blob held by an upload or a load, and a blob younger than the grace

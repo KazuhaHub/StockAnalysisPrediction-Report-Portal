@@ -20,11 +20,6 @@ import (
 // id until it settles.
 const platformLoadImageKind = "load_image"
 
-// platformNotLoadImage is the SQL fragment that makes a count of an operation's effects ignore the load. The
-// load runs before a start and touches only daemon image storage, so the exact-history guards that count the
-// start-side effects of an operation do not count it.
-const platformNotLoadImage = "kind<>'load_image'"
-
 type platformImageRows struct {
 	s         *Server
 	lease     platformOperationLease

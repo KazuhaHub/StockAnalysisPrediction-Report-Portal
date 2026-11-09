@@ -107,9 +107,11 @@ func (s *Server) restorePlatformBundleBlobs(dir string, manifest platformRecover
 	for _, f := range manifest.ImageBlobs {
 		blobs = append(blobs, appplatform.ImageBlob{Digest: f.SHA256, Size: f.Bytes})
 	}
-	if !store.fitsBlobs(blobs) {
-		return errPlatformImageStoreFull
+	unreserve, err := store.reserveBlobs(blobs)
+	if err != nil {
+		return err
 	}
+	defer unreserve()
 	for _, f := range manifest.ImageBlobs {
 		in, err := os.Open(filepath.Join(dir, filepath.FromSlash(f.Path)))
 		if err != nil {

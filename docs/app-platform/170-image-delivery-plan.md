@@ -431,29 +431,25 @@ The fourth review round passed. These minor findings are carried into the first 
 
 Where the plan was silent, or the code made a different choice the safer one, the choice is recorded here.
 
-1. **The load-image effect has no Portal row (deviation).** The plan asks for effect number 1 in stage `stage`
-   for every operation. Portal keeps no `app_platform_operation_effects` row for it. Four existing guards
-   count the effect rows of an operation and would refuse the extra row: the candidate and data intents
-   (`effects == 1`), the managed history read (`count != 3`), the install admission (`resources == 0`) and the
-   removal advance rule (`f.stage<>o.stage AND f.state<>'applied'`). Relaxing them would loosen evidence checks
-   that exist to refuse exactly an unexpected row. The effect identity is instead derived, so it is the same on
-   every attempt, restart and lease takeover:
-   `platformDerivedUUID("load-image", <operation id> "/" <release sha256>)`. The runner's journal is the record
-   of the effect, under journal stage `stage`, number 1; Portal writes an audit entry when a load settles
-   applied. The runner's `sameLoadCommand` does not bind the fence, so a command signed again at a later lease
-   fence is the same command. An unknown effect is therefore settled under its own id by the next attempt, and
-   no attempt can mint another one.
-2. **`enable` and `restore` have no `stage` stage (resolves 3a note 3).** Because there is no Portal row, no
-   stage is added to the action's stage list and the journal enum is untouched. The command's journal stage is
-   `stage` whatever stage the Portal operation is in, which the runner accepts for any operation. The fail-closed
-   part is the gate order, not the stage name: the load runs before the start's own effect row exists.
+1. **The load-image effect has a Portal row, with kind `load_image` (reversed in the first review round; see
+   "PR 3b first-round review follow-ups").** The row is `app_platform_operation_effects`, stage `stage`, number
+   1, kind `load_image`, and the id derived from the operation and release, so it is the same on every attempt,
+   restart and lease takeover: `platformDerivedUUID("load-image", <operation id> "/" <release sha256>)`. The
+   kind column has no enum check, so no DDL is needed. The runner's `sameLoadCommand` does not bind the fence, so
+   a command signed again at a later lease fence is the same command.
+2. **`enable` and `restore` have no `stage` stage (resolves 3a note 3).** No stage is added to the action's
+   stage list and the journal enum is untouched. The row carries stage `stage` whatever stage the Portal
+   operation is in, and the command's journal stage is `stage` too. The guards that count an operation's
+   effects exclude kind `load_image`, and the advance rules tolerate a row of stage `stage` on an operation that
+   never passes through it (`TestEnableOperationCompletesWithALoadImageRowOfStageStage`).
 3. **Where the load runs.** The gate `ensurePlatformReleaseImage` is the first statement of
    `startPlatformWritableInstall` (install writer and writable start), `dispatchPlatformInstallCandidate`,
    `dispatchPlatformMigrateData` (the migration job runs the target image), `executePlatformUpdateStart` (update,
    enable, repair, retry and roll back, which are all updates or same-release lifecycles) and
    `executePlatformRestoreStart` (restore launch and the restore resume of a paused Portal). It is idempotent:
    an applied effect answers a receipt and uploads nothing. `TestEveryStartPathEnsuresTheImageBeforeAnythingElse`
-   fails if a start path loses its gate.
+   fails if a start path loses its gate; since the first review round it finds every call to a runner start
+   sender instead of a fixed list (`TestEveryStartSenderIsPrecededByTheImageGate`).
 4. **The release and platform.** The target release is the plan's `target_release_sha256` (every plan carries
    it). The host platform is the one the review recorded in the managed runtime profile. A release with no
    `backend.images` (a static release, or the development form that names a registry reference) is skipped and
@@ -579,7 +575,7 @@ Named tests per step. Each failure direction is in the test name or its comment.
     `TestEnsureImageDoesNotBelieveAReceiptForAnotherEffect`,
     `TestMigrateDataIsNotSentWhenTheReleaseImageCannotBeLoaded`, `TestMigrateDataRunsAfterTheImageIsLoaded`,
     `TestUpdateStartIsNotReservedWhenTheReleaseImageCannotBeLoaded`,
-    `TestEveryStartPathEnsuresTheImageBeforeAnythingElse`. The gates of the restore start, the writable install
+    `TestEveryStartSenderIsPrecededByTheImageGate`. The gates of the restore start, the writable install
     start and the candidate start are covered by the structural test only; their behaviour is the same call.
 15. **Recovery:** `TestRecoveryBundleCarriesTheBlobsOfEveryActiveAndPinnedManagedRelease`,
     `TestRecoveryBundleIsRefusedAndRemovedWhenAPinnedManagedReleaseHasLostABlob`,
@@ -592,3 +588,74 @@ Named tests per step. Each failure direction is in the test name or its comment.
     `TestAManifestRefusedUnderTheExactRoleCountsAgainstTheImage` and the other manifest refusal tests,
     `TestPlanImageRefusesAConfigWithoutAConfigSection`,
     `TestLoadImageLogsTheBoundedSanitizedDaemonDetailAndKeepsItOutOfTheReceipt`.
+
+## PR 3b first-round review follow-ups
+
+The adversarial review failed PR 3b at `09291a62`. Everything below is fixed, test-first.
+
+1. **Blocker: the runner's exact-history readers counted the load-image row.** The first managed install from a
+   version 2 package could not start on a real runner, because the writer, candidate and registration readers
+   refuse when any other command row of the installation exists. Every installation-wide reader of
+   `runner_commands` (the writer, candidate, registration, update-start, checkpoint, removal, reservation,
+   import, migrate and delete-data readers, their `unknown` guards, and the fence, generation and epoch floors)
+   now ignores kind `load-image` in any state. A load touches only the daemon's image storage, never data,
+   fences or containers. The start gate itself still requires an applied load for the exact release. Tests on the
+   real SQLite journal: `TestEveryCommandFamilyAdmitsAfterAnAppliedOrUnknownLoadImageRow` (writer chain through
+   candidate claim, data reservation, registration, checkpoint, update start, managed removal, legacy
+   candidate, each with an applied and with an unknown load) and the source guard
+   `TestInstallationWideCommandReadersIgnoreLoadImageRows`, which fails if a new installation-wide reader omits
+   the exclusion. Not done: a Portal test that drives a writable install against the real runner journal in
+   process. The seam does not exist: Portal's runner calls go through `platformRunLifecycle` over the control
+   socket, which only the Linux native tests (run in CI) can stand up with a real journal and transport.
+2. **Major: an unknown load was invisible to the Portal (reverses the earlier "no Portal row" deviation).** The
+   load now has the row described in note 1 above. It is written `prepared` before the first command leaves
+   Portal, ends `applied` with the runner's receipt or `reverted` with a rejection, and is left `unknown` when
+   the gate gives up with no verdict. The existing model then applies: the scheduler ends the operation for
+   review (`recovery_required`), `platformRequireSettledLoad` refuses every recovery choice while the load is
+   `prepared` or `unknown`, and the idle driver `settlePlatformLoadImages` (beside the migration settlement
+   driver) reads the load back and sends it again under the same id, uploading the blobs the runner names, until
+   it settles. The guards that count an operation's effects exclude kind `load_image`: the candidate intent
+   (`effects == 1`), the managed history (`count != 3`), the install admission (`resources == 0`), the removal
+   advance rule (`platformRemovalAdvanceRule`), and the writer, writable start, registration, update-start
+   registration, activation, data, restore-resume and installation-wide first-install counts. Tests:
+   `TestEnsureImageWritesALoadImageRowThatEndsAppliedWithTheReceiptAndIsNotSentAgain`,
+   `TestEnsureImageLeavesTheRowUnknownWhenTheOutcomeIsNotKnown`,
+   `TestEnsureImageRecordsARejectionAsRevertedAndRefusesWithoutAskingAgain`,
+   `TestAnUnknownLoadKeepsTheOperationRecoveryRequiredUntilTheDriverSettlesItUnderTheSameId`, and one test per
+   named guard that proves it still refuses another kind
+   (`TestManagedAccessHistoryCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestCandidateIntentEffectCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestInstallAdmissionResourceCountIgnoresALoadImageRowButNotAnotherKind`,
+   `TestRemovalSelectionAdvanceRuleToleratesALoadImageRowOfStageStageButNotAnotherKind`). Not exercised end to
+   end: a restore operation carrying the row. The restore-resume counts exclude it, which a test does not prove.
+3. **Blocker: the pinned set dropped retired activations.** A disabled, revoked or repair-pending app lost its
+   blobs to the sweep, so enable and repair failed and every recovery bundle was refused. One function,
+   `loadPlatformReleasePins`, now computes the pins for both the sweep and `platformRequiredReleaseBlobs`: the
+   last activation of every installation that is not removed, retained recovery sets, candidate and active
+   activations, recovery sets not deleted, open operations and open plans. The bundle uses the first two
+   reasons, the sweep all of them, so the sweep's set is a superset of the bundle's. Test:
+   `TestSweepKeepsTheBlobsOfARetiredActivationOfADisabledInstallationAndTheBundleStillWrites`.
+4. **Major: a failed descriptor query let the sweep run on a partial set.** Any error computing the pinned set
+   (a cancelled context, a descriptor query, a manifest that cannot be read to name its layers) aborts the sweep,
+   which removes nothing. Test: `TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed`. A pinned release with
+   an unreadable manifest therefore stops sweeps until its package is uploaded again.
+5. **Minors.**
+   - Cap checks are atomic: room is promised under the store's lock before any write and given back when the
+     write ends (`reserveBlobs`, `reserveStaging`). `TestImageStoreCapReservationsAreAtomicUnderConcurrency`.
+   - Concurrent puts of one digest are serialized by a per-digest lock, and the partial is created `O_EXCL`
+     after removing a stale one. `TestImageStoreConcurrentPutsOfOneDigestAllSucceedAndLeaveOneValidBlob`.
+   - A blob write that fails part-way removes the unpinned blobs the staging call already wrote.
+     `TestOfflineManagedPackageWhoseLaterBlobWriteFailsLeavesNoBlobsAndNoRelease`.
+   - A read error (EIO, EMFILE) fails the attempt and deletes nothing; only a proven size or hash mismatch
+     deletes. `TestImageStoreAReadErrorFailsTheAttemptAndKeepsTheBlob`.
+   - Opens use `O_NOFOLLOW`, store directories are checked for type and owner and tightened to 0700.
+     `TestImageStoreNeverFollowsALinkInPlaceOfABlob`, `TestImageStoreTightensDirectoryModesAndRefusesALinkedDirectory`.
+   - A server with no configuration falls back to a temporary directory, never the working directory. The
+     staged file that was committed under `internal/app/data/` is removed, and a `TestMain` fails the run if
+     the stores appear there.
+   - `dispatchPlatformInstallCandidate` is not reached by production code, but native and unit tests drive it, so
+     it stays, gated. The AST test now finds every call to a runner start sender (`startSenders`) and requires
+     the gate before it in the same function or in every caller; `readOnlyStartPaths` names the read-back paths
+     that are exempt, each with its reason.
+   - `staticcheck` findings from CI (`openStaged`, `readBlob`, an unused test field) are removed.
+   - `06-acceptance.md` now separates what ran against fakes, against the real journal, and natively in CI.
