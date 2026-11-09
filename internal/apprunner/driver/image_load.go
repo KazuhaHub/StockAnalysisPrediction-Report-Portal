@@ -156,27 +156,36 @@ const (
 )
 
 // inspectLoadedImage reads the loaded image by its expected ID and judges it against the platform: linux, the
-// right architecture and no declared volumes.
-func inspectLoadedImage(ctx context.Context, client *http.Client, expected, arch string) (imageOnDaemon, error) {
+// right architecture and no declared volumes. For an image that is present but fails, the returned detail names the
+// check that failed (bounded; for logs and tests only, never the wire).
+func inspectLoadedImage(ctx context.Context, client *http.Client, expected, arch string) (imageOnDaemon, string, error) {
 	ctx, cancel := probeContext(ctx)
 	defer cancel()
 	var response imageResponse
 	err := readJSONOrMissing(ctx, client, "/v"+APIVersion+"/images/"+expected+"/json", &response, ErrImageMissing)
 	if errors.Is(err, ErrImageMissing) {
-		return imageAbsent, nil
+		return imageAbsent, "not found under the expected ID " + expected, nil
 	}
 	if errors.Is(err, ErrInvalidResponse) {
-		return imageInvalid, nil
+		return imageInvalid, "inspect response failed projection validation (duplicate or aliased keys, or not an object)", nil
 	}
 	if err != nil {
-		return imageAbsent, err
+		return imageAbsent, "", err
 	}
 	var config imageConfig
-	if response.ID != expected || response.OS != "linux" || response.Architecture != arch || (response.Variant != "" && !(arch == "arm64" && response.Variant == "v8")) ||
-		!validProjection(response.Config, &imageConfig{}) || json.Unmarshal(response.Config, &config) != nil || len(config.Volumes) != 0 {
-		return imageInvalid, nil
+	switch {
+	case response.ID != expected:
+		return imageInvalid, "ID differs: got " + response.ID + ", want " + expected, nil
+	case response.OS != "linux" || response.Architecture != arch || (response.Variant != "" && !(arch == "arm64" && response.Variant == "v8")):
+		return imageInvalid, "platform differs: os=" + response.OS + " architecture=" + response.Architecture + " variant=" + response.Variant + ", want linux/" + arch, nil
+	case !validProjection(response.Config, &imageConfig{}):
+		return imageInvalid, "config projection invalid (missing, null or aliased keys): " + boundedDetail(string(response.Config)), nil
+	case json.Unmarshal(response.Config, &config) != nil:
+		return imageInvalid, "config is not decodable", nil
+	case len(config.Volumes) != 0:
+		return imageInvalid, "config declares volumes", nil
 	}
-	return imageValid, nil
+	return imageValid, "", nil
 }
 
 func removeLoadedImage(ctx context.Context, client *http.Client, id string) error {
@@ -406,10 +415,11 @@ func loadImageHTTP(ctx context.Context, client *http.Client, request LoadImageRe
 	}
 	_, wasPresent := before[expected]
 	if wasPresent {
-		state, err := inspectLoadedImage(ctx, client, expected, arch)
+		state, detail, err := inspectLoadedImage(ctx, client, expected, arch)
 		if err != nil {
 			return zero, err
 		}
+		snapshot.DaemonDetail = boundedDetail(detail)
 		snapshot.ObservedMS = time.Now().UnixMilli()
 		if state == imageValid {
 			snapshot.State = LoadStatePresent
@@ -458,11 +468,12 @@ func loadImageHTTP(ctx context.Context, client *http.Client, request LoadImageRe
 	if post.status != http.StatusOK || post.daemonErr {
 		return reject(LoadOutcomeLoadRejected)
 	}
-	state, err := inspectLoadedImage(ctx, client, expected, arch)
+	state, detail, err := inspectLoadedImage(ctx, client, expected, arch)
 	if err != nil {
 		return zero, err
 	}
 	if state != imageValid {
+		post.detail = detail
 		return reject(LoadOutcomeInspectMismatch)
 	}
 	snapshot.State, snapshot.ObservedMS = LoadStateLoaded, time.Now().UnixMilli()
@@ -512,6 +523,6 @@ func loadedImagePresentHTTP(ctx context.Context, client *http.Client, descriptor
 	if err != nil {
 		return false, err
 	}
-	state, err := inspectLoadedImage(ctx, client, ExpectedImageID(imageStoreFromInfo(info), entry), arch)
+	state, _, err := inspectLoadedImage(ctx, client, ExpectedImageID(imageStoreFromInfo(info), entry), arch)
 	return state == imageValid, err
 }
