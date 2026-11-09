@@ -788,7 +788,7 @@ type platformServiceFixture struct {
 	once    sync.Once
 }
 
-func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, deployment journal.Deployment) *platformServiceFixture {
+func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, deployment journal.Deployment, options ...func(*service.Config)) *platformServiceFixture {
 	t.Helper()
 	root, err := os.MkdirTemp("/run", "portal-service-")
 	if err != nil {
@@ -850,6 +850,9 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 			ControlRevision: deployment.ControlRevision,
 			Fingerprint:     deployment.Fingerprint,
 		},
+	}
+	for _, option := range options {
+		option(&cfg)
 	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
@@ -925,6 +928,34 @@ func TestPlatformRunnerServiceChild(t *testing.T) {
 	}
 }
 
+// bindPlatformFixtureRuntime seeds a confirmed runtime binding for the shared public fixture deployment, using
+// real DEK encryption. Existing runtime confirmation has separate cross-UID acceptance; never enroll this public
+// seed in a production deployment.
+func bindPlatformFixtureRuntime(t *testing.T, s *Server, session platformActorSession, enrollment journal.ControllerEnrollment) {
+	t.Helper()
+	mustExec(t, s.st, `UPDATE meta SET v=? WHERE k='app_platform_controller_epoch'`, enrollment.ControllerEpoch)
+	runtime, err := s.preparePlatformRuntimeBinding(session, enrollment.DeploymentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := bytes.Repeat([]byte{30}, ed25519.SeedSize)
+	key := ed25519.NewKeyFromSeed(seed)
+	if !bytes.Equal(key[ed25519.SeedSize:], enrollment.PublicKey) {
+		t.Fatal("shared public fixture key changed")
+	}
+	clear(key)
+	dek, err := s.dek()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := aesSeal(dek, seed, aad("app-platform", "runtime-control:"+runtime.id))
+	clear(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1,revision=2,control_revision=?,verification_key_fingerprint=?,sealed_control_key=? WHERE id=?`, enrollment.ControlRevision, enrollment.Fingerprint, sealPrefix+ciphertext, runtime.id)
+}
+
 func TestPlatformInstallDataEndpointChild(t *testing.T) {
 	if os.Getenv("PORTAL_DATA_CHILD") != "1" {
 		t.Skip("isolated Portal data child only")
@@ -947,30 +978,7 @@ func TestPlatformInstallDataEndpointChild(t *testing.T) {
 		t.Fatal("missing public enrollment")
 	}
 	s, session, release := platformInstallFixture(t, false)
-	// Existing runtime confirmation has separate cross-UID acceptance. Seed a
-	// confirmed binding for this shared public fixture deployment, using real DEK
-	// encryption; never enroll this public seed in a production deployment.
-	mustExec(t, s.st, `UPDATE meta SET v=? WHERE k='app_platform_controller_epoch'`, enrollment.ControllerEpoch)
-	runtime, err := s.preparePlatformRuntimeBinding(session, enrollment.DeploymentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seed := bytes.Repeat([]byte{30}, ed25519.SeedSize)
-	key := ed25519.NewKeyFromSeed(seed)
-	if !bytes.Equal(key[ed25519.SeedSize:], enrollment.PublicKey) {
-		t.Fatal("shared public fixture key changed")
-	}
-	clear(key)
-	dek, err := s.dek()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ciphertext, err := aesSeal(dek, seed, aad("app-platform", "runtime-control:"+runtime.id))
-	clear(seed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mustExec(t, s.st, `UPDATE app_platform_runtime_bindings SET enabled=1,revision=2,control_revision=?,verification_key_fingerprint=?,sealed_control_key=? WHERE id=?`, enrollment.ControlRevision, enrollment.Fingerprint, sealPrefix+ciphertext, runtime.id)
+	bindPlatformFixtureRuntime(t, s, session, enrollment)
 	plan, err := s.createPlatformNativeInstallAudienceReview(session, release.sha256, 1, []platformAudienceTarget{{kind: "user", username: session.username}})
 	if err != nil {
 		t.Fatal(err)

@@ -787,3 +787,74 @@ amended by items 1 and 3 here.
    What it cannot catch, also in the test's comment: SQL assembled in a function that never mentions the table and
    handed to a helper elsewhere, text read at run time, a name supplied through `fmt.Sprintf` in another function,
    and anything reached by reflection. It is a tripwire for the ordinary ways of adding a writer, not a proof.
+
+## PR 3c: the exact image started by a real runner from blobs
+
+Stacked on PR 3b, into `integration/app-platform`. Closes the central `PKG-01` gap that 3b left open: CI had
+staged the real package with fakes and had loaded a real image on the real daemon only in the 3a test, but no
+run had started the exact Scheduled Digest image through a real root runner after a real `load-image`.
+
+### Plan
+
+1. **Package in the quota job.** The job that already owns the root runner, the XFS filesystem and the Portal test
+   binary (`enforce-disposable-project-quota`) builds the `portalapp/2` package with the same commands as
+   `deliver-managed-image-package` (default builder, `docker save <image-id>`, the Apps `export-image-oci.py`,
+   `build-app-v2.py --images`; the Apps pin does not change).
+2. **A new scenario, last in the probe.** `project_quota_probe.py` runs `TestPlatformManagedImageDeliveryAcceptance`
+   after every test that starts the image from the registry copy, because the scenario removes that copy:
+   - the parent (root) removes, by ID, the image the job built and the containers made from it, and proves the
+     package's image ID is gone from the Docker store;
+   - it starts a second runner service in the production profile (`allow_local_reference_images=false`, a real
+     `image_root`) on the same journal and data root, and an unprivileged Portal child;
+   - the child stages the package through the real offline import route, then runs the ordinary review,
+     consumption and install worker: `load_image` and the blob upload over the control socket, the runner's
+     `load-image` receipt, start, probe, registration and activation, with no synthetic native observation and
+     no direct journal write;
+   - while the app runs, the parent inspects the daemon and then releases the child, which uninstalls the app.
+3. **Asserted:** the effect row and the runner's receipt (`loaded`, not `present`, so the image was absent), image
+   ID, store and the claim's manifest and config digests against the package; every blob stored over the control
+   socket; readiness evidence on the activation; the Scheduled Digest task answered through the platform path
+   that the exact-image test already uses; on the daemon, the stored image's ID, platform, layer chain and the
+   absence of any name; the store changed by exactly that image; every container created from it created from
+   the image ID, one running; no image `pull`, `tag`, `untag`, `push` or `import` event while the scenario ran,
+   with a watcher proven live by a container creation event.
+4. **Evidence.** One JSON file (`portal.managed-image-delivery.real-runner/1-dev.1`), checked by the probe against a
+   closed list of markers and true-valued claims, uploaded as the workflow artifact `managed-image-real-runner`
+   and merged into `project-quota-evidence`.
+5. **PKG-08 against the real runner: not attempted.** A corrupt Portal blob is refused before any runner effect
+   (a Portal-side fact, covered by the 3b tests); a real-runner version would need a second installation of the
+   same app to fail and then be recovered inside the same runner state, which is not cheap in this harness. It is
+   left unproven against a real runner and stated as such.
+
+Ordering decision: the registry-copy tests and the new scenario are kept in one job and one runner, and the new
+scenario runs last. They are not made independent, because the exact image is shared and its removal by ID is the
+point of the proof. A restart of the runner service on the shared journal is the supported restart path, and the
+scenario uses fresh Portal identifiers, so it does not collide with earlier fixtures.
+
+### Implementation notes
+
+- **Production profile.** `startPlatformServiceFixture` takes options; the new scenario clears
+  `AllowLocalReferenceImages`. With it cleared, a descriptor that names a registry reference is refused by the
+  runner (3a), so the only way the app can start is the loaded image.
+- **Docker store, by ID.** The parent reaches the daemon with a small unix-socket client (images, containers,
+  `/info`, `/events`). It deletes only containers whose image ID is the package's image ID, then the image by ID
+  with `force=1`, which also drops every name the job gave it (the build tag and the registry copy).
+  Expected ID follows resolution 7: the config digest on the classic store, the manifest digest on the containerd
+  store.
+- **Counting seam.** The child wraps the Portal's runner seam (`platformImageRunner`) in a recorder that delegates
+  every call to the real transport. It records blob sends and how many were `stored`, the number of `load-image`
+  executes, and the receipt the runner returned. It changes no behaviour.
+- **Manifest digest.** The classic store does not retain the manifest digest, so it is not readable back from the
+  daemon. It is bound through the runner's signed claim and receipt, which the child compares with the package. The
+  daemon-side checks are the image ID (the config digest), the layer diff IDs, the platform and the absent names.
+- **Pure checks.** Each daemon-side proof is a function with a unit test that fails in the direction it guards
+  (`app_platform_image_delivery_evidence_unit_test.go`), and the probe's own acceptance of the run (markers and
+  true-valued evidence, production profile required) has python unit tests. The refactor of the runtime binding
+  seeding into `bindPlatformFixtureRuntime` is shared with the existing child.
+- **Not proven by this scenario:** PKG-08 against a real runner (above); the containerd store (CI uses the
+  classic store, so that branch stays covered by unit tests and the 3a native tests); a prune between the load
+  and the start; the fresh-host managed restore of `DATA-05`; PostgreSQL.
+- **No production change, no schema change.** The scenario exercised existing code only.
+
+CI status of this section is recorded in `06-acceptance.md` and the evidence file; neither claims more than the run
+named there.

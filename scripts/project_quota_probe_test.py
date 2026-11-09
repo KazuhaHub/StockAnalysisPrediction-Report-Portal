@@ -249,5 +249,66 @@ class CandidateProbeConfigurationTests(unittest.TestCase):
                     probe.candidate_configuration()
 
 
+class ImageDeliveryProbeTests(unittest.TestCase):
+    ENV = {
+        "APP_IMAGE_DELIVERY_CANDIDATE": "/tmp/image-delivery/candidate",
+        "APP_IMAGE_DELIVERY_BLOBS": "/tmp/image-delivery/export/blobs",
+    }
+
+    def evidence(self, **changed):
+        good = {name: True for name in probe.IMAGE_DELIVERY_EVIDENCE_TRUE}
+        good["format"] = probe.IMAGE_DELIVERY_EVIDENCE_FORMAT
+        good["allow_local_reference_images"] = False
+        good.update(changed)
+        return good
+
+    def stdout(self, drop=None):
+        lines = ["    x_test.go:1: " + marker for marker in probe.IMAGE_DELIVERY_MARKERS if marker != drop]
+        lines.append("--- PASS: TestPlatformManagedImageDeliveryAcceptance (12.00s)")
+        return "\n".join(lines)
+
+    def test_configuration_is_absent_or_complete_and_absolute(self):
+        with patch.dict(probe.os.environ, {}, clear=True):
+            self.assertIsNone(probe.image_delivery_configuration())
+        with patch.dict(probe.os.environ, self.ENV, clear=True):
+            self.assertEqual(probe.image_delivery_configuration(), tuple(self.ENV.values()))
+        for changed in ({"APP_IMAGE_DELIVERY_CANDIDATE": "relative"}, {"APP_IMAGE_DELIVERY_BLOBS": "relative"},
+                        {"APP_IMAGE_DELIVERY_BLOBS": ""}, {"APP_IMAGE_DELIVERY_CANDIDATE": ""}):
+            with patch.dict(probe.os.environ, dict(self.ENV, **changed), clear=True):
+                with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                    probe.image_delivery_configuration()
+
+    def test_every_marker_and_the_pass_line_are_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            path.write_text(__import__("json").dumps(self.evidence()))
+            self.assertTrue(probe.verify_image_delivery(self.stdout(), path)["production_profile"])
+            for marker in probe.IMAGE_DELIVERY_MARKERS:
+                with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                    probe.verify_image_delivery(self.stdout(drop=marker), path)
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.verify_image_delivery(self.stdout().replace("--- PASS", "--- FAIL"), path)
+
+    def test_the_evidence_must_prove_each_claim_and_the_production_profile(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "evidence.json"
+            for name in probe.IMAGE_DELIVERY_EVIDENCE_TRUE:
+                path.write_text(json.dumps(self.evidence(**{name: False})))
+                with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                    probe.verify_image_delivery(self.stdout(), path)
+            for changed in ({"allow_local_reference_images": True}, {"format": "other"}):
+                path.write_text(json.dumps(self.evidence(**changed)))
+                with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                    probe.verify_image_delivery(self.stdout(), path)
+            missing = self.evidence()
+            del missing["no_pull_events"]
+            path.write_text(json.dumps(missing))
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.verify_image_delivery(self.stdout(), path)
+            with self.assertRaisesRegex(RuntimeError, "image delivery"):
+                probe.verify_image_delivery(self.stdout(), Path(directory) / "absent.json")
+
+
 if __name__ == "__main__":
     unittest.main()
