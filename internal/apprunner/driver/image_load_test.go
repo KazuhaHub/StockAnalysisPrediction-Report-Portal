@@ -45,7 +45,10 @@ type loadFixture struct {
 }
 
 // newLoadFixture builds a real two-layer image and the descriptor that binds it.
-func newLoadFixture(t *testing.T) loadFixture {
+func newLoadFixture(t *testing.T) loadFixture { return newLoadFixtureFor(t, "amd64") }
+
+// newLoadFixtureFor builds the image for one architecture, so a native test can load an image the host can run.
+func newLoadFixtureFor(t *testing.T, arch string) loadFixture {
 	t.Helper()
 	fixture := loadFixture{source: memorySource{}}
 	var diffIDs []string
@@ -67,7 +70,7 @@ func newLoadFixture(t *testing.T) loadFixture {
 		layerDescriptors = append(layerDescriptors, map[string]any{"mediaType": appplatform.MediaTypeOCIManifest[:0] + "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + hexSum(gz.Bytes()), "size": gz.Len()})
 		entryLayers = append(entryLayers, map[string]any{"diff_id": hexSum(tarball.Bytes()), "uncompressed_bytes": tarball.Len()})
 	}
-	config, _ := json.Marshal(map[string]any{"architecture": "amd64", "os": "linux", "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
+	config, _ := json.Marshal(map[string]any{"architecture": arch, "os": "linux", "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
 	manifest, _ := json.Marshal(map[string]any{
 		"schemaVersion": 2, "mediaType": appplatform.MediaTypeOCIManifest,
 		"config": map[string]any{"mediaType": appplatform.MediaTypeOCIConfig, "digest": "sha256:" + hexSum(config), "size": len(config)},
@@ -82,8 +85,8 @@ func newLoadFixture(t *testing.T) loadFixture {
 	}
 	backend := d["backend"].(map[string]any)
 	delete(backend, "image")
-	backend["platforms"] = []any{"linux/amd64"}
-	backend["images"] = []any{map[string]any{"platform": "linux/amd64", "manifest_digest": hexSum(manifest), "config_digest": hexSum(config), "layers": entryLayers}}
+	backend["platforms"] = []any{"linux/" + arch}
+	backend["images"] = []any{map[string]any{"platform": "linux/" + arch, "manifest_digest": hexSum(manifest), "config_digest": hexSum(config), "layers": entryLayers}}
 	encoded, err := json.Marshal(d)
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +101,7 @@ func newLoadFixture(t *testing.T) loadFixture {
 }
 
 func (f loadFixture) request() LoadImageRequest {
-	return LoadImageRequest{Descriptor: f.raw, ReleaseSHA256: f.parsed.SHA256, Platform: "linux/amd64", Source: f.source}
+	return LoadImageRequest{Descriptor: f.raw, ReleaseSHA256: f.parsed.SHA256, Platform: f.entry.Platform, Source: f.source}
 }
 
 // fakeDaemon is a small Docker image API. Each scenario overrides what a load does to the image list.
