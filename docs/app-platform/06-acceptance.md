@@ -73,7 +73,7 @@ Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 
   identity across attempts and is read back, never re-sent under another; the recovery bundle carries and
   verifies the pinned blobs and a restored host loads the image before its start.
 - **Proven only in CI-native jobs (not run on the development host):** the real Scheduled Digest image exported
-  with `docker buildx --output type=oci` parses under the Portal's strict parser and passes the same
+  with `docker save` parses under the Portal's strict parser and passes the same
   offline, catalogue, corruption and cap scenarios at its real size
   (`deliver-managed-image-package`); the daemon's image list is unchanged around those runs; the SEC-01
   negatives (no image pull, no credential file or helper, a closed Docker request set) hold in the driver tests

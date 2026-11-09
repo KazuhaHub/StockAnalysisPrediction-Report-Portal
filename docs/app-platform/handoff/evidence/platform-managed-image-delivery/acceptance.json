@@ -49,7 +49,7 @@
     "note": "Not run when this record was written; the job runs on the pull request."
   },
   "limits": [
-    "No Docker on the development host: the CI job, docker buildx output through the Apps exporter and every native Linux path were not run.",
+    "No Docker on the development host: the CI job, docker save output through the Apps exporter and every native Linux path were not run.",
     "The new Portal tests use the SQLite test server only.",
     "The real daemon load is proven by the native test of a two-layer image built in the test, not by the exact Scheduled Digest image.",
     "Retag detection could not be demonstrated: Docker 28.0.4 ignored the name annotation."

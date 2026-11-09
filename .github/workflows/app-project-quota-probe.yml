@@ -195,7 +195,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: f0c4f2133f13d6c347131121ff5346b0c1bc7901
+          ref: 40b2e3c09c369d601ada4be33e06ede97b147175
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -389,7 +389,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
-          ref: f0c4f2133f13d6c347131121ff5346b0c1bc7901
+          ref: 40b2e3c09c369d601ada4be33e06ede97b147175
           path: .sdk-browser-apps
           persist-credentials: false
       - uses: actions/setup-node@v6
@@ -403,11 +403,11 @@ jobs:
           out="$RUNNER_TEMP/image-delivery"
           mkdir -p "$out"
           npm ci --prefix "$APPS"
-          # The OCI exporter needs a docker-container builder; the default driver cannot write type=oci.
-          docker buildx create --name image-delivery --driver docker-container --use
-          docker buildx build --platform linux/amd64 --provenance=false --sbom=false \
-            --file "$APPS/apps/scheduled-digest/service/Dockerfile" \
-            --output "type=oci,dest=$out/image.tar" "$APPS"
+          # Default builder, as the exact-image probe does; docker save writes an OCI layout on Docker 25+.
+          docker build --file "$APPS/apps/scheduled-digest/service/Dockerfile" \
+            --tag scheduled-digest-delivery:build "$APPS"
+          image_id=$(docker image inspect scheduled-digest-delivery:build --format '{{.Id}}')
+          docker save "$image_id" --output "$out/image.tar"
           python3 "$APPS/scripts/export-image-oci.py" "$out/image.tar" \
             --platform linux/amd64 --output "$out/export"
           python3 "$APPS/scripts/build-app-v2.py" scheduled-digest \

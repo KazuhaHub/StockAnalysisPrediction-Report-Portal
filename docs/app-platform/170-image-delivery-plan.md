@@ -525,13 +525,14 @@ Where the plan was silent, or the code made a different choice the safer one, th
     2 envelopes, and the descriptor validator accepts `backend.images`. The workflow pin moved to that branch's
     head.
 14. **CI.** A new job `deliver-managed-image-package` in `app-project-quota-probe.yml` builds the exact Scheduled
-    Digest image with `docker buildx build --output type=oci` (a `docker-container` builder, which pulls the
-    BuildKit image from the same registry the Dockerfile's base image already comes from), exports and packs it
-    with the Apps tooling, runs the real-image acceptance test, diffs the daemon's image list before and after,
-    and runs the SEC-01 negatives.
+    Digest image with the daemon's default builder, runs `docker save <image-id>` (Docker 25 and later writes an
+    OCI layout into the tar), exports it with the Apps tooling (which resolves a manifest named directly by
+    `index.json` or reached through a nested index, and gzips layers deterministically when a blob or the package
+    would be too large), packs it, runs the real-image acceptance test, diffs the daemon's image list before
+    and after, and runs the SEC-01 negatives. No BuildKit builder is created, so there is no new registry pull.
 
-Not verified here (no Docker on the development host, and no CI run yet): the CI job itself, `docker buildx`'s
-real output shape through the Apps exporter, every native Linux path, the new Portal tests on PostgreSQL (they
+Not verified here (no Docker on the development host, and no CI run yet): the CI job itself, the real `docker save`
+output shape through the Apps exporter, every native Linux path, the new Portal tests on PostgreSQL (they
 use the SQLite test server and standard SQL through `bind`), and a start of the exact Scheduled Digest image
 through the real runner from blobs. The managed image is therefore proven loadable on the real daemon only by the
 3a native test of a two-layer image built in the test, not by the exact image.
