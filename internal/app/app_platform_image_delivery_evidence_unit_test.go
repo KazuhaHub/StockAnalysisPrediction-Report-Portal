@@ -128,3 +128,18 @@ func TestDeliveryExpectedImageIDFollowsTheStore(t *testing.T) {
 		t.Fatal("expected image id")
 	}
 }
+
+// Fails if a descriptor digest (bare hex) is compared with the daemon's form ("sha256:" and the hex) without
+// normalising it, which would make "the image is absent from the store" pass on a store that still holds it.
+func TestDeliveryDigestsAreComparedInTheDaemonsForm(t *testing.T) {
+	hex := strings.Repeat("9", 64)
+	if imageDeliveryDaemonID(hex) != "sha256:"+hex || imageDeliveryDaemonID("sha256:"+hex) != "sha256:"+hex {
+		t.Fatal("daemon id form")
+	}
+	if imageDeliveryExpectedID(false, strings.Repeat("8", 64), hex) != "sha256:"+hex {
+		t.Fatal("expected id from a bare config digest")
+	}
+	if imageDeliveryCheckAbsent([]imageDeliveryImage{{ID: "sha256:" + hex}}, imageDeliveryExpectedID(false, "", hex)) == nil {
+		t.Fatal("a bare descriptor digest hid a present image")
+	}
+}

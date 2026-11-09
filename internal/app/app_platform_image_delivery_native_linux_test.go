@@ -326,7 +326,7 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 
 	layers := make([]string, 0, len(entry.Layers))
 	for _, layer := range entry.Layers {
-		layers = append(layers, layer.DiffID)
+		layers = append(layers, imageDeliveryDaemonID(layer.DiffID))
 	}
 	expected := imageDeliveryExpected{
 		ReleaseSHA256: platformDigest(parts.descriptor), ManifestDigest: entry.ManifestDigest, ConfigDigest: entry.ConfigDigest,
@@ -776,7 +776,8 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 		t.Fatalf("load receipt image %s store %s, expected %s on the %s store", receipt.ImageID, receipt.Store, expected.ImageID, expected.Store)
 	}
 	claim := receipt.Claim
-	if claim.ReleaseSHA256 != expected.ReleaseSHA256 || claim.ManifestDigest != expected.ManifestDigest || claim.ConfigDigest != expected.ConfigDigest || claim.Platform != expected.Platform {
+	bare := func(digest string) string { return strings.TrimPrefix(digest, "sha256:") }
+	if bare(claim.ReleaseSHA256) != bare(expected.ReleaseSHA256) || bare(claim.ManifestDigest) != bare(expected.ManifestDigest) || bare(claim.ConfigDigest) != bare(expected.ConfigDigest) || claim.Platform != expected.Platform {
 		t.Fatalf("the runner's claim does not bind the package's image: %+v", claim)
 	}
 	if evidence.BlobsStored != expected.Blobs || evidence.LoadExecutes < 2 {

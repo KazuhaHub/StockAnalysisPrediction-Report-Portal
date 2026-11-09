@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 )
 
 // The checks of the real-runner image delivery acceptance. They are plain functions of what the Docker API
@@ -30,12 +31,18 @@ type imageDeliveryInspect struct {
 	Layers               []string
 }
 
-// imageDeliveryExpectedID is the ID the daemon gives the loaded image (doc 170, resolution 7).
+// imageDeliveryDaemonID is the form the Docker API reports an image or a layer in: "sha256:" and the hex. The
+// descriptor writes the same digest as bare hex, so every comparison with the daemon goes through this.
+func imageDeliveryDaemonID(digest string) string {
+	return "sha256:" + strings.TrimPrefix(digest, "sha256:")
+}
+
+// imageDeliveryExpectedID is the ID the daemon gives the loaded image (doc 170, resolution 7), in the daemon's form.
 func imageDeliveryExpectedID(containerdStore bool, manifestDigest, configDigest string) string {
 	if containerdStore {
-		return manifestDigest
+		return imageDeliveryDaemonID(manifestDigest)
 	}
-	return configDigest
+	return imageDeliveryDaemonID(configDigest)
 }
 
 func imageDeliveryCheckAbsent(images []imageDeliveryImage, target string) error {
