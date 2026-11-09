@@ -304,41 +304,30 @@ func TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed(t *testing.T) {
 // newest operation at createdMS.
 func cloneFailedOperation(t *testing.T, s *Server, from, id, release string, createdMS int64) {
 	t.Helper()
+	cloneOperation(t, s, from, id, release, createdMS, "update", "recovery_required")
+}
+
+// cloneOperation adds a finished operation of the given action and stage targeting release.
+func cloneOperation(t *testing.T, s *Server, from, id, release string, createdMS int64, action, stage string) {
+	t.Helper()
 	plan := platformFixtureID(40000 + int(createdMS%100000))
 	mustExec(t, s.st, `INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
 		SELECT ?,installation_id,app_id,publisher_id,action,source_release_sha256,?,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms
 		FROM app_platform_review_plans WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, plan, release, from)
 	mustExec(t, s.st, `INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-		SELECT ?,installation_id,?,actor_scope,?,?,action,managed,source_generation,target_generation,'recovery_required',state_revision,row_revision,NULL,NULL,fence,controller_epoch,error_code,?,?,?
-		FROM app_platform_operations WHERE id=?`, id, plan, platformDigest([]byte(id)), platformDigest([]byte(plan)), createdMS, createdMS, createdMS, from)
+		SELECT ?,installation_id,?,actor_scope,?,?,?,managed,source_generation,target_generation,?,state_revision,row_revision,NULL,NULL,fence,controller_epoch,error_code,?,?,?
+		FROM app_platform_operations WHERE id=?`, id, plan, platformDigest([]byte(id)), platformDigest([]byte(plan)), action, stage, createdMS, createdMS, createdMS, from)
 }
 
-func markRecovered(t *testing.T, s *Server, operation string, n int) {
-	t.Helper()
-	addEffectRow(t, s, operation, "recovered", "recovered", 1, platformFixtureID(60000+n))
-}
-
-// Fails if pins accumulate: after a successful retry the failed operation's target is sweepable, a stream of failed
-// then recovered updates stays bounded to the one unrecovered target, and that one stays pinned while unrecovered.
-func TestOnlyTheLatestUnrecoveredFailurePinsItsReleaseAndAStreamOfFailuresStaysBounded(t *testing.T) {
+// Fails if pins accumulate or are released too early: a failed update stays pinned across a later disable (which
+// does not recover it), is released when a later start-bearing operation completes, and a stream of failures each
+// followed by a success never grows beyond the failures since the last success.
+func TestAFailureStaysPinnedUntilALaterStartBearingOperationCompletesAndAStreamStaysBounded(t *testing.T) {
 	b, _, _ := bundleWithManagedReleases(t)
 	store, _ := b.s.platformImages()
 	store.grace = 0
 	base := len(blobFiles(t, b.s))
-	var targets []platformManagedImageParts
-	for i := range 5 {
-		p := newPlatformManagedImageParts(t, "7.0."+string(rune('0'+i)), "stream-"+string(rune('a'+i)))
-		sha := platformInsertManagedRelease(t, b.s, b.release, p)
-		for _, blob := range p.imageBlobList() {
-			store.putBlob(blob, bytes.NewReader(p.blobs[blob.Digest]))
-		}
-		id := platformFixtureID(9100 + i)
-		cloneFailedOperation(t, b.s, b.operation, id, sha, time.Now().UnixMilli()+10000+int64(i))
-		if i < 4 {
-			markRecovered(t, b.s, id, i)
-		}
-		targets = append(targets, p)
-	}
+	now := time.Now().UnixMilli() + 10000
 	present := func(p platformManagedImageParts) int {
 		n := 0
 		for _, blob := range p.imageBlobList() {
@@ -348,24 +337,45 @@ func TestOnlyTheLatestUnrecoveredFailurePinsItsReleaseAndAStreamOfFailuresStaysB
 		}
 		return n
 	}
-	b.s.sweepPlatformImages(context.Background())
-	for i, p := range targets {
-		want := 0
-		if i == 4 {
-			want = 4 // the latest operation, still unrecovered
+	newRelease := func(version, seed string) (platformManagedImageParts, string) {
+		p := newPlatformManagedImageParts(t, version, seed)
+		sha := platformInsertManagedRelease(t, b.s, b.release, p)
+		for _, blob := range p.imageBlobList() {
+			store.putBlob(blob, bytes.NewReader(p.blobs[blob.Digest]))
 		}
-		if got := present(p); got != want {
-			t.Fatalf("target %d keeps %d blobs, want %d", i, got, want)
-		}
+		return p, sha
 	}
-	if total := len(blobFiles(t, b.s)); total != base+4 {
-		t.Fatalf("a stream of failures left %d blobs, want %d", total, base+4)
-	}
-	// A successful retry marks the failure recovered: its target is no longer needed and is swept.
-	markRecovered(t, b.s, platformFixtureID(9104), 4)
+	failed, failedSHA := newRelease("7.0.0", "failure")
+	cloneFailedOperation(t, b.s, b.operation, platformFixtureID(9100), failedSHA, now)
 	b.s.sweepPlatformImages(context.Background())
-	if present(targets[4]) != 0 || len(blobFiles(t, b.s)) != base {
+	if present(failed) != 4 {
+		t.Fatal("an unrecovered failure did not pin its target")
+	}
+	// A later disable does not recover it.
+	cloneOperation(t, b.s, b.operation, platformFixtureID(9101), failedSHA, now+1, "disable", "complete")
+	b.s.sweepPlatformImages(context.Background())
+	if present(failed) != 4 {
+		t.Fatal("a later disable released the pin of a failed start")
+	}
+	// A later enable that completed does.
+	cloneOperation(t, b.s, b.operation, platformFixtureID(9102), failedSHA, now+2, "enable", "complete")
+	b.s.sweepPlatformImages(context.Background())
+	if present(failed) != 0 || len(blobFiles(t, b.s)) != base {
 		t.Fatalf("a recovered failure still pins its target: %d blobs", len(blobFiles(t, b.s)))
+	}
+	// A stream of failures, each followed by a successful update, leaves only the failures since the last success.
+	var last platformManagedImageParts
+	for i := range 4 {
+		p, sha := newRelease("7.1."+string(rune('0'+i)), "stream-"+string(rune('a'+i)))
+		cloneFailedOperation(t, b.s, b.operation, platformFixtureID(9110+2*i), sha, now+int64(10+2*i))
+		if i < 3 {
+			cloneOperation(t, b.s, b.operation, platformFixtureID(9111+2*i), sha, now+int64(11+2*i), "update", "complete")
+		}
+		last = p
+	}
+	b.s.sweepPlatformImages(context.Background())
+	if present(last) != 4 || len(blobFiles(t, b.s)) != base+4 {
+		t.Fatalf("a stream of failures left %d blobs, want %d", len(blobFiles(t, b.s)), base+4)
 	}
 }
 

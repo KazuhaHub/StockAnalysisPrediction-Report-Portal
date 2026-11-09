@@ -423,7 +423,8 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 //   - recovery_set: a recovery set that is not deleted names it, retained or still being cut;
 //   - operation: a non-terminal operation moves from or to it;
 //   - unsettled_load: an operation (completed or not) holds a load with no verdict;
-//   - unrecovered: the installation's latest operation is recovery_required and nothing recovered it;
+//   - unrecovered: an operation ended recovery_required and no later start-bearing operation of the installation
+//     completed;
 //   - plan: an open review plan names it.
 //
 // The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
@@ -474,13 +475,15 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 			// (a) any operation holding a load with no verdict, completed or not.
 			struct{ reason, query string }{"unsettled_load", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 				JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown') WHERE p.` + column + ` IS NOT NULL`},
-			// (b) the latest operation of an installation that is not removed, while it is recovery_required and no
-			// recovery marker was written for it. Earlier failed operations, and recovered ones, pin nothing.
+			// (b) an operation that ended recovery_required of an installation that is not removed, until a later
+			// start-bearing operation of the same installation completed successfully. A later disable, uninstall or
+			// delete_data does not recover it: the failed start still needs its release.
 			struct{ reason, query string }{"unrecovered", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 				JOIN app_platform_installations i ON i.id=o.installation_id
 				WHERE o.stage='recovery_required' AND i.desired_state<>'removed' AND p.` + column + ` IS NOT NULL
-				AND NOT EXISTS (SELECT 1 FROM app_platform_operations o2 WHERE o2.installation_id=o.installation_id AND (o2.created_ms>o.created_ms OR (o2.created_ms=o.created_ms AND o2.id>o.id)))
-				AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects r WHERE r.operation_id=o.id AND r.stage='recovered' AND r.state='applied')`})
+				AND NOT EXISTS (SELECT 1 FROM app_platform_operations o2 WHERE o2.installation_id=o.installation_id AND o2.id<>o.id
+					AND (o2.created_ms>o.created_ms OR (o2.created_ms=o.created_ms AND o2.id>o.id))
+					AND o2.action IN ` + platformStartBearingSQL() + ` AND o2.stage='complete' AND o2.completed_ms IS NOT NULL)`})
 	}
 	for _, step := range steps {
 		if err := collect(step.reason, step.query); err != nil {

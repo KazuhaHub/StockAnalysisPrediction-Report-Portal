@@ -186,6 +186,24 @@ func (s *Server) platformLoadSettlementCandidates(ctx context.Context) (ids, ski
 	return ids, skipped, rows.Err()
 }
 
+// settleLoadsAsAbandoned settles the unsettled loads of the given operations as reverted with the outcome
+// abandoned_outcome_unknown: Portal has no runner verdict for them.
+func (s *Server) settleLoadsAsAbandoned(ctx context.Context, operations []string) error {
+	return s.st.withOUMutation(func(e migExec) error {
+		now, err := platformDatabaseNow(e)
+		if err != nil {
+			return err
+		}
+		for _, id := range operations {
+			if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json='{"outcome":"abandoned_outcome_unknown"}',updated_ms=?
+				WHERE operation_id=? AND kind='load_image' AND state IN ('prepared','unknown')`, now, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // platformLoadSettlementWindow is how many loads one tick settles.
 const platformLoadSettlementWindow = 8
 
@@ -222,8 +240,15 @@ func (s *Server) settlePlatformLoadImages(ctx context.Context, endpoint platform
 	if err != nil {
 		return 0, err
 	}
-	for _, id := range skipped {
-		log.Printf("app-platform load-image settlement %s: skipped, the installation's fence or the controller epoch has moved", id)
+	// A load whose operation's fence or epoch has moved can never settle under its lease. Its outcome is unknown, and
+	// leaving it open would block the installation for ever, so it is settled as such.
+	if len(skipped) > 0 {
+		for _, id := range skipped {
+			log.Printf("app-platform load-image settlement %s: the installation's fence or the controller epoch has moved; settling the load as abandoned_outcome_unknown", id)
+		}
+		if err := s.settleLoadsAsAbandoned(ctx, skipped); err != nil {
+			return 0, err
+		}
 	}
 	if len(ids) > platformLoadSettlementWindow {
 		start := s.platformLoadCursor % len(ids)

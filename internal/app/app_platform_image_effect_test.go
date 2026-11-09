@@ -108,7 +108,7 @@ func giveUp(t *testing.T, s *Server, lease platformOperationLease, endpoint plat
 // The unknown load of an operation the gate gave up on: no operation is admitted while it has no verdict, a
 // later driver tick settles it under the same id, and the installation is then free. Fails if the unknown load
 // is invisible, if the driver mints a second identity, or if the installation stays blocked afterwards.
-func TestAnUnknownLoadBlocksEveryAdmissionUntilTheDriverSettlesItUnderTheSameId(t *testing.T) {
+func TestAnUnknownLoadBlocksAStartingAdmissionUntilTheDriverSettlesItUnderTheSameId(t *testing.T) {
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	giveUp(t, s, lease, endpoint, fake)
 	if stage := scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, lease.id); stage != "recovery_required" {
@@ -135,13 +135,20 @@ func TestAnUnknownLoadBlocksEveryAdmissionUntilTheDriverSettlesItUnderTheSameId(
 	}
 }
 
-// Fails if any operation kind can be admitted while the installation holds an unsettled load.
-func TestEveryOperationKindIsRefusedWhileALoadIsUnsettled(t *testing.T) {
+// Only operations that start a backend are refused while a load has no verdict; every other kind is admitted, so a
+// trust quarantine and its stop can never be deferred. Fails if a start-bearing kind is admitted, or a non-start
+// kind refused.
+func TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled(t *testing.T) {
 	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
 	giveUp(t, s, lease, endpoint, fake)
-	for _, action := range []string{"install", "update", "enable", "disable", "repair", "uninstall", "delete_data", "restore", "restore_import"} {
+	for _, action := range platformStartBearingActions {
 		if err := tryAdmit(t, s, lease.installationID, action); !errors.Is(err, errAppPlatformOperationConflict) {
 			t.Errorf("%s was not refused: %v", action, err)
+		}
+	}
+	for _, action := range platformNonStartActions {
+		if err := tryAdmit(t, s, lease.installationID, action); errors.Is(err, errAppPlatformOperationConflict) {
+			t.Errorf("%s was refused although it starts no backend", action)
 		}
 	}
 	// Another installation is not affected.
@@ -150,15 +157,111 @@ func TestEveryOperationKindIsRefusedWhileALoadIsUnsettled(t *testing.T) {
 	}
 }
 
-// Fails if any non-test code can write the operations table other than the one helper: every string literal and
-// constant is normalised (lower case, whitespace collapsed, adjacent literals joined) and none outside the
-// helper's file may hold an insert into the table, an insert or ignore into it, or a rewrite of an operation's
-// installation.
+// Fails if an operation kind is in neither list, in both, or the lists drift from the schema's set of actions.
+func TestEveryOperationKindIsClassifiedAsStartBearingOrNot(t *testing.T) {
+	kinds := []string{"install", "update", "disable", "enable", "repair", "uninstall", "delete_data", "restore", "restore_import"}
+	for _, kind := range kinds {
+		in := 0
+		for _, a := range platformStartBearingActions {
+			if a == kind {
+				in++
+			}
+		}
+		for _, a := range platformNonStartActions {
+			if a == kind {
+				in++
+			}
+		}
+		if in != 1 {
+			t.Errorf("%s is classified %d times", kind, in)
+		}
+	}
+	if len(platformStartBearingActions)+len(platformNonStartActions) != len(kinds) {
+		t.Fatal("a list holds a kind the schema does not")
+	}
+	for _, kind := range kinds {
+		if !strings.Contains(platformActions(), "'"+kind+"'") {
+			t.Fatalf("%s is not an action of the schema", kind)
+		}
+	}
+}
+
+// moduleGoFiles lists every non-test Go file of the module, whichever package it is in.
+func moduleGoFiles(t *testing.T) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir("../..", func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "node_modules", ".git", "web", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
+// computedSQLAllowList are functions that mention the operations table and pass a computed SQL string to a database
+// call on purpose. Each is constant text assembled from constants, never from input.
+var computedSQLAllowList = map[string]string{
+	"loadPlatformReleasePins":                "joins constant fragments and a fixed action list",
+	"applyPlatformRestore":                   "loops over a literal list of statements; none inserts an operation",
+	"consumePlatformDeleteDataReviewContext": "loops over literal statements and appends a closed column list; admission itself uses the helper",
+	"platformReadDeleteDataPlan":             "a read with a closed suffix",
+	"claimNextPlatformInstallForFormat":      "closed stage list and runtime clause chosen by code, user values bound; a read",
+	"platformUnresolvedOperationCount":       "a read with a closed predicate",
+	"platformUnresolvedOperationEffectCount": "a read with a closed predicate",
+	"writePlatformOperationLease":            "updates the lease columns of an existing operation; never the installation",
+	"applyPlatformAbandonRuntime":            "loops over literal statements; none inserts an operation",
+}
+
+// Fails if any non-test Go file of the module can write the operations table other than the one helper.
+//
+// Rule 1: every string literal and constant is normalised (lower case, whitespace collapsed, adjacent literals
+// joined) and none outside the helper's file may hold an insert into the table, an insert or ignore, a replace, or a
+// rewrite of an operation's installation.
+//
+// Rule 2: in a function that mentions app_platform_operations in any literal, a computed SQL string (anything that is
+// not literals and package constants) passed to an exec or query call fails, unless the function is allow-listed.
+//
+// What it cannot catch: SQL assembled in a function that never mentions the table and then handed to a helper in
+// another function; text read from a file or the network at run time; a string built by fmt.Sprintf with the table
+// name as an argument in another function; a writer reached through reflection. It is a tripwire for the ordinary
+// ways of adding a writer, not a proof.
 func TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper(t *testing.T) {
 	forbidden := regexp.MustCompile(`insert (or \w+ )?into app_platform_operations\b|replace into app_platform_operations\b|update app_platform_operations set installation_id`)
 	fset := token.NewFileSet()
-	files, _ := filepath.Glob("*.go")
+	files := moduleGoFiles(t)
 	checked := 0
+	parsedFiles := map[string]*ast.File{}
+	constNames := map[string]bool{}
+	for _, f := range files {
+		parsed, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsedFiles[f] = parsed
+		for _, decl := range parsed.Decls {
+			if g, ok := decl.(*ast.GenDecl); ok && g.Tok == token.CONST {
+				for _, sp := range g.Specs {
+					for _, n := range sp.(*ast.ValueSpec).Names {
+						constNames[n.Name] = true
+					}
+				}
+			}
+		}
+	}
 	var fold func(e ast.Expr) (string, bool)
 	fold = func(e ast.Expr) (string, bool) {
 		switch v := e.(type) {
@@ -178,14 +281,33 @@ func TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper(t *testing.T) {
 		}
 		return "", false
 	}
+	// constant reports whether an expression is only literals, package constants and their concatenation.
+	var constant func(e ast.Expr) bool
+	constant = func(e ast.Expr) bool {
+		switch v := e.(type) {
+		case *ast.BasicLit:
+			return true
+		case *ast.Ident:
+			// lock and lockSQL are the row-lock suffixes ("" or " FOR UPDATE") the callers append.
+			return constNames[v.Name] || v.Name == "lock" || v.Name == "lockSQL"
+		case *ast.BinaryExpr:
+			return v.Op == token.ADD && constant(v.X) && constant(v.Y)
+		case *ast.ParenExpr:
+			return constant(v.X)
+		case *ast.CallExpr:
+			// s.st.bind(<constant>) only rewrites placeholders.
+			if sel, ok := v.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "bind" && len(v.Args) == 1 {
+				return constant(v.Args[0])
+			}
+		}
+		return false
+	}
+	sqlCalls := map[string]int{"exec": 0, "Exec": 0, "query": 0, "Query": 0, "queryRow": 0, "QueryRow": 0, "ExecContext": 1, "QueryContext": 1, "QueryRowContext": 1}
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || f == "app_platform_operation_insert.go" {
+		if strings.HasSuffix(f, "internal/app/app_platform_operation_insert.go") {
 			continue
 		}
-		parsed, err := parser.ParseFile(fset, f, nil, 0)
-		if err != nil {
-			t.Fatal(err)
-		}
+		parsed := parsedFiles[f]
 		check := func(text string, pos token.Pos) {
 			checked++
 			norm := strings.Join(strings.Fields(strings.ToLower(text)), " ")
@@ -207,9 +329,45 @@ func TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper(t *testing.T) {
 			}
 			return true
 		})
+		for _, decl := range parsed.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			mentions := false
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING && strings.Contains(strings.ToLower(lit.Value), "app_platform_operations") {
+					mentions = true
+				}
+				return true
+			})
+			if !mentions {
+				continue
+			}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				index, isSQL := sqlCalls[sel.Sel.Name]
+				if !isSQL || len(call.Args) <= index {
+					return true
+				}
+				if !constant(call.Args[index]) {
+					if _, allowed := computedSQLAllowList[fn.Name.Name]; !allowed {
+						t.Errorf("%s: %s passes a computed SQL string to %s in a function that mentions the operations table", fset.Position(call.Pos()), fn.Name.Name, sel.Sel.Name)
+					}
+				}
+				return true
+			})
+		}
 	}
-	if checked < 1000 {
-		t.Fatalf("only %d literals were checked; the walk is broken", checked)
+	if checked < 2000 {
+		t.Fatalf("only %d literals were checked across %d files; the walk is broken", checked, len(files))
 	}
 }
 
@@ -353,7 +511,12 @@ func TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow(t *testing.T) {
 	if !strings.Contains(logged.String(), lease.id) {
 		t.Fatal("the load that cannot settle was not reported")
 	}
-	if _, _, state, _, _ := imageRow(t, s, lease.id); state != "unknown" {
-		t.Fatalf("the unsettleable load changed state: %q", state)
+	if err := tryAdmit(t, s, lease.installationID, "update"); errors.Is(err, errAppPlatformOperationConflict) {
+		t.Fatal("the installation is still blocked after every load settled")
+	}
+	// It can never settle under its lease, so it is settled as an outcome Portal does not know, and the
+	// installation is not blocked for ever.
+	if _, _, state, receipt, _ := imageRow(t, s, lease.id); state != "reverted" || receipt != `{"outcome":"abandoned_outcome_unknown"}` {
+		t.Fatalf("the unsettleable load: %q %q", state, receipt)
 	}
 }

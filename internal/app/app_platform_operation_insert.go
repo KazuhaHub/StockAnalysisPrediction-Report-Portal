@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 )
 
 // platformOperationRow is every value an application operation is admitted with. The columns an admission never
@@ -28,8 +29,10 @@ func insertPlatformOperation(e migExec, row platformOperationRow) error {
 	if !platformValidUUID(row.InstallationID) {
 		return errAppPlatformStageEvidence
 	}
-	if err := platformRefuseWhileLoadUnsettled(e, row.InstallationID); err != nil {
-		return err
+	if platformStartsBackend(row.Action) {
+		if err := platformRefuseWhileLoadUnsettled(e, row.InstallationID); err != nil {
+			return err
+		}
 	}
 	var completed any
 	if row.Completed {
@@ -44,6 +47,35 @@ func insertPlatformOperation(e migExec, row platformOperationRow) error {
 		boolInt(row.Managed), row.SourceGeneration, row.TargetGeneration, row.Stage, row.StateRevision,
 		row.ControllerEpoch, completed, row.NowMS, row.NowMS)
 	return err
+}
+
+// platformStartBearingActions are the operation kinds that start a backend, and so need the release image on the
+// host: install, update (which also carries retry and roll back), enable, repair and restore. Only these are
+// refused while a load has no verdict. Every other kind is always admitted: disable, uninstall, delete_data,
+// restore_import, and the trust quarantine with its stop. That is safe because the runner's readers ignore load
+// rows and a load touches only the daemon's image storage, never data, fences or containers; and it is necessary
+// because a trust quarantine must never be deferred. platformNonStartActions is the rest; a test requires every
+// operation kind to be in exactly one of the two lists.
+var platformStartBearingActions = []string{"install", "update", "enable", "repair", "restore"}
+
+var platformNonStartActions = []string{"disable", "uninstall", "delete_data", "restore_import"}
+
+func platformStartsBackend(action string) bool {
+	for _, a := range platformStartBearingActions {
+		if a == action {
+			return true
+		}
+	}
+	return false
+}
+
+// platformStartBearingSQL is the action list as an SQL set, for queries that must agree with the list above.
+func platformStartBearingSQL() string {
+	quoted := make([]string, len(platformStartBearingActions))
+	for i, a := range platformStartBearingActions {
+		quoted[i] = "'" + a + "'"
+	}
+	return "(" + strings.Join(quoted, ",") + ")"
 }
 
 // platformRefuseWhileLoadUnsettled refuses a new operation for an installation that holds a load with no verdict.

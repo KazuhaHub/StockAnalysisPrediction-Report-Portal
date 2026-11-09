@@ -743,3 +743,47 @@ check inside `migExec.exec`) is replaced by item 3 here.
 5. **Minor: no invented runner verdict.** The load of a retired runtime is settled `reverted` with the receipt
    `{"outcome":"abandoned_outcome_unknown"}`. The receipt column is free JSON text, so no CHECK or DDL change is
    needed (the test writes it under the existing constraints).
+
+## PR 3b fourth-round review follow-ups
+
+The review failed PR 3b a fourth time at `121e878b`. Fixed, test-first. Items 2 and 3 of the third-round section are
+amended by items 1 and 3 here.
+
+1. **Major: a deferred trust quarantine was lost.** Skipping an installation dropped the whole quarantine, and
+   nothing retried it, so the backend kept running with its service identities, tasks and subscriptions. The
+   refusal is redesigned.
+   - It applies only to operations that start a backend, named in one list: `platformStartBearingActions`
+     (install, update, which also carries retry and roll back, enable, repair, restore). `platformNonStartActions`
+     (disable, uninstall, delete_data, restore_import) are always admitted. That is safe because the runner's
+     readers ignore load rows and a load touches only the daemon's image storage, never data, fences or
+     containers. `TestEveryOperationKindIsClassifiedAsStartBearingOrNot` requires every kind to be in exactly one
+     list, and `TestOnlyStartBearingOperationsAreRefusedWhileALoadIsUnsettled` covers both sides.
+   - Trust revocation never skips: the deferral and `trust_quarantine_deferred` are removed. A quarantine is a
+     disable, which is always admitted. `TestTrustRevocationFullyQuarantinesAnInstallationWithAnUnsettledLoad`
+     shows, with an unsettled load present, the activation retired, the installation disabled, the fence and the
+     data writer fence bumped, the stop queued, launch and service facts refused, a start-bearing operation
+     refused, and, after the driver settles the load, admitted. Tasks and event subscriptions are invalidated by
+     the same unchanged quarantine code path that runs for every installation; the test fixture cannot reach them,
+     so that part is not asserted separately.
+   - Liveness: a load whose operation's fence or epoch has moved (the quarantine moves it) can never settle
+     under its lease. The settlement driver now settles it as `reverted` with `{"outcome":"abandoned_outcome_unknown"}`,
+     as for a retired runtime, so the installation is never blocked for ever
+     (`TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow`).
+   - Service identity now re-verifies the publisher's trust (`VerifyPublisherDescriptor`), as the launch path does.
+     It was cheap and consistent: one read of the trust and the stored signature already in the facts query.
+     `TestServiceIdentityReverifiesPublisherTrust`. The service-identity fixture cannot run a revocation
+     (its installation is not a complete managed one), so refusal after a quarantine is asserted through the
+     service facts of the managed fixture instead.
+2. **Minor: the pin rule's "later operation".** A `recovery_required` failure releases its pin only when a later
+   start-bearing operation of the same installation completed successfully, or the installation was removed. A
+   later disable, uninstall or delete_data releases nothing. A failure that is not the latest still pins until a
+   success follows it, so consecutive failures all pin until then.
+   `TestAFailureStaysPinnedUntilALaterStartBearingOperationCompletesAndAStreamStaysBounded` (failed update, disable,
+   blobs kept; enable completes, blobs released; a stream of failures each followed by a success stays bounded).
+3. **Minor: the guard's scope.** `TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper` now walks every
+   non-test Go file of the module, not only the application package, and it also fails when a computed SQL string
+   (not literals, package constants, the row-lock suffix or `bind` of a constant) is passed to an exec or query call
+   in a function that mentions the operations table, unless the function is on a short allow-list with a reason.
+   What it cannot catch, also in the test's comment: SQL assembled in a function that never mentions the table and
+   handed to a helper elsewhere, text read at run time, a name supplied through `fmt.Sprintf` in another function,
+   and anything reached by reflection. It is a tripwire for the ordinary ways of adding a writer, not a proof.
