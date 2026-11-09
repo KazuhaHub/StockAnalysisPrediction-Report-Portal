@@ -36,7 +36,7 @@ func TestDockerAcceptanceBackendImage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := InspectBackendImage(context.Background(), socket, raw, parsed.SHA256)
+	got, err := InspectBackendImage(context.Background(), socket, raw, parsed.SHA256, ImagePolicy{AllowLocalReference: true})
 	if err != nil || got.ReleaseSHA256 != parsed.SHA256 || got.Reference != reference || !nativeImageID.MatchString(got.ImageID) || got.Platform != "linux/"+runtime.GOARCH {
 		t.Fatalf("native image observation: %+v %v", got, err)
 	}

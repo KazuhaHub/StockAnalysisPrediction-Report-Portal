@@ -58,7 +58,7 @@ func runDockerCandidateAcceptance(t *testing.T, imageEnvironment string, start b
 	fixture := containerFixture(t)
 	owner := fixture.owner
 	owner.ReleaseSHA256 = containerHash(raw)
-	image, err := InspectBackendImage(context.Background(), socket, raw, owner.ReleaseSHA256)
+	image, err := InspectBackendImage(context.Background(), socket, raw, owner.ReleaseSHA256, ImagePolicy{AllowLocalReference: true})
 	if err != nil {
 		t.Fatal(err)
 	}

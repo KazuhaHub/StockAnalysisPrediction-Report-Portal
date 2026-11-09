@@ -70,7 +70,7 @@ func TestNativeCandidateRuntime(t *testing.T) {
 		}
 	})
 
-	native, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin)
+	native, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin, WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestNativeCandidateRuntime(t *testing.T) {
 	if err := native.ReleaseCandidateHTTPStorage(context.Background(), request.Identity); err != ErrContainerConflict {
 		t.Fatal("live native pins did not block IPC cleanup", err)
 	}
-	other, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin)
+	other, err := OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, socketRoot, root, pin, WithLocalReferenceImages())
 	if err != nil {
 		t.Fatal(err)
 	}

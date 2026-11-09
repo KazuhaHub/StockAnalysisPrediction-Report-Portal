@@ -45,8 +45,7 @@ func (r *CandidateRuntime) removeStoppedUpdateStartSource(ctx context.Context, r
 		}
 	}
 	r.mu.Unlock()
-	image, err := InspectBackendImage(
-		ctx, r.socket, request.Descriptor, request.Source.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Source.ReleaseSHA256, r.imagePolicy)
 	if err != nil {
 		return err
 	}

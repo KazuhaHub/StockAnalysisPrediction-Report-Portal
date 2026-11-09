@@ -10,7 +10,7 @@ import (
 type CandidateRuntime struct{}
 type candidateLaunchState struct{}
 
-func OpenCandidateRuntime(context.Context, string, string, string, *data.Root, data.RootIdentity) (*CandidateRuntime, error) {
+func OpenCandidateRuntime(context.Context, string, string, string, *data.Root, data.RootIdentity, ...RuntimeOption) (*CandidateRuntime, error) {
 	return nil, ErrUnsupported
 }
 func (*CandidateRuntime) Close() error { return nil }

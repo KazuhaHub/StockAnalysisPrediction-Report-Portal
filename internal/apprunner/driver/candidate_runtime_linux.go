@@ -21,6 +21,7 @@ type CandidateRuntime struct {
 	mu           sync.Mutex
 	closed       bool
 	socket       string
+	imagePolicy  ImagePolicy
 	roots        containerRoots
 	root         *data.Root
 	rootIdentity data.RootIdentity
@@ -40,7 +41,7 @@ type candidateLaunchState struct {
 // The concrete root is borrowed from the shared provider; its owner must keep it
 // open until runtime work settles. Runtime.Close never closes that shared root.
 // Socket/data/sockets paths are infrastructure configuration, never app input.
-func OpenCandidateRuntime(ctx context.Context, socket, dataPath, socketsPath string, root *data.Root, expected data.RootIdentity) (*CandidateRuntime, error) {
+func OpenCandidateRuntime(ctx context.Context, socket, dataPath, socketsPath string, root *data.Root, expected data.RootIdentity, options ...RuntimeOption) (*CandidateRuntime, error) {
 	if os.Geteuid() != 0 || (runtime.GOARCH != "amd64" && runtime.GOARCH != "arm64") {
 		return nil, ErrUnsupported
 	}
@@ -83,7 +84,11 @@ func OpenCandidateRuntime(ctx context.Context, socket, dataPath, socketsPath str
 		}
 		return nil, ErrUnsafeSocket
 	}
-	return &CandidateRuntime{socket: socket, roots: containerRoots{Data: dataPath, Sockets: socketsPath}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}}, nil
+	var configuration runtimeOptions
+	for _, option := range options {
+		option(&configuration)
+	}
+	return &CandidateRuntime{socket: socket, imagePolicy: configuration.imagePolicy, roots: containerRoots{Data: dataPath, Sockets: socketsPath}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}}, nil
 }
 func (r *CandidateRuntime) Close() error {
 	if r == nil {
@@ -178,7 +183,7 @@ func (r *CandidateRuntime) prepareCandidateProfileAccess(ctx context.Context, re
 	if err := r.checkCandidateDataProfile(ctx, request.Identity, request.Data, accessWritable); err != nil {
 		return zero, fmt.Errorf("prepare candidate data profile: %w", err)
 	}
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil {
 		return zero, err
 	}

@@ -47,7 +47,7 @@ func imageFixtureClient(t *testing.T, response any, reference string, calls *int
 func TestBackendImageInspectionBindsDescriptorDigestAndNativeImage(t *testing.T) {
 	raw, digest, reference := managedImageFixture(t)
 	calls := 0
-	got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, digest, "amd64")
+	got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, digest, "amd64", ImagePolicy{AllowLocalReference: true})
 	if err != nil || calls != 1 || got.ReleaseSHA256 != digest || got.Reference != reference || got.ImageID != "sha256:"+strings.Repeat("b", 64) || got.Platform != "linux/amd64" {
 		t.Fatalf("image inspection: %+v %v (%d requests)", got, err, calls)
 	}
@@ -71,6 +71,7 @@ func TestBackendImageInspectionNeverRunsImageEntrypoint(t *testing.T) {
 		raw,
 		digest,
 		"amd64",
+		ImagePolicy{AllowLocalReference: true},
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestBackendImageInspectionRefusesUnsafeMetadata(t *testing.T) {
 			v := imageResponseFixture(reference)
 			mutate(v)
 			calls := 0
-			got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, v, reference, &calls), raw, digest, "amd64")
+			got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, v, reference, &calls), raw, digest, "amd64", ImagePolicy{AllowLocalReference: true})
 			if !errors.Is(err, ErrInvalidResponse) || got != (BackendImageInspection{}) {
 				t.Fatalf("unsafe image accepted: %+v %v", got, err)
 			}
@@ -144,7 +145,7 @@ func TestBackendImageInspectionRefusesBeforeDaemonAccess(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			client := daemonClient(transportFunc(func(*http.Request) (*http.Response, error) { calls++; return nil, errors.New("unexpected access") }))
-			got, err := inspectBackendImageHTTP(context.Background(), client, tc.raw, tc.digest, tc.arch)
+			got, err := inspectBackendImageHTTP(context.Background(), client, tc.raw, tc.digest, tc.arch, ImagePolicy{AllowLocalReference: true})
 			if err == nil || calls != 0 || got != (BackendImageInspection{}) {
 				t.Fatalf("invalid request escaped: %+v %v calls=%d", got, err, calls)
 			}
@@ -173,7 +174,7 @@ func TestBackendImageInspectionArm64Variant(t *testing.T) {
 			response["Architecture"] = "arm64"
 			response["Variant"] = variant
 			calls := 0
-			got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, response, reference, &calls), raw, parsed.SHA256, "arm64")
+			got, err := inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, response, reference, &calls), raw, parsed.SHA256, "arm64", ImagePolicy{AllowLocalReference: true})
 			if variant == "" || variant == "v8" {
 				if err != nil || got.Platform != "linux/arm64" {
 					t.Fatalf("valid native variant: %+v %v", got, err)
@@ -184,7 +185,7 @@ func TestBackendImageInspectionArm64Variant(t *testing.T) {
 		})
 	}
 	calls := 0
-	_, err = inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, parsed.SHA256, "amd64")
+	_, err = inspectBackendImageHTTP(context.Background(), imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, parsed.SHA256, "amd64", ImagePolicy{AllowLocalReference: true})
 	if !errors.Is(err, ErrUnsupported) || calls != 0 {
 		t.Fatal("undeclared platform queried daemon", err, calls)
 	}
@@ -211,7 +212,7 @@ func TestBackendImageInspectionWireRefusals(t *testing.T) {
 				calls++
 				return &http.Response{StatusCode: tc.status, Header: http.Header{"Location": []string{"https://fixture.invalid/escape"}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 			}))
-			got, err := inspectBackendImageHTTP(context.Background(), client, raw, digest, "amd64")
+			got, err := inspectBackendImageHTTP(context.Background(), client, raw, digest, "amd64", ImagePolicy{AllowLocalReference: true})
 			if err == nil || got != (BackendImageInspection{}) || calls != 1 || strings.Contains(err.Error(), "fixture-sensitive") {
 				t.Fatalf("unsafe wire response: %+v %v calls=%d reference=%s", got, err, calls, reference)
 			}
@@ -220,7 +221,7 @@ func TestBackendImageInspectionWireRefusals(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	_, err := inspectBackendImageHTTP(ctx, imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, digest, "amd64")
+	_, err := inspectBackendImageHTTP(ctx, imageFixtureClient(t, imageResponseFixture(reference), reference, &calls), raw, digest, "amd64", ImagePolicy{AllowLocalReference: true})
 	if !errors.Is(err, context.Canceled) || calls != 0 {
 		t.Fatal("canceled request queried daemon", err, calls)
 	}
@@ -238,7 +239,7 @@ func TestBackendImageInspectionDiscardsCanceledResponse(t *testing.T) {
 		cancel()
 		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(encoded)))}, nil
 	}))
-	got, err := inspectBackendImageHTTP(ctx, client, raw, digest, "amd64")
+	got, err := inspectBackendImageHTTP(ctx, client, raw, digest, "amd64", ImagePolicy{AllowLocalReference: true})
 	if !errors.Is(err, context.Canceled) || got != (BackendImageInspection{}) {
 		t.Fatalf("late observation escaped canceled request: %+v %v", got, err)
 	}

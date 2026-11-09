@@ -194,7 +194,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}
 		defer os.RemoveAll(sockets)
 		managedSocketRoot = sockets
-		native, err = driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), sockets, root, pin)
+		native, err = driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), sockets, root, pin, driver.WithLocalReferenceImages())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +358,7 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 				return
 			}
 			defer reopenedStore.Close()
-			native, err := driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), serviceFixture.ipcRoot, reopenedRoot, pin)
+			native, err := driver.OpenCandidateRuntime(context.Background(), os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), os.Getenv("APP_DATA_JOURNAL_ROOT"), serviceFixture.ipcRoot, reopenedRoot, pin, driver.WithLocalReferenceImages())
 			if err != nil {
 				t.Error("reopen service native runtime", err)
 				return

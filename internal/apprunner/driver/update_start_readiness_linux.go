@@ -114,7 +114,7 @@ func (r *CandidateRuntime) withVerifiedUpdateStartCandidate(ctx context.Context,
 		return zero, fmt.Errorf(
 			"update-start readiness data profile: %w", err)
 	}
-	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256)
+	image, err := InspectBackendImage(ctx, r.socket, request.Descriptor, request.Identity.ReleaseSHA256, r.imagePolicy)
 	if err != nil || image.Platform != request.Platform {
 		return zero, fmt.Errorf(
 			"update-start readiness image: %w",
