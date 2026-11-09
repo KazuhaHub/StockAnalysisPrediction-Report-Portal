@@ -675,21 +675,20 @@ func TestMigrateDataRefusesBeforeItsClaimWhenTheTargetImageIsMissing(t *testing.
 	}
 }
 
-// refuseALayerUpload uploads the second layer under a diff_id that is not its tar's: a definite verification
-// refusal for a blob this image needs, in the layer role.
+// refuseALayerUpload sends bytes that do not hash to the second layer's digest, under the plan's own declaration:
+// a definite verification refusal for a blob this image needs, in the layer role.
 func (f *loadFixtureT) refuseALayerUpload(t *testing.T) {
 	t.Helper()
-	bad := f.blobs[3].blob
-	bad.DiffID = strings.Repeat("a", 64)
-	u, _, _, refusal, err := f.scratch.Begin(f.command.OperationID, bad, 0)
+	body := append([]byte(nil), f.blobs[3].body...)
+	body[len(body)-1] ^= 1
+	u, _, _, refusal, err := f.scratch.Begin(f.command.OperationID, f.blobs[3].blob, 0)
 	if err != nil || refusal != imagestore.RefusalNone {
 		t.Fatalf("begin: %v %v", refusal, err)
 	}
-	if r := u.Write(f.blobs[3].body); r != imagestore.RefusalNone {
-		t.Logf("refused while writing: %v", r)
+	if r := u.Write(body); r != imagestore.RefusalNone {
 		return
 	}
-	if r := u.Commit(bad.Digest, bad.Size); r != imagestore.RefusalDiffIDMismatch {
+	if r := u.Commit(f.blobs[3].blob.Digest, f.blobs[3].blob.Size); r != imagestore.RefusalDigestMismatch {
 		t.Fatalf("commit: %q", r)
 	}
 }
@@ -725,7 +724,9 @@ func TestLoadImageExecuteAfterARefusedUploadSettlesBlobRefusedWithoutDocker(t *t
 	}
 }
 
-func TestLoadImageReadBackAfterARefusedUploadSettlesBlobRefused(t *testing.T) {
+// A read-back never writes a row: it answers the typed blob_refused state, and the execute under the same effect id
+// then settles the effect reverted.
+func TestLoadImageReadBackAfterARefusedUploadAnswersBlobRefusedAndWritesNothing(t *testing.T) {
 	f := newLoadFixture(t)
 	for _, b := range f.blobs[:3] {
 		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
@@ -735,12 +736,77 @@ func TestLoadImageReadBackAfterARefusedUploadSettlesBlobRefused(t *testing.T) {
 	calls := f.native.calls
 	f.refuseALayerUpload(t)
 	got, err := f.store.ReadLoadImageOrStatus(context.Background(), f.raw, f.readSig(t, f.raw), f.descriptor, f.native, f.scratch)
-	receipt, ok := got.(LoadImageReceipt)
-	if err != nil || !ok || receipt.Outcome != driver.LoadOutcomeBlobRefused || f.native.calls != calls {
+	status, ok := got.(LoadImageStatus)
+	if err != nil || !ok || status.State != "blob_refused" || f.native.calls != calls {
 		t.Fatalf("read-back: %+v %v calls=%d", got, err, f.native.calls)
+	}
+	if state, _ := f.rowState(t); state != "unknown" {
+		t.Fatalf("a read-back settled the row: %q", state)
+	}
+	done, err := f.dispatch()
+	if receipt, ok := done.(LoadImageReceipt); err != nil || !ok || receipt.Outcome != driver.LoadOutcomeBlobRefused || f.native.calls != calls {
+		t.Fatalf("execute after the read: %+v %v", done, err)
 	}
 	if state, _ := f.rowState(t); state != "reverted" {
 		t.Fatalf("row %q", state)
+	}
+}
+
+// A refusal made under a wrong declaration never poisons the role: valid bytes uploaded again under the right one are
+// stored and the load applies.
+func TestLoadImageAppliesAfterAWrongDeclarationWasRefusedAndTheUploadWasCorrected(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	f.native.err = driver.ErrImageBlobUnavailable
+	_, _ = f.dispatch()
+	bad := f.blobs[3].blob
+	bad.DiffID = strings.Repeat("a", 64)
+	u, _, _, _, _ := f.scratch.Begin(f.command.OperationID, bad, 0)
+	_ = u.Write(f.blobs[3].body)
+	if r := u.Commit(bad.Digest, bad.Size); r != imagestore.RefusalDiffIDMismatch {
+		t.Fatalf("wrong declaration: %q", r)
+	}
+	f.uploadAll(t)
+	f.native.err = nil
+	got, err := f.dispatch()
+	if receipt, ok := got.(LoadImageReceipt); err != nil || !ok || receipt.State != driver.LoadStateLoaded {
+		t.Fatalf("load after correction: %+v %v", got, err)
+	}
+}
+
+// An image already in the daemon settles as applied even if a blob was once refused.
+func TestLoadImagePresentBeatsARefusal(t *testing.T) {
+	f := newLoadFixture(t)
+	for _, b := range f.blobs[:3] {
+		uploadLoadBlob(t, f.scratch, f.command.OperationID, b)
+	}
+	f.native.err = driver.ErrImageBlobUnavailable
+	_, _ = f.dispatch()
+	f.refuseALayerUpload(t)
+	f.native.err = nil
+	f.native.present = true
+	f.native.snapshot = func(r driver.LoadImageRequest, fx loadFixtureT) driver.LoadImageSnapshot {
+		return driver.LoadImageSnapshot{ReleaseSHA256: r.ReleaseSHA256, Platform: r.Platform, ImageID: driver.ExpectedImageID(driver.ImageStoreClassic, fx.entry),
+			Store: driver.ImageStoreClassic, State: driver.LoadStatePresent, ObservedMS: time.Now().UnixMilli()}
+	}
+	got, err := f.dispatch()
+	if receipt, ok := got.(LoadImageReceipt); err != nil || !ok || receipt.State != driver.LoadStatePresent {
+		t.Fatalf("present image: %+v %v", got, err)
+	}
+	// And a read-back answers orphaned, not blob_refused, while the image is there.
+	g2 := newLoadFixture(t)
+	for _, b := range g2.blobs[:3] {
+		uploadLoadBlob(t, g2.scratch, g2.command.OperationID, b)
+	}
+	g2.native.err = driver.ErrImageBlobUnavailable
+	_, _ = g2.dispatch()
+	g2.refuseALayerUpload(t)
+	g2.native.present = true
+	read, err := g2.store.ReadLoadImageOrStatus(context.Background(), g2.raw, g2.readSig(t, g2.raw), g2.descriptor, g2.native, g2.scratch)
+	if status, ok := read.(LoadImageStatus); err != nil || !ok || status.State != "orphaned" {
+		t.Fatalf("read with the image present: %+v %v", read, err)
 	}
 }
 

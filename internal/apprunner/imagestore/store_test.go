@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
@@ -514,25 +515,28 @@ func TestABombUploadedAsConfigNeverCountsAsALayer(t *testing.T) {
 	}
 }
 
+func flipped(b []byte) []byte {
+	c := append([]byte(nil), b...)
+	c[len(c)-1] ^= 1
+	return c
+}
+
 func TestADefiniteRefusalIsRecordedAndSurvivesEviction(t *testing.T) {
 	s := newStore(t)
+	s.idle = 0
 	f := newImageFixture(t)
 	uploadTo(t, s, operation, f.manifest, f.manifestBytes)
 	uploadTo(t, s, operation, f.config, f.configBytes)
-	bad := f.layers[0].blob
-	bad.DiffID = strings.Repeat("a", 64)
-	if r := uploadTo(t, s, operation, bad, f.layers[0].compressed); r != RefusalDiffIDMismatch {
+	// Bytes that do not hash to the digest the plan declares, under the plan's own declaration.
+	if r := uploadTo(t, s, operation, f.layers[0].blob, flipped(f.layers[0].compressed)); r != RefusalDigestMismatch {
 		t.Fatal(r)
 	}
-	// The refused role is the layer role under the entry's own claims.
 	if !s.Refused(operation, f.entry) {
 		t.Fatal("a definite refusal was not recorded")
 	}
 	// Evicting the operation's scratch does not lose it.
 	s.limit = 1
-	if r := uploadTo(t, s, operation2, f.layers[1].blob, f.layers[1].compressed); r != RefusalScratchFull {
-		t.Logf("second upload: %q", r)
-	}
+	_ = uploadTo(t, s, operation2, f.layers[1].blob, f.layers[1].compressed)
 	// The layer digests come from the manifest, so the verdict is read again once the sender has put it back.
 	s.limit = MaxScratchBytes
 	uploadTo(t, s, operation, f.manifest, f.manifestBytes)
@@ -541,7 +545,6 @@ func TestADefiniteRefusalIsRecordedAndSurvivesEviction(t *testing.T) {
 		t.Fatal("eviction lost the refusal record")
 	}
 	// A later good upload clears it.
-	f.layers[0].blob.Kind = appplatform.ImageBlobLayer
 	if r := uploadTo(t, s, operation, f.layers[0].blob, f.layers[0].compressed); r != RefusalNone {
 		t.Fatal(r)
 	}
@@ -550,8 +553,36 @@ func TestADefiniteRefusalIsRecordedAndSurvivesEviction(t *testing.T) {
 	}
 }
 
+// Valid bytes uploaded under a wrong declaration are refused, but the refusal is about that declaration only: it
+// never counts against the plan's role, and a correct re-upload proceeds and is stored.
+func TestARefusalUnderAWrongDeclarationDoesNotCountAgainstTheRole(t *testing.T) {
+	for name, wrong := range map[string]func(*appplatform.ImageBlob){
+		"diff id":           func(b *appplatform.ImageBlob) { b.DiffID = strings.Repeat("a", 64) },
+		"uncompressed size": func(b *appplatform.ImageBlob) { b.UncompressedBytes++ },
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newStore(t)
+			f := newImageFixture(t)
+			uploadTo(t, s, operation, f.manifest, f.manifestBytes)
+			uploadTo(t, s, operation, f.config, f.configBytes)
+			bad := f.layers[0].blob
+			wrong(&bad)
+			if r := uploadTo(t, s, operation, bad, f.layers[0].compressed); r != RefusalDiffIDMismatch {
+				t.Fatalf("wrong declaration: %q", r)
+			}
+			if s.Refused(operation, f.entry) {
+				t.Fatal("a wrong declaration poisoned a role whose bytes are valid")
+			}
+			if r := uploadTo(t, s, operation, f.layers[0].blob, f.layers[0].compressed); r != RefusalNone || !s.Verified(operation, f.layers[0].blob) {
+				t.Fatalf("correct re-upload: %q", r)
+			}
+		})
+	}
+}
+
 func TestAbandonedScratchDoesNotBlockANewOperation(t *testing.T) {
 	s := newStore(t)
+	s.idle = 0
 	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
 	s.limit = a.blob.Size + 10
 	if r := uploadTo(t, s, operation, a.blob, a.compressed); r != RefusalNone {
@@ -571,6 +602,7 @@ func TestAbandonedScratchDoesNotBlockANewOperation(t *testing.T) {
 
 func TestEvictionSparesHeldOperationsAndActiveSessions(t *testing.T) {
 	s := newStore(t)
+	s.idle = 0
 	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
 	s.limit = a.blob.Size + 10
 	uploadTo(t, s, operation, a.blob, a.compressed)
@@ -634,5 +666,49 @@ func TestAFailedPrefixReadRefundsExactlyWhatWasCharged(t *testing.T) {
 	}
 	if s2.Used() < before {
 		t.Fatalf("another operation's bytes were refunded: %d < %d", s2.Used(), before)
+	}
+}
+
+// An operation that is active, or was only recently idle, is never evicted: the answer is the retryable
+// scratch_full. Only after the idle period may it go, and leftovers are renamed away under the lock.
+func TestEvictionNeverTakesAnActiveOrRecentlyIdleOperation(t *testing.T) {
+	s := newStore(t)
+	a, b := newLayer(t, strings.Repeat("a", 500)), newLayer(t, strings.Repeat("b", 500))
+	s.limit = a.blob.Size + 10
+	u, _, _, _, _ := s.Begin(operation, a.blob, 0)
+	_ = u.Write(a.compressed[:20])
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalScratchFull {
+		t.Fatalf("an active session's operation was evicted: %q", r)
+	}
+	u.Abort()
+	// Just idle: still protected for the idle period.
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalScratchFull {
+		t.Fatalf("a recently idle operation was evicted: %q", r)
+	}
+	s.mu.Lock()
+	s.lastUse[operation] = time.Now().Add(-EvictIdle - time.Second)
+	s.mu.Unlock()
+	if r := uploadTo(t, s, operation2, b.blob, b.compressed); r != RefusalNone {
+		t.Fatalf("an idle operation blocked a new one: %q", r)
+	}
+	if entries, _ := os.ReadDir(s.root); len(entries) != 2 {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".trash-") {
+				t.Fatalf("trash left behind: %s", e.Name())
+			}
+		}
+	}
+}
+
+func TestOpenRemovesLeftoverTrash(t *testing.T) {
+	dir := canonicalTemp(t)
+	root := filepath.Join(dir, "images")
+	_ = os.Mkdir(root, 0700)
+	_ = os.MkdirAll(filepath.Join(root, ".trash-7", "x"), 0700)
+	if _, err := Open(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".trash-7")); err == nil {
+		t.Fatal("trash survived a start")
 	}
 }

@@ -167,6 +167,7 @@ func TestLoadImageTransportStatusReplies(t *testing.T) {
 		{"pending", status("pending", nil, now), true},
 		{"orphaned", status("orphaned", nil, now), true},
 		{"absent", status("absent", nil, now), true},
+		{"blob refused", status("blob_refused", nil, now), true},
 		{"blobs missing", status("blobs_missing", []string{strings.Repeat("4", 64)}, now), true},
 		{"observed before the command was issued", status("pending", nil, now.Add(-time.Hour)), false},
 		{"observed in the future", status("pending", nil, now.Add(time.Hour)), false},

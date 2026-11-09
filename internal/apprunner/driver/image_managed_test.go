@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net/http"
 	"os"
@@ -305,24 +308,65 @@ func TestRunnerSourceNeverPullsOrReadsDockerCredentials(t *testing.T) {
 	}
 }
 
-// Every Docker socket client comes from newDockerClient, which wraps the allow-list. The dialer to the socket is
-// referenced nowhere else, so no code can reach the daemon without passing the allow-list.
+// Every Docker socket client comes from newDockerClient, which wraps the allow-list. The check is structural, over
+// the syntax of the non-test runner code: it fails on any reference to dockerDialer outside the constructor and the
+// dialer's own definition, on any unix-network dial outside them (the one app-socket readiness dialer is named), and
+// on any http.Transport or http.Client literal that is not the constructor and not an app-socket client.
+//
+// The unix-dial and literal rules are scoped to the driver and journal packages, the only ones that can reach the
+// Docker daemon; the broker's outbound HTTP clients and the transport's control-socket dial are unrelated to Docker
+// and are not scanned by them. An app-socket client is recognised by its function naming the app host and never a
+// Docker host.
 func TestOnlyTheDockerClientConstructorDialsTheSocket(t *testing.T) {
-	allowed := map[string]bool{"docker_client.go": true, "socket_linux.go": true, "socket_other.go": true}
+	appSocketDialers := map[string]bool{"readinessSocketDialer": true}
+	fset := token.NewFileSet()
 	err := filepath.Walk("..", func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return err
 		}
-		body, err := os.ReadFile(path)
+		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(body), "dockerDialer") && !(allowed[filepath.Base(path)] && strings.Contains(path, "driver")) {
-			t.Errorf("%s dials the Docker socket outside the client constructor", path)
-		}
-		if strings.Contains(string(body), "http.Transport{") && strings.Contains(path, "driver") && !allowed[filepath.Base(path)] &&
-			strings.Contains(string(body), "docker.invalid") && !strings.Contains(string(body), "portal-app.invalid") {
-			t.Errorf("%s builds its own transport for the Docker host", path)
+		scoped := strings.HasPrefix(path, "../driver/") || strings.HasPrefix(path, "../journal/")
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			name := fn.Name.Name
+			hosts := map[string]bool{}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					hosts["docker"] = hosts["docker"] || strings.Contains(lit.Value, "docker.invalid")
+					hosts["app"] = hosts["app"] || strings.Contains(lit.Value, "portal-app.invalid")
+				}
+				return true
+			})
+			inConstructor := name == "newDockerClient" || name == "dockerDialer"
+			ast.Inspect(fn, func(n ast.Node) bool {
+				switch x := n.(type) {
+				case *ast.Ident:
+					if x.Name == "dockerDialer" && !inConstructor {
+						t.Errorf("%s: %s references dockerDialer outside the client constructor", path, name)
+					}
+				case *ast.CallExpr:
+					for _, arg := range x.Args {
+						if lit, ok := arg.(*ast.BasicLit); ok && lit.Value == `"unix"` && scoped && !inConstructor && !appSocketDialers[name] {
+							t.Errorf("%s: %s dials a unix socket outside the Docker client constructor", path, name)
+						}
+					}
+				case *ast.CompositeLit:
+					sel, ok := x.Type.(*ast.SelectorExpr)
+					if !ok || !scoped || inConstructor || name == "daemonClient" {
+						return true
+					}
+					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "http" && (sel.Sel.Name == "Transport" || sel.Sel.Name == "Client") && !(hosts["app"] && !hosts["docker"]) {
+						t.Errorf("%s: %s builds its own http.%s outside the Docker client constructor", path, name, sel.Sel.Name)
+					}
+				}
+				return true
+			})
 		}
 		return nil
 	})

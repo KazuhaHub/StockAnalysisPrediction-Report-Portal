@@ -153,7 +153,9 @@ func LoadImageReceiptMatchesCommand(r LoadImageReceipt, c control.LoadImageComma
 
 // LoadImageStatus is the runner's typed answer when there is no receipt: "pending" while the load lock is held,
 // "orphaned" for an unknown effect nothing is running, "absent" for an effect the journal proves it never claimed
-// (given only under the lock), and "blobs_missing" for an unknown effect whose scratch no longer holds blobs.
+// (given only under the lock), "blobs_missing" for an unknown effect whose scratch no longer holds blobs, and
+// "blob_refused" for an unknown effect a blob of which failed verification for good: the sender sends the execute
+// under the same effect id and the execute settles it reverted. A read never writes a row.
 type LoadImageStatus struct {
 	Format           string   `json:"format"`
 	DeploymentID     string   `json:"deployment_id"`
@@ -176,7 +178,7 @@ func validLoadStatus(s LoadImageStatus) bool {
 		return false
 	}
 	switch s.State {
-	case "pending", "orphaned", "absent":
+	case "pending", "orphaned", "absent", "blob_refused":
 		if len(s.Missing) != 0 {
 			return false
 		}
@@ -534,7 +536,9 @@ func (s *Store) DispatchLoadImage(ctx context.Context, raw, signature, descripto
 	defer scratch.Hold(intent.full.OperationID)()
 	// A blob this image needs failed verification for good: the load can never complete, so it ends here, with no
 	// Docker call, instead of answering blobs_missing for ever.
-	if scratch.Refused(intent.full.OperationID, entry) {
+	// An image that is already in the daemon settles as present whatever was once refused: check that first.
+	present, presentErr := native.LoadedImagePresent(ctx, descriptor, intent.full.Payload.ReleaseSHA256, intent.full.Payload.Platform)
+	if !(presentErr == nil && present) && scratch.Refused(intent.full.OperationID, entry) {
 		receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageSettlement)
 		if err != nil {
 			return nil, fmt.Errorf("settle refused blob: %w", err)
@@ -687,12 +691,12 @@ func (s *Store) ReadLoadImageOrStatus(ctx context.Context, raw, signature, descr
 	case again.missing:
 		return loadStatusFor(again.command, "absent", nil, time.Now().UTC().UnixMilli()), nil
 	}
-	return s.unknownLoadStatus(ctx, again, raw, signature, descriptor, native, scratch)
+	return s.unknownLoadStatus(ctx, again, descriptor, native, scratch)
 }
 
 // unknownLoadStatus says what an unknown load needs: nothing the sender cannot give by resending (orphaned), or
 // the blobs scratch lost.
-func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, raw, signature, descriptor []byte, native LoadImageNative, scratch *imagestore.Store) (any, error) {
+func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, descriptor []byte, native LoadImageNative, scratch *imagestore.Store) (any, error) {
 	now := time.Now().UTC().UnixMilli()
 	entry, err := bindLoadImageDescriptor(got.command, descriptor)
 	if err != nil {
@@ -704,14 +708,14 @@ func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, raw, 
 		return loadStatusFor(got.command, "orphaned", nil, now), nil
 	}
 	if scratch.Refused(got.command.OperationID, entry) {
-		// The next read-back after a definite refusal ends the effect: reverted with the typed outcome.
-		intent := loadImageIntent{full: got.command, raw: bytes.Clone(raw), signature: bytes.Clone(signature), marker: got.claim, markerRaw: got.markerRaw, entry: entry}
-		receipt, err := s.settleLoadImage(ctx, intent, blobRefusedSnapshot(intent), control.VerifyLoadImageRead)
-		if err != nil {
-			return nil, fmt.Errorf("settle refused blob: %w", err)
+		// An image already in the daemon wins over a refusal; otherwise tell the sender the load can never finish.
+		// This read writes nothing: the execute that follows settles the effect.
+		if native != nil {
+			if present, err := native.LoadedImagePresent(ctx, descriptor, got.command.Payload.ReleaseSHA256, got.command.Payload.Platform); err == nil && present {
+				return loadStatusFor(got.command, "orphaned", nil, now), nil
+			}
 		}
-		_ = scratch.RemoveOperation(got.command.OperationID)
-		return receipt, nil
+		return loadStatusFor(got.command, "blob_refused", nil, now), nil
 	}
 	missing := scratch.Missing(got.command.OperationID, entry)
 	if len(missing) == 0 {
