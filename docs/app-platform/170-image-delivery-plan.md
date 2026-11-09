@@ -84,6 +84,19 @@ journal stage enum already has `stage`.
    number free in that stage for the operation. The implementer records the exact number for each
    operation action in this document. No new stage value is added, because a stage value would be
    a journal CHECK change.
+
+   Recorded numbers. No effect is issued in stage `stage` today (the kinds `stage` and `verify`
+   are allowed but never sent), and each operation loads exactly one image, so the next free
+   number is `1` for every action. The runner does not hard-code it: it accepts any number from
+   1 to 32 and enforces only the journal's uniqueness per operation and stage.
+
+   | Operation action | Effect number | Note |
+   |---|---|---|
+   | install | 1 | the stage list already has `stage` |
+   | update (also retry, and roll back as a new update plan) | 1 | loads the target release's image |
+   | repair | 1 | the stage list already has `stage` |
+   | enable | 1 | the stage list has no `stage`; see implementation note 3 |
+   | restore (launch) | 1 | the stage list has no `stage`; see implementation note 3 |
 10. **Settlement.** A load is convergent: the archive is content-addressed, written by the runner,
     and carries no names. An `unknown` load is therefore completed under the same claim, the
     pattern doc 169 approved for restore. Read-back answers one of:
@@ -255,3 +268,111 @@ The named failing tests for each step are listed in the review record of each pu
   the cap; the operator frees space by retention (section 5).
 - Packages are bounded at 384 MiB, which limits image size. A registry pull is deferred to its own
   ADR.
+
+## Implementation notes (PR 3a)
+
+Where the plan was silent, or the code made a different choice the safer one, the choice is
+recorded here.
+
+1. **Descriptor bounds the plan left open.** `uncompressed_bytes` is at most 1 GiB per layer, and
+   the sum over one platform at most 4 GiB. `images` has one entry per declared platform, so at
+   most 2.
+2. **Layers travel as a string in the `load-image` payload.** The command parser accepts objects
+   and strings only, so the list is `diff_id:uncompressed_bytes` pairs joined by commas, the same
+   encoding the `recovers_chain` field already uses. The runner binds the string to the descriptor
+   entry in the descriptor the frame carries, which it hashes against `release_sha256`.
+3. **Operations without a `stage` stage.** `enable` and `restore` have no `stage` stage in
+   `operationStages`. The runner accepts the command whatever the operation; Portal (PR 3b) must
+   either add the stage to those actions or issue the load from an existing stage. The runner
+   needs no change either way. PR 3a also does not add `load-image` to Portal's
+   `platformEffectKindAllowed`, which is Portal code.
+4. **"Read-back of a present image answers `applied`" is implemented on execute.** A read never
+   writes a row, so it cannot create an applied effect. A `load-image` execute under a new claim
+   checks the daemon first and settles `applied` with state `present` without any blob in
+   scratch. A read-back of an unknown effect whose blobs are lost answers `orphaned` (not
+   `blobs_missing`) when the image is already present, so the sender resends and gets that
+   receipt with no upload.
+5. **`image_missing` and `reference_image_refused` are typed on the runner, not on the wire.**
+   Every start path (`DispatchCandidate`, `DispatchDataWriter`, `DispatchWritableCandidate`,
+   `DispatchUpdateStart`, `DispatchMigrateData`) now calls a read-only image gate before it claims
+   or reserves anything. The lifecycle protocol has no typed failure reply, so the sender sees an
+   uncertain error, reads the effect back and finds a typed absence: the existing definite-failure
+   path. The runner logs the typed reason. The update-start reservation action carries no
+   descriptor, so its gate sits at the claim, after the reservation.
+6. **The production profile refuses a registry reference in the inspection every start performs,**
+   not in a separate admission step, and a `load-image` for a registry-reference descriptor is
+   refused before its claim.
+7. **Uncompressed size is an exact match, not only a bound.** The layer sink stops at the declared
+   size and also requires the decompressed length to equal it, which is stricter than the plan.
+8. **Layers are verified while the upload arrives,** through a pipe into the gzip reader, as the
+   plan says. A resumed upload rebuilds every hasher by reading the stored prefix back; nothing
+   about a prefix is trusted.
+9. **The end frame carries the declared digest.** A resumed sender has not seen the prefix, so it
+   cannot hash the whole blob; the runner compares the end frame with its own computation and with
+   the signed command.
+10. **A separate load lock.** Loads are serialized by a gate of their own, not the data execution
+    gate, so a large load does not block data effects.
+11. **Scratch.** The scratch cap is 1 GiB in total, at most 2 concurrent sessions and one session
+    per blob; orphans are removed when the store is opened, which the service does first at start.
+12. **Docker allow-list.** The set includes `GET /containers/{id}/logs`, which the runner never
+    issues; the native container tests read container logs through the same client.
+13. **Portal is unchanged in 3a.** The offline route refuses a managed package
+    (`ErrManagedOfflineNotReady`) until Portal stores blobs, and the catalogue's `package_url` is
+    parsed but unused. `cmd/app-inspect` reads up to 384 MiB so the tool can inspect a version 2
+    package.
+14. **Registry-reference descriptors need the development profile.** Every CI probe that runs an
+    image by reference sets `allow_local_reference_images`, as do the in-process native tests
+    through `driver.WithLocalReferenceImages()`.
+
+Not verified here (no Docker on the development host): the loaded image's ID on the classic and
+containerd stores, the daemon's handling of an OCI layout with Docker schema 2 media types, and
+every native Linux path. The native tests in `image_load_native_linux_test.go` state what they
+prove, and the store the daemon reports is logged.
+
+## PR 3a review record
+
+Named tests per step. Each failure direction is in the test name or its comment.
+
+1. **Descriptor contract:** `TestDescriptorBackendImagesAcceptedAndBoundToPlatforms`,
+   `TestDescriptorBackendImagesRefusesLooseForms` (both forms, none, missing or extra or duplicate
+   platform, bad digests, layer count and size bounds, unknown fields),
+   `TestDescriptorContractSourceAndTypes` (digest pin and generated types).
+2. **Envelope version 2:** `TestOfflineEnvelopeV2BindsImageContentToDescriptor`,
+   `TestOfflineEnvelopeV2RefusesCraftedPackages` (extra and missing member, Deflate layer, changed
+   or renamed layer, diff_id and order mismatch, wrong architecture, zstd and foreign layers, an
+   index or manifest list, layer `urls`, case-aliased keys, `index.json` with a tag annotation,
+   `manifest.json`, `repositories`, `oci-layout` at any depth and case, too many entries, oversize
+   metadata), `TestOfflineEnvelopeV2AcceptsDockerSpellingsAndSharedBlobs`,
+   `TestOfflineEnvelopeV1RefusesImageMembersWithoutDeclaration`,
+   `TestPlatformOfflineRefusesManagedPackageUntilBlobsAreStored`.
+3. **Catalogue:** `TestCatalogueV2Dev2CarriesPackageURL`,
+   `TestCatalogueV2Dev2RefusesUnsafePackageURLAndOldFormatPackage`.
+4. **Runner config:** `TestConfigRefusesExposureAndOverlappingRoots` (image root),
+   `TestConfigDevelopmentProfileDefaultsToProduction`.
+5. **Control contracts:** `TestLoadImage*` and `TestImageBlob*` in `internal/apprunner/control`
+   (canonical bytes, disjoint purposes, malformed payloads, every field bound by the digest, the
+   nonce proof), plus `TestRunnerCommandVectors` over the regenerated vectors.
+6. **Driver:** `TestInspectManagedImage*`, `TestProductionProfileRefusesRegistryReferenceBeforeAnyDaemonRequest`,
+   `TestExpectedImageIDPerStore`, `TestPlanCandidateContainerBindsManagedImageByManifestIdentity`,
+   `TestLoadImage*` (runner-owned layout, present, typed rejections, corrupt scratch,
+   uncertain errors, allow-listed requests), `TestLoadedImagePresentIsReadOnly`,
+   `TestDockerRequestAllowListIsClosed`, `TestAllowListTransportStopsAPullBeforeTheSocket`,
+   `TestRunnerSourceNeverPullsOrReadsDockerCredentials`.
+7. **Scratch and blob channel:** `internal/apprunner/imagestore` tests (verification, bomb stop,
+   resume, caps, concurrency, orphans, link refusal) and the `TestBlobChannel*` tests (multi-chunk
+   store, resume after a lost connection, typed refusals, oversize traffic, damaged chunk, malformed
+   frames and stalls, unauthenticated sessions, session bounds, `TestBlobProviderHoldsNoJournalOrNative`).
+8. **Journal:** `TestLoadImageClaimsUnknownBeforeAnyNativeCall`,
+   `TestLoadImageUnknownIsCompletedUnderTheSameClaim`,
+   `TestLoadImageMissingBlobsKeepTheClaimAndNameTheDigests`, `TestLoadImageRefusesBeforeAnyClaim`,
+   `TestLoadImageRefusesStaleAndConflictingIdentities`,
+   `TestLoadImageRefusesASnapshotThatDoesNotBindTheClaim`, `TestLoadImageSerializesLoads`,
+   `TestLoadImageReadBackStates`, the receipt and status parser test, and the replay and rejection
+   tests.
+9. **Transport and start paths:** `TestLoadImageTransportActionsAndSignaturePurposes`,
+   `TestLoadImageTransportReplyBinding`, `TestLoadImageTransportStatusReplies`,
+   `TestMigrateDataRefusesBeforeItsClaimWhenTheTargetImageIsMissing`. The other start paths call
+   the same gate on a concrete native runtime, so they compile here and run natively.
+10. **Native Linux:** `TestNativeLoadImageTwoLayerImageOnTheDaemonStore`,
+    `TestNativeRetagByAPublisherLayoutIsDetected`,
+    `TestNativeLoadImageRefusesACorruptLayerAndAddsNothing`, `TestNativeNoPullIsPossible`.
