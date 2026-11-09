@@ -81,3 +81,6 @@ func (*CandidateRuntime) RemoveStrayContainer(context.Context, string) error { r
 func (*CandidateRuntime) InspectTarget(context.Context, string) (TargetInspection, error) {
 	return TargetInspection{}, ErrUnsupported
 }
+func (*CandidateRuntime) LoadImage(context.Context, LoadImageRequest) (LoadImageSnapshot, error) {
+	return LoadImageSnapshot{}, ErrUnsupported
+}
