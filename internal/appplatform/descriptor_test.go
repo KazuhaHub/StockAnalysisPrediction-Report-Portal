@@ -262,7 +262,10 @@ func TestDescriptorBackendImagesRefusesLooseForms(t *testing.T) {
 			d["backend"].(map[string]any)["image"] = "ghcr.io/example/digest@sha256:" + hexDigest("a")
 		},
 		"neither image nor images refused": func(d map[string]any) { delete(d["backend"].(map[string]any), "image") },
-		"empty images refused":             func(d map[string]any) { delete(d["backend"].(map[string]any), "image"); d["backend"].(map[string]any)["images"] = []any{} },
+		"empty images refused": func(d map[string]any) {
+			delete(d["backend"].(map[string]any), "image")
+			d["backend"].(map[string]any)["images"] = []any{}
+		},
 		"missing platform entry refused": func(d map[string]any) {
 			useManagedImages(d)
 			b := d["backend"].(map[string]any)

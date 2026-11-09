@@ -30,6 +30,9 @@ func (s *Server) apiPlatformMarketOffline(
 		return
 	}
 	envelope, err := appplatform.InspectOfflineEnvelope(raw)
+	if err == nil {
+		err = platformOfflineStageable(envelope)
+	}
 	if err != nil {
 		platformManagementError(w, err)
 		return
@@ -50,4 +53,14 @@ func (s *Server) apiPlatformMarketOffline(
 		"envelope_format": envelope.Inspection.Format,
 		"execution":       envelope.Inspection.Execution,
 	})
+}
+
+// platformOfflineStageable refuses a managed package until Portal stores its
+// image blobs: staging only the descriptor would create a release whose image
+// can never reach a runner.
+func platformOfflineStageable(envelope appplatform.OfflineEnvelope) error {
+	if envelope.Inspection.Execution == "managed" {
+		return appplatform.ErrManagedOfflineNotReady
+	}
+	return nil
 }

@@ -16,6 +16,8 @@ type offlineTestEntry struct {
 	name string
 	body []byte
 	mode fs.FileMode
+	// store writes the member uncompressed, as an image blob must be.
+	store bool
 }
 
 func offlineTestArchive(
@@ -28,6 +30,9 @@ func offlineTestArchive(
 	for _, entry := range entries {
 		header := &zip.FileHeader{
 			Name: entry.name, Method: zip.Deflate,
+		}
+		if entry.store {
+			header.Method = zip.Store
 		}
 		if entry.mode != 0 {
 			header.SetMode(entry.mode)
@@ -197,7 +202,7 @@ func TestOfflineEnvelopeRejectsUnsafeOrMismatchedMembers(t *testing.T) {
 	}
 }
 
-func TestOfflineEnvelopeRefusesManagedUntilImagePayloadExists(t *testing.T) {
+func TestOfflineEnvelopeRefusesRegistryReferenceDescriptor(t *testing.T) {
 	frontend := frontendTestArchive(t, frontendTestEntry{
 		name: "index.html", body: "<!doctype html>",
 	})
@@ -223,7 +228,7 @@ func TestOfflineEnvelopeRefusesManagedUntilImagePayloadExists(t *testing.T) {
 		})
 	if _, err := InspectOfflineEnvelope(raw); !errors.Is(
 		err, ErrManagedOfflineNotReady) {
-		t.Fatalf("managed frontend-only envelope accepted: %v", err)
+		t.Fatalf("registry reference envelope accepted: %v", err)
 	}
 }
 

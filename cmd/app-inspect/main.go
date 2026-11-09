@@ -36,7 +36,7 @@ func run(args []string, output, diagnostics io.Writer) int {
 			return 2
 		}
 		raw, err := readRegularFile(
-			*envelopePath, appplatform.MaxOfflineEnvelopeBytes)
+			*envelopePath, appplatform.MaxManagedOfflineEnvelopeBytes)
 		if err != nil {
 			fmt.Fprintln(diagnostics, "Offline envelope input is unavailable, non-regular or oversized.")
 			return 1
