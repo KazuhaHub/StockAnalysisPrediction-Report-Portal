@@ -35,7 +35,7 @@ func TestDescriptorContractSourceAndTypes(t *testing.T) {
 		"RouteQuery":   reflect.TypeFor[RouteQuery](),
 		"Presentation": reflect.TypeFor[Presentation](), "Route": reflect.TypeFor[Route](),
 		"Artifact": reflect.TypeFor[Artifact](), "Backend": reflect.TypeFor[Backend](),
-		"Resources": reflect.TypeFor[Resources](), "Capabilities": reflect.TypeFor[Capabilities](),
+		"Resources": reflect.TypeFor[Resources](), "BackendImage": reflect.TypeFor[BackendImage](), "ImageLayer": reflect.TypeFor[ImageLayer](), "Capabilities": reflect.TypeFor[Capabilities](),
 		"DataCompatibility": reflect.TypeFor[DataCompatibility](),
 		"DataMigration":     reflect.TypeFor[DataMigration](),
 	}

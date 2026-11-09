@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "189f99c6ff4d59d277797afad80718dd2a24214b63e62cb4f24e47d22cdc9479"
+const descriptorContractSHA256 = "776619608942d190cdda4e4926475bd413a8dbadf6513bc7ae66a10a79d9d3e9"
 
 type Manifest struct {
 	Format        string            `json:"format"`
@@ -40,11 +40,22 @@ type Artifact struct {
 	SHA256   string `json:"sha256"`
 }
 type Backend struct {
-	Kind      string    `json:"kind"`
-	Image     string    `json:"image"`
-	Platforms []string  `json:"platforms"`
-	Protocol  string    `json:"protocol"`
-	Resources Resources `json:"resources"`
+	Kind      string         `json:"kind"`
+	Image     string         `json:"image,omitempty"`
+	Images    []BackendImage `json:"images,omitempty"`
+	Platforms []string       `json:"platforms"`
+	Protocol  string         `json:"protocol"`
+	Resources Resources      `json:"resources"`
+}
+type BackendImage struct {
+	Platform       string       `json:"platform"`
+	ManifestDigest string       `json:"manifest_digest"`
+	ConfigDigest   string       `json:"config_digest"`
+	Layers         []ImageLayer `json:"layers"`
+}
+type ImageLayer struct {
+	DiffID            string `json:"diff_id"`
+	UncompressedBytes int    `json:"uncompressed_bytes"`
 }
 type Resources struct {
 	MemoryMiB int `json:"memory_mib"`
@@ -104,6 +115,9 @@ const minDescriptorDataSchema = 1
 const maxDescriptorDataSchema = 1000000
 const maxDescriptorPathBytes = 256
 const maxBackendImageBytes = 512
+const maxBackendImagePlatforms = 2
+const maxImageLayers = 32
+const maxImageLayerUncompressedBytes = 1073741824
 const maxDescriptorVersionBytes = 128
 const minBackendMemoryMiB = 16
 const maxBackendMemoryMiB = 4096

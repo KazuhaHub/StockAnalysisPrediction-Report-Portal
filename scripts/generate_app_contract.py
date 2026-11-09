@@ -154,6 +154,9 @@ def render(raw):
         "maxDescriptorDataSchema": p("DataCompatibility", "schema")["maximum"],
         "maxDescriptorPathBytes": p("Presentation", "entry")["maxLength"],
         "maxBackendImageBytes": p("Backend", "image")["maxLength"],
+        "maxBackendImagePlatforms": p("Backend", "images")["maxItems"],
+        "maxImageLayers": p("BackendImage", "layers")["maxItems"],
+        "maxImageLayerUncompressedBytes": p("ImageLayer", "uncompressed_bytes")["maximum"],
         "maxDescriptorVersionBytes": p("Manifest", "version")["maxLength"],
     }
     for key in ("memory_mib", "cpu_millis", "pids"):

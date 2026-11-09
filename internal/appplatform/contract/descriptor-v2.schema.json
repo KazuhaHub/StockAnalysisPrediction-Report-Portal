@@ -259,7 +259,18 @@
           "type": "string",
           "maxLength": 512,
           "pattern": "^[a-z0-9][a-z0-9.-]*(:[0-9]{1,5})?/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$",
-          "description": "Strict parsing also rejects repeated separators and double dots."
+          "x-go-omitempty": true,
+          "description": "Registry reference accepted only by a runner configured for local reference images. Strict parsing also rejects repeated separators and double dots, and requires exactly one of image and images."
+        },
+        "images": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackendImage"
+          },
+          "minItems": 1,
+          "maxItems": 2,
+          "x-go-omitempty": true,
+          "description": "Managed image content carried inside the signed package. The strict parser requires exactly one of image and images, and the platforms to equal the backend platforms exactly."
         },
         "platforms": {
           "type": "array",
@@ -283,10 +294,65 @@
       },
       "required": [
         "kind",
-        "image",
         "platforms",
         "protocol",
         "resources"
+      ]
+    },
+    "BackendImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "linux/amd64",
+            "linux/arm64"
+          ]
+        },
+        "manifest_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "config_digest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ImageLayer"
+          },
+          "minItems": 1,
+          "maxItems": 32,
+          "description": "Ordered layer list. The order of diff_id values is checked against the image config."
+        }
+      },
+      "required": [
+        "platform",
+        "manifest_digest",
+        "config_digest",
+        "layers"
+      ]
+    },
+    "ImageLayer": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "diff_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$",
+          "x-go-name": "DiffID"
+        },
+        "uncompressed_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1073741824
+        }
+      },
+      "required": [
+        "diff_id",
+        "uncompressed_bytes"
       ]
     },
     "Resources": {
