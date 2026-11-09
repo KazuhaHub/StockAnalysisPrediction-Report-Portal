@@ -952,6 +952,12 @@ func (s *Store) DispatchUpdateStart(ctx context.Context, raw, signature, descrip
 			verified.Command().OperationID, err)
 		return zero, ErrUpdateStartExecutionUnavailable
 	}
+	// The image gate runs before the claim, so a pruned image leaves no unknown start behind.
+	if err := requireBackendImage(ctx, native, descriptor, parsed.SHA256); err != nil {
+		log.Printf("update-start %s: image gate: %v",
+			verified.Command().OperationID, err)
+		return zero, err
+	}
 	log.Printf("update-start %s: claiming",
 		verified.Command().OperationID)
 	claim, err := s.ClaimUpdateStart(ctx, raw, signature)

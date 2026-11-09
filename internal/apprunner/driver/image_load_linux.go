@@ -46,3 +46,21 @@ func (r *CandidateRuntime) LoadedImagePresent(ctx context.Context, descriptor []
 	defer closeClient()
 	return loadedImagePresentHTTP(ctx, client, descriptor, releaseSHA256, platform, runtime.GOARCH)
 }
+
+// CheckBackendImage is the read-only gate every start path runs before it claims anything: the image a descriptor
+// binds must be present and valid in the daemon, or the start is refused with the typed ErrImageMissing (a managed
+// image that was pruned, or never loaded on this host) or ErrReferenceImageRefused (a registry reference under the
+// production profile). Nothing is pulled and nothing is changed.
+func (r *CandidateRuntime) CheckBackendImage(ctx context.Context, descriptor []byte, releaseSHA256 string) error {
+	if r == nil {
+		return ErrUnsupported
+	}
+	r.mu.Lock()
+	closed, socket, policy := r.closed, r.socket, r.imagePolicy
+	r.mu.Unlock()
+	if closed {
+		return ErrInvalidResponse
+	}
+	_, err := InspectBackendImage(ctx, socket, descriptor, releaseSHA256, policy)
+	return err
+}

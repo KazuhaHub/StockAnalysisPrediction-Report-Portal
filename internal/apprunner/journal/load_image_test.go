@@ -652,3 +652,25 @@ func TestLoadImageReceiptAndStatusParsersRefuseNonCanonicalOrMismatchedBytes(t *
 		t.Fatal("absent with digests accepted")
 	}
 }
+
+// A managed image that was pruned after its load refuses the start before any claim: no unknown effect is left
+// behind, no job is created, and the reason is the typed image_missing.
+func TestMigrateDataRefusesBeforeItsClaimWhenTheTargetImageIsMissing(t *testing.T) {
+	m := migrateDataJournalFixture(t)
+	m.native.imageErr = driver.ErrImageMissing
+	before := scalar(t, m.f.store.db, `SELECT COUNT(*) FROM runner_commands`)
+	if _, err := m.dispatch(t); !errors.Is(err, driver.ErrImageMissing) {
+		t.Fatalf("missing image: %v", err)
+	}
+	if m.native.runs != 0 || m.native.imageChecks != 1 {
+		t.Fatalf("native runs=%d checks=%d", m.native.runs, m.native.imageChecks)
+	}
+	if scalar(t, m.f.store.db, `SELECT COUNT(*) FROM runner_commands`) != before || scalar(t, m.f.store.db, `SELECT COUNT(*) FROM runner_resources WHERE kind='container' AND native_id LIKE 'migration-job/%'`) != 0 {
+		t.Fatal("a refused start left a claim or a reserved job behind")
+	}
+	// The gate passes once the image is back, and the same signed command then runs.
+	m.native.imageErr = nil
+	if receipt, err := m.dispatch(t); err != nil || receipt.State != "migrated" {
+		t.Fatalf("after the image returned: %+v %v", receipt, err)
+	}
+}

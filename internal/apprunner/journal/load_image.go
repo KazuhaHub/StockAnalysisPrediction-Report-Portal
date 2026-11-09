@@ -683,3 +683,16 @@ func (s *Store) unknownLoadStatus(ctx context.Context, got loadReadResult, descr
 	}
 	return loadStatusFor(got.command, "blobs_missing", missing, now), nil
 }
+
+// requireBackendImage is the gate every start path runs before it claims anything. A managed image that is no
+// longer in the daemon refuses the start with the typed driver.ErrImageMissing, so no unknown effect is left behind
+// and the operation follows its existing definite-failure path: the sender's read-back finds no claim.
+func requireBackendImage(ctx context.Context, native *driver.CandidateRuntime, descriptor []byte, releaseSHA256 string) error {
+	if native == nil {
+		return ErrLoadImageUnavailable
+	}
+	if err := native.CheckBackendImage(ctx, descriptor, releaseSHA256); err != nil {
+		return fmt.Errorf("start image: %w", err)
+	}
+	return nil
+}

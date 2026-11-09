@@ -87,3 +87,6 @@ func (*CandidateRuntime) LoadImage(context.Context, LoadImageRequest) (LoadImage
 func (*CandidateRuntime) LoadedImagePresent(context.Context, []byte, string, string) (bool, error) {
 	return false, ErrUnsupported
 }
+func (*CandidateRuntime) CheckBackendImage(context.Context, []byte, string) error {
+	return ErrUnsupported
+}

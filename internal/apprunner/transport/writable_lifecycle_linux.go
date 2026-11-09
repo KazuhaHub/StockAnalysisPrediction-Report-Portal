@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -33,7 +34,7 @@ const restoreExecutionTimeout = 2 * time.Minute
 
 // bulkDataAction reports the actions that read or write a whole checkpoint.
 func bulkDataAction(action WritableLifecycleAction) bool {
-	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute
+	return action == RestoreExecute || action == ImportCheckpointExecute || action == MigrateDataExecute || action == DiscardMigrationExecute || action == LoadImageExecute
 }
 
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
@@ -166,7 +167,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 			return zero, &journal.UpdateStartHeldError{State: absence.State}
 		}
 	}
-	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -298,6 +299,16 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchDiscardMigration(ctx, raw, sig, descriptor, journal.NewMigrationNative(provider.native, provider.dataRoot), provider.dataPin)
 	case DiscardMigrationRead:
 		result, err = provider.store.ReadDiscardMigrationOrStatus(ctx, raw, sig)
+	case LoadImageExecute:
+		if provider.images == nil {
+			return
+		}
+		result, err = provider.store.DispatchLoadImage(ctx, raw, sig, descriptor, provider.native, provider.images)
+	case LoadImageRead:
+		if provider.images == nil {
+			return
+		}
+		result, err = provider.store.ReadLoadImageOrStatus(ctx, raw, sig, descriptor, provider.native, provider.images)
 	case SettleUpdateStartExecute:
 		result, err = provider.store.SettleUpdateStart(ctx, raw, sig, provider.native)
 	case SettleUpdateStartRead:
@@ -343,6 +354,12 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 	}
 	if err != nil || ctx.Err() != nil {
 		if err != nil {
+			if errors.Is(err, driver.ErrImageMissing) || errors.Is(err, driver.ErrReferenceImageRefused) {
+				// A typed refusal before any claim: the sender's read-back finds no claim and the operation
+				// follows its definite-failure path.
+				log.Printf("writable lifecycle action %d refused before its claim: %v", action, err)
+				return
+			}
 			log.Printf("writable lifecycle action %d failed: %v",
 				action, err)
 		}
