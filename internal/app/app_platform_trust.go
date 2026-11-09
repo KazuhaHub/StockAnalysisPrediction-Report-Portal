@@ -271,6 +271,23 @@ func platformQuarantinePublisherInstallations(
 		if err != nil {
 			return 0, err
 		}
+		// An installation that holds a load with no verdict cannot take a new operation yet. That must not abort
+		// the revocation of every other installation: it is skipped, the reason is recorded, and launches stay
+		// fenced by current trust, as for an operation that is already pending.
+		if err := platformRefuseWhileLoadUnsettled(e, p.InstallationID); errors.Is(err, errAppPlatformOperationConflict) {
+			detail, _ := json.Marshal(struct {
+				Installation string `json:"installation_id"`
+				Reason       string `json:"reason"`
+			}{p.InstallationID, "unsettled_load_image"})
+			if _, err := e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
+				VALUES(?,?,?,'app_platform.trust_quarantine_deferred','app_platform_installation',?,?,'')`,
+				time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, p.InstallationID, string(detail)); err != nil {
+				return 0, err
+			}
+			continue
+		} else if err != nil {
+			return 0, err
+		}
 		if err := admitPlatformTrustQuarantine(
 			e, actor, control, p); err != nil {
 			return 0, err
@@ -358,16 +375,11 @@ func admitPlatformTrustQuarantine(
 			return err
 		}
 	}
-	if _, err := e.exec(`INSERT INTO app_platform_operations(
-		id,installation_id,review_plan_id,actor_scope,idempotency_sha256,
-		request_sha256,action,managed,source_generation,target_generation,
-		stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,
-		controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-		VALUES(?,?,?,?,?,?,'disable',?,?,?,'queued',1,1,NULL,NULL,0,
-		?,NULL,NULL,?,?)`,
-		operationID, p.InstallationID, planID, actor.scope, idempotency,
-		request, boolInt(p.Managed), p.Generation, p.TargetGeneration,
-		control.epoch, control.nowMS, control.nowMS); err != nil {
+	if err := insertPlatformOperation(e, platformOperationRow{
+		ID: operationID, InstallationID: p.InstallationID, ReviewPlanID: planID, ActorScope: actor.scope,
+		IdempotencySHA: idempotency, RequestSHA: request, Action: "disable", Managed: p.Managed,
+		SourceGeneration: p.Generation, TargetGeneration: p.TargetGeneration, Stage: "queued", StateRevision: 1,
+		ControllerEpoch: control.epoch, NowMS: control.nowMS}); err != nil {
 		return err
 	}
 	detail, _ := json.Marshal(struct {

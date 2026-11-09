@@ -421,8 +421,9 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 //   - pinned: a retained recovery set restores it (the bundle's rule);
 //   - candidate: it has a candidate or active activation, at any generation;
 //   - recovery_set: a recovery set that is not deleted names it, retained or still being cut;
-//   - operation: a non-terminal operation, one that ended recovery_required, or one holding a load with no
-//     verdict moves from or to it;
+//   - operation: a non-terminal operation moves from or to it;
+//   - unsettled_load: an operation (completed or not) holds a load with no verdict;
+//   - unrecovered: the installation's latest operation is recovery_required and nothing recovered it;
 //   - plan: an open review plan names it.
 //
 // The sweep uses every reason, the bundle only the first two. nowMS bounds which plans are open; zero ignores
@@ -459,19 +460,27 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 	if nowMS == 0 {
 		return pins, nil
 	}
+	// Unsettled work only. An installation that was removed pins nothing here: whatever its recovery sets still
+	// hold is pinned by the bundle's own rule above.
+	live := `installation_id IN (SELECT id FROM app_platform_installations WHERE desired_state<>'removed')`
 	steps := []struct{ reason, query string }{
-		{"candidate", `SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active')`},
-		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted'`},
+		{"candidate", `SELECT release_sha256 FROM app_platform_activations WHERE state IN ('candidate','active') AND ` + live},
+		{"recovery_set", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE state<>'deleted' AND ` + live},
 		{"operation", `SELECT p.source_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.source_release_sha256 IS NOT NULL`},
 		{"operation", `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.completed_ms IS NULL AND p.target_release_sha256 IS NOT NULL`},
 	}
-	// An operation that ended recovery_required, or that holds a load with no verdict, is still unsettled work
-	// whether or not it completed: its releases stay pinned until the work is settled.
 	for _, column := range []string{"source_release_sha256", "target_release_sha256"} {
 		steps = append(steps,
-			struct{ reason, query string }{"operation", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.stage='recovery_required' AND p.` + column + ` IS NOT NULL`},
-			struct{ reason, query string }{"operation", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-				JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown') WHERE p.` + column + ` IS NOT NULL`})
+			// (a) any operation holding a load with no verdict, completed or not.
+			struct{ reason, query string }{"unsettled_load", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+				JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.kind='load_image' AND f.state IN ('prepared','unknown') WHERE p.` + column + ` IS NOT NULL`},
+			// (b) the latest operation of an installation that is not removed, while it is recovery_required and no
+			// recovery marker was written for it. Earlier failed operations, and recovered ones, pin nothing.
+			struct{ reason, query string }{"unrecovered", `SELECT p.` + column + ` FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+				JOIN app_platform_installations i ON i.id=o.installation_id
+				WHERE o.stage='recovery_required' AND i.desired_state<>'removed' AND p.` + column + ` IS NOT NULL
+				AND NOT EXISTS (SELECT 1 FROM app_platform_operations o2 WHERE o2.installation_id=o.installation_id AND (o2.created_ms>o.created_ms OR (o2.created_ms=o.created_ms AND o2.id>o.id)))
+				AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects r WHERE r.operation_id=o.id AND r.stage='recovered' AND r.state='applied')`})
 	}
 	for _, step := range steps {
 		if err := collect(step.reason, step.query); err != nil {

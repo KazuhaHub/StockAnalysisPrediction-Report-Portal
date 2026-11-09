@@ -11,7 +11,7 @@ import (
 func addEffectRow(t *testing.T, s *Server, operation, kind, stage string, number int, id string) {
 	t.Helper()
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-		SELECT id,?,?,?,?,?,NULL,controller_epoch,fence,fence,'applied','{}',created_ms,updated_ms FROM app_platform_operations WHERE id=?`,
+		SELECT id,?,?,?,?,?,NULL,controller_epoch,MAX(fence,1),MAX(fence,1),'applied','{}',created_ms,updated_ms FROM app_platform_operations WHERE id=?`,
 		stage, number, id, kind, platformDigest([]byte(id)), operation)
 }
 

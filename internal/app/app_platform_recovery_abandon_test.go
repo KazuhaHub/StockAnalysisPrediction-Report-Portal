@@ -484,4 +484,8 @@ func TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRu
 	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE effect_id=?`, platformFixtureID(8701)) != "reverted" {
 		t.Fatal("the driver left the load of a retired runtime unsettled")
 	}
+	// Portal has no runner verdict for it, so it says so instead of recording one.
+	if scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE effect_id=?`, platformFixtureID(8701)) != `{"outcome":"abandoned_outcome_unknown"}` {
+		t.Fatal("the settled load does not carry the abandoned_outcome_unknown outcome")
+	}
 }

@@ -444,7 +444,9 @@ func (p *platformImageStore) openBlob(blob appplatform.ImageBlob) (*os.File, err
 			return nil, errPlatformImageBlobMissing
 		}
 		if platformIsLinkRefusal(err) {
-			_ = os.Remove(path)
+			if seen, lerr := os.Lstat(path); lerr == nil {
+				p.removeProven(blob.Digest, seen)
+			}
 			return nil, errPlatformImageBlobCorrupt
 		}
 		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
@@ -456,7 +458,7 @@ func (p *platformImageStore) openBlob(blob appplatform.ImageBlob) (*os.File, err
 	}
 	if !info.Mode().IsRegular() || info.Size() != blob.Size {
 		file.Close()
-		_ = os.Remove(path)
+		p.removeProven(blob.Digest, info)
 		return nil, errPlatformImageBlobCorrupt
 	}
 	hash := sha256.New()
@@ -467,7 +469,7 @@ func (p *platformImageStore) openBlob(blob appplatform.ImageBlob) (*os.File, err
 	}
 	if n != blob.Size || hex.EncodeToString(hash.Sum(nil)) != blob.Digest {
 		file.Close()
-		_ = os.Remove(path)
+		p.removeProven(blob.Digest, info)
 		return nil, errPlatformImageBlobCorrupt
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {

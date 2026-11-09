@@ -753,18 +753,11 @@ func (s *Server) consumePlatformDeleteDataReviewContext(
 			if err := platformLeaseCAS(changed, err); err != nil {
 				return errAppPlatformPlanChanged
 			}
-			_, err = e.exec(`INSERT INTO app_platform_operations(
-				id,installation_id,review_plan_id,actor_scope,
-				idempotency_sha256,request_sha256,action,managed,
-				source_generation,target_generation,stage,state_revision,
-				row_revision,lease_owner,lease_until_ms,fence,
-				controller_epoch,error_code,completed_ms,created_ms,
-				updated_ms)
-				VALUES(?,?,?,?,?,?,'delete_data',1,?,?,'queued',1,1,
-				NULL,NULL,0,?,NULL,NULL,?,?)`,
-				id, p.InstallationID, planID, actor.scope, keyDigest,
-				requestDigest, p.Generation, p.TargetGeneration,
-				p.ControllerEpoch, control.nowMS, control.nowMS)
+			err = insertPlatformOperation(e, platformOperationRow{
+				ID: id, InstallationID: p.InstallationID, ReviewPlanID: planID, ActorScope: actor.scope,
+				IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: "delete_data", Managed: true,
+				SourceGeneration: p.Generation, TargetGeneration: p.TargetGeneration, Stage: "queued", StateRevision: 1,
+				ControllerEpoch: p.ControllerEpoch, NowMS: control.nowMS})
 			if err != nil {
 				return err
 			}

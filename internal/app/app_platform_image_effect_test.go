@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"log"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -79,14 +83,13 @@ func TestEnsureImageRecordsARejectionAsRevertedAndRefusesWithoutAskingAgain(t *t
 	}
 }
 
-// tryAdmit attempts the admission INSERT every operation kind goes through. The central check refuses before the
-// statement reaches the database; a statement that gets past it fails on the missing columns, which is not a
-// conflict.
+// tryAdmit admits an operation row through the one helper that writes the operations table.
 func tryAdmit(t *testing.T, s *Server, installation, action string) error {
 	t.Helper()
-	_, err := s.st.poolExec().exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,action) VALUES(?,?,?,?)`,
-		platformFixtureID(8801), installation, platformFixtureID(8802), action)
-	return err
+	return insertPlatformOperation(s.st.poolExec(), platformOperationRow{
+		ID: platformFixtureID(8801), InstallationID: installation, ReviewPlanID: platformFixtureID(8802), ActorScope: platformDigest([]byte("a")),
+		IdempotencySHA: platformDigest([]byte("i")), RequestSHA: platformDigest([]byte("r")), Action: action, Managed: true,
+		SourceGeneration: 1, TargetGeneration: 2, Stage: "queued", StateRevision: 1, ControllerEpoch: platformFixtureID(8803), NowMS: 1})
 }
 
 // giveUp makes the gate end with an unknown load and the operation finish for review.
@@ -147,26 +150,66 @@ func TestEveryOperationKindIsRefusedWhileALoadIsUnsettled(t *testing.T) {
 	}
 }
 
-// Fails if an admission path inserts an operation without going through migExec.exec, which carries the central
-// check.
-func TestEveryOperationInsertGoesThroughTheCentralAdmissionCheck(t *testing.T) {
+// Fails if any non-test code can write the operations table other than the one helper: every string literal and
+// constant is normalised (lower case, whitespace collapsed, adjacent literals joined) and none outside the
+// helper's file may hold an insert into the table, an insert or ignore into it, or a rewrite of an operation's
+// installation.
+func TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper(t *testing.T) {
+	forbidden := regexp.MustCompile(`insert (or \w+ )?into app_platform_operations\b|replace into app_platform_operations\b|update app_platform_operations set installation_id`)
+	fset := token.NewFileSet()
 	files, _ := filepath.Glob("*.go")
-	insert := regexp.MustCompile("(?s)([A-Za-z_.]+)\\(\\s*`INSERT INTO app_platform_operations\\(")
-	found := 0
+	checked := 0
+	var fold func(e ast.Expr) (string, bool)
+	fold = func(e ast.Expr) (string, bool) {
+		switch v := e.(type) {
+		case *ast.BasicLit:
+			if v.Kind == token.STRING {
+				u, err := strconv.Unquote(v.Value)
+				return u, err == nil
+			}
+		case *ast.BinaryExpr:
+			if v.Op == token.ADD {
+				l, lok := fold(v.X)
+				r, rok := fold(v.Y)
+				return l + r, lok && rok
+			}
+		case *ast.ParenExpr:
+			return fold(v.X)
+		}
+		return "", false
+	}
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
+		if strings.HasSuffix(f, "_test.go") || f == "app_platform_operation_insert.go" {
 			continue
 		}
-		raw, _ := os.ReadFile(f)
-		for _, m := range insert.FindAllStringSubmatch(string(raw), -1) {
-			found++
-			if m[1] != "e.exec" {
-				t.Errorf("%s inserts an operation through %s, not the central check", f, m[1])
+		parsed, err := parser.ParseFile(fset, f, nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check := func(text string, pos token.Pos) {
+			checked++
+			norm := strings.Join(strings.Fields(strings.ToLower(text)), " ")
+			if forbidden.MatchString(norm) {
+				t.Errorf("%s writes the operations table outside the insert helper: %q", fset.Position(pos), norm)
 			}
 		}
+		ast.Inspect(parsed, func(n ast.Node) bool {
+			switch v := n.(type) {
+			case *ast.BinaryExpr:
+				if text, ok := fold(v); ok {
+					check(text, v.Pos())
+					return false
+				}
+			case *ast.BasicLit:
+				if text, ok := fold(v); ok {
+					check(text, v.Pos())
+				}
+			}
+			return true
+		})
 	}
-	if found < 10 {
-		t.Fatalf("found %d operation inserts; the pattern is stale", found)
+	if checked < 1000 {
+		t.Fatalf("only %d literals were checked; the walk is broken", checked)
 	}
 }
 

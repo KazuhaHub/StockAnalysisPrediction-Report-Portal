@@ -464,10 +464,11 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 			if err != nil {
 				return errAppPlatformPlanChanged
 			}
-			if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
-				source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-				VALUES(?,?,?,?,?,?,?,?,?,?,'complete',?,1,NULL,NULL,0,?,NULL,?,?,?)`, id, p.InstallationID, planID, actor.scope, keyDigest, requestDigest, string(action),
-				boolInt(p.Managed), p.Generation, p.TargetGeneration, int64(snapshot.Revision), control.epoch, control.nowMS, control.nowMS, control.nowMS); err != nil {
+			if err := insertPlatformOperation(e, platformOperationRow{
+				ID: id, InstallationID: p.InstallationID, ReviewPlanID: planID, ActorScope: actor.scope,
+				IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: string(action), Managed: p.Managed,
+				SourceGeneration: p.Generation, TargetGeneration: p.TargetGeneration, Stage: "complete", StateRevision: int64(snapshot.Revision),
+				ControllerEpoch: control.epoch, Completed: true, NowMS: control.nowMS}); err != nil {
 				return err
 			}
 			if err := settlePlatformPortalSideUninstall(e, p.InstallationID, control.nowMS); err != nil {
@@ -484,9 +485,11 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 			result = platformRemovalCommit{OperationID: id, InstallationID: p.InstallationID, Generation: p.TargetGeneration, Revision: int64(snapshot.Revision), Stage: appplatform.StageComplete}
 			return nil
 		}
-		_, err = e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
-            source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-            VALUES(?,?,?,?,?,?,?,?,?,?,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`, id, p.InstallationID, planID, actor.scope, keyDigest, requestDigest, string(action), boolInt(p.Managed), p.Generation, p.TargetGeneration, control.epoch, control.nowMS, control.nowMS)
+		err = insertPlatformOperation(e, platformOperationRow{
+			ID: id, InstallationID: p.InstallationID, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: string(action), Managed: p.Managed,
+			SourceGeneration: p.Generation, TargetGeneration: p.TargetGeneration, Stage: "queued", StateRevision: 1,
+			ControllerEpoch: control.epoch, NowMS: control.nowMS})
 		if err != nil {
 			return err
 		}

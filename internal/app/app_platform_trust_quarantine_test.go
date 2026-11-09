@@ -164,3 +164,25 @@ func TestPlatformTrustQuarantineManagedSQLite(t *testing.T) {
 func TestPlatformTrustQuarantineManagedPostgres(t *testing.T) {
 	testPlatformTrustQuarantineManaged(t, true)
 }
+
+// A revocation quarantines every affected installation. One whose load has no verdict cannot take a new operation
+// yet; that must not abort the revocation. Fails if the revocation errors, if it quarantines the blocked
+// installation anyway, or if the deferral leaves no record.
+func TestTrustRevocationSkipsAnInstallationWithAnUnsettledLoadAndRecordsWhy(t *testing.T) {
+	s, actor, _, installation := platformObjectsFixturePG(t, false)
+	operation := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? ORDER BY created_ms LIMIT 1`, installation)
+	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		SELECT o.id,'stage',1,?,'load_image',?,NULL,o.controller_epoch,1,0,'unknown','{}',o.created_ms,o.updated_ms FROM app_platform_operations o WHERE o.id=?`,
+		platformFixtureID(8901), platformDigest([]byte("load")), operation)
+	revision, err := s.changePlatformPublisherTrust(actor, platformPublisherChange{
+		kind: "revoke_key", publisherID: "fixture-publisher", expectedRevision: 1, keyID: "first-key", expectedKeyRevision: 1})
+	if err != nil || revision.quarantined != 0 {
+		t.Fatalf("the revocation was aborted or quarantined the blocked installation: %+v %v", revision, err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=? AND action='disable'`, installation) != 0 {
+		t.Fatal("a disable was admitted for an installation with an unsettled load")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.trust_quarantine_deferred' AND target_id=?`, installation) != 1 {
+		t.Fatal("the deferral was not recorded")
+	}
+}

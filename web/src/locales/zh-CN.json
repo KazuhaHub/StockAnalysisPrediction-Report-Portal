@@ -3773,6 +3773,8 @@
   "appPlatform.settings.restoreScopeValue": "规划和确认时会重新校验所选恢复集、检查点操作、数据命名空间、版本和写入栅栏。授权和受众仍作为明确的审核输入。",
   "appPlatform.settings.imageDelivery.reuploadRequired": "需要重新上传软件包",
   "appPlatform.settings.imageDelivery.reuploadDetail": "此服务器已不再保存发布版本 {{release}} 的镜像，应用无法启动或恢复。请重新上传该发布版本的软件包。",
+  "appPlatform.storage.reuploadRequired": "需要重新上传软件包",
+  "appPlatform.storage.reuploadDetail": "{{app}} {{version}}（发布版本 {{release}}）已保存的镜像无法使用，应用无法启动或恢复。请重新上传该发布版本的软件包。",
   "appPlatform.settings.migrationRecovery.title": "数据迁移恢复",
   "appPlatform.settings.migrationRecovery.state.settling": "处理中",
   "appPlatform.settings.migrationRecovery.state.settled": "需要决定",

@@ -14,59 +14,99 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// readMetadata returns a manifest or config blob after hashing it against its name. It deletes the blob only
-// when it is proven wrong; a failed read leaves it.
+// readMetadata returns a manifest or config blob after hashing it against its name. A blob it proves wrong is
+// removed, under the digest lock and only if the file is still the one it examined; a failed read leaves it.
 func (p *platformImageStore) readMetadata(digest string) ([]byte, error) {
+	raw, _, err := p.metadata(digest, true)
+	return raw, err
+}
+
+func (p *platformImageStore) metadata(digest string, remove bool) ([]byte, os.FileInfo, error) {
 	if !platformValidSHA(digest) {
-		return nil, errPlatformImageBlobMissing
+		return nil, nil, errPlatformImageBlobMissing
 	}
 	path := p.blobPath(digest)
 	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, errPlatformImageBlobMissing
+			return nil, nil, errPlatformImageBlobMissing
 		}
 		if platformIsLinkRefusal(err) {
-			_ = os.Remove(path)
-			return nil, errPlatformImageBlobCorrupt
+			if remove {
+				if seen, lerr := os.Lstat(path); lerr == nil {
+					p.removeProven(digest, seen)
+				}
+			}
+			return nil, nil, errPlatformImageBlobCorrupt
 		}
-		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+		return nil, nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+		return nil, nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
 	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > appplatform.MaxImageMetadataBytes {
-		_ = os.Remove(path)
-		return nil, errPlatformImageBlobCorrupt
+		if remove {
+			p.removeProven(digest, info)
+		}
+		return nil, info, errPlatformImageBlobCorrupt
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, appplatform.MaxImageMetadataBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
+		return nil, nil, fmt.Errorf("%w: %v", errPlatformImageBlobRead, err)
 	}
 	sum := sha256.Sum256(raw)
 	if hex.EncodeToString(sum[:]) != digest {
-		_ = os.Remove(path)
-		return nil, errPlatformImageBlobCorrupt
+		if remove {
+			p.removeProven(digest, info)
+		}
+		return nil, info, errPlatformImageBlobCorrupt
 	}
-	return raw, nil
+	return raw, info, nil
 }
 
-// planFor rebuilds the verified plan of a descriptor's image entry from the stored manifest and config.
+// removeProven deletes a blob that was proven wrong, only when it is still the file that was examined: the same
+// inode, size and modification time, checked under the digest lock a writer also takes. A blob replaced in the
+// meantime (a re-upload) is left alone.
+func (p *platformImageStore) removeProven(digest string, seen os.FileInfo) {
+	if seen == nil {
+		return
+	}
+	defer p.lockDigest(digest)()
+	current, err := os.Lstat(p.blobPath(digest))
+	if err != nil || !os.SameFile(current, seen) || current.Size() != seen.Size() || !current.ModTime().Equal(seen.ModTime()) {
+		return
+	}
+	_ = os.Remove(p.blobPath(digest))
+}
+
+// planFor rebuilds the verified plan of a descriptor's image entry from the stored manifest and config. It
+// removes what it proves wrong.
 func (p *platformImageStore) planFor(entry appplatform.BackendImage) (appplatform.ImagePlan, error) {
-	manifest, err := p.readMetadata(entry.ManifestDigest)
+	return p.plan(entry, true)
+}
+
+// peekPlan is planFor that never writes.
+func (p *platformImageStore) peekPlan(entry appplatform.BackendImage) (appplatform.ImagePlan, error) {
+	return p.plan(entry, false)
+}
+
+func (p *platformImageStore) plan(entry appplatform.BackendImage, remove bool) (appplatform.ImagePlan, error) {
+	manifest, manifestInfo, err := p.metadata(entry.ManifestDigest, remove)
 	if err != nil {
 		return appplatform.ImagePlan{}, err
 	}
-	config, err := p.readMetadata(entry.ConfigDigest)
+	config, configInfo, err := p.metadata(entry.ConfigDigest, remove)
 	if err != nil {
 		return appplatform.ImagePlan{}, err
 	}
 	plan, err := appplatform.PlanImage(entry, manifest, config)
 	if err != nil {
-		_ = os.Remove(p.blobPath(entry.ManifestDigest))
-		_ = os.Remove(p.blobPath(entry.ConfigDigest))
+		if remove {
+			p.removeProven(entry.ManifestDigest, manifestInfo)
+			p.removeProven(entry.ConfigDigest, configInfo)
+		}
 		return appplatform.ImagePlan{}, errPlatformImageBlobCorrupt
 	}
 	return plan, nil

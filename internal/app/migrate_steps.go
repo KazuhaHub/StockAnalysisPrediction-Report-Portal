@@ -58,12 +58,6 @@ type migExec struct {
 func (s *Store) poolExec() migExec { return migExec{s: s, ex: s.db} }
 
 func (e migExec) exec(q string, args ...any) (sql.Result, error) {
-	// The one admission check of every new application operation: see platformRefuseWhileLoadUnsettled.
-	if strings.Contains(q, "INSERT INTO app_platform_operations(") {
-		if err := platformRefuseWhileLoadUnsettled(e, args); err != nil {
-			return nil, err
-		}
-	}
 	return e.ex.Exec(e.s.bind(q), args...)
 }
 

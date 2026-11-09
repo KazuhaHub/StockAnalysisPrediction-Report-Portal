@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+	"time"
 )
 
 // bundleWithManagedReleases returns a bundle source whose active release is a managed release with image
@@ -296,5 +297,179 @@ func TestSweepRemovesNothingWhenThePinnedSetCannotBeComputed(t *testing.T) {
 	b.s.sweepPlatformImages(context.Background())
 	if strays() != 4 {
 		t.Fatal("a sweep ran after a pinned release's descriptor query failed")
+	}
+}
+
+// cloneFailedOperation adds an operation that ended recovery_required, targeting release, as the installation's
+// newest operation at createdMS.
+func cloneFailedOperation(t *testing.T, s *Server, from, id, release string, createdMS int64) {
+	t.Helper()
+	plan := platformFixtureID(40000 + int(createdMS%100000))
+	mustExec(t, s.st, `INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)
+		SELECT ?,installation_id,app_id,publisher_id,action,source_release_sha256,?,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms
+		FROM app_platform_review_plans WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, plan, release, from)
+	mustExec(t, s.st, `INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
+		SELECT ?,installation_id,?,actor_scope,?,?,action,managed,source_generation,target_generation,'recovery_required',state_revision,row_revision,NULL,NULL,fence,controller_epoch,error_code,?,?,?
+		FROM app_platform_operations WHERE id=?`, id, plan, platformDigest([]byte(id)), platformDigest([]byte(plan)), createdMS, createdMS, createdMS, from)
+}
+
+func markRecovered(t *testing.T, s *Server, operation string, n int) {
+	t.Helper()
+	addEffectRow(t, s, operation, "recovered", "recovered", 1, platformFixtureID(60000+n))
+}
+
+// Fails if pins accumulate: after a successful retry the failed operation's target is sweepable, a stream of failed
+// then recovered updates stays bounded to the one unrecovered target, and that one stays pinned while unrecovered.
+func TestOnlyTheLatestUnrecoveredFailurePinsItsReleaseAndAStreamOfFailuresStaysBounded(t *testing.T) {
+	b, _, _ := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	store.grace = 0
+	base := len(blobFiles(t, b.s))
+	var targets []platformManagedImageParts
+	for i := range 5 {
+		p := newPlatformManagedImageParts(t, "7.0."+string(rune('0'+i)), "stream-"+string(rune('a'+i)))
+		sha := platformInsertManagedRelease(t, b.s, b.release, p)
+		for _, blob := range p.imageBlobList() {
+			store.putBlob(blob, bytes.NewReader(p.blobs[blob.Digest]))
+		}
+		id := platformFixtureID(9100 + i)
+		cloneFailedOperation(t, b.s, b.operation, id, sha, time.Now().UnixMilli()+10000+int64(i))
+		if i < 4 {
+			markRecovered(t, b.s, id, i)
+		}
+		targets = append(targets, p)
+	}
+	present := func(p platformManagedImageParts) int {
+		n := 0
+		for _, blob := range p.imageBlobList() {
+			if _, err := os.Stat(store.blobPath(blob.Digest)); err == nil {
+				n++
+			}
+		}
+		return n
+	}
+	b.s.sweepPlatformImages(context.Background())
+	for i, p := range targets {
+		want := 0
+		if i == 4 {
+			want = 4 // the latest operation, still unrecovered
+		}
+		if got := present(p); got != want {
+			t.Fatalf("target %d keeps %d blobs, want %d", i, got, want)
+		}
+	}
+	if total := len(blobFiles(t, b.s)); total != base+4 {
+		t.Fatalf("a stream of failures left %d blobs, want %d", total, base+4)
+	}
+	// A successful retry marks the failure recovered: its target is no longer needed and is swept.
+	markRecovered(t, b.s, platformFixtureID(9104), 4)
+	b.s.sweepPlatformImages(context.Background())
+	if present(targets[4]) != 0 || len(blobFiles(t, b.s)) != base {
+		t.Fatalf("a recovered failure still pins its target: %d blobs", len(blobFiles(t, b.s)))
+	}
+}
+
+// Fails if anything stays pinned once the installation is uninstalled.
+func TestAfterAnUninstallNothingStaysPinned(t *testing.T) {
+	b, _, _ := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	store.grace = 0
+	p := newPlatformManagedImageParts(t, "7.1.0", "uninstall")
+	sha := platformInsertManagedRelease(t, b.s, b.release, p)
+	for _, blob := range p.imageBlobList() {
+		store.putBlob(blob, bytes.NewReader(p.blobs[blob.Digest]))
+	}
+	cloneFailedOperation(t, b.s, b.operation, platformFixtureID(9200), sha, time.Now().UnixMilli()+20000)
+	mustExec(t, b.s.st, `UPDATE app_platform_installations SET desired_state='removed',phase='removed' WHERE id=?`, b.installation)
+	if err := settlePlatformPortalSideUninstall(b.s.st.poolExec(), b.installation, 3000); err != nil {
+		t.Fatal(err)
+	}
+	b.s.sweepPlatformImages(context.Background())
+	if left := blobFiles(t, b.s); len(left) != 0 {
+		t.Fatalf("%d blobs stayed pinned after the uninstall", len(left))
+	}
+}
+
+// The global storage status names every pinned release whose manifest cannot be read, while the sweep stays
+// fail-closed for exactly those. Fails if the status misses the release, or if the sweep does not resume once the
+// package is uploaded again.
+func TestGlobalStorageStatusListsAnUnreadablePinnedManifestAndTheSweepResumesAfterAReupload(t *testing.T) {
+	b, active, _ := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	store.grace = 0
+	stray := newPlatformManagedImageParts(t, "7.2.0", "global-stray")
+	for _, blob := range stray.imageBlobList() {
+		store.putBlob(blob, bytes.NewReader(stray.blobs[blob.Digest]))
+	}
+	empty, err := b.s.platformImageStorageStatus(context.Background())
+	if err != nil || len(empty.Unreadable) != 0 {
+		t.Fatalf("a healthy store reported %+v %v", empty, err)
+	}
+	// Corrupt the manifest of the active release.
+	path := store.blobPath(active.entry.ManifestDigest)
+	original, _ := os.ReadFile(path)
+	os.WriteFile(path, append(original[:len(original)-2:len(original)-2], '}', ' '), 0o600)
+	status, err := b.s.platformImageStorageStatus(context.Background())
+	sha := platformDigest(active.descriptor)
+	if err != nil || len(status.Unreadable) != 1 || status.Unreadable[0].ReleaseSHA256 != sha || status.Unreadable[0].Reason != "manifest_unreadable" {
+		t.Fatalf("status: %+v %v", status, err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("the status read removed the file")
+	}
+	b.s.sweepPlatformImages(context.Background())
+	for _, blob := range stray.imageBlobList() {
+		if _, err := os.Stat(store.blobPath(blob.Digest)); err != nil {
+			t.Fatal("the sweep ran with an unreadable pinned manifest")
+		}
+	}
+	// The package is uploaded again: the manifest is back, the status clears and the sweep resumes.
+	os.Remove(path)
+	if err := store.putBlob(active.plan.Manifest, bytes.NewReader(active.blobs[active.entry.ManifestDigest])); err != nil {
+		t.Fatal(err)
+	}
+	if after, _ := b.s.platformImageStorageStatus(context.Background()); len(after.Unreadable) != 0 {
+		t.Fatalf("the status did not clear: %+v", after)
+	}
+	b.s.sweepPlatformImages(context.Background())
+	for _, blob := range stray.imageBlobList() {
+		if _, err := os.Stat(store.blobPath(blob.Digest)); err == nil {
+			t.Fatal("the sweep did not resume after the re-upload")
+		}
+	}
+}
+
+// Fails if a status read removes any file, or if a removal ignores that the file was replaced after it was examined.
+func TestStatusReadsNeverRemoveAndAProvenWrongRemovalSparesAReplacedFile(t *testing.T) {
+	b, active, _ := bundleWithManagedReleases(t)
+	store, _ := b.s.platformImages()
+	layer := active.plan.Layers[0]
+	bad := append([]byte(nil), active.blobs[layer.Digest]...)
+	bad[3] ^= 1
+	manifest := store.blobPath(active.entry.ManifestDigest)
+	os.WriteFile(manifest, []byte("not the manifest"), 0o600)
+	os.WriteFile(store.blobPath(layer.Digest), bad, 0o600)
+	before := blobFiles(t, b.s)
+	for range 2 {
+		b.s.platformImageStorageStatus(context.Background())
+		b.s.platformImageDeliveryProjection(b.s.st.poolExec(), b.installation, platformDigest(active.descriptor))
+	}
+	if got := blobFiles(t, b.s); len(got) != len(before) {
+		t.Fatalf("a status read removed files: %d -> %d", len(before), len(got))
+	}
+	// A file replaced after it was examined is not removed on the strength of the old examination.
+	seen, _ := os.Lstat(manifest)
+	os.Remove(manifest)
+	os.WriteFile(manifest, active.blobs[active.entry.ManifestDigest], 0o600)
+	store.removeProven(active.entry.ManifestDigest, seen)
+	if _, err := os.Stat(manifest); err != nil {
+		t.Fatal("a replaced file was removed on a stale examination")
+	}
+	// The write path removes a blob it proves wrong.
+	if _, err := store.openBlob(layer); err == nil {
+		t.Fatal("a wrong blob passed")
+	}
+	if _, err := os.Stat(store.blobPath(layer.Digest)); err == nil {
+		t.Fatal("the write path did not remove a blob it proved wrong")
 	}
 }

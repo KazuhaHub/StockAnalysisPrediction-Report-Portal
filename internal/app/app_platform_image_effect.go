@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"sort"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -187,7 +189,8 @@ func (s *Server) platformLoadSettlementCandidates(ctx context.Context) (ids, ski
 // platformLoadSettlementWindow is how many loads one tick settles.
 const platformLoadSettlementWindow = 8
 
-// revertLoadsOfRetiredRuntimes settles, as reverted, the loads issued to a runtime binding that was retired
+// revertLoadsOfRetiredRuntimes settles, as reverted with the outcome abandoned_outcome_unknown (not a runner verdict,
+// which Portal does not have), the loads issued to a runtime binding that was retired
 // (abandoned). A load to a runtime that no longer exists cannot happen, and nothing could read it back. The
 // abandon itself leaves these rows to this driver (it reverts every other unsettled effect of the runtime).
 func (s *Server) revertLoadsOfRetiredRuntimes(ctx context.Context) error {
@@ -196,7 +199,7 @@ func (s *Server) revertLoadsOfRetiredRuntimes(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		_, err = e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json='{"reason":"runtime_abandoned"}',updated_ms=?
+		_, err = e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json='{"outcome":"abandoned_outcome_unknown"}',updated_ms=?
 			WHERE kind='load_image' AND state IN ('prepared','unknown')
 			AND runtime_id IN (SELECT id FROM app_platform_runtime_bindings WHERE enabled=0)
 			AND operation_id IN (SELECT id FROM app_platform_operations WHERE completed_ms IS NOT NULL)`, now)
@@ -294,36 +297,6 @@ func (s *Server) settlePlatformLoadImage(ctx context.Context, endpoint platformR
 	return s.runPlatformImageLoad(ctx, endpoint, signer, target, rows)
 }
 
-// platformRefuseWhileLoadUnsettled is the central admission check of application operations: no operation of any
-// kind (install, update, enable, repair, retry, roll back, restore, uninstall, delete data, recovery action) is
-// admitted for an installation while it holds a load-image effect with no verdict. The load may still be running
-// on the runner or may run later under its id, and any new operation would move the installation's fence past the
-// one the settlement is bound to. migExec.exec calls it for every INSERT into the operations table, so no
-// admission path can skip it; it finds the installation among the statement's arguments, because the columns
-// differ between the admission paths. The settlement driver lifts it by settling the load.
-func platformRefuseWhileLoadUnsettled(e migExec, args []any) error {
-	var ids []any
-	marks := ""
-	for _, a := range args {
-		if id, ok := a.(string); ok && platformValidUUID(id) {
-			ids = append(ids, id)
-			marks += ",?"
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	var open int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
-		WHERE f.kind='load_image' AND f.state IN ('prepared','unknown') AND o.installation_id IN (`+marks[1:]+`)`, ids...).Scan(&open); err != nil {
-		return err
-	}
-	if open != 0 {
-		return fmt.Errorf("%w: a load of the application image has no verdict yet", errAppPlatformOperationConflict)
-	}
-	return nil
-}
-
 // platformImageDeliveryProjection reports the first release this installation needs whose image blobs cannot be
 // used: the current release, or the target of an operation that ended recovery_required or holds a load with no
 // verdict. It checks presence and the stored manifest, not hashes. The same fact makes the sweep stop (fail
@@ -366,7 +339,7 @@ func (s *Server) platformImageDeliveryProjection(e migExec, installation, curren
 			continue
 		}
 		for _, entry := range parsed.Manifest.Backend.Images {
-			plan, err := store.planFor(entry)
+			plan, err := store.peekPlan(entry)
 			if err != nil {
 				return &platformSettingsImageDelivery{State: "reupload_required", ReleaseSHA256: sha, Reason: "manifest_unreadable"}, nil
 			}
@@ -376,4 +349,75 @@ func (s *Server) platformImageDeliveryProjection(e migExec, installation, curren
 		}
 	}
 	return nil, nil
+}
+
+// platformImageStorageStatus lists every pinned release whose stored image cannot be used: the manifest or config
+// cannot be read (the sweep stops on these, fail-closed) or a blob is missing. It is global, not per installation,
+// and it reads without writing anything. The operator's fix is the same for each: upload the package again.
+type platformImageStorageStatus struct {
+	Unreadable []platformImageUnreadable `json:"unreadable"`
+}
+
+type platformImageUnreadable struct {
+	ReleaseSHA256 string `json:"release_sha256"`
+	AppID         string `json:"app_id"`
+	Version       string `json:"version"`
+	// Reason is "manifest_unreadable" or "blobs_missing".
+	Reason string `json:"reason"`
+}
+
+func (s *Server) platformImageStorageStatus(ctx context.Context) (platformImageStorageStatus, error) {
+	result := platformImageStorageStatus{Unreadable: []platformImageUnreadable{}}
+	store, err := s.platformImages()
+	if err != nil {
+		return result, nil
+	}
+	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
+	pins, err := loadPlatformReleasePins(pool, time.Now().UnixMilli())
+	if err != nil {
+		return result, err
+	}
+	shas := make([]string, 0, len(pins))
+	for sha := range pins {
+		shas = append(shas, sha)
+	}
+	sort.Strings(shas)
+	for _, sha := range shas {
+		var descriptor []byte
+		if err := pool.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, sha).Scan(&descriptor); err != nil {
+			continue
+		}
+		parsed, err := appplatform.ParseDescriptor(descriptor)
+		if err != nil || parsed.Manifest.Backend == nil {
+			continue
+		}
+		reason := ""
+		for _, entry := range parsed.Manifest.Backend.Images {
+			plan, err := store.peekPlan(entry)
+			if err != nil {
+				reason = "manifest_unreadable"
+				break
+			}
+			if len(store.missingBlobs(plan.Blobs())) != 0 {
+				reason = "blobs_missing"
+			}
+		}
+		if reason != "" {
+			result.Unreadable = append(result.Unreadable, platformImageUnreadable{ReleaseSHA256: sha, AppID: parsed.Manifest.ID, Version: parsed.Manifest.Version, Reason: reason})
+		}
+	}
+	return result, nil
+}
+
+func (s *Server) apiPlatformImageStorageStatus(w http.ResponseWriter, r *http.Request, user string) {
+	if _, err := s.platformHTTPReader(r, user); err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	status, err := s.platformImageStorageStatus(r.Context())
+	if err != nil {
+		platformManagementError(w, err)
+		return
+	}
+	writeJSON(w, status)
 }

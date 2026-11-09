@@ -705,3 +705,41 @@ The review failed PR 3b again at `1baa9470`. Fixed, test-first.
    a runtime binding that was retired (`revertLoadsOfRetiredRuntimes`), since nothing could read such a load back.
    Without that, the abandoned installation would stay blocked for ever
    (`TestAbandonLeavesALoadImageRowToTheDriverAndTheDriverRevertsItForARetiredRuntime`).
+
+## PR 3b third-round review follow-ups
+
+The review failed PR 3b a third time at `8cc0ea0e`. Fixed, test-first. Item 2 of the second-round section (the
+check inside `migExec.exec`) is replaced by item 3 here.
+
+1. **Blocker: pins never released.** `loadPlatformReleasePins` pinned every operation that ever ended
+   `recovery_required`, and operations never leave that stage, so storage would have grown until the 8 GiB cap
+   returned 507 for every install. The pin rule is now unsettled work only: (a) the source and target of any
+   operation holding a `load_image` row that is `prepared` or `unknown`, and (b) those of an installation's
+   latest operation, while it is `recovery_required`, the installation is not removed, and no `recovered` marker
+   was written for it. Candidate activations and recovery sets that are not deleted pin only for installations
+   that are not removed. The bundle's own rule already excluded a removed installation's active release; a
+   retained recovery set of a removed installation could pin, but uninstall deletes every set
+   (`settlePlatformPortalSideUninstall`), so nothing stays pinned. Tests:
+   `TestOnlyTheLatestUnrecoveredFailurePinsItsReleaseAndAStreamOfFailuresStaysBounded` (a stream of five failed
+   updates leaves one target pinned, and a successful retry releases it) and `TestAfterAnUninstallNothingStaysPinned`.
+2. **Major: unreadable manifest visibility.** The sweep stays fail-closed, and only for manifests of releases that
+   are pinned, which item 1 bounds. A global status, `GET /api/admin/app-platform/storage-status`, lists every
+   pinned release whose manifest cannot be read or whose blobs are missing, by release, app and version. The
+   apps administration page shows "Package re-upload required" for each (three locales, `t()`, a vitest file).
+   `TestGlobalStorageStatusListsAnUnreadablePinnedManifestAndTheSweepResumesAfterAReupload`.
+3. **Major: the SQL interception is gone.** `insertPlatformOperation(e, platformOperationRow)` is the only writer
+   of `app_platform_operations`. It takes the installation explicitly and runs `platformRefuseWhileLoadUnsettled`
+   in the same transaction. All 13 admission sites use it. `TestNoCodeWritesTheOperationsTableOutsideTheInsertHelper`
+   parses every non-test Go file, joins and normalises every string literal and constant (lower case, whitespace
+   collapsed), and fails on an insert, an insert or ignore, a replace, or a rewrite of an operation's installation
+   anywhere but the helper's file. A trust revocation no longer aborts because of one installation: it checks the
+   same refusal before it admits that installation's disable, skips it, and records
+   `app_platform.trust_quarantine_deferred` with the reason; launches stay fenced by current trust, as for an
+   operation that is already pending (`TestTrustRevocationSkipsAnInstallationWithAnUnsettledLoadAndRecordsWhy`).
+4. **Minor: reads never write.** The settings read and the storage status use `peekPlan` and `peekMetadata`, which
+   remove nothing. Deleting what is proven wrong now happens only on the write paths and in the sweep, through
+   `removeProven`, which takes the digest lock and removes the file only if it is still the one that was examined
+   (same inode, size and modification time). `TestStatusReadsNeverRemoveAndAProvenWrongRemovalSparesAReplacedFile`.
+5. **Minor: no invented runner verdict.** The load of a retired runtime is settled `reverted` with the receipt
+   `{"outcome":"abandoned_outcome_unknown"}`. The receipt column is free JSON text, so no CHECK or DDL change is
+   needed (the test writes it under the existing constraints).

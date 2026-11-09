@@ -354,10 +354,11 @@ func (s *Server) consumePlatformRestoreImportReview(ctx context.Context, session
 		if err != nil {
 			return err
 		}
-		if _, err := e.exec(`INSERT INTO app_platform_operations(id,installation_id,review_plan_id,actor_scope,idempotency_sha256,request_sha256,action,managed,
-			source_generation,target_generation,stage,state_revision,row_revision,lease_owner,lease_until_ms,fence,controller_epoch,error_code,completed_ms,created_ms,updated_ms)
-			VALUES(?,?,?,?,?,?,'restore_import',1,?,?,'queued',1,1,NULL,NULL,0,?,NULL,NULL,?,?)`,
-			operationID, installation.String, planID, actor.scope, keyDigest, requestDigest, plan.SourceGeneration, plan.TargetGeneration, epoch, now, now); err != nil {
+		if err := insertPlatformOperation(e, platformOperationRow{
+			ID: operationID, InstallationID: installation.String, ReviewPlanID: planID, ActorScope: actor.scope,
+			IdempotencySHA: keyDigest, RequestSHA: requestDigest, Action: "restore_import", Managed: true,
+			SourceGeneration: plan.SourceGeneration, TargetGeneration: plan.TargetGeneration, Stage: "queued", StateRevision: 1,
+			ControllerEpoch: epoch, NowMS: now}); err != nil {
 			return err
 		}
 		changed, err = e.exec(`UPDATE app_platform_review_plans SET consumed_ms=?,updated_ms=? WHERE id=? AND consumed_ms IS NULL AND expires_ms>? AND plan_sha256=?`,

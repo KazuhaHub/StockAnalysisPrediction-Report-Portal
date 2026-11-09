@@ -11,6 +11,7 @@ import { appPath, useAppLabels, useAppsCatalog, type AdminApp } from './appsAdmi
 import { AppIcon, ServiceStatus } from './appsAdminParts'
 import CardTable from '../../components/CardTable'
 import AppPlatformInstallPanel from './AppPlatformInstallPanel'
+import AppPlatformStorageStatus from './AppPlatformStorageStatus'
 import AppPlatformPublishersPanel from './AppPlatformPublishersPanel'
 import AppPlatformTasksPanel from './AppPlatformTasksPanel'
 import AppPlatformEventSubscriptionsPanel from './AppPlatformEventSubscriptionsPanel'
@@ -113,7 +114,7 @@ export default function AppsAdminPage() {
         <AppReorderModal open={reordering} apps={apps} onClose={() => setReordering(false)} onSaved={() => reload({ quiet: true })} />
       </LoadGate>,
     },
-    { key: 'platform', label: t('appPlatform.tab'), children: <AppPlatformInstallPanel /> },
+    { key: 'platform', label: t('appPlatform.tab'), children: <><AppPlatformStorageStatus /><AppPlatformInstallPanel /></> },
     { key: 'publishers', label: t('appTrust.tab'), children: <AppPlatformPublishersPanel /> },
     { key: 'tasks', label: t('appPlatform.tasks.tab'), children: <AppPlatformTasksPanel /> },
     { key: 'subscriptions', label: t('appPlatform.events.tab'), children: <AppPlatformEventSubscriptionsPanel /> },

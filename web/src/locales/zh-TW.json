@@ -3773,6 +3773,8 @@
   "appPlatform.settings.restoreScopeValue": "規劃與確認時會重新校驗所選復原集、檢查點操作、資料命名空間、版本與寫入柵欄。授權與受眾仍作為明確的稽核輸入。",
   "appPlatform.settings.imageDelivery.reuploadRequired": "需要重新上傳軟體套件",
   "appPlatform.settings.imageDelivery.reuploadDetail": "此伺服器已不再保存發佈版本 {{release}} 的映像檔，應用無法啟動或還原。請重新上傳該發佈版本的軟體套件。",
+  "appPlatform.storage.reuploadRequired": "需要重新上傳軟體套件",
+  "appPlatform.storage.reuploadDetail": "{{app}} {{version}}（發佈版本 {{release}}）已保存的映像檔無法使用，應用無法啟動或還原。請重新上傳該發佈版本的軟體套件。",
   "appPlatform.settings.migrationRecovery.title": "資料遷移復原",
   "appPlatform.settings.migrationRecovery.state.settling": "處理中",
   "appPlatform.settings.migrationRecovery.state.settled": "需要決定",
