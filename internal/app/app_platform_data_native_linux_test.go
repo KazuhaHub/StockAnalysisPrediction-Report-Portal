@@ -806,21 +806,31 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 	if err := os.Chmod(checkpointRoot, 0700); err != nil {
 		t.Fatal(err)
 	}
+	imageRoot, err := os.MkdirTemp(filepath.Dir(os.Getenv("APP_DATA_JOURNAL_ROOT")), "service-images-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(imageRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
 	cfg := service.Config{
 		Format:         service.ConfigFormat,
 		DockerSocket:   os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"),
 		JournalDir:     os.Getenv("APP_DATA_JOURNAL_CONTROL"),
 		DataRoot:       os.Getenv("APP_DATA_JOURNAL_ROOT"),
 		CheckpointRoot: checkpointRoot,
-		IPCRoot:        ipcRoot,
-		ControlRoot:    controlRoot,
-		ControlSocket:  socket,
-		ControllerUID:  41001,
-		ControllerGID:  41001,
-		NetworkActive:  2,
-		NetworkEntries: 16,
-		MinimumCPUs:    1,
-		MinimumMemory:  512 << 20,
+		ImageRoot:      imageRoot,
+		// This probe runs images built into a local registry by reference.
+		AllowLocalReferenceImages: true,
+		IPCRoot:                   ipcRoot,
+		ControlRoot:               controlRoot,
+		ControlSocket:             socket,
+		ControllerUID:             41001,
+		ControllerGID:             41001,
+		NetworkActive:             2,
+		NetworkEntries:            16,
+		MinimumCPUs:               1,
+		MinimumMemory:             512 << 20,
 		Controller: service.Controller{
 			DeploymentID:    deployment.DeploymentID,
 			ControllerEpoch: deployment.ControllerEpoch,

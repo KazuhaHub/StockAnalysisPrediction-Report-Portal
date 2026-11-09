@@ -35,6 +35,13 @@ type Config struct {
 	JournalDir     string     `json:"journal_dir"`
 	DataRoot       string     `json:"data_root"`
 	CheckpointRoot string     `json:"checkpoint_root"`
+	// ImageRoot is the runner-private scratch for image blobs in transit.
+	// Nothing in it outlives an operation, and orphans are removed on start.
+	ImageRoot string `json:"image_root"`
+	// AllowLocalReferenceImages is the development profile: a descriptor with a
+	// registry reference is inspected in the local daemon instead of refused.
+	// The default, false, is the production profile (doc 170 resolution 3).
+	AllowLocalReferenceImages bool `json:"allow_local_reference_images"`
 	IPCRoot        string     `json:"ipc_root"`
 	ControlRoot    string     `json:"control_root"`
 	ControlSocket  string     `json:"control_socket"`
@@ -58,14 +65,16 @@ func LoadConfig(path string) (Config, error) {
 	var cfg Config
 	raw, err := readPrivateConfig(path)
 	if err != nil || decodeStrict(raw, &cfg) != nil || !validController(cfg.Controller) || cfg.Format != ConfigFormat ||
-		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) || !validAbsolute(cfg.CheckpointRoot) ||
+		!validAbsolute(cfg.DockerSocket) || !validAbsolute(cfg.JournalDir) || !validAbsolute(cfg.DataRoot) || !validAbsolute(cfg.CheckpointRoot) || !validAbsolute(cfg.ImageRoot) ||
 		!validAbsolute(cfg.IPCRoot) || !validAbsolute(cfg.ControlRoot) || !validAbsolute(cfg.ControlSocket) ||
 		filepath.Dir(cfg.ControlSocket) != cfg.ControlRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
 		cfg.NetworkActive < 1 || cfg.NetworkActive > 16 || cfg.NetworkEntries < 16 || cfg.NetworkEntries > 4096 ||
 		cfg.MinimumCPUs < 1 || cfg.MinimumCPUs > 1024 || cfg.MinimumMemory < 64<<20 || cfg.MinimumMemory > 1<<50 ||
 		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.CheckpointRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
 		overlap(cfg.DataRoot, cfg.CheckpointRoot) || overlap(cfg.DataRoot, cfg.IPCRoot) || overlap(cfg.DataRoot, cfg.ControlRoot) ||
-		overlap(cfg.CheckpointRoot, cfg.IPCRoot) || overlap(cfg.CheckpointRoot, cfg.ControlRoot) || overlap(cfg.IPCRoot, cfg.ControlRoot) {
+		overlap(cfg.CheckpointRoot, cfg.IPCRoot) || overlap(cfg.CheckpointRoot, cfg.ControlRoot) || overlap(cfg.IPCRoot, cfg.ControlRoot) ||
+		overlap(cfg.ImageRoot, cfg.JournalDir) || overlap(cfg.ImageRoot, cfg.DataRoot) || overlap(cfg.ImageRoot, cfg.CheckpointRoot) ||
+		overlap(cfg.ImageRoot, cfg.IPCRoot) || overlap(cfg.ImageRoot, cfg.ControlRoot) {
 		return Config{}, ErrConfig
 	}
 	return cfg, nil

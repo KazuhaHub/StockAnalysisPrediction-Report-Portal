@@ -4,6 +4,8 @@
   "journal_dir": "/var/lib/portal-app-runner/journal",
   "data_root": "/srv/portal-apps/data",
   "checkpoint_root": "/var/lib/portal-app-runner/checkpoints",
+  "image_root": "/var/lib/portal-app-runner/images",
+  "allow_local_reference_images": false,
   "ipc_root": "/run/portal-app-runner/ipc",
   "control_root": "/run/portal-app-runner/control",
   "control_socket": "/run/portal-app-runner/control/runner.sock",
