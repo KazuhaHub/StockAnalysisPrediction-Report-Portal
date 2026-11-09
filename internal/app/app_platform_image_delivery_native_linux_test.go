@@ -790,7 +790,15 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	if !evidence.ReadinessSeen {
 		t.Fatal("the activation carries no readiness evidence")
 	}
-	testNativeExactScheduledDigest(t, s, platformOperationLease{installationID: committed.InstallationID}, session)
+	// A worker-installed generation-1 app has no service-task history (that is tied to the managed-install review
+	// format), so the answer is a signed session request through the platform to the running backend, the path the
+	// enable and repair acceptances use: the Scheduled Digest service serves its current digest.
+	configureNativeScheduledDigestSetup(t, s, session, committed.InstallationID)
+	answer, err := s.requestPlatformWritableBackend(ctx, session, committed.InstallationID, "GET", "/v1/digest", nil, endpoint)
+	var snapshot map[string]any
+	if err != nil || answer.Status != http.StatusOK || json.Unmarshal(answer.Body, &snapshot) != nil || len(snapshot) == 0 {
+		t.Fatalf("the installed Scheduled Digest did not answer through the platform: status %d err %v body %q", answer.Status, err, answer.Body)
+	}
 	evidence.AppAnswered = true
 	t.Log("IMAGE_DELIVERY_CHILD_APP_ANSWERED")
 
