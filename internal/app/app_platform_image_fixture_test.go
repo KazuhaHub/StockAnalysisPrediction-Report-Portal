@@ -21,6 +21,8 @@ type platformManagedImageParts struct {
 	entry                           appplatform.BackendImage
 	plan                            appplatform.ImagePlan
 	version                         string
+	// frontendName is the member name of the frontend archive; empty means "ui.zip".
+	frontendName string
 }
 
 func platformImageLayer(t testing.TB, name, body string) (compressed []byte, diffID string, size int) {
@@ -126,7 +128,11 @@ func (p platformManagedImageParts) packageBytes(t testing.TB, extra map[string][
 	}
 	write("descriptor.json", p.descriptor, false)
 	write("descriptor.sig", p.signature, false)
-	write("blobs/"+platformDigest(p.frontend)+"/ui.zip", p.frontend, false)
+	name := p.frontendName
+	if name == "" {
+		name = "ui.zip"
+	}
+	write("blobs/"+platformDigest(p.frontend)+"/"+name, p.frontend, false)
 	for digest, body := range p.blobs {
 		if digest != omit {
 			write("blobs/"+digest, body, true)

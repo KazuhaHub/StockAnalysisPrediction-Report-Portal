@@ -3863,6 +3863,7 @@
   "err.app_platform_operation_conflict": "此请求与已有的应用操作冲突。",
   "err.app_platform_package_untrusted": "软件包签名或发布者信任已变化。",
   "err.app_platform_requirements_unavailable": "此应用需要尚未支持的平台能力。",
+  "err.app_platform_storage_full": "应用镜像存储空间已满。请删除旧的恢复集或卸载不再使用的应用以释放空间后重试。",
   "err.app_platform_control_paused": "应用控制已暂停，等待恢复审核。",
   "err.app_platform_recovery_unsettled": "应用恢复尚未完成：仍有安装需要恢复或停用，或有恢复导入、恢复操作正在运行。",
   "err.app_platform_migration_unsettled": "应用的数据迁移仍在结算中。结算完成后再选择。",

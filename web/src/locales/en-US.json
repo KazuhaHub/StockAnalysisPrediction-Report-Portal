@@ -3863,6 +3863,7 @@
   "err.app_platform_operation_conflict": "This request conflicts with an existing application operation.",
   "err.app_platform_package_untrusted": "The package signature or publisher trust has changed.",
   "err.app_platform_requirements_unavailable": "This application requires platform features that are not available yet.",
+  "err.app_platform_storage_full": "The application image storage is full. Free space by deleting old recovery sets or removing unused apps, then try again.",
   "err.app_platform_control_paused": "Application control is paused pending recovery review.",
   "err.app_platform_recovery_unsettled": "Application recovery is not finished: an installation still needs to be resumed or disabled, or a restore import or resume is still running.",
   "err.app_platform_migration_unsettled": "The application's data migration is still being settled. Choose again once settlement finishes.",

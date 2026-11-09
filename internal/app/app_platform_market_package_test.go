@@ -33,11 +33,15 @@ type platformPackageRemote struct {
 
 func newPlatformPackageRemote(t *testing.T, parts platformManagedImageParts, pkg []byte) *platformPackageRemote {
 	r := &platformPackageRemote{t: t, parts: parts, pkg: pkg, etag: `"pkg-v1"`}
+	parsed, err := appplatform.ParseDescriptor(parts.descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var base string
 	r.server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		switch req.URL.Path {
 		case "/index.json":
-			entry := appplatform.CatalogueRelease{AppID: "notes-sample", PublisherID: "fixture-publisher", Version: parts.version, DescriptorSHA256: platformDigest(parts.descriptor), DescriptorURL: base + "/app.json", SignatureURL: base + "/app.sig"}
+			entry := appplatform.CatalogueRelease{AppID: parsed.Manifest.ID, PublisherID: parsed.Manifest.Publisher, Version: parsed.Manifest.Version, DescriptorSHA256: platformDigest(parts.descriptor), DescriptorURL: base + "/app.json", SignatureURL: base + "/app.sig"}
 			if !r.noPackageURL {
 				entry.PackageURL = base + "/app.portalapp"
 			}

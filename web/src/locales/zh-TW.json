@@ -3863,6 +3863,7 @@
   "err.app_platform_operation_conflict": "此請求與既有的應用操作衝突。",
   "err.app_platform_package_untrusted": "軟體套件簽章或發佈者信任已變更。",
   "err.app_platform_requirements_unavailable": "此應用需要尚未支援的平台能力。",
+  "err.app_platform_storage_full": "應用映像檔儲存空間已滿。請刪除舊的還原集或解除安裝不再使用的應用以釋出空間後重試。",
   "err.app_platform_control_paused": "應用控制已暫停，等待復原審核。",
   "err.app_platform_recovery_unsettled": "應用恢復尚未完成：仍有安裝需要恢復或停用，或有恢復匯入、恢復操作正在執行。",
   "err.app_platform_migration_unsettled": "應用的資料遷移仍在結算中。結算完成後再選擇。",
