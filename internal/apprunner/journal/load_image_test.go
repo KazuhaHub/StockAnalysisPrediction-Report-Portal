@@ -144,7 +144,7 @@ func newLoadFixture(t *testing.T) *loadFixtureT {
 		descriptors = append(descriptors, map[string]any{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + digest, "size": gz.Len()})
 		entryLayers = append(entryLayers, map[string]any{"diff_id": loadSum(tarball.Bytes()), "uncompressed_bytes": tarball.Len()})
 	}
-	config, _ := json.Marshal(map[string]any{"architecture": runtime.GOARCH, "os": "linux", "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
+	config, _ := json.Marshal(map[string]any{"architecture": runtime.GOARCH, "os": "linux", "config": map[string]any{}, "rootfs": map[string]any{"type": "layers", "diff_ids": diffIDs}})
 	manifest, _ := json.Marshal(map[string]any{
 		"schemaVersion": 2, "mediaType": appplatform.MediaTypeOCIManifest,
 		"config": map[string]any{"mediaType": appplatform.MediaTypeOCIConfig, "digest": "sha256:" + loadSum(config), "size": len(config)},

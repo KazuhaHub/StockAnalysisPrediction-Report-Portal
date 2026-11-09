@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -25,6 +26,11 @@ const (
 )
 
 var ErrInvalidImage = errors.New("invalid managed image content")
+
+// ErrImageConfigSectionMissing is the refusal of an image config document that has no "config" object. A backend
+// start uses the image's own entrypoint and command, so an image without that section cannot be projected. It is
+// an ErrInvalidImage too.
+var ErrImageConfigSectionMissing = fmt.Errorf("%w: the image config has no config section", ErrInvalidImage)
 
 // ImageBlobKind names the role a blob plays in an image. It is carried by the
 // blob channel so the runner never infers a role from bytes.
@@ -102,7 +108,7 @@ type ociManifest struct {
 type ociConfig struct {
 	Architecture string `json:"architecture"`
 	OS           string `json:"os"`
-	Config       struct {
+	Config       *struct {
 		Volumes map[string]json.RawMessage `json:"Volumes"`
 	} `json:"config"`
 	RootFS struct {
@@ -140,7 +146,13 @@ func PlanImage(entry BackendImage, manifestRaw, configRaw []byte) (ImagePlan, er
 		return zero, ErrInvalidImage
 	}
 	var config ociConfig
-	if !decodeStrictImageJSON(configRaw, &config, false) || config.OS != "linux" || config.Architecture != platformArchitecture(entry.Platform) ||
+	if !decodeStrictImageJSON(configRaw, &config, false) {
+		return zero, ErrInvalidImage
+	}
+	if config.Config == nil {
+		return zero, ErrImageConfigSectionMissing
+	}
+	if config.OS != "linux" || config.Architecture != platformArchitecture(entry.Platform) ||
 		config.RootFS.Type != "layers" || len(config.RootFS.DiffIDs) != len(entry.Layers) || len(config.Config.Volumes) != 0 {
 		return zero, ErrInvalidImage
 	}
