@@ -863,13 +863,21 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   pull; the app answered `GET /v1/digest` with status 200; the uninstall removed the container.
 - **Deviation from the plan: the answer is a session request, not a task.** The first design ran the exact-image test's
   Scheduled Digest task. It failed with `backend_preflight_unavailable`. For generation 1, `preparePlatformServiceTask`
-  reads the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
+  read the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
   `portal.managed-install-review` and exactly three non-load effects. An app installed by the install worker uses
-  `portal.writable-install-review`, so no service task (digest, event or backend) can run for it at generation 1;
-  the update acceptance runs them at generation 2. This is an existing property of the code, not something the
-  image delivery changed, and it was not touched. It is reported as a finding: a freshly installed Scheduled Digest
-  cannot run its scheduled task until it is updated, unless that is intended. The scenario answers instead with
-  `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair acceptances use.
+  `portal.writable-install-review`, so no service task (digest, event or backend) can run for it at generation 1.
+  Later generations had a second, separate defect: the task preflight called the update reader directly and skipped
+  the resume and restore readers, so a task after a completed resume or restore failed the same way. The second is
+  fixed: generation 2 and later now go through the shared writable selector, exactly as launch does, and the choice
+  is covered for update, restore and resume. The first is **not** fixed by the controller alone: the runner verifies a
+  service-task registration only in the managed initial format and the update-start format, so a writable
+  generation-1 registration has no runner-side counterpart (control verification, journal forwarding, native
+  delivery). The preflight now refuses a writable generation-1 install explicitly instead of reading it as managed.
+  The scenario still answers with `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair
+  acceptances use, until the runner gains that registration kind.
+  Prerequisite: shipping the writable install scheduler, which is development-only today, requires the runner-side
+  writable generation-1 service-task registration kind first. Until that exists, a freshly installed writable app's
+  scheduled, event and backend tasks are refused.
 - **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
   API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
   "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker
@@ -934,4 +942,6 @@ earlier run (42716037743) predates these changes; its claims are re-established 
 9. **Other images' references.** The store-diff check compares every other image's digest references as well as
    its tags.
 
-Not changed, as instructed: the generation-1 service-task finding above is left for its own change.
+The generation-1 service-task limit above is narrowed to writable installs and needs a runner-side registration kind; the generation 2 and later routing is fixed. Shipping the writable install scheduler
+requires that runner-side registration kind first; until then a freshly installed writable app's scheduled, event and
+backend tasks are refused.
