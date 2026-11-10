@@ -569,7 +569,7 @@ wait:
 		"delivered_image_id":             target,
 		"built_image_is_delivered_image": builtImageID == target,
 		"publisher":                      expected.Publisher,
-		"staged_descriptor_change":       "compatibility.runner_protocol only: >=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0",
+		"staged_descriptor_change":       "none",
 		"image_store":                    storeName,
 		"platform":                       entry.Platform,
 		"release_sha256":                 expected.ReleaseSHA256,

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -42,21 +41,10 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 	if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" || m.Backend == nil || len(m.Backend.Images) != 1 || m.Backend.Image != "" {
 		t.Fatal("the candidate is not the managed Scheduled Digest descriptor")
 	}
-	// The one rewrite: the Apps builder declares runner_protocol ">=1.0.0 <2.0.0", which can never match this
-	// runner's pre-release protocol (see TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol). Only
-	// that range is changed, in the bytes as built; the publisher, the platform range and every other byte of the
-	// descriptor, the frontend and the blobs are the builder's own.
-	const builtRange, stagedRange = `"runner_protocol": ">=1.0.0 <2.0.0"`, `"runner_protocol": ">=1.0.0-0 <2.0.0"`
-	if bytes.Count(raw, []byte(builtRange)) != 1 {
-		t.Fatal("the built descriptor does not declare the expected runner protocol range")
-	}
-	descriptor := bytes.Replace(raw, []byte(builtRange), []byte(stagedRange), 1)
-	if err := imageDeliveryOnlyRunnerRangeDiffers(raw, descriptor); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(descriptor, &m); err != nil {
-		t.Fatal(err)
-	}
+	// The descriptor is staged exactly as the Apps builder wrote it. Its runner_protocol range carries the -0
+	// pre-release floor, without which it could never match this runner's development protocol (see
+	// TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol).
+	descriptor := raw
 	blobs := map[string][]byte{}
 	entries, err := os.ReadDir(blobsDir)
 	if err != nil {

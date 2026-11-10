@@ -87,9 +87,7 @@ what.
   image from the three blobs uploaded over the control socket (receipt `loaded`), starts it, and it reaches
   readiness; the container's image ID is the package's config digest, the layer chain and platform match, the
   image carries no name, Docker events show no pull, tag, untag, push or import, and the running app answers a
-  signed session request. The descriptor is the Apps builder's own except one string: its `runner_protocol` range
-  `>=1.0.0 <2.0.0` cannot match the runner's pre-release protocol `1.0.0-dev.1`, so the test changes it to
-  `>=1.0.0-0 <2.0.0` and asserts that nothing else differs (an Apps or protocol-version finding); the envelope assembled and signed by the test with a test key registered under the builder's publisher. Only the package
+  signed session request. The descriptor is staged byte for byte as the Apps builder wrote it; the envelope is assembled and signed by the test with a test key registered under the builder's publisher. Only the package
   import uses the admin HTTP route; the review uses the writable development entry point. Limits: the classic store does not retain the manifest digest, so that digest is bound
   through the runner's signed claim and receipt, not read back; the run installs through the offline path;
   CI uses the classic store.

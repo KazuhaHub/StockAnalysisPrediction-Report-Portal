@@ -236,30 +236,9 @@ func TestDeliveryContainerIsTiedToTheRunnersStartReceipt(t *testing.T) {
 	}
 }
 
-// Fails if the staged descriptor may differ from the built one in anything but the runner protocol range.
-func TestDeliveryStagedDescriptorDiffersOnlyInTheRunnerProtocolRange(t *testing.T) {
-	built := []byte(`{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0 <2.0.0"},"backend":{"images":[{"x":1}]}}`)
-	good := []byte(`{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`)
-	if err := imageDeliveryOnlyRunnerRangeDiffers(built, good); err != nil {
-		t.Fatal(err)
-	}
-	for name, staged := range map[string]string{
-		"identical":      string(built),
-		"publisher":      `{"id":"a","publisher":"p","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`,
-		"platform range": `{"id":"a","compatibility":{"platform_api":">=2.0.0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`,
-		"image":          `{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":2}]}}`,
-		"not json":       `{`,
-	} {
-		if imageDeliveryOnlyRunnerRangeDiffers(built, []byte(staged)) == nil {
-			t.Fatalf("%s passed", name)
-		}
-	}
-}
-
-// The finding that forces the one rewrite: the Apps builder declares runner_protocol ">=1.0.0 <2.0.0", and a
-// range without a pre-release tag never matches this runner's protocol 1.0.0-dev.1 (semver pre-release rule).
-// Fails if the built range ever becomes compatible (the rewrite is then unnecessary) or the runner's protocol
-// stops being a pre-release (the finding no longer holds).
+// Why Apps descriptors declare runner_protocol ">=1.0.0-0 <2.0.0": a range without a pre-release tag never
+// matches this runner's protocol 1.0.0-dev.1 (semver pre-release rule). Fails if the runner's protocol stops
+// being a pre-release, which is when the -0 floor may be dropped.
 func TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol(t *testing.T) {
 	parts := newPlatformManagedImageParts(t, "2.0.0", "range")
 	var m appplatform.Manifest

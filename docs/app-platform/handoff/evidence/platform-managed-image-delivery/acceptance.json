@@ -29,7 +29,7 @@
         "install_path": "offline import route, then the install worker",
         "catalogue_path_with_real_runner": false,
         "containerd_store": false,
-        "descriptor_rewrite": "compatibility.runner_protocol only (>=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0): the built range cannot match the runner's pre-release protocol 1.0.0-dev.1; asserted that nothing else differs; frontend and blobs are the builder's bytes",
+        "descriptor_rewrite": "none: staged byte for byte as built (Apps 4cd986e gives runner_protocol the -0 pre-release floor)",
         "publisher": "development-publisher (as built), registered with the test key",
         "admin_http_route": "package import only",
         "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
