@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -36,6 +37,80 @@ func (h *platformServiceBackendHistory) Close() {
 	}
 	h.registration.Close()
 	h.raw, h.signature, h.descriptor = nil, nil, nil
+}
+
+// loadPlatformServiceBackendHistory selects the completed execution history a
+// service task is delivered against, the same way the launch path selects it.
+// Generation 1 follows the install plan's format; later generations go through
+// the shared writable selector, which picks the resume, restore or update
+// reader. Anything the runner cannot verify as a service-task registration is
+// refused here rather than at delivery.
+func (s *Server) loadPlatformServiceBackendHistory(
+	e migExec, b platformBackendHistoryBinding,
+	runtime platformRuntimeRegistration, seed, dek []byte, now int64,
+) (platformServiceBackendHistory, error) {
+	var zero platformServiceBackendHistory
+	history := platformServiceBackendHistory{
+		runtime: runtime, authority: platformRuntimeAuthority(runtime),
+	}
+	if b.generation < 1 {
+		return zero, errAppPlatformTaskUnavailable
+	}
+	if b.generation == 1 {
+		var raw string
+		if err := e.queryRow(`SELECT p.plan_json
+			FROM app_platform_operations o
+			JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+			WHERE o.installation_id=? AND o.action='install'
+			AND o.target_generation=1 AND o.stage='complete'
+			AND o.completed_ms IS NOT NULL`, b.installation).
+			Scan(&raw); err != nil {
+			return zero, errAppPlatformTaskUnavailable
+		}
+		var plan struct {
+			Format string `json:"format"`
+		}
+		if json.Unmarshal([]byte(raw), &plan) != nil ||
+			plan.Format != platformManagedInstallFormat {
+			// A writable install has no service-task registration the
+			// runner can verify at generation 1 (it is only verified for
+			// the managed initial registration and the update-start
+			// family), so it is refused instead of mis-read as managed.
+			return zero, errAppPlatformTaskUnavailable
+		}
+		delivery, err := s.loadPlatformManagedBackendHistory(
+			e, b.installation, b.activation, b.release, b.namespace,
+			b.epoch, b.format, b.fence, b.observed, b.readiness,
+			runtime, seed, dek, now)
+		if err != nil {
+			return zero, errAppPlatformTaskUnavailable
+		}
+		history.format = control.BackendRegistrationFormat
+		history.registration = delivery.registration
+		history.raw, history.signature = delivery.raw, delivery.signature
+		history.descriptor = bytes.Clone(delivery.candidate.descriptor)
+		history.runtime = delivery.candidate.runtime
+		history.authority = delivery.candidate.authority
+		history.initial = &delivery
+		return history, nil
+	}
+	update, err := s.loadPlatformWritableBackendHistory(
+		e, b, runtime, seed, dek, now)
+	if err != nil {
+		return zero, errAppPlatformTaskUnavailable
+	}
+	if update.update == nil {
+		update.registration.Close()
+		return zero, errAppPlatformTaskUnavailable
+	}
+	history.format = control.UpdateStartRegistrationFormat
+	history.registration = update.registration
+	history.raw, history.signature = update.raw, update.signature
+	history.descriptor = bytes.Clone(update.start.writer.descriptor)
+	history.runtime = update.start.writer.runtime
+	history.authority = update.start.writer.authority
+	history.update = &update
+	return history, nil
 }
 
 func (s *Server) preparePlatformServiceTask(
@@ -102,45 +177,17 @@ func (s *Server) preparePlatformServiceTask(
 		clear(controlSeed)
 		return zero, err
 	}
-	history := platformServiceBackendHistory{
-		runtime: runtime, authority: platformRuntimeAuthority(runtime),
-	}
-	if task.Generation == 1 {
-		delivery, err := s.loadPlatformManagedBackendHistory(
-			e, task.InstallationID, activation, release, namespace,
-			task.ControllerEpoch, format, fence, observed, readiness,
-			runtime, controlSeed, dek, now)
-		if err != nil {
-			clear(controlSeed)
-			return zero, errAppPlatformTaskUnavailable
-		}
-		history.format = control.BackendRegistrationFormat
-		history.registration = delivery.registration
-		history.raw, history.signature = delivery.raw, delivery.signature
-		history.descriptor = bytes.Clone(delivery.candidate.descriptor)
-		history.runtime = delivery.candidate.runtime
-		history.authority = delivery.candidate.authority
-		history.initial = &delivery
-	} else {
-		update, err := s.loadPlatformWritableUpdateBackendHistory(
-			e, platformBackendHistoryBinding{
-				installation: task.InstallationID, activation: activation,
-				release: release, namespace: namespace,
-				epoch: task.ControllerEpoch, readiness: readiness,
-				format: format, fence: fence, observed: observed,
-				generation: task.Generation,
-			}, runtime, controlSeed, dek, now)
-		if err != nil {
-			clear(controlSeed)
-			return zero, errAppPlatformTaskUnavailable
-		}
-		history.format = control.UpdateStartRegistrationFormat
-		history.registration = update.registration
-		history.raw, history.signature = update.raw, update.signature
-		history.descriptor = bytes.Clone(update.start.writer.descriptor)
-		history.runtime = update.start.writer.runtime
-		history.authority = update.start.writer.authority
-		history.update = &update
+	history, err := s.loadPlatformServiceBackendHistory(
+		e, platformBackendHistoryBinding{
+			installation: task.InstallationID, activation: activation,
+			release: release, namespace: namespace,
+			epoch: task.ControllerEpoch, readiness: readiness,
+			format: format, fence: fence, observed: observed,
+			generation: task.Generation,
+		}, runtime, controlSeed, dek, now)
+	if err != nil {
+		clear(controlSeed)
+		return zero, errAppPlatformTaskUnavailable
 	}
 	failed := true
 	defer func() {
