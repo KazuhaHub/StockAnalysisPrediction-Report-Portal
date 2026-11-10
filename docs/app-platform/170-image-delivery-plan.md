@@ -875,6 +875,9 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   delivery). The preflight now refuses a writable generation-1 install explicitly instead of reading it as managed.
   The scenario still answers with `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair
   acceptances use, until the runner gains that registration kind.
+  Prerequisite: shipping the writable install scheduler, which is development-only today, requires the runner-side
+  writable generation-1 service-task registration kind first. Until that exists, a freshly installed writable app's
+  scheduled, event and backend tasks are refused.
 - **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
   API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
   "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker
@@ -939,4 +942,6 @@ earlier run (42716037743) predates these changes; its claims are re-established 
 9. **Other images' references.** The store-diff check compares every other image's digest references as well as
    its tags.
 
-The generation-1 service-task limit above is narrowed to writable installs and needs a runner-side registration kind; the generation 2 and later routing is fixed.
+The generation-1 service-task limit above is narrowed to writable installs and needs a runner-side registration kind; the generation 2 and later routing is fixed. Shipping the writable install scheduler
+requires that runner-side registration kind first; until then a freshly installed writable app's scheduled, event and
+backend tasks are refused.

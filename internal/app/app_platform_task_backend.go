@@ -6,12 +6,23 @@ import (
 	"crypto/ed25519"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
+)
+
+// Distinct causes behind errAppPlatformTaskUnavailable, so a refusal is
+// observable and cannot be confused with the managed reader rejecting a plan.
+var (
+	errPlatformWritableInitialServiceTask = errors.New(
+		"writable generation-1 install has no service-task registration")
+	errPlatformUnknownServiceTaskPlan = errors.New(
+		"unknown install plan format for service task")
 )
 
 type platformServiceTaskIntent struct {
@@ -70,13 +81,21 @@ func (s *Server) loadPlatformServiceBackendHistory(
 		var plan struct {
 			Format string `json:"format"`
 		}
-		if json.Unmarshal([]byte(raw), &plan) != nil ||
-			plan.Format != platformManagedInstallFormat {
+		if json.Unmarshal([]byte(raw), &plan) != nil {
+			return zero, errAppPlatformTaskUnavailable
+		}
+		switch plan.Format {
+		case platformManagedInstallFormat:
+		case platformWritableInstallFormat:
 			// A writable install has no service-task registration the
 			// runner can verify at generation 1 (it is only verified for
 			// the managed initial registration and the update-start
 			// family), so it is refused instead of mis-read as managed.
-			return zero, errAppPlatformTaskUnavailable
+			return zero, fmt.Errorf("%w: %w", errAppPlatformTaskUnavailable,
+				errPlatformWritableInitialServiceTask)
+		default:
+			return zero, fmt.Errorf("%w: %w", errAppPlatformTaskUnavailable,
+				errPlatformUnknownServiceTaskPlan)
 		}
 		delivery, err := s.loadPlatformManagedBackendHistory(
 			e, b.installation, b.activation, b.release, b.namespace,

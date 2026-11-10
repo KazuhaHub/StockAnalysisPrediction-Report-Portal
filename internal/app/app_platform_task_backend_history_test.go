@@ -80,7 +80,8 @@ func testPlatformServiceHistoryWritableGenerationOneIsRefusedByFormat(t *testing
 		h.Close()
 		t.Fatal("a writable generation-1 install resolved a service-task history")
 	}
-	if !errors.Is(err, errAppPlatformTaskUnavailable) {
+	if !errors.Is(err, errAppPlatformTaskUnavailable) ||
+		!errors.Is(err, errPlatformWritableInitialServiceTask) {
 		t.Fatalf("unexpected refusal: %v", err)
 	}
 }
@@ -122,14 +123,19 @@ func testPlatformServiceHistoryGenerationTwoAfterResume(t *testing.T, pg bool) {
 	requireServiceHistory(t, h, control.UpdateStartRegistrationFormat, false, true)
 }
 
-// Nothing completed to read: no format is guessed.
+// A plan with a validly digested but unknown format is never guessed to be managed.
 func testPlatformServiceHistoryUnknownPlanFormatIsRefused(t *testing.T, pg bool) {
 	s, _, lease := platformManagedAccessFixture(t, pg)
-	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json='{"format":"portal.unknown/1"}' WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, lease.id)
+	plan := `{"format":"portal.unknown/1"}`
+	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=? WHERE id=(SELECT review_plan_id FROM app_platform_operations WHERE id=?)`, plan, platformDigest([]byte(plan)), lease.id)
 	h, err := platformServiceHistoryFor(t, s, lease.installationID)
 	if err == nil {
 		h.Close()
 		t.Fatal("an unknown plan format resolved a service-task history")
+	}
+	if !errors.Is(err, errAppPlatformTaskUnavailable) ||
+		!errors.Is(err, errPlatformUnknownServiceTaskPlan) {
+		t.Fatalf("unexpected refusal: %v", err)
 	}
 }
 
