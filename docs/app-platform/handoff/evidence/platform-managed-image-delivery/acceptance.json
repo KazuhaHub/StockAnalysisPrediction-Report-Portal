@@ -29,7 +29,7 @@
         "install_path": "offline import route, then the install worker",
         "catalogue_path_with_real_runner": false,
         "containerd_store": false,
-        "descriptor_rewrite": "none: staged byte for byte as built (Apps 4cd986e gives runner_protocol the -0 pre-release floor)",
+        "descriptor_rewrite": "none: staged byte for byte as built (Apps 8d8520d gives both bounds of runner_protocol and platform_api the -0 suffix)",
         "publisher": "development-publisher (as built), registered with the test key",
         "admin_http_route": "package import only",
         "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
