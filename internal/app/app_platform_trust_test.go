@@ -27,8 +27,14 @@ func platformTrustTestServer(t *testing.T, pg bool) (*Server, platformActorSessi
 }
 func platformRegisterTestPublisher(t *testing.T, s *Server, session platformActorSession) platformPublisherTrustRevision {
 	t.Helper()
+	return platformRegisterTestPublisherAs(t, s, session, "fixture-publisher")
+}
+
+// platformRegisterTestPublisherAs registers the test key (seed 7) under the given publisher identity.
+func platformRegisterTestPublisherAs(t *testing.T, s *Server, session platformActorSession, publisher string) platformPublisherTrustRevision {
+	t.Helper()
 	key := platformTrustFixtureKey(7, "first-key")
-	result, err := s.changePlatformPublisherTrust(session, platformPublisherChange{kind: "register", publisherID: "fixture-publisher", enabled: true, namespaces: []appplatform.PublisherNamespace{{Kind: "prefix", Value: "notes-"}, {Kind: "exact", Value: "scheduled-digest"}}, key: &key})
+	result, err := s.changePlatformPublisherTrust(session, platformPublisherChange{kind: "register", publisherID: publisher, enabled: true, namespaces: []appplatform.PublisherNamespace{{Kind: "prefix", Value: "notes-"}, {Kind: "exact", Value: "scheduled-digest"}}, key: &key})
 	if err != nil {
 		t.Fatal(err)
 	}

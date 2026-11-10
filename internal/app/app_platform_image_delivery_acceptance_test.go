@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -41,11 +42,19 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 	if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" || m.Backend == nil || len(m.Backend.Images) != 1 || m.Backend.Image != "" {
 		t.Fatal("the candidate is not the managed Scheduled Digest descriptor")
 	}
-	m.Publisher = "fixture-publisher"
-	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
-	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
-	descriptor, err := json.Marshal(m)
-	if err != nil {
+	// The one rewrite: the Apps builder declares runner_protocol ">=1.0.0 <2.0.0", which can never match this
+	// runner's pre-release protocol (see TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol). Only
+	// that range is changed, in the bytes as built; the publisher, the platform range and every other byte of the
+	// descriptor, the frontend and the blobs are the builder's own.
+	const builtRange, stagedRange = `"runner_protocol": ">=1.0.0 <2.0.0"`, `"runner_protocol": ">=1.0.0-0 <2.0.0"`
+	if bytes.Count(raw, []byte(builtRange)) != 1 {
+		t.Fatal("the built descriptor does not declare the expected runner protocol range")
+	}
+	descriptor := bytes.Replace(raw, []byte(builtRange), []byte(stagedRange), 1)
+	if err := imageDeliveryOnlyRunnerRangeDiffers(raw, descriptor); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(descriptor, &m); err != nil {
 		t.Fatal(err)
 	}
 	blobs := map[string][]byte{}
@@ -66,8 +75,8 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 		t.Fatal("the real image does not plan under the Portal's parser:", err)
 	}
 	return platformManagedImageParts{
-		descriptor: descriptor, signature: platformSignTestDescriptor(t, descriptor), frontend: frontend,
-		blobs: blobs, entry: entry, plan: plan, version: m.Version, frontendName: m.Frontend.Artifact,
+		descriptor: descriptor, signature: platformSignTestDescriptorAs(t, descriptor, m.Publisher), frontend: frontend,
+		blobs: blobs, entry: entry, plan: plan, version: m.Version, frontendName: m.Frontend.Artifact, publisher: m.Publisher,
 	}
 }
 
@@ -84,7 +93,8 @@ func TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios(t *testing.
 	}
 
 	// PKG-01, offline: the package stages, every blob is in the store and hashes to its name.
-	offline := newPlatformImageHTTP(t, true)
+	offline := newPlatformImageHTTP(t, false)
+	platformRegisterTestPublisherAs(t, offline.s, offline.actor, parts.trustPublisher())
 	if code, body := offline.upload(pkg); code != http.StatusOK || !strings.Contains(body, platformDigest(parts.descriptor)) {
 		t.Fatal("offline install:", code, body)
 	}
@@ -100,7 +110,7 @@ func TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios(t *testing.
 	// PKG-01, catalogue: the same package arrives through the catalogue and yields the same release and blobs.
 	fixture := &platformCatalogueFixture{parts: parts}
 	fixture.s, fixture.actor = platformTrustTestServer(t, false)
-	platformRegisterTestPublisher(t, fixture.s, fixture.actor)
+	platformRegisterTestPublisherAs(t, fixture.s, fixture.actor, parts.trustPublisher())
 	fixture.s.platformImageDir = t.TempDir()
 	fixture.remote = newPlatformPackageRemote(t, parts, pkg)
 	staged, err := fixture.install(context.Background())
@@ -132,7 +142,8 @@ func TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios(t *testing.
 	}
 
 	// PKG-08: each cap refuses with no partial release, on the real size.
-	capped := newPlatformImageHTTP(t, true)
+	capped := newPlatformImageHTTP(t, false)
+	platformRegisterTestPublisherAs(t, capped.s, capped.actor, parts.trustPublisher())
 	capStore, _ := capped.s.platformImages()
 	capStore.blobCap = total - 1
 	if code, body := capped.upload(pkg); code != http.StatusInsufficientStorage {

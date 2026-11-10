@@ -10,9 +10,34 @@
     "PKG-01": {
       "offline_and_catalogue_stage_the_same_release_and_blobs": "unit-tested",
       "crafted_layouts_refused_without_release_or_blob": "unit-tested",
-      "real_image_through_apps_tooling": "ci-native-pending",
-      "exact_image_started_by_real_runner_from_blobs": false,
-      "status": "partial"
+      "real_image_through_apps_tooling": "ci-native-passed",
+      "exact_image_started_by_real_runner_from_blobs": "ci-native-passed",
+      "status": "partial",
+      "real_runner_scenario": {
+        "test": "TestPlatformManagedImageDeliveryAcceptance",
+        "runner_profile": "production (allow_local_reference_images=false, real image_root)",
+        "image_absent_from_docker_store_before_load": true,
+        "load_receipt_state": "loaded",
+        "blobs_uploaded_over_control_socket": true,
+        "container_image_id_equals_package_config_digest": true,
+        "layers_and_platform_match_package": true,
+        "manifest_digest": "bound through the runner's signed claim and receipt; not retained by the classic store",
+        "readiness_reached": true,
+        "app_answered": "signed session request GET /v1/digest through the platform",
+        "no_pull_tag_untag_push_import_events": true,
+        "no_names_added_to_the_image": true,
+        "install_path": "offline import route, then the install worker",
+        "catalogue_path_with_real_runner": false,
+        "containerd_store": false,
+        "descriptor_rewrite": "compatibility.runner_protocol only (>=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0): the built range cannot match the runner's pre-release protocol 1.0.0-dev.1; asserted that nothing else differs; frontend and blobs are the builder's bytes",
+        "publisher": "development-publisher (as built), registered with the test key",
+        "admin_http_route": "package import only",
+        "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
+        "container_tied_to_runner_start_receipt": true,
+        "delivered_image_equals_built_and_verified_image": true,
+        "exactly_one_image_load_event": true,
+        "envelope": "envelope assembled and signed by the test with a test key registered under the builder's publisher"
+      }
     },
     "PKG-08": {
       "download_resumes_after_portal_restart_with_range_and_if_range": "unit-tested",
@@ -20,9 +45,10 @@
       "staging_cap_refuses_before_download": "unit-tested",
       "blob_cap_refuses_without_partial_release_or_eviction": "unit-tested",
       "active_and_retained_release_blobs_survive_sweeps": "unit-tested",
-      "real_size_scenarios": "ci-native-pending",
+      "real_size_scenarios": "ci-native-passed",
       "postgresql": false,
-      "status": "partial"
+      "status": "partial",
+      "corrupt_blob_against_real_runner": false
     },
     "SEC-01": {
       "no_image_pull_possible": "unit-tested",
@@ -31,7 +57,8 @@
       "source_guard_resolves_aliases_dot_imports_and_raw_unix_connect": "unit-tested",
       "production_profile_refuses_registry_reference": "unit-tested",
       "retag_detection_on_docker_28_0_4": false,
-      "status": "partial"
+      "status": "partial",
+      "no_pull_on_real_runner_run": "ci-native-passed (docker events)"
     },
     "DATA-05": {
       "bundle_carries_and_verifies_pinned_blobs": "unit-tested",
@@ -43,15 +70,23 @@
     }
   },
   "ci": {
-    "job": "deliver-managed-image-package",
+    "jobs": [
+      "deliver-managed-image-package",
+      "enforce-disposable-project-quota"
+    ],
     "workflow": ".github/workflows/app-project-quota-probe.yml",
-    "run": null,
-    "note": "Not run when this record was written; the job runs on the pull request."
+    "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42719361547",
+    "artifact": "managed-image-real-runner",
+    "note": "Pull request run 42719361547 (draft PR 412) covers the review follow-ups; both image jobs passed."
   },
   "limits": [
-    "No Docker on the development host: the CI job, docker save output through the Apps exporter and every native Linux path were not run.",
+    "Native paths run in CI only; the development host has no Docker.",
     "The new Portal tests use the SQLite test server only.",
-    "The real daemon load is proven by the native test of a two-layer image built in the test, not by the exact Scheduled Digest image.",
-    "Retag detection could not be demonstrated: Docker 28.0.4 ignored the name annotation."
+    "The real-runner scenario installs through the offline path; the catalogue path is proven on real bytes with fakes, not with a real runner.",
+    "CI uses the classic image store; the containerd branch is covered by unit tests and the 3a native tests.",
+    "PKG-08's corrupt-blob scenario is not run against a real runner.",
+    "A worker-installed generation-1 app has no service-task history (tied to the managed-install review format), so the scenario's answer is a session request, not a scheduled task.",
+    "Retag detection could not be demonstrated: Docker 28.0.4 ignored the name annotation.",
+    "DATA-05's managed half on a fresh Linux host is still open."
   ]
 }

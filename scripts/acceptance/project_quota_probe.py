@@ -247,11 +247,105 @@ def scheduled_digest_image_configuration():
     return image
 
 
+IMAGE_DELIVERY_EVIDENCE_FORMAT = "portal.managed-image-delivery.real-runner/1-dev.1"
+IMAGE_DELIVERY_MARKERS = (
+    "IMAGE_DELIVERY_REAL_RUNNER_IMAGE_ABSENT_BEFORE_LOAD",
+    "IMAGE_DELIVERY_CHILD_STAGED_OFFLINE",
+    "IMAGE_DELIVERY_CHILD_LOAD_RECEIPT",
+    "IMAGE_DELIVERY_CHILD_APP_ANSWERED",
+    "IMAGE_DELIVERY_CHILD_UNINSTALLED",
+    "IMAGE_DELIVERY_REAL_RUNNER_LOADED_FROM_BLOBS",
+    "IMAGE_DELIVERY_REAL_RUNNER_CONTAINER_IMAGE_IS_PACKAGE_IMAGE",
+    "IMAGE_DELIVERY_REAL_RUNNER_NO_PULL_NO_NAMES",
+    "IMAGE_DELIVERY_REAL_RUNNER_APP_ANSWERED",
+)
+IMAGE_DELIVERY_EVIDENCE_TRUE = (
+    "image_absent_before_load",
+    "production_profile",
+    "blobs_uploaded_over_control_socket",
+    "load_receipt_loaded",
+    "runner_started_container_uses_package_image",
+    "manifest_digest_bound_by_receipt",
+    "layers_match",
+    "readiness_reached",
+    "app_answered",
+    "no_pull_events",
+    "no_names_added",
+    "container_tied_to_start_receipt",
+    "built_image_is_delivered_image",
+)
+
+
+def image_delivery_required():
+    """True when this job is expected to run the real-runner image delivery scenario."""
+    value = os.environ.get("APP_IMAGE_DELIVERY_REQUIRED", "")
+    if value not in ("", "1"):
+        raise RuntimeError("invalid image delivery requirement")
+    return value == "1"
+
+
+def image_delivery_configuration():
+    """The exported managed package of the exact Scheduled Digest image, or None when the job did not build one."""
+    names = ("APP_IMAGE_DELIVERY_CANDIDATE", "APP_IMAGE_DELIVERY_BLOBS", "APP_IMAGE_DELIVERY_BUILT_IMAGE_ID")
+    values = tuple(os.environ.get(name, "") for name in names)
+    if not any(values):
+        return None
+    if (not all(values) or not Path(values[0]).is_absolute() or not Path(values[1]).is_absolute()
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", values[2])):
+        raise RuntimeError("invalid image delivery fixture configuration")
+    return values
+
+
+def require_image_delivery(report, configuration):
+    """A job that is expected to run the scenario fails when its configuration or its report entry is missing."""
+    if not image_delivery_required():
+        return
+    if configuration is None:
+        raise RuntimeError("image delivery is required but its export environment is missing")
+    if "managed_image_delivery_real_runner" not in report:
+        raise RuntimeError("image delivery is required but the scenario did not report")
+
+
+def keep_image_delivery_evidence(source, target):
+    """Copy the evidence before it is judged, so a failed run still uploads it."""
+    if Path(source).is_file():
+        shutil.copyfile(source, target)
+
+
+def verify_image_delivery(stdout, evidence_path):
+    """Accept the real-runner image delivery run only on its markers, its pass line and its evidence file."""
+    for marker in IMAGE_DELIVERY_MARKERS:
+        if marker not in stdout:
+            raise RuntimeError("image delivery assertion missing: " + marker)
+    if "--- PASS: TestPlatformManagedImageDeliveryAcceptance" not in stdout:
+        raise RuntimeError("image delivery acceptance did not pass")
+    try:
+        evidence = json.loads(Path(evidence_path).read_text())
+    except (OSError, ValueError):
+        raise RuntimeError("image delivery evidence missing or unreadable")
+    if evidence.get("format") != IMAGE_DELIVERY_EVIDENCE_FORMAT:
+        raise RuntimeError("image delivery evidence has an unknown format")
+    if evidence.get("allow_local_reference_images") is not False:
+        raise RuntimeError("image delivery did not run in the production profile")
+    runner = evidence.get("runner")
+    if not isinstance(runner, dict) or runner.get("images") != "production":
+        raise RuntimeError("image delivery evidence does not show the runner's production image mode")
+    for name in IMAGE_DELIVERY_EVIDENCE_TRUE:
+        if evidence.get(name) is not True:
+            raise RuntimeError("image delivery evidence does not prove: " + name)
+    return evidence
+
+
 def main(args):
     require_disposable(args)
     candidate = candidate_configuration()
     ready_image = readiness_image_configuration()
     scheduled_digest_image = scheduled_digest_image_configuration()
+    image_delivery = image_delivery_configuration()
+    if (image_delivery or image_delivery_required()) and (not candidate or len(args) != 11):
+        raise RuntimeError("image delivery requires managed Portal acceptance")
+    if image_delivery_required() and not image_delivery:
+        raise RuntimeError("image delivery is required but its export environment is missing")
     if ready_image and (not candidate or len(args) != 11):
         raise RuntimeError("readiness fixture requires managed Portal acceptance")
     if candidate and len(args) not in (5, 7, 9, 11):
@@ -868,6 +962,28 @@ def main(args):
                         report["native_candidate_execution_replay_same_native_id"] = True
                         report["native_managed_endpoint_shared_provider_refusal"] = True
                         report["native_managed_endpoint_data_and_candidate_cross_uid"] = True
+                if image_delivery:
+                    # Last on purpose: it removes the job's own copy of the exact image (by ID) from the Docker
+                    # store, so every test that starts the image from the local registry has already run.
+                    delivery_candidate, delivery_blobs, delivery_built = image_delivery
+                    delivery_evidence = root / "image-delivery-evidence.json"
+                    delivery_env = dict(
+                        portal_env,
+                        APP_IMAGE_DELIVERY_CANDIDATE=delivery_candidate,
+                        APP_IMAGE_DELIVERY_BLOBS=delivery_blobs,
+                        APP_IMAGE_DELIVERY_BUILT_IMAGE_ID=delivery_built,
+                        APP_IMAGE_DELIVERY_EVIDENCE=str(delivery_evidence))
+                    delivery = subprocess.run(
+                        [args[10], "-test.run=^TestPlatformManagedImageDeliveryAcceptance$", "-test.v", "-test.timeout=600s"],
+                        env=delivery_env, capture_output=True, text=True, timeout=620)
+                    delivery_output = delivery.stdout + delivery.stderr
+                    keep_image_delivery_evidence(delivery_evidence, Path.cwd() / "managed-image-real-runner-evidence.json")
+                    if delivery.returncode:
+                        diagnostic = Path.cwd() / "portal-image-delivery-failure.txt"
+                        diagnostic.write_text(delivery_output[-262144:])
+                        print("Image delivery output:\n" + diagnostic.read_text(), file=sys.stderr, flush=True)
+                        raise RuntimeError("image delivery acceptance failed: " + delivery_output[-32768:])
+                    report["managed_image_delivery_real_runner"] = verify_image_delivery(delivery.stdout, delivery_evidence)
             command("xfs_quota", "-x", "-c", "disable -p", str(mountpoint))
             native_env["APP_DATA_NATIVE_PHASE"] = "disabled"
             native = subprocess.run([args[2], "-test.run=^TestNativeDataPrimitive$", "-test.v", "-test.timeout=30s"], env=native_env, capture_output=True, text=True, timeout=45)
@@ -922,6 +1038,7 @@ def main(args):
         if not loop_cleanup_deferred:
             shutil.rmtree(root)
     report["owned_resources_cleaned"] = not loop_cleanup_deferred
+    require_image_delivery(report, image_delivery)
     print(json.dumps(report, sort_keys=True, indent=2))
 
 

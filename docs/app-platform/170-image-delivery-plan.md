@@ -787,3 +787,151 @@ amended by items 1 and 3 here.
    What it cannot catch, also in the test's comment: SQL assembled in a function that never mentions the table and
    handed to a helper elsewhere, text read at run time, a name supplied through `fmt.Sprintf` in another function,
    and anything reached by reflection. It is a tripwire for the ordinary ways of adding a writer, not a proof.
+
+## PR 3c: the exact image started by a real runner from blobs
+
+Stacked on PR 3b, into `integration/app-platform`. Closes the central `PKG-01` gap that 3b left open: CI had
+staged the real package with fakes and had loaded a real image on the real daemon only in the 3a test, but no
+run had started the exact Scheduled Digest image through a real root runner after a real `load-image`.
+
+### Plan
+
+1. **Package in the quota job.** The job that already owns the root runner, the XFS filesystem and the Portal test
+   binary (`enforce-disposable-project-quota`) builds the `portalapp/2` package with the same commands as
+   `deliver-managed-image-package` (default builder, `docker save <image-id>`, the Apps `export-image-oci.py`,
+   `build-app-v2.py --images`; the Apps pin does not change).
+2. **A new scenario, last in the probe.** `project_quota_probe.py` runs `TestPlatformManagedImageDeliveryAcceptance`
+   after every test that starts the image from the registry copy, because the scenario removes that copy:
+   - the parent (root) removes, by ID, the image the job built and the containers made from it, and proves the
+     package's image ID is gone from the Docker store;
+   - it starts a second runner service in the production profile (`allow_local_reference_images=false`, a real
+     `image_root`) on the same journal and data root, and an unprivileged Portal child;
+   - the child stages the package through the real offline import route, then runs the ordinary review,
+     consumption and install worker: `load_image` and the blob upload over the control socket, the runner's
+     `load-image` receipt, start, probe, registration and activation, with no synthetic native observation and
+     no direct journal write;
+   - while the app runs, the parent inspects the daemon and then releases the child, which uninstalls the app.
+3. **Asserted:** the effect row and the runner's receipt (`loaded`, not `present`, so the image was absent), image
+   ID, store and the claim's manifest and config digests against the package; every blob stored over the control
+   socket; readiness evidence on the activation; the running app answering through the platform (as built, a signed
+   session request, see the implementation notes; the plan had a scheduled digest task); on the daemon, the stored image's ID, platform, layer chain and the
+   absence of any name; the store changed by exactly that image; every container created from it created from
+   the image ID, one running; no image `pull`, `tag`, `untag`, `push` or `import` event while the scenario ran,
+   with a watcher proven live by a container creation event.
+4. **Evidence.** One JSON file (`portal.managed-image-delivery.real-runner/1-dev.1`), checked by the probe against a
+   closed list of markers and true-valued claims, uploaded as the workflow artifact `managed-image-real-runner`
+   and merged into `project-quota-evidence`.
+5. **PKG-08 against the real runner: not attempted.** A corrupt Portal blob is refused before any runner effect
+   (a Portal-side fact, covered by the 3b tests); a real-runner version would need a second installation of the
+   same app to fail and then be recovered inside the same runner state, which is not cheap in this harness. It is
+   left unproven against a real runner and stated as such.
+
+Ordering decision: the registry-copy tests and the new scenario are kept in one job and one runner, and the new
+scenario runs last. They are not made independent, because the exact image is shared and its removal by ID is the
+point of the proof. A restart of the runner service on the shared journal is the supported restart path, and the
+scenario uses fresh Portal identifiers, so it does not collide with earlier fixtures.
+
+### Implementation notes
+
+- **Production profile.** `startPlatformServiceFixture` takes options; the new scenario clears
+  `AllowLocalReferenceImages`. With it cleared, a descriptor that names a registry reference is refused by the
+  runner (3a), so the only way the app can start is the loaded image.
+- **Docker store, by ID.** The parent reaches the daemon with a small unix-socket client (images, containers,
+  `/info`, `/events`). It deletes only containers whose image ID is the package's image ID, then the image by ID
+  with `force=1`, which also drops every name the job gave it (the build tag and the registry copy).
+  Expected ID follows resolution 7: the config digest on the classic store, the manifest digest on the containerd
+  store.
+- **Counting seam.** The child wraps the Portal's runner seam (`platformImageRunner`) in a recorder that delegates
+  every call to the real transport. It records blob sends and how many were `stored`, the number of `load-image`
+  executes, and the receipt the runner returned. It changes no behaviour.
+- **Manifest digest.** The classic store does not retain the manifest digest, so it is not readable back from the
+  daemon. It is bound through the runner's signed claim and receipt, which the child compares with the package. The
+  daemon-side checks are the image ID (the config digest), the layer diff IDs, the platform and the absent names.
+- **Pure checks.** Each daemon-side proof is a function with a unit test that fails in the direction it guards
+  (`app_platform_image_delivery_evidence_unit_test.go`), and the probe's own acceptance of the run (markers and
+  true-valued evidence, production profile required) has python unit tests. The refactor of the runtime binding
+  seeding into `bindPlatformFixtureRuntime` is shared with the existing child.
+- **Result.** Run [42716037743](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42716037743)
+  (workflow dispatch on the branch; both jobs passed; the quota job's probe step took about three minutes, the job
+  about nine). Artifact `managed-image-real-runner`. The evidence for that run: the package's image (config digest
+  `cb98d4d3...`, one 6 MiB layer, three blobs) was removed from a store of nine images; the production-profile
+  runner reported `images=production`; Portal stored the package (HTTP 200), uploaded three blobs, executed
+  `load-image` three times (the first answered `blobs_missing`, as designed), and the runner's receipt was `loaded`
+  with store `classic`; the activation carried readiness evidence; the daemon then held exactly one new image, with
+  no tag and no digest reference, its `RootFS.Layers` equal to the descriptor's `diff_id` list, and one running
+  container created from that image ID; the event stream showed one image `load`, one container `create` and no
+  pull; the app answered `GET /v1/digest` with status 200; the uninstall removed the container.
+- **Deviation from the plan: the answer is a session request, not a task.** The first design ran the exact-image test's
+  Scheduled Digest task. It failed with `backend_preflight_unavailable`. For generation 1, `preparePlatformServiceTask`
+  reads the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
+  `portal.managed-install-review` and exactly three non-load effects. An app installed by the install worker uses
+  `portal.writable-install-review`, so no service task (digest, event or backend) can run for it at generation 1;
+  the update acceptance runs them at generation 2. This is an existing property of the code, not something the
+  image delivery changed, and it was not touched. It is reported as a finding: a freshly installed Scheduled Digest
+  cannot run its scheduled task until it is updated, unless that is intended. The scenario answers instead with
+  `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair acceptances use.
+- **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
+  API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
+  "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker
+  accepts the bare form). Every daemon-side comparison now goes through `imageDeliveryDaemonID`, with a unit test
+  that fails if a bare digest hides a present image.
+- **Not proven by this scenario:** PKG-08 against a real runner (above); the same scenario through the catalogue
+  (the catalogue install is the offline install by construction, and is proven on real bytes with fakes); the
+  containerd store (CI uses the classic store, so that branch stays covered by unit tests and the 3a native
+  tests); a prune between the load and the start; the fresh-host managed restore of `DATA-05`; PostgreSQL.
+- **No production change, no schema change.** The scenario exercised existing code only. The test-side changes are
+  an options parameter on the service fixture and `bindPlatformFixtureRuntime`, shared with the existing child.
+
+CI status of this section is recorded in `06-acceptance.md` and the evidence file; neither claims more than the run
+named there.
+
+### PR 3c review follow-ups
+
+The judge's review of the first push found no blocker. Fixed here, test-first where a pure function allows it. The
+earlier run (42716037743) predates these changes; its claims are re-established by the run named in
+`06-acceptance.md`.
+
+1. **What is installed, and the one rewrite.** The Apps builder emits an unsigned development candidate
+   (`descriptor.json`, `frontend.zip`) and the exporter emits the blobs. The Apps packer needs a signature, so the
+   test supplies a detached signature; nothing else is generated by the test. Staging the builder's descriptor
+   byte for byte is **not possible**: it declares `compatibility.runner_protocol` as `>=1.0.0 <2.0.0`, and this
+   runner's protocol is the pre-release `1.0.0-dev.1`, which a range without a pre-release tag never matches
+   (`TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol` shows both directions). That is a finding
+   for the Apps builder or the runner protocol version, not something to hide. The test therefore changes exactly
+   that one string, in the bytes as built (`>=1.0.0 <2.0.0` to `>=1.0.0-0 <2.0.0`), and asserts it
+   (`imageDeliveryOnlyRunnerRangeDiffers`: the staged descriptor differs from the built one in no other field).
+   The publisher (`development-publisher`) and the platform range are no longer rewritten: the test registers
+   that publisher with the test key and signs the descriptor as that publisher. The frontend archive and every
+   blob are the builder's own bytes (the blobs are re-hashed against their names); the envelope is assembled and
+   signed by the test with a test key registered under the builder's publisher. The evidence records the
+   publisher and the change.
+2. **Path filters.** The quota workflow now also runs when `internal/apprunner/service/**`,
+   `internal/apprunner/imagestore/**`, `internal/appplatform/catalogue*` or
+   `internal/app/app_platform_catalogue*` change, on pull requests and on pushes to main (the load-image and
+   blob-store code, the image driver, journal and control paths, `app_platform_image_*`, `offline*` and the
+   market code were already listed).
+3. **Observed, not asserted.** `production_profile`, `layers_match`, `manifest_digest_bound_by_receipt`,
+   `no_names_added` and `runner_started_container_uses_package_image` are computed from what the daemon, the receipt
+   and the runner reported. The runner's own ready line (`images=production`) is parsed from its captured output
+   and recorded with its profile and platform; the run fails if it is not `production`.
+4. **Exactly one load.** The event check requires exactly one image `load` event, on the target ID, besides the
+   live-watcher rule and the pull, tag, untag, push and import ban.
+5. **The container is the runner's.** The Portal child reads the `native_id` from the operation's start effect
+   receipt; the parent requires the running container's ID to equal it and its owner labels
+   (`org.portal.app.installation`, `operation`, `release`) to name this installation, operation and release.
+6. **Exact does not depend on a cache hit.** The package is saved from the image the build step produced and the
+   next step verifies (its ID is on the second line of `scheduled-digest-exact-image.txt`), instead of from a
+   rebuild. The export step fails unless the package's config digest equals that ID, and the Go scenario fails
+   unless the delivered ID equals it; both IDs are in the evidence.
+7. **Which route is real.** Only the package import goes through the admin HTTP route
+   (`POST /api/admin/app-platform/market/offline`, in process). The review and its consumption call
+   `createPlatformWritableInstallReview` and `consumePlatformWritableInstallReview`, the writable development
+   entry point that the install worker acceptance already uses; they do not go through the admin managed-install
+   route. The install worker itself is the ordinary one.
+8. **Evidence survives failure, and the scenario is required.** The probe copies the evidence file before judging
+   it, and the Go scenario writes a failure record (with the child's output tail) if it fails. The quota job sets
+   `APP_IMAGE_DELIVERY_REQUIRED=1`; with it, a missing export environment or a missing report entry fails the probe.
+9. **Other images' references.** The store-diff check compares every other image's digest references as well as
+   its tags.
+
+Not changed, as instructed: the generation-1 service-task finding above is left for its own change.
