@@ -902,8 +902,9 @@ earlier run (42716037743) predates these changes; its claims are re-established 
    (`imageDeliveryOnlyRunnerRangeDiffers`: the staged descriptor differs from the built one in no other field).
    The publisher (`development-publisher`) and the platform range are no longer rewritten: the test registers
    that publisher with the test key and signs the descriptor as that publisher. The frontend archive and every
-   blob are the builder's own bytes (the blobs are re-hashed against their names, the package is not re-zipped
-   from any other source). The evidence records the publisher and the change.
+   blob are the builder's own bytes (the blobs are re-hashed against their names); the envelope is assembled and
+   signed by the test with a test key registered under the builder's publisher. The evidence records the
+   publisher and the change.
 2. **Path filters.** The quota workflow now also runs when `internal/apprunner/service/**`,
    `internal/apprunner/imagestore/**`, `internal/appplatform/catalogue*` or
    `internal/app/app_platform_catalogue*` change, on pull requests and on pushes to main (the load-image and

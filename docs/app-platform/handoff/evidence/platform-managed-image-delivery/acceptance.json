@@ -35,7 +35,8 @@
         "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
         "container_tied_to_runner_start_receipt": true,
         "delivered_image_equals_built_and_verified_image": true,
-        "exactly_one_image_load_event": true
+        "exactly_one_image_load_event": true,
+        "envelope": "envelope assembled and signed by the test with a test key registered under the builder's publisher"
       }
     },
     "PKG-08": {

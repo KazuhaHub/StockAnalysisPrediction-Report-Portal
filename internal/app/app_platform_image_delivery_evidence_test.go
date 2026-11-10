@@ -113,7 +113,7 @@ func imageDeliveryCheckEvents(events []imageDeliveryEvent, target string) error 
 			return fmt.Errorf("image event %q on %s", e.Action, e.ID)
 		case "load":
 			loads++
-			if e.ID != "" && e.ID != target {
+			if e.ID != target {
 				return fmt.Errorf("image load event on %s, not the package's image %s", e.ID, target)
 			}
 		}

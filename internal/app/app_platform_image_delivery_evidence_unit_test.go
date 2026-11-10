@@ -75,6 +75,9 @@ func TestDeliveryProofRequiresALiveWatcherExactlyOneLoadAndNoPullTagOrPush(t *te
 	if imageDeliveryCheckEvents([]imageDeliveryEvent{load, load, live}, deliveryTargetID) == nil {
 		t.Fatal("two load events passed")
 	}
+	if imageDeliveryCheckEvents([]imageDeliveryEvent{{Type: "image", Action: "load"}, live}, deliveryTargetID) == nil {
+		t.Fatal("a load event with no ID passed")
+	}
 	other := imageDeliveryEvent{Type: "image", Action: "load", ID: deliveryOtherID}
 	if imageDeliveryCheckEvents([]imageDeliveryEvent{other, live}, deliveryTargetID) == nil {
 		t.Fatal("a load of another image passed")

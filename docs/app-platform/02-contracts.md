@@ -53,7 +53,7 @@ and must not appear in accepted packages. It is not the legacy `app.json` format
   "publisher": "example-publisher",
   "compatibility": {
     "platform_api": ">=2.0.0 <3.0.0",
-    "runner_protocol": ">=1.0.0 <2.0.0"
+    "runner_protocol": ">=1.0.0-0 <2.0.0"
   },
   "presentation": {
     "name_key": "app.name",
@@ -77,6 +77,10 @@ and must not appear in accepted packages. It is not the legacy `app.json` format
   "data": {"schema": 1, "readable_schemas": [1], "writes_on_startup": false}
 }
 ```
+
+While the runner protocol is a development pre-release (currently `1.0.0-dev.1`), a
+`runner_protocol` range needs the `-0` floor, as in the example above: a range such as
+`>=1.0.0 <2.0.0` never matches a pre-release version.
 
 No backend object means a static app. It must not secretly launch server work.
 Package limits and allowed file types are enforced before extraction, after
