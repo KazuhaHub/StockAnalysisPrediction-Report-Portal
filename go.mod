@@ -1,6 +1,6 @@
 module github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a
