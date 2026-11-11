@@ -11,12 +11,20 @@ import StatusTag, { type StatusTone } from '../components/StatusTag'
 // tier: a run stores "urgent" or a base number 0..100 (docs/adr/0008-multifactor-priority.md).
 
 export const BASE_MAX = 100
+// Covers both vocabularies statusTag renders: job statuses (queued..finished, expired) and item
+// outcomes (succeeded, partial, failed, untracked). A status missing here falls back to 'neutral';
+// batchUi.statusTone.test.ts keeps every labelled status mapped.
 export const JOB_STATUS_TONE: Record<string, StatusTone> = {
   queued: 'waiting',
   running: 'processing',
   cancelling: 'warning',
   cancelled: 'neutral',
   finished: 'success',
+  // A scheduled job whose window passed before it could start: it never ran, so it is no failure.
+  expired: 'neutral',
+  succeeded: 'success',
+  partial: 'warning',
+  failed: 'error',
   // 'untracked': the run reached Dify but its outcome couldn't be confirmed — a warning (not a
   // failure), and never re-run to avoid a duplicate charged run. See docs/adr/0015-reconcile-not-retry-untracked.md.
   untracked: 'warning',
