@@ -905,7 +905,7 @@ earlier run (42716037743) predates these changes; its claims are re-established 
    byte as built. (Until the Apps range fix the builder declared `compatibility.runner_protocol` as
    `>=1.0.0 <2.0.0`, which never matches this runner's pre-release protocol `1.0.0-dev.1`, and the test had to
    rewrite that one string. The Apps descriptors now declare `>=1.0.0-0 <2.0.0-0` (and `platform_api` `>=2.0.0-0 <3.0.0-0`, whose plain
-   ceiling admitted `3.0.0-dev.x`), and the rewrite is gone; `TestDeliveryRunnerProtocolRangesNeedPreReleaseBounds` keeps both reasons.) The
+   ceiling admitted `3.0.0-dev.x`), and the rewrite is gone; `TestDeliveryCompatibilityRangesNeedPreReleaseBounds` keeps both reasons.) The
    publisher (`development-publisher`) is registered with the test key and the descriptor is signed as that
    publisher. The frontend archive and every blob are the builder's own bytes (the blobs are re-hashed against
    their names); the envelope is assembled and signed by the test with a test key registered under the builder's

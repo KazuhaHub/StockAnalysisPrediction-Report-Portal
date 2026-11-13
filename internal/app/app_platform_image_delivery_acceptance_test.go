@@ -43,7 +43,7 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 		t.Fatal("the candidate is not the managed Scheduled Digest descriptor")
 	}
 	// The descriptor is staged exactly as the Apps builder wrote it, so it must already be compatible with this
-	// Portal and runner (see TestDeliveryRunnerProtocolRangesNeedPreReleaseBounds). Checked here so that a range
+	// Portal and runner (see TestDeliveryCompatibilityRangesNeedPreReleaseBounds). Checked here so that a range
 	// regression in the Apps repo fails every job that consumes the package, not only the native install.
 	descriptor := raw
 	compatibility, err := appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{

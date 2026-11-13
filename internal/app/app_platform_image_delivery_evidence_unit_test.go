@@ -236,10 +236,10 @@ func TestDeliveryContainerIsTiedToTheRunnersStartReceipt(t *testing.T) {
 	}
 }
 
-// Why Apps descriptors declare runner_protocol ">=1.0.0-0 <2.0.0-0": a plain floor never matches this runner's
-// pre-release protocol (semver pre-release rule), and a plain "<2.0.0" ceiling still admits 2.0.0-dev.x, the
-// first pre-release of the next breaking protocol. Fails if either half of that rule stops holding.
-func TestDeliveryRunnerProtocolRangesNeedPreReleaseBounds(t *testing.T) {
+// Why Apps descriptors declare runner_protocol ">=1.0.0-0 <2.0.0-0" and platform_api ">=2.0.0-0 <3.0.0-0": a
+// plain floor never matches a pre-release version (semver pre-release rule), and a plain ceiling still admits the
+// first pre-release of the next breaking version. Fails if either half of that rule stops holding for either range.
+func TestDeliveryCompatibilityRangesNeedPreReleaseBounds(t *testing.T) {
 	parts := newPlatformManagedImageParts(t, "2.0.0", "range")
 	var m appplatform.Manifest
 	if err := json.Unmarshal(parts.descriptor, &m); err != nil || m.Backend == nil {
@@ -263,6 +263,37 @@ func TestDeliveryRunnerProtocolRangesNeedPreReleaseBounds(t *testing.T) {
 		if got := imageDeliveryRunnerProtocolAdmits(t, m, target); got != c.admitted {
 			t.Fatalf("range %q, protocol %s: admitted=%v, want %v", c.rng, c.protocol, got, c.admitted)
 		}
+	}
+	// The same rule for platform_api: Apps descriptors declare ">=2.0.0-0 <3.0.0-0".
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0-0"
+	for _, c := range []struct {
+		rng, api string
+		admitted bool
+	}{
+		{">=2.0.0 <3.0.0", platformDevelopmentAPI, false},
+		{">=2.0.0-0 <3.0.0-0", platformDevelopmentAPI, true},
+		{">=2.0.0-0 <3.0.0", "3.0.0-dev.1", true},
+		{">=2.0.0-0 <3.0.0-0", "3.0.0-dev.1", false},
+	} {
+		m.Compatibility.PlatformAPI = c.rng
+		result, err := appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{PlatformAPI: c.api,
+			Runner: &appplatform.RunnerCompatibility{Protocol: transport.ManagedRunnerProtocol,
+				Platform: m.Backend.Platforms[0], BackendProtocol: m.Backend.Protocol}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		admitted := true
+		for _, issue := range result.Issues {
+			if issue == appplatform.PlatformAPIMismatch {
+				admitted = false
+			}
+		}
+		if admitted != c.admitted {
+			t.Fatalf("platform range %q, API %s: admitted=%v, want %v", c.rng, c.api, admitted, c.admitted)
+		}
+	}
+	if !strings.Contains(platformDevelopmentAPI, "-") {
+		t.Fatal("the platform API is no longer a pre-release; revisit the -0 floor in the Apps descriptors")
 	}
 	if !strings.Contains(transport.ManagedRunnerProtocol, "-") {
 		t.Fatal("the runner protocol is no longer a pre-release; revisit the -0 floor in the Apps descriptors")
