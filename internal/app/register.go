@@ -239,7 +239,7 @@ func (s *Server) sendVerifyEmailContext(ctx context.Context, email, token string
 	brand := s.brandName()
 	body := fmt.Sprintf(
 		`<p>Hi,</p><p>Confirm this address to finish creating your %s account:</p><p><a href="%s">%s</a></p><p>The link is valid for 24 hours. If you did not sign up, ignore this email — the account stays disabled and is removed automatically.</p>`,
-		html.EscapeString(brand), link, html.EscapeString(link))
+		html.EscapeString(brand), html.EscapeString(link), html.EscapeString(link))
 	return s.sendEmailContext(ctx, []string{email}, brand+" — confirm your email", body)
 }
 

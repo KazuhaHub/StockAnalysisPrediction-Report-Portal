@@ -400,7 +400,7 @@ describe('the live price on a card', () => {
     // Page two, which happens to carry the same stock — so the stale answer below is not merely
     // about a card that has gone: it names a symbol that is still on screen and would paint.
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(screen.getByText('N000001')).toBeTruthy())
     await waitFor(() => expect(state.quotes).toHaveLength(2))
 
@@ -460,7 +460,7 @@ describe('the live price on a card', () => {
     await waitFor(() => expect(state.quotes).toHaveLength(1))
 
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(state.quotes).toHaveLength(2))
     await settle(state.quotes[1], quoteBody({ '600519': [3335, 12, '0.12'] }))
     expect(await screen.findByTestId('card-quote')).toBeTruthy()
@@ -484,7 +484,7 @@ describe('the live price on a card', () => {
     // …the reader steps to page two, which carries the same stock — the ordinary case, since a
     // stock with reports on three dates is three groups in this feed.
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(screen.getByText('N000001')).toBeTruthy())
     await waitFor(() => expect(state.quotes).toHaveLength(2))
 

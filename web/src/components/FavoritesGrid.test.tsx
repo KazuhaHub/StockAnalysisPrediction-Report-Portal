@@ -57,7 +57,7 @@ describe('FavoritesGrid', () => {
     expect(firstPage[0]).toBe('sh:600000')
     expect(firstPage).not.toContain('sh:600020')
 
-    await userEvent.click(screen.getByTitle('Next Page'))
+    await userEvent.click(screen.getByRole('button', { name: 'Next Page' }))
     await waitFor(() => expect(quoteCalls.some((call) => call.length === 1 && call[0] === 'sh:600020')).toBe(true))
   })
 
