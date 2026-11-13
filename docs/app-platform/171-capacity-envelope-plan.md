@@ -384,7 +384,27 @@ What the removal command needs:
   `removeLoadedImage` exists in the driver; it needs an exported runtime method), prove it absent, then settle
   `applied` and release the `image` reservation in one transaction.
 - **The Portal:** an effect kind and an operation stage for it (`kind` has no database enum, so no Portal DDL, but
-  the Go effect-kind allow-list and the stage order change), and the decision of who owns "last referencing
-  installation": the runner from its load-image rows and removed installations, or the Portal from the releases
-  every installation still references.
+  the Go effect-kind allow-list and the stage order change).
+- **Who owns "last referencing installation": the Portal.** Only the Portal knows which releases every
+  non-removed installation still references, including rollback and restore targets kept in checkpoints. The
+  runner still enforces the native guard: no container of any state uses the image.
+- **Also required** (round-2 review of PR 4a):
+  - The `schemaProducts` freeze test and the v1 to v3 and v2 to v3 upgrade fixtures change. Folding into v3 is
+    only acceptable while no runner, CI or development host included, has opened a v3 journal.
+  - A removal refused by the daemon because a container still references the image (HTTP 409) is a typed
+    refusal, not an unknown effect.
+  - `load-image` and `remove-image` of the same digest are fenced against each other: both run under the load
+    gate, and a `remove-image` claim refuses while a load of that digest is `unknown`.
+  - An unknown `remove-image` is resolved by proving the image absent or present by ID. It is never resent blind.
+  - The image reservation is released only at `applied`.
+  - The Portal defines what an image-store refusal means while a removal is pending.
+
+### Follow-up that blocks the integration to main merge: candidate orphan settlement
+
+A candidate or writable-candidate start that was claimed and then failed natively stays `unknown`, so its
+reservation is never released (`journal/candidate_execution.go:173`). Update starts have `settleOrphan`;
+candidates have no settlement path. This follows "an unknown effect keeps its reservation", but without a
+settlement it is a permanent leak with no remedy short of a fresh journal. The fix is a candidate orphan
+settlement modelled on `update_start_settle.go`: prove the native resource absent by name and label, then
+settle and release in one transaction.
 
