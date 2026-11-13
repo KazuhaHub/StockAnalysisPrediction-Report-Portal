@@ -792,12 +792,7 @@ func (s *Server) readPlatformManagementProgress(ctx context.Context, actor platf
 	result.ControlPaused = paused != "0" || !platformValidUUID(epoch) || epoch != currentEpoch
 	result.Terminal = result.Stage == appplatform.StageComplete || result.Stage == appplatform.StageFailed || result.Stage == appplatform.StageRecoveryRequired
 	if code.Valid && code.String != "" {
-		switch code.String {
-		case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required":
-			result.ErrorCode = code.String
-		default:
-			result.ErrorCode = "app_platform_operation_failed"
-		}
+		result.ErrorCode = platformPublicOperationErrorCode(code.String)
 	}
 	final, err := platformDatabaseNow(e)
 	if err != nil {

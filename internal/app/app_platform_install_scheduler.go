@@ -299,6 +299,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
+	if refusal, ok := platformCapacityRefusalOf(err); ok {
+		// A definite refusal by the runner is not retried: the operation ends with the typed outcome.
+		return w.finishCapacity(ctx, refusal)
+	}
 	if (errors.Is(err, errPlatformImageBusy) ||
 		(w.active.snapshot.Action == appplatform.ActionRestoreImport &&
 			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
@@ -320,9 +324,18 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	return err
 }
-func (w *platformInstallScheduler) finish(ctx context.Context) error {
+func (w *platformInstallScheduler) finish(ctx context.Context) error { return w.finishAs(ctx, "") }
+
+// finishAs ends the active operation by its action's review path. A capacity code, when given, becomes the
+// failure code of an installation, whose finish owns one.
+func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode string) error {
 	operation, stage := w.active.id, w.active.snapshot.Stage
 	finish := w.server.finishPlatformInstallForReview
+	if capacityCode != "" && w.active.snapshot.Action == appplatform.ActionInstall {
+		finish = func(ctx context.Context, lease platformOperationLease) error {
+			return w.server.finishPlatformInstallWithCode(ctx, lease, capacityCode)
+		}
+	}
 	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
 		finish = w.server.finishPlatformRestoreImportForReview
 	} else if w.active.snapshot.Action == appplatform.ActionUpdate {

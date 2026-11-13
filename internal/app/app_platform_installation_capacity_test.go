@@ -77,8 +77,10 @@ func testPlatformInstallationCapacity(t *testing.T, pg bool) {
 	})
 }
 
-func TestPlatformInstallationCapacitySQLite(t *testing.T)   { testPlatformInstallationCapacity(t, false) }
-func TestPlatformInstallationCapacityPostgres(t *testing.T) { testPlatformInstallationCapacity(t, true) }
+func TestPlatformInstallationCapacitySQLite(t *testing.T) { testPlatformInstallationCapacity(t, false) }
+func TestPlatformInstallationCapacityPostgres(t *testing.T) {
+	testPlatformInstallationCapacity(t, true)
+}
 
 func TestPlatformInstallationCapacityIsFifty(t *testing.T) {
 	if platformInstallationCap != 50 {
