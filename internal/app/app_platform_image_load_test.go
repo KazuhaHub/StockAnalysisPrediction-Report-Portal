@@ -61,6 +61,8 @@ type platformFakeImageRunner struct {
 	failUpload error
 	// readFails makes every read-back fail on the wire.
 	readFails bool
+	// refuseCapacity answers every execute and read-back with the runner's capacity refusal for this dimension.
+	refuseCapacity string
 }
 
 func newPlatformFakeImageRunner(t *testing.T, endpoint platformRuntimeEndpoint, parts platformManagedImageParts) *platformFakeImageRunner {
@@ -69,6 +71,17 @@ func newPlatformFakeImageRunner(t *testing.T, endpoint platformRuntimeEndpoint, 
 		f.needed = append(f.needed, b.Digest)
 	}
 	return f
+}
+
+func (f *platformFakeImageRunner) capacityRefusal(call platformLoadImageCall) journal.CapacityRefusal {
+	id := journal.CapacityIdentityOfHeader(call.command.CommandHeader)
+	return journal.CapacityRefusal{
+		Format: "portal.runner.capacity-refusal/1-dev.1", DeploymentID: id.DeploymentID, ControllerEpoch: id.ControllerEpoch,
+		InstallationID: id.InstallationID, OperationID: id.OperationID, TargetGeneration: id.TargetGeneration, Stage: id.Stage,
+		EffectNumber: id.EffectNumber, EffectID: id.EffectID, Kind: id.Kind, PayloadSHA256: id.PayloadSHA256,
+		Outcome: "capacity_exhausted", Dimension: f.refuseCapacity, Requested: "4096", Remaining: "0",
+		SettledMS: strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
+	}
 }
 
 func (f *platformFakeImageRunner) count(prefix string) int {
@@ -128,6 +141,9 @@ func (f *platformFakeImageRunner) LoadImage(_ context.Context, _ platformRuntime
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "load")
 	f.effectIDs[call.command.EffectID] = true
+	if f.refuseCapacity != "" {
+		return nil, &journal.CapacityRefusalError{Receipt: f.capacityRefusal(call)}
+	}
 	if _, err := control.VerifyLoadImage(call.raw, call.signature, call.authority, time.Now().UnixMilli()); err != nil {
 		f.t.Errorf("the runner would refuse the command: %v", err)
 		return nil, err
@@ -171,6 +187,9 @@ func (f *platformFakeImageRunner) ReadLoadImage(_ context.Context, _ platformRun
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "read")
+	if f.refuseCapacity != "" {
+		return nil, &journal.CapacityRefusalError{Receipt: f.capacityRefusal(call)}
+	}
 	if f.readFails {
 		return nil, errors.New("read-back lost on the wire")
 	}

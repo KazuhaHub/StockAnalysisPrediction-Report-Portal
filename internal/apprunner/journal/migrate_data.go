@@ -684,6 +684,11 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 		if !sameMigrateCommand(existing, c.CommandHeader) {
 			return zero, false, ErrCommandConflict
 		}
+		if existing.state == "reverted" {
+			if r, ok := storedCapacityRefusal(existing.receipt, CapacityIdentityOfHeader(c.CommandHeader)); ok {
+				return zero, false, &CapacityRefusalError{Receipt: r}
+			}
+		}
 		switch existing.state {
 		case "applied", "reverted":
 			parsed, err := ParseMigrateDataReceipt([]byte(existing.receipt))
@@ -742,6 +747,34 @@ func (s *Store) beginMigrateData(ctx context.Context, raw, signature []byte) (mi
 	writer := mustDataInt(p.WriterFence)
 	if fence < fenceFloor || generation < generationFloor || writer <= writerFloor {
 		return zero, false, fmt.Errorf("%w: migration fence floors", ErrCommandConflict)
+	}
+	// Reserve the job's declared resources in the claim's own transaction, before anything is written for it.
+	// A refusal is the row of the effect: reverted, with no resource, reservation or tombstone behind it.
+	plan, admit, err := s.backendPlan(ctx, reservationMigration, p.ResourceID, c.InstallationID)
+	if err != nil {
+		return zero, false, err
+	}
+	if admit {
+		refusal, err := s.admitCapacity(ctx, tx, plan, now)
+		if err != nil {
+			return zero, false, err
+		}
+		if refusal != nil {
+			receipt, err := refuseCapacityInsert(ctx, tx, CapacityIdentityOfHeader(c.CommandHeader), mustDataInt(c.InstallationFence), mustDataInt(c.TargetGeneration), *refusal, now)
+			if err != nil {
+				return zero, false, err
+			}
+			if _, err := control.VerifyMigrateData(raw, signature, authority, time.Now().UTC().UnixMilli()); err != nil {
+				return zero, false, fmt.Errorf("migration refusal command: %w", err)
+			}
+			if s.closing.Load() {
+				return zero, false, ErrMigrateDataUnavailable
+			}
+			if err := tx.Commit(); err != nil {
+				return zero, false, err
+			}
+			return zero, false, &CapacityRefusalError{Receipt: receipt}
+		}
 	}
 	// The updates this retry recovers without a migration of their own are closed in the same transaction that
 	// admits it, so no command of theirs can be claimed afterwards.
@@ -880,6 +913,10 @@ func settleMigrateRows(ctx context.Context, tx *sql.Tx, marker migrateClaimMarke
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return fmt.Errorf("migration settlement resource rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
 	}
+	// The job's container is proven absent in this transaction, so its reservation is released in it.
+	if err := releaseReservation(ctx, tx, marker.ResourceID, now); err != nil {
+		return err
+	}
 	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state=?,receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`,
 		commandState, receipt, now, marker.EffectID, markerRaw)
 	if err != nil {
@@ -976,6 +1013,11 @@ func (s *Store) DispatchMigrateData(ctx context.Context, raw, signature, descrip
 	}
 	switch state {
 	case "applied", "reverted":
+		if state == "reverted" {
+			if refusal := s.lookupCapacityRefusal(ctx, CapacityIdentityOfHeader(command.CommandHeader)); refusal != nil {
+				return zero, refusal
+			}
+		}
 		return s.readMigrateReceiptHeld(ctx, raw, signature)
 	case "unknown":
 		return zero, ErrMigrationUnknown
@@ -983,6 +1025,9 @@ func (s *Store) DispatchMigrateData(ctx context.Context, raw, signature, descrip
 	step, err := bindMigrateDescriptor(command, descriptor)
 	if err != nil {
 		return zero, err
+	}
+	if parsed, perr := appplatform.ParseDescriptor(descriptor); perr == nil && parsed.Manifest.Backend != nil {
+		ctx = withBackendResources(ctx, parsed.Manifest.Backend.Resources)
 	}
 	// The marker is checked before any claim: a namespace already past the source schema is not migrated.
 	before, err := native.ReadSchemaMarker(ctx, pin, command.Payload.NamespaceID, uint32(mustDataUint(command.Payload.ProjectID)))
@@ -1207,6 +1252,20 @@ func (s *Store) tryAcquireDataExecution() bool {
 func (s *Store) ReadMigrateDataOrStatus(ctx context.Context, raw, signature []byte) (any, error) {
 	got, err := s.readMigrateData(ctx, raw, signature, control.VerifyMigrateDataRead)
 	if err != nil {
+		// A migration a capacity refusal reverted answers with the refusal.
+		var effect struct {
+			EffectID string `json:"effect_id"`
+		}
+		_ = json.Unmarshal(raw, &effect)
+		if refusal := s.answerCapacityRefusal(ctx, effect.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+			v, err := control.VerifyMigrateDataRead(raw, signature, a, now)
+			return CapacityIdentityOfHeader(v.Command().CommandHeader), err
+		}); refusal != nil {
+			var typed *CapacityRefusalError
+			if errors.As(refusal, &typed) {
+				return typed.Receipt, nil
+			}
+		}
 		return nil, err
 	}
 	now := time.Now().UTC().UnixMilli()

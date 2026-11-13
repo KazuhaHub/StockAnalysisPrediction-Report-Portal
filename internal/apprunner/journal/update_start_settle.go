@@ -508,6 +508,10 @@ func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observe
 		changed, err = tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=4,observed_ms=?,updated_ms=?
 			WHERE id=? AND kind='container' AND native_id=? AND revision=1 AND desired_state='present' AND observed_state='unknown' AND observed_ms IS NULL`,
 			now, now, facts.resource.id, updateStartPendingPrefix+start.Payload.ResourceID)
+		if err == nil {
+			// The orphaned start's absence is proven in this transaction, so its reservation is released in it.
+			err = releaseReservation(ctx, tx, facts.resource.id, now)
+		}
 	} else {
 		var marker UpdateStartClaimMarker
 		if !canonicalDataJSON(facts.startRow, &marker) || marker.Preflight == nil || !validUpdateStartClaimMarker(marker) || !containerSHAValue(observed.NativeID) {

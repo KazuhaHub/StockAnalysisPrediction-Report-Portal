@@ -215,7 +215,7 @@ func platformInstallResourceCount(e migExec, installation string) (int, error) {
 // claimed merely to stop it; live work requires the exact still-current lease.
 func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code string, expired bool) error {
 	lease := facts.lease
-	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" {
+	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && !isPlatformCapacityErrorCode(code) {
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {
@@ -281,6 +281,12 @@ func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code 
 	return nil
 }
 func (s *Server) finishPlatformInstallForReview(ctx context.Context, expected platformOperationLease) error {
+	return s.finishPlatformInstallWithCode(ctx, expected, "install_execution_review_required")
+}
+
+// finishPlatformInstallWithCode is the review finish with the failure code the caller names: the generic one, or
+// the dimension of a runner capacity refusal.
+func (s *Server) finishPlatformInstallWithCode(ctx context.Context, expected platformOperationLease, code string) error {
 	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -297,7 +303,7 @@ func (s *Server) finishPlatformInstallForReview(ctx context.Context, expected pl
 	if err != nil {
 		return err
 	}
-	if err = finalizePlatformInstallForReview(e, facts, "install_execution_review_required", false); err != nil {
+	if err = finalizePlatformInstallForReview(e, facts, code, false); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -86,6 +86,9 @@ func (s *Store) ClaimWritableCandidate(ctx context.Context, raw, signature []byt
 	if err != nil {
 		return zero, err
 	}
+	if err := s.requireHeldReservation(ctx, tx, reservation.ResourceID); err != nil {
+		return zero, err
+	}
 	id, err := dataClaimID()
 	if err != nil {
 		return zero, err

@@ -3,6 +3,7 @@ package journal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strconv"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -35,6 +36,16 @@ func (s *Store) ReadCandidateRunningReceipt(ctx context.Context, raw, signature 
 	var zero CandidateRunningReceipt
 	tx, f, err := s.beginCandidateCommandReceipt(ctx, raw, signature, "applied", nil)
 	if err != nil {
+		var effect struct {
+			EffectID string `json:"effect_id"`
+		}
+		_ = json.Unmarshal(raw, &effect)
+		if refusal := s.answerCapacityRefusal(ctx, effect.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+			v, err := control.VerifyCandidate(raw, signature, a, now)
+			return CapacityIdentityOfCommand(candidateIndex(v.Command())), err
+		}); refusal != nil {
+			return zero, refusal
+		}
 		return zero, err
 	}
 	defer tx.Rollback()

@@ -520,3 +520,22 @@ func TestAnUnsettleableLoadDoesNotStarveTheRestOfTheWindow(t *testing.T) {
 		t.Fatalf("the unsettleable load: %q %q", state, receipt)
 	}
 }
+
+// A capacity refusal is a definite end: the effect is recorded reverted with the typed receipt, the typed error
+// reaches the caller unmasked, and the load is neither read back nor sent again. Fails if the refusal is reported
+// as an uncertain load (which would retry for ever) or leaves the effect without a verdict.
+func TestEnsureImageRecordsACapacityRefusalAsRevertedAndKeepsItTyped(t *testing.T) {
+	s, lease, endpoint, _, fake := platformImageEnsureFixture(t)
+	fake.refuseCapacity = "image_store"
+	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
+	refusal, ok := platformCapacityRefusalOf(err)
+	if !ok || refusal.Dimension != "image_store" || errors.Is(err, errPlatformImageUncertain) {
+		t.Fatalf("the refusal was not kept typed: %v", err)
+	}
+	if _, _, state, receipt, found := imageRow(t, s, lease.id); !found || state != "reverted" || !strings.Contains(receipt, `"outcome":"capacity_exhausted"`) {
+		t.Fatalf("effect row %q %q", state, receipt)
+	}
+	if fake.count("load") != 1 || fake.count("read") != 0 {
+		t.Fatalf("calls %v", fake.calls)
+	}
+}

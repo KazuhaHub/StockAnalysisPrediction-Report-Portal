@@ -52,6 +52,8 @@ type Config struct {
 	MinimumCPUs               int        `json:"minimum_reported_cpus"`
 	MinimumMemory             int64      `json:"minimum_reported_memory_bytes"`
 	Controller                Controller `json:"controller"`
+	// Capacity is the optional declared share of the host (doc 171). Absent fields take their defaults.
+	Capacity *CapacityConfig `json:"capacity,omitempty"`
 }
 
 type BootstrapConfig struct {
@@ -69,6 +71,7 @@ func LoadConfig(path string) (Config, error) {
 		!validAbsolute(cfg.IPCRoot) || !validAbsolute(cfg.ControlRoot) || !validAbsolute(cfg.ControlSocket) ||
 		filepath.Dir(cfg.ControlSocket) != cfg.ControlRoot || !validIdentity(cfg.ControllerUID, cfg.ControllerGID) ||
 		cfg.NetworkActive < 1 || cfg.NetworkActive > 16 || cfg.NetworkEntries < 16 || cfg.NetworkEntries > 4096 ||
+		!cfg.Capacity.valid() ||
 		cfg.MinimumCPUs < 1 || cfg.MinimumCPUs > 1024 || cfg.MinimumMemory < 64<<20 || cfg.MinimumMemory > 1<<50 ||
 		overlap(cfg.JournalDir, cfg.DataRoot) || overlap(cfg.JournalDir, cfg.CheckpointRoot) || overlap(cfg.JournalDir, cfg.IPCRoot) || overlap(cfg.JournalDir, cfg.ControlRoot) ||
 		overlap(cfg.DataRoot, cfg.CheckpointRoot) || overlap(cfg.DataRoot, cfg.IPCRoot) || overlap(cfg.DataRoot, cfg.ControlRoot) ||

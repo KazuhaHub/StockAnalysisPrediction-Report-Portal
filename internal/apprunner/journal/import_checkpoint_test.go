@@ -359,7 +359,7 @@ func TestUpgradedV1JournalStillRefusesForeignRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	if scalar(t, store.db, `PRAGMA user_version`) != 2 {
+	if scalar(t, store.db, `PRAGMA user_version`) != 3 {
 		t.Fatal("journal not upgraded")
 	}
 	command := importCommandFixture(t, 1700)

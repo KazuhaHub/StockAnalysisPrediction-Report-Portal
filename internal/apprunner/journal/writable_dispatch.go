@@ -81,6 +81,7 @@ func (s *Store) DispatchWritableCandidate(ctx context.Context, raw, signature, d
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != v.Index().Payload.ReleaseSHA256 {
 		return zero, ErrFenceReconciliation
 	}
+	ctx = withBackendResources(ctx, parsed.Manifest.Backend.Resources)
 	// Existing running/reserved history has its own strict current validators;
 	// never weaken first admission to accept a later lifecycle resource shape.
 	if receipt, err := s.ReadWritableCandidateRunningReceipt(ctx, raw, signature); err == nil {
@@ -118,6 +119,8 @@ func (s *Store) DispatchWritableCandidate(ctx context.Context, raw, signature, d
 		return s.ExecuteWritableCandidate(ctx, claim, native, descriptor)
 	case "applied":
 		return s.ReadWritableCandidateRunningReceipt(ctx, raw, signature)
+	case "reverted":
+		return zero, s.capacityRefusalFor(ctx, CapacityIdentityOfCommand(candidateIndex(v.Index())))
 	default:
 		return zero, ErrFenceReconciliation
 	}

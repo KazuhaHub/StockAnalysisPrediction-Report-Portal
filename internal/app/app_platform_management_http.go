@@ -191,6 +191,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 400, "app_platform_invalid_request"
 	case errors.Is(err, errPlatformImageStoreFull):
 		status, code = 507, "app_platform_storage_full"
+	case errors.Is(err, errPlatformInstallationCapacity):
+		status, code = 429, "installation_capacity"
 	case errors.Is(err, appplatform.ErrManagedOfflineNotReady):
 		status, code = 409, "app_platform_requirements_unavailable"
 	case errors.Is(err, errAppPlatformInstallUnavailable):
@@ -790,12 +792,7 @@ func (s *Server) readPlatformManagementProgress(ctx context.Context, actor platf
 	result.ControlPaused = paused != "0" || !platformValidUUID(epoch) || epoch != currentEpoch
 	result.Terminal = result.Stage == appplatform.StageComplete || result.Stage == appplatform.StageFailed || result.Stage == appplatform.StageRecoveryRequired
 	if code.Valid && code.String != "" {
-		switch code.String {
-		case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required":
-			result.ErrorCode = code.String
-		default:
-			result.ErrorCode = "app_platform_operation_failed"
-		}
+		result.ErrorCode = platformPublicOperationErrorCode(code.String)
 	}
 	final, err := platformDatabaseNow(e)
 	if err != nil {

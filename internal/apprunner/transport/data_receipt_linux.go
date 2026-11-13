@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -68,15 +69,28 @@ func (s *Server) handleDataResponse(ctx context.Context, conn *net.UnixConn, exe
 	} else {
 		receipt, err = reader.ReadDataPreparationReceipt(ctx, body[:size], body[size:])
 	}
-	if err != nil {
-		return
-	}
-	encoded, err := json.Marshal(receipt)
-	if err != nil {
-		return
-	}
-	if _, err := journal.ParseDataPreparationReceipt(encoded); err != nil {
-		return
+	var encoded []byte
+	var refusal *journal.CapacityRefusalError
+	if errors.As(err, &refusal) {
+		// The runner refused the namespace for lack of room: a definite, typed end the sender needs to see.
+		encoded, err = json.Marshal(refusal.Receipt)
+		if err != nil {
+			return
+		}
+		if _, err := journal.ParseCapacityRefusal(encoded); err != nil {
+			return
+		}
+	} else {
+		if err != nil {
+			return
+		}
+		encoded, err = json.Marshal(receipt)
+		if err != nil {
+			return
+		}
+		if _, err := journal.ParseDataPreparationReceipt(encoded); err != nil {
+			return
+		}
 	}
 	digest := sha256.New()
 	digest.Write(header)
@@ -162,6 +176,15 @@ func readDataResponse(parent context.Context, path string, profile endpointProfi
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
 		return zero, ErrDataReceiptObservation
+	}
+	if refusal, parseErr := journal.ParseCapacityRefusal(body); parseErr == nil {
+		if !refusal.Matches(journal.CapacityIdentityOfCommand(verified.Command())) {
+			return zero, ErrDataReceiptObservation
+		}
+		if _, err := control.Verify(raw, signature, authority, time.Now().UnixMilli()); err != nil {
+			return zero, ErrDataReceiptObservation
+		}
+		return zero, &journal.CapacityRefusalError{Receipt: refusal}
 	}
 	receipt, err := journal.ParseDataPreparationReceipt(body)
 	if err != nil || !receipt.MatchesCommand(verified.Command()) {

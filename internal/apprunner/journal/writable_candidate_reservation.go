@@ -232,6 +232,34 @@ func (s *Store) ReserveWritableCandidate(ctx context.Context, raw, signature []b
 		generation, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 		writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
 		result = WritableCandidateReservation{ResourceID: c.Payload.ResourceID, InstallationID: c.InstallationID, NamespaceID: c.Payload.DataNamespaceID, EffectID: c.EffectID, OwnershipSHA256: writableCandidateOwnership(f), DataReceiptSHA256: f.verified.Writer().Command().DataReceiptSHA256, WriterReceiptSHA256: f.verified.Command().WriterReceiptSHA256, Generation: generation, ControlFence: f.stored.fence, WriterFence: writer}
+		// Reserve the declared resources before the resource row exists and before any native call. A refusal
+		// reverts the command and leaves no resource or reservation row behind.
+		plan, admit, err := s.backendPlan(ctx, reservationBackend, c.Payload.ResourceID, c.InstallationID)
+		if err != nil {
+			return zero, err
+		}
+		if admit {
+			refusal, err := s.admitCapacity(ctx, tx, plan, f.now)
+			if err != nil {
+				return zero, err
+			}
+			if refusal != nil {
+				receipt, err := refuseCapacityPrepared(ctx, tx, CapacityIdentityOfCommand(candidateIndex(c)), *refusal, f.now)
+				if err != nil {
+					return zero, err
+				}
+				if err := finalWritableCandidateCheck(ctx, f); err != nil {
+					return zero, err
+				}
+				if s.closing.Load() {
+					return zero, ErrWritableCandidateClaimUnavailable
+				}
+				if err := tx.Commit(); err != nil {
+					return zero, err
+				}
+				return zero, &CapacityRefusalError{Receipt: receipt}
+			}
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms) VALUES(?,?,?,'container',?,?,?,?,?,?,'present','unknown',?,1,NULL,?,?)`, result.ResourceID, c.InstallationID, result.NamespaceID, writableCandidatePendingPrefix+result.ResourceID, c.Payload.ReleaseSHA256, generation, c.ControllerEpoch, f.stored.fence, writer, result.OwnershipSHA256, f.now, f.now)
 		if err != nil {
 			return zero, err

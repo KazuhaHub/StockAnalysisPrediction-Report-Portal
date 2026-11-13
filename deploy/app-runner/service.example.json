@@ -15,6 +15,13 @@
   "network_entries": 1024,
   "minimum_reported_cpus": 2,
   "minimum_reported_memory_bytes": 2147483648,
+  "capacity": {
+    "memory_percent": 25,
+    "cpu_percent": 50,
+    "disk_bytes": 8589934592,
+    "running_backends": 8,
+    "image_store_bytes": 10737418240
+  },
   "controller": {
     "deployment_id": "10000000-0000-4000-8000-000000000001",
     "controller_epoch": "20000000-0000-4000-8000-000000000002",

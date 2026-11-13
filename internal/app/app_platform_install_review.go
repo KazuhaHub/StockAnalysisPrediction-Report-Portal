@@ -194,6 +194,10 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 		if err != nil {
 			return err
 		}
+		// An early, cheap refusal: the authoritative count is the one in the consumption transaction.
+		if err := requirePlatformInstallationSlot(e); err != nil {
+			return err
+		}
 		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + 900000}
 		_, err = e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms) VALUES(?,NULL,?,?,'install',NULL,?,0,0,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`, id, projection.AppID, projection.PublisherID, release, trustRevision, control.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint, result.SHA256, result.JSON, result.ExpiresMS, control.nowMS, control.nowMS)
 		if err == nil && facts != nil && !validPlatformInstallRuntimeFacts(*facts, endpoint) {
@@ -364,6 +368,13 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if err != nil {
 			return err
 		}
+		// Authoritative: counted in the transaction that inserts the installation. Two consumptions cannot both
+		// take the last slot because this transaction runs under the publisher-trust guard
+		// (lockPlatformPublisherTrust): on PostgreSQL a SHARE ROW EXCLUSIVE table lock, which conflicts with
+		// itself, and on SQLite the database write lock.
+		if err := requirePlatformInstallationSlot(e); err != nil {
+			return err
+		}
 		if _, err = e.exec(`INSERT INTO app_platform_installations(id,app_id,publisher_id,runtime_id,desired_state,phase,generation,revision,policy_revision,control_fence,controller_epoch,sealed_identity_seed,created_ms,updated_ms) VALUES(?,?,?,?,'enabled','pending',1,1,1,0,?,?,?,?)`, installationID, appID, publisher, managedInstallRuntimeID(projection), control.epoch, sealPrefix+sealed, control.nowMS, control.nowMS); err != nil {
 			return err
 		}
@@ -425,4 +436,23 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		return platformRemovalCommit{}, err
 	}
 	return result, nil
+}
+
+// platformInstallationCap is the declared maximum of installations, static and managed together (doc 167
+// section 4). Like the task quotas it is a constant, not a setting.
+const platformInstallationCap = 50
+
+var errPlatformInstallationCapacity = errors.New("application installation capacity exhausted")
+
+// requirePlatformInstallationSlot refuses an installation when the cap is reached. Only a removed installation
+// frees a slot: every other phase, including a disabled or quarantined one, still holds its resources.
+func requirePlatformInstallationSlot(e migExec) error {
+	var active int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_installations WHERE phase<>'removed'`).Scan(&active); err != nil {
+		return err
+	}
+	if active >= platformInstallationCap {
+		return errPlatformInstallationCapacity
+	}
+	return nil
 }

@@ -85,6 +85,9 @@ func (s *Store) ClaimPrepareData(ctx context.Context, raw, signature []byte) (Da
 	if err != nil {
 		return zero, err
 	}
+	if err := s.requireHeldReservation(ctx, tx, reservation.ResourceID); err != nil {
+		return zero, err
+	}
 	id, err := dataClaimID()
 	if err != nil {
 		return zero, err

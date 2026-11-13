@@ -214,7 +214,7 @@ func TestJournalInitializationIsAtomicOnPageExhaustion(t *testing.T) {
 	if err := initialize(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if scalar(t, db, `PRAGMA user_version`) != 2 {
+	if scalar(t, db, `PRAGMA user_version`) != 3 {
 		t.Fatal("clean retry did not initialize")
 	}
 }

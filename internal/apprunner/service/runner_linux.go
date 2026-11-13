@@ -19,7 +19,6 @@ import (
 )
 
 var ErrUnsupported = errors.New("app-runner service requires native Linux amd64 or arm64")
-var ErrNotReady = errors.New("app-runner runtime is not ready")
 
 // Serve owns one already-provisioned runtime. Configuration never selects an
 // arbitrary command, mount, app, image or controller key.
@@ -76,6 +75,19 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady
 	}
+	// The declared capacity envelope turns percentages of the host into absolute budgets. A fact that cannot be
+	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
+	budgets, err := DeriveBudgets(cfg.Capacity.Resolve(), HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot)})
+	if err != nil {
+		var notReady *NotReadyError
+		if errors.As(err, &notReady) {
+			logger.Printf("app-runner not ready: capacity: %s", notReady.Reason)
+		}
+		return ErrNotReady
+	}
+	if err := store.SetCapacityBudgets(budgets); err != nil {
+		return ErrNotReady
+	}
 	// The scratch is opened first: it removes any blobs an earlier run left, before anything can read them.
 	images, err := imagestore.Open(cfg.ImageRoot)
 	if err != nil {
@@ -90,12 +102,23 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		return ErrNotReady
 	}
 	defer native.Close()
+	// Nothing is admitted before the upgrade's estimated reservations are refined from the live containers: a
+	// daemon that cannot answer leaves the runner not ready, an unobservable row keeps its fail-closed estimate.
+	refined, err := store.RefineEstimatedReservations(ctx, native)
+	if err != nil {
+		logger.Printf("app-runner not ready: capacity: refine estimated reservations: %v", err)
+		return ErrNotReady
+	}
+	estimated, err := store.EstimatedReservations(ctx)
+	if err != nil {
+		return ErrNotReady
+	}
 	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries)
 	if err != nil {
 		return ErrNotReady
 	}
 	defer server.Close()
-	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg))
+	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s refined_rows=%d estimated_rows=%d", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets), refined, estimated)
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil

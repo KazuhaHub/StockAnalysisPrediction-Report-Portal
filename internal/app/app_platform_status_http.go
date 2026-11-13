@@ -189,12 +189,7 @@ func (s *Server) readPlatformInstallationStatus(ctx context.Context, session pla
 			result.Stage = string(stage)
 		}
 		if code.Valid && code.String != "" {
-			result.ErrorCode = "app_platform_operation_failed"
-			if code.String == "install_lease_recovery_required" ||
-				code.String == "install_authority_review_required" ||
-				code.String == "install_execution_review_required" {
-				result.ErrorCode = code.String
-			}
+			result.ErrorCode = platformPublicOperationErrorCode(code.String)
 		}
 	}
 

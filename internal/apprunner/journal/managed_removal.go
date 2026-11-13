@@ -736,6 +736,12 @@ func (s *Store) settleManagedRemoval(ctx context.Context, source managedRemovalS
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, fmt.Errorf("%w: managed removal settlement resource CAS", ErrFenceReconciliation)
 	}
+	if nextState == "absent" {
+		// Proven absence is recorded in this transaction, so the reservation is released in it.
+		if err := releaseReservation(ctx, tx, current.resourceID(), now); err != nil {
+			return zero, err
+		}
+	}
 	result := ManagedRemovalReceipt{
 		Format: managedRemovalReceiptFormat, DeploymentID: source.command.DeploymentID, ControllerEpoch: source.command.ControllerEpoch,
 		InstallationID: source.command.InstallationID, OperationID: source.command.OperationID,

@@ -182,7 +182,9 @@ jobs:
             rm -rf "$work"
           }
           trap cleanup EXIT
-          truncate -s 1G "$image"
+          # Sparse: the runner reports not ready on a volume smaller than its declared disk budget (8 GiB by
+          # default), so the service volume is larger than the 1 GiB the quota probes use.
+          truncate -s 9G "$image"
           loop=$(sudo -n losetup --find --show "$image")
           test -n "$loop"
           sudo -n mkfs.xfs -f "$loop" >/dev/null

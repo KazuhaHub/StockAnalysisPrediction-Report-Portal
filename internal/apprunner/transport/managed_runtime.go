@@ -27,7 +27,34 @@ type ManagedRuntimeProfile struct {
 	RootInode              string `json:"root_inode"`
 	WritableSandboxProfile string `json:"writable_sandbox_profile,omitempty"`
 	ExecutionReady         bool   `json:"execution_ready"`
+	// Capacity is the effective budgets the runner admits against and the number of reservations still
+	// estimated at the descriptor maxima. All decimal strings; the zero value (nothing reported) is accepted so
+	// that a runner without a declared envelope remains readable.
+	Capacity ManagedRuntimeCapacity `json:"capacity"`
 }
+
+// ManagedRuntimeCapacity reports the declared capacity envelope (doc 171).
+type ManagedRuntimeCapacity struct {
+	MemoryMiB       string `json:"memory_mib,omitempty"`
+	CPUMillis       string `json:"cpu_millis,omitempty"`
+	DiskBytes       string `json:"disk_bytes,omitempty"`
+	ImageStoreBytes string `json:"image_store_bytes,omitempty"`
+	RunningBackends string `json:"running_backends,omitempty"`
+	EstimatedRows   string `json:"estimated_rows,omitempty"`
+}
+
+func validManagedCapacity(c ManagedRuntimeCapacity) bool {
+	if c == (ManagedRuntimeCapacity{}) {
+		return true
+	}
+	decimal := func(v string, positive bool) bool {
+		n, err := strconv.ParseInt(v, 10, 64)
+		return err == nil && n >= 0 && (!positive || n > 0) && strconv.FormatInt(n, 10) == v
+	}
+	return decimal(c.MemoryMiB, true) && decimal(c.CPUMillis, true) && decimal(c.DiskBytes, true) && decimal(c.ImageStoreBytes, true) &&
+		decimal(c.RunningBackends, true) && decimal(c.EstimatedRows, false)
+}
+
 type managedRuntimeWire struct {
 	Format     string                `json:"format"`
 	Controller enrollmentWire        `json:"controller"`
@@ -37,7 +64,7 @@ type managedRuntimeWire struct {
 
 func validManagedProfile(p ManagedRuntimeProfile) bool {
 	inode, err := strconv.ParseUint(p.RootInode, 10, 64)
-	return err == nil && inode > 0 && strconv.FormatUint(inode, 10) == p.RootInode && observationUUID.MatchString(p.RootFilesystemUUID) && p.RootFilesystemUUID != "00000000-0000-0000-0000-000000000000" && p.Protocol == ManagedRunnerProtocol && (p.Platform == "linux/amd64" || p.Platform == "linux/arm64") && p.BackendProtocol == ManagedBackendProtocol && p.SandboxProfile == control.CandidateSandboxProfile && !p.ExecutionReady && (p.WritableSandboxProfile == "" || p.WritableSandboxProfile == control.WritableCandidateSandboxProfile)
+	return err == nil && inode > 0 && strconv.FormatUint(inode, 10) == p.RootInode && observationUUID.MatchString(p.RootFilesystemUUID) && p.RootFilesystemUUID != "00000000-0000-0000-0000-000000000000" && p.Protocol == ManagedRunnerProtocol && (p.Platform == "linux/amd64" || p.Platform == "linux/arm64") && p.BackendProtocol == ManagedBackendProtocol && p.SandboxProfile == control.CandidateSandboxProfile && !p.ExecutionReady && validManagedCapacity(p.Capacity) && (p.WritableSandboxProfile == "" || p.WritableSandboxProfile == control.WritableCandidateSandboxProfile)
 }
 func decodeManagedRuntime(raw []byte) (managedRuntimeWire, control.Authority, error) {
 	var w managedRuntimeWire

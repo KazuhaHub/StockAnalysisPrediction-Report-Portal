@@ -974,6 +974,22 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 				read.intent.resourceID, lease.installationID, lease.snapshot.Generation)
 			return err
 		})
+	case err != nil && platformSettlementRefusal(err, read.intent):
+		// The runner refused the start for lack of room: it never ran and never will, whatever the signed window.
+		refusal, _ := platformCapacityRefusalOf(err)
+		raw, _ := json.Marshal(refusal)
+		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
+			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start' AND payload_sha256=?
+				AND state IN ('prepared','unknown') AND receipt_json=?`,
+				string(raw), now, lease.id, read.intent.effectID, read.intent.command.PayloadSHA256, start.receipt)
+			if err := platformLeaseCAS(changed, err); err != nil {
+				return err
+			}
+			_, err = e.exec(`DELETE FROM app_platform_activations WHERE id=? AND installation_id=? AND generation=? AND state='candidate'`,
+				read.intent.resourceID, lease.installationID, lease.snapshot.Generation)
+			return err
+		})
 	case err != nil:
 		var held *journal.UpdateStartHeldError
 		if !errors.As(err, &held) {
@@ -1538,4 +1554,10 @@ func (s *Server) markPlatformMigrationSettled(ctx context.Context, lease platfor
 		return err
 	})
 	return err == nil, err
+}
+
+// platformSettlementRefusal reports whether err is the runner's capacity refusal of exactly this start.
+func platformSettlementRefusal(err error, intent platformUpdateStartIntent) bool {
+	refusal, ok := platformCapacityRefusalOf(err)
+	return ok && refusal.Matches(journal.CapacityIdentityOfUpdateStart(intent.command))
 }

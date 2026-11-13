@@ -36,6 +36,11 @@ const errors = new Set([
   'install_lease_recovery_required',
   'install_authority_review_required',
   'install_execution_review_required',
+  'capacity_exhausted_memory',
+  'capacity_exhausted_cpu',
+  'capacity_exhausted_disk',
+  'capacity_exhausted_image_store',
+  'capacity_exhausted_running_backends',
 ])
 const events = new Set([
   'admitted', 'stage', 'activated', 'restored', 'failed', 'pending',
