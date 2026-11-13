@@ -48,7 +48,45 @@ const platformRemoveImageMaxNumber = 32
 var (
 	// errPlatformReclaimUncertain is a removal whose outcome is not known; the same effect is read again.
 	errPlatformReclaimUncertain = errors.New("the outcome of the image removal is not known")
+	// errPlatformStillReferenced is not a failure: the image is referenced again, or was loaded again, so the
+	// removal is not started.
+	errPlatformStillReferenced = errors.New("the image is referenced again")
 )
+
+// platformKnownLoadsIn is the watermark of an image on a runtime: every applied load effect of its config digest.
+func platformKnownLoadsIn(e migExec, runtimeID, digest string) (string, error) {
+	rows, err := e.query(`SELECT effect_id,receipt_json FROM app_platform_operation_effects WHERE kind='load_image' AND state='applied' AND COALESCE(runtime_id,'')=?`, runtimeID)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id, receipt string
+		if err := rows.Scan(&id, &receipt); err != nil {
+			return "", err
+		}
+		if parsed, err := journal.ParseLoadImageReceipt([]byte(receipt)); err == nil && parsed.Claim.ConfigDigest == digest {
+			ids = append(ids, id)
+		}
+	}
+	return control.FormatKnownLoads(ids), rows.Err()
+}
+
+// platformRefuseLoadWhileRemoval makes a load of an image wait while a removal of the same image on the runtime has
+// no verdict: the runner fences the two as well, but the Portal stops sending the load, which is not a failure.
+func (s *Server) platformRefuseLoadWhileRemoval(ctx context.Context, runtimeID, configDigest string) error {
+	open, err := s.platformOpenRemovals(ctx)
+	if err != nil {
+		return err
+	}
+	for _, t := range open {
+		if t.runtimeID == runtimeID && t.intent.ConfigDigest == configDigest {
+			return fmt.Errorf("%w: a removal of the image has no verdict yet", errPlatformImageBusy)
+		}
+	}
+	return nil
+}
 
 // platformRemoveImageReply is what the transport proves about a reply to a remove-image command or its read-back.
 type platformRemoveImageReply interface {
@@ -89,6 +127,11 @@ type platformReclaimIntent struct {
 	ConfigDigest   string `json:"config_digest"`
 	Layers         string `json:"layers"`
 	LoadEffectID   string `json:"load_effect_id"`
+	// KnownLoads is the reference watermark the command carries: every applied load of this image on the runtime
+	// the Portal saw when it computed the references, as control.FormatKnownLoads encodes it.
+	KnownLoads string `json:"known_loads"`
+	// Attempt numbers the tries after a refusal; it is part of the effect id, so a retry is a new effect.
+	Attempt int `json:"attempt"`
 }
 
 type platformReclaimRow struct {
@@ -103,18 +146,35 @@ type platformReclaimTarget struct {
 	intent        platformReclaimIntent
 	effectID      string
 	effectNumber  int64
+	// stale marks a begun removal whose watermark no longer names every load of the image.
+	stale bool
 	// state is "" for a removal not begun, otherwise the Portal row's open state ("prepared" or "unknown").
 	state string
 }
 
-func platformRemoveImageEffectID(hostOperation, loadEffect string) string {
-	return platformDerivedUUID("remove-image", hostOperation+"/"+loadEffect)
+func platformRemoveImageEffectID(hostOperation, loadEffect string, attempt int) string {
+	if attempt == 0 {
+		return platformDerivedUUID("remove-image", hostOperation+"/"+loadEffect)
+	}
+	return platformDerivedUUID("remove-image", hostOperation+"/"+loadEffect+"/"+strconv.Itoa(attempt))
+}
+
+// platformReclaimBackoff is how long a refused removal waits before its next attempt, per attempt already made and
+// capped at platformReclaimBackoffCap. Tests set it to zero.
+var platformReclaimBackoff = 10 * time.Minute
+
+const platformReclaimBackoffCap = 6 * time.Hour
+
+func platformReclaimWait(attempts int) time.Duration {
+	return min(time.Duration(attempts)*platformReclaimBackoff, platformReclaimBackoffCap)
 }
 
 type platformLoadedImage struct {
 	runtimeID, operation, installation, effectID string
 	updatedMS                                    int64
 	intent                                       platformReclaimIntent
+	// knownLoads is every applied load effect of the image on the runtime.
+	knownLoads []string
 }
 
 // platformReferencedConfigDigests is every config digest a release the Portal still needs carries. A release is
@@ -127,17 +187,26 @@ func (s *Server) platformReferencedConfigDigests(ctx context.Context) (map[strin
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
-	pins, err := loadPlatformReleasePins(pool, time.Now().UnixMilli())
+	referenced, err := platformReferencedConfigDigestsIn(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT DISTINCT p.source_release_sha256 FROM app_platform_operations o
+	return referenced, nil
+}
+
+// platformReferencedConfigDigestsIn is the same computation on any executor, so the removal row can be inserted in
+// the transaction that computed it, under the lock operation admission also takes.
+func platformReferencedConfigDigestsIn(e migExec) (map[string]bool, error) {
+	pins, err := loadPlatformReleasePins(e, time.Now().UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	rows, err := e.query(`SELECT DISTINCT p.source_release_sha256 FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE o.action='update' AND o.stage='complete' AND o.completed_ms IS NOT NULL AND i.desired_state<>'removed' AND p.source_release_sha256 IS NOT NULL
 		AND NOT EXISTS (SELECT 1 FROM app_platform_operations o2 WHERE o2.installation_id=o.installation_id AND o2.action='update' AND o2.stage='complete'
-			AND o2.completed_ms IS NOT NULL AND (o2.completed_ms>o.completed_ms OR (o2.completed_ms=o.completed_ms AND o2.id>o.id)))`))
+			AND o2.completed_ms IS NOT NULL AND (o2.completed_ms>o.completed_ms OR (o2.completed_ms=o.completed_ms AND o2.id>o.id)))`)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +234,7 @@ func (s *Server) platformReferencedConfigDigests(ctx context.Context) (map[strin
 	sort.Strings(shas)
 	for _, sha := range shas {
 		var descriptor []byte
-		if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), sha).Scan(&descriptor); err != nil {
+		if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, sha).Scan(&descriptor); err != nil {
 			return nil, fmt.Errorf("referenced release %s: %w", sha, err)
 		}
 		parsed, err := appplatform.ParseDescriptor(descriptor)
@@ -179,7 +248,7 @@ func (s *Server) platformReferencedConfigDigests(ctx context.Context) (map[strin
 			referenced[entry.ConfigDigest] = true
 		}
 	}
-	return referenced, ctx.Err()
+	return referenced, nil
 }
 
 // platformLoadedImages lists what the Portal has loaded on a runtime and not removed since: the latest applied load
@@ -195,6 +264,7 @@ func (s *Server) platformLoadedImages(ctx context.Context) ([]platformLoadedImag
 	defer rows.Close()
 	type key struct{ runtime, digest string }
 	latestLoad := map[key]platformLoadedImage{}
+	known := map[key][]string{}
 	removedAt := map[key]int64{}
 	busy := map[string]bool{}
 	for rows.Next() {
@@ -211,6 +281,7 @@ func (s *Server) platformLoadedImages(ctx context.Context) ([]platformLoadedImag
 				continue
 			}
 			k := key{runtimeID, parsed.Claim.ConfigDigest}
+			known[k] = append(known[k], effect)
 			latestLoad[k] = platformLoadedImage{runtimeID: runtimeID, operation: operation, installation: installation, effectID: effect, updatedMS: updated,
 				intent: platformReclaimIntent{ReleaseSHA256: parsed.Claim.ReleaseSHA256, Platform: parsed.Claim.Platform, ManifestDigest: parsed.Claim.ManifestDigest,
 					ConfigDigest: parsed.Claim.ConfigDigest, Layers: parsed.Claim.Layers, LoadEffectID: effect}}
@@ -234,6 +305,8 @@ func (s *Server) platformLoadedImages(ctx context.Context) ([]platformLoadedImag
 		if at, removed := removedAt[k]; removed && at >= image.updatedMS {
 			continue
 		}
+		image.knownLoads = known[k]
+		image.intent.KnownLoads = control.FormatKnownLoads(known[k])
 		out = append(out, image)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -271,10 +344,58 @@ func (s *Server) platformOpenRemovals(ctx context.Context) ([]platformReclaimTar
 	return out, rows.Err()
 }
 
+type platformRemovalOutcome struct {
+	Outcome      string `json:"outcome"`
+	ConfigDigest string `json:"config_digest"`
+	Claim        struct {
+		ConfigDigest string `json:"config_digest"`
+	} `json:"claim"`
+	Intent platformReclaimIntent `json:"intent"`
+}
+
+func (s *Server) platformRemovalRows(ctx context.Context) (map[string][]platformRemovalRow, error) {
+	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT COALESCE(runtime_id,''),state,updated_ms,receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]platformRemovalRow{}
+	for rows.Next() {
+		var runtimeID, state, receipt string
+		var updated int64
+		if err := rows.Scan(&runtimeID, &state, &updated, &receipt); err != nil {
+			return nil, err
+		}
+		var parsed platformRemovalOutcome
+		if json.Unmarshal([]byte(receipt), &parsed) != nil {
+			continue
+		}
+		digest := parsed.Claim.ConfigDigest
+		if digest == "" {
+			digest = parsed.ConfigDigest
+		}
+		if digest == "" {
+			digest = parsed.Intent.ConfigDigest
+		}
+		if digest == "" {
+			continue
+		}
+		out[runtimeID+"/"+digest] = append(out[runtimeID+"/"+digest], platformRemovalRow{state: state, updated: updated})
+	}
+	return out, rows.Err()
+}
+
+type platformRemovalRow struct {
+	state   string
+	updated int64
+}
+
 // platformReclaimTargets returns the removals to carry out now: the begun ones that still have no verdict, and the
-// new ones for images nothing references. A begun removal whose image is referenced again is returned with
-// stillUnreferenced false so the caller can abandon it. Any failure to compute the references returns an error and
-// no target: if in doubt, the image stays.
+// new ones for images nothing references. A begun removal whose image is referenced again, or whose watermark no
+// longer names every load of the image, is returned so the caller can abandon it. A refused removal is tried again
+// on a later tick, as a new attempt with an effect id of its own, after a backoff that grows with the attempts; an
+// applied one never is, and an open one is never started twice. Any failure to compute the references returns an
+// error and no target: if in doubt, the image stays.
 func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platformReclaimTarget, referenced map[string]bool, err error) {
 	referenced, err = s.platformReferencedConfigDigests(ctx)
 	if err != nil {
@@ -284,18 +405,48 @@ func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platform
 	if err != nil {
 		return nil, nil, err
 	}
-	begun := map[string]bool{}
-	for _, t := range open {
-		begun[t.runtimeID+"/"+t.intent.ConfigDigest] = true
-		targets = append(targets, t)
-	}
 	loaded, err := s.platformLoadedImages(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
+	fresh := map[string]string{}
+	for _, image := range loaded {
+		fresh[image.runtimeID+"/"+image.intent.ConfigDigest] = image.intent.KnownLoads
+	}
+	begun := map[string]bool{}
+	for _, t := range open {
+		k := t.runtimeID + "/" + t.intent.ConfigDigest
+		begun[k] = true
+		if watermark, ok := fresh[k]; ok && watermark != t.intent.KnownLoads {
+			// A load the command does not name has been applied since: the image may be referenced again.
+			t.stale = true
+		}
+		targets = append(targets, t)
+	}
+	history, err := s.platformRemovalRows(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	now := time.Now().UnixMilli()
 	pool := s.st.poolExec()
 	for _, image := range loaded {
-		if referenced[image.intent.ConfigDigest] || begun[image.runtimeID+"/"+image.intent.ConfigDigest] {
+		k := image.runtimeID + "/" + image.intent.ConfigDigest
+		if referenced[image.intent.ConfigDigest] || begun[k] {
+			continue
+		}
+		if len(image.knownLoads) > control.MaxKnownLoads {
+			log.Printf("app-platform image removal: %d loads of one image exceed the watermark bound; the image is kept", len(image.knownLoads))
+			continue
+		}
+		attempts := 0
+		var last int64
+		for _, row := range history[k] {
+			if row.updated >= image.updatedMS && row.state == "reverted" {
+				attempts++
+				last = max(last, row.updated)
+			}
+		}
+		if attempts > 0 && now < last+platformReclaimWait(attempts).Milliseconds() {
 			continue
 		}
 		host, ok, err := platformReclaimHost(pool, image.installation)
@@ -305,7 +456,7 @@ func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platform
 		if !ok {
 			continue
 		}
-		effect := platformRemoveImageEffectID(host, image.effectID)
+		effect := platformRemoveImageEffectID(host, image.effectID, attempts)
 		var exists int
 		if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE effect_id=?`), effect).Scan(&exists); err != nil {
 			return nil, nil, err
@@ -313,7 +464,9 @@ func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platform
 		if exists != 0 {
 			continue
 		}
-		targets = append(targets, platformReclaimTarget{runtimeID: image.runtimeID, hostOperation: host, installation: image.installation, intent: image.intent, effectID: effect})
+		intent := image.intent
+		intent.Attempt = attempts
+		targets = append(targets, platformReclaimTarget{runtimeID: image.runtimeID, hostOperation: host, installation: image.installation, intent: intent, effectID: effect})
 	}
 	return targets, referenced, nil
 }
@@ -374,7 +527,7 @@ func (g *platformImageSigner) removeCall(t platformReclaimTarget, descriptor []b
 		},
 		Payload: control.RemoveImagePayload{
 			ReleaseSHA256: t.intent.ReleaseSHA256, Platform: t.intent.Platform, ManifestDigest: t.intent.ManifestDigest,
-			ConfigDigest: t.intent.ConfigDigest, Layers: t.intent.Layers,
+			ConfigDigest: t.intent.ConfigDigest, Layers: t.intent.Layers, KnownLoads: t.intent.KnownLoads,
 		},
 	}
 	digest, err := control.RemoveImageLogicalDigest(command)
@@ -410,7 +563,28 @@ func (r platformImageRows) prepareRemoval(ctx context.Context, c control.RemoveI
 		qerr := e.queryRow(`SELECT effect_id,kind,payload_sha256,state FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=?`+lock,
 			r.lease.id, control.RemoveImageStage, mustInt64(c.EffectNumber)).Scan(&id, &kind, &digest, &state)
 		if errors.Is(qerr, sql.ErrNoRows) {
-			_, err := e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+			// The references are computed again here, in the transaction that inserts the row, under the lock
+			// operation admission takes too: an operation admitted first is pinned by its unfinished-operation
+			// pin and stops the removal here, and a removal inserted first is seen by any later load of the image,
+			// which waits for it (platformRefuseLoadWhileRemoval).
+			if err := lockPlatformPublisherTrust(e); err != nil {
+				return err
+			}
+			referenced, err := platformReferencedConfigDigestsIn(e)
+			if err != nil {
+				return err
+			}
+			if referenced[intent.ConfigDigest] {
+				return errPlatformStillReferenced
+			}
+			watermark, err := platformKnownLoadsIn(e, r.runtimeID, intent.ConfigDigest)
+			if err != nil {
+				return err
+			}
+			if watermark != intent.KnownLoads {
+				return errPlatformStillReferenced
+			}
+			_, err = e.exec(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
 				VALUES(?,?,?,?,?,?,?,?,?,0,'prepared',?,?,?)`, r.lease.id, control.RemoveImageStage, mustInt64(c.EffectNumber), c.EffectID, platformRemoveImageKind, c.PayloadSHA256,
 				r.runtimeID, r.lease.controllerEpoch, r.lease.fence, string(raw), now, now)
 			state = "prepared"
@@ -465,7 +639,7 @@ func (s *Server) abandonPlatformRemoval(ctx context.Context, t platformReclaimTa
 			return err
 		}
 		_, err = e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-			WHERE operation_id=? AND effect_id=? AND kind='remove_image' AND state IN ('prepared','unknown')`, `{"outcome":"`+outcome+`"}`, now, t.hostOperation, t.effectID)
+			WHERE operation_id=? AND effect_id=? AND kind='remove_image' AND state IN ('prepared','unknown')`, `{"outcome":"`+outcome+`","config_digest":"`+t.intent.ConfigDigest+`"}`, now, t.hostOperation, t.effectID)
 		return err
 	})
 }
@@ -532,6 +706,9 @@ func (s *Server) reclaimPlatformImage(ctx context.Context, endpoint platformRunt
 	}
 	rows := platformImageRows{s: s, lease: lease, runtimeID: signer.runtime.id, guard: guard}
 	state, err := rows.prepareRemoval(ctx, call.command, t.intent)
+	if errors.Is(err, errPlatformStillReferenced) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
@@ -604,9 +781,9 @@ func (s *Server) reclaimPlatformImage(ctx context.Context, endpoint platformRunt
 // recordPlatformRemoval writes a verified receipt on the removal row: applied for a removed or absent image, reverted
 // for the runner's refusal because a container still uses it.
 func (s *Server) recordPlatformRemoval(ctx context.Context, signer *platformImageSigner, rows platformImageRows, call platformRemoveImageCall, receipt *journal.RemoveImageReceipt) error {
-	state := "applied"
-	if receipt.State == "in_use" {
-		state = "reverted"
+	state := "reverted"
+	if receipt.State == "removed" || receipt.State == "absent" {
+		state = "applied"
 	}
 	raw, _ := json.Marshal(receipt)
 	if err := rows.settleRemoval(ctx, call.command, state, string(raw)); err != nil {
@@ -633,6 +810,11 @@ func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRun
 	if endpoint.path == "" {
 		return 0, nil
 	}
+	// While the Portal is paused for recovery nothing else of the application platform runs, and an image removed
+	// now could be one the recovery is about to restore: the step waits for the pause to end.
+	if s.platformRecoveryPaused(ctx) {
+		return 0, nil
+	}
 	targets, referenced, err := s.platformReclaimTargets(ctx)
 	if err != nil {
 		// Fail closed: with the references unknown nothing is removed.
@@ -645,7 +827,7 @@ func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRun
 	}
 	settled := 0
 	for _, t := range targets {
-		done, err := s.reclaimPlatformImage(ctx, endpoint, t, !referenced[t.intent.ConfigDigest])
+		done, err := s.reclaimPlatformImage(ctx, endpoint, t, !referenced[t.intent.ConfigDigest] && !t.stale)
 		switch {
 		case err == nil && done:
 			settled++

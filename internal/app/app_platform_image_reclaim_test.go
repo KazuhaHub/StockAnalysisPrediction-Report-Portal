@@ -56,6 +56,8 @@ type platformFakeReclaimRunner struct {
 	// absentOnRead answers a read-back with the typed absence, as a runner that never claimed the effect.
 	absentOnRead bool
 	pendingFor   int
+	// conflict makes a refusal the daemon's own conflict rather than a container using the image.
+	conflict bool
 }
 
 func newPlatformFakeReclaimRunner(t *testing.T, endpoint platformRuntimeEndpoint) *platformFakeReclaimRunner {
@@ -105,7 +107,11 @@ func (f *platformFakeReclaimRunner) answer(call platformRemoveImageCall) platfor
 	case "applied":
 		reply.receipt = f.receipt(call, "removed", "")
 	case "reverted":
-		reply.receipt = f.receipt(call, "in_use", "image_in_use")
+		if f.conflict {
+			reply.receipt = f.receipt(call, "conflict", "image_conflict")
+		} else {
+			reply.receipt = f.receipt(call, "in_use", "image_in_use")
+		}
 	}
 	return reply
 }
@@ -200,8 +206,13 @@ func newReclaimFixture(t *testing.T) *reclaimFixture {
 
 // release adds a managed release with images of its own and returns its sha.
 func (f *reclaimFixture) release(t *testing.T, name string) string {
+	return f.releaseSeed(t, name, "reclaim-"+name)
+}
+
+// releaseSeed is release with the image seed named, so two releases can share an image.
+func (f *reclaimFixture) releaseSeed(t *testing.T, name, seed string) string {
 	t.Helper()
-	parts := newPlatformManagedImageParts(t, "7."+strconv.Itoa(len(f.releases)+1)+".0", "reclaim-"+name)
+	parts := newPlatformManagedImageParts(t, "7."+strconv.Itoa(len(f.releases)+1)+".0", seed)
 	like := scalar[string](t, f.s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND state='active'`, f.installation)
 	sha := platformInsertManagedRelease(t, f.s, like, parts)
 	f.releases[name], f.shas[name] = parts, sha
@@ -262,6 +273,14 @@ func (f *reclaimFixture) targets(t *testing.T) map[string]bool {
 
 func (f *reclaimFixture) removalRows(t *testing.T) int {
 	return scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE kind='remove_image'`)
+}
+
+// noBackoff lets a refused removal be retried at once for the length of the test.
+func noBackoff(t *testing.T) {
+	t.Helper()
+	old := platformReclaimBackoff
+	platformReclaimBackoff = 0
+	t.Cleanup(func() { platformReclaimBackoff = old })
 }
 
 func TestReclaimComputesOnlyTheImagesNothingReferences(t *testing.T) {
@@ -393,7 +412,7 @@ func TestReclaimSendsOneSignedRemovalPerImageAndNeverAgainOnceApplied(t *testing
 	}
 	// The effect id is the one derived from the host operation and the load it undoes.
 	loadEffect := scalar[string](t, f.s.st, `SELECT effect_id FROM app_platform_operation_effects WHERE kind='load_image' AND receipt_json LIKE ?`, "%"+f.config("a")+"%")
-	want := platformRemoveImageEffectID(f.hostOp, loadEffect)
+	want := platformRemoveImageEffectID(f.hostOp, loadEffect, 0)
 	found := false
 	for _, c := range f.fake.sent {
 		found = found || c.EffectID == want
@@ -498,7 +517,7 @@ func TestReclaimDoesNotCompleteAnUnknownRemovalOfAnImageReferencedAgain(t *testi
 	if f.fake.count("remove") != sends {
 		t.Fatal("a removal of a referenced image was completed")
 	}
-	if scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`) != `{"outcome":"referenced_again"}` ||
+	if scalar[string](t, f.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`) != `{"outcome":"referenced_again","config_digest":"`+f.config("a")+`"}` ||
 		scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`) != "reverted" {
 		t.Fatal("the row of a removal that no longer applies is not closed with its reason")
 	}

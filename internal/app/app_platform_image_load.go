@@ -347,6 +347,10 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 	}
 	release := store.hold(names...)
 	defer release()
+	// A removal of this image with no verdict is ahead of this load: wait for it (the runner fences them too).
+	if err := s.platformRefuseLoadWhileRemoval(ctx, signer.runtime.id, target.entry.ConfigDigest); err != nil {
+		return err
+	}
 	runner := s.platformImageRunnerSeam()
 	sent := false
 	for round := 0; round < 4; round++ {

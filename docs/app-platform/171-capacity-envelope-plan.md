@@ -531,3 +531,45 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
 - The Portal reaches the removal through the scheduler hooks and the idle tick; a test shows the idle tick and the
   hook send it, and a source check shows both operation endings call the hook, but no test runs a whole update or
   uninstall through the scheduler into a removal.
+
+## Resolutions (PR 4c, review round 1)
+
+37. **Remove versus install.** Closed on both sides. Portal: the references are computed again in the transaction that
+    inserts the `remove_image` row (`prepareRemoval`), which takes the OU mutation lock and the publisher-trust lock
+    every installation mutation takes (the SHARE ROW EXCLUSIVE table lock on PostgreSQL, the write lock on SQLite). An
+    operation admitted first is pinned by the unfinished-operation and open-plan pins and stops the removal there; a
+    removal inserted first is seen by any later load of the image, which waits (`platformRefuseLoadWhileRemoval`,
+    called by `runPlatformImageLoad`, so the settlement driver honours it too). Runner: the signed command carries a
+    watermark, `known_loads`, the effect ids of every load of the image the Portal saw applied on the runtime (one to
+    32, canonical, ascending). The claim is refused with the typed `ErrRemoveImageReferencedAgain` when the journal
+    holds an applied or unknown load of the digest outside the list, with no row written; a reverted load never
+    counts. The error did not exist before; it means exactly this. The wire carries no reply for a pre-claim refusal,
+    so the Portal sees an uncertain execute and a typed absence on read-back, leaves the row prepared, and on the next
+    tick abandons a removal whose stored watermark no longer matches the loads it sees (`referenced_again`). An image
+    with more than 32 loads is kept. Both interleavings are tested on SQLite; PostgreSQL is not reachable from this
+    host.
+38. **Enable source release.** `settleOrphan` (both branches) now releases the enable start's source through
+    `settleEnableSourceAbsent`, in its transaction, after two absence observations of the source. Not reachable today:
+    `control` refuses a settle command for any kind but `update-start`, and the reserved removal likewise, so an
+    unknown enable start cannot be settled by either path yet. The journal side is ready and tested through the helper;
+    admitting `enable-start` in `control` is a separate change.
+39. **Orphan settlement on the Portal.** A runner answer of `candidate_never_ran` settles the Portal's start effect
+    `reverted` with the typed receipt (lease, fence, runtime, effect id and payload compare-and-swap, one audit entry)
+    and the operation ends failed with the closed code `start_never_ran`. A replay settles once. The plain candidate
+    start has no scheduler route today; its settlement is tested alone.
+40. **Retry of a refused removal.** The effect id carries an attempt number (0 keeps the old id). A refusal
+    (`image_in_use`, the daemon's own 409 after the guard as `image_conflict`, `referenced_again`,
+    `abandoned_outcome_unknown`) is tried again on a later tick as a new effect after a backoff of ten minutes per
+    attempt made, capped at six hours. An applied removal is never retried, and no attempt begins beside an open one.
+41. **Recovery pause.** The step does nothing while the Portal is paused for recovery: an image removed then could be
+    one the recovery is about to restore.
+42. **Pins.** Tests keep the image of an unfinished or queued operation's release, a `recovery_required` failure, an open
+    review plan, and a release sharing its config digest with a pinned one; an image of another runtime is never sent
+    through this runtime's endpoint.
+43. **Orphan window.** Two absence observations a settle delay apart (two seconds) are required before a candidate or
+    update-start orphan is settled. A daemon that completes a create later than that window still leaves a container
+    the settlement has recorded absent; the namespace sweep that follows a settled update start removes it, a
+    candidate has no such sweep, and this residual window is accepted.
+44. **Untag events.** Docker emits `delete` for an image removed by ID that has no tag and `untag` only when a tag is
+    removed, so the delivery evidence's rejection of `untag` events should hold for the delivered image, which carries
+    no name. This is reasoning about the daemon, not something run here; the native job is the check.
