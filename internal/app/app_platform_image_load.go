@@ -359,6 +359,15 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 		sent = true
 		reply, err := runner.LoadImage(ctx, endpoint, call)
 		if err != nil {
+			// The runner refused the load for lack of room in its image store. That is a definite end, not an
+			// uncertain execute: the effect is reverted with the typed receipt and the refusal stays typed.
+			if refusal, ok := platformCapacityRefusalOf(err); ok && refusal.Matches(journal.CapacityIdentityOfHeader(call.command.CommandHeader)) {
+				raw, _ := json.Marshal(refusal)
+				if settleErr := rows.settle(ctx, call.command, "reverted", string(raw)); settleErr != nil {
+					return settleErr
+				}
+				return err
+			}
 			// An uncertain execute is read back under its own identity. It is never sent again under another.
 			var readErr error
 			if reply, readErr = runner.ReadLoadImage(ctx, endpoint, call); readErr != nil || reply == nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 // The load-image effect row. Kind load_image, stage "stage", number 1, the id derived from the operation and
@@ -311,6 +313,12 @@ func (s *Server) settlePlatformLoadImage(ctx context.Context, endpoint platformR
 		}
 	case errors.Is(readErr, errPlatformMigrationAbsent):
 	default:
+		// The runner refused the load for lack of room in its image store: the effect never ran, so it is settled
+		// as reverted with the typed receipt, which is the definite end the operation already ended with.
+		if refusal, ok := platformCapacityRefusalOf(readErr); ok && refusal.Matches(journal.CapacityIdentityOfHeader(call.command.CommandHeader)) {
+			raw, _ := json.Marshal(refusal)
+			return rows.settle(ctx, call.command, "reverted", string(raw))
+		}
 		return readErr
 	}
 	// The runner needs the bytes. Hash them again now; if they are gone the load cannot settle until the package is
