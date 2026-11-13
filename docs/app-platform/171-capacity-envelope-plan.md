@@ -477,9 +477,10 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
     every command family's fixtures and, on the Portal, into the readers that guard managed access, the candidate
     intent, install admission, the removal selection and the enable operation.
 30. **An image-store refusal while a removal is pending.** The load refusal stays the typed
-    `capacity_exhausted_image_store` and is not retried. Reclaim is automatic after an operation ends, so the operator
-    message (`err.capacity_exhausted_image_store`, in the three locales) now says that images of removed or replaced
-    versions are reclaimed automatically and to try again in a few minutes before removing apps. No key was added.
+    `capacity_exhausted_image_store` and is not retried. The operator message (`err.capacity_exhausted_image_store`,
+    in the three locales) says the image store is full, that images no installation uses are reclaimed only after the
+    app versions that referenced them are removed, and that an administrator can raise the image store budget; it does
+    not promise a reclaim within minutes. No key was added.
 31. **Native coverage.** The image delivery acceptance child now runs the reclaim step after its uninstall and
     asserts the `remove_image` effect is `applied` with a `removed` receipt for the delivered image ID; the parent
     asserts, from the daemon itself, that exactly one image `delete` event names that ID, that the ID is gone, and
@@ -501,9 +502,16 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
     the receipt over both lifecycle transports, and the controller side validates it against the exact signed command
     and returns it as `*journal.CandidateOrphanSettledError`. No new command kind was added, so the Portal needs no new
     effect; it receives a definite typed end where it used to receive only an uncertain error.
-34. **Not wired: the Portal's own effect row.** The Portal does not yet turn `CandidateOrphanSettledError` into a
-    settled effect row; the start stage treats it as the failure it is, through the ordinary retry and finish path.
-    The runner's reservation, the leak this item was about, is released.
+34. **The Portal's own effect row.** `settleOrphanedStartEffect` (`app_platform_candidate_orphan.go`) turns
+    `CandidateOrphanSettledError` into a `reverted` row for the start effect (stage `start`, effect 1), keeping the typed
+    receipt, compared on operation, effect id, payload digest, runtime, controller epoch and an admission fence no newer
+    than the lease's. The scheduler ends the operation in the same transaction through the effect-settlement hook the
+    capacity refusal uses, with the closed error code `start_never_ran` (public allow-list, status view and the three
+    locales), and the audit entry `app_platform.candidate_never_ran` is written there once. A replay of the same receipt
+    against the row it closed succeeds and changes nothing; a receipt that disagrees with the row settles nothing and is
+    treated as the ordinary failure. The plain candidate start has no scheduler route and the install review finisher
+    accepts only the writable format, so only the writable start is ended end to end; the plain candidate settles the
+    same row through the same function.
 
 ### Round-2 minors from PR 4a
 
