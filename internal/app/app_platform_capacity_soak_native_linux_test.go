@@ -519,8 +519,11 @@ func (c *soakChild) drive(operation string, limit time.Duration) string {
 	deadline := time.Now().Add(limit)
 	ctx, cancel := context.WithDeadline(c.ctx, deadline)
 	defer cancel()
+	var lastTick error
 	for time.Now().Before(deadline) {
-		_ = c.writable.tick(ctx)
+		if err := c.writable.tick(ctx); err != nil {
+			lastTick = err
+		}
 		if scalar[string](c.t, c.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) == "complete" {
 			return ""
 		}
@@ -529,11 +532,29 @@ func (c *soakChild) drive(operation string, limit time.Duration) string {
 			c.t.Fatal(err)
 		}
 		if code.Valid && code.String != "" {
+			c.t.Logf("operation %s ended with %s; last worker error: %v; status %+v\n%s", operation, code.String, lastTick, c.writable.currentStatus(), c.effectSummary(operation))
 			return code.String
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return "timeout"
+}
+
+// effectSummary lists the operation's effects with their state, so a failed install says where it stopped.
+func (c *soakChild) effectSummary(operation string) string {
+	rows, err := c.s.st.query(`SELECT stage,kind,state,receipt_json FROM app_platform_operation_effects WHERE operation_id=? ORDER BY stage,effect_number`, operation)
+	if err != nil {
+		return err.Error()
+	}
+	defer rows.Close()
+	var out strings.Builder
+	for rows.Next() {
+		var stage, kind, state, receipt string
+		if rows.Scan(&stage, &kind, &state, &receipt) == nil {
+			fmt.Fprintf(&out, "  effect %s/%s %s %.300s\n", stage, kind, state, receipt)
+		}
+	}
+	return out.String()
 }
 
 func (c *soakChild) stageStatic(app string) platformStagedRelease {
