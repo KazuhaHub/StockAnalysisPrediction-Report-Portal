@@ -5,7 +5,7 @@ go 1.26.11
 require (
 	github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol v0.0.0-20261022100605-28553caad93a
 	github.com/KazuhaHub/authcore v0.6.2
-	github.com/beevik/etree v1.7.0
+	github.com/beevik/etree v1.8.1
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/crewjam/saml v0.5.1
 	github.com/descope/virtualwebauthn v1.0.5
