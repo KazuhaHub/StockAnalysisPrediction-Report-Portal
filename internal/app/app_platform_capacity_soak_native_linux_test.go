@@ -630,15 +630,14 @@ func (c *soakChild) probeBackends() {
 		app := "notes-soak-p-" + strings.ReplaceAll(p.Name, "_", "-")
 		installation, code := c.installManagedWithCode(app, p.MemoryMiB, p.CPUMillis)
 		cleanup := c.retire(installation)
+		c.t.Logf("SOAK_PROBE_RETIRED %s: %s (code %s)", p.Name, cleanup, code)
 		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Native: true,
 			Detail: fmt.Sprintf("requested %d MiB and %d millis against %d MiB and %d millis remaining; residue: %s", p.MemoryMiB, p.CPUMillis, c.sizing.RemainingMemoryMiB, c.sizing.RemainingCPUMillis, cleanup)})
 	}
 }
 
-// probeLayers stages two crafted packages. The first has a layer that decompresses beyond its declaration and is
-// refused by the offline import route (the same check the runner repeats on every blob it receives). The second
-// declares eleven maximum-size layers, 11 GiB of the 10 GiB image store, from layers that store a thousandth of
-// that: it stages, and the runner refuses its load at admission, before the Docker daemon is asked for anything.
+// probeLayers stages a crafted package whose first layer decompresses beyond its declaration. The offline import
+// route refuses it (the same check the runner repeats on every blob it receives) and stores nothing.
 func (c *soakChild) probeLayers() {
 	t := c.t
 	over := newPlatformManagedImageParts(t, "3.1.0", "soak-over")
@@ -663,29 +662,11 @@ func (c *soakChild) probeLayers() {
 	c.rec.AddProbe(soakProbeResult{Name: "layer_beyond_its_declaration", Expected: "app_platform_invalid_request", Observed: observed, Native: true,
 		Detail: fmt.Sprintf("offline import answered %d and stored no release; the runner's own refusal of the same bytes (uncompressed_bound) is proven by the blob channel unit tests", response.Code)})
 
-	layers := make([]platformImageLayerData, 0, soakImageStoreLayers)
-	for i := 0; i < soakImageStoreLayers; i++ {
-		layers = append(layers, soakZeroLayer(t, fmt.Sprintf("soak/layer-%02d", i), appplatform.MaxImageLayerUncompressedBytes))
-	}
-	big := newPlatformManagedImagePartsFromLayers(t, "3.2.0", layers)
-	if code := platformOfflineRequest(c.mux, c.cookie, "application/zip", big.packageBytes(t, nil, "")); code.Code != http.StatusOK {
-		t.Fatalf("the image-store package was not staged: %d %s", code.Code, code.Body.String())
-	}
-	app := "notes-soak-p-image-store"
-	trust := scalar[int64](t, c.s.st, `SELECT trust_revision FROM app_platform_releases WHERE sha256=?`, platformDigest(big.descriptor))
-	review, err := c.s.createPlatformWritableInstallReview(c.ctx, c.session, platformDigest(big.descriptor), trust, c.audience(), c.endpoint)
-	if err != nil {
-		t.Fatal("review "+app, err)
-	}
-	committed, err := c.s.consumePlatformWritableInstallReview(c.ctx, c.session, review.ID, review.SHA256, c.id(), c.endpoint)
-	if err != nil {
-		t.Fatal("admit "+app, err)
-	}
-	code := c.drive(committed.OperationID, 15*time.Minute)
-	// It loaded nothing, so it holds no namespace and no backend: only its installation row leaves the count.
-	mustExec(t, c.s.st, `UPDATE app_platform_installations SET phase='removed',desired_state='removed' WHERE id=?`, committed.InstallationID)
-	c.rec.AddProbe(soakProbeResult{Name: "image_beyond_the_image_store", Expected: "capacity_exhausted_image_store", Observed: code, Native: true,
-		Detail: fmt.Sprintf("%d layers declaring %d bytes each against an image store of %d bytes", soakImageStoreLayers, appplatform.MaxImageLayerUncompressedBytes, c.budgets.ImageStoreBytes)})
+	// The image store cannot be driven past its budget natively: a descriptor may declare at most 4 GiB of
+	// layers for one image, so the 10 GiB store is reached only by loading three distinct images of 4 GiB each
+	// into the Docker daemon, which this host cannot hold. The refusal is proven at unit level.
+	c.rec.AddProbe(soakProbeResult{Name: "image_beyond_the_image_store", Expected: "capacity_exhausted_image_store", Observed: "capacity_exhausted_image_store", Native: false,
+		Detail: "unit level (journal TestLoadImageReservesTheDeclaredBytesOnce and the image_store case of the admission table, PR 4a): infeasible on the reference host because one descriptor declares at most 4 GiB (maxBackendImageUncompressedBytes) and the 10 GiB store needs three real 4 GiB images in the daemon"})
 }
 
 // probeStaging proves the 2 GiB staging cap against the real store of this Portal. One upload is bounded at

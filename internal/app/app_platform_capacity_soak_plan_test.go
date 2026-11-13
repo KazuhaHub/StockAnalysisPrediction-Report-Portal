@@ -1,14 +1,8 @@
 package app
 
 import (
-	"archive/tar"
-	"bytes"
-	"compress/gzip"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -311,90 +305,4 @@ func TestTaskQuotasRefuseAtTheirOwnBoundary(t *testing.T) {
 			t.Errorf("%s: admitted=%t", tc.name, got)
 		}
 	}
-}
-
-func TestSoakZeroLayerDeclaresItsExactTarLengthAndHashesToItsDiffID(t *testing.T) {
-	const target = 3 << 20
-	layer := soakZeroLayer(t, "soak/zero-a", target)
-	if layer.size != target {
-		t.Fatalf("declared size %d", layer.size)
-	}
-	zr, err := gzip.NewReader(bytes.NewReader(layer.compressed))
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash := sha256.New()
-	n, err := io.Copy(hash, zr)
-	if err != nil || n != target || hex.EncodeToString(hash.Sum(nil)) != layer.diffID {
-		t.Fatalf("decompressed %d bytes, diff id match %t, err %v", n, hex.EncodeToString(hash.Sum(nil)) == layer.diffID, err)
-	}
-	if len(layer.compressed) > target/100 {
-		t.Fatalf("zeros did not compress: %d bytes", len(layer.compressed))
-	}
-	other := soakZeroLayer(t, "soak/zero-b", target)
-	if other.diffID == layer.diffID {
-		t.Fatal("layers with different names share a diff id")
-	}
-	// The tar is a single regular file, so a reader of the archive finds its name and its zero content.
-	reader := tar.NewReader(func() io.Reader { z, _ := gzip.NewReader(bytes.NewReader(layer.compressed)); return z }())
-	header, err := reader.Next()
-	if err != nil || header.Name != "soak/zero-a" || header.Size != target-1536 {
-		t.Fatalf("header %+v %v", header, err)
-	}
-}
-
-func TestSoakImageStoreLayersExceedTheStoreByOneLayerOfDeclaredBytes(t *testing.T) {
-	if soakImageStoreLayers*appplatform.MaxImageLayerUncompressedBytes <= int(10<<30) {
-		t.Fatalf("%d layers of the maximum declared size do not exceed the 10 GiB image store", soakImageStoreLayers)
-	}
-	if (soakImageStoreLayers-1)*appplatform.MaxImageLayerUncompressedBytes > int(10<<30) {
-		t.Fatalf("%d layers would exceed the store by more than one layer", soakImageStoreLayers)
-	}
-	if soakImageStoreLayers > appplatform.MaxImageLayers {
-		t.Fatal("more layers than a descriptor may declare")
-	}
-}
-
-// soakImageStoreLayers is the number of maximum-size layers (1 GiB declared each) of the image that must not fit
-// the 10 GiB image store: eleven declare 11 GiB, ten would fit exactly.
-const soakImageStoreLayers = 11
-
-// soakZeroLayer builds a layer whose tar is exactly tarBytes long and holds one file of zeros, so it declares a
-// large uncompressed size and stores about a thousandth of it. The tar length is the file's size plus a
-// 512-byte header and the 1024-byte end marker, and tarBytes must make the file a multiple of 512. The name
-// makes the diff ID unique.
-func soakZeroLayer(t testing.TB, name string, tarBytes int64) platformImageLayerData {
-	t.Helper()
-	content := tarBytes - 1536
-	if content < 0 || content%512 != 0 {
-		t.Fatalf("a tar of %d bytes cannot hold one zero file", tarBytes)
-	}
-	var compressed bytes.Buffer
-	gz, err := gzip.NewWriterLevel(&compressed, gzip.BestSpeed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	hash := sha256.New()
-	tw := tar.NewWriter(io.MultiWriter(hash, gz))
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: content, Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
-	}
-	zeros := make([]byte, 1<<20)
-	for written := int64(0); written < content; {
-		n := int64(len(zeros))
-		if content-written < n {
-			n = content - written
-		}
-		if _, err := tw.Write(zeros[:n]); err != nil {
-			t.Fatal(err)
-		}
-		written += n
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return platformImageLayerData{compressed: compressed.Bytes(), diffID: hex.EncodeToString(hash.Sum(nil)), size: tarBytes}
 }

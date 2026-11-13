@@ -55,36 +55,18 @@ func platformImageLayer(t testing.TB, name, body string) (compressed []byte, dif
 // releases never share a blob unless a test asks them to.
 func newPlatformManagedImageParts(t *testing.T, version, seed string) platformManagedImageParts {
 	t.Helper()
-	var layers []platformImageLayerData
-	for i, body := range []string{seed + "-one", seed + "-two"} {
-		compressed, diffID, size := platformImageLayer(t, "etc/layer"+string(rune('a'+i)), body)
-		layers = append(layers, platformImageLayerData{compressed: compressed, diffID: diffID, size: int64(size)})
-	}
-	return newPlatformManagedImagePartsFromLayers(t, version, layers)
-}
-
-// platformImageLayerData is one finished layer: its gzip bytes, the diff ID of its tar and the tar's length.
-type platformImageLayerData struct {
-	compressed []byte
-	diffID     string
-	size       int64
-}
-
-// newPlatformManagedImagePartsFromLayers builds a managed release for the fixture publisher around the given
-// layers, which the capacity soak uses for an image whose declared size is far beyond what it stores.
-func newPlatformManagedImagePartsFromLayers(t *testing.T, version string, layers []platformImageLayerData) platformManagedImageParts {
-	t.Helper()
 	_, _, frontend := platformSignedReleaseFixture(t, version)
 	var layerDescriptors []map[string]any
 	var diffIDs []string
 	blobs := map[string][]byte{}
 	var entry appplatform.BackendImage
-	for _, layer := range layers {
-		digest := platformDigest(layer.compressed)
-		blobs[digest] = layer.compressed
-		diffIDs = append(diffIDs, "sha256:"+layer.diffID)
-		layerDescriptors = append(layerDescriptors, map[string]any{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + digest, "size": len(layer.compressed)})
-		entry.Layers = append(entry.Layers, appplatform.ImageLayer{DiffID: layer.diffID, UncompressedBytes: int(layer.size)})
+	for i, body := range []string{seed + "-one", seed + "-two"} {
+		compressed, diffID, size := platformImageLayer(t, "etc/layer"+string(rune('a'+i)), body)
+		digest := platformDigest(compressed)
+		blobs[digest] = compressed
+		diffIDs = append(diffIDs, "sha256:"+diffID)
+		layerDescriptors = append(layerDescriptors, map[string]any{"mediaType": "application/vnd.oci.image.layer.v1.tar+gzip", "digest": "sha256:" + digest, "size": len(compressed)})
+		entry.Layers = append(entry.Layers, appplatform.ImageLayer{DiffID: diffID, UncompressedBytes: size})
 	}
 	config, _ := json.Marshal(map[string]any{
 		"architecture": "amd64", "os": "linux", "config": map[string]any{},
