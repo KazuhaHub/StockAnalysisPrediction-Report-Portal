@@ -19,7 +19,6 @@ import (
 )
 
 var ErrUnsupported = errors.New("app-runner service requires native Linux amd64 or arm64")
-var ErrNotReady = errors.New("app-runner runtime is not ready")
 
 // Serve owns one already-provisioned runtime. Configuration never selects an
 // arbitrary command, mount, app, image or controller key.
