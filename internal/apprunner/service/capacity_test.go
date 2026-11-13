@@ -190,3 +190,31 @@ func TestExampleConfigDeclaresTheDefaultCapacity(t *testing.T) {
 		t.Fatalf("example capacity %+v is not the defaults", cfg.Capacity.Resolve())
 	}
 }
+
+func TestDeriveBudgetsChecksASeparateCheckpointVolume(t *testing.T) {
+	defaults := (*CapacityConfig)(nil).Resolve()
+	host := HostFacts{MemoryBytes: 16 * gib, CPUs: 4, VolumeBytes: 16 * gib}
+	// Two retained checkpoints per 768 MiB namespace is two thirds of the disk budget.
+	share := defaults.DiskBytes / 3 * 2
+	if got := CheckpointShare(defaults.DiskBytes); got != share {
+		t.Fatalf("checkpoint share = %d, want %d", got, share)
+	}
+	host.CheckpointSeparate, host.CheckpointVolumeBytes = true, share
+	if _, err := DeriveBudgets(defaults, host); err != nil {
+		t.Fatalf("a checkpoint volume exactly the share was refused: %v", err)
+	}
+	host.CheckpointVolumeBytes = share - 1
+	var notReady *NotReadyError
+	if _, err := DeriveBudgets(defaults, host); !errors.As(err, &notReady) || notReady.Reason != NotReadyCheckpointVolume {
+		t.Fatalf("a checkpoint volume under the share: %v", err)
+	}
+	host.CheckpointVolumeBytes = 0
+	if _, err := DeriveBudgets(defaults, host); !errors.As(err, &notReady) || notReady.Reason != NotReadyHostFact {
+		t.Fatalf("an unreadable checkpoint volume: %v", err)
+	}
+	// On the data volume's own filesystem the data check already covers the checkpoints.
+	host.CheckpointSeparate = false
+	if _, err := DeriveBudgets(defaults, host); err != nil {
+		t.Fatal(err)
+	}
+}

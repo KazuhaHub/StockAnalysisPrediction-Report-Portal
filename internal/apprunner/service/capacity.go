@@ -83,14 +83,23 @@ type HostFacts struct {
 	MemoryBytes int64
 	CPUs        int
 	VolumeBytes int64
+	// CheckpointSeparate is set when the checkpoint root is on another filesystem than the data root. Then its
+	// volume must hold the checkpoint share of the disk budget; otherwise the data volume covers both.
+	CheckpointSeparate    bool
+	CheckpointVolumeBytes int64
 }
+
+// CheckpointShare is the part of the disk budget the retained recovery checkpoints may use: two checkpoints of
+// at most 256 MiB for every 768 MiB namespace, which is two thirds.
+func CheckpointShare(diskBytes int64) int64 { return diskBytes / 3 * 2 }
 
 // Typed reasons a runner reports for not being ready on capacity grounds.
 const (
-	NotReadyHostFact       = "host_fact_unreadable"
-	NotReadyVolumeTooSmall = "volume_smaller_than_disk_budget"
-	NotReadyMemoryBudget   = "memory_budget_below_minimum_backend"
-	NotReadyCPUBudget      = "cpu_budget_below_minimum_backend"
+	NotReadyHostFact         = "host_fact_unreadable"
+	NotReadyVolumeTooSmall   = "volume_smaller_than_disk_budget"
+	NotReadyMemoryBudget     = "memory_budget_below_minimum_backend"
+	NotReadyCPUBudget        = "cpu_budget_below_minimum_backend"
+	NotReadyCheckpointVolume = "checkpoint_volume_smaller_than_share"
 )
 
 // NotReadyError carries the typed reason. It matches ErrNotReady.
@@ -109,6 +118,14 @@ func DeriveBudgets(c ResolvedCapacity, h HostFacts) (journal.CapacityBudgets, er
 	}
 	if h.VolumeBytes < c.DiskBytes {
 		return zero, &NotReadyError{NotReadyVolumeTooSmall}
+	}
+	if h.CheckpointSeparate {
+		if h.CheckpointVolumeBytes <= 0 {
+			return zero, &NotReadyError{NotReadyHostFact}
+		}
+		if h.CheckpointVolumeBytes < CheckpointShare(c.DiskBytes) {
+			return zero, &NotReadyError{NotReadyCheckpointVolume}
+		}
 	}
 	memoryMiB := h.MemoryBytes / (1 << 20) * int64(c.MemoryPercent) / 100
 	cpuMillis := int64(h.CPUs) * 1000 * int64(c.CPUPercent) / 100

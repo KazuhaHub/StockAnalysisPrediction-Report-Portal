@@ -77,7 +77,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	// The declared capacity envelope turns percentages of the host into absolute budgets. A fact that cannot be
 	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
-	budgets, err := DeriveBudgets(cfg.Capacity.Resolve(), HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot)})
+	budgets, err := DeriveBudgets(cfg.Capacity.Resolve(), HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot)})
 	if err != nil {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {
