@@ -258,7 +258,7 @@ func loadDeleteDataSource(
 	}
 
 	var containerRelease, containerDesired, containerObserved sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT release_sha256,
+	containerErr := tx.QueryRowContext(ctx, `SELECT release_sha256,
 		desired_state,observed_state,generation,control_fence,
 		writer_fence,revision FROM runner_resources
 		WHERE kind='container' AND data_namespace_id=?
@@ -267,37 +267,45 @@ func loadDeleteDataSource(
 		&containerRelease, &containerDesired, &containerObserved,
 		&result.container.generation, &result.container.controlFence,
 		&result.container.writerFence,
-		&result.container.revision); err != nil {
+		&result.container.revision)
+	if errors.Is(containerErr, sql.ErrNoRows) {
+		// No container was ever created for this namespace: the install was refused before its start. The
+		// deletion is bound to the volume instead, and only when nothing of the installation ever started.
+		if err := requireDeleteDataNeverStarted(ctx, tx, c, result.volume); err != nil {
+			return result, err
+		}
+	} else if containerErr != nil {
 		return result, fmt.Errorf(
 			"%w: delete-data container history",
 			ErrFenceReconciliation)
-	}
-	result.container.release = containerRelease.String
-	result.container.desired = containerDesired.String
-	result.container.observed = containerObserved.String
-	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
-	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
-	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
-	if !containerRelease.Valid ||
-		result.container.release != c.Payload.ReleaseSHA256 ||
-		!((result.container.desired == "absent" &&
-			result.container.observed == "absent") ||
-			(result.container.desired == "stopped" &&
-				result.container.observed == "stopped")) ||
-		result.container.generation+1 != target ||
-		result.container.controlFence > fence ||
-		result.volume.controlFence > fence ||
-		result.container.writerFence+1 != writer {
-		return result, fmt.Errorf(
-			"delete-data writer/container binding release=%s/%s desired=%s/%s observed=%s/%s generation=%d/%d control=%d/%d volume-control=%d writer=%d/%d target=%d: %w",
-			containerRelease.String, c.Payload.ReleaseSHA256,
-			containerDesired.String, "absent|stopped",
-			containerObserved.String, "absent|stopped",
-			result.container.generation, target-1,
-			result.container.controlFence, fence,
-			result.volume.controlFence,
-			result.container.writerFence, writer-1, target,
-			ErrFenceReconciliation)
+	} else {
+		result.container.release = containerRelease.String
+		result.container.desired = containerDesired.String
+		result.container.observed = containerObserved.String
+		target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+		writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+		fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+		if !containerRelease.Valid ||
+			result.container.release != c.Payload.ReleaseSHA256 ||
+			!((result.container.desired == "absent" &&
+				result.container.observed == "absent") ||
+				(result.container.desired == "stopped" &&
+					result.container.observed == "stopped")) ||
+			result.container.generation+1 != target ||
+			result.container.controlFence > fence ||
+			result.volume.controlFence > fence ||
+			result.container.writerFence+1 != writer {
+			return result, fmt.Errorf(
+				"delete-data writer/container binding release=%s/%s desired=%s/%s observed=%s/%s generation=%d/%d control=%d/%d volume-control=%d writer=%d/%d target=%d: %w",
+				containerRelease.String, c.Payload.ReleaseSHA256,
+				containerDesired.String, "absent|stopped",
+				containerObserved.String, "absent|stopped",
+				result.container.generation, target-1,
+				result.container.controlFence, fence,
+				result.volume.controlFence,
+				result.container.writerFence, writer-1, target,
+				ErrFenceReconciliation)
+		}
 	}
 	var pending int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)
@@ -310,6 +318,42 @@ func loadDeleteDataSource(
 			ErrFenceReconciliation)
 	}
 	return result, nil
+}
+
+// requireDeleteDataNeverStarted admits the deletion of a namespace that has no container history. It proves that
+// nothing of the installation ever started: no command past the data stage is anything but reverted (a refused
+// start is reverted; an applied, unknown or merely prepared one may have run), and the installation has no
+// container resource at all. The volume is what the command is bound to: the release, the generation and the
+// writer fence must be exactly those the install prepared, the way the container binds the ordinary deletion.
+func requireDeleteDataNeverStarted(
+	ctx context.Context, tx *sql.Tx, c control.DeleteDataCommand,
+	volume deleteDataVolume,
+) error {
+	var started, containers int
+	if err := tx.QueryRowContext(ctx, `SELECT
+		(SELECT COUNT(*) FROM runner_commands
+		 WHERE installation_id=? AND effect_id<>?
+		 AND kind NOT IN ('load-image','remove-image')
+		 AND stage NOT IN ('stage','prepare_data') AND state<>'reverted'),
+		(SELECT COUNT(*) FROM runner_resources
+		 WHERE installation_id=? AND kind='container')`,
+		c.InstallationID, c.EffectID, c.InstallationID).Scan(
+		&started, &containers); err != nil {
+		return err
+	}
+	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
+	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
+	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
+	if started != 0 || containers != 0 ||
+		volume.release != c.Payload.ReleaseSHA256 ||
+		volume.generation+1 != target ||
+		volume.controlFence > fence ||
+		volume.writerFence+1 != writer {
+		return fmt.Errorf(
+			"%w: delete-data never-started binding",
+			ErrFenceReconciliation)
+	}
+	return nil
 }
 
 func (s *Store) beginDeleteData(
@@ -501,6 +545,16 @@ func (s *Store) settleDeleteData(
 			"%w: delete-data observation",
 			ErrFenceReconciliation)
 	}
+	return s.settleDeleteDataSnapshot(ctx, source, snapshot)
+}
+
+// settleDeleteDataSnapshot settles a minted snapshot: the part of the settlement that is the journal's own, and
+// the one the journal tests reach without a native data root.
+func (s *Store) settleDeleteDataSnapshot(
+	ctx context.Context, source deleteDataSource,
+	snapshot data.DeleteSnapshot,
+) (DeleteDataReceipt, error) {
+	var zero DeleteDataReceipt
 	if snapshot.NamespaceID != source.command.Payload.NamespaceID ||
 		snapshot.ReleaseSHA256 != source.command.Payload.ReleaseSHA256 ||
 		strconv.FormatUint(uint64(snapshot.ProjectID), 10) !=

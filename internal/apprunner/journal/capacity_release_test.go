@@ -138,7 +138,7 @@ func callsReleaseReservation(t *testing.T, file, function string) bool {
 func TestSettlementsThatProveAbsenceReleaseTheReservation(t *testing.T) {
 	for _, tc := range []struct{ file, function string }{
 		{"managed_removal.go", "settleManagedRemoval"},
-		{"delete_data.go", "settleDeleteData"},
+		{"delete_data.go", "settleDeleteDataSnapshot"},
 		{"migrate_data.go", "settleMigrateRows"},
 		{"update_start_settle.go", "settleOrphan"},
 	} {
