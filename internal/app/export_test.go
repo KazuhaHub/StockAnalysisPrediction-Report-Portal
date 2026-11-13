@@ -1221,6 +1221,13 @@ func TestExportFailureIsRecordedAndLeavesNoPartFile(t *testing.T) {
 
 func TestExportListAndActiveFilter(t *testing.T) {
 	e := newExportEnv(t)
+	// The list orders by created_at, newest first, and job ids are random, so two jobs created in
+	// the same millisecond have no defined order (CI did create both in one). A clock that moves a
+	// millisecond per read, atomically because the export worker reads it on its own goroutine,
+	// gives each job its own instant.
+	var tick atomic.Int64
+	base := time.Now()
+	e.s.exports.now = func() time.Time { return base.Add(time.Duration(tick.Add(1)) * time.Millisecond) }
 	a := e.run2(`{"source":"cleanup","format":"csv","name":"first"}`)
 	b := e.create(`{"source":"cleanup","format":"jsonl","name":"second: ünï/code"}`)
 	var out struct{ Jobs []exportJobJSON }
