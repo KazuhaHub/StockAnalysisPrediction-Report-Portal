@@ -134,6 +134,10 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 		// Already counted at exactly this size: a replay, or an image another installation loaded first.
 		return nil, nil
 	}
+	if existing && held.state == reservationHeld && plan.kind == reservationImage && image >= plan.imageBytes {
+		// An image is counted once, at the largest size any load declared; a smaller declaration changes nothing.
+		return nil, nil
+	}
 	var usedMem, usedCPU, usedDisk, usedImage, usedBackends int64
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_mib),0),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(disk_bytes),0),COALESCE(SUM(image_bytes),0),COALESCE(SUM(CASE WHEN kind='backend' THEN 1 ELSE 0 END),0)
 		FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
@@ -163,8 +167,11 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms)
 		VALUES(?,?,?,?,?,?,?,?,'held',?,?)
-		ON CONFLICT(resource_id) DO UPDATE SET installation_id=excluded.installation_id,kind=excluded.kind,memory_mib=excluded.memory_mib,cpu_millis=excluded.cpu_millis,
-		disk_bytes=excluded.disk_bytes,image_bytes=excluded.image_bytes,state='held',updated_ms=excluded.updated_ms`,
+		ON CONFLICT(resource_id) DO UPDATE SET
+		installation_id=CASE WHEN excluded.kind='image' AND runner_reservations.state='held' THEN runner_reservations.installation_id ELSE excluded.installation_id END,
+		kind=excluded.kind,memory_mib=excluded.memory_mib,cpu_millis=excluded.cpu_millis,disk_bytes=excluded.disk_bytes,
+		image_bytes=CASE WHEN excluded.kind='image' AND runner_reservations.state='held' THEN max(runner_reservations.image_bytes,excluded.image_bytes) ELSE excluded.image_bytes END,
+		state='held',updated_ms=excluded.updated_ms`,
 		id, plan.resourceID, plan.installationID, plan.kind, plan.memoryMiB, plan.cpuMillis, plan.diskBytes, plan.imageBytes, now, now)
 	return nil, err
 }

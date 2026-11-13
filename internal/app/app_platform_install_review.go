@@ -368,8 +368,10 @@ func (s *Server) consumePlatformInstallReviewWithRuntime(ctx context.Context, se
 		if err != nil {
 			return err
 		}
-		// Authoritative: counted in the transaction that inserts the installation, under the same serialisation
-		// as every other installation mutation, so two consumptions cannot both take the last slot.
+		// Authoritative: counted in the transaction that inserts the installation. Two consumptions cannot both
+		// take the last slot because this transaction runs under the publisher-trust guard
+		// (lockPlatformPublisherTrust): on PostgreSQL a SHARE ROW EXCLUSIVE table lock, which conflicts with
+		// itself, and on SQLite the database write lock.
 		if err := requirePlatformInstallationSlot(e); err != nil {
 			return err
 		}

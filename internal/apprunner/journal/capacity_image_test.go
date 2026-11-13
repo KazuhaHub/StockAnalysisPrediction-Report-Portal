@@ -5,6 +5,7 @@ package journal
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
@@ -110,5 +111,34 @@ func TestRejectedLoadReleasesItsReservationUnlessAnotherLoadHoldsTheImage(t *tes
 	}
 	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_reservations WHERE kind='image' AND state='released'`) != 1 {
 		t.Fatal("a rejected load kept its reservation")
+	}
+}
+
+// One image is counted once, at the largest size any load declared, and keeps its first holder.
+func TestImageReservationNeverShrinksAndKeepsItsFirstHolder(t *testing.T) {
+	s := capacityStore(t, roomyBudgets())
+	digest := strings.Repeat("7", 64)
+	plan := func(installation string, bytes int64) capacityPlan {
+		return capacityPlan{kind: reservationImage, resourceID: imageResourceID(digest), installationID: installation, imageBytes: bytes}
+	}
+	if refusal := admitPlan(t, s, plan(fixtureID(1), 3000)); refusal != nil {
+		t.Fatal(refusal)
+	}
+	if refusal := admitPlan(t, s, plan(fixtureID(2), 1000)); refusal != nil {
+		t.Fatal(refusal)
+	}
+	var holder string
+	var bytes int64
+	if err := s.db.QueryRow(`SELECT installation_id,image_bytes FROM runner_reservations WHERE resource_id=?`, imageResourceID(digest)).Scan(&holder, &bytes); err != nil {
+		t.Fatal(err)
+	}
+	if bytes != 3000 || holder != fixtureID(1) {
+		t.Fatalf("after a smaller load by another installation: %d held by %s", bytes, holder)
+	}
+	if refusal := admitPlan(t, s, plan(fixtureID(3), 5000)); refusal != nil {
+		t.Fatal(refusal)
+	}
+	if err := s.db.QueryRow(`SELECT installation_id,image_bytes FROM runner_reservations WHERE resource_id=?`, imageResourceID(digest)).Scan(&holder, &bytes); err != nil || bytes != 5000 || holder != fixtureID(1) {
+		t.Fatalf("after a larger load: %d held by %s", bytes, holder)
 	}
 }
