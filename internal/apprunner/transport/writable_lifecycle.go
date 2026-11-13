@@ -54,13 +54,15 @@ const (
 	SettleUpdateStartRead
 	LoadImageExecute
 	LoadImageRead
+	RemoveImageExecute
+	RemoveImageRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= LoadImageRead
+	return a >= WritableWriterExecute && a <= RemoveImageRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -167,6 +169,24 @@ func (o WritableLifecycleObservation) LoadImageStatus() (journal.LoadImageStatus
 	return journal.ParseLoadImageStatus([]byte(o.body))
 }
 
+// RemoveImageReceipt returns the receipt of a remove-image execute or read-back. A typed status is not a receipt: see
+// RemoveImageStatus.
+func (o WritableLifecycleObservation) RemoveImageReceipt() (journal.RemoveImageReceipt, error) {
+	if o.action != RemoveImageExecute && o.action != RemoveImageRead {
+		return journal.RemoveImageReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseRemoveImageReceipt([]byte(o.body))
+}
+
+// RemoveImageStatus returns the typed "pending" or "orphaned" answer to a remove-image execute or read-back. A
+// definite absence is not an observation: it is reported as journal.ErrNoSuchEffect.
+func (o WritableLifecycleObservation) RemoveImageStatus() (journal.RemoveImageStatus, error) {
+	if o.action != RemoveImageExecute && o.action != RemoveImageRead {
+		return journal.RemoveImageStatus{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseRemoveImageStatus([]byte(o.body))
+}
+
 func (o WritableLifecycleObservation) SettleUpdateStartReceipt() (journal.SettleUpdateStartReceipt, error) {
 	if o.action != SettleUpdateStartExecute && o.action != SettleUpdateStartRead {
 		return journal.SettleUpdateStartReceipt{}, driver.ErrContainerUncertain
@@ -238,6 +258,7 @@ type writableLifecycleReference struct {
 	discard                 control.DiscardMigrationCommand
 	settleStart             control.SettleUpdateStartCommand
 	loadImage               control.LoadImageCommand
+	removeImage             control.RemoveImageCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -398,6 +419,21 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		r.release = r.loadImage.Payload.ReleaseSHA256
 		id := journal.CapacityIdentityOfHeader(r.loadImage.CommandHeader)
 		r.capacity = &id
+	case action == RemoveImageExecute || action == RemoveImageRead:
+		var v control.VerifiedRemoveImageCommand
+		var err error
+		if action == RemoveImageRead {
+			v, err = control.VerifyRemoveImageRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifyRemoveImageSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyRemoveImage(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.removeImage = v.Command()
+		r.release = r.removeImage.Payload.ReleaseSHA256
 	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
 		var v control.VerifiedSettleUpdateStartCommand
 		var err error
@@ -451,6 +487,12 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 	return r, nil
 }
 
+// candidateOrphanAction reports whether the runner may answer the action with the receipt of a claimed start it
+// proved never ran: the writable candidate start and its reconcile and read-back.
+func candidateOrphanAction(action WritableLifecycleAction) bool {
+	return action == WritableCandidateStart || action == WritableCandidateRead || action == WritableCandidateReconcile
+}
+
 // capacityRefusalAction reports whether the runner may answer the action with a capacity refusal: the actions
 // whose effect starts a backend, runs a migration job or loads an image.
 func capacityRefusalAction(action WritableLifecycleAction) bool {
@@ -475,11 +517,21 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 			return r.capacity != nil && refusal.Matches(*r.capacity) && settled <= received.UnixMilli()
 		}
 	}
+	if candidateOrphanAction(action) {
+		if orphan, err := journal.ParseCandidateOrphanReceipt(body); err == nil {
+			// Terminal and immutable, like a refusal: bound to the exact command, not to its signing time.
+			settled, _ := strconv.ParseInt(orphan.SettledMS, 10, 64)
+			return r.capacity != nil && orphan.Matches(*r.capacity) && settled <= received.UnixMilli()
+		}
+	}
 	if status, ok := lifecycleStatusReply(action, body); ok {
 		return validLifecycleStatus(action, status, r, received)
 	}
 	if action == LoadImageExecute || action == LoadImageRead {
 		return validLoadImageReply(body, r.loadImage, received)
+	}
+	if action == RemoveImageExecute || action == RemoveImageRead {
+		return validRemoveImageReply(body, r.removeImage, received)
 	}
 	var settled string
 	switch {
@@ -863,5 +915,32 @@ func loadImageAbsenceReply(action WritableLifecycleAction, body []byte) bool {
 		return false
 	}
 	status, err := journal.ParseLoadImageStatus(body)
+	return err == nil && status.State == "absent"
+}
+
+// validRemoveImageReply accepts a typed status or a receipt, each bound to the exact signed command. A receipt is
+// terminal and immutable, so a read-back is not held to the command's signing time.
+func validRemoveImageReply(body []byte, c control.RemoveImageCommand, received time.Time) bool {
+	if status, err := journal.ParseRemoveImageStatus(body); err == nil {
+		observed, observedErr := strconv.ParseInt(status.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		return journal.RemoveImageStatusMatchesCommand(status, c) && observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+	}
+	receipt, err := journal.ParseRemoveImageReceipt(body)
+	if err != nil || !journal.RemoveImageReceiptMatchesCommand(receipt, c) {
+		return false
+	}
+	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
+	return settledErr == nil && settled <= received.UnixMilli()
+}
+
+// removeImageAbsenceReply reports whether body is the runner's definite "never claimed" answer. Only a read-back can
+// be answered so; an execute that found no row claims one instead. Pending and orphaned are not definite and stay
+// observations.
+func removeImageAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	if action != RemoveImageRead {
+		return false
+	}
+	status, err := journal.ParseRemoveImageStatus(body)
 	return err == nil && status.State == "absent"
 }

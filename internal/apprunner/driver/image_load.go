@@ -86,6 +86,9 @@ const maxListedImages = 4096
 // imageLoadTimeout bounds one load: hashing, decompression-free copy into Docker and its unpack.
 const ImageLoadTimeout = 10 * time.Minute
 
+// ImageRemoveTimeout bounds one image removal: two image listings, two container listings and a delete.
+const ImageRemoveTimeout = 5 * time.Minute
+
 func probeContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, probeTimeout)
 }

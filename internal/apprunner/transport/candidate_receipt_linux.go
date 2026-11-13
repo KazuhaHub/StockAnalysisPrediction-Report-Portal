@@ -97,7 +97,17 @@ func (s *Server) handleCandidateResponseKind(ctx context.Context, conn *net.Unix
 		receipt, err = reader.ReadCandidateRunningReceipt(ctx, body[:size], body[size:])
 	}
 	var refusal *journal.CapacityRefusalError
-	if !readiness && errors.As(err, &refusal) {
+	var orphan *journal.CandidateOrphanSettledError
+	if !readiness && errors.As(err, &orphan) {
+		// The runner proved the claimed start never ran and settled it: a definite end the sender needs to see.
+		encoded, err = json.Marshal(orphan.Receipt)
+		if err != nil {
+			return
+		}
+		if _, err := journal.ParseCandidateOrphanReceipt(encoded); err != nil {
+			return
+		}
+	} else if !readiness && errors.As(err, &refusal) {
 		// The runner refused the start for lack of room: a definite, typed end the sender needs to see.
 		encoded, err = json.Marshal(refusal.Receipt)
 		if err != nil {
@@ -229,6 +239,15 @@ func readCandidateResponseMode(parent context.Context, path string, profile endp
 			return zero, ErrCandidateReceiptObservation
 		}
 		return zero, &journal.CapacityRefusalError{Receipt: refusal}
+	}
+	if orphan, parseErr := journal.ParseCandidateOrphanReceipt(body); parseErr == nil {
+		if !orphan.Matches(journal.CapacityIdentityOfCandidate(verified.Command())) {
+			return zero, ErrCandidateReceiptObservation
+		}
+		if _, err := control.VerifyCandidate(raw, signature, authority, time.Now().UnixMilli()); err != nil {
+			return zero, ErrCandidateReceiptObservation
+		}
+		return zero, &journal.CandidateOrphanSettledError{Receipt: orphan}
 	}
 	receipt, err := journal.ParseCandidateRunningReceipt(body)
 	if err != nil || !receipt.MatchesCommand(verified.Command()) {

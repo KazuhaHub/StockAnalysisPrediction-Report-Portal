@@ -42,11 +42,16 @@ func bulkDataAction(action WritableLifecycleAction) bool {
 // connection instead of having to poll a read-back.
 const loadImageExecutionTimeout = driver.ImageLoadTimeout + 2*time.Minute
 
+// removeImageExecutionTimeout bounds the connection of a remove-image execute the same way.
+const removeImageExecutionTimeout = driver.ImageRemoveTimeout + 2*time.Minute
+
 // writableLifecycleTimeout is the connection bound of an action, used by the runner and the sender alike.
 func writableLifecycleTimeout(action WritableLifecycleAction) time.Duration {
 	switch {
 	case action == LoadImageExecute:
 		return loadImageExecutionTimeout
+	case action == RemoveImageExecute:
+		return removeImageExecutionTimeout
 	case bulkDataAction(action):
 		return restoreExecutionTimeout
 	case action.mutating():
@@ -58,6 +63,9 @@ func writableLifecycleTimeout(action WritableLifecycleAction) time.Duration {
 func writableLifecycleServerTimeout(action WritableLifecycleAction) time.Duration {
 	if action == LoadImageExecute {
 		return loadImageExecutionTimeout
+	}
+	if action == RemoveImageExecute {
+		return removeImageExecutionTimeout
 	}
 	if bulkDataAction(action) {
 		return restoreExecutionTimeout
@@ -182,13 +190,19 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 			return zero, &journal.CapacityRefusalError{Receipt: refusal}
 		}
 	}
+	if candidateOrphanAction(action) {
+		if orphan, err := journal.ParseCandidateOrphanReceipt(body); err == nil {
+			// The runner proved the claimed start never ran and settled it: a definite end, not an observation.
+			return zero, &journal.CandidateOrphanSettledError{Receipt: orphan}
+		}
+	}
 	if startAbsenceReply(action, body) {
 		if absence, err := journal.ParseUpdateStartAbsence(body); err == nil && absence.State != "absent" {
 			// The runner holds the start without a running receipt: not an observation, and not an absence.
 			return zero, &journal.UpdateStartHeldError{State: absence.State}
 		}
 	}
-	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) || removeImageAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -330,6 +344,10 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 			return
 		}
 		result, err = provider.store.ReadLoadImageOrStatus(ctx, raw, sig, descriptor, provider.native, provider.images)
+	case RemoveImageExecute:
+		result, err = provider.store.DispatchRemoveImage(ctx, raw, sig, descriptor, provider.native)
+	case RemoveImageRead:
+		result, err = provider.store.ReadRemoveImageOrStatus(ctx, raw, sig)
 	case SettleUpdateStartExecute:
 		result, err = provider.store.SettleUpdateStart(ctx, raw, sig, provider.native)
 	case SettleUpdateStartRead:
@@ -372,6 +390,12 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 			ctx, raw, sig)
 	default:
 		return
+	}
+	if err != nil && candidateOrphanAction(action) {
+		var orphan *journal.CandidateOrphanSettledError
+		if errors.As(err, &orphan) {
+			result, err = orphan.Receipt, nil
+		}
 	}
 	if err != nil && capacityRefusalAction(action) {
 		var refusal *journal.CapacityRefusalError

@@ -62,3 +62,37 @@ func (r *CandidateRuntime) CheckBackendImage(ctx context.Context, descriptor []b
 	_, err := InspectBackendImage(ctx, socket, descriptor, releaseSHA256, policy)
 	return err
 }
+
+// RemoveImage removes one managed image by ID and proves it absent. The caller holds the journal's load lock and the
+// durable unknown claim. It refuses, typed, while any container of any state uses the image.
+func (r *CandidateRuntime) RemoveImage(ctx context.Context, request RemoveImageRequest) (RemoveImageSnapshot, error) {
+	if r == nil {
+		return RemoveImageSnapshot{}, ErrUnsupported
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed || request.Platform != "linux/"+runtime.GOARCH {
+		return RemoveImageSnapshot{}, ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	return removeImageHTTP(ctx, client, request, runtime.GOARCH)
+}
+
+// ImagePresentByID reports whether the managed image a descriptor implies is in the daemon by ID, valid or not. It
+// is read-only, so a read-back may ask it.
+func (r *CandidateRuntime) ImagePresentByID(ctx context.Context, descriptor []byte, releaseSHA256, platform string) (RemoveImageSnapshot, error) {
+	if r == nil {
+		return RemoveImageSnapshot{}, ErrUnsupported
+	}
+	r.mu.Lock()
+	closed := r.closed
+	r.mu.Unlock()
+	if closed {
+		return RemoveImageSnapshot{}, ErrInvalidResponse
+	}
+	client, closeClient := r.client()
+	defer closeClient()
+	return imagePresentByIDHTTP(ctx, client, descriptor, releaseSHA256, platform, runtime.GOARCH)
+}
