@@ -98,6 +98,21 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 		now, plan.installationID, plan.resourceID); err != nil {
 		return nil, err
 	}
+	// Definite evidence that a reserved start never reached the native layer, so its reservation is dead: the
+	// resource is still the pending row the reserve wrote, and the start command either ended reverted or was
+	// superseded by a newer fence before any claim (a claim of a superseded fence is refused). A start that was
+	// claimed (unknown) or applied is never released here: only the proof of its absence releases it.
+	const startOf = `s.installation_id=res.installation_id AND s.target_generation=res.generation AND s.admitted_fence=res.control_fence AND s.stage='start' AND s.kind IN ('start-candidate','update-start')`
+	if _, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=?
+		WHERE state='held' AND kind='backend' AND resource_id IN (
+			SELECT res.id FROM runner_resources res
+			WHERE res.kind='container' AND res.desired_state='present' AND res.observed_state='unknown' AND res.revision=1 AND res.observed_ms IS NULL
+			AND EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state IN ('prepared','reverted'))
+			AND NOT EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state IN ('unknown','applied'))
+			AND (EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state='reverted')
+			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind<>'load-image' AND n.admitted_fence>res.control_fence)))`, now); err != nil {
+		return nil, err
+	}
 	if plan.transferFrom != "" {
 		// Transfer: the source of the same installation is stopped or absent, and the same effect removes it before
 		// it creates the target, so the target takes its place in the totals. A running source is not transferred.
