@@ -196,6 +196,10 @@ func (s *Store) settleReservedRemoval(ctx context.Context, raw, signature []byte
 		changed, err = tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=4,observed_ms=?,updated_ms=?
 			WHERE id=? AND kind='container' AND native_id=? AND revision=3 AND desired_state='stopped' AND observed_state='stopped'`,
 			now, now, facts.resource.id, updateStartPendingPrefix+start.Payload.ResourceID)
+		if err == nil {
+			// Proven absence is recorded in this transaction, so the reservation is released in it.
+			err = releaseReservation(ctx, tx, facts.resource.id, now)
+		}
 	}
 	if err != nil {
 		return zero, err

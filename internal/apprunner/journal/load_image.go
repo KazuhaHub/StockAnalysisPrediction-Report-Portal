@@ -387,6 +387,32 @@ func (s *Store) beginLoadImage(ctx context.Context, raw, signature []byte, entry
 	if fence < fenceFloor || generation < generationFloor {
 		return zero, fmt.Errorf("%w: load fence floors", ErrCommandConflict)
 	}
+	// Reserve the image's declared bytes, once per config digest, in the claim's own transaction. A refusal is
+	// the row of the effect: reverted, with no reservation behind it and no call to the daemon ever made.
+	if _, ok := s.CapacityBudgets(); ok {
+		var declared int64
+		for _, layer := range entry.Layers {
+			declared += int64(layer.UncompressedBytes)
+		}
+		plan := capacityPlan{kind: reservationImage, resourceID: imageResourceID(c.Payload.ConfigDigest), installationID: c.InstallationID, imageBytes: declared}
+		refusal, err := s.admitCapacity(ctx, tx, plan, now)
+		if err != nil {
+			return zero, err
+		}
+		if refusal != nil {
+			receipt, err := refuseCapacityInsert(ctx, tx, CapacityIdentityOfHeader(c.CommandHeader), fence, generation, *refusal, now)
+			if err != nil {
+				return zero, err
+			}
+			if s.closing.Load() {
+				return zero, ErrLoadImageUnavailable
+			}
+			if err := tx.Commit(); err != nil {
+				return zero, err
+			}
+			return zero, &CapacityRefusalError{Receipt: receipt}
+		}
+	}
 	claimID, err := dataClaimID()
 	if err != nil {
 		return zero, err
@@ -512,6 +538,20 @@ func (s *Store) settleLoadImage(ctx context.Context, intent loadImageIntent, sna
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, fmt.Errorf("load settlement rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
 	}
+	if commandState == "reverted" {
+		// A rejected load leaves no image of its own in the store. Its reservation is released unless another
+		// load of the same config digest, applied or still unknown, holds the image.
+		var others int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE kind='load-image' AND state IN ('applied','unknown') AND effect_id<>?
+			AND COALESCE(json_extract(receipt_json,'$.claim.config_digest'),json_extract(receipt_json,'$.config_digest'))=?`, c.EffectID, c.Payload.ConfigDigest).Scan(&others); err != nil {
+			return zero, err
+		}
+		if others == 0 {
+			if err := releaseReservation(ctx, tx, imageResourceID(c.Payload.ConfigDigest), now); err != nil {
+				return zero, err
+			}
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
@@ -546,6 +586,11 @@ func (s *Store) DispatchLoadImage(ctx context.Context, raw, signature, descripto
 	state, command, row, err := s.loadState(ctx, raw, signature)
 	if err != nil {
 		return nil, fmt.Errorf("load state: %w", err)
+	}
+	if state == "reverted" {
+		if refusal := s.lookupCapacityRefusal(ctx, CapacityIdentityOfHeader(command.CommandHeader)); refusal != nil {
+			return nil, refusal
+		}
 	}
 	if state == "applied" || state == "reverted" {
 		return s.readLoadReceiptHeld(ctx, raw, signature)
@@ -706,6 +751,20 @@ func (s *Store) readLoadImage(ctx context.Context, raw, signature []byte, verify
 func (s *Store) ReadLoadImageOrStatus(ctx context.Context, raw, signature, descriptor []byte, native LoadImageNative, scratch *imagestore.Store) (any, error) {
 	got, err := s.readLoadImage(ctx, raw, signature, control.VerifyLoadImageRead)
 	if err != nil {
+		// A load a capacity refusal reverted answers with the refusal.
+		var effect struct {
+			EffectID string `json:"effect_id"`
+		}
+		_ = json.Unmarshal(raw, &effect)
+		if refusal := s.answerCapacityRefusal(ctx, effect.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+			v, err := control.VerifyLoadImageRead(raw, signature, a, now)
+			return CapacityIdentityOfHeader(v.Command().CommandHeader), err
+		}); refusal != nil {
+			var typed *CapacityRefusalError
+			if errors.As(refusal, &typed) {
+				return typed.Receipt, nil
+			}
+		}
 		return nil, err
 	}
 	now := time.Now().UTC().UnixMilli()

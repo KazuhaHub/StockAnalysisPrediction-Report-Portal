@@ -579,6 +579,10 @@ func (s *Store) settleDeleteData(
 			"%w: delete-data volume settlement CAS",
 			ErrFenceReconciliation)
 	}
+	// The namespace is destroyed in this transaction, so its disk reservation is released in it.
+	if err := releaseReservation(ctx, tx, source.command.Payload.NamespaceID, now); err != nil {
+		return zero, err
+	}
 	result := DeleteDataReceipt{
 		Format:            deleteDataReceiptFormat,
 		DeploymentID:      source.command.DeploymentID,

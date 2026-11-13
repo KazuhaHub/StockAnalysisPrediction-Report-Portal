@@ -415,7 +415,12 @@ func advanceUpdateStartRemovalResource(
 	if err != nil {
 		return 0, err
 	}
-	return changed.RowsAffected()
+	rows, err := changed.RowsAffected()
+	if err == nil && rows == 1 && nextState == "absent" {
+		// Proven absence is recorded in this transaction, so the reservation is released in it.
+		err = releaseReservation(ctx, tx, resourceID, now)
+	}
+	return rows, err
 }
 
 func (store *Store) ReadUpdateStartRemovalReceipt(
