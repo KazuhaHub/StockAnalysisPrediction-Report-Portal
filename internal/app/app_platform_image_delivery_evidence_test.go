@@ -3,7 +3,6 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"regexp"
 	"slices"
 	"sort"
@@ -217,29 +216,6 @@ func imageDeliveryCheckContainerOwner(containerID string, labels map[string]stri
 		if got := labels["org.portal.app."+label]; got != want || want == "" {
 			return fmt.Errorf("container label %s is %q, expected %q", label, got, want)
 		}
-	}
-	return nil
-}
-
-// imageDeliveryOnlyRunnerRangeDiffers proves the staged descriptor is the built one with exactly one field
-// changed: compatibility.runner_protocol.
-func imageDeliveryOnlyRunnerRangeDiffers(built, staged []byte) error {
-	var a, b map[string]any
-	if err := json.Unmarshal(built, &a); err != nil {
-		return fmt.Errorf("built descriptor: %w", err)
-	}
-	if err := json.Unmarshal(staged, &b); err != nil {
-		return fmt.Errorf("staged descriptor: %w", err)
-	}
-	ca, _ := a["compatibility"].(map[string]any)
-	cb, _ := b["compatibility"].(map[string]any)
-	if ca == nil || cb == nil || ca["runner_protocol"] == cb["runner_protocol"] {
-		return fmt.Errorf("the staged descriptor does not change the runner protocol range")
-	}
-	delete(ca, "runner_protocol")
-	delete(cb, "runner_protocol")
-	if !reflect.DeepEqual(a, b) {
-		return fmt.Errorf("the staged descriptor differs from the built one in more than the runner protocol range")
 	}
 	return nil
 }

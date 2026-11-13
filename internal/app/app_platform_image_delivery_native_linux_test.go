@@ -306,6 +306,14 @@ func TestPlatformManagedImageDeliveryAcceptance(t *testing.T) {
 	ctx := context.Background()
 	parts := realImageParts(t)
 	entry := parts.entry
+	builtDescriptor, err := os.ReadFile(filepath.Join(os.Getenv("APP_IMAGE_DELIVERY_CANDIDATE"), "descriptor.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtDescriptorSHA256 := platformDigest(builtDescriptor)
+	if builtDescriptorSHA256 != platformDigest(parts.descriptor) {
+		t.Fatal("the staged descriptor is not the one the Apps builder wrote")
+	}
 	docker := newImageDeliveryDocker(socket)
 
 	// BEFORE the load: no image with the package's ID exists in the Docker store. The job built this very image
@@ -569,7 +577,8 @@ wait:
 		"delivered_image_id":             target,
 		"built_image_is_delivered_image": builtImageID == target,
 		"publisher":                      expected.Publisher,
-		"staged_descriptor_change":       "compatibility.runner_protocol only: >=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0",
+		"built_descriptor_sha256":        builtDescriptorSHA256,
+		"staged_descriptor_is_built":     builtDescriptorSHA256 == expected.ReleaseSHA256,
 		"image_store":                    storeName,
 		"platform":                       entry.Platform,
 		"release_sha256":                 expected.ReleaseSHA256,

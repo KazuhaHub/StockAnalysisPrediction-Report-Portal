@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 // The acceptance of managed image delivery on a real image (doc 167 section 3, PKG-01 and PKG-08). It runs
@@ -42,20 +42,15 @@ func realImageParts(t *testing.T) platformManagedImageParts {
 	if json.Unmarshal(raw, &m) != nil || m.ID != "scheduled-digest" || m.Backend == nil || len(m.Backend.Images) != 1 || m.Backend.Image != "" {
 		t.Fatal("the candidate is not the managed Scheduled Digest descriptor")
 	}
-	// The one rewrite: the Apps builder declares runner_protocol ">=1.0.0 <2.0.0", which can never match this
-	// runner's pre-release protocol (see TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol). Only
-	// that range is changed, in the bytes as built; the publisher, the platform range and every other byte of the
-	// descriptor, the frontend and the blobs are the builder's own.
-	const builtRange, stagedRange = `"runner_protocol": ">=1.0.0 <2.0.0"`, `"runner_protocol": ">=1.0.0-0 <2.0.0"`
-	if bytes.Count(raw, []byte(builtRange)) != 1 {
-		t.Fatal("the built descriptor does not declare the expected runner protocol range")
-	}
-	descriptor := bytes.Replace(raw, []byte(builtRange), []byte(stagedRange), 1)
-	if err := imageDeliveryOnlyRunnerRangeDiffers(raw, descriptor); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(descriptor, &m); err != nil {
-		t.Fatal(err)
+	// The descriptor is staged exactly as the Apps builder wrote it, so it must already be compatible with this
+	// Portal and runner (see TestDeliveryCompatibilityRangesNeedPreReleaseBounds). Checked here so that a range
+	// regression in the Apps repo fails every job that consumes the package, not only the native install.
+	descriptor := raw
+	compatibility, err := appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{
+		PlatformAPI: platformDevelopmentAPI, Runner: &appplatform.RunnerCompatibility{
+			Protocol: transport.ManagedRunnerProtocol, Platform: m.Backend.Images[0].Platform, BackendProtocol: m.Backend.Protocol}})
+	if err != nil || !compatibility.Compatible {
+		t.Fatalf("the built descriptor is not compatible with this Portal and runner: %v %v", compatibility.Issues, err)
 	}
 	blobs := map[string][]byte{}
 	entries, err := os.ReadDir(blobsDir)

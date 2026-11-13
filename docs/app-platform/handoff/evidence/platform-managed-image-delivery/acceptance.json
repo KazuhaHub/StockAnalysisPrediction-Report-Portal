@@ -29,7 +29,7 @@
         "install_path": "offline import route, then the install worker",
         "catalogue_path_with_real_runner": false,
         "containerd_store": false,
-        "descriptor_rewrite": "compatibility.runner_protocol only (>=1.0.0 <2.0.0 to >=1.0.0-0 <2.0.0): the built range cannot match the runner's pre-release protocol 1.0.0-dev.1; asserted that nothing else differs; frontend and blobs are the builder's bytes",
+        "descriptor_rewrite": "none: staged byte for byte as built (Apps 8d8520d gives both bounds of runner_protocol and platform_api the -0 suffix)",
         "publisher": "development-publisher (as built), registered with the test key",
         "admin_http_route": "package import only",
         "review_entry_point": "createPlatformWritableInstallReview (writable development entry point), not the admin managed-install route",
@@ -75,9 +75,9 @@
       "enforce-disposable-project-quota"
     ],
     "workflow": ".github/workflows/app-project-quota-probe.yml",
-    "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42719361547",
+    "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42749515804",
     "artifact": "managed-image-real-runner",
-    "note": "Pull request run 42719361547 (draft PR 412) covers the review follow-ups; both image jobs passed."
+    "note": "Pull request run 42749515804 (PR 414, head 457bc895) stages the Apps-built descriptor byte for byte: built_descriptor_sha256 equals the release digest the runner signed; both image jobs passed."
   },
   "limits": [
     "Native paths run in CI only; the development host has no Docker.",

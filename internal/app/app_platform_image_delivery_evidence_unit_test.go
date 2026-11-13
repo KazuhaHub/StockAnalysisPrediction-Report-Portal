@@ -236,53 +236,80 @@ func TestDeliveryContainerIsTiedToTheRunnersStartReceipt(t *testing.T) {
 	}
 }
 
-// Fails if the staged descriptor may differ from the built one in anything but the runner protocol range.
-func TestDeliveryStagedDescriptorDiffersOnlyInTheRunnerProtocolRange(t *testing.T) {
-	built := []byte(`{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0 <2.0.0"},"backend":{"images":[{"x":1}]}}`)
-	good := []byte(`{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`)
-	if err := imageDeliveryOnlyRunnerRangeDiffers(built, good); err != nil {
-		t.Fatal(err)
-	}
-	for name, staged := range map[string]string{
-		"identical":      string(built),
-		"publisher":      `{"id":"a","publisher":"p","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`,
-		"platform range": `{"id":"a","compatibility":{"platform_api":">=2.0.0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":1}]}}`,
-		"image":          `{"id":"a","compatibility":{"platform_api":">=2.0.0-0 <3.0.0","runner_protocol":">=1.0.0-0 <2.0.0"},"backend":{"images":[{"x":2}]}}`,
-		"not json":       `{`,
-	} {
-		if imageDeliveryOnlyRunnerRangeDiffers(built, []byte(staged)) == nil {
-			t.Fatalf("%s passed", name)
-		}
-	}
-}
-
-// The finding that forces the one rewrite: the Apps builder declares runner_protocol ">=1.0.0 <2.0.0", and a
-// range without a pre-release tag never matches this runner's protocol 1.0.0-dev.1 (semver pre-release rule).
-// Fails if the built range ever becomes compatible (the rewrite is then unnecessary) or the runner's protocol
-// stops being a pre-release (the finding no longer holds).
-func TestDeliveryBuiltRunnerProtocolRangeExcludesTheRunnersDevProtocol(t *testing.T) {
+// Why Apps descriptors declare runner_protocol ">=1.0.0-0 <2.0.0-0" and platform_api ">=2.0.0-0 <3.0.0-0": a
+// plain floor never matches a pre-release version (semver pre-release rule), and a plain ceiling still admits the
+// first pre-release of the next breaking version. Fails if either half of that rule stops holding for either range.
+func TestDeliveryCompatibilityRangesNeedPreReleaseBounds(t *testing.T) {
 	parts := newPlatformManagedImageParts(t, "2.0.0", "range")
 	var m appplatform.Manifest
 	if err := json.Unmarshal(parts.descriptor, &m); err != nil || m.Backend == nil {
 		t.Fatal(err)
 	}
-	target := appplatform.CompatibilityTarget{PlatformAPI: "2.0.0-dev.1", Runner: &appplatform.RunnerCompatibility{
-		Protocol: transport.ManagedRunnerProtocol, Platform: m.Backend.Platforms[0], BackendProtocol: m.Backend.Protocol}}
-	for rng, want := range map[string]bool{">=1.0.0 <2.0.0": false, ">=1.0.0-0 <2.0.0": true} {
-		m.Compatibility.RunnerProtocol = rng
-		m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
-		result, err := appplatform.EvaluateCompatibility(m, target)
+	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0-0"
+	for _, c := range []struct {
+		rng, protocol string
+		admitted      bool
+	}{
+		{">=1.0.0 <2.0.0", transport.ManagedRunnerProtocol, false},
+		{">=1.0.0-0 <2.0.0-0", transport.ManagedRunnerProtocol, true},
+		{">=1.0.0-0 <2.0.0-0", "1.4.0", true},
+		{">=1.0.0-0 <2.0.0", "2.0.0-dev.1", true},
+		{">=1.0.0-0 <2.0.0-0", "2.0.0-dev.1", false},
+		{">=1.0.0-0 <2.0.0-0", "2.0.0", false},
+	} {
+		m.Compatibility.RunnerProtocol = c.rng
+		target := appplatform.CompatibilityTarget{PlatformAPI: platformDevelopmentAPI, Runner: &appplatform.RunnerCompatibility{
+			Protocol: c.protocol, Platform: m.Backend.Platforms[0], BackendProtocol: m.Backend.Protocol}}
+		if got := imageDeliveryRunnerProtocolAdmits(t, m, target); got != c.admitted {
+			t.Fatalf("range %q, protocol %s: admitted=%v, want %v", c.rng, c.protocol, got, c.admitted)
+		}
+	}
+	// The same rule for platform_api: Apps descriptors declare ">=2.0.0-0 <3.0.0-0".
+	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0-0"
+	for _, c := range []struct {
+		rng, api string
+		admitted bool
+	}{
+		{">=2.0.0 <3.0.0", platformDevelopmentAPI, false},
+		{">=2.0.0-0 <3.0.0-0", platformDevelopmentAPI, true},
+		{">=2.0.0-0 <3.0.0", "3.0.0-dev.1", true},
+		{">=2.0.0-0 <3.0.0-0", "3.0.0-dev.1", false},
+	} {
+		m.Compatibility.PlatformAPI = c.rng
+		result, err := appplatform.EvaluateCompatibility(m, appplatform.CompatibilityTarget{PlatformAPI: c.api,
+			Runner: &appplatform.RunnerCompatibility{Protocol: transport.ManagedRunnerProtocol,
+				Platform: m.Backend.Platforms[0], BackendProtocol: m.Backend.Protocol}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		mismatch := false
+		admitted := true
 		for _, issue := range result.Issues {
-			if issue == appplatform.RunnerProtocolMismatch {
-				mismatch = true
+			if issue == appplatform.PlatformAPIMismatch {
+				admitted = false
 			}
 		}
-		if mismatch == want {
-			t.Fatalf("range %q: runner protocol mismatch=%v, want %v (issues %v)", rng, mismatch, !want, result.Issues)
+		if admitted != c.admitted {
+			t.Fatalf("platform range %q, API %s: admitted=%v, want %v", c.rng, c.api, admitted, c.admitted)
 		}
 	}
+	if !strings.Contains(platformDevelopmentAPI, "-") {
+		t.Fatal("the platform API is no longer a pre-release; revisit the -0 floor in the Apps descriptors")
+	}
+	if !strings.Contains(transport.ManagedRunnerProtocol, "-") {
+		t.Fatal("the runner protocol is no longer a pre-release; revisit the -0 floor in the Apps descriptors")
+	}
+}
+
+func imageDeliveryRunnerProtocolAdmits(t *testing.T, m appplatform.Manifest, target appplatform.CompatibilityTarget) bool {
+	t.Helper()
+	result, err := appplatform.EvaluateCompatibility(m, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range result.Issues {
+		if issue == appplatform.RunnerProtocolMismatch {
+			return false
+		}
+	}
+	return true
 }
