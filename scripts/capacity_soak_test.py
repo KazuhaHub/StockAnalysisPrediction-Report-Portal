@@ -171,20 +171,35 @@ class EvaluateTests(unittest.TestCase):
         self.assertTrue(verdict["passed"], verdict)
         self.assertEqual(self.failing(verdict), set())
 
-    def test_p95_at_exactly_one_and_a_half_times_the_baseline_passes_and_beyond_fails(self):
-        evidence = child_evidence()
-        for window in evidence["windows"]:
-            window["home"]["p95_us"] = 1500
-        self.assertTrue(self.verdict(evidence)["passed"])
-        evidence["windows"][1]["home"]["p95_us"] = 1501
-        verdict = self.verdict(evidence)
-        self.assertIn("home_p95_within_1_5x_of_idle", self.failing(verdict))
+    def test_the_threshold_is_the_larger_of_one_and_a_half_times_and_five_milliseconds_more(self):
+        self.assertEqual(soak.LATENCY_FLOOR_US, 5000)
+        self.assertEqual(soak.latency_threshold_us(1000), 6000)      # the floor governs a sub-millisecond baseline
+        self.assertEqual(soak.latency_threshold_us(10000), 15000)    # the two rules meet at 10 ms
+        self.assertEqual(soak.latency_threshold_us(40000), 60000)    # the ratio governs a slow baseline
+        self.assertEqual(soak.latency_threshold_us(0), 5000)         # an unmeasured baseline is not a free pass
+
+    def test_p95_at_the_threshold_passes_and_one_microsecond_beyond_fails(self):
+        for idle in (1000, 40000):
+            threshold = soak.latency_threshold_us(idle)
+            evidence = child_evidence(home=idle)
+            for window in evidence["windows"]:
+                window["home"]["p95_us"] = threshold
+            self.assertTrue(self.verdict(evidence)["passed"], idle)
+            evidence["windows"][1]["home"]["p95_us"] = threshold + 1
+            self.assertIn("home_p95_within_threshold_of_idle", self.failing(self.verdict(evidence)))
 
     def test_each_latency_series_is_checked_on_its_own(self):
-        for series, check in (("report", "report_p95_within_1_5x_of_idle"), ("dispatch", "dispatch_within_1_5x_of_idle")):
+        for series, check in (("report", "report_p95_within_threshold_of_idle"), ("dispatch", "dispatch_within_threshold_of_idle")):
             evidence = child_evidence()
-            evidence["windows"][0][series]["p95_us"] = evidence["idle"][series]["p95_us"] * 2
+            evidence["windows"][0][series]["p95_us"] = soak.latency_threshold_us(evidence["idle"][series]["p95_us"]) + 1
             self.assertEqual(self.failing(self.verdict(evidence)), {check})
+
+    def test_the_effective_threshold_of_every_window_is_recorded(self):
+        verdict = self.verdict()
+        check = next(c for c in verdict["checks"] if c["name"] == "home_p95_within_threshold_of_idle")
+        rows = check["detail"]["window_thresholds"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(rows[0], {"minute": 1, "p95_us": 1200, "threshold_us": 6000, "passed": True})
 
     def test_summed_backend_memory_and_cpu_must_stay_inside_the_budgets(self):
         over_memory = [backend_sample(1600, mem_mib=3994)]

@@ -282,6 +282,10 @@ with a typed error; Portal p95 latency for the home page and report detail
 within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
+Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured process. A window passes when its p95 is at most
+the larger of 1.5 times the idle p95 and the idle p95 plus 5 ms, for the home page, the report page and the queue's
+dispatch decision.
+
 ## 5. DATA-08: retention defaults
 
 **Decision: adopt the doc 05 proposal values, corrected so retention never

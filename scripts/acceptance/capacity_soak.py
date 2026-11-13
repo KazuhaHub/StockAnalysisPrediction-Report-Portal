@@ -205,17 +205,30 @@ def _check(name, passed, detail):
     return {"name": name, "passed": bool(passed), "detail": detail}
 
 
-def _ratio_check(name, series, evidence):
-    baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 1)
-    worst, over = 0, []
+# Owner decision 2026-11-13: a window passes when its p95 is within max(1.5x the idle p95, the idle p95 plus
+# 5 ms). A ratio alone is meaningless against a sub-millisecond baseline; the load is generated outside the
+# measured process, so the measured process sees only platform load.
+LATENCY_FLOOR_US = 5000
+
+
+def latency_threshold_us(idle_p95_us):
+    return max(idle_p95_us * RATIO_LIMIT_NUMERATOR // RATIO_LIMIT_DENOMINATOR, idle_p95_us + LATENCY_FLOOR_US)
+
+
+def _latency_check(name, series, evidence):
+    baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 0)
+    threshold = latency_threshold_us(baseline)
+    rows, over, worst = [], [], 0
     for window in evidence.get("windows", []):
         p95 = window[series]["p95_us"]
         worst = max(worst, p95)
-        if p95 * RATIO_LIMIT_DENOMINATOR > baseline * RATIO_LIMIT_NUMERATOR:
+        ok = p95 <= threshold
+        rows.append({"minute": window["minute"], "p95_us": p95, "threshold_us": threshold, "passed": ok})
+        if not ok:
             over.append(window["minute"])
-    return _check(name, not over and evidence.get("windows"), {
-        "idle_p95_us": baseline, "worst_window_p95_us": worst, "worst_ratio": round(worst / baseline, 3),
-        "windows": len(evidence.get("windows", [])), "windows_over_the_limit": over[:20]})
+    return _check(name, not over and rows, {
+        "idle_p95_us": baseline, "threshold_us": threshold, "worst_window_p95_us": worst,
+        "worst_ratio": round(worst / max(baseline, 1), 3), "windows_over_the_threshold": over[:20], "window_thresholds": rows})
 
 
 def _loads_check(evidence):
@@ -274,9 +287,9 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
     windows = evidence.get("windows", [])
     checks.append(_check("one_measurement_window_per_minute", minutes > 0 and len(windows) >= max(1, minutes - 1),
                          {"windows": len(windows), "minutes": minutes}))
-    ratio_checks = {"home": _ratio_check("home_p95_within_1_5x_of_idle", "home", evidence),
-                    "report": _ratio_check("report_p95_within_1_5x_of_idle", "report", evidence),
-                    "dispatch": _ratio_check("dispatch_within_1_5x_of_idle", "dispatch", evidence)}
+    ratio_checks = {"home": _latency_check("home_p95_within_threshold_of_idle", "home", evidence),
+                    "report": _latency_check("report_p95_within_threshold_of_idle", "report", evidence),
+                    "dispatch": _latency_check("dispatch_within_threshold_of_idle", "dispatch", evidence)}
     checks.extend(ratio_checks.values())
     flood_ok = sum(w.get("flood", {}).get("backend_requests_ok", 0) for w in windows)
     checks.append(_check("backends_answered_the_message_flood", flood_ok > 0, {"answered": flood_ok}))
@@ -300,16 +313,11 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
                or s["backends"]["oom_killed"] or s["backends"]["restart_count"]]
     checks.append(_check("no_backend_crash", load and not crashes, {"expected_running": expected, "bad_samples": crashes[:20]}))
     ratios = {series: check["detail"]["worst_ratio"] for series, check in ratio_checks.items()}
-    quiet = {}
-    for series in ("home", "report", "dispatch"):
-        base = max(idle.get(series, {}).get("p95_us", 0), 1)
-        values = [w["quiet"][series]["p95_us"] for w in windows if w.get("quiet")]
-        quiet[series] = round(max(values) / base, 3) if values else None
     passed = all(c["passed"] for c in checks)
     return {
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES, "checks": checks,
         "unit_level_probes": [p["name"] for p in probes if not p.get("native")],
-        "worst_ratios": ratios, "informational_worst_quiet_ratios": quiet, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
+        "worst_ratios": ratios, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
     }
 
 
@@ -504,7 +512,7 @@ def main(argv):
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     summary = {"passed": verdict["passed"], "counts_as_ops08_evidence": verdict["counts_as_ops08_evidence"],
-               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"], "worst_quiet_ratios": verdict["informational_worst_quiet_ratios"],
+               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if verdict["passed"] else 1

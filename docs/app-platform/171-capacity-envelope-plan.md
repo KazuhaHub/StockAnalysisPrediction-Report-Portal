@@ -664,7 +664,7 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
 | 50 installations, 42 static and 8 managed | `installStatic` (frontend install through the ordinary scheduler path) and `installManaged` (the writable install worker, a real runner) |
 | Eight backends sized from the reported budget | `soakBackendSizing` over `ManagedRuntimeProfile.Capacity` (item 23) |
 | Backend holds memory, burns CPU, forks to its PID limit, floods logs and storage | `scripts/acceptance/soak_app/soak.go` |
-| Messages | the child sends every backend a signed request continuously (`load`); see resolution 55 |
+| Messages | the flood process sends every backend a signed request through the Portal's HTTP route continuously (`startFlood`); see resolution 55 |
 | Tasks and events to their quotas | `floodQuotas`; the per-application quota is unit level (resolution 54) |
 | Over-declared layer upload | `probeLayers`, through the offline import route |
 | Excess probes | `probeBackends`, `probeLayers`, `probeStaging`, `probeInstallationCap`, `floodQuotas` |
@@ -701,7 +701,7 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     review grants itself: the real grant path. Direct grant rows, which the first version used, do not satisfy the event
     subscription and are not used.
 55. **Messages.** The fixture has no outbound channel to the platform, so the message flood is the platform's inbound
-    signed request path (one request in flight to each backend for the whole load), plus the backends' log lines. The
+    signed request path, driven from a separate process over the Portal's HTTP route (one request in flight to each backend for the whole load), plus the backends' log lines. The
     counts per minute, answered and failed, are in the evidence. "As many messages as the platform lets a backend send"
     is therefore not exercised as a backend-originated flood; this is a stated gap.
 56. **Image store: unit level.** A descriptor declares at most 4 GiB of layers for one image (`maxBackendImageUncompressedBytes`),
@@ -717,11 +717,21 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     import route with HTTP 400 `app_platform_invalid_request`, storing no release. The runner's refusal of the same
     bytes (`uncompressed_bound`) is proven by the blob channel tests; the soak does not sign a blob command of its own.
 59. **Latency.** Home and the report page are `GET /api/home` and `GET /api/stock/{symbol}` of a seeded report, served
-    in process through the real routed handler with a session cookie, not over TCP. Batch queue dispatch latency is the
+    in process through the real routed handler with a session cookie. Batch queue dispatch latency is the
     queue's admission decision over 200 queued jobs (`queuedItems` and `queue.Admit`), the measurement the existing
     isolation test uses, not the duration of a Dify run. The baseline pools the idle windows (100 samples of each series
-    per window); each load minute is judged on its own 100 samples, strictly at 1.5 times the pooled idle p95. One noisy
-    minute fails a run; if shared hardware proves too noisy, the owner can decide to judge pooled windows instead.
+    per window); each load minute is judged on its own 100 samples.
+    **Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured
+    process.** The first smoke measured p95 of 3 to 25 ms against a sub-millisecond idle baseline (9 to 18 times), and
+    with the soak's own flood goroutines paused the ratios fell to 1.4 to 2.0: a ratio alone cannot judge a baseline
+    that small, and the generator shared the measured process. The verdict is now `latency_threshold_us(idle) =
+    max(idle * 3 / 2, idle + LATENCY_FLOOR_US)` with `LATENCY_FLOOR_US = 5000`, tested at both rules and where they meet
+    (10 ms), and the evidence records the effective threshold of every window. The flood generator is a second process
+    (`TestPlatformCapacitySoakFlood`, started by the child) that drives the Portal's real
+    `POST /api/app-platform/installations/{id}/backend` route over loopback, one request in flight per backend, so the
+    measured process carries the platform's work for those requests and none of the generator's. The refusal flood of
+    task admissions that ran in the measured process is gone from the load; the quotas are still driven to their limits
+    and probed once, before the load, by `floodQuotas`. The quiet windows of the first smoke were removed.
 60. **Host budget judged on the kernel's counters.** Summed backend CPU is the cgroup `usage_usec` delta over each
     thirty-second interval when it can be read (a rate sampled over a second can read a few percent above a quota the
     kernel enforces exactly over longer windows) and Docker's own figure otherwise; the evidence says which. Memory is

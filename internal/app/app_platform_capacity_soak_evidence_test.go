@@ -102,19 +102,9 @@ type soakWindow struct {
 	Report   soakStats `json:"report"`
 	Dispatch soakStats `json:"dispatch"`
 	Flood    soakFlood `json:"flood"`
-	// Quiet is measured right after the window with the Portal's own flood goroutines paused, while the backends
-	// keep flooding their containers: it separates the cost of the host under load from the cost of the flood
-	// generator sharing the measured process. Informational; the verdict judges the loaded window.
-	Quiet *soakQuiet `json:"quiet,omitempty"`
 	// Backends is what each soak backend reports about its own loads, read through a signed request after
 	// the window's samples: the proof that the floods really ran inside the containers.
 	Backends []soakBackendStatus `json:"backends,omitempty"`
-}
-
-type soakQuiet struct {
-	Home     soakStats `json:"home"`
-	Report   soakStats `json:"report"`
-	Dispatch soakStats `json:"dispatch"`
 }
 
 type soakBackendStatus struct {
@@ -150,13 +140,11 @@ func soakParseBackendStatus(installation string, raw []byte) soakBackendStatus {
 		LogBytes: wire.LogBytes, StorageBytes: wire.StorageBytes, StorageFull: wire.StorageFull, DataPresent: wire.DataPresent, Requests: wire.Requests}
 }
 
-// soakFlood counts what the platform floods did in the window: signed requests to the eight backends by
-// outcome, and task admissions refused at their quota.
+// soakFlood counts what the flood process did in the window: signed requests to the eight backends by outcome.
 type soakFlood struct {
 	BackendRequests      int64 `json:"backend_requests"`
 	BackendRequestsOK    int64 `json:"backend_requests_ok"`
 	BackendRequestErrors int64 `json:"backend_request_errors"`
-	TaskRefusals         int64 `json:"task_refusals"`
 }
 
 type soakEvidence struct {

@@ -45,7 +45,7 @@
     "static_installations": 42,
     "managed_backends": 8,
     "backend_workload": "holds 60% of its memory limit, burns its CPU quota, parks threads up to its PID limit minus a margin, writes 1 MiB/s to its log, fills its data namespace to ENOSPC",
-    "platform_workload": "one signed request in flight to each backend, repeated task admission refusals, task backlog to the global quota, an event subscription saturated at its in-flight bound",
+    "platform_workload": "a flood process outside the measured one sends one signed request in flight to each backend through the Portal HTTP route; before the load, task backlog to the global quota and an event subscription saturated at its in-flight bound",
     "measurement_windows": null
   },
   "probes": {
@@ -67,11 +67,17 @@
       "report_p95_us": null,
       "dispatch_p95_us": null
     },
+    "latency_rule": "Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured process",
+    "latency_floor_us": 5000,
     "worst_load_window_ratio_to_idle": {
       "home": null,
       "report": null,
-      "dispatch": null,
-      "limit": 1.5
+      "dispatch": null
+    },
+    "effective_threshold_us": {
+      "home": null,
+      "report": null,
+      "dispatch": null
     },
     "peak_summed_backend_memory_bytes": null,
     "peak_summed_backend_cpu_millis": null,
@@ -82,9 +88,9 @@
   },
   "assertions": {
     "every_excess_request_refused_with_its_typed_error": null,
-    "home_p95_within_1_5x_of_idle": null,
-    "report_p95_within_1_5x_of_idle": null,
-    "dispatch_within_1_5x_of_idle": null,
+    "home_p95_within_threshold_of_idle": null,
+    "report_p95_within_threshold_of_idle": null,
+    "dispatch_within_threshold_of_idle": null,
     "backend_memory_within_runner_budget": null,
     "backend_cpu_within_runner_budget": null,
     "no_backend_crash": null,
@@ -101,7 +107,7 @@
     }
   },
   "unproven_until_the_dispatch_run": [
-    "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within 1.5x of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
+    "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
     "that the eight backends, flooding their limits, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted",
     "that a refused install can free its data namespace: it cannot (production gap, doc 171 resolution 53); the run raises the runner disk budget to 10 GiB instead",
     "that the per-application task quota (1000) is reached natively; it is proven at its boundary at unit level only"

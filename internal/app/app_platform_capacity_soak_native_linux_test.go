@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -907,55 +909,128 @@ func (c *soakChild) backendStatuses() []soakBackendStatus {
 
 // --- the load ---
 
+// soakFloodTarget is one backend the flood process drives through the Portal's HTTP surface.
+type soakFloodTarget struct {
+	URL  string `json:"url"`
+	Body string `json:"body"`
+}
+
+type soakFloodCounters struct {
+	Requests int64 `json:"requests"`
+	OK       int64 `json:"ok"`
+	Errors   int64 `json:"errors"`
+}
+
+// TestPlatformCapacitySoakFlood is the flood generator, a process of its own: it sends signed backend requests
+// through the Portal's real HTTP route, one in flight per backend, and counts the outcomes in a file. The Portal
+// process whose latency is measured therefore carries the platform's work for those requests and none of the
+// generator's own. It does nothing unless the soak child started it.
+func TestPlatformCapacitySoakFlood(t *testing.T) {
+	if os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD") != "1" {
+		t.Skip("flood process of the capacity soak only")
+	}
+	var targets []soakFloodTarget
+	if err := json.Unmarshal([]byte(os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_TARGETS")), &targets); err != nil || len(targets) == 0 {
+		t.Fatal("no flood targets", err)
+	}
+	cookie, out := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_COOKIE"), os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_OUT")
+	var counters [3]atomic.Int64
+	client := &http.Client{Timeout: 25 * time.Second}
+	for _, target := range targets {
+		go func(target soakFloodTarget) {
+			for {
+				counters[0].Add(1)
+				request, err := http.NewRequest(http.MethodPost, target.URL, strings.NewReader(target.Body))
+				if err == nil {
+					request.Header.Set("Content-Type", "application/json")
+					request.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
+					var response *http.Response
+					if response, err = client.Do(request); err == nil {
+						_, _ = io.Copy(io.Discard, response.Body)
+						response.Body.Close()
+						if response.StatusCode == http.StatusOK {
+							counters[1].Add(1)
+							continue
+						}
+					}
+				}
+				counters[2].Add(1)
+				time.Sleep(50 * time.Millisecond)
+			}
+		}(target)
+	}
+	deadline := time.Now().Add(time.Duration(soakEnvInt(t, "PORTAL_CAPACITY_SOAK_FLOOD_MINUTES", 1)) * time.Minute)
+	for time.Now().Before(deadline) {
+		raw, _ := json.Marshal(soakFloodCounters{Requests: counters[0].Load(), OK: counters[1].Load(), Errors: counters[2].Load()})
+		_ = os.WriteFile(out+".tmp", raw, 0o644)
+		_ = os.Rename(out+".tmp", out)
+		time.Sleep(time.Second)
+	}
+}
+
+// startFlood serves the Portal's routes on a loopback listener and starts the flood process against them.
+func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodCounters) {
+	t := c.t
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: c.mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() { _ = server.Serve(listener) }()
+	var targets []soakFloodTarget
+	body := `{"soak":"` + strings.Repeat("m", 2048) + `"}`
+	for _, installation := range c.managed {
+		var release string
+		var policy int64
+		if err := c.s.st.queryRow(`SELECT a.release_sha256,i.policy_revision FROM app_platform_activations a JOIN app_platform_installations i ON i.id=a.installation_id
+			WHERE a.installation_id=? AND a.state='active'`, installation).Scan(&release, &policy); err != nil {
+			t.Fatal(err)
+		}
+		request, _ := json.Marshal(map[string]any{
+			"binding": platformBackendRequestBinding{Generation: "1", PolicyRevision: strconv.FormatInt(policy, 10), ReleaseSHA256: release},
+			"method":  "POST", "path": "/v1/echo", "body": body})
+		targets = append(targets, soakFloodTarget{URL: "http://" + listener.Addr().String() + "/api/app-platform/installations/" + installation + "/backend", Body: string(request)})
+	}
+	rawTargets, _ := json.Marshal(targets)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(os.Getenv("TMPDIR"), "flood-counters.json")
+	flood := exec.Command(executable, "-test.run=^TestPlatformCapacitySoakFlood$", "-test.v", fmt.Sprintf("-test.timeout=%dm", minutes+10))
+	flood.Env = []string{"GOMAXPROCS=1", "PORTAL_CAPACITY_SOAK_FLOOD=1", "PORTAL_CAPACITY_SOAK_FLOOD_TARGETS=" + string(rawTargets),
+		"PORTAL_CAPACITY_SOAK_FLOOD_COOKIE=" + c.cookie, "PORTAL_CAPACITY_SOAK_FLOOD_OUT=" + out,
+		"PORTAL_CAPACITY_SOAK_FLOOD_MINUTES=" + strconv.Itoa(minutes+5), "TMPDIR=" + os.Getenv("TMPDIR"), "HOME=" + os.Getenv("HOME")}
+	var floodOutput platformSyncBuffer
+	flood.Stdout, flood.Stderr = &floodOutput, &floodOutput
+	if err := flood.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stop = func() {
+		_ = flood.Process.Kill()
+		_ = flood.Wait()
+		_ = server.Close()
+	}
+	read = func() soakFloodCounters {
+		var counters soakFloodCounters
+		if raw, err := os.ReadFile(out); err == nil {
+			_ = json.Unmarshal(raw, &counters)
+		}
+		return counters
+	}
+	return stop, read
+}
+
 // load runs the floods for the requested minutes and, once a minute, measures the Portal's pages and the queue.
-// Every backend is sent signed requests continuously (one in flight each), and task admissions that the quota
-// refuses are repeated, so the platform's limits are under pressure the whole time. The backends flood their own
-// memory, CPU, PIDs, log and storage from inside their containers.
+// The flood is a separate process driving the Portal's HTTP route, so the measured process sees platform load
+// only. The backends flood their own memory, CPU, PIDs, log and storage from inside their containers.
 func (c *soakChild) load(minutes int) {
 	started := time.Now()
 	c.rec.SetLoad(started.UnixMilli(), 0, minutes)
 	c.rec.Mark("load_started")
-	ctx, cancel := context.WithCancel(c.ctx)
-	var wg sync.WaitGroup
-	var requests, ok, failed, refusals atomic.Int64
-	var paused atomic.Bool
-	body := []byte(`{"soak":"` + strings.Repeat("m", 2048) + `"}`)
-	for _, installation := range c.managed {
-		wg.Add(1)
-		go func(installation string) {
-			defer wg.Done()
-			for ctx.Err() == nil {
-				if paused.Load() {
-					time.Sleep(50 * time.Millisecond)
-					continue
-				}
-				requests.Add(1)
-				if response, err := c.s.requestPlatformWritableBackend(ctx, c.session, installation, http.MethodPost, "/v1/echo", body, c.endpoint); err == nil && response.Status == http.StatusOK {
-					ok.Add(1)
-				} else {
-					failed.Add(1)
-					time.Sleep(50 * time.Millisecond)
-				}
-			}
-		}(installation)
-	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for n := 0; ctx.Err() == nil; n++ {
-			if paused.Load() {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-			if err := c.admit(c.managed[0], 10000+n, "pressure"); errors.Is(err, errAppPlatformTaskQuota) {
-				refusals.Add(1)
-			}
-			// Five a second: the quota refuses them all, and a tighter loop would measure the flood generator
-			// competing with the measured pages inside the one child process, not the platform.
-			time.Sleep(200 * time.Millisecond)
-		}
-	}()
-	var previous soakFlood
+	stop, read := c.startFlood(minutes)
+	defer stop()
+	var previous soakFloodCounters
 	for minute := 1; ; minute++ {
 		next := started.Add(time.Duration(minute) * time.Minute)
 		if final := started.Add(time.Duration(minutes) * time.Minute); next.After(final) {
@@ -965,27 +1040,15 @@ func (c *soakChild) load(minutes int) {
 		var samples soakSamples
 		c.sample(&samples, soakSamplesPerWindow)
 		window := samples.window(minute)
-		current := soakFlood{BackendRequests: requests.Load(), BackendRequestsOK: ok.Load(), BackendRequestErrors: failed.Load(), TaskRefusals: refusals.Load()}
-		window.Flood = soakFlood{
-			BackendRequests: current.BackendRequests - previous.BackendRequests, BackendRequestsOK: current.BackendRequestsOK - previous.BackendRequestsOK,
-			BackendRequestErrors: current.BackendRequestErrors - previous.BackendRequestErrors, TaskRefusals: current.TaskRefusals - previous.TaskRefusals,
-		}
+		current := read()
+		window.Flood = soakFlood{BackendRequests: current.Requests - previous.Requests, BackendRequestsOK: current.OK - previous.OK, BackendRequestErrors: current.Errors - previous.Errors}
 		previous = current
-		paused.Store(true)
-		time.Sleep(2 * time.Second) // let in-flight flood requests drain
-		var quiet soakSamples
-		c.sample(&quiet, soakSamplesPerWindow)
-		q := quiet.window(minute)
-		window.Quiet = &soakQuiet{Home: q.Home, Report: q.Report, Dispatch: q.Dispatch}
-		paused.Store(false)
 		window.Backends = c.backendStatuses()
 		c.rec.AddWindow(window)
 		if !time.Now().Before(started.Add(time.Duration(minutes) * time.Minute)) {
 			break
 		}
 	}
-	cancel()
-	wg.Wait()
 	c.rec.SetLoad(started.UnixMilli(), time.Now().UnixMilli(), minutes)
 	c.rec.Mark("load_finished")
 }
