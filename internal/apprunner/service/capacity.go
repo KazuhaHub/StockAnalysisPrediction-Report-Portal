@@ -18,6 +18,8 @@ type CapacityConfig struct {
 	MemoryPercent   *int   `json:"memory_percent,omitempty"`
 	CPUPercent      *int   `json:"cpu_percent,omitempty"`
 	DiskBytes       *int64 `json:"disk_bytes,omitempty"`
+	// RunningBackends bounds the live backends: every backend reservation counts from its claim until its removal
+	// is proven, so a stopped (disabled) backend counts exactly like a running one.
 	RunningBackends *int   `json:"running_backends,omitempty"`
 	ImageStoreBytes *int64 `json:"image_store_bytes,omitempty"`
 }

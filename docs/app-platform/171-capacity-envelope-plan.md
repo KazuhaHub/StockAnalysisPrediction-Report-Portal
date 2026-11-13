@@ -308,3 +308,83 @@ applied.
     namespace deletion are one-line calls to the tested `releaseReservation`, exercised through the reserved-start
     and migration paths, not through a native removal. No Linux-only path was run.
 
+## Resolutions (PR 4a, review round 1)
+
+12. **Imported namespaces are admitted.** `beginImportCheckpoint` reserves the 768 MiB namespace in its claim
+    transaction, with the same typed refusal as every other start-bearing claim, answered on the import execute
+    and read actions. Namespace deletion releases it.
+13. **Enable and repair transfer their source.** The native order was verified: `ProvisionUpdateStartSockets`
+    removes the stopped source container (`removeStoppedUpdateStartSource`) before the target is created. So
+    the claim of an `enable-start` transfers the source's reservation to the target when the source is a
+    backend of the same installation that is stopped or absent (`transferFrom`); a running source, or another
+    installation's backend, is not transferred and both count. The running settlement records the source
+    absent. If the start then fails before the removal ran, the target's reservation stands for the
+    installation's single backend; the source's row is not resurrected.
+14. **Reservations of starts that provably never ran are released.** At admission, a held backend reservation is
+    released when its resource is still the pending row the reserve wrote and its start command either ended
+    `reverted` or was superseded by a newer fence of the installation before any claim (a claim at a superseded
+    fence is refused). A claimed (`unknown`) or applied start is never released this way, and a reserved start
+    nothing has superseded keeps its reservation, because a renewed command may still claim it.
+15. **The backfill uses exact amounts where the runner can observe them.** The upgrade takes image sizes from
+    the declared layer sizes in the stored load-image claim (the largest when several loads declare one digest)
+    and namespaces from the 768 MiB constant. Backends cannot be read at upgrade time, so they are backfilled at
+    the maxima and refined at startup: before it listens, the runner reads each live container's
+    `HostConfig.Memory` and `NanoCpus` from Docker by native id and replaces the maxima (`RefineEstimatedReservations`).
+    A daemon that cannot answer makes the runner not ready; a container the daemon does not have, a pending
+    resource with no container, and a container with no limits keep the maxima. Those rows are the *estimated
+    rows*: held backend reservations still at 4096 MiB and 4000 millis (a declared amount equal to the maxima is
+    counted too, so the figure is an upper bound).
+16. **A refused target is deleted or restored by its own history.** A refused update start deletes its pending
+    target unless a removal receipt of that very resource exists, in which case the row goes back to `absent`.
+    A `remove-code` effect of the operation says nothing, since every update carries one.
+17. **A refused effect settles on the Portal as reverted.** A migration the runner refuses is ended like a known
+    migration failure: the Portal effect is reverted with the typed receipt in the transaction that ends the
+    operation for recovery, so no discard is asked of a reverted effect and recovery restores the checkpoint. The
+    same typed receipt settles any other open effect with the refused identity (start, restore-start,
+    enable-start, repair, import) when the operation finishes, and a start read back by the update settlement.
+18. **Volume sizing.** The volume is blocks times `Frsize`. When `checkpoint_root` is on another filesystem than
+    `data_root`, its volume must hold the checkpoint share of the disk budget, two thirds (two retained 256 MiB
+    checkpoints per 768 MiB namespace); otherwise the data volume covers both. An unreadable checkpoint volume is
+    not ready.
+19. **Readiness facts.** The managed runtime profile carries `capacity`: the effective memory, CPU, disk, image
+    store and running-backend budgets and the estimated rows, as decimal strings. PR 4b reads them there. The
+    ready line carries them too.
+20. **Image reservations never shrink.** One image is counted once, at the largest size any load declared, and
+    keeps its first holder; the other installations that reference it are not tracked in the reservation.
+21. **Backend counting.** `running_backends` counts live backends: a backend reservation is held from its claim
+    until the removal of its container is proven, so a stopped (disabled) backend counts like a running one. A
+    disabled backend whose enable replaces it does not count twice (item 13).
+22. **The installation cap guard.** On PostgreSQL the cap is serialised by the publisher-trust
+    `SHARE ROW EXCLUSIVE` table lock taken by every installation mutation; on SQLite by the database write lock.
+    A concurrent test shows exactly one of two consumptions wins the 50th slot.
+23. **Sizing note for PR 4b.** A host reports `MemTotal` below its nominal memory, so 25% of it is below
+    4096 MiB on a nominal 16 GiB runner. PR 4b must size its eight backends from the budget the runner reports
+    in its readiness facts, not from the nominal host memory.
+
+### Follow-up that blocks the integration to main merge: image removal
+
+The 10 GiB image store is not reclaimed by the runner (resolution 5). The merge of the integration branch to
+`main` is blocked until the owner decides how removal is carried.
+
+Operator reclaim path until then: raise `capacity.image_store_bytes` (up to 1 TiB) and restart the runner, or move
+the runner to a fresh journal and daemon by following the fresh-host procedure.
+
+What the removal command needs:
+
+- **A new `runner_commands.kind`.** The kind list is a `CHECK` in the closed v3 declaration of `runner_commands`
+  (`remove-image` beside `load-image`). SQLite cannot alter a `CHECK`, so adding it is a rebuild of that table,
+  the same copy-and-swap the v1 to v2 upgrade did, plus a changed product SQL in `schemaProducts`. That is a
+  schema change of the journal. If v3 has not shipped to any runner, the owner can fold it into the v3 upgrade (no
+  new version); once v3 has shipped it is v4.
+- **The command itself:** a signed `remove-image` command in `control` (format, logical digest, execute and read
+  purposes, expiry), a lifecycle action for execute and read in `transport`, and its verification on the
+  controller.
+- **The effect:** a journal dispatch with the idiom of `load-image`: claim as `unknown` before any native call,
+  remove the image by ID under the load gate (the daemon route `DELETE /images/{id}` is already in the allow-list and
+  `removeLoadedImage` exists in the driver; it needs an exported runtime method), prove it absent, then settle
+  `applied` and release the `image` reservation in one transaction.
+- **The Portal:** an effect kind and an operation stage for it (`kind` has no database enum, so no Portal DDL, but
+  the Go effect-kind allow-list and the stage order change), and the decision of who owns "last referencing
+  installation": the runner from its load-image rows and removed installations, or the Portal from the releases
+  every installation still references.
+
