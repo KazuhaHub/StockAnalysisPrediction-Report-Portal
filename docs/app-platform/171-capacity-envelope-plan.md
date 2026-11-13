@@ -680,30 +680,34 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     `running_backends`. Leaving 16 MiB and 25 millis free lets a minimum ninth backend fit memory and CPU and be refused
     by the count itself; the memory-over and CPU-over probes then ask for one unit more than what remains. The eight
     together still fit, a ninth does not, and the result is checked to lie inside the descriptor ranges unclamped.
-53. **Refused probe installations are retired, and the disk budget is not raised.** Eight managed namespaces reserve
-    6 GiB of the 8 GiB disk budget (768 MiB each). A refused backend probe has already prepared its namespace, so
-    leaving three of them would exhaust the disk budget and refuse the third with `disk`. Each probe's installation is
-    therefore retired through the ordinary managed uninstall (falling back to marking the row removed, which the
-    evidence records, and which would leave the namespace reserved). The image-store probe is refused at load, before
-    any namespace, and only its row is retired. Static installations use the frontend profile and hold no runner
-    namespace, as in production.
+53. **A refused install leaves its data namespace reserved, and no ordinary flow frees it (production gap, found by the
+    smoke).** Eight managed namespaces reserve 6 GiB of the 8 GiB disk budget (768 MiB each). A backend refused for memory,
+    CPU or the count has already prepared its namespace (the data stage precedes the start), the install ends
+    `review_required`, and then both the ordinary managed uninstall and the standalone delete-data review are refused with
+    `application review plan changed`: the installation can only be left counted, and its reservation is never released.
+    The third probe in the smoke was refused with `disk` for exactly this reason. The soak therefore marks each probe
+    installation removed (so the 50-installation count stays exact; the cap's own tests do the same) and raises the runner's
+    disk budget to 10 GiB for the run, which the evidence reports. The attempts to retire through the product are logged
+    on every run. Whether a refused install should offer an uninstall that destroys its namespace is a product decision
+    for the owner; nothing was changed here.
 54. **Task quotas.** The per-installation quota is reached on seven managed installations and the global quota on the
     eighth, after a backlog of waiting tasks attributed to the static installations (inserted with the columns the
     admission itself writes, since a static installation has no backend and cannot schedule tasks) brings the Portal to
     9999 active tasks: one more is admitted and the next is refused although its installation holds about 100 and its
     application far fewer, so only the global quota can have refused it. The per-application quota (1000) needs four
     installations of one application and the cap holds fifty applications, so it is proven at its boundary by
-    `TestTaskQuotasRefuseAtTheirOwnBoundary` and recorded as a unit-level probe. The managed installations receive the
-    four capabilities their tasks and events need by direct grant rows, as the service-identity fixture does, because
-    the soak's descriptors declare none.
+    `TestTaskQuotasRefuseAtTheirOwnBoundary` and recorded as a unit-level probe. The managed releases declare
+    `background.run`, `tasks.schedule`, `events.subscribe` and `reports.read` as required capabilities, which the install
+    review grants itself: the real grant path. Direct grant rows, which the first version used, do not satisfy the event
+    subscription and are not used.
 55. **Messages.** The fixture has no outbound channel to the platform, so the message flood is the platform's inbound
     signed request path (one request in flight to each backend for the whole load), plus the backends' log lines. The
     counts per minute, answered and failed, are in the evidence. "As many messages as the platform lets a backend send"
     is therefore not exercised as a backend-originated flood; this is a stated gap.
-56. **Image store.** Eleven layers of 1 GiB declared (the descriptor maximum) hold 11 GiB against the 10 GiB store. Each
-    layer is a tar of one zero file of exactly its declared length, so it compresses to about a thousandth of that and the
-    package stays under the 384 MiB offline bound. It stages, and the runner refuses its load at admission, before the
-    daemon is asked for anything, so nothing needs 10 GiB of disk.
+56. **Image store: unit level.** A descriptor declares at most 4 GiB of layers for one image (`maxBackendImageUncompressedBytes`),
+    so the 10 GiB store is reached only by loading three distinct 4 GiB images into the Docker daemon, which the reference
+    host cannot hold. The first version declared eleven 1 GiB layers in one image and the descriptor parser refused it. The
+    probe is recorded as unit level, citing the PR 4a admission tests.
 57. **Staging cap.** One upload is bounded at 384 MiB (`MaxManagedOfflineEnvelopeBytes`) and at most two management
     requests run at once, so no upload can exceed 2 GiB and two in-flight uploads cannot reach it. The cap guards the sum
     of what is held and in flight. The soak reserves 384 MiB at a time against its own real store until the sixth is
@@ -745,6 +749,6 @@ probe and window, every host sample, the runner log series and the verdict with 
 - Nothing in this change ran against Docker: the native scenario, the soak backend inside a container, the sampler and the
   loop-volume setup run only in CI, and no run of them is cited here.
 - That the latency ratios hold for two hours on shared hardware, that the eight backends stay inside the budgets and none
-  is OOM-killed or restarted, and that the retired probe installations release their disk reservation (resolution 53).
+  is OOM-killed or restarted, and the image store probe natively (resolution 56).
 - The per-application task quota natively, a backend-originated message flood, the runner's own refusal of an over-declared
   layer over the control socket, and PostgreSQL (the soak drives a SQLite Portal).

@@ -26,6 +26,7 @@
     "memory_mib": null,
     "cpu_millis": null,
     "disk_bytes": null,
+    "disk_bytes_note": "raised from the 8 GiB default to 10 GiB for the run: refused probe installs leave their namespace reserved",
     "image_store_bytes": null,
     "running_backends": 8,
     "estimated_rows": null
@@ -52,7 +53,7 @@
     "ninth_backend": {"expected": "capacity_exhausted_running_backends", "native": true, "observed": null},
     "memory_over_budget": {"expected": "capacity_exhausted_memory", "native": true, "observed": null},
     "cpu_over_budget": {"expected": "capacity_exhausted_cpu", "native": true, "observed": null},
-    "image_beyond_the_image_store": {"expected": "capacity_exhausted_image_store", "native": true, "observed": null},
+    "image_beyond_the_image_store": {"expected": "capacity_exhausted_image_store", "native": false, "observed": "unit level: a descriptor declares at most 4 GiB; the 10 GiB store needs three real images in the daemon"},
     "layer_beyond_its_declaration": {"expected": "app_platform_invalid_request (HTTP 400, nothing stored)", "native": true, "observed": null},
     "staging_over_two_gib": {"expected": "app_platform_storage_full (HTTP 507)", "native": true, "observed": null},
     "task_over_installation_quota": {"expected": "task_capacity", "native": true, "observed": null},
@@ -102,7 +103,7 @@
   "unproven_until_the_dispatch_run": [
     "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within 1.5x of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
     "that the eight backends, flooding their limits, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted",
-    "that the refused probe installations are retired by the ordinary uninstall without leaving a disk reservation that would refuse a later probe",
+    "that a refused install can free its data namespace: it cannot (production gap, doc 171 resolution 53); the run raises the runner disk budget to 10 GiB instead",
     "that the per-application task quota (1000) is reached natively; it is proven at its boundary at unit level only"
   ]
 }

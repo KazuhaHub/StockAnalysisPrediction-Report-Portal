@@ -152,7 +152,14 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	}
 
 	// The development image profile: the soak backend is a local reference image from the job's own registry.
-	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) { c.AllowLocalReferenceImages = true })
+	// The disk budget is raised from its 8 GiB default to 10 GiB: a refused backend probe leaves the data namespace
+	// it had already prepared reserved, and no ordinary flow frees it (resolution 53), so three probes would
+	// otherwise exhaust the budget that eight backends fill to 6 GiB. Disk is not a probed dimension of the soak.
+	disk := int64(10 << 30)
+	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
+		c.AllowLocalReferenceImages = true
+		c.Capacity = &service.CapacityConfig{DiskBytes: &disk}
+	})
 	defer func() {
 		runner.stop(t)
 		removePlatformServiceFixtureRoot(t, runner.root)

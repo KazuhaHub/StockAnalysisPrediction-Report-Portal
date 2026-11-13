@@ -191,7 +191,7 @@ never evidence.
   requests continuously.
 - **Excess probes, each refused with its typed error:** the 51st installation (HTTP 429 `installation_capacity`), a
   ninth backend (`running_backends`), a backend over the remaining memory and over the remaining CPU (`memory`,
-  `cpu`), an image of eleven maximum-size layers against the 10 GiB image store (`image_store`), a task over the
+  `cpu`), a task over the
   installation and over the global quota, an event subscription over its in-flight bound, a layer beyond its
   declaration (HTTP 400, nothing stored) and a staging reservation beyond 2 GiB (HTTP 507 `app_platform_storage_full`).
 - **Measured:** idle baseline first; then every minute p95 of `GET /api/home`, of the report page (`GET /api/stock/{symbol}`
@@ -203,7 +203,7 @@ never evidence.
   backend's own status (read through a signed request) shows it held memory, started threads, burned CPU, wrote its log
   and filled its data namespace. The
   evidence is uploaded as JSON with every sample (artifact `capacity-soak-evidence`).
-- **Proven at unit level only, by design:** the per-application task quota (1000; no application has more than one
+- **Proven at unit level only, by design:** the image store (`image_store`; a descriptor cannot declare the 3 x 4 GiB of loaded images the 10 GiB store needs on this host), the per-application task quota (1000; no application has more than one
   installation) and the exact 2 GiB staging cap without writing a byte (a single upload is bounded at 384 MiB, so the
   cap refuses the sum, which the soak also probes against the real store). The runner's own refusal of an
   over-declared layer is covered by the blob channel unit tests; the soak drives the Portal's import route.
