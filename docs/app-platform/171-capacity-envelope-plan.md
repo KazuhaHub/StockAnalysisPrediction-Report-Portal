@@ -367,6 +367,8 @@ applied.
 
 ### Follow-up that blocks the integration to main merge: image removal
 
+**Status: resolved by PR 4c (#429).** The residuals that still block the merge are listed under "PR 4c residuals" below.
+
 **Owner decision, 2026-11-13:** the `runner_commands` rebuild that adds the `remove-image` kind is approved and is
 folded into journal v3 (no v4), because v3 has not shipped to any persistent runner. CI and development journals
 opened at the earlier v3 shape are disposable and are not upgraded; the runner refuses a v3 journal whose
@@ -409,6 +411,8 @@ What the removal command needs:
   - The Portal defines what an image-store refusal means while a removal is pending.
 
 ### Follow-up that blocks the integration to main merge: candidate orphan settlement
+
+**Status: resolved by PR 4c (#429).** The residuals that still block the merge are listed under "PR 4c residuals" below.
 
 A candidate or writable-candidate start that was claimed and then failed natively stays `unknown`, so its
 reservation is never released (`journal/candidate_execution.go:173`). Update starts have `settleOrphan`;
