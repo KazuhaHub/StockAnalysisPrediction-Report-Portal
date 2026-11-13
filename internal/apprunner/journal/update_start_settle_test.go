@@ -144,7 +144,7 @@ func TestSettleOrphanedStartWithNoContainerIsNotRun(t *testing.T) {
 	}
 	// A replay returns the same receipt and looks at nothing.
 	again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
-	if err != nil || again != receipt || inspector.calls != 1 {
+	if err != nil || again != receipt || inspector.calls != 2 {
 		t.Fatalf("replay: %+v %v inspections=%d", again, err, inspector.calls)
 	}
 	readSig, err := control.SignSettleUpdateStartRead(raw, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), importAuthority(), time.Now().UTC().UnixMilli())

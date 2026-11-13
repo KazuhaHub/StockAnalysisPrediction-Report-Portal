@@ -128,6 +128,26 @@ func storedCandidateOrphan(raw string, id CapacityIdentity) (CandidateOrphanRece
 	return r, true
 }
 
+// absenceSettleDelay is how long an absence settlement waits between its two looks. The Docker daemon can finish a
+// container create after the client context that asked for it was cancelled, so a container missing at one look can
+// exist a moment later. A package variable so tests do not wait it out.
+var absenceSettleDelay = 2 * time.Second
+
+// waitAbsenceSettle sleeps the settle delay, or returns the context's error if it ends first.
+func waitAbsenceSettle(ctx context.Context) error {
+	if absenceSettleDelay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(absenceSettleDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 // candidateOrphanFacts is what the settlement needs of an unknown start, whichever kind it is.
 type candidateOrphanFacts struct {
 	id         CapacityIdentity
@@ -157,6 +177,18 @@ func (s *Store) settleCandidateOrphanLocked(ctx context.Context, load loadCandid
 	observed, err := inspector.InspectTarget(ctx, before.resource.id)
 	if err != nil {
 		return zero, fmt.Errorf("%w: inspect the candidate target: %v", ErrFenceReconciliation, err)
+	}
+	if observed.Found {
+		return zero, ErrCandidateOrphanPresent
+	}
+	// One absence proves nothing: the daemon can finish a create after the client gave up. A second look, a settle
+	// delay later, must agree before anything is released; otherwise the start stays unknown.
+	if err := waitAbsenceSettle(ctx); err != nil {
+		return zero, fmt.Errorf("%w: wait before the second look: %v", ErrFenceReconciliation, err)
+	}
+	observed, err = inspector.InspectTarget(ctx, before.resource.id)
+	if err != nil {
+		return zero, fmt.Errorf("%w: inspect the candidate target again: %v", ErrFenceReconciliation, err)
 	}
 	if observed.Found {
 		return zero, ErrCandidateOrphanPresent

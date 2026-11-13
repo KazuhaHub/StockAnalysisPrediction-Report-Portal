@@ -228,7 +228,7 @@ func TestCandidateOrphanAbsentIsSettledRevertedAndReleasedOnce(t *testing.T) {
 			if !errors.As(err, &settled) || !errors.Is(err, ErrCandidateOrphanSettled) || errors.Is(err, ErrFenceReconciliation) {
 				t.Fatalf("err = %v, want a typed orphan settlement distinct from ErrFenceReconciliation", err)
 			}
-			if inspector.calls != 1 {
+			if inspector.calls != 2 {
 				t.Fatalf("inspected %d times", inspector.calls)
 			}
 			st := f.state(t)
@@ -257,7 +257,7 @@ func TestCandidateOrphanAbsentIsSettledRevertedAndReleasedOnce(t *testing.T) {
 			if !errors.As(again, &replay) || replay.Receipt != settled.Receipt {
 				t.Fatalf("replay = %v, want the same receipt", again)
 			}
-			if inspector.calls != 1 || f.state(t) != st {
+			if inspector.calls != 2 || f.state(t) != st {
 				t.Fatalf("the replay inspected again or changed a row: calls=%d", inspector.calls)
 			}
 			// The freed envelope admits a backend that was refused for lack of budget.
@@ -487,7 +487,7 @@ func TestWritableReconcileSettlesAProvenAbsentStart(t *testing.T) {
 	stSettled := f.state(t)
 	replay := reconcile(absent)
 	var again *CandidateOrphanSettledError
-	if !errors.As(replay, &again) || again.Receipt != settled.Receipt || f.state(t) != stSettled || absent.calls != 1 {
+	if !errors.As(replay, &again) || again.Receipt != settled.Receipt || f.state(t) != stSettled || absent.calls != 2 {
 		t.Fatalf("replay = %v calls=%d", replay, absent.calls)
 	}
 }

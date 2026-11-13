@@ -232,6 +232,19 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 	if err != nil {
 		return zero, fmt.Errorf("%w: inspect the target: %v", ErrManagedRemovalUnavailable, err)
 	}
+	if !observed.Found {
+		// One absence proves nothing: the daemon can finish a create after the client gave up. A second look, a
+		// settle delay later, must agree; a container that appears keeps the start unknown for a later settlement.
+		if err := waitAbsenceSettle(ctx); err != nil {
+			return zero, fmt.Errorf("%w: wait before the second look: %v", ErrManagedRemovalUnavailable, err)
+		}
+		if observed, err = inspector.InspectTarget(ctx, facts.resource.id); err != nil {
+			return zero, fmt.Errorf("%w: inspect the target again: %v", ErrManagedRemovalUnavailable, err)
+		}
+		if observed.Found {
+			return zero, fmt.Errorf("%w: a container appeared after the first look", ErrManagedRemovalUnavailable)
+		}
+	}
 	return s.settleOrphan(ctx, raw, signature, observed)
 }
 
