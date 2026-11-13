@@ -88,5 +88,24 @@ func (w *platformInstallScheduler) finishCapacity(ctx context.Context, r journal
 		w.publish("worker_unavailable", w.active.id, w.active.snapshot.Stage)
 		return err
 	}
+	// The runner holds the refused effect reverted: the Portal's row of it is closed the same way, so nothing
+	// waits for a verdict the runner will never give.
+	if err := w.server.settleRefusedEffect(ctx, w.active.id, r); err != nil {
+		w.publish("worker_unavailable", w.active.id, w.active.snapshot.Stage)
+		return err
+	}
 	return w.finishAs(ctx, code)
+}
+
+// settleRefusedEffect closes the operation's open effect row that has the refused effect's identity as reverted,
+// with the typed refusal as its receipt. Effects of other identities and effects already settled are untouched.
+func (s *Server) settleRefusedEffect(ctx context.Context, operation string, r journal.CapacityRefusal) error {
+	raw, err := json.Marshal(r)
+	if err != nil || len(raw) > 16384 {
+		return errAppPlatformStageEvidence
+	}
+	_, err = s.st.db.ExecContext(ctx, s.st.bind(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+		WHERE operation_id=? AND effect_id=? AND state IN ('prepared','unknown')`),
+		string(raw), time.Now().UTC().UnixMilli(), operation, r.EffectID)
+	return err
 }

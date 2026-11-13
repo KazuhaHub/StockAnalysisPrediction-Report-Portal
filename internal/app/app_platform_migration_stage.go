@@ -405,6 +405,10 @@ func (s *Server) dispatchPlatformMigrateData(ctx context.Context, expected platf
 	}
 	observation, err := runner.ExecuteMigrate(ctx, endpoint, intent)
 	if err != nil {
+		// The runner refused the job for lack of room: a definite end, like a migration that failed.
+		if refused := s.endRefusedPlatformMigrate(ctx, expected, intent, err); refused != nil {
+			return platformOperationLease{}, refused
+		}
 		// A lost acknowledgement says nothing about the job. The only way on is to read the effect back.
 		lease, sendAgain, readErr := s.readBackPlatformMigrate(ctx, expected, endpoint, intent)
 		if readErr != nil || sendAgain {
@@ -436,6 +440,9 @@ func (s *Server) readBackPlatformMigrate(ctx context.Context, expected platformO
 			}
 			return platformOperationLease{}, true, nil
 		case readErr != nil:
+			if refused := s.endRefusedPlatformMigrate(ctx, expected, intent, readErr); refused != nil {
+				return platformOperationLease{}, false, refused
+			}
 			return platformOperationLease{}, false, readErr
 		}
 		if receipt, ok := validPlatformMigrateObservation(observation, intent, endpoint); ok {
@@ -609,4 +616,30 @@ type platformDiscardIntent struct {
 	pendingReceipt                string
 	priorSignedUntil              int64
 	effectState                   string
+}
+
+// endRefusedPlatformMigrate ends an update whose migration the runner refused for lack of room (a typed capacity
+// refusal that binds this very command). The runner holds the effect reverted, so the Portal's effect is settled
+// reverted with the typed receipt in the same transaction that ends the operation for recovery, as for a migration
+// that failed for a known reason; a discard is never asked of a reverted effect. It returns nil when err is not
+// such a refusal.
+func (s *Server) endRefusedPlatformMigrate(ctx context.Context, expected platformOperationLease, intent platformMigrateIntent, err error) error {
+	refusal, ok := platformCapacityRefusalOf(err)
+	if !ok || !refusal.Matches(journal.CapacityIdentityOfHeader(intent.command.CommandHeader)) {
+		return nil
+	}
+	raw, marshalErr := json.Marshal(refusal)
+	if marshalErr != nil || len(raw) > 16384 {
+		return errAppPlatformStageEvidence
+	}
+	if recordErr := s.recordPlatformCapacityRefusal(ctx, expected, refusal); recordErr != nil {
+		return recordErr
+	}
+	return s.endPlatformMigration(ctx, expected, func(e migExec, now int64) error {
+		changed, execErr := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',observed_fence=?,receipt_json=?,updated_ms=?
+			WHERE operation_id=? AND stage='migrate' AND effect_number=2 AND effect_id=? AND kind='migrate-data' AND payload_sha256=?
+			AND admitted_fence=? AND state='prepared' AND observed_fence=0 AND receipt_json=?`,
+			intent.admittedFence, string(raw), now, expected.id, intent.effectID, intent.command.PayloadSHA256, intent.admittedFence, intent.pendingReceiptNow(e, expected.id))
+		return platformLeaseCAS(changed, execErr)
+	})
 }
