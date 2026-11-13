@@ -58,7 +58,19 @@ func (s *Server) handleManagedRuntime(ctx context.Context, conn *net.UnixConn) {
 	if json.Unmarshal(second, &controller) != nil {
 		return
 	}
-	w := managedRuntimeWire{Format: "portal.runner.managed-profile/1-dev.1", Controller: controller, Profile: ManagedRuntimeProfile{Protocol: ManagedRunnerProtocol, Platform: config.Platform, BackendProtocol: ManagedBackendProtocol, SandboxProfile: config.SandboxProfile, WritableSandboxProfile: control.WritableCandidateSandboxProfile, RootFilesystemUUID: config.Root.FilesystemUUID, RootInode: strconv.FormatUint(config.Root.Inode, 10)}, ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10)}
+	var capacity ManagedRuntimeCapacity
+	if budgets, ok := d.store.CapacityBudgets(); ok {
+		estimated, err := d.store.EstimatedReservations(ctx)
+		if err != nil {
+			return
+		}
+		capacity = ManagedRuntimeCapacity{
+			MemoryMiB: strconv.FormatInt(budgets.MemoryMiB, 10), CPUMillis: strconv.FormatInt(budgets.CPUMillis, 10),
+			DiskBytes: strconv.FormatInt(budgets.DiskBytes, 10), ImageStoreBytes: strconv.FormatInt(budgets.ImageStoreBytes, 10),
+			RunningBackends: strconv.FormatInt(budgets.RunningBackends, 10), EstimatedRows: strconv.Itoa(estimated),
+		}
+	}
+	w := managedRuntimeWire{Format: "portal.runner.managed-profile/1-dev.1", Controller: controller, Profile: ManagedRuntimeProfile{Capacity: capacity, Protocol: ManagedRunnerProtocol, Platform: config.Platform, BackendProtocol: ManagedBackendProtocol, SandboxProfile: config.SandboxProfile, WritableSandboxProfile: control.WritableCandidateSandboxProfile, RootFilesystemUUID: config.Root.FilesystemUUID, RootInode: strconv.FormatUint(config.Root.Inode, 10)}, ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10)}
 	raw, err := json.Marshal(w)
 	if err != nil || ctx.Err() != nil {
 		return

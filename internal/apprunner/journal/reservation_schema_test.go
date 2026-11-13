@@ -147,8 +147,9 @@ func TestOpenUpgradesV2ToV3AndBacksFillAtTheMaxima(t *testing.T) {
 	insertV2Resource(t, db, 21, "volume", "xfs-project/v1/2", "absent", "absent")
 	insertV2Resource(t, db, 30, "socket", "sock", "present", "present")
 	digestX, digestY, digestZ := strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64)
-	insertV2Load(t, db, 40, 71, "applied", `{"claim":{"config_digest":"`+digestX+`"}}`)
-	insertV2Load(t, db, 41, 72, "applied", `{"claim":{"config_digest":"`+digestX+`"}}`)
+	layers := strings.Repeat("4", 64) + ":1000," + strings.Repeat("5", 64) + ":2000"
+	insertV2Load(t, db, 40, 71, "applied", `{"claim":{"config_digest":"`+digestX+`","layers":"`+layers+`"}}`)
+	insertV2Load(t, db, 41, 72, "applied", `{"claim":{"config_digest":"`+digestX+`","layers":"`+layers+`"}}`)
 	insertV2Load(t, db, 42, 73, "unknown", `{"config_digest":"`+digestY+`"}`)
 	insertV2Load(t, db, 43, 74, "reverted", `{"claim":{"config_digest":"`+digestZ+`"}}`)
 	if scalar(t, db, `PRAGMA user_version`) != 2 {
@@ -171,7 +172,7 @@ func TestOpenUpgradesV2ToV3AndBacksFillAtTheMaxima(t *testing.T) {
 		fixtureID(13):      {"migration", fixtureID(513), "held", 4096, 4000, 0, 0},
 		fixtureID(14):      {"backend", fixtureID(514), "held", 4096, 4000, 0, 0},
 		fixtureID(20):      {"namespace", fixtureID(520), "held", 0, 0, 768 << 20, 0},
-		"image/" + digestX: {"image", fixtureID(71), "held", 0, 0, 0, 4 << 30},
+		"image/" + digestX: {"image", fixtureID(71), "held", 0, 0, 0, 3000},
 		"image/" + digestY: {"image", fixtureID(73), "held", 0, 0, 0, 4 << 30},
 	}
 	if len(got) != len(want) {

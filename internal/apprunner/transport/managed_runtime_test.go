@@ -87,3 +87,29 @@ func TestManagedRuntimeWritableAdapterIsConfigurationOnly(t *testing.T) {
 		t.Fatal("unrecognized writable adapter")
 	}
 }
+
+func TestManagedRuntimeProfileCarriesTheEffectiveCapacity(t *testing.T) {
+	w, _ := managedRuntimeVector(t)
+	w.Profile.Capacity = ManagedRuntimeCapacity{MemoryMiB: "4096", CPUMillis: "2000", DiskBytes: "8589934592", ImageStoreBytes: "10737418240", RunningBackends: "8", EstimatedRows: "3"}
+	raw, _ := json.Marshal(w)
+	parsed, _, err := decodeManagedRuntime(raw)
+	if err != nil || parsed.Profile.Capacity != w.Profile.Capacity {
+		t.Fatalf("capacity facts did not survive the codec: %+v %v", parsed.Profile.Capacity, err)
+	}
+	for name, mutate := range map[string]func(*ManagedRuntimeCapacity){
+		"not_decimal": func(c *ManagedRuntimeCapacity) { c.MemoryMiB = "4 GiB" },
+		"negative":    func(c *ManagedRuntimeCapacity) { c.CPUMillis = "-1" },
+		"leading_0":   func(c *ManagedRuntimeCapacity) { c.DiskBytes = "08" },
+		"zero_budget": func(c *ManagedRuntimeCapacity) { c.RunningBackends = "0" },
+		"partial":     func(c *ManagedRuntimeCapacity) { c.EstimatedRows = "" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			bad := w
+			mutate(&bad.Profile.Capacity)
+			raw, _ := json.Marshal(bad)
+			if _, _, err := decodeManagedRuntime(raw); err == nil {
+				t.Fatal("malformed capacity facts accepted")
+			}
+		})
+	}
+}

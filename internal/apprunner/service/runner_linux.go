@@ -102,12 +102,23 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		return ErrNotReady
 	}
 	defer native.Close()
+	// Nothing is admitted before the upgrade's estimated reservations are refined from the live containers: a
+	// daemon that cannot answer leaves the runner not ready, an unobservable row keeps its fail-closed estimate.
+	refined, err := store.RefineEstimatedReservations(ctx, native)
+	if err != nil {
+		logger.Printf("app-runner not ready: capacity: refine estimated reservations: %v", err)
+		return ErrNotReady
+	}
+	estimated, err := store.EstimatedReservations(ctx)
+	if err != nil {
+		return ErrNotReady
+	}
 	server, err := transport.ListenNetworkManagedController(ctx, cfg.ControlSocket, cfg.ControllerUID, cfg.ControllerGID, store, root, pin, checkpointRoot, checkpointPin, native, images, cfg.NetworkActive, cfg.NetworkEntries)
 	if err != nil {
 		return ErrNotReady
 	}
 	defer server.Close()
-	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets))
+	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s refined_rows=%d estimated_rows=%d", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets), refined, estimated)
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
