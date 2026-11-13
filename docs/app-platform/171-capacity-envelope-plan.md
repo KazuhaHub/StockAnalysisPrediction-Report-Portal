@@ -320,6 +320,10 @@ applied.
     installation's backend, is not transferred and both count. The running settlement records the source
     absent. If the start then fails before the removal ran, the target's reservation stands for the
     installation's single backend; the source's row is not resurrected.
+    Amended: the source's reservation is no longer released at the claim, before its container's native removal.
+    Admission nets it in the arithmetic only (the source is the same installation's stopped or absent backend and is
+    not counted next to the target), and its row stays `held` until the start's running settlement records the
+    source absent and releases it in that transaction. A source that is not proven absent keeps its row.
 14. **Reservations of starts that provably never ran are released.** At admission, a held backend reservation is
     released when its resource is still the pending row the reserve wrote and its start command either ended
     `reverted` or was superseded by a newer fence of the installation before any claim (a claim at a superseded
@@ -363,6 +367,13 @@ applied.
 
 ### Follow-up that blocks the integration to main merge: image removal
 
+**Status: resolved by PR 4c (#429).** The residuals that still block the merge are listed under "PR 4c residuals" below.
+
+**Owner decision, 2026-11-13:** the `runner_commands` rebuild that adds the `remove-image` kind is approved and is
+folded into journal v3 (no v4), because v3 has not shipped to any persistent runner. CI and development journals
+opened at the earlier v3 shape are disposable and are not upgraded; the runner refuses a v3 journal whose
+`runner_commands` declaration predates the kind, with instructions to start from a fresh journal.
+
 The 10 GiB image store is not reclaimed by the runner (resolution 5). The merge of the integration branch to
 `main` is blocked until the owner decides how removal is carried.
 
@@ -401,6 +412,8 @@ What the removal command needs:
 
 ### Follow-up that blocks the integration to main merge: candidate orphan settlement
 
+**Status: resolved by PR 4c (#429).** The residuals that still block the merge are listed under "PR 4c residuals" below.
+
 A candidate or writable-candidate start that was claimed and then failed natively stays `unknown`, so its
 reservation is never released (`journal/candidate_execution.go:173`). Update starts have `settleOrphan`;
 candidates have no settlement path. This follows "an unknown effect keeps its reservation", but without a
@@ -408,3 +421,215 @@ settlement it is a permanent leak with no remedy short of a fresh journal. The f
 settlement modelled on `update_start_settle.go`: prove the native resource absent by name and label, then
 settle and release in one transaction.
 
+
+## Resolutions (PR 4c)
+
+These close the two follow-ups above that blocked the integration to main merge: image removal and candidate orphan
+settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
+
+### Image removal
+
+24. **The schema change.** The `remove-image` kind is folded into the v3 declaration of `runner_commands`
+    (`schemaProducts(3)` and the freeze test). The v1 and v2 upgrades rebuild `runner_commands` to that v3 product
+    (the same copy-and-swap, now one function, `upgradeCommandsToV3`) and then create and backfill the reservation
+    table, so both end in the new shape; the version stays 3. A journal already at the earlier v3 shape is not
+    converted: `inspectAt` recognises its `runner_commands` declaration and refuses it with `ErrEarlierV3Journal`,
+    which matches `ErrIncompatible` and says to start from a fresh journal. The file is not touched. No Portal
+    DDL and no other journal change was made.
+25. **Where the Portal step runs.** It is not an operation stage. The operation stage list is a `CHECK` on the Portal
+    `operations` table, so a new stage is a Portal schema change; and a stage in the middle of an operation would sit
+    in front of start-bearing work. The step is a sweep, `reclaimPlatformImages`, that runs after an operation ends
+    (the two places the scheduler already sweeps image blobs, the operation completing and the operation finishing
+    for review) and on every idle tick, next to the load-image settlement. An uninstall and an update are ordinary
+    operations, so both are covered; a cancelled or failed one is covered too, which is harmless because the
+    computation reads references, not the operation's outcome. The effect kind `remove_image` is in the Go allow-list
+    (`platformEffectKindAllowed`, journal stage `stage`).
+26. **Identity of the effect.** Journal stage `stage`, kind `remove-image`, effect number 2 to 32 (number 1 of that
+    stage is the load, and the runner's stage list is closed, so no stage of its own could be added). The command is
+    hosted by the latest finished operation of the installation that loaded the image, and only while no operation of
+    that installation is running, so its fence and generation are the installation's own and never below a floor a
+    newer operation set. The effect id is derived from the host operation and the load effect it undoes, so every
+    attempt and tick signs the same effect; the number is the one the row already has, or the next free in the stage.
+    The row carries the intent (release, platform, manifest, config digest, layers, load effect) in its receipt until
+    the runner's verdict replaces it, so a later tick can rebuild and read back the same command.
+27. **"Last referencing installation", computed by the Portal.** An image is unreferenced when no release the Portal
+    still needs carries its config digest. The needed releases are `loadPlatformReleasePins` (the active release of
+    every installation that still exists, every release a retained recovery checkpoint or recovery bundle could
+    restore, candidate and recovery-set releases, releases of unfinished operations, unsettled loads, unrecovered
+    failures, open review plans) plus the previous release of each existing installation (the source of its latest
+    completed update, kept for rollback). The candidate images are the latest applied load of each config digest per
+    runtime that no applied removal is at least as recent as. It fails closed in four ways: a release that cannot be
+    read returns an error and no target; a load receipt that cannot be read is never removed; a runtime with a load
+    that has no verdict is left out whole; an image already loaded again after its removal is a target again, one
+    removed and not reloaded is not. A removal that is begun and whose image is referenced again before it
+    completes is not completed: its row is closed `reverted` with the outcome `referenced_again`, and the runner's
+    unknown claim, if there is one, keeps its reservation.
+28. **Runner behaviour** (`journal/remove_image.go`). The claim is committed as `unknown` before any native call, under
+    the load gate, so it is fenced against a load of the same digest; the claim is refused, typed and with no row
+    written, while a load of that digest is `unknown` (`ErrRemoveImageLoadPending`). The native guard lists
+    containers twice (the daemon's ancestor filter, and a scan of every container's image ID) and refuses while any
+    container of any state uses the image; the delete is sent with `force=false` and the daemon's 409 is the same
+    typed refusal. A refusal settles `reverted` with the outcome `image_in_use` and keeps the reservation. The
+    removal is by ID, followed by a proof of absence by ID, and then the effect settles `applied` and the image
+    reservation is released in one transaction, and only there. An unknown removal is resolved by `ImagePresentByID`
+    first: an image already gone settles `applied` (state `absent`) with no removal call, a present one goes through
+    the guard again, an unanswered check settles nothing. The read-back answers the receipt, `pending` while the gate
+    is held, `orphaned` for an unknown effect with the gate free, or `absent` for no row, under the gate.
+29. **Installation-wide gates ignore the new rows.** Every runner and Portal reader that ignores `load-image` or
+    `load_image` rows now ignores `remove-image` or `remove_image` rows too (26 journal statements, 19 Portal
+    statements), so removal never holds back or raises a floor of a start-bearing command. Tests inject the row into
+    every command family's fixtures and, on the Portal, into the readers that guard managed access, the candidate
+    intent, install admission, the removal selection and the enable operation.
+30. **An image-store refusal while a removal is pending.** The load refusal stays the typed
+    `capacity_exhausted_image_store` and is not retried. The operator message (`err.capacity_exhausted_image_store`,
+    in the three locales) says the image store is full, that images no installation uses are reclaimed only after the
+    app versions that referenced them are removed, and that an administrator can raise the image store budget; it does
+    not promise a reclaim within minutes. No key was added.
+31. **Native coverage.** The image delivery acceptance child now runs the reclaim step after its uninstall and
+    asserts the `remove_image` effect is `applied` with a `removed` receipt for the delivered image ID; the parent
+    asserts, from the daemon itself, that exactly one image `delete` event names that ID, that the ID is gone, and
+    that every other image of the worker is unchanged. The removal runs after the parent has finished inspecting the
+    daemon and after the uninstall, so no later step of that test needs the image. The writable scheduler native
+    test installs reference images, which carry no `backend.images` and so no load effect: it can never reclaim one,
+    and an update keeps the previous release pinned.
+
+### Candidate orphan settlement
+
+32. **What settles.** A claimed candidate or writable candidate start whose command window has expired, with the
+    execution gate free and the container proven absent by name and label, settles in one transaction: the effect
+    `reverted` with the typed receipt `candidate_never_ran`, the resource `absent`, the reservation `released`. A
+    container in any state, a failed inspection, a held gate or an open window changes nothing. A replay returns the
+    same receipt (`lookupRevertedAnswer`).
+33. **Where it is wired.** The settlement runs from the entry points the Portal's scheduler already reaches through the
+    transport: `DispatchCandidate` (the unknown branch), `DispatchWritableCandidate`, and `ReconcileWritableCandidate`
+    (which the writable start stage calls as `reconcilePlatformWritableStart`). The runner answers a settled start with
+    the receipt over both lifecycle transports, and the controller side validates it against the exact signed command
+    and returns it as `*journal.CandidateOrphanSettledError`. No new command kind was added, so the Portal needs no new
+    effect; it receives a definite typed end where it used to receive only an uncertain error.
+34. **The Portal's own effect row.** `settleOrphanedStartEffect` (`app_platform_candidate_orphan.go`) turns
+    `CandidateOrphanSettledError` into a `reverted` row for the start effect (stage `start`, effect 1), keeping the typed
+    receipt, compared on operation, effect id, payload digest, runtime, controller epoch and an admission fence no newer
+    than the lease's. The scheduler ends the operation in the same transaction through the effect-settlement hook the
+    capacity refusal uses, with the closed error code `start_never_ran` (public allow-list, status view and the three
+    locales), and the audit entry `app_platform.candidate_never_ran` is written there once. A replay of the same receipt
+    against the row it closed succeeds and changes nothing; a receipt that disagrees with the row settles nothing and is
+    treated as the ordinary failure. The plain candidate start has no scheduler route and the install review finisher
+    accepts only the writable format, so only the writable start is ended end to end; the plain candidate settles the
+    same row through the same function.
+
+### Round-2 minors from PR 4a
+
+35. **Enable-start transfer.** The source's reservation is no longer released at the claim. Admission nets a stopped or
+    absent source of the same installation, so the start is still admitted, and the row is released with a rows-affected
+    check in the settlement that records the source absent (`settleEnableSourceAbsent`).
+36. **`settleRefusedEffect`.** It now runs in the transaction of `finishAs`, under the same lease, fence and epoch, with
+    the effect's payload digest compared in the UPDATE; a stale lease settles nothing, and a failure of the operation's
+    end rolls the settlement back.
+
+### Not proven here
+
+- Every Docker path (the driver removal against a real daemon, the image delivery acceptance's removal and the
+  `delete` event proof) runs only in the Linux native CI job; nothing was run against Docker locally.
+- The Portal tests of the reclaim step run on SQLite only; the SQL is portable and goes through the same helpers as
+  the load settlement, but no PostgreSQL run covers the new queries until CI.
+- The Portal reaches the removal through the scheduler hooks and the idle tick; a test shows the idle tick and the
+  hook send it, and a source check shows both operation endings call the hook, but no test runs a whole update or
+  uninstall through the scheduler into a removal.
+
+## Resolutions (PR 4c, review round 1)
+
+37. **Remove versus install.** Closed on both sides. Portal: the references are computed again in the transaction that
+    inserts the `remove_image` row (`prepareRemoval`), which takes the OU mutation lock and the publisher-trust lock
+    every installation mutation takes (the SHARE ROW EXCLUSIVE table lock on PostgreSQL, the write lock on SQLite). An
+    operation admitted first is pinned by the unfinished-operation and open-plan pins and stops the removal there; a
+    removal inserted first is seen by any later load of the image, which resolves it inline
+    (`resolvePlatformRemovalsForLoad`, item 45) rather than waiting. Runner: the signed command carries a
+    watermark, `known_loads`, the effect ids of every load of the image the Portal saw applied on the runtime (one to
+    32, canonical, ascending). The claim is refused with the typed `ErrRemoveImageReferencedAgain` when the journal
+    holds an applied or unknown load of the digest outside the list, with no row written; a reverted load never
+    counts. The error did not exist before; it means exactly this. The wire carries no reply for a pre-claim refusal,
+    so the Portal sees an uncertain execute and a typed absence on read-back, leaves the row prepared, and on the next
+    tick abandons a removal whose stored watermark no longer matches the loads it sees (`referenced_again`). An image
+    with more than 32 loads is kept. Both interleavings are tested on SQLite; PostgreSQL is not reachable from this
+    host.
+38. **Enable source release.** `settleOrphan` (both branches) now releases the enable start's source through
+    `settleEnableSourceAbsent`, in its transaction, after two absence observations of the source. Reachable since
+    item 46.
+39. **Orphan settlement on the Portal.** A runner answer of `candidate_never_ran` settles the Portal's start effect
+    `reverted` with the typed receipt (lease, fence, runtime, effect id and payload compare-and-swap, one audit entry)
+    and the operation ends failed with the closed code `start_never_ran`. A replay settles once. The plain candidate
+    start has no scheduler route today; its settlement is tested alone.
+40. **Retry of a refused removal.** The effect id carries an attempt number (0 keeps the old id). A refusal
+    (`image_in_use`, the daemon's own 409 after the guard as `image_conflict`, `referenced_again`,
+    `abandoned_outcome_unknown`) is tried again on a later tick as a new effect after a backoff of ten minutes per
+    attempt made, capped at six hours. An applied removal is never retried, and no attempt begins beside an open one.
+41. **Recovery pause.** The step does nothing while the Portal is paused for recovery: an image removed then could be
+    one the recovery is about to restore.
+42. **Pins.** Tests keep the image of an unfinished or queued operation's release, a `recovery_required` failure, an open
+    review plan, and a release sharing its config digest with a pinned one; an image of another runtime is never sent
+    through this runtime's endpoint.
+43. **Orphan window.** Two absence observations a settle delay apart (two seconds) are required before a candidate or
+    update-start orphan is settled. A daemon that completes a create later than that window still leaves a container
+    the settlement has recorded absent; the namespace sweep that follows a settled update start removes it, a
+    candidate has no such sweep, and this residual window is accepted.
+44. **Untag events.** Docker emits `delete` for an image removed by ID that has no tag and `untag` only when a tag is
+    removed, so the delivery evidence's rejection of `untag` events should hold for the delivered image, which carries
+    no name. This is reasoning about the daemon, not something run here; the native job is the check.
+
+## Resolutions (PR 4c, review round 2)
+
+45. **A load resolves an open removal of its image inline.** Reclaim runs only after an operation ends and on idle ticks,
+    so a load that waited for an open removal would have used up its bounded waits and failed the operation. The load
+    path (`runPlatformImageLoad`, after its "already applied" short-circuit) now reads each open removal of its digest
+    back under that removal's own identity: a receipt settles the row (applied: the image is gone and the load goes
+    on as a normal load that uploads the blobs again; reverted: the image is still there); pending, the runner holding
+    the gate, is a bounded wait; orphaned, a typed absence, a row never sent, or one whose host operation can no
+    longer settle it, is closed abandoned (`referenced_again` or `abandoned_outcome_unknown`) and the load goes on.
+    Reinstalling the same app while its removal is unknown completes (tested through `ensurePlatformReleaseImage`).
+46. **Orphaned enable and restore starts are settled.** `control` accepts `enable-start` and `restore-start` besides
+    `update-start` in the settle command and the reserved removal, with the same read-signed start reference and
+    payload binding. The journal side needed no change, because those starts are stored as update-start rows; the
+    enable source is released through `settleEnableSourceAbsent` in the same transaction, only after two absence
+    observations. On the Portal, `settlePlatformHeldStarts` drives the existing held-start steps for finished enable and
+    repair operations from the idle settlement tick, and a restore resume's orphan is settled from the recovery
+    reconciliation (`never_ran` reverts the effect and returns the installation to review). Not wired: a managed
+    restore that is not a recovery resume (its start command comes from a different loader), and an `enable-start`
+    the runner holds only as reserved. After an orphan settles, an enable or repair stays `recovery_required`; the
+    Portal does not complete the operation on its own.
+47. **Open removals fail closed.** The open rows are read with no window, and a row whose intent cannot be parsed is
+    treated as open for every image of its runtime, then closed `abandoned_outcome_unknown` by the step.
+48. **Attempt cap.** At most eight attempts per image (the effect numbers of one host operation are limited to 32).
+    After that the step stops without logging on every tick and `GET /api/admin/app-platform/storage-status` lists the
+    image under `reclaim_refused` with its attempts and the last typed reason (`image_in_use`, `image_conflict`,
+    `referenced_again`, `abandoned_outcome_unknown`, `unknown`).
+49. **Recovery pause fails closed.** The pause is read with the strict reader: an unreadable pause stops the step, and
+    the pause is read again in the transaction that inserts the row.
+50. **The settlement closure.** `finishAs` strips the refused-effect settlement from the context before it calls the blob
+    sweep and the image reclaim; tested.
+51. **The second absence look is a heuristic.** The two-second delay between the two absence observations of an orphan
+    settlement narrows the window in which a late daemon create is missed; it does not prove none can follow. The
+    data execution gate is held during the delay.
+
+### Follow-ups that block the integration to main merge: PR 4c residuals
+
+Recorded from the round-3 review of PR 4c (#429). Each one is on a failure path, and each fails closed or
+leaves work for an administrator. None of them may remain when the integration branch merges into `main`.
+
+- **Orphaned restore start outside a recovery resume.** The runner admits capacity when it claims the start
+  (`ClaimUpdateStart`), but nothing on the Portal sends the settlement for a managed restore that is not a
+  recovery resume. Its target reservation is therefore held until an operator steps in. Fix: settle it from
+  the path that finishes the restore, as `settlePlatformHeldStarts` does for enable and repair.
+- **Enable or repair left `recovery_required` after its orphan settles.** No reservation leaks, but the
+  operation needs an administrator. Product decision required: either complete it automatically as failed, or
+  keep it for review with a clear message.
+- **An enable start held only as reserved.** It holds no reservation, because admission happens at the claim,
+  but it leaves a pending resource row behind. Either settle it or document why the row is inert.
+- **A transient error abandons a removal.** In `resolveOpenRemoval`, an error reading the host lease or the
+  release abandons the removal as `abandoned_outcome_unknown`, even when the runner has applied it. That is
+  safe, because the load reloads the image, but the applied verdict is lost from the history. Fix: abandon only
+  on typed errors.
+- **Held-start settlement starves itself.** `platformHeldStartsToSettle` reads `LIMIT 8` in a fixed order, so
+  eight starts that keep failing block every later one. Fix: rotate with a cursor, like the load settlement.
+- **The late-create window.** The second absence check two seconds later narrows the window but does not prove
+  absence (item 51). Fix: prove absence from the daemon's event stream, or leave the reservation held until
+  the next reconcile has seen the resource absent twice, across the gate.

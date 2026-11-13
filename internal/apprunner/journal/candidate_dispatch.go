@@ -11,10 +11,18 @@ import (
 )
 
 // DispatchCandidate routes a signed request to a first native attempt or a
-// historical applied receipt. Unknown work never reenters create/start: its
-// separately authorized native reconciliation path remains to be implemented.
-// This infrastructure entry point is not connected to a production endpoint.
+// historical applied receipt. Unknown work never reenters create/start. A start
+// that is unknown after its command window ended is looked at, not resent: with
+// the execution gate free and the container proven absent it is settled as never
+// run (SettleCandidateOrphan) and answered with *CandidateOrphanSettledError; in
+// every other case it stays unknown and the answer is ErrFenceReconciliation.
+// The runner's candidate execute action calls this (transport/candidate_receipt).
 func (s *Store) DispatchCandidate(ctx context.Context, raw, signature []byte, native *driver.CandidateRuntime, descriptor []byte) (CandidateRunningReceipt, error) {
+	return s.dispatchCandidate(ctx, raw, signature, native, candidateInspectorOf(native), descriptor)
+}
+
+// dispatchCandidate is DispatchCandidate with the native look at an unknown start as its own seam.
+func (s *Store) dispatchCandidate(ctx context.Context, raw, signature []byte, native *driver.CandidateRuntime, inspector CandidateTargetInspector, descriptor []byte) (CandidateRunningReceipt, error) {
 	var zero CandidateRunningReceipt
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return zero, ErrCandidateClaimUnavailable
@@ -62,6 +70,14 @@ func (s *Store) DispatchCandidate(ctx context.Context, raw, signature []byte, na
 	case "reverted":
 		return zero, s.capacityRefusalFor(ctx, CapacityIdentityOfCommand(candidateIndex(untrusted)))
 	default:
-		return zero, ErrFenceReconciliation
+		// Unknown: never resent. After its window ended it may be proven never to have run.
+		if admission.State != "unknown" || inspector == nil {
+			return zero, ErrFenceReconciliation
+		}
+		receipt, err := s.SettleCandidateOrphan(ctx, raw, signature, inspector)
+		if err != nil {
+			return zero, err
+		}
+		return zero, &CandidateOrphanSettledError{Receipt: receipt}
 	}
 }

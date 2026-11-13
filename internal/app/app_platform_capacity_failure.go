@@ -47,7 +47,7 @@ func platformCapacityRefusalOf(err error) (journal.CapacityRefusal, bool) {
 // show. Anything else is reported as a generic failure and never leaks.
 func platformPublicOperationErrorCode(code string) string {
 	switch code {
-	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required":
+	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required", platformStartNeverRanErrorCode:
 		return code
 	}
 	if isPlatformCapacityErrorCode(code) {
@@ -89,23 +89,64 @@ func (w *platformInstallScheduler) finishCapacity(ctx context.Context, r journal
 		return err
 	}
 	// The runner holds the refused effect reverted: the Portal's row of it is closed the same way, so nothing
-	// waits for a verdict the runner will never give.
-	if err := w.server.settleRefusedEffect(ctx, w.active.id, r); err != nil {
-		w.publish("worker_unavailable", w.active.id, w.active.snapshot.Stage)
-		return err
+	// waits for a verdict the runner will never give. It is closed in the very transaction that ends the operation
+	// (see settleRefusedEffect), so either both happen or neither does.
+	return w.finishAs(withPlatformRefusedEffect(ctx, r), code)
+}
+
+// platformEffectSettlement closes an effect row of the operation inside the transaction that ends it. It runs after
+// the lease and the fence are verified and before the finisher commits.
+type platformEffectSettlement func(e migExec, facts platformLeaseFacts) error
+
+type platformEffectSettlementKey struct{}
+
+// withPlatformEffectSettlement asks the transaction that ends an operation to run the settlement in it. Every
+// operation finisher loads its lease through loadPlatformBoundOperationLease inside its own transaction, which is
+// where the request is honoured, after the lease and the fence are verified and before the finisher commits or
+// fails: the request has no other way to run. The settlement rides on the context because the finishers are
+// shared by every action and their signatures are fixed.
+func withPlatformEffectSettlement(ctx context.Context, settle platformEffectSettlement) context.Context {
+	return context.WithValue(ctx, platformEffectSettlementKey{}, settle)
+}
+
+// withPlatformRefusedEffect asks the ending transaction to close the effect a runner capacity refusal names.
+func withPlatformRefusedEffect(ctx context.Context, r journal.CapacityRefusal) context.Context {
+	return withPlatformEffectSettlement(ctx, func(e migExec, facts platformLeaseFacts) error {
+		return settleRefusedEffect(e, facts, r)
+	})
+}
+
+func platformEffectSettlementOf(e migExec) (platformEffectSettlement, bool) {
+	tx, ok := e.ex.(platformContextTx)
+	if !ok || tx.ctx == nil {
+		return nil, false
 	}
-	return w.finishAs(ctx, code)
+	settle, ok := tx.ctx.Value(platformEffectSettlementKey{}).(platformEffectSettlement)
+	return settle, ok && settle != nil
 }
 
 // settleRefusedEffect closes the operation's open effect row that has the refused effect's identity as reverted,
-// with the typed refusal as its receipt. Effects of other identities and effects already settled are untouched.
-func (s *Server) settleRefusedEffect(ctx context.Context, operation string, r journal.CapacityRefusal) error {
+// with the typed refusal as its receipt. It runs in the transaction that ends the operation, under the lease and
+// the fence the caller just verified, and compares the effect's exact identity: its id, its payload digest and the
+// controller epoch of the lease. Effects of other identities, a row whose payload digest is not the refusal's, and
+// effects already settled are untouched; a failure of the transaction undoes it.
+func settleRefusedEffect(e migExec, facts platformLeaseFacts, r journal.CapacityRefusal) error {
 	raw, err := json.Marshal(r)
 	if err != nil || len(raw) > 16384 {
 		return errAppPlatformStageEvidence
 	}
-	_, err = s.st.db.ExecContext(ctx, s.st.bind(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-		WHERE operation_id=? AND effect_id=? AND state IN ('prepared','unknown')`),
-		string(raw), time.Now().UTC().UnixMilli(), operation, r.EffectID)
-	return err
+	result, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
+		WHERE operation_id=? AND effect_id=? AND payload_sha256=? AND controller_epoch=? AND state IN ('prepared','unknown')`,
+		string(raw), facts.now, facts.lease.id, r.EffectID, r.PayloadSHA256, facts.lease.controllerEpoch)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed > 1 {
+		return errAppPlatformStageEvidence
+	}
+	return nil
 }

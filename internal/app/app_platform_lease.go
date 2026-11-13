@@ -325,6 +325,14 @@ func loadPlatformBoundOperationLease(e migExec, expected platformOperationLease)
 		return zero, errAppPlatformEffectConflict
 	}
 	facts.runtimeID = runtime
+	// An operation ending after a definite runner answer about one of its effects (a capacity refusal, a start
+	// proven never to have run) closes that effect's row here, in the finisher's own transaction and under the
+	// lease and fence just verified.
+	if settle, ok := platformEffectSettlementOf(e); ok {
+		if err := settle(e, facts); err != nil {
+			return zero, err
+		}
+	}
 	return facts, nil
 }
 

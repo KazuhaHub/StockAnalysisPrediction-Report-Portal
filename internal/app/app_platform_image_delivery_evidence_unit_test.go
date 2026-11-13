@@ -313,3 +313,47 @@ func imageDeliveryRunnerProtocolAdmits(t *testing.T, m appplatform.Manifest, tar
 	}
 	return true
 }
+
+// Fails if the removal proof accepts no delete, a second delete, or a delete of an image the package did not carry.
+func TestDeliveryProofRequiresExactlyOneDeleteOfTheDeliveredImage(t *testing.T) {
+	drop := imageDeliveryEvent{Type: "image", Action: "delete", ID: deliveryTargetID}
+	if err := imageDeliveryCheckRemoval([]imageDeliveryEvent{{Type: "image", Action: "load", ID: deliveryTargetID}, drop}, deliveryTargetID); err != nil {
+		t.Fatal(err)
+	}
+	if imageDeliveryCheckRemoval(nil, deliveryTargetID) == nil {
+		t.Fatal("no delete event passed")
+	}
+	if imageDeliveryCheckRemoval([]imageDeliveryEvent{drop, drop}, deliveryTargetID) == nil {
+		t.Fatal("two delete events passed")
+	}
+	if imageDeliveryCheckRemoval([]imageDeliveryEvent{{Type: "image", Action: "delete", ID: deliveryOtherID}}, deliveryTargetID) == nil {
+		t.Fatal("a delete of another image passed")
+	}
+	if imageDeliveryCheckRemoval([]imageDeliveryEvent{drop, {Type: "image", Action: "delete", ID: deliveryOtherID}}, deliveryTargetID) == nil {
+		t.Fatal("a second delete of another image passed")
+	}
+	if imageDeliveryCheckRemoval([]imageDeliveryEvent{{Type: "container", Action: "delete", ID: deliveryTargetID}}, deliveryTargetID) == nil {
+		t.Fatal("a container delete counted as an image delete")
+	}
+}
+
+// Fails if the daemon passes after the removal with the delivered image still in it, or with another image gone or
+// renamed.
+func TestDeliveryProofRequiresTheRemovalToTakeOnlyTheDeliveredImage(t *testing.T) {
+	keep := imageDeliveryImage{ID: deliveryOtherID, RepoTags: []string{"keep:1"}}
+	target := imageDeliveryImage{ID: deliveryTargetID}
+	if err := imageDeliveryCheckAfterRemoval([]imageDeliveryImage{keep}, []imageDeliveryImage{keep}, deliveryTargetID); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]imageDeliveryImage{
+		"target still there": {keep, target},
+		"other image gone":   {},
+		"other renamed":      {{ID: deliveryOtherID, RepoTags: []string{"keep:1", "extra:2"}}},
+		"new image":          {keep, {ID: "sha256:" + strings.Repeat("9", 64)}},
+	}
+	for name, after := range cases {
+		if imageDeliveryCheckAfterRemoval([]imageDeliveryImage{keep}, after, deliveryTargetID) == nil {
+			t.Fatalf("%s passed", name)
+		}
+	}
+}

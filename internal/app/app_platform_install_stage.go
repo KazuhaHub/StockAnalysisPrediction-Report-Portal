@@ -156,7 +156,7 @@ func validatePlatformAdmittedInstall(e migExec, lease platformOperationLease, tr
 		return err
 	}
 	var resources int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_data_namespaces WHERE owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image')`, lease.installationID, lease.installationID, lease.installationID, lease.id).Scan(&resources); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_data_namespaces WHERE owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image'))`, lease.installationID, lease.installationID, lease.installationID, lease.id).Scan(&resources); err != nil {
 		return err
 	}
 	if resources != 0 {

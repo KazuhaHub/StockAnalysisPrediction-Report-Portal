@@ -851,14 +851,7 @@ func (s *Store) settleUpdateStartRunning(ctx context.Context, claim UpdateStartC
 		return zero, ErrFenceReconciliation
 	}
 	if f.command.Kind == "enable-start" && enableStartSourceResource(f) != "" {
-		// The native start removed the stopped source before it created the target, so its absence is recorded
-		// here and its reservation, already transferred at the claim, is released for good.
-		sourceID := enableStartSourceResource(f)
-		if _, err := tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=revision+1,observed_ms=?,updated_ms=?
-			WHERE id=? AND kind='container' AND installation_id=? AND observed_state='stopped'`, f.now, f.now, sourceID, f.command.InstallationID); err != nil {
-			return zero, err
-		}
-		if err := releaseReservation(ctx, tx, sourceID, f.now); err != nil {
+		if err := settleEnableSourceAbsent(ctx, tx, f.command.InstallationID, enableStartSourceResource(f), f.now); err != nil {
 			return zero, err
 		}
 	}
@@ -1032,4 +1025,37 @@ func (s *Store) readUpdateStartRunningReceipt(ctx context.Context, raw, signatur
 		return zero, err
 	}
 	return receipt, nil
+}
+
+// settleEnableSourceAbsent is where the stopped source an enable start replaced stops counting. The native start
+// removed that container before it created the target, so this settlement proves its absence: the source resource
+// is marked absent and its reservation is released in the caller's transaction. Until then the source's row stays
+// held, and the admission of the enable start nets it instead of releasing it early (admitCapacity, transferFrom).
+// A source that is neither stopped nor already absent is not proven away and keeps its reservation.
+func settleEnableSourceAbsent(ctx context.Context, tx *sql.Tx, installationID, sourceID string, now int64) error {
+	changed, err := tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=revision+1,observed_ms=?,updated_ms=?
+		WHERE id=? AND kind='container' AND installation_id=? AND observed_state='stopped'`, now, now, sourceID, installationID)
+	if err != nil {
+		return err
+	}
+	n, err := changed.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n > 1 {
+		return fmt.Errorf("%w: enable source rows=%d", ErrFenceReconciliation, n)
+	}
+	if n == 0 {
+		var observed string
+		if err := tx.QueryRowContext(ctx, `SELECT observed_state FROM runner_resources WHERE id=? AND kind='container' AND installation_id=?`, sourceID, installationID).Scan(&observed); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return nil
+			}
+			return err
+		}
+		if observed != "absent" {
+			return nil
+		}
+	}
+	return releaseHeldReservationExactly(ctx, tx, sourceID, now)
 }

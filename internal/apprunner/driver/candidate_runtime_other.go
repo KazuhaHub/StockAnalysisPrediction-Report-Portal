@@ -87,6 +87,12 @@ func (*CandidateRuntime) LoadImage(context.Context, LoadImageRequest) (LoadImage
 func (*CandidateRuntime) LoadedImagePresent(context.Context, []byte, string, string) (bool, error) {
 	return false, ErrUnsupported
 }
+func (*CandidateRuntime) RemoveImage(context.Context, RemoveImageRequest) (RemoveImageSnapshot, error) {
+	return RemoveImageSnapshot{}, ErrUnsupported
+}
+func (*CandidateRuntime) ImagePresentByID(context.Context, []byte, string, string) (RemoveImageSnapshot, error) {
+	return RemoveImageSnapshot{}, ErrUnsupported
+}
 func (*CandidateRuntime) CheckBackendImage(context.Context, []byte, string) error {
 	return ErrUnsupported
 }

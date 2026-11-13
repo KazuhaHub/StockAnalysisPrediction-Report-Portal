@@ -350,10 +350,68 @@ func (s *Server) reconcilePlatformRecoveryResume(ctx context.Context, c platform
 		}
 		return zero, s.recordPlatformRecoveryStartJournalLoss(ctx, c, facts)
 	}
+	var heldStart *journal.UpdateStartHeldError
+	if errors.As(err, &heldStart) {
+		return zero, s.settlePlatformRecoveryHeldStart(ctx, c, facts, endpoint, heldStart.State)
+	}
 	if err != nil {
 		return zero, nil
 	}
 	return s.commitPlatformRecoveryStartApplied(ctx, c, facts, endpoint, observation, worker)
+}
+
+// settlePlatformRecoveryHeldStart acts on what the runner says it holds for a resume's start without a running
+// receipt, once no command signed for the start can still be admitted and a create the runner gave up on can no
+// longer be carried out.
+//
+//   - orphaned: claimed with nothing executing it. The runner is asked to settle it (it only looks, by name and
+//     label, and records what is there); the next read shows a running receipt or a never-run start. The start is
+//     never sent.
+//   - never_ran: the runner has settled the start as not run and released what it held, which is as definite as an
+//     absence: the effect is reverted and the installation returned to review, so a new resume can be reviewed.
+//   - reserved, pending: nothing is claimed, or the start may be executing; it is read again later.
+func (s *Server) settlePlatformRecoveryHeldStart(ctx context.Context, c platformRecoveryStartCandidate, signed platformRecoveryStartFacts, endpoint platformRuntimeEndpoint, state string) error {
+	definiteAfter := max(signed.signedUntil, c.completedMS+platformSigningSlackMS+platformStartCommandWindowMS+platformImportAbsenceMarginMS+platformCreateGraceMS+control.CommandClockSkewMS)
+	if time.Now().UnixMilli() <= definiteAfter {
+		return nil
+	}
+	switch state {
+	case "never_ran":
+		return s.revertPlatformRecoveryStart(ctx, c, signed)
+	case "orphaned":
+		tx, e, runtime, current, now, err := s.platformRecoveryStartTransaction(ctx, c, signed)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		dek, err := s.dek()
+		if err != nil {
+			return err
+		}
+		_, seed, err := s.platformDataRuntime(e, c.lease.controllerEpoch, dek)
+		if err != nil {
+			return err
+		}
+		defer clear(seed)
+		issued := time.Now().UnixMilli()
+		if issued < now-1000 || issued > now+1000 || issued > math.MaxInt64-platformStartCommandWindowMS {
+			return errAppPlatformLeaseConflict
+		}
+		key := ed25519.NewKeyFromSeed(seed)
+		defer clear(key)
+		_, intent, err := buildPlatformSettleStartCommand(current.intent, key, c.lease.id, c.lease.fence, control.SettleModeSettle, issued)
+		if err != nil {
+			return err
+		}
+		// Nothing was written; the transaction is not held across the runner calls.
+		tx.Rollback()
+		if err := s.platformMigrationRunner().CheckRoot(ctx, c.lease.id, runtime, current.intent.authority, endpoint); err != nil {
+			return err
+		}
+		// Whatever it answers, the next read of the start itself decides what follows.
+		_, _ = s.platformSettleStartRun()(ctx, endpoint, intent)
+	}
+	return nil
 }
 
 // platformRecoveryStartContext opens the transaction both settlements run in and re-proves the facts the

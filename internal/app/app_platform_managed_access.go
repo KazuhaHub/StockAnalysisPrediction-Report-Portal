@@ -333,7 +333,7 @@ func (s *Server) loadPlatformManagedBackendHistory(e migExec, installation, acti
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, installation, installation).Scan(&count); err != nil || count != 1 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, source.operationID).Scan(&count); err != nil || count != 3 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`, source.operationID).Scan(&count); err != nil || count != 3 {
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	dataEffect, err := loadPlatformManagedHistoryEffect(e, source, runtime.id, "prepare_data", "prepare-data", completed)

@@ -69,6 +69,10 @@ type imageDeliveryChildEvidence struct {
 	ReadinessSeen  bool            `json:"readiness_evidence_recorded"`
 	AppAnswered    bool            `json:"app_answered"`
 	Uninstalled    bool            `json:"uninstalled"`
+	// ImageRemoved is the Portal's reclaim step after the uninstall: one remove_image effect, applied.
+	ImageRemoved      bool            `json:"image_removed"`
+	RemoveEffectState string          `json:"remove_effect_state"`
+	RemoveReceipt     json.RawMessage `json:"remove_receipt"`
 }
 
 // --- a minimal Docker API client; the parent is root and owns the daemon of this disposable worker ---
@@ -517,6 +521,10 @@ wait:
 	if err := imageDeliveryCheckEvents(events, target); err != nil {
 		t.Fatal(err)
 	}
+	// The reclaim step after the uninstall removed the delivered image, and only it, by ID.
+	if err := imageDeliveryCheckRemoval(events, target); err != nil {
+		t.Fatal(err)
+	}
 	// What the runner announced about itself is an observation, not an assumption: stop it (the child has
 	// finished) and read its captured output.
 	runner.stop(t)
@@ -543,6 +551,19 @@ wait:
 	raw, err := os.ReadFile(filepath.Join(childData, "child-evidence.json"))
 	if err != nil || json.Unmarshal(raw, &childEvidence) != nil {
 		t.Fatal("child evidence unavailable", err)
+	}
+	// The daemon no longer holds the image: removed by ID, proven here from the daemon itself and not from the
+	// runner's receipt, and no other image of the worker went with it.
+	if _, status, err := docker.inspectImage(ctx, target); err != nil || status != http.StatusNotFound {
+		t.Errorf("the delivered image %s is still in the daemon after its removal (status %d, err %v)", target, status, err)
+	}
+	if !childEvidence.ImageRemoved || childEvidence.RemoveEffectState != "applied" {
+		t.Errorf("the Portal did not record the image removal: %+v", childEvidence.RemoveEffectState)
+	}
+	if after, err := docker.images(ctx); err != nil {
+		t.Error(err)
+	} else if err := imageDeliveryCheckAfterRemoval(before, after, target); err != nil {
+		t.Error(err)
 	}
 	pulls, loads, creates := 0, 0, 0
 	var imageEvents []imageDeliveryEvent
@@ -744,6 +765,14 @@ func (r *imageDeliveryRunner) ReadLoadImage(ctx context.Context, endpoint platfo
 		r.note(reply)
 	}
 	return reply, err
+}
+
+func (r *imageDeliveryRunner) RemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error) {
+	return r.inner.RemoveImage(ctx, endpoint, call)
+}
+
+func (r *imageDeliveryRunner) ReadRemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error) {
+	return r.inner.ReadRemoveImage(ctx, endpoint, call)
 }
 
 func TestPlatformManagedImageDeliveryChild(t *testing.T) {
@@ -952,4 +981,22 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	evidence.Uninstalled = true
 	writeEvidence()
 	t.Log("IMAGE_DELIVERY_CHILD_UNINSTALLED")
+
+	// The uninstall freed the only release that carried the image, so the reclaim step sends the runner a real
+	// remove-image, after the parent has finished inspecting the daemon: nothing later in this test needs the image.
+	settled, err := s.reclaimPlatformImages(ctx, endpoint)
+	if err != nil || settled != 1 {
+		t.Fatalf("image reclaim after the uninstall settled %d: %v", settled, err)
+	}
+	removeState := scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`)
+	removeReceipt := scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`)
+	var removed journal.RemoveImageReceipt
+	if removeState != "applied" || json.Unmarshal([]byte(removeReceipt), &removed) != nil || removed.State != "removed" ||
+		removed.ImageID != expected.ImageID || removed.Store != expected.Store {
+		t.Fatalf("remove_image effect %q receipt %s: the delivered image was not removed by ID", removeState, removeReceipt)
+	}
+	evidence.ImageRemoved, evidence.RemoveEffectState = true, removeState
+	evidence.RemoveReceipt = json.RawMessage(removeReceipt)
+	writeEvidence()
+	t.Logf("IMAGE_DELIVERY_CHILD_IMAGE_REMOVED image=%s", removed.ImageID)
 }

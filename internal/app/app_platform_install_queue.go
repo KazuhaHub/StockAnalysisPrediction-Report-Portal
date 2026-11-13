@@ -207,7 +207,7 @@ func platformInstallAuthorityRefusal(err error) bool {
 }
 func platformInstallResourceCount(e migExec, installation string) (int, error) {
 	var count int
-	err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind<>'load_image')+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted=1)`, installation, installation, installation, installation, installation, installation).Scan(&count)
+	err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind NOT IN ('load_image','remove_image'))+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted=1)`, installation, installation, installation, installation, installation, installation).Scan(&count)
 	return count, err
 }
 
@@ -215,7 +215,7 @@ func platformInstallResourceCount(e migExec, installation string) (int, error) {
 // claimed merely to stop it; live work requires the exact still-current lease.
 func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code string, expired bool) error {
 	lease := facts.lease
-	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && !isPlatformCapacityErrorCode(code) {
+	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && code != platformStartNeverRanErrorCode && !isPlatformCapacityErrorCode(code) {
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {

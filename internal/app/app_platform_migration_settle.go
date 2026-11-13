@@ -79,22 +79,22 @@ func loadPlatformSettleEffect(e migExec, operation, stage string, number int) (p
 	return f, err
 }
 
-// platformSettlementLease reads the failed update as an unleased lease: the identity every settlement command
-// is bound to.
+// platformSettlementLease reads the failed update (or the failed enable, repair or restore whose start the
+// runner may hold) as an unleased lease: the identity every settlement command is bound to.
 func platformSettlementLease(e migExec, operation string) (platformOperationLease, error) {
-	var id, installation, epoch, stage string
+	var id, installation, epoch, stage, action string
 	var fence, generation, stateRevision, rowRevision int64
 	var completed sql.NullInt64
 	var owner sql.NullString
-	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,completed_ms,lease_owner
-		FROM app_platform_operations WHERE id=? AND action='update' AND managed=1`, operation).
-		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &completed, &owner); err != nil ||
+	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,completed_ms,lease_owner,action
+		FROM app_platform_operations WHERE id=? AND action IN ('update','enable','repair','restore') AND managed=1`, operation).
+		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &completed, &owner, &action); err != nil ||
 		stage != "recovery_required" || !completed.Valid || owner.Valid || generation < 2 {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
 	return platformOperationLease{
 		id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,
-		snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionUpdate, Managed: true, Generation: uint64(generation),
+		snapshot: appplatform.OperationSnapshot{Action: appplatform.Action(action), Managed: true, Generation: uint64(generation),
 			Revision: uint64(stateRevision), Stage: appplatform.StageRecoveryRequired},
 	}, nil
 }
@@ -116,7 +116,12 @@ func platformSettlementGuard(e migExec, lease platformOperationLease) (int64, er
 		Scan(&phase, &desired, &fence, &installationEpoch); err != nil {
 		return 0, err
 	}
-	if phase != "recovery_required" || desired != "enabled" || installationEpoch != lease.controllerEpoch || fence != lease.fence {
+	// A failed enable or repair leaves the installation disabled; every other settled operation leaves it enabled.
+	wantDesired := "enabled"
+	if platformSameReleaseLifecycle(lease.snapshot.Action) {
+		wantDesired = "disabled"
+	}
+	if phase != "recovery_required" || desired != wantDesired || installationEpoch != lease.controllerEpoch || fence != lease.fence {
 		return 0, errAppPlatformLeaseConflict
 	}
 	return platformDatabaseNow(e)
@@ -217,7 +222,9 @@ func (s *Server) settlePlatformMigrations(ctx context.Context, endpoint platform
 			progressed++
 		}
 	}
-	return progressed, nil
+	// The enables and repairs whose start is open are settled by the same steps, from the same tick.
+	held, err := s.settlePlatformHeldStarts(ctx, endpoint)
+	return progressed + held, err
 }
 
 // settlePlatformMigration takes the next settlement step of one failed update, and reports whether it
@@ -834,7 +841,14 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		return fail("effect")
 	}
 	// An applied start is loaded only for the sweep, which names the start it follows and needs nothing else of it.
-	if kind != "update-start" || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown" && state != "applied") {
+	wantKind, sameRelease := "update-start", platformSameReleaseLifecycle(lease.snapshot.Action)
+	if sameRelease {
+		wantKind = platformSameReleaseStartKind(lease.snapshot.Action)
+	}
+	if lease.snapshot.Action == appplatform.ActionRestore {
+		return fail("restore start")
+	}
+	if kind != wantKind || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown" && state != "applied") {
 		return fail("effect row")
 	}
 	var reservation *journal.UpdateStartReservation
@@ -851,7 +865,8 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 	} else if observed != 0 {
 		return fail("effect row")
 	}
-	source, err := loadPlatformCheckpointSourceMode(e, lease, runtime, now, false, 0)
+	// An enable or repair starts from the disabled installation's retained tuple, so its source is read in that mode.
+	source, err := loadPlatformCheckpointSourceMode(e, lease, runtime, now, sameRelease, 0)
 	if err != nil {
 		return zero, fmt.Errorf("settlement start source: %w", err)
 	}
@@ -964,7 +979,7 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 		}
 		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start' AND payload_sha256=?
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind IN ('update-start','enable-start','restore-start') AND payload_sha256=?
 				AND state IN ('prepared','unknown') AND receipt_json=?`,
 				platformAbsentReceipt, now, lease.id, read.intent.effectID, read.intent.command.PayloadSHA256, start.receipt)
 			if err := platformLeaseCAS(changed, err); err != nil {
@@ -980,7 +995,7 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 		raw, _ := json.Marshal(refusal)
 		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start' AND payload_sha256=?
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind IN ('update-start','enable-start','restore-start') AND payload_sha256=?
 				AND state IN ('prepared','unknown') AND receipt_json=?`,
 				string(raw), now, lease.id, read.intent.effectID, read.intent.command.PayloadSHA256, start.receipt)
 			if err := platformLeaseCAS(changed, err); err != nil {
@@ -1008,7 +1023,7 @@ func (s *Server) settleSettlementStart(ctx context.Context, endpoint platformRun
 	}
 	return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='applied',observed_fence=?,receipt_json=?,updated_ms=?
-			WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind='update-start' AND payload_sha256=?
+			WHERE operation_id=? AND stage='start' AND effect_number=1 AND effect_id=? AND kind IN ('update-start','enable-start','restore-start') AND payload_sha256=?
 			AND state IN ('prepared','unknown') AND receipt_json=?`,
 			read.admitted, string(encoded), now, lease.id, read.intent.effectID, read.intent.command.PayloadSHA256, start.receipt)
 		return platformLeaseCAS(changed, err)
@@ -1058,6 +1073,11 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 		}
 		return s.settleOrphanedStart(ctx, endpoint, lease)
 	case "reserved":
+		if platformSameReleaseLifecycle(lease.snapshot.Action) {
+			// Nothing was claimed, so no capacity is held; the removal of its target is built from an update's own
+			// checkpoint and is not taken for an enable.
+			return false, nil
+		}
 		if !marker.exists {
 			return true, s.recordHeldStart(ctx, lease, read, platformHeldReservedReceipt, marker)
 		}
@@ -1077,7 +1097,7 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 		}
 		return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 			changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
+				WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind IN ('update-start','enable-start','restore-start') AND state IN ('prepared','unknown')`,
 				platformNeverRanReceipt, now, lease.id)
 			if err := platformLeaseCAS(changed, err); err != nil {
 				return err
@@ -1175,7 +1195,7 @@ func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntime
 	}
 	return true, s.settleEffectRow(ctx, lease, func(e migExec, now int64) error {
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-			WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind='update-start' AND state IN ('prepared','unknown')`,
+			WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind IN ('update-start','enable-start','restore-start') AND state IN ('prepared','unknown')`,
 			platformNeverRanReceipt, now, lease.id)
 		return platformLeaseCAS(changed, err)
 	})
@@ -1248,32 +1268,9 @@ func (s *Server) signPlatformSettlementStartCommand(ctx context.Context, lease p
 	if issued < now-1000 || issued > now+1000 || issued > math.MaxInt64-platformStartCommandWindowMS {
 		return zero, errAppPlatformLeaseConflict
 	}
-	start := read.intent.command
-	start.IssuedMS, start.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
-	startRaw, err := json.Marshal(start)
-	if err != nil {
-		return zero, err
-	}
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
-	startRead, err := control.SignUpdateStartRead(startRaw, key, read.intent.authority, issued)
-	if err != nil {
-		return zero, err
-	}
-	label := "settle-update-start"
-	if mode == control.SettleModeSweep {
-		label = "sweep-update-start"
-	}
-	command := control.SettleUpdateStartCommand{
-		Format: control.SettleUpdateStartFormat, Mode: mode, EffectID: platformDerivedUUID(label, read.intent.effectID),
-		OperationID: platformDerivedUUID(label+"-operation", lease.id), InstallationFence: strconv.FormatInt(lease.fence, 10),
-		IssuedMS: strconv.FormatInt(issued, 10), ExpiresMS: strconv.FormatInt(issued+platformStartCommandWindowMS, 10),
-		StartRaw: startRaw, StartReadSignature: startRead,
-	}
-	if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {
-		return zero, err
-	}
-	raw, signature, err := control.SignSettleUpdateStart(command, key, read.intent.authority, issued)
+	command, intent, err := buildPlatformSettleStartCommand(read.intent, key, lease.id, lease.fence, mode, issued)
 	if err != nil {
 		return zero, err
 	}
@@ -1296,11 +1293,47 @@ func (s *Server) signPlatformSettlementStartCommand(ctx context.Context, lease p
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
-	start0 := read.intent.command
-	return platformSettleStartIntent{
-		raw: raw, signature: signature, authority: read.intent.authority, runtime: runtime, descriptor: bytes.Clone(read.intent.targetDescriptor),
-		mode: mode, effectID: command.EffectID, operationID: command.OperationID, digest: command.PayloadSHA256, startEffectID: start0.EffectID,
-		resourceID: start0.Payload.ResourceID, namespaceID: start0.Payload.NamespaceID,
+	return intent, nil
+}
+
+// buildPlatformSettleStartCommand signs the settle-update-start command of a mode for the start an intent describes.
+// The start reference is signed for a read, so nothing execute-capable is made for the start; the command's own
+// effect and operation identities are derived from the start's and from the operation's, so a command signed again
+// names the same settlement.
+func buildPlatformSettleStartCommand(read platformUpdateStartIntent, key ed25519.PrivateKey, operationID string, fence int64, mode string, issued int64) (control.SettleUpdateStartCommand, platformSettleStartIntent, error) {
+	var zeroCommand control.SettleUpdateStartCommand
+	var zero platformSettleStartIntent
+	start := read.command
+	start.IssuedMS, start.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+platformStartCommandWindowMS, 10)
+	startRaw, err := json.Marshal(start)
+	if err != nil {
+		return zeroCommand, zero, err
+	}
+	startRead, err := control.SignUpdateStartRead(startRaw, key, read.authority, issued)
+	if err != nil {
+		return zeroCommand, zero, err
+	}
+	label := "settle-update-start"
+	if mode == control.SettleModeSweep {
+		label = "sweep-update-start"
+	}
+	command := control.SettleUpdateStartCommand{
+		Format: control.SettleUpdateStartFormat, Mode: mode, EffectID: platformDerivedUUID(label, read.effectID),
+		OperationID: platformDerivedUUID(label+"-operation", operationID), InstallationFence: strconv.FormatInt(fence, 10),
+		IssuedMS: strconv.FormatInt(issued, 10), ExpiresMS: strconv.FormatInt(issued+platformStartCommandWindowMS, 10),
+		StartRaw: startRaw, StartReadSignature: startRead,
+	}
+	if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {
+		return zeroCommand, zero, err
+	}
+	raw, signature, err := control.SignSettleUpdateStart(command, key, read.authority, issued)
+	if err != nil {
+		return zeroCommand, zero, err
+	}
+	return command, platformSettleStartIntent{
+		raw: raw, signature: signature, authority: read.authority, runtime: read.runtime, descriptor: bytes.Clone(read.targetDescriptor),
+		mode: mode, effectID: command.EffectID, operationID: command.OperationID, digest: command.PayloadSHA256, startEffectID: start.EffectID,
+		resourceID: start.Payload.ResourceID, namespaceID: start.Payload.NamespaceID,
 	}, nil
 }
 

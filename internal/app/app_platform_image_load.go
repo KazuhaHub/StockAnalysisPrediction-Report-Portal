@@ -73,6 +73,8 @@ type platformImageRunner interface {
 	SendBlob(ctx context.Context, endpoint platformRuntimeEndpoint, call platformImageBlobCall) (transport.ImageBlobResult, error)
 	LoadImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformLoadImageCall) (platformImageReply, error)
 	ReadLoadImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformLoadImageCall) (platformImageReply, error)
+	RemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error)
+	ReadRemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error)
 }
 
 func (s *Server) platformImageRunnerSeam() platformImageRunner {
@@ -354,6 +356,11 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 		}
 		applied, err := rows.prepare(ctx, call.command)
 		if err != nil || applied {
+			return err
+		}
+		// A removal of this image that has no verdict is resolved first, here, so the load does not wait for an
+		// idle tick: it settles, or is abandoned, or is still running (a bounded wait).
+		if err := s.resolvePlatformRemovalsForLoad(ctx, endpoint, signer.runtime.id, target.entry.ConfigDigest); err != nil {
 			return err
 		}
 		sent = true

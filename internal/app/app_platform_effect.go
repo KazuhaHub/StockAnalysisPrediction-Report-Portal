@@ -25,7 +25,7 @@ type platformEffectRecord struct {
 func platformEffectKindAllowed(stage appplatform.Stage, kind string) bool {
 	switch stage {
 	case appplatform.StageStage:
-		return kind == "stage" || kind == "verify"
+		return kind == "stage" || kind == "verify" || kind == platformRemoveImageKind
 	case appplatform.StagePrepareData:
 		return kind == "prepare-data"
 	case appplatform.StageStart:

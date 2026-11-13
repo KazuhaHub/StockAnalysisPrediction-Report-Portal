@@ -53,7 +53,7 @@ func loadPlatformWritableStartSource(e migExec, lease platformOperationLease, ru
 	err = e.queryRow(`SELECT effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms FROM app_platform_operation_effects WHERE operation_id=? AND stage='start' AND effect_number=1`, lease.id).Scan(&effect, &kind, &digest, &runtimeID, &epoch, &admitted, &observed, &state, &receipt, &created, &updated)
 	fresh := errors.Is(err, sql.ErrNoRows)
 	var count int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, lease.id).Scan(&count); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`, lease.id).Scan(&count); err != nil {
 		return zero, false, err
 	}
 	if fresh {

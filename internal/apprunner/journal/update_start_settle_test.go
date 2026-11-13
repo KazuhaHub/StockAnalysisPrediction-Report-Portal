@@ -29,6 +29,8 @@ type fakeInspector struct {
 	removed   []string
 	// beforeRemove and afterRemove observe each removal.
 	beforeRemove, afterRemove func()
+	// onInspect runs inside each inspection, before it answers.
+	onInspect func()
 }
 
 func (f *fakeInspector) ListNamespaceContainers(context.Context, string) ([]driver.NamespaceContainer, error) {
@@ -61,6 +63,9 @@ func (f *fakeInspector) RemoveStrayContainer(_ context.Context, nativeID string)
 
 func (f *fakeInspector) InspectTarget(context.Context, string) (driver.TargetInspection, error) {
 	f.calls++
+	if f.onInspect != nil {
+		f.onInspect()
+	}
 	return f.inspection, f.err
 }
 
@@ -92,7 +97,14 @@ func (r reservedStartFixture) modeCommand(t *testing.T, effect int, mode string)
 // preflight evidence a start that got as far as creating a container would have recorded.
 func (r reservedStartFixture) orphaned(t *testing.T, bound bool) {
 	t.Helper()
-	if _, err := r.f.store.ClaimUpdateStart(context.Background(), r.raw, r.sig); err != nil {
+	r.orphanedWith(t, context.Background(), bound)
+}
+
+// orphanedWith is orphaned with the context the claim is admitted under (carrying the backend's resources when
+// capacity budgets are set).
+func (r reservedStartFixture) orphanedWith(t *testing.T, ctx context.Context, bound bool) {
+	t.Helper()
+	if _, err := r.f.store.ClaimUpdateStart(ctx, r.raw, r.sig); err != nil {
 		t.Fatal(err)
 	}
 	if !bound {
@@ -139,7 +151,7 @@ func TestSettleOrphanedStartWithNoContainerIsNotRun(t *testing.T) {
 	}
 	// A replay returns the same receipt and looks at nothing.
 	again, err := r.f.store.SettleUpdateStart(context.Background(), raw, sig, inspector)
-	if err != nil || again != receipt || inspector.calls != 1 {
+	if err != nil || again != receipt || inspector.calls != 2 {
 		t.Fatalf("replay: %+v %v inspections=%d", again, err, inspector.calls)
 	}
 	readSig, err := control.SignSettleUpdateStartRead(raw, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), importAuthority(), time.Now().UTC().UnixMilli())

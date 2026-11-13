@@ -123,7 +123,7 @@ func (s *Store) admitSignedCommand(ctx context.Context, raw, signature []byte, v
 			return zero, ErrCommandConflict
 		}
 		var conflicts int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE (operation_id=? AND stage=? AND effect_number=?) OR (installation_id=? AND kind<>'load-image' AND state IN ('prepared','unknown'))`, c.OperationID, c.Stage, c.EffectNumber, c.InstallationID).Scan(&conflicts); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE (operation_id=? AND stage=? AND effect_number=?) OR (installation_id=? AND kind NOT IN ('load-image','remove-image') AND state IN ('prepared','unknown'))`, c.OperationID, c.Stage, c.EffectNumber, c.InstallationID).Scan(&conflicts); err != nil {
 			return zero, err
 		}
 		if conflicts != 0 {
@@ -160,7 +160,7 @@ func commandResourceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (i
 		return 0, err
 	}
 	var generationFloor, writerFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(generation),0) FROM (SELECT target_generation AS generation FROM runner_commands WHERE installation_id=? AND kind NOT IN ('load-image','remove-image') UNION ALL SELECT generation FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&generationFloor); err != nil {
 		return 0, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(writer_fence),0) FROM runner_resources WHERE data_namespace_id=?`, c.Payload.DataNamespaceID).Scan(&writerFloor); err != nil {
@@ -176,14 +176,14 @@ func commandResourceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (i
 // treating a historical source's writer or generation as current work.
 func commandFenceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (int64, error) {
 	var incompatible int
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`, c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.DataNamespaceID, c.ControllerEpoch).Scan(&incompatible); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind NOT IN ('load-image','remove-image') AND controller_epoch<>?)+(SELECT COUNT(*) FROM runner_resources WHERE (installation_id=? OR data_namespace_id=?) AND controller_epoch<>?)`, c.InstallationID, c.ControllerEpoch, c.InstallationID, c.Payload.DataNamespaceID, c.ControllerEpoch).Scan(&incompatible); err != nil {
 		return 0, err
 	}
 	if incompatible != 0 {
 		return 0, ErrFenceReconciliation
 	}
 	var floor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind NOT IN ('load-image','remove-image') UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&floor); err != nil {
 		return 0, err
 	}
 	var foreignNamespace int

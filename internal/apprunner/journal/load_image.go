@@ -253,16 +253,21 @@ func (s *Store) releaseLoadGate() { <-s.loadGate }
 // bindLoadImageDescriptor checks the descriptor the dispatch was given against the signed payload and the host:
 // the release, a backend with managed image content, the host platform and the exact image entry.
 func bindLoadImageDescriptor(c control.LoadImageCommand, descriptor []byte) (appplatform.BackendImage, error) {
+	return bindImagePayload(control.LoadImagePayload(c.Payload), descriptor)
+}
+
+// bindImagePayload is the binding a load and a removal share, so both name the image the same way.
+func bindImagePayload(payload control.LoadImagePayload, descriptor []byte) (appplatform.BackendImage, error) {
 	var zero appplatform.BackendImage
 	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || parsed.SHA256 != c.Payload.ReleaseSHA256 || parsed.Manifest.Backend == nil || len(parsed.Manifest.Backend.Images) == 0 ||
-		c.Payload.Platform != "linux/"+runtime.GOARCH {
+	if err != nil || parsed.SHA256 != payload.ReleaseSHA256 || parsed.Manifest.Backend == nil || len(parsed.Manifest.Backend.Images) == 0 ||
+		payload.Platform != "linux/"+runtime.GOARCH {
 		return zero, ErrLoadImageRefused
 	}
 	for _, entry := range parsed.Manifest.Backend.Images {
-		if entry.Platform == c.Payload.Platform {
-			layers, ok := control.ParseLoadImageLayers(c.Payload.Layers)
-			if !ok || entry.ManifestDigest != c.Payload.ManifestDigest || entry.ConfigDigest != c.Payload.ConfigDigest || len(layers) != len(entry.Layers) {
+		if entry.Platform == payload.Platform {
+			layers, ok := control.ParseLoadImageLayers(payload.Layers)
+			if !ok || entry.ManifestDigest != payload.ManifestDigest || entry.ConfigDigest != payload.ConfigDigest || len(layers) != len(entry.Layers) {
 				return zero, ErrLoadImageRefused
 			}
 			for i := range layers {

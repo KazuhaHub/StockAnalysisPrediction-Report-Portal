@@ -31,4 +31,12 @@ describe('capacity failure messages', () => {
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted_swap' })).toBeNull()
     expect(parseAppStatus({ ...base, error_code: 'capacity_exhausted' })).toBeNull()
   })
+
+  it('the installation status accepts the code of a start the runner proved never ran, with a message in every language', () => {
+    const base = { state: 'attention', openable: false, control_paused: false, timeline: [] }
+    expect(parseAppStatus({ ...base, error_code: 'start_never_ran' })).toEqual({ ...base, error_code: 'start_never_ran' })
+    for (const bundle of [en, zhCN, zhTW] as Array<Record<string, string>>) {
+      expect(bundle['err.start_never_ran']).toBeTruthy()
+    }
+  })
 })

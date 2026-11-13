@@ -90,7 +90,7 @@ func loadPlatformCandidateIntentMode(e migExec, lease platformOperationLease, ru
 	}
 	result.dataSHA = platformDigest(canonical)
 	var forbidden, effects, candidates int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state<>'candidate'),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID).Scan(&forbidden, &effects, &candidates); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND state<>'candidate'),(SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')),(SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)`, lease.installationID, lease.installationID, lease.id, lease.installationID).Scan(&forbidden, &effects, &candidates); err != nil {
 		return zero, false, err
 	}
 	if forbidden != 0 {

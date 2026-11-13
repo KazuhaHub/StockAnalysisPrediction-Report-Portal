@@ -74,11 +74,89 @@ func TestEnableStartTransfersTheStoppedSourceReservation(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
+	// The claim only nets the source in the arithmetic: its row stays held until its absence is proven.
+	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id='`+source+`' AND state='held'`) != 1 {
+		t.Fatal("the source reservation was released at the claim, before its removal was proven")
+	}
+	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id='`+command.Payload.ResourceID+`' AND state='held'`) != 1 {
+		t.Fatal("the target holds no reservation")
+	}
+	// The settlement that proves the source absent releases it in its own transaction, and the target holds the capacity.
+	tx, err := f.store.db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := settleEnableSourceAbsent(context.Background(), tx, command.InstallationID, source, time.Now().UTC().UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_reservations WHERE kind='backend' AND state='held'`) != 8 {
-		t.Fatal("the source and the target were both counted")
+		t.Fatal("after the source's absence is proven the target must hold the capacity")
 	}
 	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id='`+source+`' AND state='released'`) != 1 {
-		t.Fatal("the source reservation was not transferred")
+		t.Fatal("the source reservation was not released by its absence settlement")
+	}
+	if scalar(t, f.store.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+source+`' AND desired_state='absent' AND observed_state='absent'`) != 1 {
+		t.Fatal("the source resource was not recorded absent")
+	}
+}
+
+// Netting is arithmetic only: a transfer admission never changes the source row, whatever the source's state, and
+// a source that is running is not netted at all.
+func TestTransferNettingNeverReleasesTheSourceRow(t *testing.T) {
+	budgets := CapacityBudgets{MemoryMiB: 100, CPUMillis: 1000, DiskBytes: 1 << 40, ImageStoreBytes: 1 << 40, RunningBackends: 8}
+	for _, tc := range []struct {
+		observed string
+		admitted bool
+	}{{"stopped", true}, {"absent", true}, {"running", false}} {
+		t.Run(tc.observed, func(t *testing.T) {
+			s := capacityStore(t, budgets)
+			old := backendPlan(1, 100, 10)
+			if refusal := admitPlan(t, s, old); refusal != nil {
+				t.Fatal(refusal)
+			}
+			insertResourceRow(t, s.db, 1, "container", "present", tc.observed)
+			next := capacityPlan{kind: reservationBackend, resourceID: fixtureID(2), installationID: old.installationID, memoryMiB: 100, cpuMillis: 10, transferFrom: fixtureID(1)}
+			refusal := admitPlan(t, s, next)
+			if tc.admitted != (refusal == nil) {
+				t.Fatalf("admitted=%v refusal=%+v", tc.admitted, refusal)
+			}
+			if scalar(t, s.db, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id='`+fixtureID(1)+`' AND state='held'`) != 1 {
+				t.Fatal("the source row was released by the admission")
+			}
+		})
+	}
+}
+
+// The absence settlement releases only a source it proves absent, and exactly one reservation row.
+func TestSettleEnableSourceAbsentReleasesOnlyAProvenAbsentSource(t *testing.T) {
+	for _, tc := range []struct {
+		observed string
+		released bool
+	}{{"stopped", true}, {"absent", true}, {"running", false}} {
+		t.Run(tc.observed, func(t *testing.T) {
+			s := capacityStore(t, roomyBudgets())
+			old := backendPlan(1, 100, 10)
+			if refusal := admitPlan(t, s, old); refusal != nil {
+				t.Fatal(refusal)
+			}
+			insertResourceRow(t, s.db, 1, "container", "present", tc.observed)
+			tx, err := s.db.BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := settleEnableSourceAbsent(context.Background(), tx, old.installationID, old.resourceID, 20); err != nil {
+				t.Fatal(err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if released := scalar(t, s.db, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id='`+old.resourceID+`' AND state='released'`) == 1; released != tc.released {
+				t.Fatalf("released = %v, want %v", released, tc.released)
+			}
+		})
 	}
 }
 
@@ -132,6 +210,17 @@ func TestRepeatedTransfersLeaveTheTotalsUnchanged(t *testing.T) {
 		next := capacityPlan{kind: reservationBackend, resourceID: fixtureID(cycle), installationID: current.installationID, memoryMiB: 256, cpuMillis: 10, transferFrom: current.resourceID}
 		if refusal := admitPlan(t, s, next); refusal != nil {
 			t.Fatalf("cycle %d refused: %+v", cycle, refusal)
+		}
+		// The enable start's settlement proves the replaced source absent and releases it.
+		tx, err := s.db.BeginTx(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := settleEnableSourceAbsent(context.Background(), tx, current.installationID, current.resourceID, 20); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
 		}
 		current = next
 		var mem int64

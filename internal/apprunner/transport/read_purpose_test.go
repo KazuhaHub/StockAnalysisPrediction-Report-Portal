@@ -22,6 +22,12 @@ func lifecycleSignature(t *testing.T, action WritableLifecycleAction, a control.
 			t.Fatal(err)
 		}
 		return signature
+	case RemoveImageRead:
+		signature, err := control.SignRemoveImageRead(raw, key, a, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return signature
 	case LoadImageRead:
 		signature, err := control.SignLoadImageRead(raw, key, a, now)
 		if err != nil {

@@ -83,3 +83,96 @@ func TestSettleUpdateStartActionsAndReceiptBinding(t *testing.T) {
 		})
 	}
 }
+
+// The lifecycle verification of a settlement admits an enable or restore start as it does an update start, and the
+// receipt of such a settlement binds the same way.
+func TestSettleUpdateStartActionsAcceptEnableAndRestoreStarts(t *testing.T) {
+	for _, kind := range []string{"update-start", "enable-start", "restore-start"} {
+		t.Run(kind, func(t *testing.T) {
+			a, start, _, _, descriptor, _ := updateStartTransportFixture(t)
+			key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
+			now := time.Now().UnixMilli()
+			start.Kind = kind
+			if kind == "restore-start" {
+				start.OperationID = migrateTransportID(70)
+			}
+			var err error
+			if start.PayloadSHA256, err = control.UpdateStartLogicalDigest(start); err != nil {
+				t.Fatal(err)
+			}
+			startRaw, _, err := control.SignUpdateStart(start, key, a, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			startRead, err := control.SignUpdateStartRead(startRaw, key, a, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			command := control.SettleUpdateStartCommand{
+				Format: control.SettleUpdateStartFormat, Mode: control.SettleModeSettle, EffectID: migrateTransportID(60), OperationID: migrateTransportID(61),
+				InstallationFence: start.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+				StartRaw: startRaw, StartReadSignature: startRead,
+			}
+			if command.PayloadSHA256, err = control.SettleUpdateStartLogicalDigest(command); err != nil {
+				t.Fatal(err)
+			}
+			raw, sig, err := control.SignSettleUpdateStart(command, key, a, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			readSig, err := control.SignSettleUpdateStartRead(raw, key, a, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			execute, err := verifyWritableLifecycle(SettleUpdateStartExecute, raw, sig, descriptor, a, now)
+			if err != nil || execute.updateStart.Kind != kind {
+				t.Fatalf("execute: %v", err)
+			}
+			read, err := verifyWritableLifecycle(SettleUpdateStartRead, raw, readSig, descriptor, a, now)
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
+			receipt := journal.SettleUpdateStartReceipt{
+				Format: "portal.runner.settle-update-start-receipt/1-dev.1", DeploymentID: start.DeploymentID, ControllerEpoch: start.ControllerEpoch,
+				InstallationID: start.InstallationID, OperationID: command.OperationID, EffectID: command.EffectID, PayloadSHA256: command.PayloadSHA256,
+				StartOperationID: start.OperationID, StartEffectID: start.EffectID, ResourceID: start.Payload.ResourceID, NamespaceID: start.Payload.NamespaceID,
+				Outcome: "never_ran", NativeID: control.ReservedStartNativeID(start.Payload.ResourceID),
+				ObservedMS: strconv.FormatInt(now, 10), SettledMS: strconv.FormatInt(now, 10),
+			}
+			body, _ := json.Marshal(receipt)
+			started, received := time.Now().Add(-time.Second), time.Now().Add(time.Second)
+			if !validWritableLifecycleReply(SettleUpdateStartExecute, body, execute, started, received) || !validWritableLifecycleReply(SettleUpdateStartRead, body, read, started, received) {
+				t.Fatal("an exact receipt was refused")
+			}
+		})
+	}
+}
+
+// A settlement over a start of any other kind never reaches the lifecycle.
+func TestSettleUpdateStartActionsRefuseOtherKinds(t *testing.T) {
+	a, start, startRaw, _, descriptor, _ := updateStartTransportFixture(t)
+	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32))
+	now := time.Now().UnixMilli()
+	startRead, err := control.SignUpdateStartRead(startRaw, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(startRaw, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"stop", "stage", "load-image"} {
+		parsed["kind"] = kind
+		other, _ := json.Marshal(parsed)
+		command := control.SettleUpdateStartCommand{
+			Format: control.SettleUpdateStartFormat, Mode: control.SettleModeSettle, EffectID: migrateTransportID(60), OperationID: migrateTransportID(61),
+			InstallationFence: start.InstallationFence, IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+25000, 10),
+			StartRaw: other, StartReadSignature: startRead, PayloadSHA256: strings.Repeat("a", 64),
+		}
+		raw, _ := json.Marshal(command)
+		sig := ed25519.Sign(key, raw)
+		if _, err := verifyWritableLifecycle(SettleUpdateStartExecute, raw, sig, descriptor, a, now); err == nil {
+			t.Fatalf("a settlement over a %q start was verified", kind)
+		}
+	}
+}

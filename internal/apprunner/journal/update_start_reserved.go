@@ -69,8 +69,8 @@ func loadReservedRemoval(ctx context.Context, tx *sql.Tx, raw, signature []byte)
 		return zero, err
 	}
 	command, startCommand := verified.Command(), verified.Start().Command()
-	if command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || startCommand.Kind != "update-start" {
-		return fail("is not for a reserved update-start")
+	if command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || !control.SettlableStartKind(startCommand.Kind) {
+		return fail("is not for a reserved update, enable or restore start")
 	}
 	fence, _ := strconv.ParseInt(command.InstallationFence, 10, 64)
 	start, err := loadAdmittedCommand(ctx, tx, startCommand.EffectID)

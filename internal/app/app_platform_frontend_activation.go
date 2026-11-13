@@ -119,7 +119,7 @@ func verifyPlatformFrontendActivation(e migExec, installation, release, epoch st
 		return fail
 	}
 	var unsafe, count int
-	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind<>'load_image')`, installation, installation, installation).Scan(&unsafe); err != nil {
+	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?)+(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id WHERE o.installation_id=? AND f.kind NOT IN ('load_image','remove_image'))`, installation, installation, installation).Scan(&unsafe); err != nil {
 		return err
 	}
 	if unsafe != 0 {

@@ -10,7 +10,7 @@ import (
 	"unicode/utf8"
 )
 
-// SettleUpdateStartCommand asks the runner to settle an update-start it holds claimed with nothing executing it. It
+// SettleUpdateStartCommand asks the runner to settle an update, enable or restore start it holds claimed with nothing executing it. It
 // can only settle the exact start named by a signed start reference, and it never creates or starts anything: under
 // the data execution gate the runner looks at what exists by name and label and records it. The start reference is
 // signed for a read, so no execute-capable start command is made to settle one.
@@ -52,9 +52,15 @@ func (v VerifiedSettleUpdateStartCommand) Command() SettleUpdateStartCommand {
 
 func (v VerifiedSettleUpdateStartCommand) Start() VerifiedUpdateStartCommand { return v.start }
 
+// SettlableStartKind reports whether a start of this kind can be settled when orphaned: the three starts the runner
+// stores as one update-start. Every other kind is refused.
+func SettlableStartKind(kind string) bool {
+	return kind == "update-start" || kind == "enable-start" || kind == "restore-start"
+}
+
 func SettleUpdateStartLogicalDigest(c SettleUpdateStartCommand) (string, error) {
 	start, err := parseUpdateStart(c.StartRaw)
-	if err != nil || c.Format != SettleUpdateStartFormat || start.Kind != "update-start" || (c.Mode != SettleModeSettle && c.Mode != SettleModeSweep) ||
+	if err != nil || c.Format != SettleUpdateStartFormat || !SettlableStartKind(start.Kind) || (c.Mode != SettleModeSettle && c.Mode != SettleModeSweep) ||
 		!candidateUUID(c.EffectID) || !candidateUUID(c.OperationID) || len(c.StartReadSignature) != ed25519.SignatureSize {
 		return "", ErrInvalidCommand
 	}

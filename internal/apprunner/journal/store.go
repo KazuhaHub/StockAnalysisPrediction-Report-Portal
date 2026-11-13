@@ -31,6 +31,10 @@ var (
 	ErrIncompatible = errors.New("runner journal schema is incompatible")
 	ErrNewerVersion = errors.New("runner journal requires a newer binary")
 	ErrCorrupt      = errors.New("runner journal integrity check failed")
+	// ErrEarlierV3Journal is the typed refusal of a journal at the shape schema version 3 had before the
+	// remove-image command kind was folded into it. Such a journal exists only on development and CI hosts, so it
+	// is not converted. It matches ErrIncompatible.
+	ErrEarlierV3Journal = fmt.Errorf("%w: this journal has the earlier shape of schema version 3 and is not upgraded; start from a fresh journal", ErrIncompatible)
 )
 
 type Store struct {
@@ -237,6 +241,10 @@ func inspectAt(ctx context.Context, db querier, supported int) (int, error) {
 				return 0, err
 			}
 			want, ok := expected[name]
+			if ok && version == 3 && name == "runner_commands" && definition.Valid && strings.TrimSpace(definition.String) == earlierV3CommandsSQL() {
+				rows.Close()
+				return 0, ErrEarlierV3Journal
+			}
 			if !ok || kind != want.kind || !definition.Valid || strings.TrimSpace(definition.String) != want.sql {
 				rows.Close()
 				return 0, ErrIncompatible
@@ -369,7 +377,9 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 // rowid order and counted, and only then is the old table dropped; nothing is
 // created by renaming. The order matters: the rowid of a command row is the
 // order the runner admitted it in, and later checks rely on it (see rowOrder).
-// From v1 or v2, the additive v3 reservation table is created and backfilled.
+// From v1 or v2, runner_commands is rebuilt to the v3 declaration (which adds the remove-image kind) and the
+// additive v3 reservation table is created and backfilled. A journal at the earlier v3 shape is refused by the
+// inspection that precedes the upgrade; it is not converted.
 func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	if from != 1 && from != 2 {
 		return ErrIncompatible
@@ -379,10 +389,8 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 		return err
 	}
 	defer tx.Rollback()
-	if from == 1 {
-		if err := upgradeCommandsV1ToV2(ctx, tx); err != nil {
-			return err
-		}
+	if err := upgradeCommandsToV3(ctx, tx); err != nil {
+		return err
 	}
 	if err := upgradeReservationsV2ToV3(ctx, tx); err != nil {
 		return err
@@ -398,9 +406,9 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	return tx.Commit()
 }
 
-func upgradeCommandsV1ToV2(ctx context.Context, tx *sql.Tx) error {
+func upgradeCommandsToV3(ctx context.Context, tx *sql.Tx) error {
 	products := map[string]schemaProduct{}
-	for _, product := range schemaProducts(2) {
+	for _, product := range schemaProducts(3) {
 		products[product.name] = product
 	}
 	var before int
@@ -426,7 +434,7 @@ func upgradeCommandsV1ToV2(ctx context.Context, tx *sql.Tx) error {
 	if _, err := tx.ExecContext(ctx, `DROP TABLE runner_commands_v1`); err != nil {
 		return err
 	}
-	for _, product := range schemaProducts(2) {
+	for _, product := range schemaProducts(3) {
 		if product.kind == "index" && strings.Contains(product.sql, " ON runner_commands(") {
 			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
 				return err
