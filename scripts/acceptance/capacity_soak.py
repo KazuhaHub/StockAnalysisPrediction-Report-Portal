@@ -313,11 +313,15 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
                or s["backends"]["oom_killed"] or s["backends"]["restart_count"]]
     checks.append(_check("no_backend_crash", load and not crashes, {"expected_running": expected, "bad_samples": crashes[:20]}))
     ratios = {series: check["detail"]["worst_ratio"] for series, check in ratio_checks.items()}
+    # The shallow-backlog dispatch decision is recorded beside the judged one, never judged.
+    shallow_idle = max(idle.get("dispatch_shallow", {}).get("p95_us", 0), 1)
+    shallow = [w["dispatch_shallow"]["p95_us"] for w in windows if w.get("dispatch_shallow")]
+    shallow_ratio = round(max(shallow) / shallow_idle, 3) if shallow else None
     passed = all(c["passed"] for c in checks)
     return {
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES, "checks": checks,
         "unit_level_probes": [p["name"] for p in probes if not p.get("native")],
-        "worst_ratios": ratios, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
+        "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
     }
 
 
@@ -512,7 +516,7 @@ def main(argv):
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     summary = {"passed": verdict["passed"], "counts_as_ops08_evidence": verdict["counts_as_ops08_evidence"],
-               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"],
+               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"], "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0 if verdict["passed"] else 1

@@ -433,13 +433,17 @@ func (c *soakChild) get(path string) (int, time.Duration) {
 // dispatch is the queue's admission decision over the whole backlog: the multifactor priorities of every waiting
 // job and the choice of the ones to start. It is the cost the batch queue pays to dispatch, measured where the
 // existing queue measurement measures it (queuedItems), not the time a Dify run takes.
-func (c *soakChild) dispatch() time.Duration {
+func (c *soakChild) dispatch(limit int) time.Duration {
 	began := time.Now()
-	queue.Admit(c.s.queuedItems(), 0, queue.Plan{Budget: 4, Reserved: 1})
+	if limit == 0 {
+		queue.Admit(c.s.queuedItems(), 0, queue.Plan{Budget: 4, Reserved: 1})
+	} else {
+		queue.Admit(soakQueuedItems(c.s, limit), 0, queue.Plan{Budget: 4, Reserved: 1})
+	}
 	return time.Since(began)
 }
 
-type soakSamples struct{ home, report, dispatch []time.Duration }
+type soakSamples struct{ home, report, dispatch, dispatchShallow []time.Duration }
 
 func (c *soakChild) sample(into *soakSamples, n int) {
 	for i := 0; i < n; i++ {
@@ -453,14 +457,15 @@ func (c *soakChild) sample(into *soakSamples, n int) {
 		} else {
 			c.t.Errorf("report page under measurement: %d", code)
 		}
-		into.dispatch = append(into.dispatch, c.dispatch())
+		into.dispatch = append(into.dispatch, c.dispatch(0))
+		into.dispatchShallow = append(into.dispatchShallow, c.dispatch(soakQueueBacklogShallow))
 	}
 }
 
 const soakSamplesPerWindow = 100
 
 func (s soakSamples) window(minute int) soakWindow {
-	return soakWindow{Minute: minute, At: time.Now().UnixMilli(), Home: soakSummarize(s.home), Report: soakSummarize(s.report), Dispatch: soakSummarize(s.dispatch)}
+	return soakWindow{Minute: minute, At: time.Now().UnixMilli(), Home: soakSummarize(s.home), Report: soakSummarize(s.report), Dispatch: soakSummarize(s.dispatch), DispatchShallow: soakSummarize(s.dispatchShallow)}
 }
 
 func (c *soakChild) measureIdle(duration time.Duration) {
@@ -469,6 +474,7 @@ func (c *soakChild) measureIdle(duration time.Duration) {
 		var one soakSamples
 		c.sample(&one, soakSamplesPerWindow)
 		pooled.home, pooled.report, pooled.dispatch = append(pooled.home, one.home...), append(pooled.report, one.report...), append(pooled.dispatch, one.dispatch...)
+		pooled.dispatchShallow = append(pooled.dispatchShallow, one.dispatchShallow...)
 		c.rec.AddIdleWindow(one.window(i))
 		time.Sleep(time.Second)
 	}
@@ -665,9 +671,14 @@ func (c *soakChild) probeBackends() {
 		app := "notes-soak-p-" + strings.ReplaceAll(p.Name, "_", "-")
 		installation, code := c.installManagedWithCode(app, p.MemoryMiB, p.CPUMillis)
 		cleanup := c.retire(installation)
+		retiredBy := "workaround"
+		if cleanup == "uninstall" {
+			retiredBy = "managed_uninstall"
+		}
 		c.t.Logf("SOAK_PROBE_RETIRED %s: %s (code %s)", p.Name, cleanup, code)
 		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Native: true,
-			Detail: fmt.Sprintf("requested %d MiB and %d millis against %d MiB and %d millis remaining; residue: %s", p.MemoryMiB, p.CPUMillis, c.sizing.RemainingMemoryMiB, c.sizing.RemainingCPUMillis, cleanup)})
+			Retired: retiredBy,
+			Detail:  fmt.Sprintf("requested %d MiB and %d millis against %d MiB and %d millis remaining; residue: %s", p.MemoryMiB, p.CPUMillis, c.sizing.RemainingMemoryMiB, c.sizing.RemainingCPUMillis, cleanup)})
 	}
 }
 

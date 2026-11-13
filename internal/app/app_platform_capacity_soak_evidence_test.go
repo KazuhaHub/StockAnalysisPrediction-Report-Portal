@@ -90,6 +90,9 @@ type soakProbeResult struct {
 	Passed   bool   `json:"passed"`
 	Native   bool   `json:"native"`
 	Detail   string `json:"detail,omitempty"`
+	// Retired says how a refused probe installation was taken out of the count: "managed_uninstall" when the ordinary
+	// uninstall accepted it, "workaround" when it was refused and the soak marked the row removed instead.
+	Retired string `json:"retired,omitempty"`
 }
 
 func (p *soakProbeResult) judge() { p.Passed = p.Expected != "" && p.Observed == p.Expected }
@@ -101,7 +104,10 @@ type soakWindow struct {
 	Home     soakStats `json:"home"`
 	Report   soakStats `json:"report"`
 	Dispatch soakStats `json:"dispatch"`
-	Flood    soakFlood `json:"flood"`
+	// DispatchShallow is the same decision over a backlog of soakQueueBacklogShallow jobs. It is recorded beside the
+	// judged one and never judged.
+	DispatchShallow soakStats `json:"dispatch_shallow"`
+	Flood           soakFlood `json:"flood"`
 	// Backends is what each soak backend reports about its own loads, read through a signed request after
 	// the window's samples: the proof that the floods really ran inside the containers.
 	Backends []soakBackendStatus `json:"backends,omitempty"`

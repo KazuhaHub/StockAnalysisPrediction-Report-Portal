@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
 
 // The helpers of the declared-capacity soak (doc 171, PR 4b) that need no Docker: how the eight backends are
@@ -314,7 +316,67 @@ func TestTaskQuotasRefuseAtTheirOwnBoundary(t *testing.T) {
 	}
 }
 
-// soakQueueBacklog is the number of queued batch jobs the dispatch decision is measured over. The first smoke used
-// 200; the decision costs a few queries per waiting job, so a long backlog multiplies every scheduling delay the
-// loaded host adds. Fifty is a deep real queue, and the evidence states it.
-const soakQueueBacklog = 50
+// soakQueueBacklog is the number of queued batch jobs the dispatch decision is judged over: the figure fixed in the
+// plan before any measurement. The decision costs a few queries per waiting job, so a long backlog multiplies every
+// scheduling delay the loaded host adds. soakQueueBacklogShallow is measured beside it in the same run and recorded,
+// never judged.
+const (
+	soakQueueBacklog        = 200
+	soakQueueBacklogShallow = 50
+)
+
+// soakQueuedItems is queuedItems over the first limit queued jobs: the same pricing of each job, the same filters,
+// for a shallower backlog than the one in the database.
+func soakQueuedItems(s *Server, limit int) []queue.Item {
+	now := time.Now()
+	loc := s.panelLocation()
+	w := s.prioWeights()
+	usage := s.userUsage(now)
+	jobs := s.st.QueuedJobs()
+	if len(jobs) > limit {
+		jobs = jobs[:limit]
+	}
+	items := make([]queue.Item, 0, len(jobs))
+	for _, j := range jobs {
+		if !runAtDue(j.RunAt, now) || invertBlocksNow(j.RunPreset, now, loc) {
+			continue
+		}
+		f := s.jobFactors(j, now, usage)
+		items = append(items, queue.Item{ID: j.ID, Score: w.Score(f), Urgent: f.Urgent})
+	}
+	return items
+}
+
+func TestSoakQueuedItemsLimitedToTheWholeBacklogIsTheQueuesOwnDecision(t *testing.T) {
+	st := newTestStore(t)
+	s := &Server{st: st}
+	target := seedTarget(t, st)
+	for i := 0; i < 12; i++ {
+		if _, err := st.CreateBatchJob(target, 1, 0, "admin", []map[string]string{{"symbol": "600000"}}, "50"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	full := s.queuedItems()
+	if len(full) != 12 {
+		t.Fatalf("queue holds %d", len(full))
+	}
+	same := soakQueuedItems(s, 12)
+	if len(same) != len(full) {
+		t.Fatalf("limit equal to the backlog changed the decision: %d vs %d", len(same), len(full))
+	}
+	for i := range full {
+		// The age factor reads the clock, so the scores of two calls differ in the last digits.
+		if same[i].ID != full[i].ID || same[i].Urgent != full[i].Urgent || math.Abs(same[i].Score-full[i].Score) > 0.01 {
+			t.Fatalf("item %d differs: %+v vs %+v", i, same[i], full[i])
+		}
+	}
+	if got := soakQueuedItems(s, 5); len(got) != 5 {
+		t.Fatalf("limit 5 priced %d jobs", len(got))
+	}
+}
+
+func TestSoakDispatchBacklogs(t *testing.T) {
+	if soakQueueBacklog != 200 || soakQueueBacklogShallow != 50 {
+		t.Fatalf("backlogs = %d and %d", soakQueueBacklog, soakQueueBacklogShallow)
+	}
+}
