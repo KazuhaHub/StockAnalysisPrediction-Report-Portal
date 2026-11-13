@@ -96,8 +96,12 @@ func (s *soakState) holdMemory(total int64) {
 	}
 }
 
-// burnCPU is a busy loop. The container's CPU quota, not this code, decides how much of it runs.
+// burnCPU is a busy loop. The container's CPU quota, not this code, decides how much of it runs. It runs at the
+// lowest priority of its own thread, so that inside the quota the request handlers and the registration handshake
+// still win the scheduler: a backend that starved its own readiness would fail its install, not exercise its limit.
 func (s *soakState) burnCPU() {
+	runtime.LockOSThread()
+	_ = syscall.Setpriority(syscall.PRIO_PROCESS, 0, 19)
 	x := uint64(88172645463325252)
 	for {
 		for range 1 << 20 {
