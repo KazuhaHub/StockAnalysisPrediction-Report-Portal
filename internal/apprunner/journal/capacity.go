@@ -296,9 +296,11 @@ func (s *Store) admitUpdateStart(ctx context.Context, tx *sql.Tx, f updateStartF
 	if err != nil {
 		return nil, err
 	}
+	// The target reused the row of a removed one only when a removal receipt of this very resource exists. A
+	// remove-code effect alone says nothing: every update carries one for its source.
 	var removals int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='remove_code' AND kind='remove-code' AND state='applied'`,
-		c.OperationID, c.InstallationID).Scan(&removals); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind='remove-code' AND state='applied' AND json_extract(receipt_json,'$.resource_id')=?`,
+		c.InstallationID, resource.id).Scan(&removals); err != nil {
 		return nil, err
 	}
 	// A target that reused the row of a removed one goes back to absent; a fresh one never existed and is deleted.

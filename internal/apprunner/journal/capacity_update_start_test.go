@@ -124,3 +124,49 @@ func TestUpdateStartClaimWithoutDeclaredResourcesFailsClosed(t *testing.T) {
 		t.Fatal("a failed admission changed the start")
 	}
 }
+
+func refuseWithBackendLimitOne(t *testing.T, r reservedStartFixture) {
+	t.Helper()
+	budgets := roomyBudgets()
+	budgets.RunningBackends = 1
+	if err := r.f.store.SetCapacityBudgets(budgets); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.f.store.db.Exec(`INSERT INTO runner_reservations(id,resource_id,installation_id,kind,memory_mib,cpu_millis,disk_bytes,image_bytes,state,created_ms,updated_ms) VALUES(?,?,?,'backend',16,25,0,0,'held',1,1)`, fixtureID(8801), fixtureID(8802), fixtureID(8803)); err != nil {
+		t.Fatal(err)
+	}
+	_, err := r.f.store.ClaimUpdateStart(withBackendResources(context.Background(), fixtureResources()), r.raw, r.sig)
+	var refusal *CapacityRefusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// Every update carries a remove-code effect of its own, so a remove-code row says nothing about the target. A
+// refused fresh target is deleted whether or not the operation has one.
+func TestRefusedFreshTargetIsDeletedEvenWithARemoveCodeRow(t *testing.T) {
+	r := reservedStart(t)
+	if _, err := r.f.store.db.Exec(`INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+        VALUES(?,?,?,'remove_code',1,'remove-code',?,2,?,2,'applied',?,NULL,1,1)`,
+		fixtureID(8810), r.command.OperationID, r.command.InstallationID, strings.Repeat("e", 64), r.command.ControllerEpoch, `{"resource_id":"`+fixtureID(8811)+`"}`); err != nil {
+		t.Fatal(err)
+	}
+	refuseWithBackendLimitOne(t, r)
+	if scalar(t, r.f.store.db, `SELECT COUNT(*) FROM runner_resources WHERE id='`+r.command.Payload.ResourceID+`'`) != 0 {
+		t.Fatal("the refused fresh target was rewritten instead of deleted")
+	}
+}
+
+// A target that reuses the row of a removed one (its own removal receipt names it) goes back to absent.
+func TestRefusedReusedTargetGoesBackToAbsent(t *testing.T) {
+	r := reservedStart(t)
+	if _, err := r.f.store.db.Exec(`INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+        VALUES(?,?,?,'remove_code',1,'remove-code',?,2,?,2,'applied',?,NULL,1,1)`,
+		fixtureID(8810), r.command.OperationID, r.command.InstallationID, strings.Repeat("e", 64), r.command.ControllerEpoch, `{"resource_id":"`+r.command.Payload.ResourceID+`"}`); err != nil {
+		t.Fatal(err)
+	}
+	refuseWithBackendLimitOne(t, r)
+	if desired, observed, revision := r.resource(t); desired != "absent" || observed != "absent" || revision != 4 {
+		t.Fatalf("resource = %s %s %d", desired, observed, revision)
+	}
+}
