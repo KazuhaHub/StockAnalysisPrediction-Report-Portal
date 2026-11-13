@@ -111,14 +111,20 @@ type QuoteResp struct {
 	// Currency and TZ exist so that the strip cannot print a bare number: 319.97 beside a Chinese
 	// report is a yuan price to every reader who is not told otherwise, and an instant with no zone
 	// is a time the browser will happily render in its own.
-	Currency        string        `json:"currency"`
-	TZ              string        `json:"tz"`
-	Source          string        `json:"source"`
-	Snapshot        QuoteSnapshot `json:"snapshot"`
-	Bars            []QuoteBar    `json:"bars"`
-	BarsSource      string        `json:"barsSource"`
-	BarsUnavailable string        `json:"barsUnavailable"`
-	Adjusted        bool          `json:"adjusted"`
+	Currency string        `json:"currency"`
+	TZ       string        `json:"tz"`
+	Source   string        `json:"source"`
+	Snapshot QuoteSnapshot `json:"snapshot"`
+	// Phase is the same statement a home card makes (pre_open | trading | lunch_break | closed |
+	// holiday | unknown), stamped per request from the market line and never stored in a cache
+	// entry. The strip needs it for more than a label: before the open a stock that has not traded
+	// yet reports high 0 / low 0, the same shape as a suspension. Empty on a historical answer,
+	// which is a dated close and not an observation of any session.
+	Phase           string     `json:"phase,omitempty"`
+	Bars            []QuoteBar `json:"bars"`
+	BarsSource      string     `json:"barsSource"`
+	BarsUnavailable string     `json:"barsUnavailable"`
+	Adjusted        bool       `json:"adjusted"`
 	// ExDates are the dates in this series the vendor marked as ex-events, from the seventh element a
 	// day row carries on an ex-dividend date ({"fh_sh":"3.8","djr":…,"cqr":…}). It is a LIST rather
 	// than a field on QuoteBar because the element is not part of a candle: it describes an event on

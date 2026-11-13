@@ -302,3 +302,34 @@ func TestQuoteBatchCardsWithoutAMarketLineHaveUnknownPhase(t *testing.T) {
 		t.Error("a failed market line cost the card its price")
 	}
 }
+
+// The reading page's quote strip asks /api/quote, not the batch endpoint, and it needs the same
+// phase: before the open a stock that has not traded yet reports high 0 / low 0, exactly the shape
+// a suspension has, and only the phase tells the two apart.
+func TestQuoteSingleCarriesThePhase(t *testing.T) {
+	s := quoteServer(t)
+	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
+	tencent.marketLine = phaseLineAuction
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineAuction).Add(5 * time.Second) }
+	primeMarketLine(t, s)
+
+	rec := quoteGET(t, s, "/api/quote/601899")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("quote → %d (%s)", rec.Code, rec.Body.String())
+	}
+	quoteEqStr(t, "phase", quoteBody(t, rec).Phase, quotePhasePreOpen)
+
+	// A cached answer is stamped per request too: the phase must never outlive its transition by
+	// riding along in a cache entry.
+	tencent.mu.Lock()
+	tencent.marketLine = phaseLineLunch
+	tencent.mu.Unlock()
+	s.quotes.phaseMu.Lock()
+	s.quotes.phaseAt = time.Time{}
+	s.quotes.phaseMu.Unlock()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineLunch).Add(5 * time.Second) }
+	primeMarketLine(t, s)
+	quoteEqStr(t, "phase after the line moved", quoteBody(t, quoteGET(t, s, "/api/quote/601899")).Phase, quotePhaseLunchBreak)
+}

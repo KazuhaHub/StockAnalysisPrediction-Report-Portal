@@ -6,7 +6,7 @@ import type { CardQuote } from '../lib/useHomeQuotes'
 // page's session keys so the two surfaces cannot word one state differently. A phase not in this
 // table (unknown, or one a newer server invents) prints nothing: no label is honest, a wrong one is
 // not.
-const PHASE_LABEL_KEYS: Record<string, string> = {
+export const PHASE_LABEL_KEYS: Record<string, string> = {
   pre_open: 'quote.phase.pre_open',
   trading: 'quote.session.open',
   lunch_break: 'quote.phase.lunch_break',

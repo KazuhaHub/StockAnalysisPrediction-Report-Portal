@@ -195,6 +195,9 @@ func (s *Server) apiQuoteMode(w http.ResponseWriter, r *http.Request, historyOnl
 	// Bars is never written after the parser returns it.
 	out := *resp
 	out.Cached = cached
+	if !out.HistoryOnly {
+		out.Phase = s.quotes.phaseFor(target.Market, s.quotes.marketLine(cfg))
+	}
 	out.Bars = quoteVisibleBars(iv, resp.Bars)
 	advice := quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, ttl, resp)
 	if out.Stale || out.HistoryOnly {

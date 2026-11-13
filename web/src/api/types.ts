@@ -1636,6 +1636,11 @@ export interface QuoteResp {
   historyOnly?: boolean
   historyThrough?: string
   stale?: boolean
+  /**
+   * The market phase, the same statement a home card makes (pre_open | trading | lunch_break |
+   * closed | holiday | unknown). Absent on a historical answer and from an older server.
+   */
+  phase?: string
   symbol: string
   /** The live name from the quote feed — not the name frozen onto a report at ingest. */
   name: string
