@@ -101,6 +101,15 @@ describe('Markdown', () => {
     )
   })
 
+  // The chart's offset and zoom as numbers. Compared as values, not as the serialized string: CSS
+  // serializers may shorten translate(0px, 0px) to translate(0px) (jsdom 31 does), and the
+  // one-argument form means a y offset of 0.
+  function placement(el: HTMLElement) {
+    const m = /^translate\((-?[\d.]+)px(?:, (-?[\d.]+)px)?\) scale\((-?[\d.]+)\)$/.exec(el.style.transform)
+    if (!m) throw new Error(`unexpected transform: ${el.style.transform}`)
+    return { x: Number(m[1]), y: Number(m[2] ?? 0), scale: Number(m[3]) }
+  }
+
   it('zooms, pans, and resets a rendered mermaid chart', async () => {
     const { container } = render(<Markdown md={'```mermaid\nflowchart LR\nA --> B\n```'} />)
 
@@ -111,18 +120,18 @@ describe('Markdown', () => {
     const reset = container.querySelector<HTMLButtonElement>('.md-mermaid-reset')!
 
     fireEvent.click(zoomIn)
-    expect(canvas.style.transform).toBe('translate(0px, 0px) scale(1.25)')
+    expect(placement(canvas)).toEqual({ x: 0, y: 0, scale: 1.25 })
 
     fireEvent.pointerDown(viewport, { pointerId: 1, button: 0, clientX: 10, clientY: 20 })
     fireEvent.pointerMove(viewport, { pointerId: 1, clientX: 50, clientY: 80 })
     fireEvent.pointerUp(viewport, { pointerId: 1 })
-    expect(canvas.style.transform).toBe('translate(40px, 60px) scale(1.25)')
+    expect(placement(canvas)).toEqual({ x: 40, y: 60, scale: 1.25 })
 
     fireEvent.click(reset)
-    expect(canvas.style.transform).toBe('translate(0px, 0px) scale(1)')
+    expect(placement(canvas)).toEqual({ x: 0, y: 0, scale: 1 })
 
     fireEvent.wheel(viewport, { deltaY: -100, clientX: 0, clientY: 0 })
-    expect(canvas.style.transform).toBe('translate(0px, 0px) scale(1.1)')
+    expect(placement(canvas)).toEqual({ x: 0, y: 0, scale: 1.1 })
   })
 
   it('pinch-zooms a rendered mermaid chart on touch devices', async () => {
@@ -136,7 +145,7 @@ describe('Markdown', () => {
     fireEvent.pointerDown(viewport, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 100, clientY: 0 })
     fireEvent.pointerMove(viewport, { pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 0 })
 
-    expect(canvas.style.transform).toBe('translate(0px, 0px) scale(2)')
+    expect(placement(canvas)).toEqual({ x: 0, y: 0, scale: 2 })
   })
 
   it('exposes wide tables as keyboard-scrollable regions', () => {

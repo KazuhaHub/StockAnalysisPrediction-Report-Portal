@@ -286,6 +286,11 @@ describe('notification countdown, edge cases', () => {
     const view = mount()
     expect(vi.getTimerCount()).toBeGreaterThan(0)
     view.unmount()
+    // Removing a focused element makes jsdom (31+) run the spec's focus fixup on the next rendering
+    // frame, through a one-frame interval of its own that clears itself once it has run. Let that
+    // frame pass, then count: any countdown or poll of ours is far longer than one frame and would
+    // still be pending.
+    vi.advanceTimersByTime(17)
     expect(vi.getTimerCount()).toBe(0)
   })
 })

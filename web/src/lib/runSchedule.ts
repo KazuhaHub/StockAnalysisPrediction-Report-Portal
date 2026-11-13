@@ -1,5 +1,6 @@
 import type { Dayjs } from 'dayjs'
 import type { RunFreq, RunMode, RunPreset, RunPresetAnchor, RunPresetInterval, RunPresetsResp } from '../api/types'
+import type { Translate } from './translate'
 
 // The run-time + priority choice shared by the single-run modal and the batch console
 // (docs/adr/0014-idle-lane-and-preset-windows.md). mode picks WHEN (now / a preset low-peak
@@ -90,7 +91,7 @@ export function scheduleError(s: RunSchedule): '' | 'run.pickTime' | 'run.pickPr
   return ''
 }
 
-type TFunc = (key: string, opts?: Record<string, unknown>) => string
+type TFunc = Translate
 
 // ---------------------------------------------------------------------------
 // Weekly windows, as the editor works with them
