@@ -191,6 +191,8 @@ func platformManagementError(w http.ResponseWriter, err error) {
 		status, code = 400, "app_platform_invalid_request"
 	case errors.Is(err, errPlatformImageStoreFull):
 		status, code = 507, "app_platform_storage_full"
+	case errors.Is(err, errPlatformInstallationCapacity):
+		status, code = 429, "installation_capacity"
 	case errors.Is(err, appplatform.ErrManagedOfflineNotReady):
 		status, code = 409, "app_platform_requirements_unavailable"
 	case errors.Is(err, errAppPlatformInstallUnavailable):

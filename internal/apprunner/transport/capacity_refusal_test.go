@@ -64,10 +64,14 @@ func TestWritableLifecycleAcceptsOnlyABoundCapacityRefusal(t *testing.T) {
 		}
 	}
 	for name, mutate := range map[string]func(*journal.CapacityRefusal){
-		"effect":    func(r *journal.CapacityRefusal) { r.EffectID = "11111111-1111-4111-8111-111111119990" },
-		"payload":   func(r *journal.CapacityRefusal) { r.PayloadSHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+		"effect": func(r *journal.CapacityRefusal) { r.EffectID = "11111111-1111-4111-8111-111111119990" },
+		"payload": func(r *journal.CapacityRefusal) {
+			r.PayloadSHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		},
 		"operation": func(r *journal.CapacityRefusal) { r.OperationID = "11111111-1111-4111-8111-111111119991" },
-		"future":    func(r *journal.CapacityRefusal) { r.SettledMS = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10) },
+		"future": func(r *journal.CapacityRefusal) {
+			r.SettledMS = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
+		},
 		"dimension": func(r *journal.CapacityRefusal) { r.Dimension = "swap" },
 	} {
 		t.Run(name, func(t *testing.T) {
