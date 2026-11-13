@@ -113,7 +113,7 @@ func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
 	if effectState(t, s, operation, "start", 1) != "reverted" {
 		t.Fatalf("the enable start was not closed: %s", effectState(t, s, operation, "start", 1))
 	}
-	if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("sweep") != 0 && fake.count("settle-start") != 1 {
+	if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("settle-start") != 1 {
 		t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
 	}
 	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" {
@@ -168,5 +168,74 @@ func TestSettlementTickClosesAnEnableStartTheRunnerFoundRunning(t *testing.T) {
 	}
 	if effectState(t, s, operation, "start", 1) != "applied" || fake.count("remove-stop") != 0 || fake.count("execute-restore") != 0 || fake.count("execute-start") != 0 {
 		t.Fatalf("running start: %s %v", effectState(t, s, operation, "start", 1), fake.calls)
+	}
+}
+
+// A resume whose restore start the runner holds claimed with nothing executing it is settled from the recovery
+// reconciliation: the runner is asked once, and the start it then reads as never run reverts the effect and returns
+// the installation to review.
+func TestRecoveryReconcileSettlesAnOrphanedRestoreStart(t *testing.T) {
+	f, operation, _ := unknownResumeStartFixture(t)
+	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+	script.install(f.s, &platformFakeMigrationRunner{t: t})
+	f.s.platformMigration = &platformFakeMigrationRunner{t: t}
+	reconcile := func() {
+		t.Helper()
+		if selected, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil || selected.lease.id != "" {
+			t.Fatalf("reconcile: %+v %v", selected, err)
+		}
+	}
+	// Inside the start's window nothing is settled.
+	reconcile()
+	if script.settled != 0 || effectState(t, f.s, operation, "start", 1) != "unknown" {
+		t.Fatal("a start inside its window was settled")
+	}
+	ageRecoveryStart(t, f.s, operation)
+	reconcile()
+	if script.settled != 1 || effectState(t, f.s, operation, "start", 1) != "unknown" {
+		t.Fatalf("the orphan was not settled exactly once: %d", script.settled)
+	}
+	if script.receipts[0].Outcome != "never_ran" {
+		t.Fatal("unexpected scripted receipt")
+	}
+	ageRecoveryStart(t, f.s, operation)
+	reconcile()
+	if effectState(t, f.s, operation, "start", 1) != "reverted" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "failed" ||
+		scalar[string](t, f.s.st, `SELECT desired_state||':'||phase FROM app_platform_installations WHERE id=?`, f.installation) != "disabled:review_required" {
+		t.Fatal("a settled orphan did not revert the start and return the installation to review")
+	}
+	if script.settled != 1 {
+		t.Fatal("a closed start was settled again")
+	}
+}
+
+// A start the runner holds as reserved (never claimed) or pending (maybe executing) is only read again.
+func TestRecoveryReconcileLeavesAReservedOrPendingRestoreStart(t *testing.T) {
+	for _, state := range []string{"reserved", "pending"} {
+		t.Run(state, func(t *testing.T) {
+			f, operation, _ := unknownResumeStartFixture(t)
+			script := &settleScript{before: held(state), after: held(state)}
+			script.install(f.s, &platformFakeMigrationRunner{t: t})
+			f.s.platformMigration = &platformFakeMigrationRunner{t: t}
+			ageRecoveryStart(t, f.s, operation)
+			if _, err := f.s.reconcilePlatformRecoveryResumes(context.Background(), f.endpoint, platformFixtureID(5640)); err != nil {
+				t.Fatal(err)
+			}
+			if script.settled != 0 || effectState(t, f.s, operation, "start", 1) != "unknown" {
+				t.Fatalf("a %s start was acted on", state)
+			}
+		})
+	}
+}
+
+// ageRecoveryStart moves the end of the resume and every recorded read past all the windows a start could be
+// admitted in.
+func ageRecoveryStart(t *testing.T, s *Server, operation string) {
+	t.Helper()
+	mustExec(t, s.st, `UPDATE app_platform_operations SET completed_ms=1 WHERE id=?`, operation)
+	raw := scalar[string](t, s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, operation)
+	if reservation, _, ok := platformStartRecoveryReceipt(raw); ok {
+		mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE operation_id=? AND stage='start'`, platformStartPendingReceipt(reservation, 1), operation)
 	}
 }
