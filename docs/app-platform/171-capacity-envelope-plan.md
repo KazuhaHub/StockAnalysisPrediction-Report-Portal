@@ -690,6 +690,18 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     disk budget to 10 GiB for the run, which the evidence reports. The attempts to retire through the product are logged
     on every run. Whether a refused install should offer an uninstall that destroys its namespace is a product decision
     for the owner; nothing was changed here.
+    **Root cause (traced, not yet fixed).** The first refusal is `platformLoadRemovalProjection`
+    (`app_platform_removal_review.go:183-187`), which admits only the phases `pending`, `setup_required`, `ready` and
+    `disabled`; a refused install is `review_required` (`finalizePlatformInstallForReview`), so the review is refused as a
+    changed plan. Admitting that phase there is not enough, because the whole removal pipeline assumes an install that
+    completed and started: the worker claim wants `i.phase='pending'` and a managed runner effect for `stop` and
+    `remove_code` (`app_platform_managed_removal.go:665`, `:156-186`), the removal intent and the delete-data intent both
+    read a *completed* install operation with no error code and an active activation (`app_platform_managed_removal.go:186`,
+    `app_platform_data_delete.go:129-176`), and the standalone delete-data review does the same
+    (`app_platform_delete_data_review.go:127-140`). A refused install has none of these, only an applied `prepare_data`
+    effect and its namespace. A complete fix is a variant of the uninstall for a never-started installation that skips
+    `stop` and `remove_code`, and sources the namespace deletion from the failed install's `prepare_data` effect. It touches
+    the removal state machine and the delete-data command binding, so it is held for the owner's review of its design.
 54. **Task quotas.** The per-installation quota is reached on seven managed installations and the global quota on the
     eighth, after a backlog of waiting tasks attributed to the static installations (inserted with the columns the
     admission itself writes, since a static installation has no backend and cannot schedule tasks) brings the Portal to
