@@ -103,6 +103,16 @@ func (s *Store) ReadWritableCandidateRunningReceipt(ctx context.Context, raw, si
 	var zero WritableCandidateRunningReceipt
 	tx, f, err := s.beginWritableCandidate(ctx, raw, signature, "applied", nil)
 	if err != nil {
+		var effect struct {
+			EffectID string `json:"effect_id"`
+		}
+		_ = json.Unmarshal(raw, &effect)
+		if refusal := s.answerCapacityRefusal(ctx, effect.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+			v, err := control.VerifyWritableCandidate(raw, signature, a, now)
+			return CapacityIdentityOfCommand(candidateIndex(v.Index())), err
+		}); refusal != nil {
+			return zero, refusal
+		}
 		return zero, err
 	}
 	defer tx.Rollback()

@@ -33,6 +33,7 @@ func (s *Store) DispatchCandidate(ctx context.Context, raw, signature []byte, na
 	if json.Unmarshal(raw, &untrusted) != nil || parsed.SHA256 != untrusted.Payload.ReleaseSHA256 {
 		return zero, ErrCandidateClaimUnavailable
 	}
+	ctx = withBackendResources(ctx, parsed.Manifest.Backend.Resources)
 	admission, err := s.AdmitCandidateCommand(ctx, raw, signature)
 	if err != nil {
 		return zero, err
@@ -58,6 +59,8 @@ func (s *Store) DispatchCandidate(ctx context.Context, raw, signature []byte, na
 		return s.ExecuteCandidate(ctx, claim, native, descriptor)
 	case "applied":
 		return s.ReadCandidateRunningReceipt(ctx, raw, signature)
+	case "reverted":
+		return zero, s.capacityRefusalFor(ctx, CapacityIdentityOfCommand(candidateIndex(untrusted)))
 	default:
 		return zero, ErrFenceReconciliation
 	}

@@ -6,6 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 )
 
 // CapacityBudgets are the absolute ceilings the runner admits reservations
@@ -147,4 +151,89 @@ func releaseReservation(ctx context.Context, tx *sql.Tx, resourceID string, now 
 
 func (r capacityRefusal) String() string {
 	return fmt.Sprintf("%s requested=%s remaining=%s", r.dimension, strconv.FormatInt(r.requested, 10), strconv.FormatInt(r.remaining, 10))
+}
+
+type backendResourcesKey struct{}
+
+// withBackendResources carries the declared resources of the release being started to the reservation that
+// admits it. Dispatch entry points attach them after parsing the descriptor, so no signature of the claim
+// functions changes and no caller can reserve an amount the descriptor did not declare.
+func withBackendResources(ctx context.Context, r appplatform.Resources) context.Context {
+	return context.WithValue(ctx, backendResourcesKey{}, r)
+}
+
+// backendPlan builds the reservation of one backend or migration job. It reports false when admission does not
+// apply because no budgets are configured, and refuses when they are but no resources were declared.
+func (s *Store) backendPlan(ctx context.Context, kind, resourceID, installationID string) (capacityPlan, bool, error) {
+	if _, ok := s.CapacityBudgets(); !ok {
+		return capacityPlan{}, false, nil
+	}
+	r, ok := ctx.Value(backendResourcesKey{}).(appplatform.Resources)
+	if !ok || r.MemoryMiB <= 0 || r.CPUMillis <= 0 {
+		return capacityPlan{}, false, ErrCapacityPlanMissing
+	}
+	return capacityPlan{kind: kind, resourceID: resourceID, installationID: installationID, memoryMiB: int64(r.MemoryMiB), cpuMillis: int64(r.CPUMillis)}, true, nil
+}
+
+// namespacePlan builds the reservation of one managed data namespace.
+func (s *Store) namespacePlan(resourceID, installationID string) (capacityPlan, bool) {
+	if _, ok := s.CapacityBudgets(); !ok {
+		return capacityPlan{}, false
+	}
+	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationBytes}, true
+}
+
+// capacityRefusalFor answers a replay of a command a capacity refusal reverted.
+func (s *Store) capacityRefusalFor(ctx context.Context, id CapacityIdentity) error {
+	var state, raw string
+	if err := s.db.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, id.EffectID).Scan(&state, &raw); err != nil {
+		return err
+	}
+	if state == "reverted" {
+		if r, ok := storedCapacityRefusal(raw, id); ok {
+			return &CapacityRefusalError{Receipt: r}
+		}
+	}
+	return ErrFenceReconciliation
+}
+
+// requireHeldReservation is the claim's last check before a native call: with budgets configured, the resource
+// must hold a reservation. It catches a resource that reached its claim without being admitted.
+func (s *Store) requireHeldReservation(ctx context.Context, tx *sql.Tx, resourceID string) error {
+	if _, ok := s.CapacityBudgets(); !ok {
+		return nil
+	}
+	var held int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_reservations WHERE resource_id=? AND state='held'`, resourceID).Scan(&held); err != nil {
+		return err
+	}
+	if held != 1 {
+		return fmt.Errorf("%w: no held reservation", ErrFenceReconciliation)
+	}
+	return nil
+}
+
+// answerCapacityRefusal is the read side of a refusal. A read of a command whose effect is reverted by a capacity
+// refusal returns the stored receipt, but only after verify accepts the signature under the read's own purpose and
+// the stored receipt binds that exact command. It returns nil when there is no such refusal, leaving the
+// caller's own error in force.
+func (s *Store) answerCapacityRefusal(ctx context.Context, effectID string, verify func(a control.Authority, now int64) (CapacityIdentity, error)) error {
+	if s.closing.Load() {
+		return nil
+	}
+	a, err := s.writableDispatchAuthority(ctx)
+	if err != nil {
+		return nil
+	}
+	id, err := verify(a, time.Now().UTC().UnixMilli())
+	if err != nil || id.EffectID != effectID {
+		return nil
+	}
+	if refusal := s.capacityRefusalFor(ctx, id); refusal != nil {
+		var typed *CapacityRefusalError
+		if errors.As(refusal, &typed) {
+			return refusal
+		}
+	}
+	return nil
 }
