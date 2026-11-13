@@ -69,12 +69,24 @@ func reservedWritableCandidate(f writableCandidateFacts, r *dataResource) (Writa
 	return WritableCandidateReservation{ResourceID: r.id, InstallationID: r.installation, NamespaceID: r.namespace.String, EffectID: c.EffectID, OwnershipSHA256: r.ownership, DataReceiptSHA256: f.verified.Writer().Command().DataReceiptSHA256, WriterReceiptSHA256: f.verified.Command().WriterReceiptSHA256, Generation: generation, ControlFence: r.fence, WriterFence: r.writer, Replayed: true}, nil
 }
 
+// writableView says which marker the unknown start is read against.
+type writableView uint8
+
+const (
+	// writableViewCurrent is the live view: the marker must match the current envelope exactly.
+	writableViewCurrent writableView = iota
+	// writableViewRecovery reads the original expired, durably bound marker.
+	writableViewRecovery
+	// writableViewOrphan reads the original expired marker, bound or not, for the orphan settlement.
+	writableViewOrphan
+)
+
 // Exact current view. Pending and applied resources use separate strict
 // validators. Only recovery may inspect an original expired unknown marker.
 func (s *Store) beginWritableCandidate(ctx context.Context, raw, signature []byte, state string, receipt *string) (*sql.Tx, writableCandidateFacts, error) {
-	return s.beginWritableCandidateView(ctx, raw, signature, state, receipt, false)
+	return s.beginWritableCandidateView(ctx, raw, signature, state, receipt, writableViewCurrent)
 }
-func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature []byte, state string, receipt *string, recovery bool) (*sql.Tx, writableCandidateFacts, error) {
+func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature []byte, state string, receipt *string, recovery writableView) (*sql.Tx, writableCandidateFacts, error) {
 	var zero writableCandidateFacts
 	if s.closing.Load() || len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 {
 		return nil, zero, ErrWritableCandidateClaimUnavailable
@@ -114,7 +126,7 @@ func (s *Store) beginWritableCandidateView(ctx context.Context, raw, signature [
 
 // Caller owns a current write-intent transaction and verified signed reference.
 // Registration history is exempt only through its separately verified scope.
-func loadWritableCandidateFacts(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, a control.Authority, raw, signature []byte, state string, receipt *string, recovery bool, now int64, started time.Time, registration *control.VerifiedWritableBackendRegistrationCommand) (writableCandidateFacts, error) {
+func loadWritableCandidateFacts(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableCandidateCommand, a control.Authority, raw, signature []byte, state string, receipt *string, view writableView, now int64, started time.Time, registration *control.VerifiedWritableBackendRegistrationCommand) (writableCandidateFacts, error) {
 	var zero writableCandidateFacts
 	c := v.Index()
 	index := candidateIndex(c)
@@ -192,8 +204,12 @@ func loadWritableCandidateFacts(ctx context.Context, tx *sql.Tx, v control.Verif
 	if state == "unknown" {
 		var marker writableCandidateClaimMarker
 		matches := canonicalDataJSON(current, &marker) && writableCandidateMarkerMatches(marker, f)
-		if recovery {
+		switch view {
+		case writableViewRecovery:
 			matches = canonicalDataJSON(current, &marker) && writableCandidateMarkerIdentityMatches(marker, f) && marker.Preflight != nil
+		case writableViewOrphan:
+			// The orphan settlement also takes a claim that never reached its preflight binding.
+			matches = canonicalDataJSON(current, &marker) && writableCandidateMarkerIdentityMatches(marker, f)
 		}
 		if resource == nil || !matches {
 			return zero, ErrFenceReconciliation

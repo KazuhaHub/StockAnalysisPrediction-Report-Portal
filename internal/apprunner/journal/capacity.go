@@ -230,10 +230,26 @@ func (s *Store) lookupCapacityRefusal(ctx context.Context, id CapacityIdentity) 
 	return nil
 }
 
-// capacityRefusalFor answers a replay of a command a capacity refusal reverted.
+// lookupRevertedAnswer finds the typed answer a reverted start-bearing command stored: a capacity refusal or the
+// orphan receipt of a candidate start that was proven never to have run. It returns nil when the row holds neither.
+func (s *Store) lookupRevertedAnswer(ctx context.Context, id CapacityIdentity) error {
+	var state, raw string
+	if err := s.db.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, id.EffectID).Scan(&state, &raw); err != nil || state != "reverted" {
+		return nil
+	}
+	if r, ok := storedCapacityRefusal(raw, id); ok {
+		return &CapacityRefusalError{Receipt: r}
+	}
+	if r, ok := storedCandidateOrphan(raw, id); ok {
+		return &CandidateOrphanSettledError{Receipt: r}
+	}
+	return nil
+}
+
+// capacityRefusalFor answers a replay of a command a capacity refusal, or an orphan settlement, reverted.
 func (s *Store) capacityRefusalFor(ctx context.Context, id CapacityIdentity) error {
-	if refusal := s.lookupCapacityRefusal(ctx, id); refusal != nil {
-		return refusal
+	if answer := s.lookupRevertedAnswer(ctx, id); answer != nil {
+		return answer
 	}
 	return ErrFenceReconciliation
 }
@@ -270,10 +286,7 @@ func (s *Store) answerCapacityRefusal(ctx context.Context, effectID string, veri
 	if err != nil || id.EffectID != effectID {
 		return nil
 	}
-	if refusal := s.lookupCapacityRefusal(ctx, id); refusal != nil {
-		return refusal
-	}
-	return nil
+	return s.lookupRevertedAnswer(ctx, id)
 }
 
 // CapacityIdentityOfUpdateStart is the identity a refusal of an update, restore or enable start carries. All three

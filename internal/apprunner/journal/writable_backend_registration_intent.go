@@ -50,7 +50,7 @@ func checkWritableCandidateHistoryForRegistration(ctx context.Context, tx *sql.T
 func loadWritableRegistrationSource(ctx context.Context, tx *sql.Tx, v control.VerifiedWritableBackendRegistrationCommand, a control.Authority, now int64, started time.Time) (writableCandidateFacts, WritableCandidateRunningReceipt, error) {
 	var zero writableCandidateFacts
 	c := v.Command()
-	f, err := loadWritableCandidateFacts(ctx, tx, v.Candidate(), a, c.CandidateRaw, c.CandidateSignature, "applied", nil, false, now, started, &v)
+	f, err := loadWritableCandidateFacts(ctx, tx, v.Candidate(), a, c.CandidateRaw, c.CandidateSignature, "applied", nil, writableViewCurrent, now, started, &v)
 	if err != nil {
 		return zero, WritableCandidateRunningReceipt{}, err
 	}

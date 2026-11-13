@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
@@ -26,7 +27,7 @@ func writableCandidateRecoveryFresh(m writableCandidateClaimMarker, f writableCa
 }
 func (s *Store) prepareWritableCandidateRecovery(ctx context.Context, raw, signature, descriptor []byte) (writableCandidateRecoveryPreflight, error) {
 	var zero writableCandidateRecoveryPreflight
-	tx, f, err := s.beginWritableCandidateView(ctx, raw, signature, "unknown", nil, true)
+	tx, f, err := s.beginWritableCandidateView(ctx, raw, signature, "unknown", nil, writableViewRecovery)
 	if err != nil {
 		return zero, err
 	}
@@ -57,7 +58,20 @@ func (s *Store) prepareWritableCandidateRecovery(ctx context.Context, raw, signa
 // ReconcileWritableCandidate observes only the exact original expired and
 // durably bound unknown start. It never obtains/reconstructs an execution claim,
 // provisions IPC, creates a process, starts/stops it, or repairs data/policy.
+//
+// When the start cannot be observed as a running process (it never reached its
+// preflight binding, or the native observation fails), it falls back to the
+// orphan settlement under the gate this call already holds: only a container
+// proven absent by name and label settles the start as never run, answered with
+// *CandidateOrphanSettledError. A present container or a failed inspection
+// leaves the start unknown and returns the original error. The runner's writable
+// reconcile action calls this (transport/writable_lifecycle).
 func (s *Store) ReconcileWritableCandidate(ctx context.Context, raw, signature, descriptor []byte, native *driver.CandidateRuntime) (WritableCandidateRunningReceipt, error) {
+	return s.reconcileWritableCandidate(ctx, raw, signature, descriptor, native, candidateInspectorOf(native))
+}
+
+// reconcileWritableCandidate is ReconcileWritableCandidate with the native look at an absent start as its own seam.
+func (s *Store) reconcileWritableCandidate(ctx context.Context, raw, signature, descriptor []byte, native *driver.CandidateRuntime, inspector CandidateTargetInspector) (WritableCandidateRunningReceipt, error) {
 	var zero WritableCandidateRunningReceipt
 	if native == nil || s.closing.Load() || len(descriptor) == 0 || len(descriptor) > appplatform.MaxDescriptorBytes {
 		return zero, ErrWritableCandidateClaimUnavailable
@@ -70,9 +84,24 @@ func (s *Store) ReconcileWritableCandidate(ctx context.Context, raw, signature, 
 	if s.closing.Load() {
 		return zero, ErrWritableCandidateClaimUnavailable
 	}
+	orphan := func(cause error) (WritableCandidateRunningReceipt, error) {
+		receipt, err := s.settleCandidateOrphanLocked(ctx, s.writableCandidateOrphanLoader(raw, signature), inspector)
+		if err != nil {
+			// A start settled earlier answers with the same typed receipt, under the signature verified here.
+			if a, aerr := s.writableDispatchAuthority(ctx); aerr == nil {
+				if v, verr := control.VerifyWritableCandidate(raw, signature, a, time.Now().UnixMilli()); verr == nil {
+					if answer := s.lookupRevertedAnswer(ctx, CapacityIdentityOfCommand(candidateIndex(v.Index()))); answer != nil {
+						return zero, answer
+					}
+				}
+			}
+			return zero, cause
+		}
+		return zero, &CandidateOrphanSettledError{Receipt: receipt}
+	}
 	before, err := s.prepareWritableCandidateRecovery(ctx, raw, signature, descriptor)
 	if err != nil {
-		return zero, err
+		return orphan(err)
 	}
 	expires, _ := strconv.ParseInt(before.facts.verified.Index().ExpiresMS, 10, 64)
 	ctx, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
@@ -82,7 +111,7 @@ func (s *Store) ReconcileWritableCandidate(ctx context.Context, raw, signature, 
 	}
 	observation, err := native.ObserveWritableCandidate(ctx, before.request, before.expected)
 	if err != nil {
-		return zero, err
+		return orphan(err)
 	}
 	return s.settleRecoveredWritableCandidate(ctx, before, descriptor, observation)
 }
@@ -91,7 +120,7 @@ func (s *Store) ReconcileWritableCandidate(ctx context.Context, raw, signature, 
 // settlement. Native success is opaque and distinct from live start evidence.
 func (s *Store) settleRecoveredWritableCandidate(ctx context.Context, before writableCandidateRecoveryPreflight, descriptor []byte, observation driver.WritableCandidateRecoveryObservation) (WritableCandidateRunningReceipt, error) {
 	var zero WritableCandidateRunningReceipt
-	tx, f, err := s.beginWritableCandidateView(ctx, before.facts.raw, before.facts.signature, "unknown", &before.facts.receipt, true)
+	tx, f, err := s.beginWritableCandidateView(ctx, before.facts.raw, before.facts.signature, "unknown", &before.facts.receipt, writableViewRecovery)
 	if err != nil {
 		return zero, err
 	}
