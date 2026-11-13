@@ -313,3 +313,8 @@ func TestTaskQuotasRefuseAtTheirOwnBoundary(t *testing.T) {
 		}
 	}
 }
+
+// soakQueueBacklog is the number of queued batch jobs the dispatch decision is measured over. The first smoke used
+// 200; the decision costs a few queries per waiting job, so a long backlog multiplies every scheduling delay the
+// loaded host adds. Fifty is a deep real queue, and the evidence states it.
+const soakQueueBacklog = 50

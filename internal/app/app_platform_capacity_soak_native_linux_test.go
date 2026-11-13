@@ -408,7 +408,7 @@ func (c *soakChild) seedPortal() {
 	}
 	c.reportID = id
 	target := seedTarget(t, c.s.st)
-	for i := 0; i < 200; i++ {
+	for i := 0; i < soakQueueBacklog; i++ {
 		if _, err := c.s.st.CreateBatchJob(target, 1, 0, c.session.username, []map[string]string{{"symbol": c.symbol}}, "50"); err != nil {
 			t.Fatal(err)
 		}

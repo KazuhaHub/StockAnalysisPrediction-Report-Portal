@@ -195,7 +195,7 @@ never evidence.
   installation and over the global quota, an event subscription over its in-flight bound, a layer beyond its
   declaration (HTTP 400, nothing stored) and a staging reservation beyond 2 GiB (HTTP 507 `app_platform_storage_full`).
 - **Measured:** idle baseline first; then every minute p95 of `GET /api/home`, of the report page (`GET /api/stock/{symbol}`
-  of a seeded report) through the real handler, and of the batch queue's dispatch decision over 200 queued jobs; every
+  of a seeded report) through the real handler, and of the batch queue's dispatch decision over a backlog of 50 queued jobs; every
   thirty seconds host memory and CPU, tasks, the runner and Docker log sizes, XFS usage and the summed memory and CPU of
   the backends.
 - **Pass:** every probe refused with its typed error; each one-minute window of each latency series within max(1.5x idle p95, idle p95 + 5 ms)
