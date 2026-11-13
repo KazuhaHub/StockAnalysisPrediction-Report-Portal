@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 // newTestStore opens a fresh in-memory sqlite Store. In-memory (rather than a temp-dir
@@ -170,5 +172,70 @@ func TestLinkEmptyIcon(t *testing.T) {
 	ls := st.Links()
 	if len(ls) != 1 || ls[0].Icon != "" {
 		t.Fatalf("links = %+v, want one link with empty icon", ls)
+	}
+}
+
+// Two stores on one SQLite file are two processes in production: the server and the backup CLI,
+// or a server and an operator's maintenance command. A writer that finds the other holding the
+// write lock must wait for it rather than fail at once with SQLITE_BUSY ("database is locked"),
+// which is what TestForecastShadowDiagnosticsAcrossSQLiteConnections hit on a loaded CI runner.
+func TestSQLiteWriterWaitsForAnotherConnectionsLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "locked.db")
+	holder, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Close()
+	waiter, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer waiter.Close()
+
+	tx, err := holder.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO meta(k, v) VALUES ('lock-holder', '1')`); err != nil {
+		t.Fatal(err)
+	}
+	released := make(chan struct{})
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		tx.Commit()
+		close(released)
+	}()
+
+	if err := waiter.SetSetting("lock-waiter", "1"); err != nil {
+		t.Fatalf("a writer behind another connection's lock failed instead of waiting: %v", err)
+	}
+	<-released
+	if got := waiter.GetSetting("lock-holder", ""); got != "1" {
+		t.Fatalf("holder's write not visible after commit: %q", got)
+	}
+}
+
+// Every connection carries the timeout, the in-memory test store included, and an operator's own
+// busy_timeout in the source is kept.
+func TestSQLiteSourceCarriesTheBusyTimeout(t *testing.T) {
+	for _, src := range []string{":memory:", filepath.Join(t.TempDir(), "a.db")} {
+		st, err := connectStore("sqlite", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ms int
+		if err := st.db.QueryRow(`PRAGMA busy_timeout`).Scan(&ms); err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+		if ms != sqliteBusyTimeoutMs {
+			t.Errorf("%s: busy_timeout = %d, want %d", src, ms, sqliteBusyTimeoutMs)
+		}
+	}
+	if got := sqliteSource("data/p.db?_pragma=busy_timeout(100)"); got != "data/p.db?_pragma=busy_timeout(100)" {
+		t.Errorf("operator timeout rewritten: %q", got)
+	}
+	if got := sqliteSource("data/p.db?mode=rw"); got != "data/p.db?mode=rw&_pragma=busy_timeout(5000)" {
+		t.Errorf("existing query not extended: %q", got)
 	}
 }
