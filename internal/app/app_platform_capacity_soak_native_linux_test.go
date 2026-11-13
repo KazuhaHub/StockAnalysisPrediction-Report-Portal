@@ -270,6 +270,7 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	s, session := platformTrustTestServer(t, false)
 	platformRegisterTestPublisher(t, s, session)
 	s.platformImageDir = t.TempDir()
+	s.names = LoadNames(t.TempDir(), s.st)
 	bindPlatformFixtureRuntime(t, s, session, enrollment)
 	endpoint := platformRuntimeEndpoint{path: os.Getenv("PORTAL_DATA_SOCKET"), controllerUID: 41001, controllerGID: 41001}
 	s.platformBackendEndpoint.Store(&endpoint)
