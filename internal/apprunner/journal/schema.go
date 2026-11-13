@@ -16,15 +16,36 @@ type schemaProduct struct{ kind, name, sql, rowCheck string }
 // Closed physical declarations from the approved four-table journal scope.
 // Neither manifests nor control messages can supply SQL declarations.
 // Version 2 only widens the runner_commands kind list; every other product is
-// identical in both versions. Version 3 only adds runner_reservations (doc 171)
-// and its indexes; every version 2 product is unchanged.
+// identical in both versions. Version 3 adds runner_reservations (doc 171) and its
+// indexes, and widens the runner_commands kind list once more with remove-image
+// (doc 171, PR 4c); every other version 2 product is unchanged.
 func schemaProducts(version int) []schemaProduct {
+	return buildSchemaProducts(version, version >= 3)
+}
+
+// earlierV3Products is the declaration a v3 journal had before remove-image joined the kind list. It is kept only
+// to recognise such a file and refuse it with a typed error; nothing is ever created from it outside tests.
+func earlierV3Products() []schemaProduct { return buildSchemaProducts(3, false) }
+
+func earlierV3CommandsSQL() string {
+	for _, product := range earlierV3Products() {
+		if product.name == "runner_commands" {
+			return product.sql
+		}
+	}
+	return ""
+}
+
+func buildSchemaProducts(version int, removeImageKind bool) []schemaProduct {
 	if version < 1 || version > schemaVersion {
 		panic("unknown journal schema version")
 	}
 	kinds := []string{"stage", "verify", "prepare-data", "start-candidate", "update-start", "probe", "activate", "stop", "snapshot", "restore", "remove-code", "delete-data"}
 	if version >= 2 {
 		kinds = append(kinds, "import-checkpoint", "migrate-data", "discard-migration", "load-image")
+	}
+	if removeImageKind {
+		kinds = append(kinds, "remove-image")
 	}
 	tables := []struct {
 		name, fields, keys string
