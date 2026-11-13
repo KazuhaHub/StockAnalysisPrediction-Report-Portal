@@ -182,3 +182,51 @@ func TestNativeNoPullIsPossible(t *testing.T) {
 		t.Fatalf("a pull reached the daemon: %v", err)
 	}
 }
+
+// TestNativeRemoveImageRemovesByIDAndProvesAbsence loads a real image and removes it through the runner's removal
+// path on the real daemon: the image goes by its store-specific ID, no other image goes with it, a second removal
+// finds it absent and deletes nothing, and the daemon answers 404 for the ID afterwards.
+func TestNativeRemoveImageRemovesByIDAndProvesAbsence(t *testing.T) {
+	client := nativeLoadClient(t)
+	f := newLoadFixtureFor(t, runtime.GOARCH)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	var info infoResponse
+	if err := readJSON(ctx, client, "/v"+APIVersion+"/info", &info); err != nil {
+		t.Fatal(err)
+	}
+	store := imageStoreFromInfo(info)
+	expected := ExpectedImageID(store, f.entry)
+	t.Cleanup(func() { _ = removeLoadedImage(context.Background(), client, expected) })
+	if got, err := loadImageHTTP(ctx, client, f.request(), runtime.GOARCH); err != nil || got.State != LoadStateLoaded {
+		t.Fatalf("native load: %+v %v", got, err)
+	}
+	before, err := readImageList(ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RemoveImageRequest{Descriptor: f.raw, ReleaseSHA256: f.parsed.SHA256, Platform: f.entry.Platform}
+	seen, err := imagePresentByIDHTTP(ctx, client, request.Descriptor, request.ReleaseSHA256, request.Platform, runtime.GOARCH)
+	if err != nil || seen.State != RemoveStatePresent || seen.ImageID != expected {
+		t.Fatalf("presence before the removal: %+v %v", seen, err)
+	}
+	got, err := removeImageHTTP(ctx, client, request, runtime.GOARCH)
+	if err != nil || got.State != RemoveStateRemoved || got.ImageID != expected || got.Store != store {
+		t.Fatalf("native removal: %+v %v", got, err)
+	}
+	after, err := readImageList(ctx, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, present := after[expected]; present || !sameImagesExcept(before, after, expected) || len(before) != len(after)+1 {
+		t.Fatalf("the removal changed more than the delivered image: before %d after %d", len(before), len(after))
+	}
+	var inspected imageResponse
+	if err := readJSONOrMissing(ctx, client, "/v"+APIVersion+"/images/"+expected+"/json", &inspected, ErrImageMissing); !errors.Is(err, ErrImageMissing) {
+		t.Fatalf("the daemon still answers for the removed image: %v", err)
+	}
+	again, err := removeImageHTTP(ctx, client, request, runtime.GOARCH)
+	if err != nil || again.State != RemoveStateAbsent {
+		t.Fatalf("second removal: %+v %v", again, err)
+	}
+}

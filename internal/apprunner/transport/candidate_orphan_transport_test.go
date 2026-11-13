@@ -53,8 +53,10 @@ func TestWritableLifecycleAcceptsOnlyABoundCandidateOrphanReceipt(t *testing.T) 
 		}
 	}
 	for name, mutate := range map[string]func(*journal.CandidateOrphanReceipt){
-		"effect":  func(r *journal.CandidateOrphanReceipt) { r.EffectID = "11111111-1111-4111-8111-111111119990" },
-		"payload": func(r *journal.CandidateOrphanReceipt) { r.PayloadSHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+		"effect": func(r *journal.CandidateOrphanReceipt) { r.EffectID = "11111111-1111-4111-8111-111111119990" },
+		"payload": func(r *journal.CandidateOrphanReceipt) {
+			r.PayloadSHA256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		},
 		"future": func(r *journal.CandidateOrphanReceipt) {
 			r.SettledMS = strconv.FormatInt(time.Now().Add(time.Hour).UnixMilli(), 10)
 		},

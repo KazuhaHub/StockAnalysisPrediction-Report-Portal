@@ -73,6 +73,8 @@ type platformImageRunner interface {
 	SendBlob(ctx context.Context, endpoint platformRuntimeEndpoint, call platformImageBlobCall) (transport.ImageBlobResult, error)
 	LoadImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformLoadImageCall) (platformImageReply, error)
 	ReadLoadImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformLoadImageCall) (platformImageReply, error)
+	RemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error)
+	ReadRemoveImage(ctx context.Context, endpoint platformRuntimeEndpoint, call platformRemoveImageCall) (platformRemoveImageReply, error)
 }
 
 func (s *Server) platformImageRunnerSeam() platformImageRunner {

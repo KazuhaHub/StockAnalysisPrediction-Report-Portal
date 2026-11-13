@@ -126,6 +126,43 @@ func imageDeliveryCheckEvents(events []imageDeliveryEvent, target string) error 
 	return nil
 }
 
+// imageDeliveryCheckAfterRemoval requires the daemon to hold exactly the images it held before the load, with their
+// names untouched, and not the target: the removal took the delivered image and nothing else.
+func imageDeliveryCheckAfterRemoval(before, after []imageDeliveryImage, target string) error {
+	for _, image := range after {
+		if image.ID == target {
+			return fmt.Errorf("the delivered image %s is still in the store", target)
+		}
+	}
+	// The same comparison as after the load, with the target absent from both lists.
+	var kept []imageDeliveryImage
+	for _, image := range before {
+		if image.ID != target {
+			kept = append(kept, image)
+		}
+	}
+	return imageDeliveryCheckAfterLoad(kept, append(append([]imageDeliveryImage(nil), after...), imageDeliveryImage{ID: target}), target)
+}
+
+// imageDeliveryCheckRemoval requires exactly one image delete event, on the target: the runner's remove-image
+// removed the delivered image by ID and nothing else. It is checked only after the uninstall that freed the image.
+func imageDeliveryCheckRemoval(events []imageDeliveryEvent, target string) error {
+	deletes := 0
+	for _, e := range events {
+		if e.Type != "image" || e.Action != "delete" {
+			continue
+		}
+		deletes++
+		if e.ID != target {
+			return fmt.Errorf("image delete event on %s, not the package's image %s", e.ID, target)
+		}
+	}
+	if deletes != 1 {
+		return fmt.Errorf("%d image delete events, expected exactly one", deletes)
+	}
+	return nil
+}
+
 // imageDeliveryCheckContainers requires at least one running container whose image ID is the target's, and
 // refuses a running container of any other image among those it was asked about.
 func imageDeliveryCheckContainers(containers []imageDeliveryContainer, target string) error {

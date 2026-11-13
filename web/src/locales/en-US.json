@@ -3893,7 +3893,7 @@
   "err.capacity_exhausted_memory": "The runner has no memory left for this app. Stop or remove another app, then try again.",
   "err.capacity_exhausted_cpu": "The runner has no CPU left for this app. Stop or remove another app, then try again.",
   "err.capacity_exhausted_disk": "The runner has no disk left for this app's data. Delete the data of apps you no longer use, then try again.",
-  "err.capacity_exhausted_image_store": "The runner's image store is full. Remove apps you no longer use, then try again.",
+  "err.capacity_exhausted_image_store": "The runner's image store is full. Images of removed or replaced app versions are reclaimed automatically, so if one was removed recently, try again in a few minutes; otherwise remove apps you no longer use.",
   "err.capacity_exhausted_running_backends": "The runner already runs the maximum number of app backends. Stop or remove one, then try again.",
   "err.installation_capacity": "The installation limit of 50 apps is reached. Remove an app to install another.",
   "apps.draftLeaveTitle": "Leave this app?",

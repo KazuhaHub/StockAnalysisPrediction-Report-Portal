@@ -205,6 +205,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				if _, settleErr := w.server.settlePlatformLoadImages(bulkCtx, w.endpoint); settleErr != nil {
 					log.Printf("app-platform load-image settlement: %v", settleErr)
 				}
+				// Idle: the images of releases nothing references any more are removed, and begun removals settle.
+				if _, reclaimErr := w.server.reclaimPlatformImages(bulkCtx, w.endpoint); reclaimErr != nil {
+					log.Printf("app-platform image reclaim: %v", reclaimErr)
+				}
 			}
 			w.publish("idle", "", "")
 			return nil
@@ -291,8 +295,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		}
 		w.publish("complete", w.active.id, appplatform.StageComplete)
 		w.active, w.attempts = platformOperationLease{}, 0
-		// An operation ended: blobs no release pins any more may go.
+		// An operation ended: blobs no release pins any more may go, and so may the images of the releases it
+		// moved away from or removed.
 		w.server.sweepPlatformImages(ctx)
+		w.reclaimImages(ctx)
 		return nil
 	}
 	if result.lease.id == "" {
@@ -378,7 +384,19 @@ func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode st
 	w.publish("review_required", operation, "")
 	w.active, w.attempts = platformOperationLease{}, 0
 	w.server.sweepPlatformImages(ctx)
+	w.reclaimImages(ctx)
 	return nil
+}
+
+// reclaimImages runs the image removal step after an operation ended. It never fails the tick: whatever it cannot
+// do is left for the idle tick, which repeats it.
+func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
+	if w.endpoint.path == "" {
+		return
+	}
+	if _, err := w.server.reclaimPlatformImages(ctx, w.endpoint); err != nil && ctx.Err() == nil {
+		log.Printf("app-platform image reclaim: %v", err)
+	}
 }
 
 // Portal startup owns the portable no-data service separately. Native execution

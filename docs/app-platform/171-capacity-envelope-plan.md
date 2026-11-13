@@ -417,3 +417,109 @@ settlement it is a permanent leak with no remedy short of a fresh journal. The f
 settlement modelled on `update_start_settle.go`: prove the native resource absent by name and label, then
 settle and release in one transaction.
 
+
+## Resolutions (PR 4c)
+
+These close the two follow-ups above that blocked the integration to main merge: image removal and candidate orphan
+settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
+
+### Image removal
+
+24. **The schema change.** The `remove-image` kind is folded into the v3 declaration of `runner_commands`
+    (`schemaProducts(3)` and the freeze test). The v1 and v2 upgrades rebuild `runner_commands` to that v3 product
+    (the same copy-and-swap, now one function, `upgradeCommandsToV3`) and then create and backfill the reservation
+    table, so both end in the new shape; the version stays 3. A journal already at the earlier v3 shape is not
+    converted: `inspectAt` recognises its `runner_commands` declaration and refuses it with `ErrEarlierV3Journal`,
+    which matches `ErrIncompatible` and says to start from a fresh journal. The file is not touched. No Portal
+    DDL and no other journal change was made.
+25. **Where the Portal step runs.** It is not an operation stage. The operation stage list is a `CHECK` on the Portal
+    `operations` table, so a new stage is a Portal schema change; and a stage in the middle of an operation would sit
+    in front of start-bearing work. The step is a sweep, `reclaimPlatformImages`, that runs after an operation ends
+    (the two places the scheduler already sweeps image blobs, the operation completing and the operation finishing
+    for review) and on every idle tick, next to the load-image settlement. An uninstall and an update are ordinary
+    operations, so both are covered; a cancelled or failed one is covered too, which is harmless because the
+    computation reads references, not the operation's outcome. The effect kind `remove_image` is in the Go allow-list
+    (`platformEffectKindAllowed`, journal stage `stage`).
+26. **Identity of the effect.** Journal stage `stage`, kind `remove-image`, effect number 2 to 32 (number 1 of that
+    stage is the load, and the runner's stage list is closed, so no stage of its own could be added). The command is
+    hosted by the latest finished operation of the installation that loaded the image, and only while no operation of
+    that installation is running, so its fence and generation are the installation's own and never below a floor a
+    newer operation set. The effect id is derived from the host operation and the load effect it undoes, so every
+    attempt and tick signs the same effect; the number is the one the row already has, or the next free in the stage.
+    The row carries the intent (release, platform, manifest, config digest, layers, load effect) in its receipt until
+    the runner's verdict replaces it, so a later tick can rebuild and read back the same command.
+27. **"Last referencing installation", computed by the Portal.** An image is unreferenced when no release the Portal
+    still needs carries its config digest. The needed releases are `loadPlatformReleasePins` (the active release of
+    every installation that still exists, every release a retained recovery checkpoint or recovery bundle could
+    restore, candidate and recovery-set releases, releases of unfinished operations, unsettled loads, unrecovered
+    failures, open review plans) plus the previous release of each existing installation (the source of its latest
+    completed update, kept for rollback). The candidate images are the latest applied load of each config digest per
+    runtime that no applied removal is at least as recent as. It fails closed in four ways: a release that cannot be
+    read returns an error and no target; a load receipt that cannot be read is never removed; a runtime with a load
+    that has no verdict is left out whole; an image already loaded again after its removal is a target again, one
+    removed and not reloaded is not. A removal that is begun and whose image is referenced again before it
+    completes is not completed: its row is closed `reverted` with the outcome `referenced_again`, and the runner's
+    unknown claim, if there is one, keeps its reservation.
+28. **Runner behaviour** (`journal/remove_image.go`). The claim is committed as `unknown` before any native call, under
+    the load gate, so it is fenced against a load of the same digest; the claim is refused, typed and with no row
+    written, while a load of that digest is `unknown` (`ErrRemoveImageLoadPending`). The native guard lists
+    containers twice (the daemon's ancestor filter, and a scan of every container's image ID) and refuses while any
+    container of any state uses the image; the delete is sent with `force=false` and the daemon's 409 is the same
+    typed refusal. A refusal settles `reverted` with the outcome `image_in_use` and keeps the reservation. The
+    removal is by ID, followed by a proof of absence by ID, and then the effect settles `applied` and the image
+    reservation is released in one transaction, and only there. An unknown removal is resolved by `ImagePresentByID`
+    first: an image already gone settles `applied` (state `absent`) with no removal call, a present one goes through
+    the guard again, an unanswered check settles nothing. The read-back answers the receipt, `pending` while the gate
+    is held, `orphaned` for an unknown effect with the gate free, or `absent` for no row, under the gate.
+29. **Installation-wide gates ignore the new rows.** Every runner and Portal reader that ignores `load-image` or
+    `load_image` rows now ignores `remove-image` or `remove_image` rows too (26 journal statements, 19 Portal
+    statements), so removal never holds back or raises a floor of a start-bearing command. Tests inject the row into
+    every command family's fixtures and, on the Portal, into the readers that guard managed access, the candidate
+    intent, install admission, the removal selection and the enable operation.
+30. **An image-store refusal while a removal is pending.** The load refusal stays the typed
+    `capacity_exhausted_image_store` and is not retried. Reclaim is automatic after an operation ends, so the operator
+    message (`err.capacity_exhausted_image_store`, in the three locales) now says that images of removed or replaced
+    versions are reclaimed automatically and to try again in a few minutes before removing apps. No key was added.
+31. **Native coverage.** The image delivery acceptance child now runs the reclaim step after its uninstall and
+    asserts the `remove_image` effect is `applied` with a `removed` receipt for the delivered image ID; the parent
+    asserts, from the daemon itself, that exactly one image `delete` event names that ID, that the ID is gone, and
+    that every other image of the worker is unchanged. The removal runs after the parent has finished inspecting the
+    daemon and after the uninstall, so no later step of that test needs the image. The writable scheduler native
+    test installs reference images, which carry no `backend.images` and so no load effect: it can never reclaim one,
+    and an update keeps the previous release pinned.
+
+### Candidate orphan settlement
+
+32. **What settles.** A claimed candidate or writable candidate start whose command window has expired, with the
+    execution gate free and the container proven absent by name and label, settles in one transaction: the effect
+    `reverted` with the typed receipt `candidate_never_ran`, the resource `absent`, the reservation `released`. A
+    container in any state, a failed inspection, a held gate or an open window changes nothing. A replay returns the
+    same receipt (`lookupRevertedAnswer`).
+33. **Where it is wired.** The settlement runs from the entry points the Portal's scheduler already reaches through the
+    transport: `DispatchCandidate` (the unknown branch), `DispatchWritableCandidate`, and `ReconcileWritableCandidate`
+    (which the writable start stage calls as `reconcilePlatformWritableStart`). The runner answers a settled start with
+    the receipt over both lifecycle transports, and the controller side validates it against the exact signed command
+    and returns it as `*journal.CandidateOrphanSettledError`. No new command kind was added, so the Portal needs no new
+    effect; it receives a definite typed end where it used to receive only an uncertain error.
+34. **Not wired: the Portal's own effect row.** The Portal does not yet turn `CandidateOrphanSettledError` into a
+    settled effect row; the start stage treats it as the failure it is, through the ordinary retry and finish path.
+    The runner's reservation, the leak this item was about, is released.
+
+### Round-2 minors from PR 4a
+
+35. **Enable-start transfer.** The source's reservation is no longer released at the claim. Admission nets a stopped or
+    absent source of the same installation, so the start is still admitted, and the row is released with a rows-affected
+    check in the settlement that records the source absent (`settleEnableSourceAbsent`).
+36. **`settleRefusedEffect`.** It now runs in the transaction of `finishAs`, under the same lease, fence and epoch, with
+    the effect's payload digest compared in the UPDATE; a stale lease settles nothing, and a failure of the operation's
+    end rolls the settlement back.
+
+### Not proven here
+
+- Every Docker path (the driver removal against a real daemon, the image delivery acceptance's removal and the
+  `delete` event proof) runs only in the Linux native CI job; nothing was run against Docker locally.
+- The Portal tests of the reclaim step run on SQLite only; the SQL is portable and goes through the same helpers as
+  the load settlement, but no PostgreSQL run covers the new queries until CI.
+- The Portal reaches the removal through the scheduler hooks and the idle tick; a test shows the idle tick and the
+  hook send it, and a source check shows both operation endings call the hook, but no test runs a whole update or
+  uninstall through the scheduler into a removal.

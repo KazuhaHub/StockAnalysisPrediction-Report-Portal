@@ -211,6 +211,16 @@ func (f *platformFakeImageRunner) ReadLoadImage(_ context.Context, _ platformRun
 	return reply, nil
 }
 
+func (f *platformFakeImageRunner) RemoveImage(context.Context, platformRuntimeEndpoint, platformRemoveImageCall) (platformRemoveImageReply, error) {
+	f.t.Errorf("a load fixture sent a removal")
+	return nil, errors.New("unscripted removal")
+}
+
+func (f *platformFakeImageRunner) ReadRemoveImage(context.Context, platformRuntimeEndpoint, platformRemoveImageCall) (platformRemoveImageReply, error) {
+	f.t.Errorf("a load fixture read a removal")
+	return nil, errors.New("unscripted removal read")
+}
+
 func (f *platformFakeImageRunner) SendBlob(_ context.Context, _ platformRuntimeEndpoint, call platformImageBlobCall) (transport.ImageBlobResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
