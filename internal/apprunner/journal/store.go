@@ -362,24 +362,45 @@ func checkProfile(ctx context.Context, db *sql.DB) error {
 }
 
 // upgrade moves a verified older journal to the current schema in one
-// transaction. The v1 table is renamed aside, the current table is created from
-// its exact product SQL, rows are copied by explicit column name in rowid order
-// and counted, and only then is the old table dropped; nothing is created by
-// renaming. The order matters: the rowid of a command row is the order the
-// runner admitted it in, and later checks rely on it (see rowOrder).
+// transaction. From v1, the v1 table is renamed aside, the current table is
+// created from its exact product SQL, rows are copied by explicit column name in
+// rowid order and counted, and only then is the old table dropped; nothing is
+// created by renaming. The order matters: the rowid of a command row is the
+// order the runner admitted it in, and later checks rely on it (see rowOrder).
+// From v1 or v2, the additive v3 reservation table is created and backfilled.
 func upgrade(ctx context.Context, db *sql.DB, from int) error {
-	if from != 1 {
+	if from != 1 && from != 2 {
 		return ErrIncompatible
-	}
-	products := map[string]schemaProduct{}
-	for _, product := range schemaProducts(schemaVersion) {
-		products[product.name] = product
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if from == 1 {
+		if err := upgradeCommandsV1ToV2(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if err := upgradeReservationsV2ToV3(ctx, tx); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
+		return err
+	}
+	// Inspect the result before it can be committed: the transaction sees its own schema changes, and a
+	// failure here rolls back to the untouched older file.
+	if _, err := inspectUpgraded(ctx, tx, schemaVersion); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func upgradeCommandsV1ToV2(ctx context.Context, tx *sql.Tx) error {
+	products := map[string]schemaProduct{}
+	for _, product := range schemaProducts(2) {
+		products[product.name] = product
+	}
 	var before int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands`).Scan(&before); err != nil {
 		return err
@@ -403,22 +424,14 @@ func upgrade(ctx context.Context, db *sql.DB, from int) error {
 	if _, err := tx.ExecContext(ctx, `DROP TABLE runner_commands_v1`); err != nil {
 		return err
 	}
-	for _, product := range schemaProducts(schemaVersion) {
+	for _, product := range schemaProducts(2) {
 		if product.kind == "index" && strings.Contains(product.sql, " ON runner_commands(") {
 			if _, err := tx.ExecContext(ctx, product.sql); err != nil {
 				return err
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version=%d`, schemaVersion)); err != nil {
-		return err
-	}
-	// Inspect the result before it can be committed: the transaction sees its own schema changes, and a
-	// failure here rolls back to the untouched v1 file.
-	if _, err := inspectUpgraded(ctx, tx, schemaVersion); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 const runnerCommandColumns = "effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms"

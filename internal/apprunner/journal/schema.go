@@ -9,16 +9,17 @@ import (
 // schemaVersion is the newest journal schema this binary writes. Version 1 is
 // frozen: its table SQL is reproduced here only to recognise and upgrade files
 // written by earlier binaries.
-const schemaVersion = 2
+const schemaVersion = 3
 
 type schemaProduct struct{ kind, name, sql, rowCheck string }
 
 // Closed physical declarations from the approved four-table journal scope.
 // Neither manifests nor control messages can supply SQL declarations.
 // Version 2 only widens the runner_commands kind list; every other product is
-// identical in both versions.
+// identical in both versions. Version 3 only adds runner_reservations (doc 171)
+// and its indexes; every version 2 product is unchanged.
 func schemaProducts(version int) []schemaProduct {
-	if version != 1 && version != schemaVersion {
+	if version < 1 || version > schemaVersion {
 		panic("unknown journal schema version")
 	}
 	kinds := []string{"stage", "verify", "prepare-data", "start-candidate", "update-start", "probe", "activate", "stop", "snapshot", "restore", "remove-code", "delete-data"}
@@ -45,6 +46,16 @@ func schemaProducts(version int) []schemaProduct {
 			"PRIMARY KEY(id)", []string{enumCondition("state", "preparing", "verified", "restoring", "deleted", "review_required"),
 				"state<>'verified' OR (manifest_sha256 IS NOT NULL AND verified_ms IS NOT NULL)"}},
 	}
+	if version >= 3 {
+		tables = append(tables, struct {
+			name, fields, keys string
+			checks             []string
+		}{"runner_reservations", "id:ID resource_id:T128 installation_id:ID kind:T16 memory_mib:N cpu_millis:N disk_bytes:N image_bytes:N state:T16 created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(id),UNIQUE(resource_id)", []string{
+				enumCondition("kind", "backend", "migration", "namespace", "image"),
+				enumCondition("state", "held", "released"),
+				"(kind IN ('backend','migration') AND disk_bytes=0 AND image_bytes=0) OR (kind='namespace' AND memory_mib=0 AND cpu_millis=0 AND image_bytes=0) OR (kind='image' AND memory_mib=0 AND cpu_millis=0 AND disk_bytes=0)"}})
+	}
 	products := make([]schemaProduct, 0, 8)
 	for _, table := range tables {
 		columns := []string{}
@@ -62,12 +73,18 @@ func schemaProducts(version int) []schemaProduct {
 		}
 		products = append(products, schemaProduct{"table", table.name, "CREATE TABLE " + table.name + "(" + strings.Join(columns, ",") + ")", strings.Join(predicates, " AND ")})
 	}
-	for _, index := range []struct{ name, table, columns string }{
+	indexes := []struct{ name, table, columns string }{
 		{"idx_runner_commands_installation", "runner_commands", "installation_id"},
 		{"idx_runner_commands_state", "runner_commands", "state,updated_ms"},
 		{"idx_runner_resources_installation", "runner_resources", "installation_id,kind"},
 		{"idx_runner_checkpoints_namespace", "runner_checkpoints", "data_namespace_id,state,created_ms"},
-	} {
+	}
+	if version >= 3 {
+		indexes = append(indexes,
+			struct{ name, table, columns string }{"idx_runner_reservations_installation", "runner_reservations", "installation_id,state"},
+			struct{ name, table, columns string }{"idx_runner_reservations_state", "runner_reservations", "state,kind"})
+	}
+	for _, index := range indexes {
 		products = append(products, schemaProduct{"index", index.name, "CREATE INDEX " + index.name + " ON " + index.table + "(" + index.columns + ")", ""})
 	}
 	return products
