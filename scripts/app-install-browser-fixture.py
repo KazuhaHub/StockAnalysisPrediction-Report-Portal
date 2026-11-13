@@ -50,7 +50,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><AuthProvider
     process = None
     server = None
     try:
-        env = dict(os.environ, APP_INSTALL_HTTP_STATE=str(state_file), GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
+        env = dict(os.environ, APP_INSTALL_HTTP_STATE=str(state_file), GOWORK="off", GOTOOLCHAIN="local", GOMAXPROCS="2")
         env["APP_INSTALL_HTTP_MARKET"] = "1" if args.market else ""
         env["APP_INSTALL_HTTP_FRESH"] = "1" if args.fresh else ""
         env["APP_INSTALL_HTTP_SCENARIO"] = args.scenario

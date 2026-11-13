@@ -35,7 +35,7 @@ function startFixture(scenario = "install") {
       env: {
         ...process.env,
         GOWORK: "off",
-        GOTOOLCHAIN: "go1.26.10",
+        GOTOOLCHAIN: "local",
         GOMAXPROCS: "2",
         TEST_POSTGRES_DSN: "",
       },
