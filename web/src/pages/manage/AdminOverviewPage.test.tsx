@@ -142,8 +142,10 @@ it('lets administrators choose report metrics and persists them with the layout'
   fireEvent.click(screen.getByRole('checkbox',{name:'manage.dashboard.yearReports'}))
   fireEvent.click(screen.getByRole('checkbox',{name:'manage.dashboard.totalReports'}))
   fireEvent.click(screen.getByRole('button',{name:'common.done'}))
+  // The card re-renders with the chosen metrics after the picker closes, which a loaded CI runner
+  // (jsdom 31) does not finish within the click: wait for the new metric, then check the old one.
+  expect(await within(report).findByText('manage.dashboard.yesterdayReports')).toBeTruthy()
   expect(within(report).queryByText('manage.dashboard.totalReports')).toBeNull()
-  expect(within(report).getByText('manage.dashboard.yesterdayReports')).toBeTruthy()
   fireEvent.click(screen.getByRole('button',{name:'manage.dashboard.saveGlobal'}))
   await waitFor(()=>expect(saved?.blocks.find((block)=>block.id==='reports')?.metrics).toEqual(['today','recent','yesterday','year']))
 })

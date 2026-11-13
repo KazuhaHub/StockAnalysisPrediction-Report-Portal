@@ -1,6 +1,7 @@
 // Lightweight fetch wrapper: same-origin cookie session, JSON encode/decode, throws ApiError(status, message) on error.
 
 import { setConnectionError } from './connection'
+import type { Translate } from '../lib/translate'
 
 export class ApiError extends Error {
   status: number
@@ -30,7 +31,7 @@ export class ApiError extends Error {
  * errText turns a thrown error into something worth showing a user: the translation of its server
  * code when there is one, otherwise the server's own message, otherwise a generic line.
  */
-export function errText(e: unknown, t: (k: string, o?: Record<string, unknown>) => string, fallbackKey = 'common.error'): string {
+export function errText(e: unknown, t: Translate, fallbackKey = 'common.error'): string {
   if (e instanceof ApiError) {
     if (e.code) {
       const key = `err.${e.code}`

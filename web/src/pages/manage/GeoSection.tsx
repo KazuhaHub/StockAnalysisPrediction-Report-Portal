@@ -6,6 +6,7 @@ import { api, errText } from '../../api/client'
 import type { GeoStatus, GeoUpdateState } from '../../api/types'
 import { notifyError } from '../../lib/notify'
 import { usePendingSettings } from './AdminDraftBoundary'
+import type { Translate } from '../../lib/translate'
 
 /**
  * A source is described by what it needs, not by what it is called: the form asks for an edition
@@ -19,7 +20,7 @@ const GEO_SOURCES = [
   { value: 'custom', edition: '', key: false, edit: false, label: 'audit.geoSrcCustom', keyLabel: '' },
 ] as const
 
-type TFn = (key: string, vars?: Record<string, unknown>) => string
+type TFn = Translate
 
 /**
  * What one installed database is, as the single line that labels its option in the picker.

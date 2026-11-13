@@ -51,7 +51,8 @@ export function correctedText(p: number | undefined, q: number | undefined, mode
   return v === undefined ? '—' : `q=${fmt(v)}`
 }
 
-export type Translate = (key: string, opts?: Record<string, unknown>) => string
+import type { Translate } from './translate'
+export type { Translate }
 
 const ALPHA = 0.05
 
