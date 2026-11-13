@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -332,4 +333,55 @@ func TestQuoteSingleCarriesThePhase(t *testing.T) {
 	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineLunch).Add(5 * time.Second) }
 	primeMarketLine(t, s)
 	quoteEqStr(t, "phase after the line moved", quoteBody(t, quoteGET(t, s, "/api/quote/601899")).Phase, quotePhaseLunchBreak)
+}
+
+// The background refresh must not read the cache's clock. That clock is a test seam that tests
+// move between requests, and the refresh runs on its own goroutine after the request that started
+// it has returned, so reading it there is a data race against every test that moves it (and since
+// /api/quote started stamping the phase, every quote request starts a refresh). The expiry is
+// computed from the instant the request that started the refresh observed instead.
+func TestQuoteMarketLineRefreshNeverReadsTheClock(t *testing.T) {
+	s := quoteServer(t)
+	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	release := make(chan struct{})
+	for i := range s.quotes.sources {
+		if s.quotes.sources[i].fetchMarketLine != nil {
+			s.quotes.sources[i].fetchMarketLine = func(ctx context.Context) (string, error) {
+				<-release
+				return phaseLineAuction, nil
+			}
+		}
+	}
+	started := phaseAtStamp(t, phaseLineAuction)
+	s.quotes.now = func() time.Time { return started }
+	s.quotes.marketLine(s.quoteConfigLoad())
+
+	// From here on the request is over. Any clock read is the refresh goroutine's.
+	var reads atomic.Int32
+	s.quotes.phaseMu.Lock()
+	s.quotes.now = func() time.Time { reads.Add(1); return started.Add(time.Hour) }
+	s.quotes.phaseMu.Unlock()
+	close(release)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.quotes.phaseMu.Lock()
+		busy, at := s.quotes.phaseBusy, s.quotes.phaseAt
+		s.quotes.phaseMu.Unlock()
+		if !busy {
+			if n := reads.Load(); n != 0 {
+				t.Errorf("the background refresh read the clock %d time(s)", n)
+			}
+			if want := started.Add(quoteMarketLineTTL); !at.Equal(want) {
+				t.Errorf("next refresh at %v, want %v (the TTL from the requesting instant)", at, want)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("market line refresh never landed")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

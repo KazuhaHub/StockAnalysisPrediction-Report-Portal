@@ -230,7 +230,7 @@ func (c *quoteCache) marketLine(cfg quoteConfig) string {
 	line := c.phaseLine
 	if now := c.now(); (c.phaseAt.IsZero() || !now.Before(c.phaseAt)) && !c.phaseBusy {
 		c.phaseBusy = true
-		go c.refreshMarketLine(fetch)
+		go c.refreshMarketLine(fetch, now)
 	}
 	return line
 }
@@ -238,21 +238,26 @@ func (c *quoteCache) marketLine(cfg quoteConfig) string {
 // refreshMarketLine is the single background refresh. It holds phaseMu only to publish the result,
 // never across the network call. A failure keeps the previous line (the vendor-clock age check
 // retires it) and is remembered for quoteMarketLineFailTTL so a dead vendor is not asked per page.
-func (c *quoteCache) refreshMarketLine(fetch func(ctx context.Context) (string, error)) {
+//
+// Both expiries count from `asked`, the instant the request that started this refresh observed,
+// and this goroutine never reads c.now itself: the clock is a seam that tests move between
+// requests, and this runs after the starting request has returned, so a read here would race with
+// them. Counting from the ask rather than the answer moves an expiry earlier by at most one fetch
+// timeout, which only means the next label refresh is asked for a little sooner.
+func (c *quoteCache) refreshMarketLine(fetch func(ctx context.Context) (string, error), asked time.Time) {
 	ctx, cancel := context.WithTimeout(context.Background(), quoteFetchTimeout)
 	defer cancel()
 	line, err := fetch(ctx)
 	c.phaseMu.Lock()
 	defer c.phaseMu.Unlock()
 	c.phaseBusy = false
-	now := c.now()
 	if err != nil {
 		// Not recorded against the source's health: that record is the quote path's own, and a label
 		// request failing must not read as the vendor failing to serve prices.
-		c.phaseAt = now.Add(quoteMarketLineFailTTL)
+		c.phaseAt = asked.Add(quoteMarketLineFailTTL)
 		return
 	}
-	c.phaseLine, c.phaseAt = line, now.Add(quoteMarketLineTTL)
+	c.phaseLine, c.phaseAt = line, asked.Add(quoteMarketLineTTL)
 }
 
 // phaseFor is the phase for one market against the cached line, "unknown" when there is none.
