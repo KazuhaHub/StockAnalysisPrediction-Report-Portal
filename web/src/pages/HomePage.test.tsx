@@ -125,13 +125,13 @@ function group(key: string, symbol: string): Group {
 }
 
 // A batch answer, in the keyed-by-symbol shape the endpoint sends. `last` and `change` are 分.
-function quoteBody(rows: Record<string, [number, number, string]>) {
+function quoteBody(rows: Record<string, [number, number, string]>, phase?: string) {
   const quotes: Record<string, unknown> = {}
   for (const [input, [last, change, changePct]] of Object.entries(rows)) {
     const symbol = input.replace(/^(sh|sz|bj|hk|us)/, '')
     const market = input.slice(0, input.length - symbol.length) || (symbol.startsWith('6') ? 'sh' : 'sz')
     const key = `${market}${symbol}`
-    quotes[key] = { symbol, market, name: `N${symbol}`, currency: 'CNY', kind: 'stock', last, change, changePct }
+    quotes[key] = { symbol, market, name: `N${symbol}`, currency: 'CNY', kind: 'stock', last, change, changePct, ...(phase ? { phase } : {}) }
   }
   return { quotes }
 }
@@ -325,6 +325,18 @@ describe('the live price on a card', () => {
 
     const line = await screen.findByTestId('card-quote-line')
     expect(line.textContent).toBe('33.35+0.120.12%')
+    expect(line.style.height).toBe('22px')
+  })
+
+  it('labels what the number is from the server\'s phase, and prints nothing without one', async () => {
+    state.resp = { ...base, groups: [group('a', '600519')], totalRuns: 1 }
+    renderHome()
+    await waitFor(() => expect(state.quotes).toHaveLength(1))
+
+    // The reported case: flat, 0.00%, before the open. The label is what stops it reading as broken.
+    await settle(state.quotes[0], quoteBody({ sh600519: [943, 0, '0.00'] }, 'pre_open'))
+    const line = await screen.findByTestId('card-quote-line')
+    expect(line.textContent).toBe('9.430.000.00%quote.phase.pre_open_prev_close')
     expect(line.style.height).toBe('22px')
   })
 

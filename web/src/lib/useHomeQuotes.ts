@@ -21,7 +21,7 @@ import { startVisibleDeadline } from './visiblePoll'
 // itself. Same symbols, same key, no second request.
 
 /**
- * What a card prints. Three fields, and all three come from the vendor.
+ * What a card prints. Three price fields, all from the vendor, and a phase label from the server's reading of the vendor's market state.
  *
  * `last` and `change` are integer 分 — the schema has no REAL column and a float64 never touches a
  * price anywhere in this system (ADR 0028 §10), so the division by 100 happens once, in money.ts,
@@ -42,6 +42,12 @@ export interface CardQuote {
   change: number
   /** The vendor's own percentage string, e.g. "0.12" — printed with a '%' and never re-derived. */
   changePct: string
+  /**
+   * What the number IS, from the server's own reading of the vendor's market state: pre_open
+   * (the price is the previous close), trading, lunch_break, closed or holiday. Anything else —
+   * including a missing field from an older server — is "unknown" and the card prints no label.
+   */
+  phase: string
 }
 
 /**
@@ -91,7 +97,8 @@ function readOne(key: string, v: unknown): CardQuote | null {
   if (!symbol) return null
   if (typeof last !== 'number' || typeof change !== 'number' || typeof changePct !== 'string') return null
   if (typeof market !== 'string' || typeof name !== 'string' || typeof currency !== 'string' || typeof kind !== 'string') return null
-  return { symbol, market, name, currency, kind, last, change, changePct }
+  const phase = typeof o.phase === 'string' && o.phase ? o.phase : 'unknown'
+  return { symbol, market, name, currency, kind, last, change, changePct, phase }
 }
 
 /**

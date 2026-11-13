@@ -23,6 +23,7 @@ import { useNavigate } from 'react-router'
 import { errText } from '../api/client'
 import type { FavoriteItem } from '../api/types'
 import { fenToYuan, signedFenToYuan } from '../lib/money'
+import { QuotePhaseLabel } from './QuotePhaseLabel'
 import { useHomeQuotes, type CardQuote } from '../lib/useHomeQuotes'
 import { clickable } from '../lib/clickable'
 import { useAppAccess } from '../appAccess'
@@ -106,15 +107,16 @@ function FavoriteCard({ item, quote, disabled }: { item: FavoriteItem; quote?: C
           <div style={{ minHeight: 22, display: 'flex', alignItems: 'baseline', gap: 8 }}>
             {quote && (
               <>
-                <Typography.Text strong style={{ color: moveColor, fontSize: 17, fontVariantNumeric: 'tabular-nums' }}>
+                <Typography.Text strong style={{ color: moveColor, fontSize: 17, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                   {fenToYuan(quote.last)}
                 </Typography.Text>
-                <Typography.Text style={{ color: moveColor, fontVariantNumeric: 'tabular-nums' }}>
+                <Typography.Text style={{ color: moveColor, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                   {signedFenToYuan(quote.change)} {quote.changePct}%
                 </Typography.Text>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                <Typography.Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>
                   {t(`quote.currency.${quote.currency}`)}
                 </Typography.Text>
+                <QuotePhaseLabel quote={quote} />
               </>
             )}
           </div>
