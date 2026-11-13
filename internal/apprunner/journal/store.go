@@ -43,6 +43,8 @@ type Store struct {
 	executionGate chan struct{}
 	loadOnce      sync.Once
 	loadGate      chan struct{}
+	// capacity is nil until SetCapacityBudgets turns reservation and admission on.
+	capacity atomic.Pointer[CapacityBudgets]
 }
 
 func init() {
