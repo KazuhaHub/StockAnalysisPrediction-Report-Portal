@@ -144,7 +144,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></Pref
     state_file = target / "portal-state.json"
     try:
         if args.portal_http:
-            env = dict(os.environ, APP_DOCUMENT_HTTP_FIXTURE_DIR=str(target), APP_DOCUMENT_HTTP_STATE=str(state_file), APP_DOCUMENT_HTTP_ORIGIN=origin, APP_DOCUMENT_HTTP_NAMED_TIMEZONE="UTC" if args.launch_page else "", GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
+            env = dict(os.environ, APP_DOCUMENT_HTTP_FIXTURE_DIR=str(target), APP_DOCUMENT_HTTP_STATE=str(state_file), APP_DOCUMENT_HTTP_ORIGIN=origin, APP_DOCUMENT_HTTP_NAMED_TIMEZONE="UTC" if args.launch_page else "", GOWORK="off", GOTOOLCHAIN="local", GOMAXPROCS="2")
             log_file = (target / "portal-http.log").open("w+")
             process = subprocess.Popen(["go", "test", "-count=1", "-timeout=25m", "./internal/app", "-run", "^TestPlatformHTTPBrowserFixture$"], cwd=PORTAL, env=env, stdout=log_file, stderr=subprocess.STDOUT, start_new_session=True)
             deadline = time.monotonic() + 240
@@ -158,7 +158,7 @@ createRoot(document.getElementById('host')!).render(<PrefsProvider><Host/></Pref
                 except (FileNotFoundError, json.JSONDecodeError):
                     time.sleep(0.1)
         else:
-            env = dict(os.environ, APP_FRONTEND_BROWSER_INPUT_DIR=str(target / "child"), APP_FRONTEND_BROWSER_OUTPUT=str(target / "document.html"), GOWORK="off", GOTOOLCHAIN="go1.26.10", GOMAXPROCS="2")
+            env = dict(os.environ, APP_FRONTEND_BROWSER_INPUT_DIR=str(target / "child"), APP_FRONTEND_BROWSER_OUTPUT=str(target / "document.html"), GOWORK="off", GOTOOLCHAIN="local", GOMAXPROCS="2")
             subprocess.run(["go", "test", "-count=1", "-v", "./internal/appplatform", "-run", "^TestFrontendDocumentBrowserFixture$"], cwd=PORTAL, env=env, check=True)
         print(f"PROBE_URL={origin}/", flush=True)
         server.serve_forever()
