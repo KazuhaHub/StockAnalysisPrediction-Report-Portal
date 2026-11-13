@@ -139,14 +139,14 @@ func TestRemoveImageRefusedWhileAnyContainerUsesIt(t *testing.T) {
 	}
 }
 
-// Even if the daemon's own conflict check is what notices the container, the answer is the typed refusal and never
-// an uncertain effect.
+// Even if the daemon's own conflict check is what notices the container, the answer is the typed, retryable conflict
+// and never an uncertain effect.
 func TestRemoveImageDaemonConflictIsTheTypedRefusal(t *testing.T) {
 	f := newLoadFixture(t)
 	d := newRemoveDaemon(t, ImageStoreClassic, f)
 	d.deleteCode = 409
 	got, err := removeImageHTTP(context.Background(), d.client(), f.removeRequest(), "amd64")
-	if err != nil || got.State != RemoveStateInUse {
+	if err != nil || got.State != RemoveStateConflict {
 		t.Fatalf("daemon 409: %+v %v", got, err)
 	}
 	if !d.images[ExpectedImageID(ImageStoreClassic, f.entry)] {

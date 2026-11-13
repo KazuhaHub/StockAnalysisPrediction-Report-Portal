@@ -15,7 +15,7 @@ func removeImageTransportFixture(t *testing.T) (control.Authority, control.Remov
 	t.Helper()
 	a, load, _, _, descriptor, _ := loadImageTransportFixture(t)
 	now := time.Now().UnixMilli()
-	command := control.RemoveImageCommand{CommandHeader: load.CommandHeader, Payload: control.RemoveImagePayload(load.Payload)}
+	command := control.RemoveImageCommand{CommandHeader: load.CommandHeader, Payload: control.RemoveImagePayload{ReleaseSHA256: load.Payload.ReleaseSHA256, Platform: load.Payload.Platform, ManifestDigest: load.Payload.ManifestDigest, ConfigDigest: load.Payload.ConfigDigest, Layers: load.Payload.Layers, KnownLoads: loadImageTransportID(20)}}
 	command.Format, command.Kind, command.EffectNumber, command.EffectID = control.RemoveImageFormat, control.RemoveImageKind, "2", loadImageTransportID(12)
 	var err error
 	command.PayloadSHA256, err = control.RemoveImageLogicalDigest(command)

@@ -86,6 +86,19 @@ func newRemoveFixture(t *testing.T) *removeFixtureT {
 	return f
 }
 
+// extraKnown lets a test name more loads in the watermark of the commands it builds.
+var extraKnownLoads []string
+
+func (f *removeFixtureT) knownLoads(first string) []string {
+	out := []string{first}
+	for _, id := range extraKnownLoads {
+		if id != first {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 func (f *removeFixtureT) build(t *testing.T, base, slot, effect int) (control.RemoveImageCommand, []byte, []byte) {
 	t.Helper()
 	authority := importAuthority()
@@ -96,17 +109,18 @@ func (f *removeFixtureT) build(t *testing.T, base, slot, effect int) (control.Re
 	}, Payload: control.RemoveImagePayload{
 		ReleaseSHA256: f.parsed.SHA256, Platform: "linux/" + runtime.GOARCH, ManifestDigest: f.entry.ManifestDigest,
 		ConfigDigest: f.entry.ConfigDigest, Layers: control.FormatLoadImageLayers(f.entry.Layers),
+		KnownLoads: control.FormatKnownLoads(f.knownLoads(f.loadFixtureT.command.EffectID)),
 	}}
 	digest, err := control.RemoveImageLogicalDigest(c)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("digest: %v header=%+v payload=%+v", err, c.CommandHeader, c.Payload)
 	}
 	c.PayloadSHA256 = digest
 	now := time.Now().UTC().UnixMilli()
 	c.IssuedMS, c.ExpiresMS = itoa(now-1000), itoa(now+25000)
 	raw, sig, err := control.SignRemoveImage(c, f.removeKey, importAuthority(), now)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("sign: %v header=%+v payload=%+v", err, c.CommandHeader, c.Payload)
 	}
 	verified, err := control.VerifyRemoveImage(raw, sig, importAuthority(), now)
 	if err != nil {
@@ -455,5 +469,68 @@ func TestRemoveImageRefusesATakenEffectNumber(t *testing.T) {
 	}
 	if _, err := f.dispatch(); err == nil || f.rnative.removes != 0 {
 		t.Fatalf("a taken effect number admitted a removal: %v", err)
+	}
+}
+
+// A load of the image the Portal had not seen (applied after its watermark) refuses the claim, typed and with no
+// row written, even though no container uses the image yet: this is the remove-versus-install race.
+func TestRemoveImageClaimRefusedWhenALoadAppliedAfterTheWatermark(t *testing.T) {
+	f := newRemoveFixture(t)
+	f.holdImage(t) // the load the watermark names
+	// A second installation loads the same image: present, applied, and no container yet.
+	second := f.loadFixtureT.buildCommand(t, 2100)
+	f.loadFixtureT.command = second
+	f.loadFixtureT.raw, f.loadFixtureT.sig = f.loadFixtureT.sign(t, second)
+	f.uploadAll(t)
+	if _, err := f.loadFixtureT.dispatch(); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.dispatch()
+	if !errors.Is(err, ErrRemoveImageReferencedAgain) {
+		t.Fatalf("removal after an unseen load: %v", err)
+	}
+	if f.rnative.removes != 0 || f.rnative.presences != 0 {
+		t.Fatal("the native side was reached")
+	}
+	if state, _ := f.rowState(t); state != "" {
+		t.Fatalf("a refused claim wrote a row: %q", state)
+	}
+	if reservationState(t, f.store, imageResourceID(f.entry.ConfigDigest)) != "held" {
+		t.Fatal("the reservation was released")
+	}
+	// With the second load named in the watermark the removal is admitted.
+	extraKnownLoads = []string{fixtureID(1902), second.EffectID}
+	defer func() { extraKnownLoads = nil }()
+	f.command, f.raw, f.sig = f.build(t, 1900, 2, 3301)
+	if _, err := f.dispatch(); err != nil {
+		t.Fatalf("removal naming every load: %v (known %q)", err, f.command.Payload.KnownLoads)
+	}
+}
+
+// A reverted load never counts: only applied and unknown loads can reference the image.
+func TestRemoveImageWatermarkIgnoresARevertedLoad(t *testing.T) {
+	f := newRemoveFixture(t)
+	f.holdImage(t)
+	if _, err := f.store.db.Exec(`INSERT INTO runner_commands(effect_id,operation_id,installation_id,stage,effect_number,kind,payload_sha256,target_generation,controller_epoch,admitted_fence,state,receipt_json,ack_attempted_ms,created_ms,updated_ms)
+		SELECT ?,operation_id,installation_id,'stage',9,'load-image',payload_sha256,target_generation,controller_epoch,admitted_fence,'reverted',receipt_json,NULL,created_ms,updated_ms FROM runner_commands WHERE kind='load-image' LIMIT 1`, fixtureID(3999)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.dispatch(); err != nil {
+		t.Fatalf("a reverted load blocked the removal: %v", err)
+	}
+}
+
+// The daemon's own 409 after the guard passed is a typed, retryable refusal: reverted, reservation kept.
+func TestRemoveImageDaemonConflictSettlesRevertedWithItsOwnOutcome(t *testing.T) {
+	f := newRemoveFixture(t)
+	f.holdImage(t)
+	f.rnative.state = driver.RemoveStateConflict
+	got, err := f.dispatch()
+	receipt, ok := got.(RemoveImageReceipt)
+	if err != nil || !ok || receipt.State != driver.RemoveStateConflict || receipt.Outcome != RemoveOutcomeImageConflict {
+		t.Fatalf("conflict: %+v %v", got, err)
+	}
+	if state, _ := f.rowState(t); state != "reverted" || reservationState(t, f.store, imageResourceID(f.entry.ConfigDigest)) != "held" {
+		t.Fatalf("row %q", state)
 	}
 }

@@ -9,7 +9,7 @@ import (
 func removeImageFixture(t *testing.T) (RemoveImageCommand, ed25519.PrivateKey, Authority, int64) {
 	t.Helper()
 	load, key, authority, now := loadImageFixture(t)
-	command := RemoveImageCommand{CommandHeader: load.CommandHeader, Payload: RemoveImagePayload(load.Payload)}
+	command := RemoveImageCommand{CommandHeader: load.CommandHeader, Payload: RemoveImagePayload{ReleaseSHA256: load.Payload.ReleaseSHA256, Platform: load.Payload.Platform, ManifestDigest: load.Payload.ManifestDigest, ConfigDigest: load.Payload.ConfigDigest, Layers: load.Payload.Layers, KnownLoads: "c0000000-0000-4000-8000-0000000000a1"}}
 	command.Format, command.Kind, command.EffectNumber = RemoveImageFormat, RemoveImageKind, "2"
 	command.EffectID = "c0000000-0000-4000-8000-0000000000b1"
 	digest, err := RemoveImageLogicalDigest(command)
@@ -105,6 +105,14 @@ func TestRemoveImageRefusesMalformedHeaderAndPayload(t *testing.T) {
 		"prefixed config":       func(c *RemoveImageCommand) { c.Payload.ConfigDigest = "sha256:" + strings.Repeat("a", 64) },
 		"manifest is config":    func(c *RemoveImageCommand) { c.Payload.ManifestDigest = c.Payload.ConfigDigest },
 		"empty layers":          func(c *RemoveImageCommand) { c.Payload.Layers = "" },
+		"no known loads":        func(c *RemoveImageCommand) { c.Payload.KnownLoads = "" },
+		"unsorted known loads": func(c *RemoveImageCommand) {
+			c.Payload.KnownLoads = "c0000000-0000-4000-8000-0000000000a2,c0000000-0000-4000-8000-0000000000a1"
+		},
+		"duplicate known loads": func(c *RemoveImageCommand) {
+			c.Payload.KnownLoads = "c0000000-0000-4000-8000-0000000000a1,c0000000-0000-4000-8000-0000000000a1"
+		},
+		"bad known load": func(c *RemoveImageCommand) { c.Payload.KnownLoads = "not-a-uuid" },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -139,5 +147,21 @@ func TestRemoveImageDigestBindsThePayload(t *testing.T) {
 	loadDigest, _ := LoadImageLogicalDigest(load)
 	if loadDigest == base {
 		t.Fatal("a load and a removal share a logical digest")
+	}
+}
+
+func TestKnownLoadsAreCanonicalAndBounded(t *testing.T) {
+	ids := []string{"c0000000-0000-4000-8000-0000000000a2", "c0000000-0000-4000-8000-0000000000a1"}
+	encoded := FormatKnownLoads(ids)
+	parsed, ok := ParseKnownLoads(encoded)
+	if !ok || len(parsed) != 2 || parsed[0] > parsed[1] {
+		t.Fatalf("round trip: %v %v", parsed, ok)
+	}
+	var many []string
+	for i := 0; i <= MaxKnownLoads; i++ {
+		many = append(many, "c0000000-0000-4000-8000-"+strings.Repeat("0", 8)+string(rune('a'+i/26))+string(rune('a'+i%26))+"00")
+	}
+	if _, ok := ParseKnownLoads(FormatKnownLoads(many)); ok {
+		t.Fatal("more than MaxKnownLoads accepted")
 	}
 }

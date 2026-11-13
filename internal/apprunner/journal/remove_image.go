@@ -26,6 +26,10 @@ import (
 var (
 	// ErrRemoveImageUnavailable is a refusal before any claim: the runner cannot remove images now.
 	ErrRemoveImageUnavailable = errors.New("runner image removal is unavailable")
+	// ErrRemoveImageReferencedAgain is the typed refusal of a removal claim when the journal holds an applied or
+	// unknown load of the image that the command's watermark does not name: the image may be referenced again.
+	// Nothing is claimed and nothing is touched.
+	ErrRemoveImageReferencedAgain = errors.New("the image was loaded again after the references were computed (referenced_again)")
 	// ErrRemoveImageLoadPending is the typed refusal of a removal claim while a load of the same image has no
 	// verdict: the load may be about to introduce the image, so nothing is claimed and nothing is touched.
 	ErrRemoveImageLoadPending = errors.New("a load of the image has no verdict yet")
@@ -35,8 +39,10 @@ const removeClaimFormat = "portal.runner.remove-image-claim/1-dev.1"
 const removeReceiptFormat = "portal.runner.remove-image-receipt/1-dev.1"
 const removeStatusFormat = "portal.runner.remove-image-status/1-dev.1"
 
-// RemoveOutcomeImageInUse is the typed outcome of a removal the native guard refused.
+// RemoveOutcomeImageInUse is the typed outcome of a removal the native guard refused; RemoveOutcomeImageConflict is the
+// daemon's own conflict after the guard passed. Both are retryable refusals.
 const RemoveOutcomeImageInUse = "image_in_use"
+const RemoveOutcomeImageConflict = "image_conflict"
 
 // RemoveImageNative is the native side of a removal. It returns plain snapshots so the journal binds every field.
 type RemoveImageNative interface {
@@ -104,6 +110,10 @@ func validRemoveReceipt(r RemoveImageReceipt) bool {
 		}
 	case driver.RemoveStateInUse:
 		if r.Outcome != RemoveOutcomeImageInUse {
+			return false
+		}
+	case driver.RemoveStateConflict:
+		if r.Outcome != RemoveOutcomeImageConflict {
 			return false
 		}
 	default:
@@ -331,6 +341,36 @@ func (s *Store) beginRemoveImage(ctx context.Context, raw, signature []byte, ent
 	if pendingLoads != 0 {
 		return zero, ErrRemoveImageLoadPending
 	}
+	// The reference watermark: a load of the image the Portal had not seen when it computed the references means
+	// the image may be referenced again (an installation whose load answered present has no container yet, so the
+	// native guard alone would not see it).
+	known, _ := control.ParseKnownLoads(c.Payload.KnownLoads)
+	seen := map[string]bool{}
+	for _, id := range known {
+		seen[id] = true
+	}
+	loads, err := tx.QueryContext(ctx, `SELECT effect_id FROM runner_commands WHERE kind='load-image' AND state IN ('applied','unknown')
+		AND COALESCE(json_extract(receipt_json,'$.claim.config_digest'),json_extract(receipt_json,'$.config_digest'))=?`, c.Payload.ConfigDigest)
+	if err != nil {
+		return zero, err
+	}
+	unseen := false
+	for loads.Next() {
+		var id string
+		if err := loads.Scan(&id); err != nil {
+			loads.Close()
+			return zero, err
+		}
+		unseen = unseen || !seen[id]
+	}
+	err = loads.Err()
+	loads.Close()
+	if err != nil {
+		return zero, err
+	}
+	if unseen {
+		return zero, ErrRemoveImageReferencedAgain
+	}
 	claimID, err := dataClaimID()
 	if err != nil {
 		return zero, err
@@ -408,8 +448,11 @@ func (s *Store) settleRemoveImage(ctx context.Context, intent removeImageIntent,
 		ObservedMS: strconv.FormatInt(maxInt64(snapshot.ObservedMS, claimed), 10), SettledMS: strconv.FormatInt(maxInt64(now, maxInt64(snapshot.ObservedMS, claimed)), 10),
 	}
 	commandState := "applied"
-	if snapshot.State == driver.RemoveStateInUse {
+	switch snapshot.State {
+	case driver.RemoveStateInUse:
 		receipt.Outcome, commandState = RemoveOutcomeImageInUse, "reverted"
+	case driver.RemoveStateConflict:
+		receipt.Outcome, commandState = RemoveOutcomeImageConflict, "reverted"
 	}
 	if !validRemoveReceipt(receipt) || !RemoveImageReceiptMatchesCommand(receipt, c) {
 		return zero, fmt.Errorf("remove settlement receipt: %w", ErrFenceReconciliation)
@@ -442,7 +485,7 @@ func (s *Store) settleRemoveImage(ctx context.Context, intent removeImageIntent,
 func bindRemoveSnapshot(intent removeImageIntent, snapshot driver.RemoveImageSnapshot) bool {
 	expected := driver.ExpectedImageID(snapshot.Store, intent.entry)
 	return snapshot.ReleaseSHA256 == intent.full.Payload.ReleaseSHA256 && snapshot.Platform == intent.full.Payload.Platform && snapshot.ImageID == expected &&
-		(snapshot.State == driver.RemoveStateRemoved || snapshot.State == driver.RemoveStateAbsent || snapshot.State == driver.RemoveStateInUse) && snapshot.ObservedMS > 0
+		(snapshot.State == driver.RemoveStateRemoved || snapshot.State == driver.RemoveStateAbsent || snapshot.State == driver.RemoveStateInUse || snapshot.State == driver.RemoveStateConflict) && snapshot.ObservedMS > 0
 }
 
 // DispatchRemoveImage is the trusted orchestrator for one signed removal. Applied or reverted work replays its
@@ -467,7 +510,7 @@ func (s *Store) DispatchRemoveImage(ctx context.Context, raw, signature, descrip
 	if state == "applied" || state == "reverted" {
 		return s.readRemoveReceiptHeld(ctx, raw, signature)
 	}
-	entry, err := bindImagePayload(control.LoadImagePayload(command.Payload), descriptor)
+	entry, err := bindImagePayload(command.Payload.LoadPayload(), descriptor)
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +639,7 @@ func (s *Store) readRemoveImage(ctx context.Context, raw, signature []byte, veri
 		return zero, ErrRemoveImageUnavailable
 	}
 	receipt, err := ParseRemoveImageReceipt([]byte(row.receipt))
-	if err != nil || !RemoveImageReceiptMatchesCommand(receipt, c) || (row.state == "applied") != (receipt.State != driver.RemoveStateInUse) {
+	if err != nil || !RemoveImageReceiptMatchesCommand(receipt, c) || (row.state == "applied") != (receipt.State == driver.RemoveStateRemoved || receipt.State == driver.RemoveStateAbsent) {
 		return zero, ErrFenceReconciliation
 	}
 	return removeReadResult{command: c, receipt: &receipt}, nil

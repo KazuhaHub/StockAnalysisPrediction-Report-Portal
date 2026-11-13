@@ -3,6 +3,8 @@ package control
 import (
 	"crypto/ed25519"
 	"encoding/json"
+	"sort"
+	"strings"
 )
 
 const RemoveImageFormat = "portal.runner.remove-image-command/1-dev.1"
@@ -19,10 +21,54 @@ const RemoveImageKind = "remove-image"
 // MinRemoveImageEffectNumber is the first effect number a removal may take; number 1 of stage "stage" is the load.
 const MinRemoveImageEffectNumber = 2
 
-// RemoveImagePayload names the one image a runner removes. It has the shape of a load payload on purpose: the
+// MaxKnownLoads bounds the load effects a removal can name.
+const MaxKnownLoads = 32
+
+// RemoveImagePayload names the one image a runner removes. It has the fields of a load payload on purpose: the
 // release whose descriptor binds the image, the platform and the descriptor's image entry. The runner derives the
 // daemon's image ID from that entry exactly as the load does, so the removal acts on the ID the load produced.
-type RemoveImagePayload LoadImagePayload
+//
+// KnownLoads is the reference watermark: every load-image effect of this image the Portal saw applied on the
+// runtime, as effect ids joined by commas in ascending order. The runner refuses the claim, typed, when its journal
+// holds an applied or unknown load of the image that is not in the list: a load the Portal had not seen means the
+// image may be referenced again.
+type RemoveImagePayload struct {
+	ReleaseSHA256  string `json:"release_sha256"`
+	Platform       string `json:"platform"`
+	ManifestDigest string `json:"manifest_digest"`
+	ConfigDigest   string `json:"config_digest"`
+	Layers         string `json:"layers"`
+	KnownLoads     string `json:"known_loads"`
+}
+
+// LoadPayload is the load-shaped part of the payload, for binding to a descriptor.
+func (p RemoveImagePayload) LoadPayload() LoadImagePayload {
+	return LoadImagePayload{ReleaseSHA256: p.ReleaseSHA256, Platform: p.Platform, ManifestDigest: p.ManifestDigest, ConfigDigest: p.ConfigDigest, Layers: p.Layers}
+}
+
+// FormatKnownLoads is the canonical encoding of a set of load effect ids.
+func FormatKnownLoads(ids []string) string {
+	sorted := append([]string(nil), ids...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, ",")
+}
+
+// ParseKnownLoads decodes the canonical encoding only: one to MaxKnownLoads distinct, ascending effect ids.
+func ParseKnownLoads(value string) ([]string, bool) {
+	if value == "" {
+		return nil, false
+	}
+	ids := strings.Split(value, ",")
+	if len(ids) > MaxKnownLoads {
+		return nil, false
+	}
+	for i, id := range ids {
+		if !candidateUUID(id) || (i > 0 && ids[i-1] >= id) {
+			return nil, false
+		}
+	}
+	return ids, true
+}
 
 type RemoveImageCommand struct {
 	CommandHeader
@@ -38,7 +84,10 @@ func validRemoveImageLogical(c RemoveImageCommand) bool {
 	if !ok || slot < MinRemoveImageEffectNumber || !validHeaderAnySlot(c.CommandHeader, RemoveImageFormat, RemoveImageStage, RemoveImageKind) {
 		return false
 	}
-	return validLoadImageLogical(LoadImageCommand{CommandHeader: loadShapedHeader(c.CommandHeader), Payload: LoadImagePayload(c.Payload)})
+	if _, ok := ParseKnownLoads(c.Payload.KnownLoads); !ok {
+		return false
+	}
+	return validLoadImageLogical(LoadImageCommand{CommandHeader: loadShapedHeader(c.CommandHeader), Payload: c.Payload.LoadPayload()})
 }
 
 // loadShapedHeader presents a remove header to the load payload checks, which validate the payload only.

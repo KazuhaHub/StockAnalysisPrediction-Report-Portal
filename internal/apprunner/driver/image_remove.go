@@ -21,6 +21,9 @@ const (
 	RemoveStateRemoved = "removed"
 	RemoveStateAbsent  = "absent"
 	RemoveStateInUse   = "in_use"
+	// RemoveStateConflict is the daemon's own 409 after the runner's guard found no container: the image is
+	// referenced some other way (for example by several repositories). Like in use it is a refusal, and retryable.
+	RemoveStateConflict = "conflict"
 	// RemoveStatePresent is only ever an observation of an image that is in the daemon. It is never settled.
 	RemoveStatePresent = "present"
 )
@@ -201,7 +204,7 @@ func removeImageHTTP(ctx context.Context, client *http.Client, request RemoveIma
 	}
 	if err := deleteImageByID(ctx, client, expected); err != nil {
 		if errors.Is(err, ErrImageInUse) {
-			snapshot.State, snapshot.ObservedMS = RemoveStateInUse, time.Now().UnixMilli()
+			snapshot.State, snapshot.ObservedMS = RemoveStateConflict, time.Now().UnixMilli()
 			return snapshot, nil
 		}
 		return zero, err
