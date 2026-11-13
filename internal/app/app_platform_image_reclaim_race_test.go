@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,24 +93,191 @@ func TestReclaimDoesNotInsertARowWhenAnotherLoadWasAppliedAfterTheWatermark(t *t
 	}
 }
 
-// Interleaving 2: the removal row exists first. A load of that image waits for it and sends nothing.
-func TestALoadOfAnImageWaitsWhileItsRemovalHasNoVerdict(t *testing.T) {
+// Interleaving 2: the removal row exists first. The load resolves it inline instead of waiting for an idle tick: a
+// receipt settles it, a runner that holds nothing running it abandons it, and only a running removal is waited for.
+func TestALoadResolvesAnOpenRemovalOfItsImageInline(t *testing.T) {
+	cases := map[string]struct {
+		setup func(f *platformFakeReclaimRunner, effect string)
+		state string
+		busy  bool
+		want  string // the Portal row's state after the resolution
+	}{
+		"the runner applied it":  {func(f *platformFakeReclaimRunner, e string) { f.effects[e] = "applied" }, "", false, "applied"},
+		"the runner refused it":  {func(f *platformFakeReclaimRunner, e string) { f.effects[e] = "reverted" }, "", false, "reverted"},
+		"orphaned at the runner": {func(f *platformFakeReclaimRunner, e string) { f.effects[e] = "unknown" }, "", false, "reverted"},
+		"never claimed":          {func(f *platformFakeReclaimRunner, e string) { f.absentOnRead = true }, "", false, "reverted"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newReclaimFixture(t)
+			f.release(t, "a")
+			f.load(t, "a")
+			f.fake.loseExecuteReplyOnce, f.fake.readFails = true, true
+			_, _ = f.s.reclaimPlatformImages(context.Background(), f.endpoint)
+			f.fake.readFails, f.fake.loseExecuteReplyOnce = false, false
+			effect := f.fake.sent[0].EffectID
+			delete(f.fake.effects, effect)
+			tc.setup(f.fake, effect)
+			if err := f.s.resolvePlatformRemovalsForLoad(context.Background(), f.endpoint, f.runtimeID, f.config("a")); err != nil {
+				t.Fatalf("the load did not get past the open removal: %v", err)
+			}
+			if got := scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`); got != tc.want {
+				t.Fatalf("removal row %q, want %q", got, tc.want)
+			}
+			if len(f.fake.sent) != 1 {
+				t.Fatal("resolving a removal sent it again")
+			}
+		})
+	}
+}
+
+// A removal the runner is still doing is a bounded wait, not an abandonment.
+func TestALoadWaitsOnlyForARemovalTheRunnerIsStillDoing(t *testing.T) {
+	f := newReclaimFixture(t)
+	f.release(t, "a")
+	f.load(t, "a")
+	f.fake.loseExecuteReplyOnce, f.fake.readFails = true, true
+	_, _ = f.s.reclaimPlatformImages(context.Background(), f.endpoint)
+	f.fake.readFails = false
+	f.fake.effects[f.fake.sent[0].EffectID] = "unknown"
+	f.fake.readPending = true
+	err := f.s.resolvePlatformRemovalsForLoad(context.Background(), f.endpoint, f.runtimeID, f.config("a"))
+	if !errors.Is(err, errPlatformImageBusy) {
+		t.Fatalf("a running removal: %v", err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`) != "unknown" {
+		t.Fatal("a running removal was abandoned")
+	}
+	// A removal of another image is not waited for.
+	if err := f.s.resolvePlatformRemovalsForLoad(context.Background(), f.endpoint, f.runtimeID, platformDigest([]byte("another"))); err != nil {
+		t.Fatalf("a removal of another image held the load: %v", err)
+	}
+}
+
+// Reinstalling the same app while its removal has no verdict completes: the load path resolves the removal and goes
+// on, and the image is loaded.
+func TestReinstallCompletesWhileItsRemovalIsUnknown(t *testing.T) {
 	s, lease, endpoint, parts, fake := platformImageEnsureFixture(t)
 	runtimeID := scalar[string](t, s.st, `SELECT id FROM app_platform_runtime_bindings WHERE enabled=1 LIMIT 1`)
+	installOp := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install'`, lease.installationID)
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-		VALUES(?,'stage',9,?,'remove_image',?,?,?,1,0,'unknown',?,1,1)`, lease.id, platformFixtureID(9301), platformDigest([]byte("removal")), runtimeID, lease.controllerEpoch,
-		`{"intent":{"config_digest":"`+parts.entry.ConfigDigest+`"}}`)
-	err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint)
-	if !errors.Is(err, errPlatformImageBusy) {
-		t.Fatalf("a load beside an open removal of its image: %v", err)
-	}
-	if fake.count("load") != 0 || fake.count("blob:") != 0 {
-		t.Fatalf("the load was sent: %v", fake.calls)
-	}
-	// A removal of another image does not hold it.
-	mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json=? WHERE kind='remove_image'`, `{"intent":{"config_digest":"`+platformDigest([]byte("another image"))+`"}}`)
+		VALUES(?,'stage',9,?,'remove_image',?,?,?,1,0,'unknown',?,1,1)`, installOp, platformFixtureID(9301), platformDigest([]byte("removal")), runtimeID, lease.controllerEpoch,
+		`{"intent":{"release_sha256":"`+platformDigest(parts.descriptor)+`","config_digest":"`+parts.entry.ConfigDigest+`"}}`)
 	if err := s.ensurePlatformReleaseImage(context.Background(), lease, endpoint); err != nil {
-		t.Fatalf("a removal of another image held the load: %v", err)
+		t.Fatalf("the reinstall did not complete beside an unknown removal: %v", err)
+	}
+	if !fake.present || fake.count("load") == 0 {
+		t.Fatal("the image was not loaded")
+	}
+	if scalar[string](t, s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`) == "unknown" {
+		t.Fatal("the open removal was left open")
+	}
+}
+
+// An open row whose intent cannot be read is open: it is listed, blocks nothing silently, and is closed.
+func TestAnUnreadableOpenRemovalRowFailsClosed(t *testing.T) {
+	f := newReclaimFixture(t)
+	f.release(t, "a")
+	mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		VALUES(?,'stage',9,?,'remove_image',?,?,?,1,0,'unknown','{}',1,1)`, f.hostOp, platformFixtureID(9302), platformDigest([]byte("x")), f.runtimeID, f.epoch)
+	open, err := f.s.platformOpenRemovalsFor(context.Background(), f.runtimeID, f.config("a"))
+	if err != nil || len(open) != 1 || !open[0].unparsable {
+		t.Fatalf("an unreadable open row is not reported open: %+v %v", open, err)
+	}
+	if err := f.s.resolvePlatformRemovalsForLoad(context.Background(), f.endpoint, f.runtimeID, f.config("a")); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, f.s.st, `SELECT state FROM app_platform_operation_effects WHERE kind='remove_image'`) != "reverted" {
+		t.Fatal("the unreadable row was not closed")
+	}
+}
+
+// More than the old 64-row window of open removals are all seen.
+func TestOpenRemovalsAreNotWindowed(t *testing.T) {
+	f := newReclaimFixture(t)
+	for i := range 70 {
+		mustExec(t, f.s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+			VALUES(?,?,?,?,'remove_image',?,?,?,1,0,'unknown','{}',1,1)`, f.hostOp, "w"+strconv.Itoa(i/32), i%32+1, platformFixtureID(9500+i), platformDigest([]byte(strconv.Itoa(i))), f.runtimeID, f.epoch)
+	}
+	open, err := f.s.platformOpenRemovals(context.Background())
+	if err != nil || len(open) != 70 {
+		t.Fatalf("%d open removals listed: %v", len(open), err)
+	}
+}
+
+// After the attempts are used the image is reported by the storage status with the last typed reason, and nothing is
+// sent again.
+func TestReclaimStopsAfterTheAttemptCapAndReportsTheImage(t *testing.T) {
+	f := newReclaimFixture(t)
+	noBackoff(t)
+	f.release(t, "a")
+	f.load(t, "a")
+	f.fake.inUse[f.config("a")] = true
+	for range platformReclaimMaxAttempts {
+		if n, err := f.s.reclaimPlatformImages(context.Background(), f.endpoint); err != nil || n != 1 {
+			t.Fatalf("attempt: %d %v", n, err)
+		}
+	}
+	sends := len(f.fake.sent)
+	for range 3 {
+		if n, err := f.s.reclaimPlatformImages(context.Background(), f.endpoint); err != nil || n != 0 {
+			t.Fatalf("after the cap: %d %v", n, err)
+		}
+	}
+	if len(f.fake.sent) != sends || f.removalRows(t) != platformReclaimMaxAttempts {
+		t.Fatalf("the step kept trying: %d sends, %d rows", len(f.fake.sent), f.removalRows(t))
+	}
+	status, err := f.s.platformImageStorageStatus(context.Background())
+	if err != nil || len(status.ReclaimRefused) != 1 {
+		t.Fatalf("storage status: %+v %v", status, err)
+	}
+	got := status.ReclaimRefused[0]
+	if got.ConfigDigest != f.config("a") || got.Attempts != platformReclaimMaxAttempts || got.Reason != "image_in_use" {
+		t.Fatalf("reported refusal: %+v", got)
+	}
+}
+
+// An unreadable recovery pause stops the step, and a pause set after the sweep began stops the insert.
+func TestReclaimFailsClosedOnTheRecoveryPause(t *testing.T) {
+	f := newReclaimFixture(t)
+	f.release(t, "a")
+	f.load(t, "a")
+	target := f.target(t, "a")
+	mustExec(t, f.s.st, `INSERT INTO meta(k,v) VALUES('app_platform_restore_paused','1') ON CONFLICT(k) DO UPDATE SET v='1'`)
+	if done, err := f.s.reclaimPlatformImage(context.Background(), f.endpoint, target, true); err != nil || done {
+		t.Fatalf("reclaim with the pause set after the sweep began: %v %v", done, err)
+	}
+	if f.removalRows(t) != 0 || len(f.fake.calls) != 0 {
+		t.Fatal("a removal row was inserted during the recovery pause")
+	}
+	mustExec(t, f.s.st, `UPDATE meta SET v='0' WHERE k='app_platform_restore_paused'`)
+	mustExec(t, f.s.st, `ALTER TABLE meta RENAME TO meta_gone`)
+	n, err := f.s.reclaimPlatformImages(context.Background(), f.endpoint)
+	mustExec(t, f.s.st, `ALTER TABLE meta_gone RENAME TO meta`)
+	if err == nil || n != 0 || len(f.fake.calls) != 0 {
+		t.Fatalf("an unreadable pause did not stop the step: %d %v %v", n, err, f.fake.calls)
+	}
+}
+
+// The settlement closure ends with the transaction that used it: the operation's ending hands later calls a context
+// without it.
+func TestTheEffectSettlementDoesNotOutliveTheTransactionThatRanIt(t *testing.T) {
+	ctx := withPlatformEffectSettlement(context.Background(), func(migExec, platformLeaseFacts) error { return nil })
+	if settle, _ := ctx.Value(platformEffectSettlementKey{}).(platformEffectSettlement); settle == nil {
+		t.Fatal("setup: the closure is not carried")
+	}
+	stripped := withPlatformEffectSettlement(ctx, nil)
+	if settle, _ := stripped.Value(platformEffectSettlementKey{}).(platformEffectSettlement); settle != nil {
+		t.Fatal("the closure survived the strip")
+	}
+	raw, err := os.ReadFile("app_platform_install_scheduler.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+	want := "ctx = withPlatformEffectSettlement(ctx, nil)\n\tw.server.sweepPlatformImages(ctx)\n\tw.reclaimImages(ctx)"
+	if !strings.Contains(source, want) {
+		t.Fatal("finishAs hands its settlement closure to the sweeps that follow it")
 	}
 }
 

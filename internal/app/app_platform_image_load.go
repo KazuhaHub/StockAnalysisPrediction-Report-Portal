@@ -347,10 +347,6 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 	}
 	release := store.hold(names...)
 	defer release()
-	// A removal of this image with no verdict is ahead of this load: wait for it (the runner fences them too).
-	if err := s.platformRefuseLoadWhileRemoval(ctx, signer.runtime.id, target.entry.ConfigDigest); err != nil {
-		return err
-	}
 	runner := s.platformImageRunnerSeam()
 	sent := false
 	for round := 0; round < 4; round++ {
@@ -360,6 +356,11 @@ func (s *Server) runPlatformImageLoad(ctx context.Context, endpoint platformRunt
 		}
 		applied, err := rows.prepare(ctx, call.command)
 		if err != nil || applied {
+			return err
+		}
+		// A removal of this image that has no verdict is resolved first, here, so the load does not wait for an
+		// idle tick: it settles, or is abandoned, or is still running (a bounded wait).
+		if err := s.resolvePlatformRemovalsForLoad(ctx, endpoint, signer.runtime.id, target.entry.ConfigDigest); err != nil {
 			return err
 		}
 		sent = true

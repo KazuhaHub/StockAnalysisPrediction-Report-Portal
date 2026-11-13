@@ -56,6 +56,8 @@ type platformFakeReclaimRunner struct {
 	// absentOnRead answers a read-back with the typed absence, as a runner that never claimed the effect.
 	absentOnRead bool
 	pendingFor   int
+	// readPending answers every read-back of an unknown effect with pending, as a runner whose gate is held.
+	readPending bool
 	// conflict makes a refusal the daemon's own conflict rather than a container using the image.
 	conflict bool
 }
@@ -166,6 +168,10 @@ func (f *platformFakeReclaimRunner) ReadRemoveImage(_ context.Context, _ platfor
 	}
 	reply := f.answer(call)
 	if reply.receipt != nil {
+		return reply, nil
+	}
+	if f.readPending {
+		reply.status = f.statusOf(call, "pending")
 		return reply, nil
 	}
 	reply.status = f.statusOf(call, "orphaned")

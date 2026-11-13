@@ -538,8 +538,8 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
     inserts the `remove_image` row (`prepareRemoval`), which takes the OU mutation lock and the publisher-trust lock
     every installation mutation takes (the SHARE ROW EXCLUSIVE table lock on PostgreSQL, the write lock on SQLite). An
     operation admitted first is pinned by the unfinished-operation and open-plan pins and stops the removal there; a
-    removal inserted first is seen by any later load of the image, which waits (`platformRefuseLoadWhileRemoval`,
-    called by `runPlatformImageLoad`, so the settlement driver honours it too). Runner: the signed command carries a
+    removal inserted first is seen by any later load of the image, which resolves it inline
+    (`resolvePlatformRemovalsForLoad`, item 45) rather than waiting. Runner: the signed command carries a
     watermark, `known_loads`, the effect ids of every load of the image the Portal saw applied on the runtime (one to
     32, canonical, ascending). The claim is refused with the typed `ErrRemoveImageReferencedAgain` when the journal
     holds an applied or unknown load of the digest outside the list, with no row written; a reverted load never
@@ -549,10 +549,8 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
     with more than 32 loads is kept. Both interleavings are tested on SQLite; PostgreSQL is not reachable from this
     host.
 38. **Enable source release.** `settleOrphan` (both branches) now releases the enable start's source through
-    `settleEnableSourceAbsent`, in its transaction, after two absence observations of the source. Not reachable today:
-    `control` refuses a settle command for any kind but `update-start`, and the reserved removal likewise, so an
-    unknown enable start cannot be settled by either path yet. The journal side is ready and tested through the helper;
-    admitting `enable-start` in `control` is a separate change.
+    `settleEnableSourceAbsent`, in its transaction, after two absence observations of the source. Reachable since
+    item 46.
 39. **Orphan settlement on the Portal.** A runner answer of `candidate_never_ran` settles the Portal's start effect
     `reverted` with the typed receipt (lease, fence, runtime, effect id and payload compare-and-swap, one audit entry)
     and the operation ends failed with the closed code `start_never_ran`. A replay settles once. The plain candidate
@@ -573,3 +571,37 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
 44. **Untag events.** Docker emits `delete` for an image removed by ID that has no tag and `untag` only when a tag is
     removed, so the delivery evidence's rejection of `untag` events should hold for the delivered image, which carries
     no name. This is reasoning about the daemon, not something run here; the native job is the check.
+
+## Resolutions (PR 4c, review round 2)
+
+45. **A load resolves an open removal of its image inline.** Reclaim runs only after an operation ends and on idle ticks,
+    so a load that waited for an open removal would have used up its bounded waits and failed the operation. The load
+    path (`runPlatformImageLoad`, after its "already applied" short-circuit) now reads each open removal of its digest
+    back under that removal's own identity: a receipt settles the row (applied: the image is gone and the load goes
+    on as a normal load that uploads the blobs again; reverted: the image is still there); pending, the runner holding
+    the gate, is a bounded wait; orphaned, a typed absence, a row never sent, or one whose host operation can no
+    longer settle it, is closed abandoned (`referenced_again` or `abandoned_outcome_unknown`) and the load goes on.
+    Reinstalling the same app while its removal is unknown completes (tested through `ensurePlatformReleaseImage`).
+46. **Orphaned enable and restore starts are settled.** `control` accepts `enable-start` and `restore-start` besides
+    `update-start` in the settle command and the reserved removal, with the same read-signed start reference and
+    payload binding. The journal side needed no change, because those starts are stored as update-start rows; the
+    enable source is released through `settleEnableSourceAbsent` in the same transaction, only after two absence
+    observations. On the Portal, `settlePlatformHeldStarts` drives the existing held-start steps for finished enable and
+    repair operations from the idle settlement tick, and a restore resume's orphan is settled from the recovery
+    reconciliation (`never_ran` reverts the effect and returns the installation to review). Not wired: a managed
+    restore that is not a recovery resume (its start command comes from a different loader), and an `enable-start`
+    the runner holds only as reserved. After an orphan settles, an enable or repair stays `recovery_required`; the
+    Portal does not complete the operation on its own.
+47. **Open removals fail closed.** The open rows are read with no window, and a row whose intent cannot be parsed is
+    treated as open for every image of its runtime, then closed `abandoned_outcome_unknown` by the step.
+48. **Attempt cap.** At most eight attempts per image (the effect numbers of one host operation are limited to 32).
+    After that the step stops without logging on every tick and `GET /api/admin/app-platform/storage-status` lists the
+    image under `reclaim_refused` with its attempts and the last typed reason (`image_in_use`, `image_conflict`,
+    `referenced_again`, `abandoned_outcome_unknown`, `unknown`).
+49. **Recovery pause fails closed.** The pause is read with the strict reader: an unreadable pause stops the step, and
+    the pause is read again in the transaction that inserts the row.
+50. **The settlement closure.** `finishAs` strips the refused-effect settlement from the context before it calls the blob
+    sweep and the image reclaim; tested.
+51. **The second absence look is a heuristic.** The two-second delay between the two absence observations of an orphan
+    settlement narrows the window in which a late daemon create is missed; it does not prove none can follow. The
+    data execution gate is held during the delay.

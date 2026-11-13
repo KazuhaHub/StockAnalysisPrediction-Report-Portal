@@ -73,19 +73,73 @@ func platformKnownLoadsIn(e migExec, runtimeID, digest string) (string, error) {
 	return control.FormatKnownLoads(ids), rows.Err()
 }
 
-// platformRefuseLoadWhileRemoval makes a load of an image wait while a removal of the same image on the runtime has
-// no verdict: the runner fences the two as well, but the Portal stops sending the load, which is not a failure.
-func (s *Server) platformRefuseLoadWhileRemoval(ctx context.Context, runtimeID, configDigest string) error {
-	open, err := s.platformOpenRemovals(ctx)
+// resolvePlatformRemovalsForLoad settles, before a load of an image is sent, every removal of that image that has no
+// verdict, so a load never waits on a step that only an idle tick or an operation ending would run. Each removal is
+// read back under its own identity:
+//
+//   - a receipt settles the row (applied: the image is gone and the load proceeds as a normal load that uploads
+//     the blobs again; reverted: the image is still there and the load finds it present);
+//   - pending (the runner holds the gate) is a bounded wait: errPlatformImageBusy;
+//   - orphaned, a typed absence, a row that was never sent or one the host operation can no longer settle: the row is
+//     closed abandoned (referenced_again) and the load proceeds. The runner's claim, if it holds one, stays unknown
+//     and keeps its reservation, and the runner refuses to remove an image whose load it has seen applied.
+func (s *Server) resolvePlatformRemovalsForLoad(ctx context.Context, endpoint platformRuntimeEndpoint, runtimeID, configDigest string) error {
+	open, err := s.platformOpenRemovalsFor(ctx, runtimeID, configDigest)
 	if err != nil {
 		return err
 	}
 	for _, t := range open {
-		if t.runtimeID == runtimeID && t.intent.ConfigDigest == configDigest {
-			return fmt.Errorf("%w: a removal of the image has no verdict yet", errPlatformImageBusy)
+		if err := s.resolveOpenRemoval(ctx, endpoint, t); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (s *Server) resolveOpenRemoval(ctx context.Context, endpoint platformRuntimeEndpoint, t platformReclaimTarget) error {
+	if t.unparsable {
+		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+	}
+	lease, err := platformLoadSettlementLease(s.st.poolExec(), t.hostOperation)
+	if err != nil {
+		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+	}
+	guard := func(e migExec) (int64, error) { return platformLoadSettlementGuard(e, lease) }
+	signer, err := s.newPlatformImageSignerGuarded(ctx, lease, func(e migExec) error { _, err := guard(e); return err })
+	if err != nil {
+		if errors.Is(err, errAppPlatformLeaseConflict) || errors.Is(err, errAppPlatformStageEvidence) {
+			return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+		}
+		return err
+	}
+	defer signer.close()
+	var descriptor []byte
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
+		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+	}
+	call, err := signer.removeCall(t, descriptor)
+	if err != nil {
+		return err
+	}
+	reply, readErr := s.platformImageRunnerSeam().ReadRemoveImage(ctx, endpoint, call)
+	switch {
+	case errors.Is(readErr, errPlatformMigrationAbsent):
+		return s.abandonPlatformRemoval(ctx, t, "referenced_again")
+	case readErr != nil:
+		return readErr
+	}
+	receipt, status, err := s.interpretPlatformRemoveReply(reply, call, endpoint)
+	if err != nil {
+		return err
+	}
+	if receipt != nil {
+		rows := platformImageRows{s: s, lease: lease, runtimeID: signer.runtime.id, guard: guard}
+		return s.recordPlatformRemoval(ctx, signer, rows, call, receipt)
+	}
+	if status.State == "pending" {
+		return fmt.Errorf("%w: a removal of the image is still running", errPlatformImageBusy)
+	}
+	return s.abandonPlatformRemoval(ctx, t, "referenced_again")
 }
 
 // platformRemoveImageReply is what the transport proves about a reply to a remove-image command or its read-back.
@@ -146,6 +200,8 @@ type platformReclaimTarget struct {
 	intent        platformReclaimIntent
 	effectID      string
 	effectNumber  int64
+	// unparsable marks an open row whose intent cannot be read.
+	unparsable bool
 	// stale marks a begun removal whose watermark no longer names every load of the image.
 	stale bool
 	// state is "" for a removal not begun, otherwise the Portal row's open state ("prepared" or "unknown").
@@ -318,11 +374,27 @@ func (s *Server) platformLoadedImages(ctx context.Context) ([]platformLoadedImag
 	return out, nil
 }
 
+// platformOpenRemovalsFor lists the open removals of one image on a runtime, asked directly with no window. A row
+// whose intent cannot be read counts as open for every image of its runtime, so the answer fails closed.
+func (s *Server) platformOpenRemovalsFor(ctx context.Context, runtimeID, configDigest string) ([]platformReclaimTarget, error) {
+	open, err := s.platformOpenRemovals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []platformReclaimTarget
+	for _, t := range open {
+		if t.runtimeID == runtimeID && (t.unparsable || t.intent.ConfigDigest == configDigest) {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 // platformOpenRemovals lists the removal rows that have no verdict, rebuilt from the intent each recorded.
 func (s *Server) platformOpenRemovals(ctx context.Context) ([]platformReclaimTarget, error) {
 	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT f.operation_id,o.installation_id,COALESCE(f.runtime_id,''),f.effect_id,f.effect_number,f.state,f.receipt_json
 		FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
-		WHERE f.kind='remove_image' AND f.state IN ('prepared','unknown') ORDER BY f.updated_ms,f.effect_id LIMIT 64`))
+		WHERE f.kind='remove_image' AND f.state IN ('prepared','unknown') ORDER BY f.updated_ms,f.effect_id`))
 	if err != nil {
 		return nil, err
 	}
@@ -336,9 +408,12 @@ func (s *Server) platformOpenRemovals(ctx context.Context) ([]platformReclaimTar
 		}
 		var row platformReclaimRow
 		if json.Unmarshal([]byte(receipt), &row) != nil || row.Intent.ConfigDigest == "" {
-			continue
+			// An open row whose intent cannot be read is still open: it is kept in the list, so the checks that
+			// ask whether a removal is open fail closed, and the step closes it.
+			t.unparsable = true
+		} else {
+			t.intent = row.Intent
 		}
-		t.intent = row.Intent
 		out = append(out, t)
 	}
 	return out, rows.Err()
@@ -380,7 +455,7 @@ func (s *Server) platformRemovalRows(ctx context.Context) (map[string][]platform
 		if digest == "" {
 			continue
 		}
-		out[runtimeID+"/"+digest] = append(out[runtimeID+"/"+digest], platformRemovalRow{state: state, updated: updated})
+		out[runtimeID+"/"+digest] = append(out[runtimeID+"/"+digest], platformRemovalRow{state: state, updated: updated, outcome: parsed.Outcome})
 	}
 	return out, rows.Err()
 }
@@ -388,6 +463,67 @@ func (s *Server) platformRemovalRows(ctx context.Context) (map[string][]platform
 type platformRemovalRow struct {
 	state   string
 	updated int64
+	outcome string
+}
+
+// platformReclaimMaxAttempts bounds the tries of one image after refusals: the effect numbers of a host operation are
+// limited, and a removal that keeps being refused is reported to the operator instead of retried for ever.
+const platformReclaimMaxAttempts = 8
+
+// platformReclaimRefused is an image whose removal was refused on every attempt, as the storage status reports it.
+type platformReclaimRefused struct {
+	ConfigDigest  string `json:"config_digest"`
+	ReleaseSHA256 string `json:"release_sha256"`
+	Attempts      int    `json:"attempts"`
+	// Reason is the last refusal: image_in_use, image_conflict, referenced_again, abandoned_outcome_unknown or unknown.
+	Reason string `json:"reason"`
+}
+
+// platformReclaimRefusals lists the unreferenced images whose removal stopped after platformReclaimMaxAttempts refusals.
+func (s *Server) platformReclaimRefusals(ctx context.Context) ([]platformReclaimRefused, error) {
+	referenced, err := s.platformReferencedConfigDigests(ctx)
+	if err != nil {
+		return nil, err
+	}
+	loaded, err := s.platformLoadedImages(ctx)
+	if err != nil {
+		return nil, err
+	}
+	history, err := s.platformRemovalRows(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []platformReclaimRefused{}
+	for _, image := range loaded {
+		if referenced[image.intent.ConfigDigest] {
+			continue
+		}
+		attempts, _, reason := platformRefusalHistory(history[image.runtimeID+"/"+image.intent.ConfigDigest], image.updatedMS)
+		if attempts >= platformReclaimMaxAttempts {
+			out = append(out, platformReclaimRefused{ConfigDigest: image.intent.ConfigDigest, ReleaseSHA256: image.intent.ReleaseSHA256, Attempts: attempts, Reason: reason})
+		}
+	}
+	return out, nil
+}
+
+// platformRefusalHistory counts the refusals recorded after the image's latest load.
+func platformRefusalHistory(rows []platformRemovalRow, loadedMS int64) (attempts int, last int64, reason string) {
+	reason = "unknown"
+	for _, row := range rows {
+		if row.updated >= loadedMS && row.state == "reverted" {
+			attempts++
+			if row.updated >= last {
+				last = row.updated
+				switch row.outcome {
+				case "image_in_use", "image_conflict", "referenced_again", "abandoned_outcome_unknown":
+					reason = row.outcome
+				default:
+					reason = "unknown"
+				}
+			}
+		}
+	}
+	return attempts, last, reason
 }
 
 // platformReclaimTargets returns the removals to carry out now: the begun ones that still have no verdict, and the
@@ -438,13 +574,10 @@ func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platform
 			log.Printf("app-platform image removal: %d loads of one image exceed the watermark bound; the image is kept", len(image.knownLoads))
 			continue
 		}
-		attempts := 0
-		var last int64
-		for _, row := range history[k] {
-			if row.updated >= image.updatedMS && row.state == "reverted" {
-				attempts++
-				last = max(last, row.updated)
-			}
+		attempts, last, _ := platformRefusalHistory(history[k], image.updatedMS)
+		if attempts >= platformReclaimMaxAttempts {
+			// Reported by the storage status, not retried and not logged on every tick.
+			continue
 		}
 		if attempts > 0 && now < last+platformReclaimWait(attempts).Milliseconds() {
 			continue
@@ -570,6 +703,13 @@ func (r platformImageRows) prepareRemoval(ctx context.Context, c control.RemoveI
 			if err := lockPlatformPublisherTrust(e); err != nil {
 				return err
 			}
+			// The pause is read again here: a recovery that began after the sweep started stops the removal.
+			if paused, err := platformRecoveryPaused(e); err != nil || paused {
+				if err != nil {
+					return err
+				}
+				return errPlatformStillReferenced
+			}
 			referenced, err := platformReferencedConfigDigestsIn(e)
 			if err != nil {
 				return err
@@ -665,6 +805,9 @@ func (s *Server) interpretPlatformRemoveReply(reply platformRemoveImageReply, ca
 // reclaimPlatformImage drives one removal to a verdict, or leaves it for the next tick. It returns whether the
 // removal settled.
 func (s *Server) reclaimPlatformImage(ctx context.Context, endpoint platformRuntimeEndpoint, t platformReclaimTarget, stillUnreferenced bool) (bool, error) {
+	if t.unparsable {
+		return false, s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+	}
 	if !stillUnreferenced {
 		// The image is referenced again: it is kept, and the row is closed with the reason. Nothing is sent.
 		return false, s.abandonPlatformRemoval(ctx, t, "referenced_again")
@@ -812,7 +955,12 @@ func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRun
 	}
 	// While the Portal is paused for recovery nothing else of the application platform runs, and an image removed
 	// now could be one the recovery is about to restore: the step waits for the pause to end.
-	if s.platformRecoveryPaused(ctx) {
+	paused, err := platformRecoveryPaused(s.st.poolExec())
+	if err != nil {
+		// Fail closed: with the pause unreadable nothing is removed.
+		return 0, err
+	}
+	if paused {
 		return 0, nil
 	}
 	targets, referenced, err := s.platformReclaimTargets(ctx)

@@ -390,6 +390,8 @@ func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode st
 	}
 	w.publish("review_required", operation, "")
 	w.active, w.attempts = platformOperationLease{}, 0
+	// The settlement closure a finisher carried ended with its transaction: later calls do not inherit it.
+	ctx = withPlatformEffectSettlement(ctx, nil)
 	w.server.sweepPlatformImages(ctx)
 	w.reclaimImages(ctx)
 	return nil

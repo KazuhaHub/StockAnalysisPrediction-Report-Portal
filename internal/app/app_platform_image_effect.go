@@ -389,6 +389,8 @@ func (s *Server) platformImageDeliveryProjection(e migExec, installation, curren
 // and it reads without writing anything. The operator's fix is the same for each: upload the package again.
 type platformImageStorageStatus struct {
 	Unreadable []platformImageUnreadable `json:"unreadable"`
+	// ReclaimRefused lists images whose removal was refused on every attempt, with the last typed reason.
+	ReclaimRefused []platformReclaimRefused `json:"reclaim_refused"`
 }
 
 type platformImageUnreadable struct {
@@ -400,7 +402,10 @@ type platformImageUnreadable struct {
 }
 
 func (s *Server) platformImageStorageStatus(ctx context.Context) (platformImageStorageStatus, error) {
-	result := platformImageStorageStatus{Unreadable: []platformImageUnreadable{}}
+	result := platformImageStorageStatus{Unreadable: []platformImageUnreadable{}, ReclaimRefused: []platformReclaimRefused{}}
+	if refused, err := s.platformReclaimRefusals(ctx); err == nil {
+		result.ReclaimRefused = refused
+	}
 	store, err := s.platformImages()
 	if err != nil {
 		return result, nil
