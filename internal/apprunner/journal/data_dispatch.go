@@ -3,6 +3,7 @@ package journal
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"strconv"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -51,6 +52,18 @@ func (s *Store) DispatchPrepareData(ctx context.Context, raw, signature []byte, 
 		return s.ExecutePrepareData(ctx, claim, root, pin)
 	case "unknown":
 		return s.ReconcilePrepareData(ctx, raw, signature, root, pin)
+	case "reverted":
+		var command struct {
+			EffectID string `json:"effect_id"`
+		}
+		_ = json.Unmarshal(raw, &command)
+		if refusal := s.answerCapacityRefusal(ctx, command.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+			v, err := control.Verify(raw, signature, a, now)
+			return CapacityIdentityOfCommand(v.Command()), err
+		}); refusal != nil {
+			return zero, refusal
+		}
+		return zero, ErrFenceReconciliation
 	case "applied":
 		receipt, err := s.ReadDataPreparationReceipt(ctx, raw, signature)
 		if err != nil {
