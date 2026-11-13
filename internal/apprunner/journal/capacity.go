@@ -71,7 +71,8 @@ type capacityPlan struct {
 	kind, resourceID, installationID            string
 	memoryMiB, cpuMillis, diskBytes, imageBytes int64
 	// transferFrom names the stopped source backend an enable or repair start replaces. The native start removes
-	// that container before it creates the target, so its reservation is transferred to the target.
+	// that container before it creates the target, so admission does not count the source next to the target. The
+	// source's row stays held until the settlement that proves its absence releases it.
 	transferFrom string
 }
 
@@ -113,16 +114,6 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind<>'load-image' AND n.admitted_fence>res.control_fence)))`, now); err != nil {
 		return nil, err
 	}
-	if plan.transferFrom != "" {
-		// Transfer: the source of the same installation is stopped or absent, and the same effect removes it before
-		// it creates the target, so the target takes its place in the totals. A running source is not transferred.
-		if _, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=?
-			WHERE state='held' AND resource_id=? AND installation_id=? AND kind='backend'
-			AND resource_id IN (SELECT id FROM runner_resources WHERE kind='container' AND installation_id=? AND observed_state IN ('stopped','absent'))`,
-			now, plan.transferFrom, plan.installationID, plan.installationID); err != nil {
-			return nil, err
-		}
-	}
 	var held struct{ state string }
 	var mem, cpu, disk, image int64
 	err := tx.QueryRowContext(ctx, `SELECT state,memory_mib,cpu_millis,disk_bytes,image_bytes FROM runner_reservations WHERE resource_id=?`, plan.resourceID).Scan(&held.state, &mem, &cpu, &disk, &image)
@@ -142,6 +133,20 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_mib),0),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(disk_bytes),0),COALESCE(SUM(image_bytes),0),COALESCE(SUM(CASE WHEN kind='backend' THEN 1 ELSE 0 END),0)
 		FROM runner_reservations WHERE state='held' AND resource_id<>?`, plan.resourceID).Scan(&usedMem, &usedCPU, &usedDisk, &usedImage, &usedBackends); err != nil {
 		return nil, err
+	}
+	if plan.transferFrom != "" && plan.transferFrom != plan.resourceID {
+		// Transfer: the source of the same installation is stopped or absent, and the same effect removes it before
+		// it creates the target, so the target takes its place in the totals. The source's row stays held until the
+		// settlement that proves its absence releases it (settleEnableSourceAbsent); here it only does not count.
+		// A running source, or another installation's backend, is not netted.
+		var nMem, nCPU, nDisk, nImage, nBackends int64
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(memory_mib),0),COALESCE(SUM(cpu_millis),0),COALESCE(SUM(disk_bytes),0),COALESCE(SUM(image_bytes),0),COUNT(*)
+			FROM runner_reservations WHERE state='held' AND resource_id=? AND installation_id=? AND kind='backend'
+			AND resource_id IN (SELECT id FROM runner_resources WHERE kind='container' AND installation_id=? AND observed_state IN ('stopped','absent'))`,
+			plan.transferFrom, plan.installationID, plan.installationID).Scan(&nMem, &nCPU, &nDisk, &nImage, &nBackends); err != nil {
+			return nil, err
+		}
+		usedMem, usedCPU, usedDisk, usedImage, usedBackends = usedMem-nMem, usedCPU-nCPU, usedDisk-nDisk, usedImage-nImage, usedBackends-nBackends
 	}
 	backends := int64(0)
 	if plan.kind == reservationBackend {

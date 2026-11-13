@@ -320,6 +320,10 @@ applied.
     installation's backend, is not transferred and both count. The running settlement records the source
     absent. If the start then fails before the removal ran, the target's reservation stands for the
     installation's single backend; the source's row is not resurrected.
+    Amended: the source's reservation is no longer released at the claim, before its container's native removal.
+    Admission nets it in the arithmetic only (the source is the same installation's stopped or absent backend and is
+    not counted next to the target), and its row stays `held` until the start's running settlement records the
+    source absent and releases it in that transaction. A source that is not proven absent keeps its row.
 14. **Reservations of starts that provably never ran are released.** At admission, a held backend reservation is
     released when its resource is still the pending row the reserve wrote and its start command either ended
     `reverted` or was superseded by a newer fence of the installation before any claim (a claim at a superseded
