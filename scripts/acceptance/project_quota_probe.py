@@ -20,6 +20,9 @@ class ProbeCommandError(RuntimeError):
         self.code = code
 
 
+VOLUME_BYTES = 10 * 1024 * 1024 * 1024
+
+
 def command(*args):
     result = subprocess.run(args, env=ENV, check=False, capture_output=True, text=True, timeout=60)
     if len(result.stdout) + len(result.stderr) > 65536:
@@ -362,7 +365,9 @@ def main(args):
               "architecture": os.uname().machine, "execution_ready": False, "workloads": []}
     try:
         with image.open("xb") as stream:
-            stream.truncate(1024 * 1024 * 1024)
+            # Sparse: only written blocks use the host disk. The runner refuses to become ready on a
+            # volume smaller than its disk budget (8 GiB by default), so the volume must exceed it.
+            stream.truncate(VOLUME_BYTES)
         image.chmod(0o600)
         loop = command("losetup", "--find", "--show", str(image))
         require_loop_owner(loop, image)
