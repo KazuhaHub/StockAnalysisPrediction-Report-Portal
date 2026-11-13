@@ -478,6 +478,8 @@ func (c *soakChild) stageManaged(app string, memoryMiB, cpuMillis int) platformS
 	m.ID = app
 	m.Backend.Image = c.image
 	m.Backend.Resources = appplatform.Resources{MemoryMiB: memoryMiB, CPUMillis: cpuMillis, PIDs: 64}
+	// Required capabilities of this kind are granted by the install review itself: the real grant path.
+	m.Capabilities.Required = []string{"background.run", "events.subscribe", "reports.read", "tasks.schedule"}
 	raw, err := json.Marshal(m)
 	if err != nil {
 		c.t.Fatal(err)
@@ -598,10 +600,13 @@ func (c *soakChild) installStatic(app string) string {
 	return admitted.InstallationID
 }
 
-// retire takes a refused probe installation out of the count and, when it holds a data namespace, out of the
-// runner's disk reservation, through the ordinary managed uninstall. It reports how it ended.
+// retire takes a refused probe installation out of the count and its data namespace out of the runner's disk
+// reservation. The ordinary managed uninstall is tried first; a failed install has no review for it (the review
+// plan is refused), so the installation row is then marked removed, as the cap's own tests do, and the namespace
+// is destroyed through the standalone delete-data flow. It reports each step.
 func (c *soakChild) retire(installation string) string {
 	ctx := c.ctx
+	var steps []string
 	removal, err := c.s.createPlatformRemovalReview(c.session, installation, appplatform.ActionUninstall)
 	if err == nil {
 		var commit platformRemovalCommit
@@ -612,13 +617,34 @@ func (c *soakChild) retire(installation string) string {
 				if run, err = c.s.runPlatformManagedUninstall(ctx, claim.lease, c.endpoint); err == nil && run.lease.snapshot.Stage == appplatform.StageComplete {
 					return "uninstall"
 				}
-			} else if err == nil {
-				err = errors.New("claimed another operation")
 			}
 		}
 	}
+	steps = append(steps, fmt.Sprintf("uninstall refused: %v", err))
+	namespace := ""
+	var found sql.NullString
+	if err := c.s.st.queryRow(`SELECT id FROM app_platform_data_namespaces WHERE origin_installation_id=?`, installation).Scan(&found); err == nil && found.Valid {
+		namespace = found.String
+	}
 	mustExec(c.t, c.s.st, `UPDATE app_platform_installations SET phase='removed',desired_state='removed' WHERE id=?`, installation)
-	return "database: " + err.Error()
+	steps = append(steps, "installation marked removed")
+	if namespace == "" {
+		return strings.Join(append(steps, "no data namespace"), "; ")
+	}
+	review, err := c.s.createPlatformDeleteDataReview(ctx, c.session, installation, namespace)
+	if err == nil {
+		var commit platformRemovalCommit
+		if commit, err = c.s.consumePlatformDeleteDataReview(c.session, review.ID, review.SHA256, c.id()); err == nil {
+			var claim platformInstallSelection
+			if claim, err = c.s.claimNextPlatformDeleteData(ctx, c.id()); err == nil && claim.lease.id == commit.OperationID {
+				var run platformInstallRun
+				if run, err = c.s.runPlatformDeleteData(ctx, claim.lease, c.endpoint); err == nil && run.lease.snapshot.Stage == appplatform.StageComplete {
+					return strings.Join(append(steps, "namespace deleted by delete-data"), "; ")
+				}
+			}
+		}
+	}
+	return strings.Join(append(steps, fmt.Sprintf("delete-data refused: %v", err)), "; ")
 }
 
 // --- the excess probes ---
@@ -718,22 +744,6 @@ func (c *soakChild) probeInstallationCap() {
 
 // --- the platform floods ---
 
-// grantTasks gives a managed installation the capabilities its tasks and events need, as the service-identity
-// fixture does: the soak's descriptors declare none, so the install review granted nothing.
-func (c *soakChild) grantTasks(installation string) {
-	var app string
-	var policy int64
-	if err := c.s.st.queryRow(`SELECT app_id,policy_revision FROM app_platform_installations WHERE id=?`, installation).Scan(&app, &policy); err != nil {
-		c.t.Fatal(err)
-	}
-	plan := scalar[string](c.t, c.s.st, `SELECT id FROM app_platform_review_plans WHERE app_id=? AND action='install' ORDER BY created_ms DESC LIMIT 1`, app)
-	now := time.Now().UnixMilli()
-	for _, capability := range []string{"background.run", "tasks.schedule", "events.subscribe", "reports.read"} {
-		mustExec(c.t, c.s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,1,'{}',?,?,?,?)`,
-			installation, capability, policy, plan, now, now)
-	}
-}
-
 func (c *soakChild) activeTasks() int {
 	return scalar[int](c.t, c.s.st, `SELECT COUNT(*) FROM app_platform_tasks WHERE state NOT IN ('succeeded','failed','cancelled')`)
 }
@@ -756,9 +766,6 @@ func (c *soakChild) admit(installation string, n int, prefix string) error {
 // backend), inserted with the columns the admission itself writes; the refusals are the real admission.
 func (c *soakChild) floodQuotas() {
 	t := c.t
-	for _, installation := range c.managed {
-		c.grantTasks(installation)
-	}
 	// Event quota: one subscription with one in-flight delivery saturates on the second source event.
 	now, err := platformDatabaseNow(c.s.st.poolExec())
 	if err != nil {
