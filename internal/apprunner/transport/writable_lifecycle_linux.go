@@ -176,6 +176,12 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 		return zero, fmt.Errorf(
 			"%w: lifecycle final verification", driver.ErrContainerUncertain)
 	}
+	if capacityRefusalAction(action) {
+		if refusal, err := journal.ParseCapacityRefusal(body); err == nil {
+			// The runner refused the effect for lack of room. It is a definite end, not an observation.
+			return zero, &journal.CapacityRefusalError{Receipt: refusal}
+		}
+	}
 	if startAbsenceReply(action, body) {
 		if absence, err := journal.ParseUpdateStartAbsence(body); err == nil && absence.State != "absent" {
 			// The runner holds the start without a running receipt: not an observation, and not an absence.
@@ -366,6 +372,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 			ctx, raw, sig)
 	default:
 		return
+	}
+	if err != nil && capacityRefusalAction(action) {
+		var refusal *journal.CapacityRefusalError
+		if errors.As(err, &refusal) {
+			// A definite refusal is replied, not hidden: the sender needs the typed outcome and its dimension.
+			result, err = refusal.Receipt, nil
+		}
 	}
 	if err != nil || ctx.Err() != nil {
 		if err != nil {

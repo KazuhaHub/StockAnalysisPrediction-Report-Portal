@@ -287,3 +287,8 @@ func (s *Store) admitUpdateStart(ctx context.Context, tx *sql.Tx, f updateStartF
 	}
 	return &CapacityRefusalError{Receipt: receipt}, nil
 }
+
+// CapacityIdentityOfCandidate is the identity a refusal of a candidate or writable candidate start carries.
+func CapacityIdentityOfCandidate(c control.CandidateCommand) CapacityIdentity {
+	return CapacityIdentityOfCommand(candidateIndex(c))
+}

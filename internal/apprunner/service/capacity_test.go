@@ -175,3 +175,18 @@ func TestDeriveBudgetsFailsClosed(t *testing.T) {
 		t.Fatal("budget under the minimum backend accepted")
 	}
 }
+
+// The documented example must stay a valid configuration, and its capacity block must be the defaults.
+func TestExampleConfigDeclaresTheDefaultCapacity(t *testing.T) {
+	raw, err := os.ReadFile("../../../deploy/app-runner/service.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg Config
+	if err := decodeStrict(raw, &cfg); err != nil {
+		t.Fatalf("example config does not decode strictly: %v", err)
+	}
+	if !cfg.Capacity.valid() || cfg.Capacity.Resolve() != (*CapacityConfig)(nil).Resolve() {
+		t.Fatalf("example capacity %+v is not the defaults", cfg.Capacity.Resolve())
+	}
+}

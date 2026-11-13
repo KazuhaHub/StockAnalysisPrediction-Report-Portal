@@ -10,6 +10,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -95,16 +96,28 @@ func (s *Server) handleCandidateResponseKind(ctx context.Context, conn *net.Unix
 	} else {
 		receipt, err = reader.ReadCandidateRunningReceipt(ctx, body[:size], body[size:])
 	}
-	if err != nil {
-		return
-	}
-	if !readiness {
-		encoded, err = json.Marshal(receipt)
+	var refusal *journal.CapacityRefusalError
+	if !readiness && errors.As(err, &refusal) {
+		// The runner refused the start for lack of room: a definite, typed end the sender needs to see.
+		encoded, err = json.Marshal(refusal.Receipt)
 		if err != nil {
 			return
 		}
-		if _, err := journal.ParseCandidateRunningReceipt(encoded); err != nil {
+		if _, err := journal.ParseCapacityRefusal(encoded); err != nil {
 			return
+		}
+	} else {
+		if err != nil {
+			return
+		}
+		if !readiness {
+			encoded, err = json.Marshal(receipt)
+			if err != nil {
+				return
+			}
+			if _, err := journal.ParseCandidateRunningReceipt(encoded); err != nil {
+				return
+			}
 		}
 	}
 	digest := sha256.New()
@@ -207,6 +220,15 @@ func readCandidateResponseMode(parent context.Context, path string, profile endp
 	var extra [1]byte
 	if n, err := conn.Read(extra[:]); n != 0 || err != io.EOF {
 		return zero, ErrCandidateReceiptObservation
+	}
+	if refusal, parseErr := journal.ParseCapacityRefusal(body); parseErr == nil {
+		if !refusal.Matches(journal.CapacityIdentityOfCandidate(verified.Command())) {
+			return zero, ErrCandidateReceiptObservation
+		}
+		if _, err := control.VerifyCandidate(raw, signature, authority, time.Now().UnixMilli()); err != nil {
+			return zero, ErrCandidateReceiptObservation
+		}
+		return zero, &journal.CapacityRefusalError{Receipt: refusal}
 	}
 	receipt, err := journal.ParseCandidateRunningReceipt(body)
 	if err != nil || !receipt.MatchesCommand(verified.Command()) {

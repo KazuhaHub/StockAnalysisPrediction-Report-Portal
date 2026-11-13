@@ -244,6 +244,8 @@ type writableLifecycleReference struct {
 	deleteData              control.DeleteDataCommand
 	index                   control.Command
 	release                 string
+	// capacity is the identity a capacity refusal must bind: set for the start-bearing actions only.
+	capacity *journal.CapacityIdentity
 }
 
 func verifyWritableLifecycle(action WritableLifecycleAction, raw, sig, descriptor []byte, a control.Authority, now int64) (writableLifecycleReference, error) {
@@ -279,6 +281,8 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		r.writer = v.Writer().Command()
 		r.index = v.Writer().Data()
 		r.release = v.Index().Payload.ReleaseSHA256
+		id := journal.CapacityIdentityOfCandidate(v.Index())
+		r.capacity = &id
 	case action <= WritableRegistrationRead:
 		v, err := control.VerifyWritableBackendRegistration(raw, sig, a, now)
 		if err != nil {
@@ -373,6 +377,8 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.migrate = v.Command()
 		r.release = r.migrate.Payload.TargetReleaseSHA256
+		id := journal.CapacityIdentityOfHeader(r.migrate.CommandHeader)
+		r.capacity = &id
 	case action == LoadImageExecute || action == LoadImageRead:
 		var v control.VerifiedLoadImageCommand
 		var err error
@@ -388,6 +394,8 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.loadImage = v.Command()
 		r.release = r.loadImage.Payload.ReleaseSHA256
+		id := journal.CapacityIdentityOfHeader(r.loadImage.CommandHeader)
+		r.capacity = &id
 	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
 		var v control.VerifiedSettleUpdateStartCommand
 		var err error
@@ -431,6 +439,8 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.updateStart = v.Command()
 		r.release = r.updateStart.Payload.TargetReleaseSHA256
+		id := journal.CapacityIdentityOfUpdateStart(r.updateStart)
+		r.capacity = &id
 	}
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != r.release {
@@ -439,11 +449,29 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 	return r, nil
 }
 
+// capacityRefusalAction reports whether the runner may answer the action with a capacity refusal: the actions
+// whose effect starts a backend, runs a migration job or loads an image.
+func capacityRefusalAction(action WritableLifecycleAction) bool {
+	switch action {
+	case WritableCandidateStart, WritableCandidateRead, UpdateStartExecute, UpdateStartReceipt, MigrateDataExecute, MigrateDataRead, LoadImageExecute, LoadImageRead:
+		return true
+	}
+	return false
+}
+
 // Each independently parsed canonical reply must match its exact signed action.
 // This check supplements native/journal validation; it cannot replace it.
 func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r writableLifecycleReference, started, received time.Time) bool {
 	if received.Before(started) {
 		return false
+	}
+	if capacityRefusalAction(action) {
+		if refusal, err := journal.ParseCapacityRefusal(body); err == nil {
+			// A refusal is terminal and immutable: read back later it still carries the time it was settled, so
+			// freshness against the command's signing does not apply. Its binding to the exact command does.
+			settled, _ := strconv.ParseInt(refusal.SettledMS, 10, 64)
+			return r.capacity != nil && refusal.Matches(*r.capacity) && settled <= received.UnixMilli()
+		}
 	}
 	if status, ok := lifecycleStatusReply(action, body); ok {
 		return validLifecycleStatus(action, status, r, received)
