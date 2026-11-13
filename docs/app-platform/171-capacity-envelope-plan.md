@@ -605,3 +605,27 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
 51. **The second absence look is a heuristic.** The two-second delay between the two absence observations of an orphan
     settlement narrows the window in which a late daemon create is missed; it does not prove none can follow. The
     data execution gate is held during the delay.
+
+### Follow-ups that block the integration to main merge: PR 4c residuals
+
+Recorded from the round-3 review of PR 4c (#429). Each one is on a failure path, and each fails closed or
+leaves work for an administrator. None of them may remain when the integration branch merges into `main`.
+
+- **Orphaned restore start outside a recovery resume.** The runner admits capacity when it claims the start
+  (`ClaimUpdateStart`), but nothing on the Portal sends the settlement for a managed restore that is not a
+  recovery resume. Its target reservation is therefore held until an operator steps in. Fix: settle it from
+  the path that finishes the restore, as `settlePlatformHeldStarts` does for enable and repair.
+- **Enable or repair left `recovery_required` after its orphan settles.** No reservation leaks, but the
+  operation needs an administrator. Product decision required: either complete it automatically as failed, or
+  keep it for review with a clear message.
+- **An enable start held only as reserved.** It holds no reservation, because admission happens at the claim,
+  but it leaves a pending resource row behind. Either settle it or document why the row is inert.
+- **A transient error abandons a removal.** In `resolveOpenRemoval`, an error reading the host lease or the
+  release abandons the removal as `abandoned_outcome_unknown`, even when the runner has applied it. That is
+  safe, because the load reloads the image, but the applied verdict is lost from the history. Fix: abandon only
+  on typed errors.
+- **Held-start settlement starves itself.** `platformHeldStartsToSettle` reads `LIMIT 8` in a fixed order, so
+  eight starts that keep failing block every later one. Fix: rotate with a cursor, like the load settlement.
+- **The late-create window.** The second absence check two seconds later narrows the window but does not prove
+  absence (item 51). Fix: prove absence from the daemon's event stream, or leave the reservation held until
+  the next reconcile has seen the resource absent twice, across the gate.
