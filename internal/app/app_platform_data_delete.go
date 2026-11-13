@@ -126,58 +126,94 @@ func (s *Server) preparePlatformDeleteDataIntent(
 		format < 1 || writerFence < 1 || revision < 2 {
 		return zero, errAppPlatformStageEvidence
 	}
-	var release, activationNamespace string
-	var activationGeneration, activationFormat int64
-	if err := e.queryRow(`SELECT release_sha256,generation,
-		data_namespace_id,data_format
-		FROM app_platform_activations
-		WHERE installation_id=? AND data_namespace_id=?
-		ORDER BY generation DESC,created_ms DESC LIMIT 1`,
-		expected.installationID, namespaceID).Scan(
-		&release, &activationGeneration, &activationNamespace,
-		&activationFormat); err != nil {
+	never, err := platformOperationNeverStarted(e, expected.id)
+	if err != nil {
 		return zero, errAppPlatformStageEvidence
 	}
-	if activationNamespace != namespaceID ||
-		activationFormat != format ||
-		activationGeneration+1 !=
-			int64(expected.snapshot.Generation) ||
-		!platformValidSHA(release) {
-		return zero, errAppPlatformStageEvidence
-	}
+	var release string
 	var dataRaw, dataDescriptor []byte
-	if err := e.queryRow(`SELECT descriptor
-		FROM app_platform_releases WHERE sha256=?`,
-		release).Scan(&dataRaw); err != nil {
-		return zero, errAppPlatformStageEvidence
-	}
-	parsed, err := appplatform.ParseDescriptor(dataRaw)
-	if err != nil || parsed.Manifest.Backend == nil ||
-		parsed.SHA256 != release {
-		return zero, errAppPlatformStageEvidence
-	}
-	dataDescriptor = bytes.Clone(dataRaw)
-
 	var sourceOperation, planRaw, planSHA string
 	var sourceGeneration, sourceFence, completed int64
-	if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,
-		o.target_generation,o.fence,o.completed_ms
-		FROM app_platform_operations o
-		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.installation_id=? AND o.action='install' AND o.managed=1
-		AND o.stage='complete' AND o.completed_ms IS NOT NULL
-		AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
-		AND o.error_code IS NULL
-		ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`,
-		expected.installationID).Scan(
-		&sourceOperation, &planRaw, &planSHA,
-		&sourceGeneration, &sourceFence, &completed); err != nil {
-		return zero, errAppPlatformStageEvidence
-	}
-	if sourceGeneration < 1 || sourceFence < 1 ||
-		completed > facts.now ||
-		platformDigest([]byte(planRaw)) != planSHA {
-		return zero, errAppPlatformStageEvidence
+	if never == nil {
+		var activationNamespace string
+		var activationGeneration, activationFormat int64
+		if err := e.queryRow(`SELECT release_sha256,generation,
+			data_namespace_id,data_format
+			FROM app_platform_activations
+			WHERE installation_id=? AND data_namespace_id=?
+			ORDER BY generation DESC,created_ms DESC LIMIT 1`,
+			expected.installationID, namespaceID).Scan(
+			&release, &activationGeneration, &activationNamespace,
+			&activationFormat); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		if activationNamespace != namespaceID ||
+			activationFormat != format ||
+			activationGeneration+1 !=
+				int64(expected.snapshot.Generation) ||
+			!platformValidSHA(release) {
+			return zero, errAppPlatformStageEvidence
+		}
+		if err := e.queryRow(`SELECT descriptor
+			FROM app_platform_releases WHERE sha256=?`,
+			release).Scan(&dataRaw); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		parsed, err := appplatform.ParseDescriptor(dataRaw)
+		if err != nil || parsed.Manifest.Backend == nil ||
+			parsed.SHA256 != release {
+			return zero, errAppPlatformStageEvidence
+		}
+		dataDescriptor = bytes.Clone(dataRaw)
+
+		if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,
+			o.target_generation,o.fence,o.completed_ms
+			FROM app_platform_operations o
+			JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+			WHERE o.installation_id=? AND o.action='install' AND o.managed=1
+			AND o.stage='complete' AND o.completed_ms IS NOT NULL
+			AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL
+			AND o.error_code IS NULL
+			ORDER BY o.target_generation DESC,o.completed_ms DESC LIMIT 1`,
+			expected.installationID).Scan(
+			&sourceOperation, &planRaw, &planSHA,
+			&sourceGeneration, &sourceFence, &completed); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		if sourceGeneration < 1 || sourceFence < 1 ||
+			completed > facts.now ||
+			platformDigest([]byte(planRaw)) != planSHA {
+			return zero, errAppPlatformStageEvidence
+		}
+	} else {
+		// A never-started uninstall has no completed install and no activation. The release, the review and the
+		// fence come from the failed install and its applied prepare_data effect, which the plan named and
+		// validatePlatformAdmittedRemoval just compared with the database.
+		release, sourceOperation = never.ReleaseSHA256, never.OperationID
+		if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release).Scan(&dataRaw); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		parsed, err := appplatform.ParseDescriptor(dataRaw)
+		if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != release ||
+			int64(parsed.Manifest.Data.Schema) != format {
+			return zero, errAppPlatformStageEvidence
+		}
+		dataDescriptor = bytes.Clone(dataRaw)
+		if err := e.queryRow(`SELECT p.plan_json,p.plan_sha256,o.target_generation,o.completed_ms
+			FROM app_platform_operations o
+			JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+			WHERE o.id=? AND o.installation_id=? AND o.action='install' AND o.managed=1
+			AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+			AND o.lease_until_ms IS NULL AND o.error_code IS NOT NULL`,
+			sourceOperation, expected.installationID).Scan(
+			&planRaw, &planSHA, &sourceGeneration, &completed); err != nil {
+			return zero, errAppPlatformStageEvidence
+		}
+		sourceFence = never.AdmittedFence
+		if sourceGeneration != 1 || sourceFence < 1 || completed > facts.now ||
+			platformDigest([]byte(planRaw)) != planSHA {
+			return zero, errAppPlatformStageEvidence
+		}
 	}
 	var plan platformInstallProjection
 	if err := json.Unmarshal([]byte(planRaw), &plan); err != nil ||
