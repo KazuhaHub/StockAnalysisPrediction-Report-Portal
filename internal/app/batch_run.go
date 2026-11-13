@@ -388,6 +388,12 @@ func (s *Server) userUsage(now time.Time) map[string]float64 {
 // jobFactors computes a queued job's normalized priority factors at `now`. usage is the
 // precomputed decayed-usage map (see userUsage); an absent user has usage 0 → fair 1.
 func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64) queue.Factors {
+	return jobFactorsWith(j, now, usage, s.prioAgeHours())
+}
+
+// jobFactorsWith is jobFactors with the age-saturation setting already resolved, so a decision
+// over many jobs reads that setting once instead of once per job.
+func jobFactorsWith(j BatchJob, now time.Time, usage map[string]float64, ageHours float64) queue.Factors {
 	base, urgent, idle := parsePriority(j.Priority)
 	// A 定时 job "arrives" at its run_at, so it ages from then — not from when it was
 	// created — otherwise a long-scheduled job would unfairly jump ahead of runs
@@ -397,7 +403,7 @@ func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64)
 		enqueue = j.RunAt
 	}
 	wait := now.Sub(time.Unix(parseEnqueueUnix(enqueue), 0)).Seconds()
-	age := wait / (s.prioAgeHours() * 3600)
+	age := wait / (ageHours * 3600)
 	if age < 0 {
 		age = 0
 	} else if age > 1 {
@@ -415,11 +421,15 @@ func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64)
 // queuedItems maps the currently-queued jobs to scored scheduler items, used both by
 // the scheduler and by the "N ahead" computation. A job scheduled for the future is
 // hidden until its run_at passes, so it is never admitted early nor counted as waiting.
-func (s *Server) queuedItems() []queue.Item {
-	now := time.Now()
+func (s *Server) queuedItems() []queue.Item { return s.queuedItemsAt(time.Now()) }
+
+// queuedItemsAt is queuedItems evaluated at an explicit instant. A decision reads each setting
+// once and issues a fixed number of queries however long the backlog is.
+func (s *Server) queuedItemsAt(now time.Time) []queue.Item {
 	loc := s.panelLocation()
 	w := s.prioWeights()
 	usage := s.userUsage(now)
+	ageHours := s.prioAgeHours()
 	jobs := s.st.QueuedJobs()
 	items := make([]queue.Item, 0, len(jobs))
 	for _, j := range jobs {
@@ -429,7 +439,7 @@ func (s *Server) queuedItems() []queue.Item {
 		if invertBlocksNow(j.RunPreset, now, loc) {
 			continue // inverted preset currently in a blocked window — not eligible to start now
 		}
-		f := s.jobFactors(j, now, usage)
+		f := jobFactorsWith(j, now, usage, ageHours)
 		items = append(items, queue.Item{ID: j.ID, Score: w.Score(f), Urgent: f.Urgent})
 	}
 	return items
@@ -551,10 +561,22 @@ func (s *Server) admitLocked() {
 // all of a job's runs share the job's score and a higher-priority job's runs rank first.
 // Returns the scheduler items plus an id → (job, row) lookup for dispatch.
 func (s *Server) itemCandidates() ([]queue.Item, map[int64]candMeta) {
-	now := time.Now()
+	return s.itemCandidatesAt(time.Now())
+}
+
+// itemCandidatesAt is itemCandidates evaluated at an explicit instant, with the same fixed
+// query count as queuedItemsAt.
+func (s *Server) itemCandidatesAt(now time.Time) ([]queue.Item, map[int64]candMeta) {
 	loc := s.panelLocation()
 	w := s.prioWeights()
 	usage := s.userUsage(now)
+	ageHours := s.prioAgeHours()
+	// One query for every job's in-flight window of queued rows, instead of one per job: the
+	// cost of a decision must not grow with the backlog.
+	windows, err := s.st.QueuedItemWindows()
+	if err != nil {
+		return nil, map[int64]candMeta{}
+	}
 	var cands []queue.Item
 	meta := map[int64]candMeta{}
 	for _, j := range s.st.SchedulableJobs() {
@@ -571,11 +593,11 @@ func (s *Server) itemCandidates() ([]queue.Item, map[int64]candMeta) {
 		if window -= j.runningItems; window <= 0 {
 			continue // this job already has its share of runs in flight
 		}
-		items, err := s.st.QueuedItems(j.ID)
-		if err != nil || len(items) == 0 {
+		items := windows[j.ID]
+		if len(items) == 0 {
 			continue
 		}
-		f := s.jobFactors(j, now, usage)
+		f := jobFactorsWith(j, now, usage, ageHours)
 		score := w.Score(f)
 		for i, it := range items {
 			if i >= window {

@@ -145,6 +145,40 @@ func (s *Store) QueuedItems(jobID int64) ([]batch.Item, error) {
 	return out, rows.Err()
 }
 
+// QueuedItemWindows returns, for every job still queued or running, the first
+// max(concurrency,1) queued rows in row order, keyed by job id, in a single query. That is the
+// most rows the run-level scheduler can take from one job (its producer window), so it is
+// exactly what QueuedItems(jobID) would yield for the scheduler's purposes, without one round
+// trip per job.
+func (s *Store) QueuedItemWindows() (map[int64][]batch.Item, error) {
+	rows, err := s.query(`SELECT t.id, t.job_id, t.row_index, t.inputs FROM (
+			SELECT i.id AS id, i.job_id AS job_id, i.row_index AS row_index, i.inputs AS inputs,
+				ROW_NUMBER() OVER (PARTITION BY i.job_id ORDER BY i.row_index, i.id) AS rn,
+				CASE WHEN b.concurrency < 1 THEN 1 ELSE b.concurrency END AS win
+			FROM batch_items i JOIN batch_jobs b ON b.id=i.job_id
+			WHERE i.status='queued' AND b.status IN ('queued','running')
+		) t WHERE t.rn <= t.win ORDER BY t.job_id, t.rn`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64][]batch.Item{}
+	for rows.Next() {
+		var it batch.Item
+		var jobID int64
+		var inputs sql.NullString
+		if err := rows.Scan(&it.ID, &jobID, &it.RowIndex, &inputs); err != nil {
+			return nil, err
+		}
+		it.Inputs = map[string]string{}
+		if inputs.Valid && inputs.String != "" {
+			json.Unmarshal([]byte(inputs.String), &it.Inputs)
+		}
+		out[jobID] = append(out[jobID], it)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) FinishItem(id int64, st batch.Outcome, attempts int, runID, detail string) error {
 	// run_id is written only when non-empty so a finish that carries no id (e.g. a pure-chat run
 	// whose result has no workflow run id) never wipes the id already persisted mid-stream.
