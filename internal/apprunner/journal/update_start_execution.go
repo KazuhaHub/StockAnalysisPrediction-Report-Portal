@@ -850,6 +850,18 @@ func (s *Store) settleUpdateStartRunning(ctx context.Context, claim UpdateStartC
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, ErrFenceReconciliation
 	}
+	if f.command.Kind == "enable-start" && enableStartSourceResource(f) != "" {
+		// The native start removed the stopped source before it created the target, so its absence is recorded
+		// here and its reservation, already transferred at the claim, is released for good.
+		sourceID := enableStartSourceResource(f)
+		if _, err := tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=revision+1,observed_ms=?,updated_ms=?
+			WHERE id=? AND kind='container' AND installation_id=? AND observed_state='stopped'`, f.now, f.now, sourceID, f.command.InstallationID); err != nil {
+			return zero, err
+		}
+		if err := releaseReservation(ctx, tx, sourceID, f.now); err != nil {
+			return zero, err
+		}
+	}
 	changed, err = tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=?
 		WHERE effect_id=? AND kind='update-start' AND stage='start' AND state='unknown'
 		AND receipt_json=? AND ack_attempted_ms IS NULL`, string(encoded), f.now,

@@ -70,6 +70,9 @@ func (s *Store) CapacityBudgets() (CapacityBudgets, bool) {
 type capacityPlan struct {
 	kind, resourceID, installationID            string
 	memoryMiB, cpuMillis, diskBytes, imageBytes int64
+	// transferFrom names the stopped source backend an enable or repair start replaces. The native start removes
+	// that container before it creates the target, so its reservation is transferred to the target.
+	transferFrom string
 }
 
 // capacityRefusal is the dimension a plan did not fit, with what it asked for and what remained.
@@ -94,6 +97,16 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 		AND resource_id IN (SELECT id FROM runner_resources WHERE kind='container' AND desired_state='absent' AND observed_state='absent')`,
 		now, plan.installationID, plan.resourceID); err != nil {
 		return nil, err
+	}
+	if plan.transferFrom != "" {
+		// Transfer: the source of the same installation is stopped or absent, and the same effect removes it before
+		// it creates the target, so the target takes its place in the totals. A running source is not transferred.
+		if _, err := tx.ExecContext(ctx, `UPDATE runner_reservations SET state='released',updated_ms=?
+			WHERE state='held' AND resource_id=? AND installation_id=? AND kind='backend'
+			AND resource_id IN (SELECT id FROM runner_resources WHERE kind='container' AND installation_id=? AND observed_state IN ('stopped','absent'))`,
+			now, plan.transferFrom, plan.installationID, plan.installationID); err != nil {
+			return nil, err
+		}
 	}
 	var held struct{ state string }
 	var mem, cpu, disk, image int64
@@ -257,6 +270,9 @@ func (s *Store) admitUpdateStart(ctx context.Context, tx *sql.Tx, f updateStartF
 	if err != nil || !admit {
 		return nil, err
 	}
+	if id := enableStartSourceResource(f); c.Kind == "enable-start" && id != "" && id != c.Payload.ResourceID {
+		plan.transferFrom = id
+	}
 	refusal, err := s.admitCapacity(ctx, tx, plan, f.now)
 	if err != nil || refusal == nil {
 		return nil, err
@@ -296,4 +312,17 @@ func CapacityIdentityOfCandidate(c control.CandidateCommand) CapacityIdentity {
 // CapacityIdentityOfImport is the identity a refusal of an imported namespace carries.
 func CapacityIdentityOfImport(c control.ImportCheckpointCommand) CapacityIdentity {
 	return CapacityIdentity{c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.OperationID, c.TargetGeneration, c.Stage, c.EffectNumber, c.EffectID, c.Kind, c.PayloadSHA256}
+}
+
+// enableStartSourceResource is the stopped backend an enable or repair start replaces: the resource of whichever
+// start produced the checkpoint it enables from.
+func enableStartSourceResource(f updateStartFacts) string {
+	source := f.source.source
+	switch {
+	case source.update != nil:
+		return source.update.Claim.ResourceID
+	case source.writable != nil:
+		return source.writable.Claim.ResourceID
+	}
+	return source.source.Claim.ResourceID
 }
