@@ -423,6 +423,7 @@ def main(argv):
 
         soak_env = dict(native, APP_CANDIDATE_DOCKER_SOCKET=socket, APP_DATA_PORTAL_FIXTURE=str(fixture),
                         APP_CAPACITY_SOAK_IMAGE=image, APP_CAPACITY_SOAK_OUT=str(out),
+                        APP_CAPACITY_SOAK_DESCRIPTORS=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors"),
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         sampler = Sampler(run_command, "/proc", mountpoint, image_id)

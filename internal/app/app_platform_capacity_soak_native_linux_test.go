@@ -128,6 +128,25 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	if err := os.Mkdir(childData, 0700); err != nil {
 		t.Fatal(err)
 	}
+	// The fixtures read the descriptor templates relative to their working directory. Copy them into a tree the
+	// unprivileged child can traverse, as the data endpoint acceptance does, rather than open the checkout to it.
+	work := filepath.Join(dir, "app")
+	descriptors := filepath.Join(dir, "appplatform", "testdata", "descriptors")
+	for _, folder := range []string{work, filepath.Join(dir, "appplatform"), filepath.Join(dir, "appplatform", "testdata"), descriptors} {
+		if err := os.Mkdir(folder, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	templates, err := os.ReadDir(os.Getenv("APP_CAPACITY_SOAK_DESCRIPTORS"))
+	if err != nil || len(templates) == 0 {
+		t.Fatal("descriptor templates unavailable", err)
+	}
+	for _, entry := range templates {
+		raw, err := os.ReadFile(filepath.Join(os.Getenv("APP_CAPACITY_SOAK_DESCRIPTORS"), entry.Name()))
+		if err != nil || os.WriteFile(filepath.Join(descriptors, entry.Name()), raw, 0444) != nil {
+			t.Fatal("copy descriptor template", entry.Name(), err)
+		}
+	}
 	if err := os.Chown(childData, 41001, 41001); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +183,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	enrollment, _ := json.Marshal(deployment.ControllerEnrollment)
 	timeout := fmt.Sprintf("-test.timeout=%dm", minutes+75)
 	child := exec.Command(binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
-	child.Dir = dir
+	child.Dir = work
 	child.Env = []string{
 		"GOMAXPROCS=2", "PORTAL_CAPACITY_SOAK_CHILD=1", "PORTAL_CAPACITY_SOAK_DIR=" + childData,
 		"PORTAL_CAPACITY_SOAK_IMAGE=" + image,
