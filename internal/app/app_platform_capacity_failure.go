@@ -47,7 +47,7 @@ func platformCapacityRefusalOf(err error) (journal.CapacityRefusal, bool) {
 // show. Anything else is reported as a generic failure and never leaks.
 func platformPublicOperationErrorCode(code string) string {
 	switch code {
-	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required":
+	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required", platformStartNeverRanErrorCode:
 		return code
 	}
 	if isPlatformCapacityErrorCode(code) {
@@ -94,23 +94,35 @@ func (w *platformInstallScheduler) finishCapacity(ctx context.Context, r journal
 	return w.finishAs(withPlatformRefusedEffect(ctx, r), code)
 }
 
-type platformRefusedEffectKey struct{}
+// platformEffectSettlement closes an effect row of the operation inside the transaction that ends it. It runs after
+// the lease and the fence are verified and before the finisher commits.
+type platformEffectSettlement func(e migExec, facts platformLeaseFacts) error
 
-// withPlatformRefusedEffect asks the transaction that ends an operation to close the refused effect's row in it.
-// Every operation finisher loads its lease through loadPlatformBoundOperationLease inside its own transaction, which
-// is where the request is honoured, after the lease and the fence are verified and before the finisher commits or
-// fails: the request has no other way to run.
-func withPlatformRefusedEffect(ctx context.Context, r journal.CapacityRefusal) context.Context {
-	return context.WithValue(ctx, platformRefusedEffectKey{}, r)
+type platformEffectSettlementKey struct{}
+
+// withPlatformEffectSettlement asks the transaction that ends an operation to run the settlement in it. Every
+// operation finisher loads its lease through loadPlatformBoundOperationLease inside its own transaction, which is
+// where the request is honoured, after the lease and the fence are verified and before the finisher commits or
+// fails: the request has no other way to run. The settlement rides on the context because the finishers are
+// shared by every action and their signatures are fixed.
+func withPlatformEffectSettlement(ctx context.Context, settle platformEffectSettlement) context.Context {
+	return context.WithValue(ctx, platformEffectSettlementKey{}, settle)
 }
 
-func platformRefusedEffectOf(e migExec) (journal.CapacityRefusal, bool) {
+// withPlatformRefusedEffect asks the ending transaction to close the effect a runner capacity refusal names.
+func withPlatformRefusedEffect(ctx context.Context, r journal.CapacityRefusal) context.Context {
+	return withPlatformEffectSettlement(ctx, func(e migExec, facts platformLeaseFacts) error {
+		return settleRefusedEffect(e, facts, r)
+	})
+}
+
+func platformEffectSettlementOf(e migExec) (platformEffectSettlement, bool) {
 	tx, ok := e.ex.(platformContextTx)
 	if !ok || tx.ctx == nil {
-		return journal.CapacityRefusal{}, false
+		return nil, false
 	}
-	r, ok := tx.ctx.Value(platformRefusedEffectKey{}).(journal.CapacityRefusal)
-	return r, ok
+	settle, ok := tx.ctx.Value(platformEffectSettlementKey{}).(platformEffectSettlement)
+	return settle, ok && settle != nil
 }
 
 // settleRefusedEffect closes the operation's open effect row that has the refused effect's identity as reverted,

@@ -3890,6 +3890,7 @@
   "err.install_lease_recovery_required": "安裝曾中斷，需要復原審核。",
   "err.install_authority_review_required": "安裝授權已變更，需要管理員審核。",
   "err.install_execution_review_required": "安裝未能完成，需要管理員審核。",
+  "err.start_never_ran": "應用後端從未啟動，運行器已確認沒有任何程序殘留。",
   "err.capacity_exhausted_memory": "運行器的記憶體已不足以運行此應用。請停止或移除其他應用後重試。",
   "err.capacity_exhausted_cpu": "運行器的 CPU 已不足以運行此應用。請停止或移除其他應用後重試。",
   "err.capacity_exhausted_disk": "運行器的磁碟已不足以存放此應用的資料。請刪除不再使用的應用資料後重試。",

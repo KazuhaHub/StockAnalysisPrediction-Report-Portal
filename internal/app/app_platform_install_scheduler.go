@@ -313,6 +313,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		// A definite refusal by the runner is not retried: the operation ends with the typed outcome.
 		return w.finishCapacity(ctx, refusal)
 	}
+	if orphan, ok := platformCandidateOrphanOf(err); ok {
+		// The runner proved the start never ran: a definite end, never a retry. A receipt that disagrees with the
+		// Portal's own rows settles nothing and is treated as the ordinary failure it is.
+		if finishErr := w.finishOrphan(ctx, orphan); finishErr == nil || !errors.Is(finishErr, errAppPlatformStageEvidence) {
+			return finishErr
+		}
+	}
 	if (errors.Is(err, errPlatformImageBusy) ||
 		(w.active.snapshot.Action == appplatform.ActionRestoreImport &&
 			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||

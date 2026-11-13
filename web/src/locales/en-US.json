@@ -3890,6 +3890,7 @@
   "err.install_lease_recovery_required": "The interrupted installation requires recovery review.",
   "err.install_authority_review_required": "Installation authority changed. Administrator review is required.",
   "err.install_execution_review_required": "The installation could not finish. Administrator review is required.",
+  "err.start_never_ran": "The app's backend never started, and the runner confirmed that nothing was left running.",
   "err.capacity_exhausted_memory": "The runner has no memory left for this app. Stop or remove another app, then try again.",
   "err.capacity_exhausted_cpu": "The runner has no CPU left for this app. Stop or remove another app, then try again.",
   "err.capacity_exhausted_disk": "The runner has no disk left for this app's data. Delete the data of apps you no longer use, then try again.",

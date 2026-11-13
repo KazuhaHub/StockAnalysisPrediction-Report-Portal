@@ -215,7 +215,7 @@ func platformInstallResourceCount(e migExec, installation string) (int, error) {
 // claimed merely to stop it; live work requires the exact still-current lease.
 func finalizePlatformInstallForReview(e migExec, facts platformLeaseFacts, code string, expired bool) error {
 	lease := facts.lease
-	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && !isPlatformCapacityErrorCode(code) {
+	if code != "install_lease_recovery_required" && code != "install_authority_review_required" && code != "install_execution_review_required" && code != platformStartNeverRanErrorCode && !isPlatformCapacityErrorCode(code) {
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Action != appplatform.ActionInstall || lease.snapshot.Generation != 1 || facts.controlFence != lease.fence || facts.controlFence == math.MaxInt64 || facts.installationRevision == math.MaxInt64 || lease.rowRevision == math.MaxInt64 {
