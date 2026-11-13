@@ -75,9 +75,9 @@
       "enforce-disposable-project-quota"
     ],
     "workflow": ".github/workflows/app-project-quota-probe.yml",
-    "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42719361547",
+    "run": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42749515804",
     "artifact": "managed-image-real-runner",
-    "note": "Pull request run 42719361547 (draft PR 412) covers the review follow-ups; both image jobs passed."
+    "note": "Pull request run 42749515804 (PR 414, head 457bc895) stages the Apps-built descriptor byte for byte: built_descriptor_sha256 equals the release digest the runner signed; both image jobs passed."
   },
   "limits": [
     "Native paths run in CI only; the development host has no Docker.",

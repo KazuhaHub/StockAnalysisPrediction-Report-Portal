@@ -80,7 +80,7 @@ what.
   runs; the SEC-01 negatives in the driver tests that job runs; and the 3a native test that loads a two-layer
   image on the real daemon.
 - **Natively, against a real root runner (PR 3c, `enforce-disposable-project-quota`, run
-  [42719361547](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42719361547),
+  [42749515804](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42749515804),
   artifact `managed-image-real-runner`):** the exact Scheduled Digest image, from a `portalapp/2` package built in
   the job, with the image removed from the Docker store by ID beforehand and the runner in the production profile.
   The package goes through the real offline import route and the ordinary install worker; the runner loads the
