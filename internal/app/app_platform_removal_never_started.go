@@ -287,3 +287,42 @@ func (s *Server) advancePlatformNeverStartedRemoval(ctx context.Context, expecte
 	}
 	return result, nil
 }
+
+// closePlatformNeverStartedInstall moves the failed install of a never-started installation from recovery_required
+// to failed, in the transaction that finishes the installation removed. The install keeps its error code. It is
+// the one place that uses the install-only model transition, and it is reached only with the evidence of the
+// removal's own reviewed plan: the caller has just verified it, and every effect of the install is settled.
+func closePlatformNeverStartedInstall(e migExec, install, removal string, now int64) error {
+	var stage string
+	var revision, rowRevision, generation int64
+	var managed int
+	if err := e.queryRow(`SELECT stage,state_revision,row_revision,target_generation,managed FROM app_platform_operations
+		WHERE id=? AND action='install' AND completed_ms IS NOT NULL AND error_code IS NOT NULL`, install).Scan(&stage, &revision, &rowRevision, &generation, &managed); err != nil {
+		return errAppPlatformStageEvidence
+	}
+	var unsettled int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image') AND state IN ('prepared','unknown')`, install).Scan(&unsettled); err != nil || unsettled != 0 {
+		return errAppPlatformStageEvidence
+	}
+	model, err := appplatform.OperationFromSnapshot(appplatform.OperationSnapshot{Action: appplatform.ActionInstall, Managed: managed == 1,
+		Generation: uint64(generation), Revision: uint64(revision), Stage: appplatform.Stage(stage)})
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	closed, err := model.SettleNeverStarted(model.Snapshot().Revision)
+	if err != nil {
+		return errAppPlatformStageEvidence
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations SET stage=?,state_revision=?,row_revision=row_revision+1,updated_ms=?
+		WHERE id=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND completed_ms IS NOT NULL`,
+		string(closed.Snapshot().Stage), int64(closed.Snapshot().Revision), now, install, revision, rowRevision)
+	if err := platformLeaseCAS(changed, err); err != nil {
+		return err
+	}
+	detail, _ := json.Marshal(struct {
+		Removal string `json:"removal_operation_id"`
+	}{removal})
+	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.never_started_install_closed','app_platform_operation',?,?,'')`,
+		time.UnixMilli(now).UTC().Format(time.RFC3339), install, string(detail))
+	return err
+}

@@ -686,13 +686,19 @@ prepared. A namespace with any container keeps the container binding unchanged. 
 verifies with the existing control verification. `settleDeleteData` was split so that its journal half
 (`settleDeleteDataSnapshot`, which releases the reservation) is reachable by a journal test without a native data root.
 
-**Not changed.** The uninstall of a started installation and its plan check and phase gate; the standalone delete-data
-review, which still requires a retired activation and a completed install (the uninstall is the way out for a refused
-install); the model's `Settle`, which is limited to the restore actions, so the failed install operation stays
-`recovery_required` after the removal. That has one consequence worth a decision: `platformNoPriorInstall` counts an
-installation with a `recovery_required` operation as occupying its application, so the same application cannot be installed
-again after such a removal until either `Settle` accepts an install whose effects are all settled or the check is relaxed
-for a removed installation. Neither was done here.
+**Closing the failed install.** The settlement of the never-started removal also moves the failed install operation from
+`recovery_required` to `failed`, in the same transaction, keeping its error code and writing the audit entry
+`app_platform.never_started_install_closed` with the removal's operation id (`closePlatformNeverStartedInstall`). The
+transition is a new, explicit model method, `Operation.SettleNeverStarted`, limited to the install action and to
+`recovery_required`; `Settle` is unchanged and still limited to the restore actions, and `platformNoPriorInstall` is
+unchanged. It runs only on the removal's own reviewed never-started evidence, verified at the top of the same
+transaction, and refuses while any effect of the install is unsettled. Because it shares the transaction, a failure of the
+closing rolls the removal back and the application stays occupied (fail closed); the same receipt converges on retry. After the removal the
+application can be installed again, with a fresh namespace.
+
+**Not changed.** The uninstall of a started installation (its install operation stays `complete`) and its plan check and
+phase gate; the standalone delete-data review, which still requires a retired activation and a completed install (the
+uninstall is the way out for a refused install).
 
 **Recovery bundle and trust quarantine.** Neither treats this installation specially. The quarantine considers only
 installations in phase `ready` with an active activation and asks for a disable, which the variant refuses. The bundle's
@@ -704,7 +710,7 @@ the review and consumption API and ends removed, with no stop or remove-code eff
 the install's preparation receipt; the scheduler loop passes the two stages; an unsettled start (prepared, unknown,
 applied) is refused and a reverted one admitted, including through the real orphan settlement; each eligibility condition
 fails closed on its own; a started install keeps the ordinary path and review; a replayed consumption admits one operation;
-a settlement failure rolls everything back and the retry settles; a crash after the prepared effect fails closed to
+a settlement failure rolls everything back and the retry settles; the failed install is closed with the removal, atomically, and the application can be installed again with a fresh namespace; an ordinary removal leaves its install complete; a crash after the prepared effect fails closed to
 recovery without a second runner command. Runner (`delete_data_never_started_test.go`): a namespace with no container is
 accepted only with reverted starts, the volume binding holds for each field, a container keeps the container binding, and a
 signed command is admitted and settled so that the namespace is absent and its reservation released, after which a

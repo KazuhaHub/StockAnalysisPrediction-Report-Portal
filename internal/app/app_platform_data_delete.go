@@ -576,6 +576,17 @@ func (s *Server) settlePlatformDeleteData(
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return zero, err
 	}
+	never, err := platformOperationNeverStarted(e, expected.id)
+	if err != nil {
+		return zero, errAppPlatformStageEvidence
+	}
+	if never != nil {
+		// The evidence was verified at the top of this transaction, before the namespace was marked deleted.
+		if err := closePlatformNeverStartedInstall(
+			e, never.OperationID, expected.id, now); err != nil {
+			return zero, err
+		}
+	}
 	if _, err := e.exec(`INSERT INTO audit_log(
 		at,actor,actor_ou,action,target_type,target_id,detail,ip)
 		VALUES(?,'system',0,'app_platform.data_deleted',

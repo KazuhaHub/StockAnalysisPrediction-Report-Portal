@@ -173,9 +173,10 @@ func testRefusedInstallIsUninstalled(t *testing.T, pg bool) {
 		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=?`, f.installation) != 0 {
 		t.Fatal("authority outlived the removal")
 	}
-	// The failed install's own history is untouched evidence.
-	if scalar[string](t, f.s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, f.install) != "recovery_required:capacity_exhausted_memory" {
-		t.Fatal("the removal rewrote the failed install operation")
+	// The failed install is closed by the removal, keeping its error code, and the audit names the removal.
+	if scalar[string](t, f.s.st, `SELECT stage||':'||error_code FROM app_platform_operations WHERE id=?`, f.install) != "failed:capacity_exhausted_memory" ||
+		scalar[int](t, f.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.never_started_install_closed' AND target_id=? AND detail LIKE ?`, f.install, "%"+lease.id+"%") != 1 {
+		t.Fatal("the removal did not close the failed install operation")
 	}
 }
 
@@ -400,5 +401,148 @@ func TestNeverStartedRemovalRefusesStrayEffects(t *testing.T) {
 		SELECT operation_id,'stop',1,?,'stop',payload_sha256,runtime_id,controller_epoch,admitted_fence,0,'prepared','{}',?,? FROM app_platform_operation_effects WHERE kind='prepare-data' LIMIT 1`, platformFixtureID(7142), now, now)
 	if _, err := f.s.advancePlatformNeverStartedRemoval(context.Background(), lease); err == nil {
 		t.Fatal("the never-started removal advanced over a stop effect")
+	}
+}
+
+// Refused at capacity and removed through the never-started path, the application can be installed again: the
+// closed install no longer occupies it, the new install is admitted, and its data stage prepares a fresh namespace
+// (and so asks the runner for a fresh reservation). Fails while the failed install stays recovery_required.
+func TestRefusedInstallCanBeInstalledAgainAfterItsRemoval(t *testing.T) {
+	f := newRefusedInstall(t, false)
+	app := scalar[string](t, f.s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, f.installation)
+	oldNamespace := scalar[string](t, f.s.st, `SELECT id FROM app_platform_data_namespaces WHERE owner_installation_id=?`, f.installation)
+	if err := platformNoPriorInstall(migExec{s: f.s.st, ex: f.s.st.db}, app); err == nil {
+		t.Fatal("the application was free while its refused install still existed")
+	}
+	f.removeNeverStarted(t, 7150)
+	if err := platformNoPriorInstall(migExec{s: f.s.st, ex: f.s.st.db}, app); err != nil {
+		t.Fatalf("the application stayed occupied after the removal: %v", err)
+	}
+	release := scalar[string](t, f.s.st, `SELECT sha256 FROM app_platform_releases WHERE managed=0 AND app_id=? ORDER BY created_ms LIMIT 1`, app)
+	plan, err := f.s.createPlatformNativeInstallReview(f.actor, release, 1)
+	if err != nil {
+		t.Fatalf("the application could not be reviewed for install again: %v", err)
+	}
+	commit, err := f.s.consumePlatformInstallReview(f.actor, plan.ID, plan.SHA256, platformFixtureID(7160))
+	if err != nil {
+		t.Fatalf("the new install was refused: %v", err)
+	}
+	lease, err := f.s.st.claimPlatformOperation(commit.OperationID, platformFixtureID(7161))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range []appplatform.Stage{appplatform.StageValidate, appplatform.StageDownload, appplatform.StageStage, appplatform.StagePrepareData} {
+		if lease, err = f.s.st.advancePlatformInstallStaging(lease); err != nil || lease.snapshot.Stage != stage {
+			t.Fatal(stage, err)
+		}
+	}
+	intent, err := f.s.preparePlatformInstallData(context.Background(), lease)
+	if err != nil {
+		t.Fatalf("the new install could not prepare its data: %v", err)
+	}
+	if intent.namespaceID == oldNamespace || lease.installationID == f.installation ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_data_namespaces WHERE id=?`, oldNamespace) != "deleted" {
+		t.Fatal("the new install did not get a fresh namespace beside the deleted one")
+	}
+}
+
+// removeNeverStarted runs the whole never-started removal to completion with the exact runner observation.
+func (f refusedInstall) removeNeverStarted(t *testing.T, base int) {
+	t.Helper()
+	f.uninstall(t, platformFixtureID(base))
+	lease := f.claimAtStop(t, platformFixtureID(base+1))
+	var err error
+	for range 2 {
+		if lease, err = f.s.advancePlatformNeverStartedRemoval(context.Background(), lease); err != nil {
+			t.Fatal(err)
+		}
+	}
+	intent, err := f.s.preparePlatformDeleteDataIntent(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	receipt, ok := validPlatformDeleteDataObservation(platformDeleteDataObservationFixture(intent, endpoint), intent, endpoint)
+	if !ok {
+		t.Fatal("observation refused")
+	}
+	if _, err := f.s.settlePlatformDeleteData(context.Background(), lease, intent, receipt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The removal and the closing of the failed install are one transaction. A failure of the closing rolls the whole
+// removal back: the namespace is still active, the install is still recovery_required, the application is still
+// occupied (fail closed), and the same receipt converges on retry.
+func TestRefusedInstallCloseIsAtomicWithTheRemoval(t *testing.T) {
+	f := newRefusedInstall(t, false)
+	app := scalar[string](t, f.s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, f.installation)
+	_, commit := f.uninstall(t, platformFixtureID(7170))
+	lease := f.claimAtStop(t, platformFixtureID(7171))
+	var err error
+	for range 2 {
+		if lease, err = f.s.advancePlatformNeverStartedRemoval(context.Background(), lease); err != nil {
+			t.Fatal(err)
+		}
+	}
+	intent, err := f.s.preparePlatformDeleteDataIntent(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	receipt, _ := validPlatformDeleteDataObservation(platformDeleteDataObservationFixture(intent, endpoint), intent, endpoint)
+	mustExec(t, f.s.st, `CREATE TRIGGER fixture_close_failure BEFORE INSERT ON audit_log WHEN NEW.action='app_platform.never_started_install_closed' BEGIN SELECT RAISE(ABORT,'fixture close failure'); END`)
+	if _, err := f.s.settlePlatformDeleteData(context.Background(), lease, intent, receipt); err == nil {
+		t.Fatal("the removal completed without closing the install")
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, f.install) != "recovery_required" ||
+		scalar[string](t, f.s.st, `SELECT state FROM app_platform_data_namespaces WHERE origin_installation_id=?`, f.installation) != "active" ||
+		scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, commit.OperationID) != "remove_data" ||
+		platformNoPriorInstall(migExec{s: f.s.st, ex: f.s.st.db}, app) == nil {
+		t.Fatal("a failed close left the removal half applied or the application free")
+	}
+	mustExec(t, f.s.st, `DROP TRIGGER fixture_close_failure`)
+	if _, err := f.s.settlePlatformDeleteData(context.Background(), lease, intent, receipt); err != nil {
+		t.Fatalf("the retry did not converge: %v", err)
+	}
+	if scalar[string](t, f.s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, f.install) != "failed" || platformNoPriorInstall(migExec{s: f.s.st, ex: f.s.st.db}, app) != nil {
+		t.Fatal("the retry did not close the install")
+	}
+}
+
+// A started install removed through the ordinary path is unchanged: its install operation stays complete and no
+// closing is recorded.
+func TestOrdinaryRemovalDoesNotCloseTheInstall(t *testing.T) {
+	s, lease := platformWritableManagedRemovalStopFixture(t, false)
+	intent, err := s.preparePlatformManagedRemovalIntent(context.Background(), lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := platformManagedRemovalFixtureEndpoint()
+	stop, _ := validPlatformManagedRemovalObservation(platformManagedRemovalObservationFixture(intent, endpoint), intent, endpoint)
+	removeLease, err := s.settlePlatformManagedRemoval(context.Background(), lease, intent, stop)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removeIntent, err := s.preparePlatformManagedRemovalIntent(context.Background(), removeLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := validPlatformManagedRemovalObservation(platformManagedRemovalObservationFixture(removeIntent, endpoint), removeIntent, endpoint)
+	deleteLease, err := s.settlePlatformManagedRemoval(context.Background(), removeLease, removeIntent, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteIntent, err := s.preparePlatformDeleteDataIntent(context.Background(), deleteLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, _ := validPlatformDeleteDataObservation(platformDeleteDataObservationFixture(deleteIntent, endpoint), deleteIntent, endpoint)
+	if _, err := s.settlePlatformDeleteData(context.Background(), deleteLease, deleteIntent, receipt); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE action='install'`) != "complete:" ||
+		scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.never_started_install_closed'`) != 0 {
+		t.Fatal("the ordinary removal touched the install operation")
 	}
 }
