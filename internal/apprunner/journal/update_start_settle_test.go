@@ -97,7 +97,14 @@ func (r reservedStartFixture) modeCommand(t *testing.T, effect int, mode string)
 // preflight evidence a start that got as far as creating a container would have recorded.
 func (r reservedStartFixture) orphaned(t *testing.T, bound bool) {
 	t.Helper()
-	if _, err := r.f.store.ClaimUpdateStart(context.Background(), r.raw, r.sig); err != nil {
+	r.orphanedWith(t, context.Background(), bound)
+}
+
+// orphanedWith is orphaned with the context the claim is admitted under (carrying the backend's resources when
+// capacity budgets are set).
+func (r reservedStartFixture) orphanedWith(t *testing.T, ctx context.Context, bound bool) {
+	t.Helper()
+	if _, err := r.f.store.ClaimUpdateStart(ctx, r.raw, r.sig); err != nil {
 		t.Fatal(err)
 	}
 	if !bound {
