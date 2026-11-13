@@ -223,6 +223,11 @@ class EvaluateTests(unittest.TestCase):
         evidence["markers"] = []
         self.assertIn("load_completed", self.failing(self.verdict(evidence)))
 
+    def test_empty_or_null_evidence_fails_instead_of_raising(self):
+        for evidence in ({}, {"probes": None, "windows": None, "markers": None, "idle": None}):
+            verdict = soak.evaluate(evidence, [], parent_passed=False)
+            self.assertFalse(verdict["passed"])
+
     def test_too_few_windows_fail(self):
         evidence = child_evidence(windows=1)
         evidence["duration_minutes"] = 10

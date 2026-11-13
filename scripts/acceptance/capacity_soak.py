@@ -251,6 +251,8 @@ def _loads_check(evidence):
 
 def evaluate(evidence, samples, parent_passed, min_samples=1):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
+    # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
+    evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
     checks = []
     probes = evidence.get("probes", [])
     names = {p["name"] for p in probes}
@@ -458,6 +460,11 @@ def main(argv):
             shutil.rmtree(root, ignore_errors=True)
 
     verdict = evaluate(evidence, samples, parent_passed, min_samples=minutes)
+    for name in ("portal-parent.log", "portal-child.log", "runner.log"):
+        try:
+            print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
+        except OSError:
+            pass
     report = {
         "format": EVIDENCE_FORMAT, "requested_minutes": minutes, "elapsed_seconds": int(time.time() - started),
         "ops08_minutes_required": OPS08_MINUTES,
