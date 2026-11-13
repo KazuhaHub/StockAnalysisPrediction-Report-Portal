@@ -325,6 +325,13 @@ func loadPlatformBoundOperationLease(e migExec, expected platformOperationLease)
 		return zero, errAppPlatformEffectConflict
 	}
 	facts.runtimeID = runtime
+	// An operation ending after a runner capacity refusal closes the refused effect's row here, in the finisher's
+	// own transaction and under the lease and fence just verified.
+	if refusal, ok := platformRefusedEffectOf(e); ok {
+		if err := settleRefusedEffect(e, facts, refusal); err != nil {
+			return zero, err
+		}
+	}
 	return facts, nil
 }
 

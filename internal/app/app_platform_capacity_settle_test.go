@@ -73,34 +73,138 @@ func TestMigrateRefusedByCapacitySettlesRevertedAndRecovers(t *testing.T) {
 	}
 }
 
-// Whatever stage the runner refused, the Portal's effect row of that very effect is closed as reverted with the
-// typed receipt, so nothing waits on an effect the runner holds reverted. An effect of another identity, or one
-// already settled, is left alone.
-func TestSettleRefusedEffectRevertsOnlyTheNamedOpenEffect(t *testing.T) {
-	f := settleAfterEnd(t, false, orphanedScript)
-	if effectState(t, f.s, f.op, "migrate", 2) != "unknown" {
-		t.Fatalf("fixture effect is %s", effectState(t, f.s, f.op, "migrate", 2))
+// refusedEffectFixture claims the install operation and gives it one open effect row, so a capacity refusal of that
+// effect can be finished by the scheduler.
+type refusedEffectFixture struct {
+	s       *Server
+	w       *platformInstallScheduler
+	op      string
+	effect  string
+	payload string
+}
+
+func newRefusedEffectFixture(t *testing.T) refusedEffectFixture {
+	t.Helper()
+	s, _, id := platformInstallQueueFixture(t, false)
+	w := platformSchedulerFixture(t, s)
+	_ = w.tick(context.Background())
+	if w.active.id != id {
+		t.Fatal("the operation was not claimed")
 	}
-	var effectID string
-	if err := f.s.st.queryRow(`SELECT effect_id FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate' AND effect_number=2`, f.op).Scan(&effectID); err != nil {
+	f := refusedEffectFixture{s: s, w: w, op: id, effect: platformFixtureID(5001), payload: strings.Repeat("b", 64)}
+	runtime := scalar[string](t, s.st, `SELECT id FROM app_platform_runtime_bindings LIMIT 1`)
+	now := time.Now().UTC().UnixMilli()
+	if _, err := s.st.db.Exec(s.st.bind(`INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		VALUES(?,'start',1,?,'start-candidate',?,?,?,?,0,'unknown','{}',?,?)`), id, f.effect, f.payload, runtime, w.active.controllerEpoch, w.active.fence, now, now); err != nil {
 		t.Fatal(err)
 	}
-	other := capacityRefusalFixture("cpu")
-	other.EffectID = platformFixtureID(7777)
-	if err := f.s.settleRefusedEffect(context.Background(), f.op, other); err != nil {
+	return f
+}
+
+func (f refusedEffectFixture) refusal() journal.CapacityRefusal {
+	r := capacityRefusalFixture("cpu")
+	r.EffectID, r.PayloadSHA256 = f.effect, f.payload
+	return r
+}
+
+func (f refusedEffectFixture) effectState(t *testing.T) (state, receipt string) {
+	t.Helper()
+	if err := f.s.st.queryRow(`SELECT state,receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND effect_id=?`, f.op, f.effect).Scan(&state, &receipt); err != nil {
 		t.Fatal(err)
 	}
-	if effectState(t, f.s, f.op, "migrate", 2) != "unknown" {
-		t.Fatal("another effect's refusal closed this effect")
-	}
-	named := capacityRefusalFixture("cpu")
-	named.EffectID = effectID
-	if err := f.s.settleRefusedEffect(context.Background(), f.op, named); err != nil {
+	return state, receipt
+}
+
+func (f refusedEffectFixture) finished(t *testing.T) bool {
+	t.Helper()
+	return scalar[int](t, f.s.st, `SELECT COUNT(*) FROM app_platform_operations WHERE id=? AND completed_ms IS NOT NULL`, f.op) == 1
+}
+
+// The refused effect is closed in the same transaction that ends the operation, under its lease, fence and the
+// effect's payload digest.
+func TestFinishCapacitySettlesTheRefusedEffectAtomicallyWithTheOperation(t *testing.T) {
+	f := newRefusedEffectFixture(t)
+	if err := f.w.finishCapacity(context.Background(), f.refusal()); err != nil {
 		t.Fatal(err)
 	}
-	var receipt string
-	if err := f.s.st.queryRow(`SELECT receipt_json FROM app_platform_operation_effects WHERE operation_id=? AND stage='migrate' AND effect_number=2`, f.op).Scan(&receipt); err != nil ||
-		effectState(t, f.s, f.op, "migrate", 2) != "reverted" || !strings.Contains(receipt, `"dimension":"cpu"`) {
-		t.Fatalf("effect after its refusal: %s %s %v", effectState(t, f.s, f.op, "migrate", 2), receipt, err)
+	state, receipt := f.effectState(t)
+	if state != "reverted" || !strings.Contains(receipt, `"dimension":"cpu"`) || !f.finished(t) {
+		t.Fatalf("effect %s %s finished=%v", state, receipt, f.finished(t))
+	}
+}
+
+// An effect of another identity, a payload digest the effect does not carry, and an effect that is already settled
+// are not touched; the operation still ends.
+func TestFinishCapacityLeavesOtherEffectsAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*refusedEffectFixture, *journal.CapacityRefusal)
+	}{
+		{"other_effect", func(_ *refusedEffectFixture, r *journal.CapacityRefusal) { r.EffectID = platformFixtureID(7777) }},
+		{"payload_mismatch", func(_ *refusedEffectFixture, r *journal.CapacityRefusal) { r.PayloadSHA256 = strings.Repeat("c", 64) }},
+		{"already_settled", func(f *refusedEffectFixture, _ *journal.CapacityRefusal) {
+			if _, err := f.s.st.db.Exec(f.s.st.bind(`UPDATE app_platform_operation_effects SET state='applied',receipt_json='{"a":"b"}' WHERE effect_id=?`), f.effect); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRefusedEffectFixture(t)
+			r := f.refusal()
+			tc.mutate(&f, &r)
+			beforeState, beforeReceipt := f.effectState(t)
+			if err := f.w.finishCapacity(context.Background(), r); err != nil {
+				t.Fatal(err)
+			}
+			if state, receipt := f.effectState(t); state != beforeState || receipt != beforeReceipt {
+				t.Fatalf("the effect changed: %s %s", state, receipt)
+			}
+			if !f.finished(t) {
+				t.Fatal("the operation did not end")
+			}
+		})
+	}
+}
+
+// A lease that moved on (a different owner, a moved fence) ends nothing and settles nothing.
+func TestFinishCapacityWithAStaleLeaseSettlesNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*platformOperationLease)
+	}{
+		{"moved_fence", func(l *platformOperationLease) { l.fence++ }},
+		{"other_owner", func(l *platformOperationLease) { l.owner = platformFixtureID(8888) }},
+		{"other_epoch", func(l *platformOperationLease) { l.controllerEpoch = platformFixtureID(8889) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRefusedEffectFixture(t)
+			tc.mutate(&f.w.active)
+			if err := f.w.finishCapacity(context.Background(), f.refusal()); err == nil {
+				t.Fatal("a stale lease ended the operation")
+			}
+			if state, receipt := f.effectState(t); state != "unknown" || receipt != "{}" {
+				t.Fatalf("a stale lease settled the effect: %s %s", state, receipt)
+			}
+			if f.finished(t) {
+				t.Fatal("a stale lease finished the operation")
+			}
+		})
+	}
+}
+
+// If ending the operation fails after the effect was closed, the effect is not settled: one transaction.
+func TestFinishCapacitySettlesNothingWhenTheOperationCannotEnd(t *testing.T) {
+	f := newRefusedEffectFixture(t)
+	if _, err := f.s.st.db.Exec(`CREATE TRIGGER refuse_operation_end BEFORE UPDATE ON app_platform_operations WHEN NEW.completed_ms IS NOT NULL BEGIN SELECT RAISE(ABORT, 'operation cannot end'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.w.finishCapacity(context.Background(), f.refusal()); err == nil {
+		t.Fatal("the operation ended")
+	}
+	if state, receipt := f.effectState(t); state != "unknown" || receipt != "{}" {
+		t.Fatalf("the effect was settled although the operation did not end: %s %s", state, receipt)
+	}
+	if f.finished(t) {
+		t.Fatal("the operation ended")
 	}
 }
