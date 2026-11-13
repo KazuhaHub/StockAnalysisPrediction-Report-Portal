@@ -117,6 +117,27 @@ func OpenStore(driver, source string) (*Store, error) {
 	return s, nil
 }
 
+// sqliteBusyTimeoutMs is how long a SQLite writer waits for another connection's write lock before
+// giving up with SQLITE_BUSY. The server holds one connection, but the backup CLI, an operator's
+// maintenance command or a second process on the same file each hold their own, and without a
+// timeout the loser of any overlap fails at once with "database is locked" instead of waiting a
+// few milliseconds for the other's commit.
+const sqliteBusyTimeoutMs = 5000
+
+// sqliteSource adds the busy timeout to a SQLite source as a DSN pragma, so the driver applies it
+// to every connection it opens rather than only to whichever one happened to run a PRAGMA. A source
+// that already names a busy_timeout is the operator's choice and is left as written.
+func sqliteSource(source string) string {
+	if strings.Contains(source, "busy_timeout") {
+		return source
+	}
+	sep := "?"
+	if strings.Contains(source, "?") {
+		sep = "&"
+	}
+	return source + sep + "_pragma=busy_timeout(" + strconv.Itoa(sqliteBusyTimeoutMs) + ")"
+}
+
 // connectStore opens and pings the database without initializing it: no schema check, no DDL, no
 // migration. Initialization is OpenStore's job; the schema-upgrade inspection uses this to look at a
 // database it must not alter.
@@ -127,6 +148,8 @@ func connectStore(driver, source string) (*Store, error) {
 	sqlDriver := "sqlite"
 	if driver == "postgres" {
 		sqlDriver = "pgx"
+	} else {
+		source = sqliteSource(source)
 	}
 	db, err := sql.Open(sqlDriver, source)
 	if err != nil {

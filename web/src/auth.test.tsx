@@ -107,7 +107,9 @@ describe('AuthProvider and a session that ends underneath it', () => {
     const { api } = await import('./api/client')
     await api.get('/api/home').catch(() => {})
     await waitFor(() => expect(show()).toBe('user=none expired=true'))
-    expect(getNotifications()).toHaveLength(0)
+    // The reset runs in a passive effect keyed on the identity, which React may flush after the
+    // commit the waitFor above observed (it did on a loaded CI runner), so wait for it as well.
+    await waitFor(() => expect(getNotifications()).toHaveLength(0))
   })
 
   it('closes an open run detail when the identity changes', async () => {
