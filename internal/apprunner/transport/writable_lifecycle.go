@@ -362,6 +362,8 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.importCheckpoint = v.Command()
 		r.release = r.importCheckpoint.Payload.ReleaseSHA256
+		id := journal.CapacityIdentityOfImport(r.importCheckpoint)
+		r.capacity = &id
 	case action == MigrateDataExecute || action == MigrateDataRead:
 		var v control.VerifiedMigrateDataCommand
 		var err error
@@ -453,7 +455,7 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 // whose effect starts a backend, runs a migration job or loads an image.
 func capacityRefusalAction(action WritableLifecycleAction) bool {
 	switch action {
-	case WritableCandidateStart, WritableCandidateRead, UpdateStartExecute, UpdateStartReceipt, MigrateDataExecute, MigrateDataRead, LoadImageExecute, LoadImageRead:
+	case WritableCandidateStart, WritableCandidateRead, UpdateStartExecute, UpdateStartReceipt, MigrateDataExecute, MigrateDataRead, LoadImageExecute, LoadImageRead, ImportCheckpointExecute, ImportCheckpointRead:
 		return true
 	}
 	return false

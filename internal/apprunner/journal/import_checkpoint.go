@@ -350,6 +350,11 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 		if !existing.sameCommand(c) {
 			return zero, false, ErrCommandConflict
 		}
+		if existing.state == "reverted" {
+			if r, ok := storedCapacityRefusal(existing.receipt, CapacityIdentityOfImport(c)); ok {
+				return zero, false, &CapacityRefusalError{Receipt: r}
+			}
+		}
 		if existing.state == "applied" {
 			parsed, err := ParseImportCheckpointReceipt([]byte(existing.receipt))
 			if err != nil || !importReceiptMatchesCommand(parsed, c) {
@@ -383,6 +388,27 @@ func (s *Store) beginImportCheckpoint(ctx context.Context, raw, signature []byte
 	}
 	if err := requireImportFloor(ctx, tx, c); err != nil {
 		return zero, false, err
+	}
+	// Reserve the imported namespace's disk in the claim's own transaction, before its resource row exists.
+	// A refusal is the row of the effect: reverted, with no resource or reservation behind it.
+	if plan, admit := s.namespacePlan(c.Payload.NamespaceID, c.InstallationID); admit {
+		refusal, err := s.admitCapacity(ctx, tx, plan, now)
+		if err != nil {
+			return zero, false, err
+		}
+		if refusal != nil {
+			receipt, err := refuseCapacityInsert(ctx, tx, CapacityIdentityOfImport(c), mustDataInt(c.InstallationFence), mustDataInt(c.TargetGeneration), *refusal, now)
+			if err != nil {
+				return zero, false, err
+			}
+			if s.closing.Load() {
+				return zero, false, ErrImportCheckpointUnavailable
+			}
+			if err := tx.Commit(); err != nil {
+				return zero, false, err
+			}
+			return zero, false, &CapacityRefusalError{Receipt: receipt}
+		}
 	}
 	project, err := allocateDataProject(ctx, tx)
 	if err != nil {

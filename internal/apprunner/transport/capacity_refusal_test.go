@@ -23,6 +23,7 @@ func TestCapacityRefusalActionsAreTheStartBearingOnes(t *testing.T) {
 	want := map[WritableLifecycleAction]bool{
 		WritableCandidateStart: true, WritableCandidateRead: true, UpdateStartExecute: true, UpdateStartReceipt: true,
 		MigrateDataExecute: true, MigrateDataRead: true, LoadImageExecute: true, LoadImageRead: true,
+		ImportCheckpointExecute: true, ImportCheckpointRead: true,
 	}
 	for action := WritableLifecycleAction(0); action < 255; action++ {
 		if action.valid() && capacityRefusalAction(action) != want[action] {

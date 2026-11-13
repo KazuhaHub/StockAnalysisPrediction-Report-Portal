@@ -292,3 +292,8 @@ func (s *Store) admitUpdateStart(ctx context.Context, tx *sql.Tx, f updateStartF
 func CapacityIdentityOfCandidate(c control.CandidateCommand) CapacityIdentity {
 	return CapacityIdentityOfCommand(candidateIndex(c))
 }
+
+// CapacityIdentityOfImport is the identity a refusal of an imported namespace carries.
+func CapacityIdentityOfImport(c control.ImportCheckpointCommand) CapacityIdentity {
+	return CapacityIdentity{c.DeploymentID, c.ControllerEpoch, c.InstallationID, c.OperationID, c.TargetGeneration, c.Stage, c.EffectNumber, c.EffectID, c.Kind, c.PayloadSHA256}
+}

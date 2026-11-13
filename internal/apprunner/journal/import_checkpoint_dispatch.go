@@ -295,6 +295,11 @@ func (s *Store) readImportCheckpoint(ctx context.Context, raw, signature []byte,
 		absence := importAbsenceFor(c, now)
 		return zero, &absence, nil
 	}
+	if row.sameCommand(c) && row.state == "reverted" {
+		if r, ok := storedCapacityRefusal(row.receipt, CapacityIdentityOfImport(c)); ok {
+			return zero, nil, &CapacityRefusalError{Receipt: r}
+		}
+	}
 	if !row.sameCommand(c) || row.state != "applied" {
 		return zero, nil, ErrImportCheckpointUnavailable
 	}
@@ -465,6 +470,11 @@ func (s *Store) importState(ctx context.Context, raw, signature []byte) (string,
 	}
 	if !row.sameCommand(c) {
 		return "", ErrCommandConflict
+	}
+	if row.state == "reverted" {
+		if r, ok := storedCapacityRefusal(row.receipt, CapacityIdentityOfImport(c)); ok {
+			return "", &CapacityRefusalError{Receipt: r}
+		}
 	}
 	if row.state != "applied" && row.state != "unknown" {
 		return "", ErrFenceReconciliation
