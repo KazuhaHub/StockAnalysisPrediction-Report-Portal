@@ -75,6 +75,19 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil || !report.MetadataCompatible || report.ReportedCPUs < cfg.MinimumCPUs || report.ReportedMemoryBytes < cfg.MinimumMemory {
 		return ErrNotReady
 	}
+	// The declared capacity envelope turns percentages of the host into absolute budgets. A fact that cannot be
+	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
+	budgets, err := DeriveBudgets(cfg.Capacity.Resolve(), HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot)})
+	if err != nil {
+		var notReady *NotReadyError
+		if errors.As(err, &notReady) {
+			logger.Printf("app-runner not ready: capacity: %s", notReady.Reason)
+		}
+		return ErrNotReady
+	}
+	if err := store.SetCapacityBudgets(budgets); err != nil {
+		return ErrNotReady
+	}
 	// The scratch is opened first: it removes any blobs an earlier run left, before anything can read them.
 	images, err := imagestore.Open(cfg.ImageRoot)
 	if err != nil {
@@ -94,7 +107,7 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		return ErrNotReady
 	}
 	defer server.Close()
-	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg))
+	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets))
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {
 			return nil
