@@ -72,6 +72,8 @@ type platformInstallScheduler struct {
 	writable bool
 	// reconciledAt is when recovery-mode reconciliation last ran.
 	reconciledAt time.Time
+	// runOverride replaces the action dispatch of a tick. Only tests set it.
+	runOverride func(context.Context, platformOperationLease) (platformInstallRun, error)
 }
 
 func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
@@ -230,7 +232,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	}
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
 	var result platformInstallRun
-	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
+	if w.runOverride != nil {
+		result, err = w.runOverride(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionRestoreImport {
 		result.lease, err = w.server.runPlatformRestoreImport(
 			ctx, w.active, w.endpoint)
 	} else if w.active.snapshot.Action == appplatform.ActionRestore &&

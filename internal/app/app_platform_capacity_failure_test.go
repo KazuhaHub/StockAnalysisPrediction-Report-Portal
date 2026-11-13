@@ -115,3 +115,30 @@ func TestPlatformCapacityCodesReachTheManagementAndStatusViews(t *testing.T) {
 		t.Fatal("an existing public code was lost")
 	}
 }
+
+// A tick whose run ends in the runner's capacity refusal finishes the operation at once, with the typed code: it
+// is not retried like a transient failure. Fails if the tick drops the refusal into the retry path.
+func TestSchedulerTickFinishesAnOperationRefusedByCapacity(t *testing.T) {
+	s, _, id := platformInstallQueueFixture(t, false)
+	w := platformSchedulerFixture(t, s)
+	calls := 0
+	w.runOverride = func(context.Context, platformOperationLease) (platformInstallRun, error) {
+		calls++
+		return platformInstallRun{}, fmt.Errorf("start: %w", &journal.CapacityRefusalError{Receipt: capacityRefusalFixture("running_backends")})
+	}
+	if err := w.tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("the run was attempted %d times", calls)
+	}
+	if scalar[string](t, s.st, `SELECT error_code FROM app_platform_operations WHERE id=?`, id) != "capacity_exhausted_running_backends" {
+		t.Fatalf("error code = %s", scalar[string](t, s.st, `SELECT error_code FROM app_platform_operations WHERE id=?`, id))
+	}
+	if w.active.id != "" || w.currentStatus().code != "review_required" {
+		t.Fatalf("status %+v", w.currentStatus())
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.capacity_refused' AND target_id=?`, id) != 1 {
+		t.Fatal("no typed detail kept")
+	}
+}
