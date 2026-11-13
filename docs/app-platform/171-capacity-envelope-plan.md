@@ -228,3 +228,83 @@ A `capacity-soak` job in `app-project-quota-probe.yml`.
   absence is already proven in the same transaction.
 - **CI timing.** A 2-hour soak on shared CI hardware can be noisy. The latency gate compares
   against a baseline measured in the same job, not against a fixed number.
+
+## Resolutions (PR 4a)
+
+Where the code contradicted or under-specified the plan, the resolution is recorded here rather than silently
+applied.
+
+1. **Where admission runs.** The plan puts the reservation and the check in the claim transaction. A refusal must
+   also leave no resource row, and the resource row of a candidate, writable candidate or managed namespace is
+   created by the *reserve* transaction, one step before the claim. Admission therefore runs in the transaction
+   that creates the resource identity (`ReserveCandidate`, `ReserveWritableCandidate`, `ReservePrepareData`),
+   which is still before any native call, and the claim re-checks that a `held` reservation exists
+   (`requireHeldReservation`). For an update, restore or enable start the claim is the first transaction that
+   has the descriptor, so admission runs in `ClaimUpdateStart`; a refusal there reverts the start and removes the
+   never started pending target (a fresh one is deleted; one that reused the row of a removed target goes back to
+   `absent`, revision 4). The migration job and the image load insert their command row at the claim, so their
+   refusal is the row itself, inserted `reverted`.
+2. **How the declared resources reach admission.** The claim and reserve functions keep their signatures (they
+   have well over a hundred call sites). Each `Dispatch*` entry point parses the descriptor and attaches the
+   backend's declared memory and CPU to the context (`withBackendResources`); namespace and image amounts come
+   from the command and the descriptor entry. With budgets configured and no declared resources, admission fails
+   closed with `ErrCapacityPlanMissing`, which is an internal error and never a typed refusal. A `Store` with no
+   budgets configured reserves and refuses nothing; only the runner service configures them, and it reports not
+   ready when they cannot be derived. No production path reaches a reserve or claim function except through a
+   `Dispatch*`.
+3. **Netting.** Netting is implemented as an admission-time release: a `held` backend or migration reservation of
+   the same installation whose resource is `desired=absent, observed=absent` in the same transaction is released
+   and not counted. A resource that is only stopped is not netted. Proven absence also releases at the removal
+   itself (managed removal, update-start removal, reserved-start removal, orphan settlement, migration
+   settlement and discard, namespace deletion), so netting is the safety net for a row the removal missed.
+4. **Backfilled amounts.** A backfilled row is replaced by the declared amounts when a claim names the same
+   resource id again (the upsert replaces its own row and never counts it twice). A running backend that is never
+   claimed again keeps its maximum-size row until its removal releases it, which is the fail-closed direction the
+   plan accepts. Reservations are not rewritten when a start merely completes: a completed start has the same
+   resource id its claim already replaced.
+5. **Image removal: the plan's fallback applies.** Removing the image of the last installation that references a
+   config digest is not one bounded effect. The runner executes only signed commands, and there is no command
+   kind that carries an image removal; adding one means widening the `runner_commands.kind` list (a rebuild of a
+   table the owner did not approve for v3) and the Portal's effect kinds. Removing the image inside the
+   delete-data or removal command would be a Docker effect outside the claim-before-native-call idiom, with no
+   row recording it, and "last referencing installation" is not defined by the journal today. The 10 GiB image
+   store therefore counts loaded images without release, with one exception: a *rejected* load that leaves no
+   image of its own releases its reservation, unless another applied or unknown load holds the same config
+   digest. This is the documented, fail-closed gap; the daemon's image garbage is not reclaimed by the runner.
+6. **The refusal receipt.** `portal.runner.capacity-refusal/1-dev.1` carries the command identity (deployment,
+   epoch, installation, operation, generation, stage, effect number, effect id, kind, payload digest), the outcome
+   `capacity_exhausted`, the `dimension`, and the requested and remaining amounts as decimal strings. It is the
+   receipt of a `reverted` command row, so a replay returns the same bytes. `remaining` is never negative: a
+   dimension already over budget (after budgets were lowered) reports 0. A dimension a request does not use is
+   never refused, so lowering a budget cannot refuse work that needs none of it. When several dimensions
+   overflow, the first in the order memory, CPU, disk, image store, running backends is named. The runner
+   answers it on the start-bearing actions only (writable candidate start and read, update/restore/enable start
+   and receipt, migrate-data execute and read, load-image execute and read) and on the older candidate and
+   namespace endpoints; the controller validates it against the signed command it sent and returns it as a
+   `*journal.CapacityRefusalError`, never as an observation.
+7. **Namespace disk.** `NamespaceReservationBytes` is 768 MiB, defined as the 256 MiB quota plus two retained
+   checkpoints. The Portal carries the quota as the literal 268435456, so the constant is tied to it by value in a
+   test, not by a shared symbol.
+8. **Volume size.** The XFS volume is read with `statfs` on the data root (blocks times block size). `disk_bytes`
+   is validated against the volume at startup, not when the file is loaded, because the config loader has no
+   volume. The CI service job's 1 GiB loop volume is now a 9 GiB sparse file, because a volume smaller than the
+   8 GiB default makes the runner report not ready. `deploy/app-runner/service.example.json` declares the
+   defaults.
+9. **Portal failure detail, without DDL.** The operation's existing `error_code` column (96 bytes) carries one
+   closed code per dimension: `capacity_exhausted_memory`, `_cpu`, `_disk`, `_image_store`,
+   `_running_backends`. The management and status views, which map unknown codes to a generic failure, pass these
+   through, and the UI status parser accepts exactly these five. The full typed detail (outcome, dimension,
+   requested, remaining, stage, effect, kind) is written to the audit log as `app_platform.capacity_refused` for
+   every action. Only an installation finishes with the dimension as its code; the other actions finish by their
+   own review path (their codes are fixed) and keep the dimension in the audit entry. A refused image load is
+   settled as `reverted` on the Portal's effect row with the typed receipt, and is not read back.
+10. **Installation cap.** The cap counts installations whose phase is not `removed`, every other phase included.
+    A removed installation frees its slot. The HTTP mapping is 429 `installation_capacity`. It is checked when an
+    install review is created and again in the transaction that inserts the installation; the enable and repair
+    reviews of an existing installation are not counted.
+11. **Not covered in PR 4a.** The Portal's own effect rows for a refused migration, update-start, restore-start or
+    enable-start are left as they are for any definite runner failure that is not a receipt; only the typed error
+    and the audit entry are new. The release hooks of managed removal, update-start removal, orphan settlement and
+    namespace deletion are one-line calls to the tested `releaseReservation`, exercised through the reserved-start
+    and migration paths, not through a native removal. No Linux-only path was run.
+
