@@ -6,8 +6,10 @@ import (
 )
 
 // threadMargin is the number of tasks the fork load leaves free below the container's PID limit, for the
-// runtime's own threads (garbage collection, the signal thread, the HTTP server).
-const threadMargin = 12
+// runtime's own threads: garbage collection, the signal thread, the HTTP server, and one more for every goroutine
+// that is blocked in a system call at the same time (the log and storage writers). A thread the runtime cannot
+// start is fatal, so the margin is generous.
+const threadMargin = 24
 
 // parseCgroupLimit reads a cgroup v2 limit file. "max" and anything that is not a positive decimal mean the
 // limit is not known.

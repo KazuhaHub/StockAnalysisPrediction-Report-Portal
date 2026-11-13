@@ -355,6 +355,19 @@ def sampling_loop(sampler, stop, path):
     return samples
 
 
+def write_container_diagnostics(image_id, path):
+    """State and the last log lines of every container of the soak image: why a backend stopped, if one did."""
+    lines = []
+    try:
+        for container in run_command("docker", "ps", "-a", "--filter", "ancestor=" + image_id, "--format", "{{.ID}}").split():
+            state = run_command("docker", "inspect", "--format", "{{json .State}}", container).strip()
+            logs = subprocess.run(["docker", "logs", "--tail", "5", container], env=ENV, capture_output=True, text=True, timeout=60)
+            lines += [f"== {container} {state}", (logs.stdout + logs.stderr)[-1500:]]
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        lines.append("diagnostics unavailable: " + str(error))
+    path.write_text("\n".join(lines))
+
+
 def read_json_lines(path):
     try:
         return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
@@ -438,6 +451,7 @@ def main(argv):
                                     env=soak_env, stdout=sink, stderr=subprocess.STDOUT, timeout=(minutes + 85) * 60)
         stop.set()
         worker.join(timeout=SAMPLE_INTERVAL_SECONDS + 60)
+        write_container_diagnostics(image_id, out / "containers.txt")
         samples = list(collected)
         parent_passed = result.returncode == 0 and "--- PASS: TestPlatformCapacitySoak" in log.read_text()
         try:
@@ -461,7 +475,7 @@ def main(argv):
             shutil.rmtree(root, ignore_errors=True)
 
     verdict = evaluate(evidence, samples, parent_passed, min_samples=minutes)
-    for name in ("portal-parent.log", "portal-child.log", "runner.log"):
+    for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
         except OSError:
