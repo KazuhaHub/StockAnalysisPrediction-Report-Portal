@@ -15,9 +15,9 @@ var ErrNotReady = errors.New("app-runner runtime is not ready")
 // may reserve (doc 171). A field left out takes its default; an explicit value
 // outside its range is a configuration error, never silently replaced.
 type CapacityConfig struct {
-	MemoryPercent   *int   `json:"memory_percent,omitempty"`
-	CPUPercent      *int   `json:"cpu_percent,omitempty"`
-	DiskBytes       *int64 `json:"disk_bytes,omitempty"`
+	MemoryPercent *int   `json:"memory_percent,omitempty"`
+	CPUPercent    *int   `json:"cpu_percent,omitempty"`
+	DiskBytes     *int64 `json:"disk_bytes,omitempty"`
 	// RunningBackends bounds the live backends: every backend reservation counts from its claim until its removal
 	// is proven, so a stopped (disabled) backend counts exactly like a running one.
 	RunningBackends *int   `json:"running_backends,omitempty"`
