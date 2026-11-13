@@ -25,9 +25,9 @@ func TestSoakSizingFitsEightBackendsAndLeavesRoomForAMinimumNinth(t *testing.T) 
 		wantRemMemory, wantRemCPU int64
 	}{
 		// 25% of a 15.6 GiB MemTotal and 50% of four CPUs: the reference host.
-		{"reference host", 3993, 2000, 497, 246, 3993 - 8*497, 2000 - 8*246},
-		{"nominal 4 GiB", 4096, 2000, 510, 246, 4096 - 8*510, 2000 - 8*246},
-		{"smallest host that fits", 8*16 + 16, 8*25 + 25, 16, 25, 16, 25},
+		{"reference host", 3993, 2000, 497, 240, 3993 - 8*497, 2000 - 8*240},
+		{"nominal 4 GiB", 4096, 2000, 510, 240, 4096 - 8*510, 2000 - 8*240},
+		{"smallest host that fits", 8*16 + 16, 8*30 + 25, 16, 30, 16, 25},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, err := soakBackendSizing(tc.memory, tc.cpu, soakBackends)
@@ -56,6 +56,8 @@ func TestSoakSizingRefusesHostsItCannotSize(t *testing.T) {
 	}{
 		{"memory too small for eight minimum backends", 8*16 + 15, 2000},
 		{"cpu too small for eight minimum backends", 4096, 8*25 + 24},
+		// Rounded down to the 10-millis granularity a backend is below the descriptor minimum.
+		{"cpu that rounds below the minimum", 4096, 8*29 + 25},
 		{"no budget", 0, 0},
 		// The backends would be clamped to the descriptor maximum, so eight would leave a ninth room.
 		{"memory beyond the descriptor range", 8*4096 + 4096, 2000},
@@ -145,8 +147,13 @@ type soakSizing struct {
 	RemainingMemoryMiB, RemainingCPUMillis int64
 }
 
+// soakCPUGranularity is the step of a CPU limit the kernel enforces: a quota is whole milliseconds of each 100 ms
+// period, so 246 millis are enforced as 250 (the smoke measured eight such backends using 2000 millis, not 1968).
+// A backend's CPU is rounded down to it, so the enforced sum stays inside the budget.
+const soakCPUGranularity = 10
+
 // soakBackendSizing divides the budgets the runner reports in its readiness facts, not the nominal host, among
-// the backends: floor((budget - one minimum backend) / backends). One minimum backend is left unreserved on
+// the backends: floor((budget - one minimum backend) / backends), the CPU further rounded down to soakCPUGranularity. One minimum backend is left unreserved on
 // purpose. The runner names the first overflowing dimension in the order memory, CPU, disk, image store,
 // running backends, so a ninth backend that does not fit memory is refused as "memory"; only a ninth that fits
 // memory and CPU proves the count limit itself. The result must lie inside the descriptor ranges unclamped: a
@@ -156,7 +163,7 @@ func soakBackendSizing(memoryMiB, cpuMillis int64, backends int) (soakSizing, er
 		return soakSizing{}, errSoakSizing
 	}
 	memory := (memoryMiB - appplatform.MinBackendMemoryMiB) / int64(backends)
-	cpu := (cpuMillis - appplatform.MinBackendCPUMillis) / int64(backends)
+	cpu := (cpuMillis - appplatform.MinBackendCPUMillis) / int64(backends) / soakCPUGranularity * soakCPUGranularity
 	if memory < appplatform.MinBackendMemoryMiB || memory > appplatform.MaxBackendMemoryMiB ||
 		cpu < appplatform.MinBackendCPUMillis || cpu > appplatform.MaxBackendCPUMillis {
 		return soakSizing{}, errSoakSizing

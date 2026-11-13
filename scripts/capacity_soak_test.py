@@ -237,14 +237,33 @@ class EvaluateTests(unittest.TestCase):
         for change in ({"answered": False}, {"held_bytes": 100 * 1024 ** 2}, {"threads": 3}, {"burners": 0}, {"log_bytes": 0},
                        {"storage_full": 0}, {"data_present": False}):
             evidence = child_evidence()
-            evidence["windows"][-1]["backends"][3] = backend_status(3, **change)
+            for window in evidence["windows"]:
+                window["backends"][3] = backend_status(3, **change)
             self.assertEqual(self.failing(self.verdict(evidence)), {"backends_ran_every_declared_load"}, change)
         evidence = child_evidence()
-        evidence["windows"][-1]["backends"] = evidence["windows"][-1]["backends"][:7]
+        for window in evidence["windows"]:
+            window["backends"] = window["backends"][:7]
         self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)))
         evidence = child_evidence()
-        del evidence["windows"][-1]["backends"]
+        for window in evidence["windows"]:
+            del window["backends"]
         self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)))
+
+    def test_a_backend_that_missed_only_the_last_status_request_is_judged_on_its_earlier_answer(self):
+        evidence = child_evidence()
+        evidence["windows"][-1]["backends"][2] = {"installation": "installation-2", "answered": False}
+        self.assertTrue(self.verdict(evidence)["passed"])
+        for window in evidence["windows"]:
+            window["backends"][2] = {"installation": "installation-2", "answered": False}
+        self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)))
+
+    def test_cpu_is_judged_on_cgroup_samples_when_there_are_any(self):
+        rate_only = backend_sample(1600, cpu=2020.0)
+        rate_only["backends"]["cpu_source"] = "docker_stats"
+        exact = backend_sample(1700, cpu=1995.0)
+        exact["backends"]["cpu_source"] = "cgroup"
+        self.assertTrue(self.verdict(samples=[rate_only, exact])["passed"])
+        self.assertIn("backend_cpu_within_budget", self.failing(self.verdict(samples=[rate_only])))
 
     def test_flood_that_never_reached_a_backend_fails(self):
         evidence = child_evidence(flood_ok=0)

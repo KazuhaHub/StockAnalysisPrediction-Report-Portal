@@ -891,12 +891,16 @@ func (c *soakChild) seedBacklog(target int) {
 func (c *soakChild) backendStatuses() []soakBackendStatus {
 	statuses := make([]soakBackendStatus, 0, len(c.managed))
 	for _, installation := range c.managed {
-		response, err := c.s.requestPlatformWritableBackend(c.ctx, c.session, installation, http.MethodGet, "/v1/soak/status", nil, c.endpoint)
-		if err != nil || response.Status != http.StatusOK {
-			statuses = append(statuses, soakBackendStatus{Installation: installation})
-			continue
+		status := soakBackendStatus{Installation: installation}
+		// A backend throttled to its CPU share can miss one request's deadline; it gets a few tries.
+		for attempt := 0; attempt < 5 && !status.Answered; attempt++ {
+			if response, err := c.s.requestPlatformWritableBackend(c.ctx, c.session, installation, http.MethodGet, "/v1/soak/status", nil, c.endpoint); err == nil && response.Status == http.StatusOK {
+				status = soakParseBackendStatus(installation, response.Body)
+			} else {
+				time.Sleep(300 * time.Millisecond)
+			}
 		}
-		statuses = append(statuses, soakParseBackendStatus(installation, response.Body))
+		statuses = append(statuses, status)
 	}
 	return statuses
 }
@@ -937,7 +941,9 @@ func (c *soakChild) load(minutes int) {
 			if err := c.admit(c.managed[0], 10000+n, "pressure"); errors.Is(err, errAppPlatformTaskQuota) {
 				refusals.Add(1)
 			}
-			time.Sleep(10 * time.Millisecond)
+			// Five a second: the quota refuses them all, and a tighter loop would measure the flood generator
+			// competing with the measured pages inside the one child process, not the platform.
+			time.Sleep(200 * time.Millisecond)
 		}
 	}()
 	var previous soakFlood

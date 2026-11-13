@@ -221,8 +221,14 @@ def _ratio_check(name, series, evidence):
 def _loads_check(evidence):
     """The last window's status of each backend shows its own loads ran: memory held, CPU burners, threads, log
     written, and the data namespace filled to its quota. Without this a backend that did nothing would pass."""
-    windows = evidence.get("windows", [])
-    backends = windows[-1].get("backends", []) if windows else []
+    # Per backend, its latest status that answered: one missed request at the last minute is not a backend that did
+    # nothing, and a backend that never answered is.
+    latest = {}
+    for window in evidence.get("windows", []):
+        for b in window.get("backends", []):
+            if b.get("answered") or b.get("installation") not in latest:
+                latest[b.get("installation")] = b
+    backends = list(latest.values())
     held_minimum = 0.5 * evidence.get("sizing", {}).get("MemoryMiB", 0) * 1024 * 1024
     expected = evidence.get("budgets", {}).get("running_backends", 0)
     problems = []
@@ -281,7 +287,10 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
     load = [s for s in samples if start <= s["at_ms"] <= end]
     checks.append(_check("host_samples_cover_the_load", len(load) >= max(1, min_samples), {"samples": len(load), "required": max(1, min_samples)}))
     peak_memory = max((s["backends"]["memory_bytes"] for s in load), default=0)
-    peak_cpu = max((s["backends"]["cpu_millis"] for s in load), default=0.0)
+    # CPU is judged on the kernel's counters, averaged over each interval, when they exist: the first sample has no
+    # previous reading and falls back to a one-second rate that can read a few percent over an enforced quota.
+    cpu_samples = [s for s in load if s["backends"].get("cpu_source") == "cgroup"] or load
+    peak_cpu = max((s["backends"]["cpu_millis"] for s in cpu_samples), default=0.0)
     checks.append(_check("backend_memory_within_budget", load and peak_memory <= budgets.get("memory_mib", 0) * 1024 * 1024,
                          {"peak_bytes": peak_memory, "budget_mib": budgets.get("memory_mib")}))
     checks.append(_check("backend_cpu_within_budget", load and peak_cpu <= budgets.get("cpu_millis", 0),
