@@ -1,0 +1,108 @@
+{
+  "format": "portal.capacity-envelope-acceptance/1-dev.1",
+  "status": "pending-dispatch-run",
+  "plan": "docs/app-platform/171-capacity-envelope-plan.md",
+  "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 4",
+  "note": "Fill the nulls below from the capacity-soak-evidence artifact of one passing 120-minute workflow_dispatch run of app-project-quota-probe.yml (job capacity-soak). Nothing here may cite a pull request smoke run: it is five minutes and is never evidence. Until then OPS-08 stays pending and SEC-09 stays partial.",
+  "dispatch_run": {
+    "url": null,
+    "run_id": null,
+    "commit": null,
+    "requested_minutes": 120,
+    "elapsed_seconds": null,
+    "artifact": "capacity-soak-evidence",
+    "verdict_passed": null,
+    "counts_as_ops08_evidence": null
+  },
+  "reference_host": {
+    "runner": "GitHub-hosted ubuntu-24.04",
+    "vcpus": 4,
+    "memory": "16 GiB",
+    "volume": "16 GiB XFS project-quota loop volume created and owned by the job",
+    "kernel": null,
+    "docker_cgroup_driver": null
+  },
+  "budgets_reported_by_the_runner": {
+    "memory_mib": null,
+    "cpu_millis": null,
+    "disk_bytes": null,
+    "image_store_bytes": null,
+    "running_backends": 8,
+    "estimated_rows": null
+  },
+  "backend_sizing": {
+    "backends": 8,
+    "memory_mib_each": null,
+    "cpu_millis_each": null,
+    "pids_each": 64,
+    "remaining_memory_mib": null,
+    "remaining_cpu_millis": null,
+    "rule": "floor((budget - one minimum backend) / 8), computed from the budgets the runner reports in its readiness facts"
+  },
+  "load": {
+    "installations": 50,
+    "static_installations": 42,
+    "managed_backends": 8,
+    "backend_workload": "holds 70% of its memory limit, burns its CPU quota, parks threads up to its PID limit minus a margin, writes 1 MiB/s to its log, fills its data namespace to ENOSPC",
+    "platform_workload": "one signed request in flight to each backend, repeated task admission refusals, task backlog to the global quota, an event subscription saturated at its in-flight bound",
+    "measurement_windows": null
+  },
+  "probes": {
+    "fifty_first_installation": {"expected": "installation_capacity (HTTP 429)", "native": true, "observed": null},
+    "ninth_backend": {"expected": "capacity_exhausted_running_backends", "native": true, "observed": null},
+    "memory_over_budget": {"expected": "capacity_exhausted_memory", "native": true, "observed": null},
+    "cpu_over_budget": {"expected": "capacity_exhausted_cpu", "native": true, "observed": null},
+    "image_beyond_the_image_store": {"expected": "capacity_exhausted_image_store", "native": true, "observed": null},
+    "layer_beyond_its_declaration": {"expected": "app_platform_invalid_request (HTTP 400, nothing stored)", "native": true, "observed": null},
+    "staging_over_two_gib": {"expected": "app_platform_storage_full (HTTP 507)", "native": true, "observed": null},
+    "task_over_installation_quota": {"expected": "task_capacity", "native": true, "observed": null},
+    "task_over_global_quota": {"expected": "task_capacity", "native": true, "observed": null},
+    "event_subscription_over_quota": {"expected": "subscription review_required, both source events kept", "native": true, "observed": null},
+    "task_over_application_quota": {"expected": "task_capacity", "native": false, "observed": "unit level: TestTaskQuotasRefuseAtTheirOwnBoundary"}
+  },
+  "measurements": {
+    "idle_baseline": {
+      "home_p95_us": null,
+      "report_p95_us": null,
+      "dispatch_p95_us": null
+    },
+    "worst_load_window_ratio_to_idle": {
+      "home": null,
+      "report": null,
+      "dispatch": null,
+      "limit": 1.5
+    },
+    "peak_summed_backend_memory_bytes": null,
+    "peak_summed_backend_cpu_millis": null,
+    "peak_docker_log_bytes": null,
+    "peak_xfs_used_bytes": null,
+    "peak_runner_log_bytes": null,
+    "lowest_host_mem_available_kib": null
+  },
+  "assertions": {
+    "every_excess_request_refused_with_its_typed_error": null,
+    "home_p95_within_1_5x_of_idle": null,
+    "report_p95_within_1_5x_of_idle": null,
+    "dispatch_within_1_5x_of_idle": null,
+    "backend_memory_within_runner_budget": null,
+    "backend_cpu_within_runner_budget": null,
+    "no_backend_crash": null,
+    "no_runner_crash": null
+  },
+  "requirements": {
+    "OPS-08": {
+      "status": "pending",
+      "closes_when": "a 120-minute dispatch run passes every assertion above"
+    },
+    "SEC-09": {
+      "status": "partial",
+      "closes_with": "OPS-08: the deployed memory, PID, log and storage floods and the Portal business-path latency measurement"
+    }
+  },
+  "unproven_until_the_dispatch_run": [
+    "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within 1.5x of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
+    "that the eight backends, flooding their limits, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted",
+    "that the refused probe installations are retired by the ordinary uninstall without leaving a disk reservation that would refuse a later probe",
+    "that the per-application task quota (1000) is reached natively; it is proven at its boundary at unit level only"
+  ]
+}

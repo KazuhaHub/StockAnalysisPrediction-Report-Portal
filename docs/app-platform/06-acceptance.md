@@ -175,6 +175,41 @@ what.
 | OPS-07 | Present unsupported legacy app/container for managed adoption | No automatic takeover; old installation continues under legacy rules |
 | OPS-08 | Repeat test at declared maximum apps/tasks/resource envelope | Measured capacity/latency recorded, quotas reject excess and reserve host headroom |
 
+### Declared capacity envelope status (OPS-08, SEC-09)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
+[doc 171](171-capacity-envelope-plan.md). **OPS-08 is pending and SEC-09 stays partial until one 120-minute
+`workflow_dispatch` run of the `capacity-soak` job has passed; no result is cited before then.** Only that run counts. The
+same harness runs for five minutes on pull requests that touch the capacity code, so it cannot rot; that smoke is
+never evidence.
+
+- **What the job does:** on a GitHub-hosted `ubuntu-24.04` runner (4 vCPU, 16 GiB) with a 16 GiB XFS project-quota
+  loop volume it owns, a real root runner runs fifty installations (forty-two static, eight managed backends of a
+  soak fixture image, each sized from the memory and CPU budgets the runner reports in its readiness facts). The
+  backends hold memory, burn their CPU share, start threads up to their PID limit, flood their logs and fill their
+  data namespace to its quota; the Portal floods tasks and events to their quotas and sends every backend signed
+  requests continuously.
+- **Excess probes, each refused with its typed error:** the 51st installation (HTTP 429 `installation_capacity`), a
+  ninth backend (`running_backends`), a backend over the remaining memory and over the remaining CPU (`memory`,
+  `cpu`), an image of eleven maximum-size layers against the 10 GiB image store (`image_store`), a task over the
+  installation and over the global quota, an event subscription over its in-flight bound, a layer beyond its
+  declaration (HTTP 400, nothing stored) and a staging reservation beyond 2 GiB (HTTP 507 `app_platform_storage_full`).
+- **Measured:** idle baseline first; then every minute p95 of `GET /api/home`, of the report page (`GET /api/stock/{symbol}`
+  of a seeded report) through the real handler, and of the batch queue's dispatch decision over 200 queued jobs; every
+  thirty seconds host memory and CPU, tasks, the runner and Docker log sizes, XFS usage and the summed memory and CPU of
+  the backends.
+- **Pass:** every probe refused with its typed error; each one-minute window of each latency series within 1.5x of
+  its idle baseline; summed backend memory and CPU never above the runner budgets; no backend or runner crash; and each
+  backend's own status (read through a signed request) shows it held memory, started threads, burned CPU, wrote its log
+  and filled its data namespace. The
+  evidence is uploaded as JSON with every sample (artifact `capacity-soak-evidence`).
+- **Proven at unit level only, by design:** the per-application task quota (1000; no application has more than one
+  installation) and the exact 2 GiB staging cap without writing a byte (a single upload is bounded at 384 MiB, so the
+  cap refuses the sum, which the soak also probes against the real store). The runner's own refusal of an
+  over-declared layer is covered by the blob channel unit tests; the soak drives the Portal's import route.
+- **Records:** `handoff/evidence/platform-capacity-envelope/acceptance.json` (to be filled from the dispatch run) and the
+  OPS-08 and SEC-09 rows of `handoff/acceptance-checklist.csv`.
+
 ## 7. Developer and delivery verification
 
 | ID | Steps | Required result |

@@ -10,6 +10,14 @@ on:
         description: Limit a native-only diagnostic run to the event acceptance subset
         type: boolean
         default: true
+      duration_minutes:
+        description: Capacity soak length in minutes (1 to 180); only a passing run of 120 or more counts as OPS-08 evidence
+        type: string
+        default: '120'
+      soak_only:
+        description: Run only the capacity soak, not the quota and image delivery jobs
+        type: boolean
+        default: false
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
@@ -96,6 +104,10 @@ on:
       - 'go.sum'
       - 'scripts/acceptance/**'
       - 'scripts/project_quota_probe_test.py'
+      - 'scripts/capacity_soak_test.py'
+      - 'internal/app/app_platform_capacity*'
+      - 'internal/app/app_platform_installation_capacity*'
+      - 'internal/app/app_platform_image_fixture_test.go'
       - '.github/workflows/app-project-quota-probe.yml'
   push:
     branches: [main]
@@ -192,6 +204,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   enforce-disposable-project-quota:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.soak_only) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -424,6 +437,7 @@ jobs:
           retention-days: 14
 
   deliver-managed-image-package:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.soak_only) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -494,3 +508,54 @@ jobs:
             ${{ runner.temp }}/image-delivery/sec01.txt
           if-no-files-found: warn
           retention-days: 14
+
+  # The declared-capacity soak (doc 171, PR 4b; OPS-08, closing SEC-09). The dispatch run is the acceptance run
+  # (120 minutes by default); a pull request touching the capacity code or the soak runs the same harness for five
+  # minutes so it cannot rot, and that smoke is never evidence. Both use the reference host class: a GitHub-hosted
+  # ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
+  capacity-soak:
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    env:
+      SOAK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.duration_minutes || '5' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check the soak harness without privileges
+        run: |
+          python3 -B -m unittest discover -s scripts -p capacity_soak_test.py
+          GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/soak_app -count=1
+          GOWORK=off GOMAXPROCS=2 go test ./internal/app -run '^(TestSoak|TestStagingCap|TestTaskQuotasRefuse)' -count=1
+      - name: Install ephemeral filesystem acceptance tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev util-linux
+      - name: Build the native test binaries
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-soak-native.test" ./internal/app
+      - name: Build the soak backend through a disposable local registry
+        run: bash scripts/acceptance/soak_app/build-image.sh
+      - name: Run the capacity soak
+        timeout-minutes: 160
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,APP_CAPACITY_SOAK_IMAGE \
+            python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
+            --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
+            --journal-binary "$RUNNER_TEMP/app-journal-native.test" \
+            --out "$RUNNER_TEMP/capacity-soak"
+      - name: Preserve the soak evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: capacity-soak-evidence
+          path: ${{ runner.temp }}/capacity-soak
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 90 || 14 }}
+      - name: Remove only the owned soak registry
+        if: always()
+        run: bash scripts/acceptance/soak_app/cleanup-image.sh

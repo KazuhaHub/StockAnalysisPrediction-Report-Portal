@@ -633,3 +633,118 @@ leaves work for an administrator. None of them may remain when the integration b
 - **The late-create window.** The second absence check two seconds later narrows the window but does not prove
   absence (item 51). Fix: prove absence from the daemon's event stream, or leave the reservation held until
   the next reconcile has seen the resource absent twice, across the gate.
+
+## PR 4b implementation notes
+
+PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending and SEC-09
+partial until a real 120-minute dispatch run has passed; the records are written so that only the run URL and the
+numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.json`).
+
+### What was added
+
+- `capacity-soak` job in `.github/workflows/app-project-quota-probe.yml`: `workflow_dispatch` with `duration_minutes`
+  (default 120, `timeout-minutes` 170) and `soak_only`; five minutes on pull requests touching the capacity code or the
+  soak (the path filters gained `internal/app/app_platform_capacity*`, `internal/app/app_platform_installation_capacity*`
+  and the soak's Python test). The existing two jobs are skipped when `soak_only` is set.
+- `scripts/acceptance/capacity_soak.py` (with `scripts/capacity_soak_test.py`): builds the owned 16 GiB XFS volume with the
+  quota probe's ownership checks, prepares the runner's journal with the existing native journal test, runs the Go
+  acceptance while sampling the host every thirty seconds, then judges the Go evidence and the samples together.
+- `scripts/acceptance/soak_app/` (backend fixture, `Dockerfile`, `build-image.sh`, `cleanup-image.sh`): the soak backend
+  and its disposable local registry. It reads its limits from its own cgroup, so the soak needs no control channel
+  into the container.
+- `internal/app/app_platform_capacity_soak_native_linux_test.go`: the parent (root, owns the runner service, as the image
+  delivery acceptance does) and the Portal child. `app_platform_capacity_soak_plan_test.go` and
+  `app_platform_capacity_soak_evidence_test.go` hold the helpers and run in the ordinary suite in milliseconds; the native
+  scenario is gated on `APP_CAPACITY_SOAK_IMAGE` and skips otherwise, so the package's test time does not change.
+
+### Requirement to implementation
+
+| Requirement | Where it is met |
+| --- | --- |
+| 50 installations, 42 static and 8 managed | `installStatic` (frontend install through the ordinary scheduler path) and `installManaged` (the writable install worker, a real runner) |
+| Eight backends sized from the reported budget | `soakBackendSizing` over `ManagedRuntimeProfile.Capacity` (item 23) |
+| Backend holds memory, burns CPU, forks to its PID limit, floods logs and storage | `scripts/acceptance/soak_app/soak.go` |
+| Messages | the child sends every backend a signed request continuously (`load`); see resolution 55 |
+| Tasks and events to their quotas | `floodQuotas`; the per-application quota is unit level (resolution 54) |
+| Over-declared layer upload | `probeLayers`, through the offline import route |
+| Excess probes | `probeBackends`, `probeLayers`, `probeStaging`, `probeInstallationCap`, `floodQuotas` |
+| Idle baseline, then per-minute p95 and dispatch latency | `measureIdle`, `load`, `soakSummarize` |
+| 30-second host samples | `Sampler` in `capacity_soak.py` |
+| Pass criteria | `evaluate` in `capacity_soak.py`, tested in `capacity_soak_test.py` |
+
+### Resolutions (PR 4b)
+
+52. **Sizing leaves one minimum backend unreserved.** Each backend declares `floor((budget - one minimum backend) / 8)`,
+    not `floor(budget / 8)`. The runner names the first overflowing dimension in the order memory, CPU, disk, image store,
+    running backends (item 6), so with the budgets exactly filled a ninth backend is refused as `memory`, never as
+    `running_backends`. Leaving 16 MiB and 25 millis free lets a minimum ninth backend fit memory and CPU and be refused
+    by the count itself; the memory-over and CPU-over probes then ask for one unit more than what remains. The eight
+    together still fit, a ninth does not, and the result is checked to lie inside the descriptor ranges unclamped.
+53. **Refused probe installations are retired, and the disk budget is not raised.** Eight managed namespaces reserve
+    6 GiB of the 8 GiB disk budget (768 MiB each). A refused backend probe has already prepared its namespace, so
+    leaving three of them would exhaust the disk budget and refuse the third with `disk`. Each probe's installation is
+    therefore retired through the ordinary managed uninstall (falling back to marking the row removed, which the
+    evidence records, and which would leave the namespace reserved). The image-store probe is refused at load, before
+    any namespace, and only its row is retired. Static installations use the frontend profile and hold no runner
+    namespace, as in production.
+54. **Task quotas.** The per-installation quota is reached on seven managed installations and the global quota on the
+    eighth, after a backlog of waiting tasks attributed to the static installations (inserted with the columns the
+    admission itself writes, since a static installation has no backend and cannot schedule tasks) brings the Portal to
+    9999 active tasks: one more is admitted and the next is refused although its installation holds about 100 and its
+    application far fewer, so only the global quota can have refused it. The per-application quota (1000) needs four
+    installations of one application and the cap holds fifty applications, so it is proven at its boundary by
+    `TestTaskQuotasRefuseAtTheirOwnBoundary` and recorded as a unit-level probe. The managed installations receive the
+    four capabilities their tasks and events need by direct grant rows, as the service-identity fixture does, because
+    the soak's descriptors declare none.
+55. **Messages.** The fixture has no outbound channel to the platform, so the message flood is the platform's inbound
+    signed request path (one request in flight to each backend for the whole load), plus the backends' log lines. The
+    counts per minute, answered and failed, are in the evidence. "As many messages as the platform lets a backend send"
+    is therefore not exercised as a backend-originated flood; this is a stated gap.
+56. **Image store.** Eleven layers of 1 GiB declared (the descriptor maximum) hold 11 GiB against the 10 GiB store. Each
+    layer is a tar of one zero file of exactly its declared length, so it compresses to about a thousandth of that and the
+    package stays under the 384 MiB offline bound. It stages, and the runner refuses its load at admission, before the
+    daemon is asked for anything, so nothing needs 10 GiB of disk.
+57. **Staging cap.** One upload is bounded at 384 MiB (`MaxManagedOfflineEnvelopeBytes`) and at most two management
+    requests run at once, so no upload can exceed 2 GiB and two in-flight uploads cannot reach it. The cap guards the sum
+    of what is held and in flight. The soak reserves 384 MiB at a time against its own real store until the sixth is
+    refused and checks the typed 507 `app_platform_storage_full`; `TestStagingCapIsTwoGiBAndRefusesTheOneThatDoesNotFit` proves the
+    exact boundary of the production value without writing a byte.
+58. **Over-declared layer.** The crafted package declares one byte less than its first layer holds and is refused by the
+    import route with HTTP 400 `app_platform_invalid_request`, storing no release. The runner's refusal of the same
+    bytes (`uncompressed_bound`) is proven by the blob channel tests; the soak does not sign a blob command of its own.
+59. **Latency.** Home and the report page are `GET /api/home` and `GET /api/stock/{symbol}` of a seeded report, served
+    in process through the real routed handler with a session cookie, not over TCP. Batch queue dispatch latency is the
+    queue's admission decision over 200 queued jobs (`queuedItems` and `queue.Admit`), the measurement the existing
+    isolation test uses, not the duration of a Dify run. The baseline pools the idle windows (100 samples of each series
+    per window); each load minute is judged on its own 100 samples, strictly at 1.5 times the pooled idle p95. One noisy
+    minute fails a run; if shared hardware proves too noisy, the owner can decide to judge pooled windows instead.
+60. **Host budget judged on the kernel's counters.** Summed backend CPU is the cgroup `usage_usec` delta over each
+    thirty-second interval when it can be read (a rate sampled over a second can read a few percent above a quota the
+    kernel enforces exactly over longer windows) and Docker's own figure otherwise; the evidence says which. Memory is
+    Docker's usage without reclaimable cache.
+61. **Journal and defaults.** The runner uses its default budgets (25% of memory, 50% of CPUs, 8 GiB disk, 10 GiB image
+    store, eight backends) on a journal prepared with the existing native journal test, which holds no reservations
+    because that store configures no budgets.
+
+62. **Proof that the backends ran their loads.** The backend's own log is the flooded stream and rotates in seconds, so it is
+    no channel. Each minute, after the window's samples, the child asks every backend for its status through a signed request
+    (`GET /v1/soak/status`: memory held, threads started, CPU burners, log bytes written, storage written and the number of
+    times the namespace filled to ENOSPC). The last window's statuses must show every backend held at least 60% of its memory
+    limit, started at least eight threads, burned CPU, wrote its log and filled its data namespace; a backend that answered
+    the readiness probe and did nothing would otherwise pass.
+
+### Evidence files
+
+`capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity, host facts, the Go child's evidence with every
+probe and window, every host sample, the runner log series and the verdict with each check), `samples.jsonl`,
+`child-evidence.json`, `runner-log.jsonl`, `portal-parent.log`, `portal-child.log` and `runner.log`, uploaded as the
+`capacity-soak-evidence` artifact (90 days for a dispatch run).
+
+### Not proven until the 120-minute run
+
+- Nothing in this change ran against Docker: the native scenario, the soak backend inside a container, the sampler and the
+  loop-volume setup run only in CI, and no run of them is cited here.
+- That the latency ratios hold for two hours on shared hardware, that the eight backends stay inside the budgets and none
+  is OOM-killed or restarted, and that the retired probe installations release their disk reservation (resolution 53).
+- The per-application task quota natively, a backend-originated message flood, the runner's own refusal of an over-declared
+  layer over the control socket, and PostgreSQL (the soak drives a SQLite Portal).

@@ -784,7 +784,7 @@ type platformServiceFixture struct {
 	root    string
 	ipcRoot string
 	socket  string
-	output  bytes.Buffer
+	output  platformSyncBuffer
 	once    sync.Once
 }
 
