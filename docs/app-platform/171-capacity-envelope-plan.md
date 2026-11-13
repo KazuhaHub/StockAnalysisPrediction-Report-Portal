@@ -363,6 +363,11 @@ applied.
 
 ### Follow-up that blocks the integration to main merge: image removal
 
+**Owner decision, 2026-11-13:** the `runner_commands` rebuild that adds the `remove-image` kind is approved and is
+folded into journal v3 (no v4), because v3 has not shipped to any persistent runner. CI and development journals
+opened at the earlier v3 shape are disposable and are not upgraded; the runner refuses a v3 journal whose
+`runner_commands` declaration predates the kind, with instructions to start from a fresh journal.
+
 The 10 GiB image store is not reclaimed by the runner (resolution 5). The merge of the integration branch to
 `main` is blocked until the owner decides how removal is carried.
 
