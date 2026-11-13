@@ -165,6 +165,12 @@ func (s *soakState) floodStorage() {
 			n, err := file.Write(chunk)
 			written += int64(n)
 			if err == nil {
+				// Dirty page cache is charged to the container's memory. Writing a quarter gigabyte faster than it
+				// can be written back would get the backend OOM-killed before it ever reached its quota, so every
+				// few MiB are forced to disk.
+				if written%(8<<20) == 0 {
+					_ = file.Sync()
+				}
 				continue
 			}
 			if errors.Is(err, syscall.ENOSPC) || errors.Is(err, syscall.EDQUOT) {

@@ -223,7 +223,7 @@ def _loads_check(evidence):
     written, and the data namespace filled to its quota. Without this a backend that did nothing would pass."""
     windows = evidence.get("windows", [])
     backends = windows[-1].get("backends", []) if windows else []
-    held_minimum = 0.6 * evidence.get("sizing", {}).get("MemoryMiB", 0) * 1024 * 1024
+    held_minimum = 0.5 * evidence.get("sizing", {}).get("MemoryMiB", 0) * 1024 * 1024
     expected = evidence.get("budgets", {}).get("running_backends", 0)
     problems = []
     for b in backends:

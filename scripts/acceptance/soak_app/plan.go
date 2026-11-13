@@ -41,7 +41,7 @@ func cpuWorkers(raw string) int {
 	return workers
 }
 
-// memoryHold is how much memory the backend keeps resident: 70% of its limit, in whole MiB, so the Go runtime
+// memoryHold is how much memory the backend keeps resident: 60% of its limit, in whole MiB, so the Go runtime
 // and the network buffers still fit under the limit and the kernel never has to kill the process. Without a
 // known limit it holds a small fixed amount.
 func memoryHold(limit int64, known bool) int64 {
@@ -49,7 +49,7 @@ func memoryHold(limit int64, known bool) int64 {
 	if !known {
 		return 32 * mib
 	}
-	return limit * 7 / 10 / mib * mib
+	return limit * 6 / 10 / mib * mib
 }
 
 // threadsToSpawn is how many extra threads the fork load may start without reaching the PID limit.

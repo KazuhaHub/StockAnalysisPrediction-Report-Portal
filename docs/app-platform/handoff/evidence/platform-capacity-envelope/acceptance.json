@@ -43,7 +43,7 @@
     "installations": 50,
     "static_installations": 42,
     "managed_backends": 8,
-    "backend_workload": "holds 70% of its memory limit, burns its CPU quota, parks threads up to its PID limit minus a margin, writes 1 MiB/s to its log, fills its data namespace to ENOSPC",
+    "backend_workload": "holds 60% of its memory limit, burns its CPU quota, parks threads up to its PID limit minus a margin, writes 1 MiB/s to its log, fills its data namespace to ENOSPC",
     "platform_workload": "one signed request in flight to each backend, repeated task admission refusals, task backlog to the global quota, an event subscription saturated at its in-flight bound",
     "measurement_windows": null
   },

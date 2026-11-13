@@ -729,7 +729,7 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
 62. **Proof that the backends ran their loads.** The backend's own log is the flooded stream and rotates in seconds, so it is
     no channel. Each minute, after the window's samples, the child asks every backend for its status through a signed request
     (`GET /v1/soak/status`: memory held, threads started, CPU burners, log bytes written, storage written and the number of
-    times the namespace filled to ENOSPC). The last window's statuses must show every backend held at least 60% of its memory
+    times the namespace filled to ENOSPC). The last window's statuses must show every backend held at least half of its memory
     limit, started at least eight threads, burned CPU, wrote its log and filled its data namespace; a backend that answered
     the readiness probe and did nothing would otherwise pass.
 

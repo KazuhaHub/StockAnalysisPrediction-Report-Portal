@@ -51,8 +51,8 @@ func TestMemoryHoldLeavesRuntimeHeadroom(t *testing.T) {
 		known bool
 		want  int64
 	}{
-		{512 * mib, true, 358 * mib}, // 70%, rounded down to whole MiB
-		{16 * mib, true, 11 * mib},
+		{512 * mib, true, 307 * mib}, // 60%, rounded down to whole MiB
+		{16 * mib, true, 9 * mib},
 		{0, false, 32 * mib},
 	} {
 		if got := memoryHold(tc.limit, tc.known); got != tc.want {
