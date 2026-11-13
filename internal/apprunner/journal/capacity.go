@@ -183,16 +183,22 @@ func (s *Store) namespacePlan(resourceID, installationID string) (capacityPlan, 
 	return capacityPlan{kind: reservationNamespace, resourceID: resourceID, installationID: installationID, diskBytes: NamespaceReservationBytes}, true
 }
 
+// lookupCapacityRefusal finds the refusal a capacity refusal stored for this command, or nil.
+func (s *Store) lookupCapacityRefusal(ctx context.Context, id CapacityIdentity) *CapacityRefusalError {
+	var state, raw string
+	if err := s.db.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, id.EffectID).Scan(&state, &raw); err != nil || state != "reverted" {
+		return nil
+	}
+	if r, ok := storedCapacityRefusal(raw, id); ok {
+		return &CapacityRefusalError{Receipt: r}
+	}
+	return nil
+}
+
 // capacityRefusalFor answers a replay of a command a capacity refusal reverted.
 func (s *Store) capacityRefusalFor(ctx context.Context, id CapacityIdentity) error {
-	var state, raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT state,receipt_json FROM runner_commands WHERE effect_id=?`, id.EffectID).Scan(&state, &raw); err != nil {
-		return err
-	}
-	if state == "reverted" {
-		if r, ok := storedCapacityRefusal(raw, id); ok {
-			return &CapacityRefusalError{Receipt: r}
-		}
+	if refusal := s.lookupCapacityRefusal(ctx, id); refusal != nil {
+		return refusal
 	}
 	return ErrFenceReconciliation
 }
@@ -229,11 +235,55 @@ func (s *Store) answerCapacityRefusal(ctx context.Context, effectID string, veri
 	if err != nil || id.EffectID != effectID {
 		return nil
 	}
-	if refusal := s.capacityRefusalFor(ctx, id); refusal != nil {
-		var typed *CapacityRefusalError
-		if errors.As(refusal, &typed) {
-			return refusal
-		}
+	if refusal := s.lookupCapacityRefusal(ctx, id); refusal != nil {
+		return refusal
 	}
 	return nil
+}
+
+// CapacityIdentityOfUpdateStart is the identity a refusal of an update, restore or enable start carries. All three
+// are stored, and answered, as one update-start.
+func CapacityIdentityOfUpdateStart(c control.UpdateStartCommand) CapacityIdentity {
+	return CapacityIdentityOfCommand(updateStartIndex(c))
+}
+
+// admitUpdateStart reserves an update, restore or enable start in its claim transaction. On a refusal it reverts
+// the never claimed start with the typed receipt and takes its never started target resource out of the journal,
+// in the same transaction, so nothing of the refused start remains. It returns the refusal to commit, or nil when
+// the start fits.
+func (s *Store) admitUpdateStart(ctx context.Context, tx *sql.Tx, f updateStartFacts, resource *dataResource) (*CapacityRefusalError, error) {
+	c := f.command
+	plan, admit, err := s.backendPlan(ctx, reservationBackend, c.Payload.ResourceID, c.InstallationID)
+	if err != nil || !admit {
+		return nil, err
+	}
+	refusal, err := s.admitCapacity(ctx, tx, plan, f.now)
+	if err != nil || refusal == nil {
+		return nil, err
+	}
+	receipt, err := refuseCapacityPrepared(ctx, tx, CapacityIdentityOfUpdateStart(c), *refusal, f.now)
+	if err != nil {
+		return nil, err
+	}
+	var removals int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE operation_id=? AND installation_id=? AND stage='remove_code' AND kind='remove-code' AND state='applied'`,
+		c.OperationID, c.InstallationID).Scan(&removals); err != nil {
+		return nil, err
+	}
+	// A target that reused the row of a removed one goes back to absent; a fresh one never existed and is deleted.
+	var changed sql.Result
+	if removals == 0 {
+		changed, err = tx.ExecContext(ctx, `DELETE FROM runner_resources WHERE id=? AND kind='container' AND native_id=? AND revision=1 AND desired_state='present' AND observed_state='unknown' AND observed_ms IS NULL`,
+			resource.id, resource.native)
+	} else {
+		changed, err = tx.ExecContext(ctx, `UPDATE runner_resources SET desired_state='absent',observed_state='absent',revision=4,observed_ms=?,updated_ms=? WHERE id=? AND kind='container' AND native_id=? AND revision=1 AND desired_state='present' AND observed_state='unknown' AND observed_ms IS NULL`,
+			f.now, f.now, resource.id, resource.native)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if n, err := changed.RowsAffected(); err != nil || n != 1 {
+		return nil, fmt.Errorf("%w: refused update start resource rows=%d err=%v", ErrFenceReconciliation, n, err)
+	}
+	return &CapacityRefusalError{Receipt: receipt}, nil
 }

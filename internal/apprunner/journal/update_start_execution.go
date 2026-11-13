@@ -644,6 +644,22 @@ func (s *Store) ClaimUpdateStart(ctx context.Context, raw, signature []byte) (Up
 	if err != nil {
 		return zero, err
 	}
+	// Reserve the declared resources in the claim's own transaction, before any native call.
+	if refusal, err := s.admitUpdateStart(ctx, tx, f, resource); err != nil || refusal != nil {
+		if err != nil {
+			return zero, err
+		}
+		if err := finalUpdateStartCheck(ctx, f); err != nil {
+			return zero, err
+		}
+		if s.closing.Load() {
+			return zero, ErrUpdateStartExecutionUnavailable
+		}
+		if err := tx.Commit(); err != nil {
+			return zero, err
+		}
+		return zero, refusal
+	}
 	id, err := dataClaimID()
 	if err != nil {
 		return zero, err
@@ -942,8 +958,12 @@ func (s *Store) DispatchUpdateStart(ctx context.Context, raw, signature, descrip
 		parsed.SHA256 != verified.Command().Payload.TargetReleaseSHA256 {
 		return zero, ErrFenceReconciliation
 	}
+	ctx = withBackendResources(ctx, parsed.Manifest.Backend.Resources)
 	if receipt, err := s.ReadUpdateStartRunningReceipt(ctx, raw, signature); err == nil {
 		return receipt, nil
+	}
+	if refusal := s.lookupCapacityRefusal(ctx, CapacityIdentityOfCommand(updateStartIndex(verified.Command()))); refusal != nil {
+		return zero, refusal
 	}
 	log.Printf("update-start %s: reading reservation",
 		verified.Command().OperationID)

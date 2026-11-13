@@ -3,6 +3,7 @@ package journal
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"time"
@@ -90,6 +91,20 @@ func (s *Store) ReadUpdateStartRunningOrAbsence(ctx context.Context, raw, signat
 	receipt, err := s.readUpdateStartRunningReceipt(ctx, raw, signature, control.VerifyUpdateStartRead)
 	if err == nil {
 		return receipt, nil
+	}
+	// A start a capacity refusal reverted answers with the refusal: the definite end of an effect that never ran.
+	var effect struct {
+		EffectID string `json:"effect_id"`
+	}
+	_ = json.Unmarshal(raw, &effect)
+	if refusal := s.answerCapacityRefusal(ctx, effect.EffectID, func(a control.Authority, now int64) (CapacityIdentity, error) {
+		v, err := control.VerifyUpdateStartRead(raw, signature, a, now)
+		return CapacityIdentityOfCommand(updateStartIndex(v.Command())), err
+	}); refusal != nil {
+		var typed *CapacityRefusalError
+		if errors.As(refusal, &typed) {
+			return typed.Receipt, nil
+		}
 	}
 	absence, absenceErr := s.readRestoreStartAbsence(ctx, raw, signature, control.VerifyUpdateStartRead)
 	if absenceErr == nil && absence != nil {
