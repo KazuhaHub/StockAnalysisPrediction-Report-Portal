@@ -245,7 +245,72 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 			return zero, fmt.Errorf("%w: a container appeared after the first look", ErrManagedRemovalUnavailable)
 		}
 	}
-	return s.settleOrphan(ctx, raw, signature, observed)
+	sourceAbsent, err := s.enableSourceAbsentNatively(ctx, start, inspector)
+	if err != nil {
+		return zero, err
+	}
+	return s.settleOrphan(ctx, raw, signature, observed, sourceAbsent)
+}
+
+// enableSourceAbsentNatively looks, twice a settle delay apart, for the stopped source container an enable start
+// replaced. Its native removal precedes the target's creation, so an orphaned enable start may have removed it
+// without ever recording that. Only two agreeing absences prove it; anything else, or a start that is not an enable
+// start, reports false and the source keeps its reservation.
+func (s *Store) enableSourceAbsentNatively(ctx context.Context, start control.UpdateStartCommand, inspector TargetInspector) (bool, error) {
+	if start.Kind != "enable-start" {
+		return false, nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	id, err := enableStartSourceID(ctx, tx, start, time.Now().UTC().UnixMilli())
+	tx.Rollback()
+	if err != nil || id == "" {
+		return false, err
+	}
+	for look := 0; look < 2; look++ {
+		if look > 0 {
+			if err := waitAbsenceSettle(ctx); err != nil {
+				return false, fmt.Errorf("%w: wait before the second source look: %v", ErrManagedRemovalUnavailable, err)
+			}
+		}
+		seen, err := inspector.InspectTarget(ctx, id)
+		if err != nil {
+			return false, fmt.Errorf("%w: inspect the enable source: %v", ErrManagedRemovalUnavailable, err)
+		}
+		if seen.Found {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// enableStartSourceID is the stopped backend an enable start replaced, or "" when it has none distinct from its target.
+func enableStartSourceID(ctx context.Context, tx *sql.Tx, start control.UpdateStartCommand, now int64) (string, error) {
+	source, err := loadUpdateStartSource(ctx, tx, start, now)
+	if err != nil {
+		return "", err
+	}
+	id := enableStartSourceResource(updateStartFacts{command: start, source: source})
+	if id == start.Payload.ResourceID {
+		return "", nil
+	}
+	return id, nil
+}
+
+// settleEnableStartSource releases the reservation of the stopped source an enable start replaced, in the caller's
+// transaction, when the settlement proved that source absent. A source that is not proven absent, a start that is not
+// an enable start, or a source that is not this installation's stopped or absent backend keeps its row.
+func settleEnableStartSource(ctx context.Context, tx *sql.Tx, start control.UpdateStartCommand, sourceAbsent bool, now int64) error {
+	if start.Kind != "enable-start" || !sourceAbsent {
+		return nil
+	}
+	id, err := enableStartSourceID(ctx, tx, start, now)
+	if err != nil || id == "" {
+		return err
+	}
+	return settleEnableSourceAbsent(ctx, tx, start.InstallationID, id, now)
 }
 
 // insertSettleRow records the settlement as applied, in the transaction that carries its effect.
@@ -480,7 +545,7 @@ func requirePendingTarget(resource *dataResource, start control.UpdateStartComma
 	return nil
 }
 
-func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observed driver.TargetInspection) (SettleUpdateStartReceipt, error) {
+func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observed driver.TargetInspection, sourceAbsent bool) (SettleUpdateStartReceipt, error) {
 	var zero SettleUpdateStartReceipt
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -525,6 +590,10 @@ func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observe
 			// The orphaned start's absence is proven in this transaction, so its reservation is released in it.
 			err = releaseReservation(ctx, tx, facts.resource.id, now)
 		}
+		if err == nil {
+			// An enable start removed its stopped source natively before it would have created the target.
+			err = settleEnableStartSource(ctx, tx, start, sourceAbsent, now)
+		}
 	} else {
 		var marker UpdateStartClaimMarker
 		if !canonicalDataJSON(facts.startRow, &marker) || marker.Preflight == nil || !validUpdateStartClaimMarker(marker) || !containerSHAValue(observed.NativeID) {
@@ -557,6 +626,12 @@ func (s *Store) settleOrphan(ctx context.Context, raw, signature []byte, observe
 	}
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, fmt.Errorf("%w: settle update-start resource rows=%d err=%v", ErrFenceReconciliation, n, err)
+	}
+	if observed.Found {
+		// The target exists, so the source's native removal ran first: release it when it is proven gone.
+		if err := settleEnableStartSource(ctx, tx, start, sourceAbsent, now); err != nil {
+			return zero, err
+		}
 	}
 	if err := insertSettleRow(ctx, tx, command, start, receipt, now); err != nil {
 		return zero, err
