@@ -102,9 +102,19 @@ type soakWindow struct {
 	Report   soakStats `json:"report"`
 	Dispatch soakStats `json:"dispatch"`
 	Flood    soakFlood `json:"flood"`
+	// Quiet is measured right after the window with the Portal's own flood goroutines paused, while the backends
+	// keep flooding their containers: it separates the cost of the host under load from the cost of the flood
+	// generator sharing the measured process. Informational; the verdict judges the loaded window.
+	Quiet *soakQuiet `json:"quiet,omitempty"`
 	// Backends is what each soak backend reports about its own loads, read through a signed request after
 	// the window's samples: the proof that the floods really ran inside the containers.
 	Backends []soakBackendStatus `json:"backends,omitempty"`
+}
+
+type soakQuiet struct {
+	Home     soakStats `json:"home"`
+	Report   soakStats `json:"report"`
+	Dispatch soakStats `json:"dispatch"`
 }
 
 type soakBackendStatus struct {

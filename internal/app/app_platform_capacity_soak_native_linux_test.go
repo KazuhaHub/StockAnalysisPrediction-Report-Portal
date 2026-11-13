@@ -918,12 +918,17 @@ func (c *soakChild) load(minutes int) {
 	ctx, cancel := context.WithCancel(c.ctx)
 	var wg sync.WaitGroup
 	var requests, ok, failed, refusals atomic.Int64
+	var paused atomic.Bool
 	body := []byte(`{"soak":"` + strings.Repeat("m", 2048) + `"}`)
 	for _, installation := range c.managed {
 		wg.Add(1)
 		go func(installation string) {
 			defer wg.Done()
 			for ctx.Err() == nil {
+				if paused.Load() {
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
 				requests.Add(1)
 				if response, err := c.s.requestPlatformWritableBackend(ctx, c.session, installation, http.MethodPost, "/v1/echo", body, c.endpoint); err == nil && response.Status == http.StatusOK {
 					ok.Add(1)
@@ -938,6 +943,10 @@ func (c *soakChild) load(minutes int) {
 	go func() {
 		defer wg.Done()
 		for n := 0; ctx.Err() == nil; n++ {
+			if paused.Load() {
+				time.Sleep(50 * time.Millisecond)
+				continue
+			}
 			if err := c.admit(c.managed[0], 10000+n, "pressure"); errors.Is(err, errAppPlatformTaskQuota) {
 				refusals.Add(1)
 			}
@@ -962,6 +971,13 @@ func (c *soakChild) load(minutes int) {
 			BackendRequestErrors: current.BackendRequestErrors - previous.BackendRequestErrors, TaskRefusals: current.TaskRefusals - previous.TaskRefusals,
 		}
 		previous = current
+		paused.Store(true)
+		time.Sleep(2 * time.Second) // let in-flight flood requests drain
+		var quiet soakSamples
+		c.sample(&quiet, soakSamplesPerWindow)
+		q := quiet.window(minute)
+		window.Quiet = &soakQuiet{Home: q.Home, Report: q.Report, Dispatch: q.Dispatch}
+		paused.Store(false)
 		window.Backends = c.backendStatuses()
 		c.rec.AddWindow(window)
 		if !time.Now().Before(started.Add(time.Duration(minutes) * time.Minute)) {
