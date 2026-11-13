@@ -217,7 +217,9 @@ func platformRemoveImageEffectID(hostOperation, loadEffect string, attempt int) 
 
 // platformReclaimBackoff is how long a refused removal waits before its next attempt, per attempt already made and
 // capped at platformReclaimBackoffCap. Tests set it to zero.
-var platformReclaimBackoff = 10 * time.Minute
+const platformReclaimBackoffDefault = 10 * time.Minute
+
+var platformReclaimBackoff = platformReclaimBackoffDefault
 
 const platformReclaimBackoffCap = 6 * time.Hour
 
@@ -951,6 +953,15 @@ func (s *Server) auditPlatformImageRemoval(ctx context.Context, lease platformOp
 // the images for the next tick.
 func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRuntimeEndpoint) (int, error) {
 	if endpoint.path == "" {
+		return 0, nil
+	}
+	// One cheap question first: a Portal that never loaded a managed image has nothing to reclaim, and the idle tick
+	// asks this every time.
+	var images int
+	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE kind IN ('load_image','remove_image')`)).Scan(&images); err != nil {
+		return 0, err
+	}
+	if images == 0 {
 		return 0, nil
 	}
 	// While the Portal is paused for recovery nothing else of the application platform runs, and an image removed

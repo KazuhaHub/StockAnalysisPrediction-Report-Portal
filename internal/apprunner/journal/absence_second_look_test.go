@@ -115,3 +115,10 @@ func TestSettleOrphanNeverRanNeedsTwoAbsentObservations(t *testing.T) {
 		}
 	})
 }
+
+// The tests run with no delay between the two looks; this pins the production value the doc states.
+func TestTheProductionSecondLookWaitsTwoSeconds(t *testing.T) {
+	if defaultAbsenceSettleDelay != 2*time.Second {
+		t.Fatalf("the production settle delay is %s, documented as 2s", defaultAbsenceSettleDelay)
+	}
+}

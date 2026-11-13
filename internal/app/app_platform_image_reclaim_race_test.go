@@ -456,3 +456,17 @@ func TestRemoveImageWatermarkFitsTheJournalBound(t *testing.T) {
 		t.Fatal("the watermark bound is too small to be useful")
 	}
 }
+
+// Tests run the retry backoff at zero; this pins the production backoff (ten minutes per attempt made, capped at six
+// hours) on the constant and the function, without sleeping through it.
+func TestTheProductionRetryBackoffIsTenMinutesPerAttempt(t *testing.T) {
+	if platformReclaimBackoffDefault != 10*time.Minute || platformReclaimBackoffCap != 6*time.Hour {
+		t.Fatal("the documented backoff constants changed")
+	}
+	old := platformReclaimBackoff
+	platformReclaimBackoff = platformReclaimBackoffDefault
+	defer func() { platformReclaimBackoff = old }()
+	if platformReclaimWait(1) != 10*time.Minute || platformReclaimWait(3) != 30*time.Minute || platformReclaimWait(100) != 6*time.Hour {
+		t.Fatalf("backoff by attempt: %s %s %s", platformReclaimWait(1), platformReclaimWait(3), platformReclaimWait(100))
+	}
+}

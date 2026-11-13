@@ -131,7 +131,9 @@ func storedCandidateOrphan(raw string, id CapacityIdentity) (CandidateOrphanRece
 // absenceSettleDelay is how long an absence settlement waits between its two looks. The Docker daemon can finish a
 // container create after the client context that asked for it was cancelled, so a container missing at one look can
 // exist a moment later. A package variable so tests do not wait it out.
-var absenceSettleDelay = 2 * time.Second
+const defaultAbsenceSettleDelay = 2 * time.Second
+
+var absenceSettleDelay = defaultAbsenceSettleDelay
 
 // waitAbsenceSettle sleeps the settle delay, or returns the context's error if it ends first.
 func waitAbsenceSettle(ctx context.Context) error {
