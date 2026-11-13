@@ -3894,7 +3894,7 @@
   "err.capacity_exhausted_memory": "運行器的記憶體已不足以運行此應用。請停止或移除其他應用後重試。",
   "err.capacity_exhausted_cpu": "運行器的 CPU 已不足以運行此應用。請停止或移除其他應用後重試。",
   "err.capacity_exhausted_disk": "運行器的磁碟已不足以存放此應用的資料。請刪除不再使用的應用資料後重試。",
-  "err.capacity_exhausted_image_store": "運行器的映像儲存已滿。已移除或已被取代的應用版本的映像會自動回收，若剛移除過應用，請幾分鐘後重試；否則請移除不再使用的應用。",
+  "err.capacity_exhausted_image_store": "運行器的映像儲存已滿。沒有任何安裝在使用的映像，要等參照它們的應用版本被移除後才會回收。管理員可以調高映像儲存的容量上限。",
   "err.capacity_exhausted_running_backends": "運行器已達到可同時運行的應用後端數量上限。請停止或移除一個後重試。",
   "err.installation_capacity": "已達到 50 個應用的安裝上限。請先移除一個應用再安裝新的。",
   "apps.draftLeaveTitle": "離開此應用程式？",

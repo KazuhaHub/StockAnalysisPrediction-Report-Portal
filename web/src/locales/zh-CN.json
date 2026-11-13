@@ -3894,7 +3894,7 @@
   "err.capacity_exhausted_memory": "运行器的内存已不足以运行此应用。请停止或移除其他应用后重试。",
   "err.capacity_exhausted_cpu": "运行器的 CPU 已不足以运行此应用。请停止或移除其他应用后重试。",
   "err.capacity_exhausted_disk": "运行器的磁盘已不足以存放此应用的数据。请删除不再使用的应用数据后重试。",
-  "err.capacity_exhausted_image_store": "运行器的镜像存储已满。已移除或已被替换的应用版本的镜像会自动回收，若刚移除过应用，请几分钟后重试；否则请移除不再使用的应用。",
+  "err.capacity_exhausted_image_store": "运行器的镜像存储已满。没有任何安装在使用的镜像，要等引用它们的应用版本被移除后才会回收。管理员可以调高镜像存储的容量上限。",
   "err.capacity_exhausted_running_backends": "运行器已达到可同时运行的应用后端数量上限。请停止或移除一个后重试。",
   "err.installation_capacity": "已达到 50 个应用的安装上限。请先移除一个应用再安装新的。",
   "apps.draftLeaveTitle": "离开此应用？",
