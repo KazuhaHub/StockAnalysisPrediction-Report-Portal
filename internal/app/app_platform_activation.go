@@ -60,7 +60,7 @@ func loadPlatformStaticCandidate(e migExec, lease platformOperationLease, runtim
 	}
 	namespaceUpdated := updated
 	var effects, forbidden int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`, lease.id).Scan(&effects); err != nil {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`, lease.id).Scan(&effects); err != nil {
 		return zero, err
 	}
 	if err := e.queryRow(`SELECT (SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=?)+(SELECT COUNT(*) FROM app_platform_access_grants WHERE installation_id=?)`, lease.installationID, lease.installationID).Scan(&forbidden); err != nil {

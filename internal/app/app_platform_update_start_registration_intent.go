@@ -90,7 +90,7 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	}
 	var count int
 	if err := e.queryRow(
-		`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind<>'load_image'`,
+		`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`,
 		lease.id).Scan(&count); err != nil {
 		return zero, false, err
 	}

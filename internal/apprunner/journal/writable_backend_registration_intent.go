@@ -38,7 +38,7 @@ func checkWritableCandidateHistoryForRegistration(ctx context.Context, tx *sql.T
 	}
 	var conflicts int
 	if err := tx.QueryRowContext(ctx, `SELECT
- (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind<>'load-image' AND effect_id<>? AND effect_id<>? AND effect_id<>? AND effect_id<>?)+
+ (SELECT COUNT(*) FROM runner_commands WHERE installation_id=? AND kind NOT IN ('load-image','remove-image') AND effect_id<>? AND effect_id<>? AND effect_id<>? AND effect_id<>?)+
  (SELECT COUNT(*) FROM runner_resources WHERE (id=? AND id<>?) OR (data_namespace_id=? AND id<>? AND id<>?))`, ref.InstallationID, ref.EffectID, w.Command().EffectID, c.EffectID, index.EffectID, w.Command().ResourceID, allowedResource, ref.Payload.DataNamespaceID, ref.Payload.DataNamespaceID, allowedResource).Scan(&conflicts); err != nil {
 		return err
 	}

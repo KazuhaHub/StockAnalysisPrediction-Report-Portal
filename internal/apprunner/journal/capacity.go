@@ -111,7 +111,7 @@ func (s *Store) admitCapacity(ctx context.Context, tx *sql.Tx, plan capacityPlan
 			AND EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state IN ('prepared','reverted'))
 			AND NOT EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state IN ('unknown','applied'))
 			AND (EXISTS (SELECT 1 FROM runner_commands s WHERE `+startOf+` AND s.state='reverted')
-			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind<>'load-image' AND n.admitted_fence>res.control_fence)))`, now); err != nil {
+			  OR EXISTS (SELECT 1 FROM runner_commands n WHERE n.installation_id=res.installation_id AND n.kind NOT IN ('load-image','remove-image') AND n.admitted_fence>res.control_fence)))`, now); err != nil {
 		return nil, err
 	}
 	var held struct{ state string }

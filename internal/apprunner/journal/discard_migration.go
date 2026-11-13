@@ -192,7 +192,7 @@ func (s *Store) beginDiscardMigration(ctx context.Context, raw, signature []byte
 		return zero, false, fmt.Errorf("%w: one discard per operation", ErrCommandConflict)
 	}
 	var fenceFloor int64
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind<>'load-image' UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(fence),0) FROM (SELECT admitted_fence AS fence FROM runner_commands WHERE installation_id=? AND kind NOT IN ('load-image','remove-image') UNION ALL SELECT control_fence AS fence FROM runner_resources WHERE installation_id=?)`, c.InstallationID, c.InstallationID).Scan(&fenceFloor); err != nil {
 		return zero, false, err
 	}
 	fence := mustDataInt(c.InstallationFence)
