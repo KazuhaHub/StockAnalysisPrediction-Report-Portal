@@ -154,6 +154,22 @@ func platformRemovalGrantsDigestAt(e migExec, installation string, rebase int64)
 }
 
 func platformLoadRemovalProjection(e migExec, id string, action appplatform.Action, actor platformActorFacts, control platformActorControl) (platformRemovalProjection, error) {
+	var attempted bool
+	p, err := platformLoadRemovalProjectionAttempt(e, id, action, actor, control, &attempted)
+	if err != nil && attempted {
+		// An installation in review_required or recovery_required was refused before this variant existed with
+		// errAppPlatformPlanChanged, whatever else was true of it. Every refusal keeps that error type here, so a
+		// started install is told nothing new by the evidence that now runs first. Infrastructure errors pass.
+		if errors.Is(err, errAppPlatformOperationConflict) || errors.Is(err, sql.ErrNoRows) {
+			return platformRemovalProjection{}, errAppPlatformPlanChanged
+		}
+	}
+	return p, err
+}
+
+// platformLoadRemovalProjectionAttempt reports through attempted that the installation is in a phase only the
+// never-started variant admits, so the caller can keep the refusal type of the other installations in that phase.
+func platformLoadRemovalProjectionAttempt(e migExec, id string, action appplatform.Action, actor platformActorFacts, control platformActorControl, attempted *bool) (platformRemovalProjection, error) {
 	var p platformRemovalProjection
 	if !platformValidUUID(id) || (action != appplatform.ActionDisable && action != appplatform.ActionUninstall) {
 		return p, errAppPlatformPlanChanged
@@ -194,6 +210,7 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 			return p, errAppPlatformPlanChanged
 		}
 		neverStarted = true
+		*attempted = true
 	default:
 		return p, errAppPlatformPlanChanged
 	}

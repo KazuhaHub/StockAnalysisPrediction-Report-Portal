@@ -344,13 +344,22 @@ func requireDeleteDataNeverStarted(
 	target, _ := strconv.ParseInt(c.TargetGeneration, 10, 64)
 	writer, _ := strconv.ParseInt(c.Payload.WriterFence, 10, 64)
 	fence, _ := strconv.ParseInt(c.InstallationFence, 10, 64)
-	if started != 0 || containers != 0 ||
-		volume.release != c.Payload.ReleaseSHA256 ||
+	if containers != 0 {
+		return fmt.Errorf(
+			"%w: delete-data never-started container",
+			ErrFenceReconciliation)
+	}
+	if started != 0 {
+		return fmt.Errorf(
+			"%w: delete-data never-started command",
+			ErrFenceReconciliation)
+	}
+	if volume.release != c.Payload.ReleaseSHA256 ||
 		volume.generation+1 != target ||
 		volume.controlFence > fence ||
 		volume.writerFence+1 != writer {
 		return fmt.Errorf(
-			"%w: delete-data never-started binding",
+			"%w: delete-data never-started volume binding",
 			ErrFenceReconciliation)
 	}
 	return nil

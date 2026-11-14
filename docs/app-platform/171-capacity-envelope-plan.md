@@ -654,16 +654,22 @@ in the consuming transaction, because both load the removal projection, and a th
 
 - the action is uninstall, the installation is managed, enabled at generation 1, and its phase is `review_required` or
   `recovery_required`; no active activation exists;
-- the installation has exactly one operation, its install, which ended `failed` or `recovery_required` with an error code and
-  no lease;
+- the installation has exactly one operation, its first-generation install, which ended
+  `recovery_required` with an error code and no lease. Stage `failed` is not admitted: an install that owns a namespace
+  always ends `recovery_required` (the resource makes its outcome unknown), so `failed` with a namespace is not
+  reachable, and the close below accepts only `recovery_required`, so the two cannot disagree;
 - every start-bearing effect of that operation (`start-candidate`, which is both the candidate and the writable candidate,
   `update-start`, `enable-start`, `restore-start`) is `reverted`. An applied start may have run; an unknown or merely
   prepared one may have, so they are refused too. This is stricter than "not applied or unknown" on purpose;
-- every other effect is settled, none lies past the start stage, and the `prepare_data` effect is applied, on this runtime
-  and epoch, with a receipt that names the installation's namespace and data format;
+- every other effect is settled, none lies past the start stage (`load_image` and `remove_image` effects included: an
+  unsettled one blocks the variant and the close alike, a settled one does not), and the `prepare_data` effect is applied,
+  on this runtime and epoch, at a fence no newer than the install operation's own, with a receipt that names the
+  installation's namespace and data format;
 - the namespace is the installation's only one and is `active`.
 
-Anything else fails closed with `errAppPlatformPlanChanged`, the error the ordinary review gives. An install whose start is
+Each condition refuses for its own reason, and an installation in `review_required` or `recovery_required` that is not
+eligible gets `errAppPlatformPlanChanged` for every cause, as before the variant existed. Anything else fails closed with
+`errAppPlatformPlanChanged`, the error the ordinary review gives. An install whose start is
 unsettled stays refused until the orphan settlement (item 39) has reverted the start; the real settlement is tested to open
 the variant. The review carries the evidence (`never_started` in the projection: the install operation, the release and the
 `prepare_data` effect id, digest, receipt digest and admitted fence), so consumption detects a change. The field is omitted

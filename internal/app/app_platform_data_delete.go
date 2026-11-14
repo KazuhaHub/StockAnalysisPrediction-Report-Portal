@@ -203,12 +203,15 @@ func (s *Server) preparePlatformDeleteDataIntent(
 			FROM app_platform_operations o
 			JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 			WHERE o.id=? AND o.installation_id=? AND o.action='install' AND o.managed=1
-			AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+			AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 			AND o.lease_until_ms IS NULL AND o.error_code IS NOT NULL`,
 			sourceOperation, expected.installationID).Scan(
 			&planRaw, &planSHA, &sourceGeneration, &completed); err != nil {
 			return zero, errAppPlatformStageEvidence
 		}
+		// The effect's fence against the install operation's own fence is compared by the evidence loader that
+		// validatePlatformAdmittedRemoval just ran (the effect cannot have been admitted at a newer fence); the
+		// admitted fence is then compared with the effect row itself below.
 		sourceFence = never.AdmittedFence
 		if sourceGeneration != 1 || sourceFence < 1 || completed > facts.now ||
 			platformDigest([]byte(planRaw)) != planSHA {

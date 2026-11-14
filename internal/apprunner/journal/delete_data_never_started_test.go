@@ -8,6 +8,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -206,5 +207,38 @@ func TestDeleteDataNeverStartedReleasesTheNamespaceReservation(t *testing.T) {
 	// A replay of the same signed command is answered from the applied row.
 	if _, replayed, err := n.s.beginDeleteData(context.Background(), raw, signature); err != nil || !replayed {
 		t.Fatalf("the applied delete-data command did not replay: %v", err)
+	}
+}
+
+// A container of the installation on another namespace, or on none, is a container the installation had: the
+// never-started binding refuses for that reason, not for the start commands or the volume.
+func TestDeleteDataNeverStartedRefusesAnyContainerOfTheInstallation(t *testing.T) {
+	for name, namespace := range map[string]any{"another_namespace": fixtureID(8840), "no_namespace": nil} {
+		t.Run(name, func(t *testing.T) {
+			n := newNeverStartedDelete(t)
+			if _, err := n.s.db.Exec(`INSERT INTO runner_resources(id,installation_id,data_namespace_id,kind,native_id,release_sha256,generation,controller_epoch,control_fence,writer_fence,desired_state,observed_state,ownership_sha256,revision,observed_ms,created_ms,updated_ms)
+				VALUES(?,?,?,'container','portal-other-container',?,1,?,2,1,'absent','absent',?,2,1,1,1)`,
+				fixtureID(8841), n.command.InstallationID, namespace, n.command.Payload.ReleaseSHA256, n.command.ControllerEpoch, n.command.PayloadSHA256); err != nil {
+				t.Fatal(err)
+			}
+			err := n.load(t, n.command)
+			if err == nil || !strings.Contains(err.Error(), "never-started container") {
+				t.Fatalf("want the container refusal, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestDeleteDataNeverStartedNamesItsReasons(t *testing.T) {
+	n := newNeverStartedDelete(t)
+	n.startCommand(t, "unknown")
+	if err := n.load(t, n.command); err == nil || !strings.Contains(err.Error(), "never-started command") {
+		t.Fatalf("want the command refusal, got: %v", err)
+	}
+	m := newNeverStartedDelete(t)
+	changed := m.command
+	changed.TargetGeneration = "3"
+	if err := m.load(t, changed); err == nil || !strings.Contains(err.Error(), "never-started volume binding") {
+		t.Fatalf("want the volume refusal, got: %v", err)
 	}
 }

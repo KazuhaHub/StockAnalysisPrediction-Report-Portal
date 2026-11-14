@@ -62,14 +62,14 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	refused := func(reason string) (platformRemovalNeverStarted, error) {
 		return zero, fmt.Errorf("never-started removal (%s): %w", reason, errAppPlatformPlanChanged)
 	}
-	rows, err := e.query(`SELECT id,review_plan_id,action,managed,source_generation,target_generation,stage,controller_epoch,error_code,completed_ms,lease_owner,lease_until_ms
+	rows, err := e.query(`SELECT id,review_plan_id,action,managed,source_generation,target_generation,stage,controller_epoch,error_code,completed_ms,lease_owner,lease_until_ms,fence
 		FROM app_platform_operations WHERE installation_id=? AND id<>?`, installation, exceptOperation)
 	if err != nil {
 		return zero, err
 	}
 	type operation struct {
 		id, plan, action, stage, epoch string
-		managed, source, target        int64
+		managed, source, target, fence int64
 		code                           sql.NullString
 		completed, until               sql.NullInt64
 		owner                          sql.NullString
@@ -77,7 +77,7 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	var operations []operation
 	for rows.Next() {
 		var o operation
-		if err := rows.Scan(&o.id, &o.plan, &o.action, &o.managed, &o.source, &o.target, &o.stage, &o.epoch, &o.code, &o.completed, &o.owner, &o.until); err != nil {
+		if err := rows.Scan(&o.id, &o.plan, &o.action, &o.managed, &o.source, &o.target, &o.stage, &o.epoch, &o.code, &o.completed, &o.owner, &o.until, &o.fence); err != nil {
 			rows.Close()
 			return zero, err
 		}
@@ -92,11 +92,16 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 		return refused("the installation has more or fewer operations than its install")
 	}
 	install := operations[0]
-	if install.action != string(appplatform.ActionInstall) || install.managed != 1 || install.source != 0 || install.target != 1 ||
-		(install.stage != string(appplatform.StageFailed) && install.stage != string(appplatform.StageRecoveryRequired)) ||
+	if install.source != 0 || install.target != 1 {
+		return refused("the install is not the first-generation install")
+	}
+	// A failed install that owns a namespace always ends recovery_required (finalizePlatformInstallForReview): the
+	// resource makes its outcome unknown. Stage failed is therefore not admitted, and the close accepts only
+	// recovery_required, so the two cannot disagree.
+	if install.action != string(appplatform.ActionInstall) || install.managed != 1 || install.stage != string(appplatform.StageRecoveryRequired) ||
 		install.epoch != epoch || !install.code.Valid || install.code.String == "" || !install.completed.Valid || install.owner.Valid || install.until.Valid ||
 		!platformValidUUID(install.id) {
-		return refused("the install did not end failed")
+		return refused("the install did not end in recovery_required")
 	}
 	var planRaw, planSHA string
 	var target sql.NullString
@@ -119,7 +124,7 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 		return zero, err
 	}
 	effects, err := e.query(`SELECT stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,state,receipt_json
-		FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`, install.id)
+		FROM app_platform_operation_effects WHERE operation_id=?`, install.id)
 	if err != nil {
 		return zero, err
 	}
@@ -145,6 +150,7 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	var prepare *effect
 	for index := range found {
 		f := found[index]
+		// Image effects count here too: an unsettled load blocks the variant, a settled one does not.
 		if f.state != "applied" && f.state != "reverted" {
 			return refused("an effect of the install is unsettled")
 		}
@@ -168,11 +174,19 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 	if prepare == nil {
 		return refused("the install has no applied prepare_data effect")
 	}
+	if prepare.fence > install.fence {
+		return refused("the prepare_data effect was admitted at a newer fence than the install")
+	}
 	receipt, err := journal.ParseDataPreparationReceipt([]byte(prepare.receipt))
 	format, formatErr := strconv.ParseInt(receipt.DataFormat, 10, 64)
-	if err != nil || formatErr != nil || receipt.Claim.EffectID != prepare.id || receipt.Claim.ResourceID != namespaceID || receipt.InstallationID != installation ||
-		receipt.PayloadSHA256 != prepare.digest || format != namespaceFormat {
-		return refused("the prepare_data receipt does not name the installation's namespace")
+	if err != nil || formatErr != nil {
+		return refused("the prepare_data receipt is not valid")
+	}
+	if receipt.Claim.ResourceID != namespaceID {
+		return refused("the prepare_data receipt names another namespace")
+	}
+	if receipt.Claim.EffectID != prepare.id || receipt.InstallationID != installation || receipt.PayloadSHA256 != prepare.digest || format != namespaceFormat {
+		return refused("the prepare_data receipt does not match its effect")
 	}
 	var namespaces, owned, active int
 	if err := e.queryRow(`SELECT
@@ -182,8 +196,14 @@ func platformLoadNeverStartedEvidence(e migExec, installation, epoch, runtimeID,
 		installation, installation, namespaceID, installation, installation, installation).Scan(&namespaces, &owned, &active); err != nil {
 		return zero, err
 	}
-	if namespaces != 1 || owned != 1 || active != 0 {
-		return refused("the namespace or the activations are not those of a never-started install")
+	if namespaces != 1 {
+		return refused("the installation has another namespace")
+	}
+	if owned != 1 {
+		return refused("the namespace is not active and owned by the installation")
+	}
+	if active != 0 {
+		return refused("an activation is active or past the first generation")
 	}
 	result = platformRemovalNeverStarted{
 		OperationID: install.id, ReleaseSHA256: target.String, EffectID: prepare.id, PayloadSHA256: prepare.digest,
@@ -301,7 +321,7 @@ func closePlatformNeverStartedInstall(e migExec, install, removal string, now in
 		return errAppPlatformStageEvidence
 	}
 	var unsettled int
-	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image') AND state IN ('prepared','unknown')`, install).Scan(&unsettled); err != nil || unsettled != 0 {
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state IN ('prepared','unknown')`, install).Scan(&unsettled); err != nil || unsettled != 0 {
 		return errAppPlatformStageEvidence
 	}
 	model, err := appplatform.OperationFromSnapshot(appplatform.OperationSnapshot{Action: appplatform.ActionInstall, Managed: managed == 1,
