@@ -2,8 +2,12 @@ package app
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
 
 // likeOp must yield the case-insensitive operator on Postgres (whose LIKE is
@@ -351,5 +355,55 @@ func TestPostgresStockFavorites(t *testing.T) {
 	}
 	if got := st.StockFavorites("favorite-pg"); len(got) != 0 {
 		t.Fatalf("favorites survived account deletion: %+v", got)
+	}
+}
+
+// The dispatch decision's queries on Postgres: the single-query producer windows must equal the
+// per-job reads they replace (concurrency 0, 1 and 3, with a row in flight), SchedulableJobs must
+// report the in-flight counts, and the full candidate set must match the per-job reference. The
+// database is shared, so the test only compares rows of its own jobs and removes them afterwards.
+func TestPostgresDispatchDecision(t *testing.T) {
+	st := pgStore(t)
+	const user = "pg_dispatch"
+	clean := func() {
+		st.exec(`DELETE FROM batch_items WHERE job_id IN (SELECT id FROM batch_jobs WHERE created_by=?)`, user)
+		st.exec(`DELETE FROM batch_jobs WHERE created_by=?`, user)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	ids, want := windowFixture(t, st, user)
+	checkQueuedItemWindows(t, st, ids, want)
+
+	now := time.Now()
+	s := &Server{st: st}
+	wantC, wantM := s.refItemCandidates(now)
+	gotC, gotM := s.itemCandidatesAt(now)
+	mine := map[int64]bool{}
+	for _, id := range ids {
+		mine[id] = true
+	}
+	keep := func(c []queue.Item, m map[int64]candMeta) ([]queue.Item, map[int64]candMeta) {
+		var oc []queue.Item
+		om := map[int64]candMeta{}
+		for _, it := range c {
+			if mine[m[it.ID].job.ID] {
+				oc = append(oc, it)
+				om[it.ID] = m[it.ID]
+			}
+		}
+		return oc, om
+	}
+	wc, wm := keep(wantC, wantM)
+	gc, gm := keep(gotC, gotM)
+	if len(wc) == 0 {
+		t.Fatal("degenerate: no candidates from the fixture jobs")
+	}
+	if !reflect.DeepEqual(wc, gc) || !reflect.DeepEqual(wm, gm) {
+		t.Fatalf("candidates differ on Postgres\nwant %+v\n got %+v", wc, gc)
+	}
+	// The queued-job view is the same on both paths too.
+	if w, g := s.refQueuedItems(now), s.queuedItemsAt(now); !reflect.DeepEqual(w, g) {
+		t.Fatalf("queuedItems differ on Postgres")
 	}
 }

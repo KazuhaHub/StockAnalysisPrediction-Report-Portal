@@ -235,6 +235,8 @@ func seedBacklog(t testing.TB, st *Store, now time.Time, jobs []backlogJob) {
 		conc := bj.concurrency
 		if conc == 0 {
 			conc = 1
+		} else if conc < 0 {
+			conc = 0 // a legacy row with no producer window; the scheduler treats it as 1
 		}
 		data := make([]map[string]string, rows)
 		for i := range data {
@@ -284,6 +286,9 @@ func mixedBacklog(n int) []backlogJob {
 			bj.runAtOffset = time.Duration(i+1) * time.Minute // future
 		case 5:
 			bj.runAtOffset = -time.Duration(i+1) * time.Minute // past
+		}
+		if i%9 == 4 {
+			bj.concurrency = -1
 		}
 		if i%11 == 0 {
 			bj.running = 1
@@ -348,6 +353,11 @@ func TestDispatchDecisionMatchesReference(t *testing.T) {
 			{user: "a", priority: "50", age: 1 * time.Hour}, {user: "b", priority: "50", age: 12 * time.Hour},
 			{user: "c", priority: "50", age: 24 * time.Hour}, {user: "d", priority: "50", age: 90 * time.Hour},
 		}, map[string]string{"batch_prio_age_hours": "36"}},
+		{"zero concurrency", []backlogJob{
+			{user: "a", priority: "50", age: time.Hour, rows: 4, concurrency: -1},
+			{user: "b", priority: "50", age: time.Hour, rows: 3, concurrency: -1, running: 1},
+			{user: "c", priority: "50", age: time.Hour, rows: 3, concurrency: 2},
+		}, nil},
 		{"custom weights and halflife", mixedBacklog(30), map[string]string{
 			"batch_prio_w_base": "700", "batch_prio_w_age": "2500", "batch_prio_w_fair": "300", "batch_prio_fair_halflife_hours": "48",
 		}},
@@ -398,43 +408,171 @@ func TestDispatchDecisionMatchesReference(t *testing.T) {
 	}
 }
 
-// admitLocked must start the same runs the reference would have chosen.
-func TestAdmitLockedStartsSameRunsAsReference(t *testing.T) {
-	now := time.Now()
+// admitAt must start exactly the runs the reference chooses.
+func TestAdmitStartsSameRunsAsReference(t *testing.T) {
+	now := dispatchNow()
 	st := newTestStore(t)
 	st.SetSetting("batch_max_concurrent_jobs", "30")
 	st.SetSetting("batch_reserved_slots", "2")
 	seedBacklog(t, st, now, mixedBacklog(40))
 	seedUsageHistory(t, st, now)
 	s := &Server{st: st}
+	release := make(chan struct{})
+	seeded := st.RunningItemCount("") // rows seeded as running have no goroutine and never finish
+	s.buildProv = func(BatchJob, func(string, string, string)) (batch.Provider, error) {
+		return blockingProv(release), nil
+	}
+	// Runs once the test is over, pass or fail: unblock the provider goroutines and let them drain
+	// so none outlives the store.
+	t.Cleanup(func() {
+		close(release)
+		deadline := time.Now().Add(5 * time.Second)
+		for st.RunningItemCount("") > seeded && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+	})
+
+	runningIDs := func() map[int64]bool {
+		out := map[int64]bool{}
+		for _, j := range st.SchedulableJobs() {
+			for _, it := range st.BatchJobItems(j.ID) {
+				if it.Status == "running" {
+					out[it.ID] = true
+				}
+			}
+		}
+		return out
+	}
+	before := runningIDs()
 	wantC, _ := s.refItemCandidates(now)
 	want := map[int64]bool{}
 	for _, it := range queue.Admit(wantC, st.RunningItemCount(""), queue.Plan{Budget: 30, Reserved: 2}) {
 		want[it.ID] = true
 	}
-	release := make(chan struct{})
-	s.buildProv = func(BatchJob, func(string, string, string)) (batch.Provider, error) {
-		return blockingProv(release), nil
-	}
-	s.admitLocked()
-	defer close(release)
-	got := map[int64]bool{}
-	for _, j := range st.SchedulableJobs() {
-		for _, it := range st.BatchJobItems(j.ID) {
-			if it.Status == "running" {
-				got[it.ID] = true
-			}
-		}
-	}
-	// Rows seeded as running before admission are not part of the choice.
-	for id := range want {
-		if !got[id] {
-			t.Fatalf("reference admits run %d but admitLocked did not (running=%v)", id, got)
-		}
-	}
 	if len(want) == 0 {
 		t.Fatal("degenerate: reference admitted nothing")
 	}
+	s.admitAt(now)
+	got := map[int64]bool{}
+	for id := range runningIDs() {
+		if !before[id] {
+			got[id] = true
+		}
+	}
+	if !reflect.DeepEqual(want, got) {
+		t.Fatalf("admitted runs differ\nwant %v\n got %v", want, got)
+	}
+}
+
+// ---------- window query ----------
+
+// windowFixture seeds jobs that pin down exactly which rows QueuedItemWindows returns, and returns
+// the expected row ids per job (by position). user scopes the rows on a shared database.
+func windowFixture(t testing.TB, st *Store, user string) (jobIDs []int64, want map[int64][]int64) {
+	t.Helper()
+	tgt := seedDispatchTarget(t, st)
+	want = map[int64][]int64{}
+	mk := func(conc, rows int, status string, running int, wantQueued int) {
+		data := make([]map[string]string, rows)
+		for i := range data {
+			data[i] = map[string]string{"x": fmt.Sprint(i)}
+		}
+		id, err := st.CreateBatchJob(tgt, conc, 0, user, data, "50")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if status != "queued" {
+			if _, err := st.exec(`UPDATE batch_jobs SET status=? WHERE id=?`, status, id); err != nil {
+				t.Fatal(err)
+			}
+		}
+		items := st.BatchJobItems(id)
+		for i := 0; i < running; i++ {
+			if !st.MarkItemRunning(items[i].ID) {
+				t.Fatal("MarkItemRunning")
+			}
+		}
+		if wantQueued > 0 {
+			for _, it := range items[running : running+wantQueued] {
+				want[id] = append(want[id], it.ID)
+			}
+		}
+		jobIDs = append(jobIDs, id)
+	}
+	mk(0, 4, "queued", 0, 1)     // legacy zero concurrency: window 1
+	mk(1, 4, "queued", 0, 1)     // window 1
+	mk(3, 5, "queued", 0, 3)     // window 3 of 5
+	mk(3, 2, "queued", 0, 2)     // fewer rows than the window
+	mk(3, 5, "running", 1, 3)    // a running job with one row in flight: window counts queued rows
+	mk(2, 3, "finished", 0, 0)   // not schedulable
+	mk(2, 3, "cancelling", 0, 0) // not schedulable
+	mk(2, 3, "cancelled", 0, 0)  // not schedulable
+	mk(2, 2, "running", 2, 0)    // nothing queued
+	return jobIDs, want
+}
+
+// checkQueuedItemWindows asserts the exact rows (and so the exact count) QueuedItemWindows returns
+// for the fixture jobs, that they equal the first window rows of the per-job QueuedItems, and that
+// SchedulableJobs reports the in-flight counts the window logic relies on.
+func checkQueuedItemWindows(t testing.TB, st *Store, jobIDs []int64, want map[int64][]int64) {
+	t.Helper()
+	got, err := st.QueuedItemWindows()
+	if err != nil {
+		t.Fatalf("QueuedItemWindows: %v", err)
+	}
+	for _, id := range jobIDs {
+		var ids []int64
+		for _, it := range got[id] {
+			ids = append(ids, it.ID)
+		}
+		if !reflect.DeepEqual(ids, want[id]) && !(len(ids) == 0 && len(want[id]) == 0) {
+			t.Errorf("job %d: window rows = %v, want %v", id, ids, want[id])
+		}
+		// Equal to the per-job read, truncated to the producer window.
+		per, err := st.QueuedItems(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := len(want[id]); n > len(per) {
+			t.Fatalf("job %d: fixture wants %d rows, only %d queued", id, n, len(per))
+		} else if n > 0 {
+			for i, it := range per[:n] {
+				if got[id][i].ID != it.ID || got[id][i].RowIndex != it.RowIndex || !reflect.DeepEqual(got[id][i].Inputs, it.Inputs) {
+					t.Errorf("job %d row %d: window %+v != per-job %+v", id, i, got[id][i], it)
+				}
+			}
+		}
+	}
+	// SchedulableJobs: only queued/running jobs, with the running count.
+	sched := map[int64]BatchJob{}
+	for _, j := range st.SchedulableJobs() {
+		sched[j.ID] = j
+	}
+	for _, id := range jobIDs {
+		j, ok := sched[id]
+		job, _ := st.GetBatchJob(id)
+		switch job.Status {
+		case "queued", "running":
+			if !ok {
+				t.Errorf("job %d (%s) missing from SchedulableJobs", id, job.Status)
+				continue
+			}
+			_, running, _, _, _, _ := st.LiveJobCounts(id)
+			if j.runningItems != running {
+				t.Errorf("job %d runningItems = %d, want %d", id, j.runningItems, running)
+			}
+		default:
+			if ok {
+				t.Errorf("job %d (%s) must not be schedulable", id, job.Status)
+			}
+		}
+	}
+}
+
+func TestQueuedItemWindowsReturnsExactlyTheWindow(t *testing.T) {
+	st := newTestStore(t)
+	ids, want := windowFixture(t, st, "win")
+	checkQueuedItemWindows(t, st, ids, want)
 }
 
 // ---------- query count ----------
@@ -446,8 +584,6 @@ func decisionQueries(t *testing.T, jobs int, ref bool) (queued, cands int64) {
 	seedBacklog(t, st, now, mixedBacklog(jobs))
 	seedUsageHistory(t, st, now)
 	s := &Server{st: st}
-	var settingReads atomic.Int64
-	st.onSettingRead = func(string) { settingReads.Add(1) }
 
 	before := counter.n.Load()
 	if ref {
@@ -484,6 +620,31 @@ func TestDispatchDecisionQueryCountIsConstant(t *testing.T) {
 		t.Logf("reference at 200 jobs: queuedItems=%d itemCandidates=%d", rq, rc)
 	}
 	t.Logf("queries per decision: queuedItems=%d itemCandidates=%d", baseQ, baseC)
+}
+
+// The age-saturation setting is read once per decision, however many jobs are waiting.
+func TestDispatchDecisionReadsAgeSettingOnce(t *testing.T) {
+	now := dispatchNow()
+	st := newTestStore(t)
+	seedBacklog(t, st, now, mixedBacklog(50))
+	s := &Server{st: st}
+	reads := map[string]int{}
+	st.onSettingRead = func(k string) { reads[k]++ }
+	for name, run := range map[string]func(){
+		"queuedItems":    func() { s.queuedItemsAt(now) },
+		"itemCandidates": func() { s.itemCandidatesAt(now) },
+	} {
+		clear(reads)
+		run()
+		if reads["batch_prio_age_hours"] != 1 {
+			t.Errorf("%s read batch_prio_age_hours %d times, want 1 (reads: %v)", name, reads["batch_prio_age_hours"], reads)
+		}
+	}
+	clear(reads)
+	s.refQueuedItems(now)
+	if reads["batch_prio_age_hours"] <= 1 {
+		t.Errorf("reference read the setting %d times: the check cannot see per-job reads", reads["batch_prio_age_hours"])
+	}
 }
 
 // ---------- benchmarks ----------

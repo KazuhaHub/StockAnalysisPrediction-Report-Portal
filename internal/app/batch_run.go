@@ -385,14 +385,10 @@ func (s *Server) userUsage(now time.Time) map[string]float64 {
 	return usage
 }
 
-// jobFactors computes a queued job's normalized priority factors at `now`. usage is the
-// precomputed decayed-usage map (see userUsage); an absent user has usage 0 → fair 1.
-func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64) queue.Factors {
-	return jobFactorsWith(j, now, usage, s.prioAgeHours())
-}
-
-// jobFactorsWith is jobFactors with the age-saturation setting already resolved, so a decision
-// over many jobs reads that setting once instead of once per job.
+// jobFactorsWith computes a queued job's normalized priority factors at `now`. usage is the
+// precomputed decayed-usage map (see userUsage); an absent user has usage 0 → fair 1. ageHours is
+// the age-saturation setting, resolved once by the caller so a decision over many jobs reads it
+// once instead of once per job.
 func jobFactorsWith(j BatchJob, now time.Time, usage map[string]float64, ageHours float64) queue.Factors {
 	base, urgent, idle := parsePriority(j.Priority)
 	// A 定时 job "arrives" at its run_at, so it ages from then — not from when it was
@@ -535,13 +531,16 @@ type candMeta struct {
 
 // admitLocked is the body of scheduleTick; the caller holds schedMu. It fills the free
 // slots (budget − running runs) with the highest-priority runnable runs and starts them.
-func (s *Server) admitLocked() {
+func (s *Server) admitLocked() { s.admitAt(time.Now()) }
+
+// admitAt is admitLocked with the decision evaluated at an explicit instant.
+func (s *Server) admitAt(now time.Time) {
 	budget := s.batchBudget()
 	running := s.st.RunningItemCount("")
 	if budget-running <= 0 {
 		return
 	}
-	cands, meta := s.itemCandidates()
+	cands, meta := s.itemCandidatesAt(now)
 	if len(cands) == 0 {
 		return
 	}
@@ -571,15 +570,17 @@ func (s *Server) itemCandidatesAt(now time.Time) ([]queue.Item, map[int64]candMe
 	w := s.prioWeights()
 	usage := s.userUsage(now)
 	ageHours := s.prioAgeHours()
-	// One query for every job's in-flight window of queued rows, instead of one per job: the
-	// cost of a decision must not grow with the backlog.
+	// Snapshot order matches the per-job reads this replaced: the job list first, then the rows.
+	// One query fetches every job's in-flight window of queued rows, instead of one per job, so
+	// the cost of a decision does not grow with the backlog.
+	jobs := s.st.SchedulableJobs()
 	windows, err := s.st.QueuedItemWindows()
 	if err != nil {
 		return nil, map[int64]candMeta{}
 	}
 	var cands []queue.Item
 	meta := map[int64]candMeta{}
-	for _, j := range s.st.SchedulableJobs() {
+	for _, j := range jobs {
 		if !runAtDue(j.RunAt, now) {
 			continue // a not-yet-due scheduled job contributes no runs
 		}

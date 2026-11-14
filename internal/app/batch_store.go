@@ -151,13 +151,16 @@ func (s *Store) QueuedItems(jobID int64) ([]batch.Item, error) {
 // exactly what QueuedItems(jobID) would yield for the scheduler's purposes, without one round
 // trip per job.
 func (s *Store) QueuedItemWindows() (map[int64][]batch.Item, error) {
-	rows, err := s.query(`SELECT t.id, t.job_id, t.row_index, t.inputs FROM (
-			SELECT i.id AS id, i.job_id AS job_id, i.row_index AS row_index, i.inputs AS inputs,
-				ROW_NUMBER() OVER (PARTITION BY i.job_id ORDER BY i.row_index, i.id) AS rn,
+	// The window is chosen over (id, job_id, row_index) only; the wide inputs column is joined
+	// back for the surviving rows, so it is never carried through the sort.
+	rows, err := s.query(`SELECT i.id, t.job_id, i.row_index, i.inputs FROM (
+			SELECT x.id AS id, x.job_id AS job_id,
+				ROW_NUMBER() OVER (PARTITION BY x.job_id ORDER BY x.row_index, x.id) AS rn,
 				CASE WHEN b.concurrency < 1 THEN 1 ELSE b.concurrency END AS win
-			FROM batch_items i JOIN batch_jobs b ON b.id=i.job_id
-			WHERE i.status='queued' AND b.status IN ('queued','running')
-		) t WHERE t.rn <= t.win ORDER BY t.job_id, t.rn`)
+			FROM batch_items x JOIN batch_jobs b ON b.id=x.job_id
+			WHERE x.status='queued' AND b.status IN ('queued','running')
+		) t JOIN batch_items i ON i.id=t.id
+		WHERE t.rn <= t.win ORDER BY t.job_id, t.rn`)
 	if err != nil {
 		return nil, err
 	}
