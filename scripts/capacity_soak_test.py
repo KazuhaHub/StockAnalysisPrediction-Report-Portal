@@ -122,52 +122,166 @@ class SamplerTests(unittest.TestCase):
         self.assertEqual(sample["docker_log_bytes"], 2 * 1500)
 
 
-def backend_status(index, **changes):
-    status = {"installation": f"installation-{index}", "answered": True, "held_bytes": 350 * 1024 ** 2, "threads": 40, "burners": 1,
-              "log_bytes": 900000, "storage_bytes": 256 * 1024 ** 2, "storage_full": 2, "data_present": True, "requests": 10}
+
+class CgroupSampleTests(unittest.TestCase):
+    def test_sample_records_each_backends_own_cgroup_counters(self):
+        full = "f" * 64
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            scope = root / "cg" / f"docker-{full}.scope"
+            scope.mkdir(parents=True)
+            for name, text in {"cpu.stat": "usage_usec 5000000\nuser_usec 1\n", "memory.current": "400000000\n", "memory.max": "521142272\n",
+                               "cpu.max": "24600 100000\n", "pids.current": "58\n", "pids.max": "64\n", "memory.peak": "410000000\n",
+                               "pids.peak": "60\n"}.items():
+                (scope / name).write_text(text)
+            proc = root / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "stat").write_text("cpu  100 0 100 700 100 0 0 0 0 0\n")
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            (root / "mount").mkdir()
+
+            def run(*args):
+                if args[:2] == ("docker", "ps"):
+                    return "aaa\n"
+                if args[:2] == ("docker", "inspect"):
+                    return json.dumps({"Id": full, "State": {"Running": True}, "RestartCount": 0})
+                return json.dumps({"ID": "aaa", "MemUsage": "400MiB / 497MiB", "CPUPerc": "20.00%", "PIDs": "58"})
+
+            sampler = soak.Sampler(run=run, proc=proc, mountpoint=root / "mount", image_id="sha256:" + "b" * 64, clock=lambda: 1000.0,
+                                   cgroup_root=root / "cg")
+            rows = sampler.sample()["backends"]["per_backend"]
+        self.assertEqual(rows, [{"id": "aaa", "usage_usec": 5000000, "memory_current": 400000000, "memory_max": 521142272,
+                                 "cpu_quota_millis": 246.0, "pids_current": 58, "pids_max": 64, "memory_peak": 410000000, "pids_peak": 60}])
+
+    def test_cgroup_limit_and_cpu_max_parsers(self):
+        self.assertEqual(soak.parse_cgroup_number("64\n"), 64)
+        self.assertIsNone(soak.parse_cgroup_number("max\n"))
+        self.assertEqual(soak.parse_cpu_max_millis("24600 100000\n"), 246.0)
+        self.assertEqual(soak.parse_cpu_max_millis("200000 100000"), 2000.0)
+        self.assertIsNone(soak.parse_cpu_max_millis("max 100000"))
+
+    def test_a_failed_host_sample_is_recorded_as_an_error_row_and_counted(self):
+        class Flaky:
+            calls = 0
+
+            def sample(self):
+                Flaky.calls += 1
+                if Flaky.calls == 2:
+                    raise RuntimeError("docker stats timed out")
+                return {"at_ms": Flaky.calls}
+
+        import threading
+        stop = threading.Event()
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "samples.jsonl"
+            original = Flaky.sample
+
+            def sample_then_stop(self):
+                try:
+                    return original(self)
+                finally:
+                    if Flaky.calls >= 3:
+                        stop.set()
+
+            Flaky.sample = sample_then_stop
+            samples, failed = soak.sampling_loop(Flaky(), stop, path, interval=0)
+            rows = [json.loads(line) for line in path.read_text().splitlines()]
+        self.assertEqual((len(samples), failed), (2, 1))
+        self.assertEqual([("error" in r) for r in rows], [False, True, False])
+
+
+LIMIT_MIB = 497
+PERIOD_MS = 60_000
+LOAD_START_MS = 1_000_000
+
+
+def backend_status(index, window=1, **changes):
+    status = {"installation": f"installation-{index}", "answered": True, "held_bytes": int(0.85 * LIMIT_MIB) * 1024 ** 2, "threads": 40,
+              "burners": 1, "log_bytes": 900000 + window * 60_000_000, "storage_bytes": 256 * 1024 ** 2, "storage_full": 2,
+              "data_present": True, "requests": 10 + window * 40}
     status.update(changes)
     return status
 
 
-def child_evidence(windows=3, home=1000, report=2000, dispatch=300, flood_ok=100):
-    window = lambda m, scale: {
-        "minute": m, "at_ms": 1000 * m,
-        "home": {"count": 100, "p50_us": 1, "p95_us": int(home * scale), "max_us": 5},
-        "report": {"count": 100, "p50_us": 1, "p95_us": int(report * scale), "max_us": 5},
-        "dispatch": {"count": 100, "p50_us": 1, "p95_us": int(dispatch * scale), "max_us": 5},
-        "flood": {"backend_requests": 100, "backend_requests_ok": flood_ok, "backend_request_errors": 100 - flood_ok, "task_refusals": 5},
-        "backends": [backend_status(i) for i in range(8)],
-    }
+def stats(p95, count=100):
+    return {"count": count, "p50_us": 1, "p95_us": p95, "max_us": 5}
+
+
+def flood(answered=600, busy=7000, errors=0, alive=True, heartbeat_age_ms=1500, classes=None):
+    return {"backend_requests": answered + busy + errors, "backend_requests_ok": answered, "backend_requests_busy": busy,
+            "backend_request_errors": errors, "flood_alive": alive, "heartbeat_age_ms": heartbeat_age_ms,
+            "classes": classes if classes is not None else {"200": answered, "429:app_platform_busy": busy}}
+
+
+def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, flood_ok=100):
+    def window(m, scale):
+        return {
+            "minute": m, "at_ms": LOAD_START_MS + PERIOD_MS * m, "started_ms": LOAD_START_MS + PERIOD_MS * (m - 1),
+            "ended_ms": LOAD_START_MS + PERIOD_MS * m,
+            "home": stats(int(home * scale)), "report": stats(int(report * scale)), "dispatch": stats(int(dispatch * scale)),
+            "batch_start": stats(int(batch * scale), 20),
+            "flood": flood(answered=flood_ok),
+            "backends": [backend_status(i, window=m) for i in range(8)],
+        }
     return {
         "format": "portal.capacity-soak.child/1-dev.1",
         "budgets": {"memory_mib": 3993, "cpu_millis": 2000, "disk_bytes": 8 << 30, "image_store_bytes": 10 << 30, "running_backends": 8},
-        "sizing": {"MemoryMiB": 497, "CPUMillis": 246},
-        "probes": [{"name": name, "expected": "x", "observed": "x", "passed": True, "native": True,
+        "sizing": {"MemoryMiB": LIMIT_MIB, "CPUMillis": 246},
+        "probes": [{"name": name, "expected": "x", "observed": "x", "passed": True, "level": "native",
                     **({"retired": "managed_uninstall"} if name in soak.RETIRED_PROBES else {})} for name in soak.REQUIRED_PROBES]
-                  + [{"name": "task_over_application_quota", "expected": "y", "observed": "y", "passed": True, "native": False}],
-        "idle": window(0, 1.0),
+                  + [{"name": "task_over_application_quota", "expected": "task_capacity", "observed": None, "passed": None, "level": "unit",
+                      "tests": ["TestTaskQuotasRefuseAtTheirOwnBoundary"]}],
+        "idle": {**window(0, 1.0)},
         "loaded": {series: {"count": 100 * windows, "p50_us": 1, "p95_us": int(base * 1.2), "max_us": 9}
-                   for series, base in (("home", home), ("report", report), ("dispatch", dispatch), ("dispatch_shallow", dispatch))},
+                   for series, base in (("home", home), ("report", report), ("dispatch", dispatch), ("dispatch_shallow", dispatch), ("batch_start", batch))},
         "windows": [window(m, 1.2) for m in range(1, windows + 1)],
-        "load_started_ms": 500, "load_finished_ms": 1000 * (windows + 1), "duration_minutes": windows,
+        "load_started_ms": LOAD_START_MS, "load_finished_ms": LOAD_START_MS + PERIOD_MS * windows, "duration_minutes": windows,
+        "session_expires_ms": LOAD_START_MS + PERIOD_MS * windows + 3_600_000,
         "markers": ["load_finished"],
     }
 
 
-def backend_sample(at_ms, mem_mib=3900, cpu=1900.0, running=8, total=8, oom=0, restarts=0):
-    return {"at_ms": at_ms, "mem_total_kib": 1, "mem_available_kib": 1,
-            "backends": {"total": total, "running": running, "oom_killed": oom, "restarting": 0, "exited": total - running,
-                         "restart_count": restarts, "memory_bytes": mem_mib * 1024 ** 2, "cpu_millis": cpu, "pids": 400}}
+CPU_QUOTA_MILLIS = 246
+PIDS_MAX = 64
+
+
+def per_backend(index, at_ms, usage_usec, mem_fraction=0.9, pids=58, quota=CPU_QUOTA_MILLIS):
+    return {"id": f"container-{index}", "usage_usec": usage_usec, "memory_current": int(mem_fraction * LIMIT_MIB * 1024 ** 2),
+            "memory_max": LIMIT_MIB * 1024 ** 2, "cpu_quota_millis": quota, "pids_current": pids, "pids_max": PIDS_MAX}
+
+
+def backend_sample(at_ms, mem_mib=3900, cpu=1900.0, running=8, total=8, oom=0, restarts=0, usage_fraction=0.95, mem_fraction=0.9, pids=58,
+                   available_kib=12_000_000, detail=True):
+    """One host sample. usage_usec counts from LOAD_START_MS so a backend at usage_fraction burns that share of its quota."""
+    seconds = (at_ms - LOAD_START_MS) / 1000.0
+    usage = int(max(seconds, 0) * CPU_QUOTA_MILLIS * usage_fraction * 1000.0)
+    sample = {"at_ms": at_ms, "mem_total_kib": 16_380_000, "mem_available_kib": available_kib,
+              "backends": {"total": total, "running": running, "oom_killed": oom, "restarting": 0, "exited": total - running,
+                           "restart_count": restarts, "memory_bytes": mem_mib * 1024 ** 2, "cpu_millis": cpu, "pids": 400}}
+    if detail:
+        sample["backends"]["per_backend"] = [per_backend(i, at_ms, usage, mem_fraction=mem_fraction, pids=pids) for i in range(8)]
+    return sample
+
+
+def load_samples(windows, step_ms=30_000, **changes):
+    """Samples every step from one step before the load to its end: enough pairs for every window."""
+    end = LOAD_START_MS + PERIOD_MS * windows
+    return [backend_sample(at, **changes) for at in range(LOAD_START_MS - step_ms, end + 1, step_ms)]
 
 
 class EvaluateTests(unittest.TestCase):
-    def verdict(self, evidence=None, samples=None, minutes=3, exit_ok=True):
+    def verdict(self, evidence=None, samples=None, minutes=3, exit_ok=True, **kwargs):
         evidence = evidence or child_evidence(minutes)
-        samples = samples if samples is not None else [backend_sample(1000 * m + 600) for m in range(1, minutes + 1)]
-        return soak.evaluate(evidence, samples, parent_passed=exit_ok)
+        samples = samples if samples is not None else load_samples(minutes)
+        kwargs.setdefault("unit_tests", {"TestTaskQuotasRefuseAtTheirOwnBoundary": True})
+        return soak.evaluate(evidence, samples, parent_passed=exit_ok, **kwargs)
 
     def failing(self, verdict):
         return {c["name"] for c in verdict["checks"] if not c["passed"]}
+
+    def check(self, verdict, name):
+        return next(c for c in verdict["checks"] if c["name"] == name)
 
     def test_a_clean_run_passes(self):
         verdict = self.verdict()
@@ -191,7 +305,8 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(self.failing(self.verdict(evidence)), {"home_p95_within_threshold_of_idle"})
 
     def test_each_latency_series_is_judged_on_its_own_pooled_p95(self):
-        for series, check in (("report", "report_p95_within_threshold_of_idle"), ("dispatch", "dispatch_within_threshold_of_idle")):
+        for series, check in (("report", "report_p95_within_threshold_of_idle"), ("dispatch", "dispatch_within_threshold_of_idle"),
+                              ("batch_start", "batch_start_within_threshold_of_idle")):
             evidence = child_evidence()
             evidence["loaded"][series]["p95_us"] = soak.latency_threshold_us(evidence["idle"][series]["p95_us"]) + 1
             self.assertEqual(self.failing(self.verdict(evidence)), {check})
@@ -203,7 +318,7 @@ class EvaluateTests(unittest.TestCase):
         evidence["windows"][3]["home"]["p95_us"] = threshold + 1
         verdict = self.verdict(evidence, minutes=4)
         self.assertTrue(verdict["passed"], verdict)
-        detail = next(c for c in verdict["checks"] if c["name"] == "home_p95_within_threshold_of_idle")["detail"]
+        detail = self.check(verdict, "home_p95_within_threshold_of_idle")["detail"]
         self.assertEqual(detail["windows_over_the_threshold"], [2, 4])
         self.assertEqual(detail["windows_over_count"], 2)
         self.assertEqual(detail["worst_window"], {"minute": 2, "p95_us": threshold + 4000})
@@ -214,7 +329,7 @@ class EvaluateTests(unittest.TestCase):
         evidence = child_evidence()
         evidence["loaded"]["report"]["p95_us"] = soak.latency_threshold_us(evidence["idle"]["report"]["p95_us"]) + 1
         verdict = self.verdict(evidence)
-        detail = next(c for c in verdict["checks"] if c["name"] == "report_p95_within_threshold_of_idle")["detail"]
+        detail = self.check(verdict, "report_p95_within_threshold_of_idle")["detail"]
         self.assertEqual(detail["windows_over_count"], 0)
         self.assertIn("report_p95_within_threshold_of_idle", self.failing(verdict))
 
@@ -228,37 +343,63 @@ class EvaluateTests(unittest.TestCase):
         evidence = child_evidence(windows=3)
         verdict = self.verdict(evidence, minutes=3)
         text = soak.render_summary(evidence, verdict)
-        for series in ("home", "report", "dispatch"):
+        for series in ("home", "report", "dispatch", "batch_start"):
             self.assertIn(f"### {series}", text)
-        self.assertEqual(text.count("| 1 |"), 3)  # minute 1 appears once in each series table
-        self.assertEqual(text.count("| 3 |"), 3)
+        self.assertEqual(text.count("| 1 |"), 4)  # minute 1 appears once in each series table
+        self.assertEqual(text.count("| 3 |"), 4)
         self.assertIn("pooled", text)
 
     def test_the_effective_threshold_of_every_window_is_recorded(self):
         verdict = self.verdict()
-        check = next(c for c in verdict["checks"] if c["name"] == "home_p95_within_threshold_of_idle")
-        rows = check["detail"]["window_thresholds"]
+        rows = self.check(verdict, "home_p95_within_threshold_of_idle")["detail"]["window_thresholds"]
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows[0], {"minute": 1, "p95_us": 1200, "threshold_us": 6000, "passed": True})
 
     def test_summed_backend_memory_and_cpu_must_stay_inside_the_budgets(self):
-        over_memory = [backend_sample(1600, mem_mib=3994)]
+        samples = load_samples(3)
+        over_memory = [dict(s) for s in samples]
+        over_memory[2] = backend_sample(samples[2]["at_ms"], mem_mib=3994)
         self.assertEqual(self.failing(self.verdict(samples=over_memory)), {"backend_memory_within_budget"})
-        over_cpu = [backend_sample(1600, cpu=2000.5)]
+        over_cpu = [dict(s) for s in samples]
+        over_cpu[2] = backend_sample(samples[2]["at_ms"], cpu=2000.5)
         self.assertEqual(self.failing(self.verdict(samples=over_cpu)), {"backend_cpu_within_budget"})
-        exact = [backend_sample(1600, mem_mib=3993, cpu=2000.0)]
+        exact = [dict(s) for s in samples]
+        exact[2] = backend_sample(samples[2]["at_ms"], mem_mib=3993, cpu=2000.0)
         self.assertTrue(self.verdict(samples=exact)["passed"])
 
     def test_samples_outside_the_load_do_not_count(self):
-        before_load = [backend_sample(100, mem_mib=9999, cpu=9999.0), backend_sample(1600)]
+        before_load = [backend_sample(100, mem_mib=9999, cpu=9999.0)] + load_samples(3)
         self.assertTrue(self.verdict(samples=before_load)["passed"])
 
     def test_a_missing_exited_oom_or_restarted_backend_is_a_crash(self):
-        for sample in (backend_sample(1600, running=7), backend_sample(1600, oom=1), backend_sample(1600, restarts=1)):
-            self.assertIn("no_backend_crash", self.failing(self.verdict(samples=[sample])))
+        for changes in ({"running": 7}, {"oom": 1}, {"restarts": 1}):
+            samples = load_samples(3)
+            samples[3] = backend_sample(samples[3]["at_ms"], **changes)
+            self.assertIn("no_backend_crash", self.failing(self.verdict(samples=samples)), changes)
 
     def test_no_samples_during_the_load_is_a_failure_not_a_pass(self):
         self.assertIn("host_samples_cover_the_load", self.failing(self.verdict(samples=[])))
+
+    def test_at_least_ninety_percent_of_the_expected_host_samples_must_exist_and_failed_ones_are_counted(self):
+        # Three minutes of load at a thirty-second interval expect six samples; ninety percent of that is six (rounded up).
+        samples = [s for s in load_samples(3) if LOAD_START_MS < s["at_ms"] <= LOAD_START_MS + 3 * PERIOD_MS]
+        self.assertEqual(len(samples), 6)
+        verdict = self.verdict(samples=load_samples(3))
+        detail = self.check(verdict, "host_samples_cover_the_load")["detail"]
+        self.assertEqual((detail["expected"], detail["required"]), (6, 6))
+        short = [s for s in load_samples(3) if s["at_ms"] != LOAD_START_MS + 2 * PERIOD_MS]
+        self.assertIn("host_samples_cover_the_load", self.failing(self.verdict(samples=short)))
+        failed = self.verdict(samples=load_samples(3), failed_samples=1)
+        self.assertIn("host_samples_cover_the_load", self.failing(failed))
+        self.assertEqual(self.check(failed, "host_samples_cover_the_load")["detail"]["failed_samples"], 1)
+
+    def test_host_free_memory_is_judged_and_recorded(self):
+        samples = load_samples(3)
+        samples[4] = backend_sample(samples[4]["at_ms"], available_kib=1_500_000)  # 9.2% of 16.38 GB
+        verdict = self.verdict(samples=samples)
+        self.assertEqual(self.failing(verdict), {"host_memory_headroom"})
+        self.assertEqual(self.check(verdict, "host_memory_headroom")["detail"]["lowest_available_kib"], 1_500_000)
+        self.assertEqual(self.check(self.verdict(), "host_memory_headroom")["detail"]["lowest_available_kib"], 12_000_000)
 
     def test_a_required_probe_that_never_ran_fails(self):
         evidence = child_evidence()
@@ -275,12 +416,32 @@ class EvaluateTests(unittest.TestCase):
                 probe["retired"] = retired
             self.assertEqual(self.failing(self.verdict(evidence)), {"probes_retired_through_the_managed_uninstall"}, retired)
 
-    def test_an_unrefused_probe_fails_and_unit_level_probes_are_listed(self):
+    def test_an_unrefused_native_probe_fails(self):
         evidence = child_evidence()
         evidence["probes"][0].update(observed="capacity_exhausted_disk", passed=False)
         verdict = self.verdict(evidence)
         self.assertIn("every_excess_request_refused_with_its_typed_error", self.failing(verdict))
-        self.assertEqual(verdict["unit_level_probes"], ["task_over_application_quota"])
+
+    def test_unit_level_probes_are_reported_separately_with_no_observation_and_judged_on_their_tests(self):
+        verdict = self.verdict()
+        self.assertEqual(verdict["unit_level_probes"], [{"name": "task_over_application_quota", "tests": ["TestTaskQuotasRefuseAtTheirOwnBoundary"],
+                                                          "tests_passed": True}])
+        # A unit probe has no observation, and its absence does not fail the native refusal check.
+        self.assertNotIn("every_excess_request_refused_with_its_typed_error", self.failing(verdict))
+        # Its test must have been run in this job and passed.
+        for unit_tests in ({}, {"TestTaskQuotasRefuseAtTheirOwnBoundary": False}, None):
+            kwargs = {} if unit_tests is None else {"unit_tests": unit_tests}
+            evidence = child_evidence()
+            verdict = soak.evaluate(evidence, load_samples(3), parent_passed=True, **kwargs)
+            self.assertIn("unit_level_probe_tests_passed", self.failing(verdict), unit_tests)
+
+    def test_a_unit_probe_may_not_claim_an_observation_or_come_without_tests(self):
+        evidence = child_evidence()
+        evidence["probes"][-1]["observed"] = "task_capacity"
+        self.assertIn("unit_level_probe_tests_passed", self.failing(self.verdict(evidence)))
+        evidence = child_evidence()
+        evidence["probes"][-1]["tests"] = []
+        self.assertIn("unit_level_probe_tests_passed", self.failing(self.verdict(evidence)))
 
     def test_a_parent_failure_or_missing_load_marker_fails(self):
         self.assertIn("no_runner_crash", self.failing(self.verdict(exit_ok=False)))
@@ -298,13 +459,58 @@ class EvaluateTests(unittest.TestCase):
         evidence["duration_minutes"] = 10
         self.assertIn("one_measurement_window_per_minute", self.failing(self.verdict(evidence)))
 
+    def test_the_session_must_outlive_the_run(self):
+        evidence = child_evidence()
+        evidence["session_expires_ms"] = evidence["load_finished_ms"] - 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"session_outlives_the_run"})
+        del evidence["session_expires_ms"]
+        self.assertIn("session_outlives_the_run", self.failing(self.verdict(evidence)))
+
+    def test_a_flood_that_dies_after_the_first_minute_fails_even_though_it_answered_once(self):
+        evidence = child_evidence(windows=4)
+        for window in evidence["windows"][1:]:
+            window["flood"] = flood(answered=0, busy=0, alive=False, heartbeat_age_ms=600_000, classes={})
+        failed = self.failing(self.verdict(evidence, minutes=4))
+        self.assertIn("message_flood_answered_in_every_window", failed)
+        self.assertIn("message_flood_alive_throughout", failed)
+
+    def test_every_window_needs_the_minimum_of_answered_requests(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["flood"] = flood(answered=soak.FLOOD_MIN_ANSWERED_PER_WINDOW - 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"message_flood_answered_in_every_window"})
+        detail = self.check(verdict, "message_flood_answered_in_every_window")["detail"]
+        self.assertEqual(detail["windows_below_the_minimum"], [2])
+        evidence["windows"][1]["flood"] = flood(answered=soak.FLOOD_MIN_ANSWERED_PER_WINDOW)
+        self.assertTrue(self.verdict(evidence)["passed"])
+
+    def test_busy_refusals_are_typed_and_any_server_error_or_untyped_failure_fails(self):
+        evidence = child_evidence(flood_ok=600)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        detail = self.check(self.verdict(evidence), "message_flood_answered_in_every_window")["detail"]
+        self.assertEqual(detail["answered"], 1800)
+        self.assertEqual(detail["busy_refusals"], 21000)
+        for classes in ({"200": 600, "429:app_platform_busy": 7000, "502:app_platform_unavailable": 3},
+                        {"200": 600, "transport": 2}, {"200": 600, "429:": 4}, {"200": 600, "500:": 1}):
+            evidence = child_evidence()
+            evidence["windows"][2]["flood"] = flood(classes=classes)
+            verdict = self.verdict(evidence)
+            self.assertIn("message_flood_refusals_are_typed", self.failing(verdict), classes)
+            self.assertEqual(self.check(verdict, "message_flood_refusals_are_typed")["detail"]["classes_by_window"][2], classes)
+
+    def test_a_late_heartbeat_or_a_dead_flood_process_fails_the_liveness_check(self):
+        for change in ({"alive": False}, {"heartbeat_age_ms": soak.FLOOD_HEARTBEAT_MAX_AGE_MS + 1}):
+            evidence = child_evidence()
+            evidence["windows"][2]["flood"] = flood(**change)
+            self.assertEqual(self.failing(self.verdict(evidence)), {"message_flood_alive_throughout"}, change)
+
     def test_every_backend_must_show_it_ran_each_of_its_loads(self):
         for change in ({"answered": False}, {"held_bytes": 100 * 1024 ** 2}, {"threads": 3}, {"burners": 0}, {"log_bytes": 0},
                        {"storage_full": 0}, {"data_present": False}):
             evidence = child_evidence()
-            for window in evidence["windows"]:
-                window["backends"][3] = backend_status(3, **change)
-            self.assertEqual(self.failing(self.verdict(evidence)), {"backends_ran_every_declared_load"}, change)
+            for index, window in enumerate(evidence["windows"], start=1):
+                window["backends"][3] = backend_status(3, window=index, **change)
+            self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)), change)
         evidence = child_evidence()
         for window in evidence["windows"]:
             window["backends"] = window["backends"][:7]
@@ -314,35 +520,108 @@ class EvaluateTests(unittest.TestCase):
             del window["backends"]
         self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)))
 
-    def test_a_backend_that_missed_only_the_last_status_request_is_judged_on_its_earlier_answer(self):
+    def test_a_held_memory_below_the_held_fraction_of_the_limit_fails(self):
+        self.assertEqual(soak.MEMORY_HELD_FRACTION, 0.85)
         evidence = child_evidence()
-        evidence["windows"][-1]["backends"][2] = {"installation": "installation-2", "answered": False}
-        self.assertTrue(self.verdict(evidence)["passed"])
-        for window in evidence["windows"]:
-            window["backends"][2] = {"installation": "installation-2", "answered": False}
+        for index, window in enumerate(evidence["windows"], start=1):
+            window["backends"][1] = backend_status(1, window=index, held_bytes=int(0.80 * LIMIT_MIB) * 1024 ** 2)
         self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence)))
 
-    def test_cpu_is_judged_on_cgroup_samples_when_there_are_any(self):
-        rate_only = backend_sample(1600, cpu=2020.0)
-        rate_only["backends"]["cpu_source"] = "docker_stats"
-        exact = backend_sample(1700, cpu=1995.0)
-        exact["backends"]["cpu_source"] = "cgroup"
-        self.assertTrue(self.verdict(samples=[rate_only, exact])["passed"])
-        self.assertIn("backend_cpu_within_budget", self.failing(self.verdict(samples=[rate_only])))
+    def test_status_counters_must_advance_in_every_window(self):
+        for counter in ("log_bytes", "requests"):
+            evidence = child_evidence(windows=4)
+            frozen = backend_status(2, window=2)[counter]
+            for window in evidence["windows"][2:]:
+                window["backends"][2][counter] = frozen
+            verdict = self.verdict(evidence, minutes=4)
+            self.assertIn("backends_ran_every_declared_load", self.failing(verdict), counter)
+            problems = self.check(verdict, "backends_ran_every_declared_load")["detail"]["problems"]
+            self.assertTrue(any(counter in reason for p in problems for reason in p["reasons"]), problems)
 
-    def test_flood_that_never_reached_a_backend_fails(self):
-        evidence = child_evidence(flood_ok=0)
-        self.assertIn("backends_answered_the_message_flood", self.failing(self.verdict(evidence)))
+    def test_a_backend_that_missed_a_status_request_is_judged_across_the_gap_but_missing_more_than_a_few_windows_fails(self):
+        evidence = child_evidence(windows=60)
+        evidence["windows"][10]["backends"][2] = {"installation": "installation-2", "answered": False}
+        verdict = self.verdict(evidence, minutes=60, samples=load_samples(60))
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        for window in evidence["windows"][20:30]:
+            window["backends"][2] = {"installation": "installation-2", "answered": False}
+        self.assertIn("backends_ran_every_declared_load", self.failing(self.verdict(evidence, minutes=60, samples=load_samples(60))))
+
+    def test_cpu_is_judged_on_cgroup_samples_when_there_are_any(self):
+        samples = load_samples(3)
+        for sample in samples:
+            sample["backends"]["cpu_source"] = "cgroup"
+        rate_only = backend_sample(LOAD_START_MS + 100, cpu=2020.0)
+        rate_only["backends"]["cpu_source"] = "docker_stats"
+        self.assertTrue(self.verdict(samples=samples + [rate_only])["passed"])
+        self.assertIn("backend_cpu_within_budget", self.failing(self.verdict(samples=load_samples(3, cpu=2020.0))))
+
+    def test_every_backend_must_use_most_of_its_cpu_quota_in_every_window(self):
+        self.assertEqual(soak.CPU_QUOTA_USED_FRACTION, 0.70)
+        # 60 percent of the quota is idle by this rule; the same backend at 75 percent passes.
+        slow = [backend_sample(at, usage_fraction=0.60) for at in range(LOAD_START_MS - 30_000, LOAD_START_MS + 3 * PERIOD_MS + 1, 30_000)]
+        verdict = self.verdict(samples=slow)
+        self.assertEqual(self.failing(verdict), {"backends_held_their_limits_in_every_window"})
+        ok = [backend_sample(at, usage_fraction=0.75) for at in range(LOAD_START_MS - 30_000, LOAD_START_MS + 3 * PERIOD_MS + 1, 30_000)]
+        self.assertTrue(self.verdict(samples=ok)["passed"])
+
+    def test_one_idle_backend_in_one_window_is_reported_with_its_window_and_fails(self):
+        samples = load_samples(3)
+        for sample in samples:
+            if LOAD_START_MS + PERIOD_MS < sample["at_ms"] <= LOAD_START_MS + 2 * PERIOD_MS:
+                # Window 2: backend 5 burns nothing (its usage stays what it was at the window's start).
+                row = sample["backends"]["per_backend"][5]
+                row["usage_usec"] = int((PERIOD_MS / 1000.0) * CPU_QUOTA_MILLIS * 0.95 * 1000.0) * 1
+        verdict = self.verdict(samples=samples)
+        self.assertIn("backends_held_their_limits_in_every_window", self.failing(verdict))
+        problems = self.check(verdict, "backends_held_their_limits_in_every_window")["detail"]["problems"]
+        self.assertTrue(any(p["window"] == 2 and p["backend"] == "container-5" for p in problems), problems)
+
+    def test_memory_current_must_stay_at_or_above_the_held_fraction_in_every_window(self):
+        samples = load_samples(3)
+        samples[3]["backends"]["per_backend"][0]["memory_current"] = int(0.50 * LIMIT_MIB * 1024 ** 2)
+        verdict = self.verdict(samples=samples)
+        self.assertIn("backends_held_their_limits_in_every_window", self.failing(verdict))
+        problems = self.check(verdict, "backends_held_their_limits_in_every_window")["detail"]["problems"]
+        self.assertTrue(any("memory" in p["reason"] for p in problems), problems)
+
+    def test_cgroup_counters_missing_from_the_samples_fail_instead_of_passing_vacuously(self):
+        samples = load_samples(3, detail=False)
+        self.assertIn("backends_held_their_limits_in_every_window", self.failing(self.verdict(samples=samples)))
+        self.assertIn("backends_reached_their_pid_limit", self.failing(self.verdict(samples=samples)))
+
+    def test_pids_must_reach_the_limit_minus_a_small_margin_and_the_fractions_are_recorded(self):
+        self.assertEqual(soak.PIDS_REACHED_FRACTION, 0.85)
+        low = load_samples(3, pids=40)  # 40 of 64: the first smoke
+        verdict = self.verdict(samples=low)
+        self.assertEqual(self.failing(verdict), {"backends_reached_their_pid_limit"})
+        achieved = self.verdict()["achieved_fractions"]
+        self.assertAlmostEqual(achieved["pids_peak"]["min"], 58 / 64, places=3)
+        self.assertAlmostEqual(achieved["memory_current_min"]["min"], 0.9, places=3)
+        self.assertGreaterEqual(achieved["cpu_window_min"]["min"], 0.94)
+        self.assertEqual(len(achieved["pids_peak"]["per_backend"]), 8)
 
     def test_ops08_evidence_requires_the_full_duration_and_a_pass(self):
         smoke = self.verdict(minutes=5)
         self.assertTrue(smoke["passed"])
         self.assertFalse(smoke["counts_as_ops08_evidence"])
         evidence = child_evidence(windows=120)
-        samples = [backend_sample(1000 * m + 600) for m in range(1, 121)]
-        full = soak.evaluate(evidence, samples, parent_passed=True)
-        self.assertTrue(full["passed"], full)
+        full = soak.evaluate(evidence, load_samples(120), parent_passed=True, unit_tests={"TestTaskQuotasRefuseAtTheirOwnBoundary": True})
+        self.assertTrue(full["passed"], self.failing(full))
         self.assertTrue(full["counts_as_ops08_evidence"])
+
+
+class UnitTestResultTests(unittest.TestCase):
+    def test_go_test_json_results_are_read_by_test_name(self):
+        lines = "\n".join(json.dumps(e) for e in [
+            {"Action": "run", "Package": "p", "Test": "TestA"}, {"Action": "pass", "Package": "p", "Test": "TestA"},
+            {"Action": "fail", "Package": "p", "Test": "TestB"}, {"Action": "pass", "Package": "p"},
+            {"Action": "pass", "Package": "q", "Test": "TestC/sub"}, {"Action": "skip", "Package": "q", "Test": "TestD"}])
+        self.assertEqual(soak.parse_go_test_json(lines + "\nnot json\n"), {"TestA": True, "TestB": False, "TestC/sub": True, "TestD": False})
+
+    def test_a_missing_file_is_no_results(self):
+        self.assertEqual(soak.read_go_test_json("/nonexistent/unit-tests.json"), {})
+        self.assertEqual(soak.read_go_test_json(""), {})
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -353,15 +632,29 @@ class ConfigurationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 soak.soak_image(bad)
 
-    def test_duration_is_bounded(self):
+    def test_duration_is_bounded_to_what_the_step_timeout_allows(self):
+        self.assertEqual(soak.MAX_DURATION_MINUTES, 140)
         self.assertEqual(soak.duration_minutes("120"), 120)
-        for bad in ["0", "-1", "x", "", "181", "3.5"]:
+        self.assertEqual(soak.duration_minutes("140"), 140)
+        for bad in ["0", "-1", "x", "", "141", "180", "181", "3.5"]:
             with self.assertRaises(RuntimeError):
                 soak.duration_minutes(bad)
 
-    def test_baseline_scales_with_the_run(self):
-        self.assertEqual(soak.baseline_seconds(5), 30)
+    def test_the_image_store_probe_runs_natively_only_when_the_daemon_disk_can_hold_two_images_and_keeps_headroom(self):
+        need = soak.IMAGE_STORE_NATIVE_BYTES
+        self.assertEqual(need, 8 * 1024 ** 3 + soak.IMAGE_STORE_HEADROOM_BYTES)
+        self.assertEqual(soak.image_store_mode(need), ("native", ""))
+        mode, reason = soak.image_store_mode(need - 1)
+        self.assertEqual(mode, "unit")
+        self.assertIn(str(need - 1), reason)
+        self.assertIn("free", reason)
+        self.assertEqual(soak.image_store_mode(None)[0], "unit")
+
+    def test_the_baseline_is_the_same_for_the_smoke_and_the_acceptance_run(self):
+        # The pull request smoke runs the dispatch configuration apart from its duration (and the diagnosis it adds).
+        self.assertEqual(soak.baseline_seconds(5), 180)
         self.assertEqual(soak.baseline_seconds(120), 180)
+        self.assertEqual(soak.baseline_seconds(140), 180)
 
     def test_disposable_host_is_required(self):
         with self.assertRaises(RuntimeError):

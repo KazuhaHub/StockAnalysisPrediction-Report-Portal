@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -149,6 +148,18 @@ func TestPlatformCapacitySoak(t *testing.T) {
 			t.Fatal("copy descriptor template", entry.Name(), err)
 		}
 	}
+	// The soak backend's executable is the layer of the images the image store probe loads; the child reads it from here.
+	soakBinaryPath := ""
+	if source := os.Getenv("APP_CAPACITY_SOAK_APP_BINARY"); source != "" {
+		raw, err := os.ReadFile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		soakBinaryPath = filepath.Join(dir, "soak-app")
+		if err := os.WriteFile(soakBinaryPath, raw, 0o555); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.Chown(childData, 41001, 41001); err != nil {
 		t.Fatal(err)
 	}
@@ -192,6 +203,10 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"PORTAL_CAPACITY_SOAK_IMAGE=" + image,
 		"APP_CAPACITY_SOAK_MINUTES=" + strconv.Itoa(minutes), "APP_CAPACITY_SOAK_BASELINE_SECONDS=" + strconv.Itoa(baseline),
 		"APP_CAPACITY_SOAK_DIAGNOSE=" + os.Getenv("APP_CAPACITY_SOAK_DIAGNOSE"),
+		"APP_CAPACITY_SOAK_IMAGE_STORE=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"),
+		"APP_CAPACITY_SOAK_IMAGE_STORE_REASON=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"),
+		"APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=" + os.Getenv("APP_CAPACITY_SOAK_DOCKER_FREE_BYTES"),
+		"PORTAL_CAPACITY_SOAK_APP_BINARY=" + soakBinaryPath,
 		"PORTAL_DATA_SOCKET=" + runner.socket,
 		"PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment),
 		"TMPDIR=" + childData, "HOME=" + childData,
@@ -270,6 +285,9 @@ type soakChild struct {
 	symbol   string
 	reportID int64
 	nextID   int
+	batch    *soakBatch
+	minutes  int
+	baseline int
 }
 
 func (c *soakChild) id() string {
@@ -299,7 +317,21 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	if json.Unmarshal(encoded, &enrollment) != nil {
 		t.Fatal("missing public enrollment")
 	}
-	s, session := platformTrustTestServer(t, false)
+	// The measured Portal is production-shaped: a file-backed SQLite database opened as the server opens it (the
+	// production driver's connection setup, WAL included), not the in-memory template store of the unit suite.
+	store, err := OpenStore("sqlite", filepath.Join(dir, "portal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	s, session := platformActorTestServerWithStore(t, store)
+	if err := s.initializeAppPlatformControl(session); err != nil {
+		t.Fatal(err)
+	}
+	// The session and its cookie must outlive the run: the actor fixture's hour would expire 55 minutes into the load
+	// and every home and stock request, and the flood, would answer 401.
+	session.expires = time.Unix(time.Now().Add(soakSessionLifetime(minutes, baseline)).Unix(), 0)
+	platformSeedActorSession(t, s.st, session)
 	platformRegisterTestPublisher(t, s, session)
 	s.platformImageDir = t.TempDir()
 	s.names = LoadNames(t.TempDir(), s.st)
@@ -308,8 +340,17 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	s.platformBackendEndpoint.Store(&endpoint)
 	c := &soakChild{
 		t: t, ctx: context.Background(), s: s, session: session, endpoint: endpoint, image: os.Getenv("PORTAL_CAPACITY_SOAK_IMAGE"),
-		rec: newSoakRecorder(filepath.Join(dir, soakChildFile)), nextID: 9000, symbol: "600000",
+		rec: newSoakRecorder(filepath.Join(dir, soakChildFile)), nextID: 9000, symbol: "600000", minutes: minutes, baseline: baseline,
 	}
+	c.rec.SetSession(session.expires)
+	c.rec.SetPortal(soakPortalEvidence{
+		Database: "file-backed SQLite opened with OpenStore, as the server opens it",
+		Running: []string{"the batch scheduler (scheduleTick, and scheduleLoop every 30 seconds) with the real Dify provider against a local stub",
+			"the platform relay, installs and uninstalls through the ordinary workers and the real runner"},
+		NotExercised: []string{"the platform task worker (the soak's tasks are admitted with a run time an hour out, so none is due)",
+			"event delivery (the source events are captured and the subscription fenced; no delivery coordinator runs)",
+			"Postgres", "a backend-originated message or task request (the soak backends have no outbound channel to the platform)"},
+	})
 
 	// The budgets the runner reports in its readiness facts, not the nominal host, size the backends.
 	facts, err := s.observePlatformManagedRuntime(c.ctx, session, endpoint)
@@ -343,10 +384,13 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 		c.diagnose("idle", 60*time.Second)
 	}
 
-	// 2. Eight managed backends at the sizing the budgets give, then the excess probes that need them.
+	// 2. The image store probe loads two images of about 4 GiB into the daemon, so it runs before any backend holds memory.
 	if c.writable, err = newPlatformWritableInstallScheduler(s, endpoint, c.id(), 50*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
+	c.probeImageStore()
+
+	// 3. Eight managed backends at the sizing the budgets give, then the excess probes that need them.
 	for i := 0; i < soakBackends; i++ {
 		c.managed = append(c.managed, c.installManaged(fmt.Sprintf("notes-soak-m%d", i), c.sizing.MemoryMiB, c.sizing.CPUMillis))
 	}
@@ -356,7 +400,7 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	c.probeLayers()
 	c.probeStaging()
 
-	// 3. Forty-two static installations bring the Portal to the cap; the next install is refused.
+	// 4. Forty-two static installations bring the Portal to the cap; the next install is refused.
 	for i := 0; i < soakStaticApps; i++ {
 		c.statics = append(c.statics, c.installStatic(fmt.Sprintf("notes-soak-s%02d", i)))
 	}
@@ -367,9 +411,9 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	c.probeInstallationCap()
 	t.Log("SOAK_INSTALLATIONS_AT_THE_CAP")
 
-	// 4. The task and event floods, then the load.
+	// 5. The task and event floods, then the load.
 	c.floodQuotas()
-	if failed := c.failedProbes(); len(failed) > 0 {
+	if failed := soakFailedProbes(c.rec.Snapshot().Probes); len(failed) > 0 {
 		t.Fatalf("excess requests not refused with their typed error: %v", failed)
 	}
 	t.Log("SOAK_EXCESS_PROBES_REFUSED")
@@ -393,19 +437,11 @@ func soakBudgetsOf(c transport.ManagedRuntimeCapacity) (soakBudgets, error) {
 	return b, nil
 }
 
-func (c *soakChild) failedProbes() []string {
-	var failed []string
-	for _, p := range c.rec.Snapshot().Probes {
-		if !p.Passed {
-			failed = append(failed, fmt.Sprintf("%s: expected %q, observed %q", p.Name, p.Expected, p.Observed))
-		}
-	}
-	return failed
-}
-
 // --- the Portal's own reads, and the queue ---
 
-// seedPortal adds one report and a backlog of queued batch jobs, so the pages and the queue have rows to read.
+// seedPortal adds one report and the batch queue: the real scheduler against a stub Dify, with a standing backlog of
+// queued jobs the dispatch decision is measured over and soakBatchHeld long runs that hold the budget's slots, so the pages
+// and the queue have rows to read and the scheduler has real work to do.
 func (c *soakChild) seedPortal() {
 	t := c.t
 	body := strings.Repeat("Soak report paragraph with enough text to be a realistic page.\n\n", 200)
@@ -414,12 +450,9 @@ func (c *soakChild) seedPortal() {
 		t.Fatal(err)
 	}
 	c.reportID = id
-	target := seedTarget(t, c.s.st)
-	for i := 0; i < soakQueueBacklog; i++ {
-		if _, err := c.s.st.CreateBatchJob(target, 1, 0, c.session.username, []map[string]string{{"symbol": c.symbol}}, "50"); err != nil {
-			t.Fatal(err)
-		}
-	}
+	c.batch = newSoakBatch(t, c.s, c.session.username)
+	c.batch.seed(soakQueueBacklog)
+	go c.s.scheduleLoop() // the 30 second tick of the running server
 	if code, _ := c.get("/api/home"); code != http.StatusOK {
 		t.Fatalf("home page: %d", code)
 	}
@@ -450,40 +483,69 @@ func (c *soakChild) dispatch(limit int) time.Duration {
 	return time.Since(began)
 }
 
-func (c *soakChild) sample(into *soakSamples, n int) {
-	for i := 0; i < n; i++ {
-		if code, took := c.get("/api/home"); code == http.StatusOK {
-			into.home = append(into.home, took)
+// sampleOnce takes one of each latency sample: the two pages, the queue's dispatch decision over the deep and the shallow
+// backlog and, on every soakBatchProbeEvery-th call, one batch job from enqueue to its start at the stub Dify.
+func (c *soakChild) sampleOnce(into *soakSamples, iteration int) {
+	if code, took := c.get("/api/home"); code == http.StatusOK {
+		into.home = append(into.home, took)
+	} else {
+		c.t.Errorf("home page under measurement: %d", code)
+	}
+	if code, took := c.get("/api/stock/" + c.symbol); code == http.StatusOK {
+		into.report = append(into.report, took)
+	} else {
+		c.t.Errorf("report page under measurement: %d", code)
+	}
+	into.dispatch = append(into.dispatch, c.dispatch(0))
+	into.dispatchShallow = append(into.dispatchShallow, c.dispatch(soakQueueBacklogShallow))
+	if soakBatchProbeDue(iteration) {
+		if took, err := c.batch.probe(); err != nil {
+			c.t.Errorf("batch probe under measurement: %v", err)
 		} else {
-			c.t.Errorf("home page under measurement: %d", code)
+			into.batchStart = append(into.batchStart, took)
 		}
-		if code, took := c.get("/api/stock/" + c.symbol); code == http.StatusOK {
-			into.report = append(into.report, took)
-		} else {
-			c.t.Errorf("report page under measurement: %d", code)
-		}
-		into.dispatch = append(into.dispatch, c.dispatch(0))
-		into.dispatchShallow = append(into.dispatchShallow, c.dispatch(soakQueueBacklogShallow))
 	}
 }
 
-const soakSamplesPerWindow = 100
-
-func (s soakSamples) window(minute int) soakWindow {
-	return soakWindow{Minute: minute, At: time.Now().UnixMilli(), Home: soakSummarize(s.home), Report: soakSummarize(s.report), Dispatch: soakSummarize(s.dispatch), DispatchShallow: soakSummarize(s.dispatchShallow)}
+// sampleWindow spreads n samples evenly across span from start (one every 600 ms for a minute of 100) and returns when
+// the span is over. A sample that finds the clock past its slot runs at once; nothing is dropped.
+func (c *soakChild) sampleWindow(start time.Time, span time.Duration, n int) soakSamples {
+	var samples soakSamples
+	for i, at := range soakSampleTimes(start, span, n) {
+		time.Sleep(time.Until(at))
+		c.sampleOnce(&samples, i)
+	}
+	time.Sleep(time.Until(start.Add(span)))
+	return samples
 }
 
+func (s soakSamples) window(minute int, start time.Time, end time.Time) soakWindow {
+	return soakWindow{Minute: minute, At: end.UnixMilli(), StartedMS: start.UnixMilli(), EndedMS: end.UnixMilli(), Home: soakSummarize(s.home), Report: soakSummarize(s.report),
+		Dispatch: soakSummarize(s.dispatch), DispatchShallow: soakSummarize(s.dispatchShallow), BatchStart: soakSummarize(s.batchStart)}
+}
+
+func (s soakSamples) appended(more soakSamples) soakSamples {
+	s.home, s.report, s.dispatch = append(s.home, more.home...), append(s.report, more.report...), append(s.dispatch, more.dispatch...)
+	s.dispatchShallow, s.batchStart = append(s.dispatchShallow, more.dispatchShallow...), append(s.batchStart, more.batchStart...)
+	return s
+}
+
+// measureIdle measures the baseline the same way the load is measured: samples spread evenly across one-minute windows, the
+// batch probes included, the whole idle period pooled.
 func (c *soakChild) measureIdle(duration time.Duration) {
 	var pooled soakSamples
-	for deadline, i := time.Now().Add(duration), 0; time.Now().Before(deadline); i++ {
-		var one soakSamples
-		c.sample(&one, soakSamplesPerWindow)
-		pooled.home, pooled.report, pooled.dispatch = append(pooled.home, one.home...), append(pooled.report, one.report...), append(pooled.dispatch, one.dispatch...)
-		pooled.dispatchShallow = append(pooled.dispatchShallow, one.dispatchShallow...)
-		c.rec.AddIdleWindow(one.window(i))
-		time.Sleep(time.Second)
+	perSample := time.Minute / soakSamplesPerWindow
+	for began, index := time.Now(), 0; time.Since(began) < duration; index++ {
+		start := time.Now()
+		span := time.Minute
+		if left := duration - time.Since(began); left < span {
+			span = left
+		}
+		one := c.sampleWindow(start, span, int(span/perSample))
+		pooled = pooled.appended(one)
+		c.rec.AddIdleWindow(one.window(index, start, time.Now()))
 	}
-	c.rec.SetIdle(pooled.window(0))
+	c.rec.SetIdle(pooled.window(0, time.Now(), time.Now()))
 }
 
 // --- installations ---
@@ -523,9 +585,14 @@ func (c *soakChild) installManaged(app string, memoryMiB, cpuMillis int) string 
 // installManagedWithCode runs the same worker until the operation ends: the second result is its error code,
 // empty when the install completed.
 func (c *soakChild) installManagedWithCode(app string, memoryMiB, cpuMillis int) (string, string) {
-	t := c.t
 	release := c.stageManaged(app, memoryMiB, cpuMillis)
-	review, err := c.s.createPlatformWritableInstallReview(c.ctx, c.session, release.sha256, release.trustRevision, c.audience(), c.endpoint)
+	return c.installStagedRelease(app, release.sha256, release.trustRevision)
+}
+
+// installStagedRelease reviews, admits and drives the install of an already staged managed release.
+func (c *soakChild) installStagedRelease(app, sha string, trust int64) (string, string) {
+	t := c.t
+	review, err := c.s.createPlatformWritableInstallReview(c.ctx, c.session, sha, trust, c.audience(), c.endpoint)
 	if err != nil {
 		t.Fatal("review "+app, err)
 	}
@@ -533,7 +600,18 @@ func (c *soakChild) installManagedWithCode(app string, memoryMiB, cpuMillis int)
 	if err != nil {
 		t.Fatal("admit "+app, err)
 	}
-	return committed.InstallationID, c.drive(committed.OperationID, 6*time.Minute)
+	return committed.InstallationID, c.drive(committed.OperationID, 12*time.Minute)
+}
+
+// installOffline imports a release as an administrator does, through the offline import route, and installs it.
+func (c *soakChild) installOffline(app string, parts platformManagedImageParts) (installation, code string) {
+	response := platformOfflineRequest(c.mux, c.cookie, "application/zip", parts.packageBytes(c.t, nil, ""))
+	if response.Code != http.StatusOK {
+		c.t.Fatalf("offline import of %s answered %d: %.300s", app, response.Code, response.Body.String())
+	}
+	sha := platformDigest(parts.descriptor)
+	trust := scalar[int64](c.t, c.s.st, `SELECT trust_revision FROM app_platform_releases WHERE sha256=?`, sha)
+	return c.installStagedRelease(app, sha, trust)
 }
 
 // drive ticks the writable install worker until the operation completes (empty code) or ends with an error code.
@@ -662,7 +740,7 @@ func (c *soakChild) probeBackends() {
 			retiredBy, detail = "refused", detail+"; retirement: "+retired.Error()
 		}
 		c.t.Logf("SOAK_PROBE_RETIRED %s: %s (code %s)", p.Name, retiredBy, code)
-		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Native: true, Retired: retiredBy, Detail: detail})
+		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Level: soakProbeNative, Retired: retiredBy, Detail: detail})
 		if retired != nil {
 			c.t.Fatalf("the refused install %s could not be uninstalled: %v", p.Name, retired)
 		}
@@ -692,20 +770,77 @@ func (c *soakChild) probeLayers() {
 		scalar[int](t, c.s.st, `SELECT COUNT(*) FROM app_platform_releases`) == before {
 		observed = "app_platform_invalid_request"
 	}
-	c.rec.AddProbe(soakProbeResult{Name: "layer_beyond_its_declaration", Expected: "app_platform_invalid_request", Observed: observed, Native: true,
-		Detail: fmt.Sprintf("offline import answered %d and stored no release; the runner's own refusal of the same bytes (uncompressed_bound) is proven by the blob channel unit tests", response.Code)})
-
-	// The image store cannot be driven past its budget natively: a descriptor may declare at most 4 GiB of
-	// layers for one image, so the 10 GiB store is reached only by loading three distinct images of 4 GiB each
-	// into the Docker daemon, which this host cannot hold. The refusal is proven at unit level.
-	c.rec.AddProbe(soakProbeResult{Name: "image_beyond_the_image_store", Expected: "capacity_exhausted_image_store", Observed: "capacity_exhausted_image_store", Native: false,
-		Detail: "unit level (journal TestLoadImageReservesTheDeclaredBytesOnce and the image_store case of the admission table, PR 4a): infeasible on the reference host because one descriptor declares at most 4 GiB (maxBackendImageUncompressedBytes) and the 10 GiB store needs three real 4 GiB images in the daemon"})
+	c.rec.AddProbe(soakProbeResult{Name: "layer_beyond_its_declaration", Expected: "app_platform_invalid_request", Observed: observed, Level: soakProbeNative,
+		Detail: fmt.Sprintf("the Portal's offline import route answered %d and stored no release; the runner's own refusal of the same bytes (uncompressed_bound) is proven by the blob channel unit tests, not in this run", response.Code)})
 }
 
-// probeStaging proves the 2 GiB staging cap against the real store of this Portal. One upload is bounded at
-// 384 MiB by the offline route, so the cap refuses the sum: five uploads in flight hold 1920 MiB and the sixth is
-// refused, and the refusal is the typed storage-full response. The same cap is proven at its exact value, without
-// writing a byte, by the unit tests of this change.
+// probeImageStore refuses a third image of about 4 GiB against the runner's 10 GiB image store, natively when the daemon's
+// disk can hold two such images (the harness measures it and says so), else at unit level with the measured reason.
+func (c *soakChild) probeImageStore() {
+	unitTests := []string{"TestLoadImageReservesTheDeclaredBytesOnce", "TestLoadImageRefusedRunsNothingAndReplays", "TestAdmissionRefusesEachDimensionByOneUnit"}
+	free, _ := strconv.ParseInt(os.Getenv("APP_CAPACITY_SOAK_DOCKER_FREE_BYTES"), 10, 64)
+	evidence := soakImageStoreEvidence{Mode: os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"), Reason: os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"), DockerFreeBytes: free}
+	binaryPath := os.Getenv("PORTAL_CAPACITY_SOAK_APP_BINARY")
+	if evidence.Mode == "native" && binaryPath == "" {
+		evidence.Mode, evidence.Reason = "unit", "the harness gave no soak backend binary to build the images from"
+	}
+	if evidence.Mode != "native" {
+		c.rec.SetImageStore(evidence)
+		c.rec.AddProbe(soakProbeResult{Name: "image_beyond_the_image_store", Expected: "capacity_exhausted_image_store", Level: soakProbeUnit, Tests: unitTests,
+			Detail: "unit level: " + evidence.Reason})
+		return
+	}
+	binary, err := os.ReadFile(binaryPath)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	_, _, binaryTar, err := soakBinaryLayer(binary)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	fillers := soakFillerFileBytes(binaryTar)
+	resources := appplatform.Resources{MemoryMiB: 128, CPUMillis: 100, PIDs: 64}
+	var installed []string
+	codes := map[string]string{}
+	var third string
+	// Two images load into the daemon (each declares about 4 GiB of zero-filled layers; the blobs that cross are a few MiB);
+	// the third is the one the 10 GiB store refuses at its load, before a byte of it is written.
+	for i, seed := range []string{"a", "b", "c"} {
+		app := "notes-soak-i-" + seed
+		began := time.Now()
+		parts := soakImageRelease(c.t, app, seed, c.platform, binary, fillers, resources)
+		installation, code := c.installOffline(app, parts)
+		installed = append(installed, installation)
+		codes[app] = code
+		c.t.Logf("SOAK_IMAGE_STORE_PROBE_INSTALL %s: code %q after %v", app, code, time.Since(began).Round(time.Second))
+		if i == 2 {
+			third = code
+		}
+	}
+	// The third image's installation is retired like every refused probe; the two that loaded are ordinary installs and are
+	// uninstalled through the same managed removal.
+	retiredBy, detail := "managed_uninstall", fmt.Sprintf("install codes %v; declared bytes of an image %d against the 10 GiB store", codes, soakImageDeclaredTarget)
+	for _, installation := range installed {
+		if err := c.retire(installation); err != nil {
+			retiredBy, detail = "refused", detail+"; retirement: "+err.Error()
+			break
+		}
+	}
+	settled, reclaimErr := c.s.reclaimPlatformImages(c.ctx, c.endpoint)
+	detail += fmt.Sprintf("; image reclaim after the uninstalls settled %d (error %v)", settled, reclaimErr)
+	evidence.Detail = detail
+	c.rec.SetImageStore(evidence)
+	c.rec.AddProbe(soakProbeResult{Name: "image_beyond_the_image_store", Expected: "capacity_exhausted_image_store", Observed: third, Level: soakProbeNative, Retired: retiredBy, Detail: detail})
+	if retiredBy != "managed_uninstall" {
+		c.t.Fatalf("the image store probe installations could not be uninstalled: %s", detail)
+	}
+}
+
+// probeStaging is a store-level probe of the 2 GiB staging cap, not a drive of the upload route. It reserves 384 MiB at a
+// time (the most one offline upload may hold) against the real staging store of this Portal until the sixth is refused, and
+// maps the refusal through the real management error handler, which answers the typed 507 storage-full. No byte is written.
+// The route itself holds at most two uploads at once, 768 MiB, so no sequence of route requests reaches the cap without
+// writing gigabytes of unpinned packages; the exact boundary of the production value is proven by the unit tests.
 func (c *soakChild) probeStaging() {
 	store, err := c.s.platformImages()
 	if err != nil {
@@ -730,8 +865,8 @@ func (c *soakChild) probeStaging() {
 			observed = "app_platform_storage_full"
 		}
 	}
-	c.rec.AddProbe(soakProbeResult{Name: "staging_over_two_gib", Expected: "app_platform_storage_full", Observed: observed, Native: true,
-		Detail: fmt.Sprintf("%d concurrent 384 MiB uploads held against a cap of %d bytes", len(releases), store.stagingCap)})
+	c.rec.AddProbe(soakProbeResult{Name: "staging_over_two_gib", Expected: "app_platform_storage_full", Observed: observed, Level: soakProbeNative,
+		Detail: fmt.Sprintf("store level, not through the upload route: %d reservations of 384 MiB against a cap of %d bytes, the refusal mapped by platformManagementError", len(releases), store.stagingCap)})
 }
 
 func (c *soakChild) probeInstallationCap() {
@@ -745,7 +880,7 @@ func (c *soakChild) probeInstallationCap() {
 	if reviewRefused && response.Code == http.StatusTooManyRequests && strings.Contains(response.Body.String(), `"installation_capacity"`) {
 		observed = "installation_capacity"
 	}
-	c.rec.AddProbe(soakProbeResult{Name: "fifty_first_installation", Expected: "installation_capacity", Observed: observed, Native: true,
+	c.rec.AddProbe(soakProbeResult{Name: "fifty_first_installation", Expected: "installation_capacity", Observed: observed, Level: soakProbeNative,
 		Detail: fmt.Sprintf("review error refused=%t, HTTP %d, %d installations", reviewRefused, response.Code, scalar[int](c.t, c.s.st, `SELECT COUNT(*) FROM app_platform_installations WHERE phase<>'removed'`))})
 }
 
@@ -767,13 +902,16 @@ func (c *soakChild) admit(installation string, n int, prefix string) error {
 	return err
 }
 
-// floodQuotas drives the event subscription to its in-flight bound, each of seven managed installations to its
-// 256 task quota, and the whole Portal to its 10000 global quota. The global quota is reached with a backlog of
-// waiting tasks attributed to the static installations (they cannot schedule tasks themselves: they have no
-// backend), inserted with the columns the admission itself writes; the refusals are the real admission.
+// floodQuotas drives the event subscription to its in-flight bound with a flood of source events, each of seven managed
+// installations to its 256 task quota, and the whole Portal to its 10000 global quota. Task admissions are calls of
+// admitPlatformTask in the Portal process: the function the backend task route runs after it has verified the backend's service
+// identity. The soak backends have no outbound channel to the platform, so no admission comes from a backend. The global quota
+// is reached with a backlog of waiting tasks attributed to the static installations (they cannot schedule tasks themselves:
+// they have no backend), inserted with the columns the admission itself writes; the refusals are the real admission.
 func (c *soakChild) floodQuotas() {
 	t := c.t
-	// Event quota: one subscription with one in-flight delivery saturates on the second source event.
+	// Event quota: one subscription that allows one delivery in flight is flooded with source events. The first is delivered
+	// (one task), the second finds the bound reached and fences the subscription for review, and the rest are captured and kept.
 	now, err := platformDatabaseNow(c.s.st.poolExec())
 	if err != nil {
 		t.Fatal(err)
@@ -783,7 +921,8 @@ func (c *soakChild) floodQuotas() {
 	if err != nil || !created {
 		t.Fatalf("event subscription: %s %t %v", subscription, created, err)
 	}
-	for i := 0; i < 2; i++ {
+	const sourceEvents = 64
+	for i := 0; i < sourceEvents; i++ {
 		event := NotificationEvent{ID: fmt.Sprintf("10000000-0000-4000-8000-%012d", 8300+i), SourceKey: fmt.Sprintf("soak:%d", i), Type: appplatform.EventReportIngested,
 			Payload: `{"id":1}`, ResourceType: "report", ResourceID: strconv.FormatInt(c.reportID, 10), CreatedAt: now}
 		if err := c.s.st.CaptureNotification(event, nil, nil); err != nil {
@@ -791,8 +930,15 @@ func (c *soakChild) floodQuotas() {
 		}
 	}
 	state := scalar[string](t, c.s.st, `SELECT state FROM app_platform_event_subscriptions WHERE id=?`, subscription)
-	c.rec.AddProbe(soakProbeResult{Name: "event_subscription_over_quota", Expected: "review_required", Observed: state, Native: true,
-		Detail: "two source events against a subscription that allows one delivery in flight; both source events are kept"})
+	kept := scalar[int](t, c.s.st, `SELECT COUNT(*) FROM notification_events WHERE source_key LIKE 'soak:%'`)
+	deliveries := scalar[int](t, c.s.st, `SELECT COUNT(*) FROM app_platform_tasks WHERE installation_id=? AND handler=?`, c.managed[0], appplatform.TaskHandlerEvent)
+	reasons := scalar[int](t, c.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.event_review_required' AND target_id=? AND detail LIKE '%inflight_limit%'`, subscription)
+	eventObserved := ""
+	if state == "review_required" && kept == sourceEvents && deliveries == 1 && reasons == 1 {
+		eventObserved = "review_required:inflight_limit"
+	}
+	c.rec.AddProbe(soakProbeResult{Name: "event_subscription_over_quota", Expected: "review_required:inflight_limit", Observed: eventObserved, Level: soakProbeNative,
+		Detail: fmt.Sprintf("%d source events against a subscription that allows one delivery in flight: state %q, %d source events kept, %d delivery task, %d audit entries naming inflight_limit", sourceEvents, state, kept, deliveries, reasons)})
 
 	// Per-installation quota on seven installations; the eighth is filled halfway so the global quota is the one
 	// that refuses last.
@@ -818,8 +964,8 @@ func (c *soakChild) floodQuotas() {
 	if filled == len(c.managed)-1 {
 		quotaObserved = "task_capacity"
 	}
-	c.rec.AddProbe(soakProbeResult{Name: "task_over_installation_quota", Expected: "task_capacity", Observed: quotaObserved, Native: true,
-		Detail: fmt.Sprintf("%d installations refused the 257th active task", filled)})
+	c.rec.AddProbe(soakProbeResult{Name: "task_over_installation_quota", Expected: "task_capacity", Observed: quotaObserved, Level: soakProbeNative,
+		Detail: fmt.Sprintf("in-process admitPlatformTask (the function the backend task route calls after verifying the service identity): %d installations refused the 257th active task", filled)})
 
 	// Global quota: a backlog up to one task short of the quota, then one more admitted and the next refused.
 	c.seedBacklog(appplatform.MaxGlobalActiveTasks - 1)
@@ -831,12 +977,12 @@ func (c *soakChild) floodQuotas() {
 	if admitted == nil && errors.Is(refused, errAppPlatformTaskQuota) && c.activeTasks() == appplatform.MaxGlobalActiveTasks && perInstallation < appplatform.MaxInstallationActiveTasks {
 		observed = "task_capacity"
 	}
-	c.rec.AddProbe(soakProbeResult{Name: "task_over_global_quota", Expected: "task_capacity", Observed: observed, Native: true,
-		Detail: fmt.Sprintf("%d active tasks in all, %d on the installation that was refused, so only the global quota can have refused it", c.activeTasks(), perInstallation)})
+	c.rec.AddProbe(soakProbeResult{Name: "task_over_global_quota", Expected: "task_capacity", Observed: observed, Level: soakProbeNative,
+		Detail: fmt.Sprintf("in-process admitPlatformTask: %d active tasks in all, %d on the installation that was refused, so only the global quota can have refused it", c.activeTasks(), perInstallation)})
 	// The per-application quota (1000) needs four installations of one application, and the cap of fifty holds
 	// fifty applications: it is proven at its boundary by TestTaskQuotasRefuseAtTheirOwnBoundary.
-	c.rec.AddProbe(soakProbeResult{Name: "task_over_application_quota", Expected: "task_capacity", Observed: "task_capacity", Native: false,
-		Detail: "unit level: appplatform.AdmitTask refuses at 1000 active tasks of one application independently of the other two quotas (TestTaskQuotasRefuseAtTheirOwnBoundary); no application has more than one installation in this soak"})
+	c.rec.AddProbe(soakProbeResult{Name: "task_over_application_quota", Expected: "task_capacity", Level: soakProbeUnit, Tests: []string{"TestTaskQuotasRefuseAtTheirOwnBoundary"},
+		Detail: "unit level: appplatform.AdmitTask refuses at 1000 active tasks of one application independently of the other two quotas; no application has more than one installation in this soak, so it is not observed here"})
 	c.rec.SetFlood("active_tasks", c.activeTasks())
 }
 
@@ -893,7 +1039,7 @@ func (c *soakChild) backendStatuses() []soakBackendStatus {
 	for _, installation := range c.managed {
 		status := soakBackendStatus{Installation: installation}
 		// A backend throttled to its CPU share can miss one request's deadline; it gets a few tries.
-		for attempt := 0; attempt < 5 && !status.Answered; attempt++ {
+		for attempt := 0; attempt < 8 && !status.Answered; attempt++ {
 			if response, err := c.s.requestPlatformWritableBackend(c.ctx, c.session, installation, http.MethodGet, "/v1/soak/status", nil, c.endpoint); err == nil && response.Status == http.StatusOK {
 				status = soakParseBackendStatus(installation, response.Body)
 			} else {
@@ -913,16 +1059,12 @@ type soakFloodTarget struct {
 	Body string `json:"body"`
 }
 
-type soakFloodCounters struct {
-	Requests int64 `json:"requests"`
-	OK       int64 `json:"ok"`
-	Errors   int64 `json:"errors"`
-}
-
 // TestPlatformCapacitySoakFlood is the flood generator, a process of its own: it sends signed backend requests
-// through the Portal's real HTTP route, one in flight per backend, and counts the outcomes in a file. The Portal
-// process whose latency is measured therefore carries the platform's work for those requests and none of the
-// generator's own. It does nothing unless the soak child started it.
+// through the Portal's real HTTP route, one attempt in flight per backend, and counts the outcomes by class in a file it
+// rewrites once a second. The relay admits at most two requests at once Portal-wide (platformDocumentBudget), so the
+// attempts the Portal refuses answer 429 app_platform_busy; that is the production admission behaviour and it is counted
+// as such. The Portal process whose latency is measured therefore carries the platform's work for those requests and none
+// of the generator's. It does nothing unless the soak child started it.
 func TestPlatformCapacitySoakFlood(t *testing.T) {
 	if os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD") != "1" {
 		t.Skip("flood process of the capacity soak only")
@@ -932,42 +1074,59 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 		t.Fatal("no flood targets", err)
 	}
 	cookie, out := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_COOKIE"), os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_OUT")
-	var counters [3]atomic.Int64
+	var mu sync.Mutex
+	counters := soakFloodCounters{Classes: map[string]int64{}}
+	record := func(class string) {
+		mu.Lock()
+		defer mu.Unlock()
+		counters.Requests++
+		counters.Classes[class]++
+	}
 	client := &http.Client{Timeout: 25 * time.Second}
 	for _, target := range targets {
 		go func(target soakFloodTarget) {
 			for {
-				counters[0].Add(1)
+				status, class := 0, ""
+				var body []byte
 				request, err := http.NewRequest(http.MethodPost, target.URL, strings.NewReader(target.Body))
 				if err == nil {
 					request.Header.Set("Content-Type", "application/json")
 					request.AddCookie(&http.Cookie{Name: cookieName, Value: cookie})
 					var response *http.Response
 					if response, err = client.Do(request); err == nil {
+						status = response.StatusCode
+						body, _ = io.ReadAll(io.LimitReader(response.Body, 4096))
 						_, _ = io.Copy(io.Discard, response.Body)
 						response.Body.Close()
-						if response.StatusCode == http.StatusOK {
-							counters[1].Add(1)
-							continue
-						}
 					}
 				}
-				counters[2].Add(1)
+				class = soakFloodClass(status, body, err)
+				record(class)
+				if class == soakFloodOK {
+					continue
+				}
 				time.Sleep(50 * time.Millisecond)
 			}
 		}(target)
 	}
 	deadline := time.Now().Add(time.Duration(soakEnvInt(t, "PORTAL_CAPACITY_SOAK_FLOOD_MINUTES", 1)) * time.Minute)
 	for time.Now().Before(deadline) {
-		raw, _ := json.Marshal(soakFloodCounters{Requests: counters[0].Load(), OK: counters[1].Load(), Errors: counters[2].Load()})
+		mu.Lock()
+		snapshot := soakFloodCounters{Requests: counters.Requests, Classes: map[string]int64{}, HeartbeatMS: time.Now().UnixMilli()}
+		for class, count := range counters.Classes {
+			snapshot.Classes[class] = count
+		}
+		mu.Unlock()
+		raw, _ := json.Marshal(snapshot)
 		_ = os.WriteFile(out+".tmp", raw, 0o644)
 		_ = os.Rename(out+".tmp", out)
 		time.Sleep(time.Second)
 	}
 }
 
-// startFlood serves the Portal's routes on a loopback listener and starts the flood process against them.
-func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodCounters) {
+// startFlood serves the Portal's routes on a loopback listener and starts the flood process against them. alive reports whether
+// the flood process is still running.
+func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodCounters, alive func() bool) {
 	t := c.t
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1004,10 +1163,24 @@ func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodC
 	if err := flood.Start(); err != nil {
 		t.Fatal(err)
 	}
+	exited := make(chan struct{})
+	go func() {
+		_ = flood.Wait()
+		close(exited)
+	}()
 	stop = func() {
 		_ = flood.Process.Kill()
-		_ = flood.Wait()
+		<-exited
 		_ = server.Close()
+	}
+	alive = func() bool {
+		select {
+		case <-exited:
+			c.t.Logf("SOAK_FLOOD_EXITED output tail: %s", tail(floodOutput.String(), 2000))
+			return false
+		default:
+			return true
+		}
 	}
 	read = func() soakFloodCounters {
 		var counters soakFloodCounters
@@ -1016,43 +1189,35 @@ func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodC
 		}
 		return counters
 	}
-	return stop, read
+	return stop, read, alive
 }
 
-// load runs the floods for the requested minutes and, once a minute, measures the Portal's pages and the queue.
-// The flood is a separate process driving the Portal's HTTP route, so the measured process sees platform load
-// only. The backends flood their own memory, CPU, PIDs, log and storage from inside their containers.
+// load runs the floods for the requested minutes and measures the Portal's pages, the queue's dispatch decision and the real
+// scheduler's start of a batch job throughout: soakSamplesPerWindow samples spread evenly across each one-minute window. The
+// flood is a separate process driving the Portal's HTTP route, so the measured process sees platform load only. The backends
+// flood their own memory, CPU, PIDs, log and storage from inside their containers.
 func (c *soakChild) load(minutes int) {
-	started := time.Now()
-	c.rec.SetLoad(started.UnixMilli(), 0, minutes)
-	c.rec.Mark("load_started")
-	stop, read := c.startFlood(minutes)
+	stop, read, alive := c.startFlood(minutes)
 	defer stop()
 	if soakDiagnosing() {
 		c.diagnose("loaded", 60*time.Second)
 	}
+	started := time.Now()
+	c.rec.SetLoad(started.UnixMilli(), 0, minutes)
+	c.rec.Mark("load_started")
 	var previous soakFloodCounters
 	var pooled soakSamples
-	for minute := 1; ; minute++ {
-		next := started.Add(time.Duration(minute) * time.Minute)
-		if final := started.Add(time.Duration(minutes) * time.Minute); next.After(final) {
-			next = final
-		}
-		time.Sleep(time.Until(next))
-		var samples soakSamples
-		c.sample(&samples, soakSamplesPerWindow)
-		window := samples.window(minute)
-		pooled.home, pooled.report = append(pooled.home, samples.home...), append(pooled.report, samples.report...)
-		pooled.dispatch, pooled.dispatchShallow = append(pooled.dispatch, samples.dispatch...), append(pooled.dispatchShallow, samples.dispatchShallow...)
+	for minute := 1; minute <= minutes; minute++ {
+		windowStart := started.Add(time.Duration(minute-1) * time.Minute)
+		samples := c.sampleWindow(windowStart, time.Minute, soakSamplesPerWindow)
+		window := samples.window(minute, windowStart, windowStart.Add(time.Minute))
+		pooled = pooled.appended(samples)
 		c.rec.SetLoaded(pooled)
 		current := read()
-		window.Flood = soakFlood{BackendRequests: current.Requests - previous.Requests, BackendRequestsOK: current.OK - previous.OK, BackendRequestErrors: current.Errors - previous.Errors}
+		window.Flood = soakFloodWindow(previous, current, alive(), time.Now())
 		previous = current
 		window.Backends = c.backendStatuses()
 		c.rec.AddWindow(window)
-		if !time.Now().Before(started.Add(time.Duration(minutes) * time.Minute)) {
-			break
-		}
 	}
 	c.rec.SetLoad(started.UnixMilli(), time.Now().UnixMilli(), minutes)
 	c.rec.Mark("load_finished")

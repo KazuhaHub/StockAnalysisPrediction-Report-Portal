@@ -8,7 +8,7 @@ and runner logs, the XFS volume and the summed memory and CPU of the soak backen
 evidence and the samples together against the pass criteria of doc 167 section 4 and writes everything as JSON.
 
 Only a run of at least 120 minutes that passes counts as OPS-08 evidence; a shorter run is a smoke of the same
-harness. Only synthetic fixtures live on the volume, and only the loop device and mount this process created are
+harness. The run is a workflow_dispatch of this branch at the reviewed commit; the evidence records both. Only synthetic fixtures live on the volume, and only the loop device and mount this process created are
 ever detached or removed.
 """
 import json
@@ -28,7 +28,26 @@ EVIDENCE_FORMAT = "portal.capacity-soak/1-dev.1"
 VOLUME_BYTES = 16 * 1024 * 1024 * 1024
 RATIO_LIMIT_NUMERATOR, RATIO_LIMIT_DENOMINATOR = 3, 2  # 1.5x
 OPS08_MINUTES = 120
+# The step timeout is 160 minutes and the run also builds, installs and judges: a longer soak would be killed, not judged.
+MAX_DURATION_MINUTES = 140
 SAMPLE_INTERVAL_SECONDS = 30
+# At least this share of the expected thirty-second host samples must exist, and at most the rest may have failed.
+HOST_SAMPLE_COVERAGE = 0.9
+HOST_MIN_AVAILABLE_FRACTION = 0.10
+# The message flood is driven at the Portal's admission cap: a handful of requests are answered, the rest are refused 429
+# app_platform_busy. Every one-minute window must show answered requests, a typed refusal for the rest, and a live flood.
+FLOOD_MIN_ANSWERED_PER_WINDOW = 20
+FLOOD_HEARTBEAT_MAX_AGE_MS = 10_000
+TYPED_FLOOD_CLASSES = ("200", "429:app_platform_busy")
+# What each backend must show in every one-minute window, from its own cgroup counters.
+MEMORY_HELD_PERCENT = 85
+MEMORY_HELD_FRACTION = MEMORY_HELD_PERCENT / 100.0
+CPU_QUOTA_USED_FRACTION = 0.70
+PIDS_REACHED_FRACTION = 0.85
+# The image store probe needs two images of about 4 GiB each in the daemon's store, plus room for the rest of the run.
+IMAGE_STORE_HEADROOM_BYTES = 6 * 1024 ** 3
+IMAGE_STORE_NATIVE_BYTES = 8 * 1024 ** 3 + IMAGE_STORE_HEADROOM_BYTES
+MEBIBYTE = 1024 ** 2
 RETIRED_PROBES = ("ninth_backend", "memory_over_budget", "cpu_over_budget")
 REQUIRED_PROBES = (
     "fifty_first_installation",
@@ -107,6 +126,22 @@ def parse_cgroup_usage_usec(text):
     raise ValueError("cpu.stat has no usage_usec")
 
 
+def parse_cgroup_number(text):
+    """A cgroup v2 counter or limit; None for "max" (no limit)."""
+    value = text.strip()
+    if value == "max":
+        return None
+    return int(value)
+
+
+def parse_cpu_max_millis(text):
+    """The CPU quota of cgroup v2 cpu.max in thousandths of a core; None when there is no quota."""
+    fields = text.split()
+    if len(fields) != 2 or fields[0] == "max":
+        return None
+    return int(fields[0]) / int(fields[1]) * 1000.0
+
+
 def cpu_millis_between(previous_usec, current_usec, seconds):
     """Average CPU use over an interval, in thousandths of a core: the cgroup's own count, not a rate sample."""
     if seconds <= 0:
@@ -158,25 +193,47 @@ class Sampler:
             summary["memory_bytes"] = sum(r["memory_bytes"] for r in rows)
             summary["cpu_millis"] = sum(r["cpu_millis"] for r in rows)
             summary["pids"] = sum(r["pids"] for r in rows)
-            cgroup = self._cgroup_cpu_millis(running, full_ids, now)
-            if cgroup is not None:
-                summary["cpu_millis"], summary["cpu_source"] = cgroup, "cgroup"
+            counters = self._cgroup_counters(running, full_ids)
+            if counters is not None:
+                summary["per_backend"] = [dict(id=container, **counters[container]) for container in running]
+                cgroup = self._cgroup_cpu_millis(counters, now)
+                if cgroup is not None:
+                    summary["cpu_millis"], summary["cpu_source"] = cgroup, "cgroup"
         return summary, log_bytes
 
-    def _cgroup_cpu_millis(self, running, full_ids, now):
-        """The summed average CPU of the running backends since the previous sample, from the kernel's counters.
+    def _read_cgroup(self, full_id):
+        """One backend's own kernel counters: CPU used, memory and PIDs held against their limits, and the peaks the kernel keeps."""
+        base = self.cgroup_root / f"docker-{full_id}.scope"
+        row = {"usage_usec": parse_cgroup_usage_usec((base / "cpu.stat").read_text()),
+               "memory_current": parse_cgroup_number((base / "memory.current").read_text()),
+               "memory_max": parse_cgroup_number((base / "memory.max").read_text()),
+               "cpu_quota_millis": parse_cpu_max_millis((base / "cpu.max").read_text()),
+               "pids_current": parse_cgroup_number((base / "pids.current").read_text()),
+               "pids_max": parse_cgroup_number((base / "pids.max").read_text())}
+        for name, key in (("memory.peak", "memory_peak"), ("pids.peak", "pids_peak")):
+            try:  # the peak files exist from kernel 5.19 and 6.1; the sampled current values stand in where they do not
+                row[key] = parse_cgroup_number((base / name).read_text())
+            except (OSError, ValueError):
+                pass
+        return row
 
-        This is the figure the budget is judged on when it is available: a rate sampled over a second can read a
-        few percent above a quota that the kernel enforces exactly over any longer window."""
-        current = {}
+    def _cgroup_counters(self, running, full_ids):
+        counters = {}
         for container in running:
             if container not in full_ids:
                 return None
             try:
-                usage = parse_cgroup_usage_usec((self.cgroup_root / f"docker-{full_ids[container]}.scope" / "cpu.stat").read_text())
+                counters[container] = self._read_cgroup(full_ids[container])
             except (OSError, ValueError):
                 return None
-            current[container] = (usage, now)
+        return counters
+
+    def _cgroup_cpu_millis(self, counters, now):
+        """The summed average CPU of the running backends since the previous sample, from the kernel's counters.
+
+        This is the figure the budget is judged on when it is available: a rate sampled over a second can read a
+        few percent above a quota that the kernel enforces exactly over any longer window."""
+        current = {container: (row["usage_usec"], now) for container, row in counters.items()}
         previous, self._cgroup = self._cgroup, current
         if set(previous) != set(current) or not previous:
             return None
@@ -208,11 +265,13 @@ def _check(name, passed, detail):
 
 # Owner decision 2026-11-13: the p95 of the loaded period must be within max(1.5x the idle p95, the idle p95 plus
 # 5 ms). A ratio alone is meaningless against a sub-millisecond baseline; the load is generated outside the measured
-# process, so the measured process sees only platform load. Doc 167 asks for one p95 over the soak, so the verdict is
-# the p95 of every loaded sample of the run pooled together (the idle p95 is pooled the same way). The p95 of each
-# one-minute window, its threshold, the count over it and the worst window are diagnostics: none is hidden or
-# dropped, none decides.
+# process, so the measured process sees only platform load. The owner decided only that floor.
+#
+# Verdict computation (engineering decision, not the owner's): the p95 of every loaded sample of the run pooled together
+# (the idle p95 is pooled the same way). The p95 of each one-minute window, its threshold, the count over it and the worst
+# window are diagnostics: none is hidden or dropped, none decides.
 LATENCY_FLOOR_US = 5000
+LATENCY_SERIES = ("home", "report", "dispatch", "batch_start")
 
 
 def latency_threshold_us(idle_p95_us):
@@ -224,27 +283,31 @@ def _latency_check(name, series, evidence):
     threshold = latency_threshold_us(baseline)
     pooled = evidence.get("loaded", {}).get(series, {})
     pooled_p95, pooled_count = pooled.get("p95_us", 0), pooled.get("count", 0)
-    rows, over, worst = [], [], None
+    rows, over, empty, worst = [], [], [], None
     for window in evidence.get("windows", []):
-        p95 = window[series]["p95_us"]
+        stats = window.get(series) or {}
+        p95 = stats.get("p95_us", 0)
         ok = p95 <= threshold
         rows.append({"minute": window["minute"], "p95_us": p95, "threshold_us": threshold, "passed": ok})
         if not ok:
             over.append(window["minute"])
+        if not stats.get("count", 0):
+            empty.append(window["minute"])
         if worst is None or p95 > worst["p95_us"]:
             worst = {"minute": window["minute"], "p95_us": p95}
-    return _check(name, pooled_count > 0 and pooled_p95 <= threshold, {
+    return _check(name, pooled_count > 0 and pooled_p95 <= threshold and not empty, {
         "idle_p95_us": baseline, "threshold_us": threshold, "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
         "pooled_ratio": round(pooled_p95 / max(baseline, 1), 3), "worst_ratio": round((worst or {"p95_us": 0})["p95_us"] / max(baseline, 1), 3),
         "worst_window": worst, "windows": len(rows), "windows_over_count": len(over), "windows_over_the_threshold": over[:200],
-        "window_thresholds": rows})
+        "windows_without_samples": empty[:200], "window_thresholds": rows})
 
 
 def render_summary(evidence, verdict):
     """Markdown for the job's step summary: the verdict per series and every window of every series."""
     lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {'passed' if verdict['passed'] else 'FAILED'}",
-             "", "Latency verdict: the pooled loaded p95 must be at most max(1.5 x idle p95, idle p95 + 5 ms). Windows are diagnostics."]
-    for series in ("home", "report", "dispatch"):
+             "", "Latency verdict (engineering decision, not the owner's): the pooled loaded p95 must be at most "
+             "max(1.5 x idle p95, idle p95 + 5 ms). Windows are diagnostics."]
+    for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
         if check is None:
             continue
@@ -256,80 +319,222 @@ def render_summary(evidence, verdict):
                   "| minute | window p95 (us) | threshold (us) | over |", "| --- | --- | --- | --- |"]
         for row in d["window_thresholds"]:
             lines.append(f"| {row['minute']} | {row['p95_us']} | {row['threshold_us']} | {'' if row['passed'] else 'over'} |")
+    achieved = verdict.get("achieved_fractions") or {}
+    if achieved:
+        lines += ["", "### Backend fractions achieved (lowest backend)", ""]
+        lines += [f"- {name}: {value['min']:.3f} (per backend {', '.join(f'{v:.3f}' for v in value['per_backend'].values())})"
+                  for name, value in achieved.items() if value.get("per_backend")]
+    for item in verdict.get("unit_level_probes", []):
+        lines.append(f"- unit level, not observed in this run: {item['name']} (tests {', '.join(item['tests'])}: "
+                     f"{'passed' if item['tests_passed'] else 'NOT PASSED'})")
     return "\n".join(lines) + "\n"
 
 
-def _loads_check(evidence):
-    """The last window's status of each backend shows its own loads ran: memory held, CPU burners, threads, log
-    written, and the data namespace filled to its quota. Without this a backend that did nothing would pass."""
-    # Per backend, its latest status that answered: one missed request at the last minute is not a backend that did
-    # nothing, and a backend that never answered is.
-    latest = {}
+def _window_bounds(evidence):
+    """(minute, start_ms, end_ms) of every loaded window: the one-minute interval its samples were spread over."""
+    started = evidence.get("load_started_ms", 0)
+    bounds = []
     for window in evidence.get("windows", []):
-        for b in window.get("backends", []):
-            if b.get("answered") or b.get("installation") not in latest:
-                latest[b.get("installation")] = b
-    backends = list(latest.values())
-    held_minimum = 0.5 * evidence.get("sizing", {}).get("MemoryMiB", 0) * 1024 * 1024
+        start = window.get("started_ms") or started + (window["minute"] - 1) * 60_000
+        bounds.append((window["minute"], start, window.get("ended_ms") or start + 60_000))
+    return bounds
+
+
+def _loads_check(evidence):
+    """Each backend's own status shows its loads ran, and keeps showing it: memory held at the held fraction of its limit,
+    CPU burners, threads, log written and the data namespace filled to its quota, with the log and request counters
+    advancing in every window. Without this a backend that did nothing, or stopped, would pass."""
+    windows = evidence.get("windows", [])
+    series = {}
+    for window in windows:
+        for b in window.get("backends") or []:
+            series.setdefault(b.get("installation"), []).append((window["minute"], b))
+    held_minimum = (evidence.get("sizing", {}).get("MemoryMiB", 0) * MEMORY_HELD_PERCENT // 100) * MEBIBYTE
     expected = evidence.get("budgets", {}).get("running_backends", 0)
+    allowed_missing = max(1, int(0.02 * len(windows)))
     problems = []
-    for b in backends:
+    for installation, rows in series.items():
         reasons = []
-        if not b.get("answered"):
-            reasons.append("did not answer")
-        else:
-            if b["held_bytes"] < held_minimum or held_minimum <= 0:
-                reasons.append("held too little memory")
-            if b["threads"] < 8:
+        answered = [(minute, b) for minute, b in rows if b.get("answered")]
+        if len(rows) - len(answered) > allowed_missing or not answered:
+            reasons.append(f"did not answer in {len(rows) - len(answered)} of {len(rows)} windows")
+        if answered:
+            last = answered[-1][1]
+            if held_minimum <= 0 or last["held_bytes"] < held_minimum:
+                reasons.append(f"held too little memory ({last['held_bytes']} of at least {held_minimum} bytes)")
+            if last["threads"] < 8:
                 reasons.append("started too few threads")
-            if b["burners"] < 1:
+            if last["burners"] < 1:
                 reasons.append("burned no CPU")
-            if b["log_bytes"] <= 0:
+            if last["log_bytes"] <= 0:
                 reasons.append("wrote no log")
-            if not b["data_present"]:
+            if not last["data_present"]:
                 reasons.append("had no data namespace")
-            elif b["storage_full"] < 1:
+            elif last["storage_full"] < 1:
                 reasons.append("never filled its data namespace")
+            for (_, before), (minute, after) in zip(answered, answered[1:]):
+                for counter in ("log_bytes", "requests"):
+                    if after.get(counter, 0) <= before.get(counter, 0):
+                        reasons.append(f"{counter} did not advance in window {minute}")
         if reasons:
-            problems.append({"installation": b.get("installation"), "reasons": reasons})
-    return _check("backends_ran_every_declared_load", expected > 0 and len(backends) == expected and not problems,
-                  {"backends": len(backends), "expected": expected, "problems": problems})
+            problems.append({"installation": installation, "reasons": reasons[:20]})
+    return _check("backends_ran_every_declared_load", expected > 0 and len(series) == expected and not problems,
+                  {"backends": len(series), "expected": expected, "windows": len(windows), "problems": problems})
 
 
-def evaluate(evidence, samples, parent_passed, min_samples=1):
+def _fractions(values):
+    return {"min": min(values.values()), "max": max(values.values()), "per_backend": values} if values else {}
+
+
+def _backend_limits(evidence, samples):
+    """Judge each backend against its own cgroup counters, window by window: CPU used at least CPU_QUOTA_USED_FRACTION of
+    its quota, memory current at least MEMORY_HELD_FRACTION of its limit, and PIDs up to the limit less a small margin.
+    The status counters the backend reports about itself are checked separately; these cannot be reported by the backend."""
+    rows = sorted((s for s in samples if (s.get("backends") or {}).get("per_backend")), key=lambda s: s["at_ms"])
+    expected = evidence.get("budgets", {}).get("running_backends", 0)
+    problems, cpu_min, memory_min, memory_peak, pids_peak = [], {}, {}, {}, {}
+    bounds = _window_bounds(evidence)
+    for minute, start, end in bounds:
+        in_window = [(i, r) for i, r in enumerate(rows) if start < r["at_ms"] <= end]
+        if not in_window:
+            problems.append({"window": minute, "backend": None, "reason": "no cgroup sample in the window"})
+            continue
+        used, available = {}, {}
+        for i, current in in_window:
+            if i == 0:
+                continue
+            previous = rows[i - 1]
+            seconds = (current["at_ms"] - previous["at_ms"]) / 1000.0
+            before = {b["id"]: b for b in previous["backends"]["per_backend"]}
+            for b in current["backends"]["per_backend"]:
+                if b["id"] in before and b.get("cpu_quota_millis"):
+                    used[b["id"]] = used.get(b["id"], 0) + b["usage_usec"] - before[b["id"]]["usage_usec"]
+                    available[b["id"]] = available.get(b["id"], 0) + seconds * 1e6 * b["cpu_quota_millis"] / 1000.0
+        ids = {b["id"] for _, r in in_window for b in r["backends"]["per_backend"]}
+        if expected and len(ids) != expected:
+            problems.append({"window": minute, "backend": None, "reason": f"{len(ids)} backends in the cgroup samples, expected {expected}"})
+        for backend in sorted(ids):
+            if available.get(backend, 0) <= 0:
+                problems.append({"window": minute, "backend": backend, "reason": "no CPU interval in the window"})
+            else:
+                fraction = used[backend] / available[backend]
+                cpu_min[backend] = min(cpu_min.get(backend, fraction), fraction)
+                if fraction < CPU_QUOTA_USED_FRACTION:
+                    problems.append({"window": minute, "backend": backend, "reason": f"CPU used {fraction:.3f} of its quota, below {CPU_QUOTA_USED_FRACTION}"})
+            held = [r_b["memory_current"] / r_b["memory_max"] for _, r in in_window for r_b in r["backends"]["per_backend"]
+                    if r_b["id"] == backend and r_b.get("memory_max") and r_b.get("memory_current") is not None]
+            if not held:
+                problems.append({"window": minute, "backend": backend, "reason": "memory current or its limit unknown"})
+            elif min(held) < MEMORY_HELD_FRACTION:
+                problems.append({"window": minute, "backend": backend, "reason": f"memory current {min(held):.3f} of its limit, below {MEMORY_HELD_FRACTION}"})
+    start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
+    for sample in rows:
+        if start < sample["at_ms"] <= end:
+            for b in sample["backends"]["per_backend"]:
+                if b.get("memory_max") and b.get("memory_current") is not None:
+                    fraction = b["memory_current"] / b["memory_max"]
+                    memory_min[b["id"]] = min(memory_min.get(b["id"], fraction), fraction)
+                    memory_peak[b["id"]] = max(memory_peak.get(b["id"], fraction), fraction)
+                if b.get("pids_max"):
+                    reached = max(b.get("pids_current") or 0, b.get("pids_peak") or 0)
+                    pids_peak[b["id"]] = max(pids_peak.get(b["id"], 0.0), reached / b["pids_max"])
+    achieved = {"cpu_window_min": _fractions(cpu_min), "memory_current_min": _fractions(memory_min),
+                "memory_current_peak": _fractions(memory_peak), "pids_peak": _fractions(pids_peak)}
+    held_check = _check("backends_held_their_limits_in_every_window", bool(bounds) and bool(rows) and not problems,
+                        {"windows": len(bounds), "cpu_minimum_fraction_of_quota": CPU_QUOTA_USED_FRACTION,
+                         "memory_minimum_fraction_of_limit": MEMORY_HELD_FRACTION, "problems": problems[:50], "problem_count": len(problems)})
+    short = {b: f for b, f in pids_peak.items() if f < PIDS_REACHED_FRACTION}
+    pid_check = _check("backends_reached_their_pid_limit", bool(pids_peak) and (not expected or len(pids_peak) == expected) and not short,
+                       {"minimum_fraction_of_limit": PIDS_REACHED_FRACTION, "peak_fractions": pids_peak, "below_the_minimum": short})
+    return held_check, pid_check, achieved
+
+
+def _flood_checks(evidence):
+    windows = evidence.get("windows", [])
+    floods = [w.get("flood") or {} for w in windows]
+    answered = [f.get("backend_requests_ok", 0) for f in floods]
+    below = [w["minute"] for w, n in zip(windows, answered) if n < FLOOD_MIN_ANSWERED_PER_WINDOW]
+    first = _check("message_flood_answered_in_every_window", bool(windows) and not below, {
+        "answered": sum(answered), "busy_refusals": sum(f.get("backend_requests_busy", 0) for f in floods),
+        "minimum_per_window": FLOOD_MIN_ANSWERED_PER_WINDOW, "windows_below_the_minimum": below[:200],
+        "answered_by_window": answered[:500]})
+    classes_by_window, bad = [], []
+    for window, flood in zip(windows, floods):
+        classes = dict(flood.get("classes") or {})
+        classes_by_window.append(classes)
+        untyped = {k: v for k, v in classes.items() if k not in TYPED_FLOOD_CLASSES and v}
+        if untyped or (flood.get("backend_request_errors", 0) and not classes):
+            bad.append(window["minute"])
+    second = _check("message_flood_refusals_are_typed", bool(windows) and not bad, {
+        "allowed_classes": list(TYPED_FLOOD_CLASSES), "windows_with_other_classes": bad[:200], "classes_by_window": classes_by_window[:500]})
+    dead = [w["minute"] for w, f in zip(windows, floods)
+            if not f.get("flood_alive") or f.get("heartbeat_age_ms", FLOOD_HEARTBEAT_MAX_AGE_MS + 1) > FLOOD_HEARTBEAT_MAX_AGE_MS]
+    third = _check("message_flood_alive_throughout", bool(windows) and not dead,
+                   {"maximum_heartbeat_age_ms": FLOOD_HEARTBEAT_MAX_AGE_MS, "windows_without_a_live_flood": dead[:200]})
+    return [first, second, third]
+
+
+def _probe_checks(probes, unit_tests):
+    names = {p["name"] for p in probes}
+    native = [p for p in probes if p.get("level") == "native"]
+    unit = [p for p in probes if p.get("level") == "unit"]
+    checks = [_check("every_required_probe_ran", set(REQUIRED_PROBES) <= names, {"missing": sorted(set(REQUIRED_PROBES) - names)})]
+    failed = [{"name": p["name"], "expected": p.get("expected"), "observed": p.get("observed")} for p in native if not p.get("passed")]
+    checks.append(_check("every_excess_request_refused_with_its_typed_error", native and not failed, {"native_probes": len(native), "failed": failed}))
+    retired = {p["name"]: p.get("retired") for p in probes if p["name"] in RETIRED_PROBES}
+    checks.append(_check("probes_retired_through_the_managed_uninstall",
+                         set(retired) == set(RETIRED_PROBES) and all(v == "managed_uninstall" for v in retired.values()), {"retired": retired}))
+    results = unit_tests or {}
+    reported, problems = [], []
+    for p in unit:
+        tests = list(p.get("tests") or [])
+        passed = bool(tests) and all(results.get(t) is True for t in tests)
+        reported.append({"name": p["name"], "tests": tests, "tests_passed": passed})
+        if p.get("observed") is not None:
+            problems.append({"name": p["name"], "reason": "a unit level probe has no observation in this run"})
+        if not tests:
+            problems.append({"name": p["name"], "reason": "a unit level probe names the tests that prove it"})
+        elif not passed:
+            problems.append({"name": p["name"], "reason": "its tests did not pass in this job", "tests": {t: results.get(t) for t in tests}})
+    checks.append(_check("unit_level_probe_tests_passed", not problems, {"unit_level": reported, "problems": problems}))
+    return checks, reported
+
+
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
     checks = []
     probes = evidence.get("probes", [])
-    names = {p["name"] for p in probes}
-    checks.append(_check("every_required_probe_ran", set(REQUIRED_PROBES) <= names,
-                         {"missing": sorted(set(REQUIRED_PROBES) - names)}))
-    failed = [{"name": p["name"], "expected": p.get("expected"), "observed": p.get("observed")} for p in probes if not p.get("passed")]
-    checks.append(_check("every_excess_request_refused_with_its_typed_error", probes and not failed, {"failed": failed}))
-    retired = {p["name"]: p.get("retired") for p in probes if p["name"] in RETIRED_PROBES}
-    checks.append(_check("probes_retired_through_the_managed_uninstall",
-                         set(retired) == set(RETIRED_PROBES) and all(v == "managed_uninstall" for v in retired.values()), {"retired": retired}))
+    probe_checks, unit_reported = _probe_checks(probes, unit_tests)
+    checks.extend(probe_checks)
     checks.append(_check("no_runner_crash", parent_passed, "the Go acceptance, which owns the runner, ended cleanly" if parent_passed else "the Go acceptance failed"))
     checks.append(_check("load_completed", "load_finished" in evidence.get("markers", []), {"markers": evidence.get("markers", [])}))
     idle = evidence.get("idle", {})
-    checks.append(_check("idle_baseline_measured", all(idle.get(s, {}).get("count", 0) > 0 for s in ("home", "report", "dispatch")), idle))
+    checks.append(_check("idle_baseline_measured", all(idle.get(s, {}).get("count", 0) > 0 for s in LATENCY_SERIES), idle))
     minutes = evidence.get("duration_minutes", 0)
     windows = evidence.get("windows", [])
     checks.append(_check("one_measurement_window_per_minute", minutes > 0 and len(windows) >= max(1, minutes - 1),
                          {"windows": len(windows), "minutes": minutes}))
+    checks.append(_check("session_outlives_the_run", evidence.get("session_expires_ms", 0) > evidence.get("load_finished_ms", 0) > 0,
+                         {"session_expires_ms": evidence.get("session_expires_ms"), "load_finished_ms": evidence.get("load_finished_ms")}))
     ratio_checks = {"home": _latency_check("home_p95_within_threshold_of_idle", "home", evidence),
                     "report": _latency_check("report_p95_within_threshold_of_idle", "report", evidence),
-                    "dispatch": _latency_check("dispatch_within_threshold_of_idle", "dispatch", evidence)}
+                    "dispatch": _latency_check("dispatch_within_threshold_of_idle", "dispatch", evidence),
+                    "batch_start": _latency_check("batch_start_within_threshold_of_idle", "batch_start", evidence)}
     checks.extend(ratio_checks.values())
-    flood_ok = sum(w.get("flood", {}).get("backend_requests_ok", 0) for w in windows)
-    checks.append(_check("backends_answered_the_message_flood", flood_ok > 0, {"answered": flood_ok}))
+    checks.extend(_flood_checks(evidence))
 
     budgets = evidence.get("budgets", {})
     checks.append(_loads_check(evidence))
+    held_check, pid_check, achieved = _backend_limits(evidence, samples)
+    checks.extend([held_check, pid_check])
     start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
-    load = [s for s in samples if start <= s["at_ms"] <= end]
-    checks.append(_check("host_samples_cover_the_load", len(load) >= max(1, min_samples), {"samples": len(load), "required": max(1, min_samples)}))
+    load = [s for s in samples if start < s["at_ms"] <= end]
+    expected_samples = int((end - start) / 1000.0 // SAMPLE_INTERVAL_SECONDS) if end > start else 0
+    required = max(1, -(-int(HOST_SAMPLE_COVERAGE * 100) * expected_samples // 100))
+    checks.append(_check("host_samples_cover_the_load", len(load) >= required and failed_samples * 10 <= expected_samples,
+                         {"samples": len(load), "expected": expected_samples, "required": required, "failed_samples": failed_samples}))
     peak_memory = max((s["backends"]["memory_bytes"] for s in load), default=0)
     # CPU is judged on the kernel's counters, averaged over each interval, when they exist: the first sample has no
     # previous reading and falls back to a one-second rate that can read a few percent over an enforced quota.
@@ -339,6 +544,12 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
                          {"peak_bytes": peak_memory, "budget_mib": budgets.get("memory_mib")}))
     checks.append(_check("backend_cpu_within_budget", load and peak_cpu <= budgets.get("cpu_millis", 0),
                          {"peak_millis": round(peak_cpu, 1), "budget_millis": budgets.get("cpu_millis")}))
+    # The container caps sit below the budgets, so those two cannot fail on their own: the host's free memory is judged too.
+    lowest = min(load, key=lambda s: s["mem_available_kib"] / max(s["mem_total_kib"], 1), default=None)
+    fraction = lowest["mem_available_kib"] / max(lowest["mem_total_kib"], 1) if lowest else 0.0
+    checks.append(_check("host_memory_headroom", bool(load) and fraction >= HOST_MIN_AVAILABLE_FRACTION,
+                         {"minimum_available_fraction": HOST_MIN_AVAILABLE_FRACTION, "lowest_available_fraction": round(fraction, 4),
+                          "lowest_available_kib": lowest["mem_available_kib"] if lowest else None}))
     expected = budgets.get("running_backends", 0)
     crashes = [s["at_ms"] for s in load if s["backends"]["running"] != expected or s["backends"]["exited"] or s["backends"]["restarting"]
                or s["backends"]["oom_killed"] or s["backends"]["restart_count"]]
@@ -351,9 +562,31 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
     passed = all(c["passed"] for c in checks)
     return {
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES, "checks": checks,
-        "unit_level_probes": [p["name"] for p in probes if not p.get("native")],
+        "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
     }
+
+
+# ---- unit test results ----
+
+def parse_go_test_json(text):
+    """name -> passed, from `go test -json` output; a skipped or failed test is not a pass. Package lines have no test."""
+    results = {}
+    for line in text.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("Test") and event.get("Action") in ("pass", "fail", "skip"):
+            results[event["Test"]] = event["Action"] == "pass"
+    return results
+
+
+def read_go_test_json(path):
+    try:
+        return parse_go_test_json(Path(path).read_text())
+    except (OSError, ValueError):
+        return {}
 
 
 # ---- configuration ----
@@ -366,14 +599,24 @@ def soak_image(value):
 
 
 def duration_minutes(value):
-    if not re.fullmatch(r"[0-9]+", value or "") or not 1 <= int(value) <= 180:
-        raise RuntimeError("the duration is 1 to 180 minutes")
+    if not re.fullmatch(r"[0-9]+", value or "") or not 1 <= int(value) <= MAX_DURATION_MINUTES:
+        raise RuntimeError(f"the duration is 1 to {MAX_DURATION_MINUTES} minutes")
     return int(value)
 
 
+def image_store_mode(free_bytes):
+    """Whether the image store probe runs natively: two images of about 4 GiB each are loaded into the daemon, so its disk
+    must hold 8 GiB and keep headroom. Otherwise the probe stays at unit level and says why, with the measured free space."""
+    if free_bytes is not None and free_bytes >= IMAGE_STORE_NATIVE_BYTES:
+        return "native", ""
+    return "unit", (f"the Docker store's disk had {free_bytes} bytes free; two 4 GiB images need 8 GiB and the run keeps "
+                    f"{IMAGE_STORE_HEADROOM_BYTES} bytes of headroom, {IMAGE_STORE_NATIVE_BYTES} bytes in all")
+
+
 def baseline_seconds(minutes):
-    """A smoke measures its idle baseline briefly; the acceptance run measures it for three minutes."""
-    return 30 if minutes < 30 else 180
+    """The idle baseline is three minutes in every run: the pull request smoke differs from the dispatch run in duration (and in
+    the diagnosis it adds), not in how it measures."""
+    return 180
 
 
 def require_disposable_environment(env, euid, platform, which):
@@ -395,9 +638,10 @@ def run_command(*args):
     return result.stdout
 
 
-def sampling_loop(sampler, stop, path):
-    """Samples until stopped; a failed sample is recorded as an error row so a gap is never silent."""
-    samples = []
+def sampling_loop(sampler, stop, path, interval=SAMPLE_INTERVAL_SECONDS):
+    """Samples until stopped. A failed sample is recorded as an error row and counted, so a gap is never silent:
+    returns (samples, failed)."""
+    samples, failed = [], 0
     with open(path, "a", encoding="utf-8") as sink:
         while not stop.is_set():
             began = time.time()
@@ -406,10 +650,11 @@ def sampling_loop(sampler, stop, path):
                 samples.append(row)
             except Exception as error:  # noqa: BLE001 - the loop must outlive one bad sample
                 row = {"at_ms": int(began * 1000), "error": str(error)[:500]}
+                failed += 1
             sink.write(json.dumps(row, sort_keys=True) + "\n")
             sink.flush()
-            stop.wait(max(0.0, SAMPLE_INTERVAL_SECONDS - (time.time() - began)))
-    return samples
+            stop.wait(max(0.0, interval - (time.time() - began)))
+    return samples, failed
 
 
 def write_container_diagnostics(image_id, path):
@@ -442,10 +687,12 @@ def main(argv):
     parser.add_argument("--portal-binary", required=True)
     parser.add_argument("--journal-binary", required=True)
     parser.add_argument("--out", required=True)
+    parser.add_argument("--unit-tests", default="", help="go test -json output of the unit tests the unit level probes cite")
     args = parser.parse_args(argv)
     minutes = duration_minutes(args.duration_minutes)
     image = soak_image(os.environ.get("APP_CAPACITY_SOAK_IMAGE"))
-    for path in (args.portal_binary, args.journal_binary, args.out):
+    app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
+    for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
         if not Path(path).is_absolute():
             raise RuntimeError("paths must be absolute")
     require_disposable_environment(os.environ, os.geteuid(), sys.platform, shutil.which)
@@ -456,6 +703,16 @@ def main(argv):
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
         raise RuntimeError("the soak image is not in the local Docker store")
 
+    # The daemon store's disk decides whether the image store probe can run natively (two 4 GiB images); measured, not assumed.
+    docker_root = run_command("docker", "info", "--format", "{{.DockerRootDir}}").strip() or "/var/lib/docker"
+    try:
+        docker_free = shutil.disk_usage(docker_root).free
+    except OSError:
+        docker_free = None
+    store_mode, store_reason = image_store_mode(docker_free)
+    print(f"docker store {docker_root}: {docker_free} bytes free; image store probe: {store_mode}", file=sys.stderr)
+    unit_tests = read_go_test_json(args.unit_tests) if args.unit_tests else {}
+
     root = Path(tempfile.mkdtemp(prefix="portal-capacity-soak-", dir="/tmp"))
     root.chmod(0o755)
     volume = root / "owned.xfs"
@@ -463,6 +720,7 @@ def main(argv):
     mountpoint.mkdir()
     loop = None
     parent_passed, evidence, samples, started = False, {}, [], time.time()
+    failed_counter = [0]
     try:
         with volume.open("xb") as stream:
             stream.truncate(VOLUME_BYTES)  # sparse: only written blocks use the worker's disk
@@ -494,14 +752,23 @@ def main(argv):
         soak_env = dict(native, APP_CANDIDATE_DOCKER_SOCKET=socket, APP_DATA_PORTAL_FIXTURE=str(fixture),
                         APP_CAPACITY_SOAK_IMAGE=image, APP_CAPACITY_SOAK_OUT=str(out),
                         APP_CAPACITY_SOAK_DESCRIPTORS=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors"),
-                        APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)))
+                        APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
+                        APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
+                        APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary)
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
             soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
         sampler = Sampler(run_command, "/proc", mountpoint, image_id)
         stop = threading.Event()
-        collected = []
-        worker = threading.Thread(target=lambda: collected.extend(sampling_loop(sampler, stop, out / "samples.jsonl")), daemon=True)
+        collected, failed_counter = [], [0]
+
+        def sample_until_stopped():
+            samples_taken, failures = sampling_loop(sampler, stop, out / "samples.jsonl")
+            collected.extend(samples_taken)
+            failed_counter[0] = failures
+
+        worker = threading.Thread(target=sample_until_stopped, daemon=True)
         worker.start()
         started = time.time()
         log = out / "portal-parent.log"
@@ -533,7 +800,7 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, min_samples=minutes)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests)
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -542,14 +809,19 @@ def main(argv):
     report = {
         "format": EVIDENCE_FORMAT, "requested_minutes": minutes, "elapsed_seconds": int(time.time() - started),
         "ops08_minutes_required": OPS08_MINUTES,
-        "run": {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF")},
+        # The branch and the commit the run measured, and how it was started: a dispatch of the reviewed branch at that commit.
+        "run": {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_SHA",
+                                                           "GITHUB_REF", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME", "GITHUB_WORKFLOW_REF")},
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
-                 "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id},
+                 "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
+                 "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
+        "unit_tests": unit_tests,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     summary = {"passed": verdict["passed"], "counts_as_ops08_evidence": verdict["counts_as_ops08_evidence"],
-               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"], "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
+               "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"],
+               "achieved_fractions": {name: {"min": value.get("min"), "max": value.get("max")} for name, value in verdict["achieved_fractions"].items()}, "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
     print(json.dumps(summary, indent=2, sort_keys=True))
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")

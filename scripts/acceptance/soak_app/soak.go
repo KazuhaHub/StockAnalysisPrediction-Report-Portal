@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"sync/atomic"
 	"syscall"
@@ -48,6 +49,9 @@ func readCgroup(name string) string {
 // the log flood, and the only output the soak needs from inside the container.
 func (s *soakState) run() {
 	limit, known := parseCgroupLimit(readCgroup("memory.max"))
+	if soft := softMemoryLimit(limit, known); soft > 0 {
+		debug.SetMemoryLimit(soft)
+	}
 	go s.holdMemory(memoryHold(limit, known))
 	workers := cpuWorkers(readCgroup("cpu.max"))
 	for range workers {

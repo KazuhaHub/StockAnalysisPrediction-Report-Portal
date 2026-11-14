@@ -8,8 +8,8 @@ import (
 // threadMargin is the number of tasks the fork load leaves free below the container's PID limit, for the
 // runtime's own threads: garbage collection, the signal thread, the HTTP server, and one more for every goroutine
 // that is blocked in a system call at the same time (the log and storage writers). A thread the runtime cannot
-// start is fatal, so the margin is generous.
-const threadMargin = 24
+// start is fatal, so the margin is not zero, but it is small: the first smoke left 24 of 64 free and reached 41.
+const threadMargin = 8
 
 // parseCgroupLimit reads a cgroup v2 limit file. "max" and anything that is not a positive decimal mean the
 // limit is not known.
@@ -41,15 +41,29 @@ func cpuWorkers(raw string) int {
 	return workers
 }
 
-// memoryHold is how much memory the backend keeps resident: 60% of its limit, in whole MiB, so the Go runtime
-// and the network buffers still fit under the limit and the kernel never has to kill the process. Without a
+// memoryHeldPercent is the share of its memory limit the backend keeps resident. The first version held 60%; a
+// backend at its declared limit holds most of it, and the headroom is what the Go runtime, the network buffers and the
+// page cache of the storage flood (synced every few MiB) need.
+const memoryHeldPercent = 85
+
+// memoryHold is how much memory the backend keeps resident: memoryHeldPercent of its limit, in whole MiB. Without a
 // known limit it holds a small fixed amount.
 func memoryHold(limit int64, known bool) int64 {
 	const mib = 1 << 20
 	if !known {
 		return 32 * mib
 	}
-	return limit * 6 / 10 / mib * mib
+	return limit * memoryHeldPercent / 100 / mib * mib
+}
+
+// softMemoryLimit is the Go runtime's own memory limit: 95% of the container's, so the collector runs before the kernel
+// has to kill the process. Without it the collector waits for the heap to reach twice the held memory, which is far past
+// the cgroup limit at 85%. -1 means no limit is set.
+func softMemoryLimit(limit int64, known bool) int64 {
+	if !known {
+		return -1
+	}
+	return limit * 95 / 100
 }
 
 // threadsToSpawn is how many extra threads the fork load may start without reaching the PID limit.

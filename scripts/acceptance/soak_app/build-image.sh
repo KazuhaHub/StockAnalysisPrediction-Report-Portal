@@ -23,3 +23,5 @@ done
 digest=$(docker image inspect "$reference" --format '{{index .RepoDigests 0}}')
 [[ "$digest" =~ ^localhost:[0-9]+/portal-soak-backend@sha256:[a-f0-9]{64}$ ]]
 printf 'APP_CAPACITY_SOAK_IMAGE=%s\n' "$digest" >> "$GITHUB_ENV"
+# The image store probe builds its images from the same executable.
+printf 'APP_CAPACITY_SOAK_APP_BINARY=%s\n' "$fixture_root/soak-app" >> "$GITHUB_ENV"

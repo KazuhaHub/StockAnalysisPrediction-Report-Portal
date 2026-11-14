@@ -51,13 +51,32 @@ func TestMemoryHoldLeavesRuntimeHeadroom(t *testing.T) {
 		known bool
 		want  int64
 	}{
-		{512 * mib, true, 307 * mib}, // 60%, rounded down to whole MiB
-		{16 * mib, true, 9 * mib},
+		{512 * mib, true, 435 * mib}, // 85%, rounded down to whole MiB
+		{497 * mib, true, 422 * mib},
+		{16 * mib, true, 13 * mib},
 		{0, false, 32 * mib},
 	} {
 		if got := memoryHold(tc.limit, tc.known); got != tc.want {
 			t.Errorf("memoryHold(%d,%t) = %d, want %d", tc.limit, tc.known, got, tc.want)
 		}
+	}
+}
+
+func TestMemoryIsHeldAtEightyFivePercentAndTheGoRuntimeIsToldTheLimit(t *testing.T) {
+	const mib = 1 << 20
+	if memoryHeldPercent != 85 {
+		t.Fatalf("the held share is %d percent", memoryHeldPercent)
+	}
+	// The held memory leaves room for the runtime, and the soft limit sits between the held memory and the hard one, so
+	// the collector runs before the kernel kills the container: garbage never has to reach twice the live heap.
+	for _, limit := range []int64{16 * mib, 497 * mib, 512 * mib} {
+		held, soft := memoryHold(limit, true), softMemoryLimit(limit, true)
+		if soft <= held || soft >= limit {
+			t.Errorf("limit %d: held %d, soft limit %d", limit, held, soft)
+		}
+	}
+	if got := softMemoryLimit(0, false); got != -1 {
+		t.Errorf("an unknown limit sets no soft limit, got %d", got)
 	}
 }
 
@@ -68,15 +87,26 @@ func TestThreadsToSpawnStayBelowThePIDLimit(t *testing.T) {
 		want         int
 	}{
 		{64, 10, true, 64 - 10 - threadMargin},
+		{64, 0, true, 64 - threadMargin},
 		{64, 64, true, 0},
 		{64, 60, true, 0},
-		{16, 4, true, 0},
+		{12, 4, true, 0},
 		{1024, 5, true, 1024 - 5 - threadMargin},
 		{0, 0, false, 0},
 	} {
 		if got := threadsToSpawn(tc.max, tc.current, tc.known); got != tc.want {
 			t.Errorf("threadsToSpawn(%d,%d,%t) = %d, want %d", tc.max, tc.current, tc.known, got, tc.want)
 		}
+	}
+}
+
+func TestThreadMarginIsSmallSoThePIDsReachTheirLimit(t *testing.T) {
+	// 64 PIDs is the soak's declared limit: a margin of eight leaves 56, 87.5 percent, above the 85 percent the verdict requires.
+	if threadMargin < 1 || threadMargin > 8 {
+		t.Fatalf("margin %d", threadMargin)
+	}
+	if reached := float64(64-threadMargin) / 64; reached < 0.85 {
+		t.Fatalf("a 64 PID backend reaches %.3f of its limit", reached)
 	}
 }
 

@@ -383,4 +383,4 @@ func TestSoakDispatchBacklogs(t *testing.T) {
 }
 
 // soakSamples are the latency samples of one window, or of the whole loaded period when pooled.
-type soakSamples struct{ home, report, dispatch, dispatchShallow []time.Duration }
+type soakSamples struct{ home, report, dispatch, dispatchShallow, batchStart []time.Duration }

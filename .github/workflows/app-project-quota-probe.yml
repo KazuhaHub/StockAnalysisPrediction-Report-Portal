@@ -11,7 +11,7 @@ on:
         type: boolean
         default: true
       duration_minutes:
-        description: Capacity soak length in minutes (1 to 180); only a passing run of 120 or more counts as OPS-08 evidence
+        description: Capacity soak length in minutes (1 to 140, the step timeout allows no more); only a passing run of 120 or more counts as OPS-08 evidence
         type: string
         default: '120'
       soak_only:
@@ -100,12 +100,18 @@ on:
       - 'internal/app/app_platform_viewer*'
       - 'internal/app/app_platform_audience*'
       - 'internal/appplatform/viewer_identity*'
-      - 'go.mod'
-      - 'go.sum'
       - 'scripts/acceptance/**'
       - 'scripts/project_quota_probe_test.py'
       - 'scripts/capacity_soak_test.py'
       - 'internal/app/app_platform_capacity*'
+      - 'internal/apprunner/**'
+      - 'internal/app/app_platform_backend_http*'
+      - 'internal/app/app_platform_managed_access*'
+      - 'internal/app/app_platform_writable_request*'
+      - 'internal/app/store.go'
+      - 'internal/app/store_stmtcache*'
+      - 'internal/app/batch_run.go'
+      - 'internal/queue/**'
       - 'internal/app/app_platform_installation_capacity*'
       - 'internal/app/app_platform_image_fixture_test.go'
       - '.github/workflows/app-project-quota-probe.yml'
@@ -510,9 +516,10 @@ jobs:
           retention-days: 14
 
   # The declared-capacity soak (doc 171, PR 4b; OPS-08, closing SEC-09). The dispatch run is the acceptance run
-  # (120 minutes by default); a pull request touching the capacity code or the soak runs the same harness for five
-  # minutes so it cannot rot, and that smoke is never evidence. Both use the reference host class: a GitHub-hosted
-  # ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
+  # (120 minutes by default, 140 at most), started on the branch that carries this job at the reviewed commit; a pull request
+  # touching the capacity code, the code behind its latency fixes or the soak runs the same configuration for five minutes
+  # (and adds the diagnosis) so it cannot rot, and that smoke is never evidence. Both use the reference host class: a
+  # GitHub-hosted ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
   capacity-soak:
     if: github.event_name != 'push'
     runs-on: ubuntu-24.04
@@ -526,11 +533,27 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Check the requested duration
+        run: |
+          [[ "$SOAK_MINUTES" =~ ^[0-9]+$ ]] && (( SOAK_MINUTES >= 1 && SOAK_MINUTES <= 140 )) \
+            || { echo "duration_minutes must be 1 to 140 (the step timeout is 160 minutes), got '$SOAK_MINUTES'"; exit 1; }
       - name: Check the soak harness without privileges
         run: |
           python3 -B -m unittest discover -s scripts -p capacity_soak_test.py
           GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/soak_app -count=1
           GOWORK=off GOMAXPROCS=2 go test ./internal/app -run '^(TestSoak|TestStagingCap|TestTaskQuotasRefuse)' -count=1
+      - name: Run the unit tests the unit level probes cite
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/capacity-soak"
+          # The verdict reads this file: a unit level probe is proven by these tests, run in this job.
+          GOWORK=off GOMAXPROCS=2 go test -json -count=1 \
+            -run '^(TestTaskQuotasRefuseAtTheirOwnBoundary|TestLoadImageReservesTheDeclaredBytesOnce|TestLoadImageRefusedRunsNothingAndReplays|TestAdmissionRefusesEachDimensionByOneUnit)$' \
+            ./internal/app ./internal/apprunner/journal > "$RUNNER_TEMP/capacity-soak/unit-tests.json"
+      - name: Record the disk space before the soak
+        run: |
+          mkdir -p "$RUNNER_TEMP/capacity-soak"
+          { df -B1 / /tmp /var/lib/docker 2>&1; docker info --format 'docker root: {{.DockerRootDir}}' 2>&1; } | tee "$RUNNER_TEMP/capacity-soak/disk-before.txt"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
@@ -545,10 +568,11 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_IMAGE \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \
+            --unit-tests "$RUNNER_TEMP/capacity-soak/unit-tests.json" \
             --out "$RUNNER_TEMP/capacity-soak"
       - name: Preserve the soak evidence
         if: always()
