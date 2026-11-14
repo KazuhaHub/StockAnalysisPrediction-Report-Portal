@@ -626,6 +626,7 @@ class VariantTests(unittest.TestCase):
     def test_the_variant_is_a_closed_list(self):
         self.assertEqual(soak.soak_variant(""), "")
         self.assertEqual(soak.soak_variant("memory-db,no-batch-probes"), "memory-db,no-batch-probes")
+        self.assertEqual(soak.soak_variant("skip-image-store"), "skip-image-store")
         for bad in ("memory", "no-batch-probes;x", "a b"):
             with self.assertRaises(RuntimeError):
                 soak.soak_variant(bad)

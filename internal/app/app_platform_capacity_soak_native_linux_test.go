@@ -829,6 +829,9 @@ func (c *soakChild) probeImageStore() {
 	free, _ := strconv.ParseInt(os.Getenv("APP_CAPACITY_SOAK_DOCKER_FREE_BYTES"), 10, 64)
 	evidence := soakImageStoreEvidence{Mode: os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"), Reason: os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"), DockerFreeBytes: free}
 	binaryPath := os.Getenv("PORTAL_CAPACITY_SOAK_APP_BINARY")
+	if evidence.Mode == "native" && c.variant.SkipImageStore {
+		evidence.Mode, evidence.Reason = "unit", "the skip-image-store diagnostic variant"
+	}
 	if evidence.Mode == "native" && binaryPath == "" {
 		evidence.Mode, evidence.Reason = "unit", "the harness gave no soak backend binary to build the images from"
 	}

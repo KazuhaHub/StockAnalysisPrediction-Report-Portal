@@ -375,12 +375,13 @@ func soakRunnerServiceTimeout(minutes, baselineSeconds int) string {
 // soakVariant is a diagnostic switch for explaining a failing run, never part of an evidence run: it measures the same
 // scenario with one part removed so the part's share of a latency can be told apart.
 type soakVariant struct {
-	Name        string
-	MemoryDB    bool // the in-memory template store of the unit suite instead of a file-backed SQLite database
-	BatchProbes bool // the batch enqueue-to-start probes; without them the scheduler still runs and holds its backlog
+	Name           string
+	SkipImageStore bool // the image store probe stays at unit level whatever the disk allows
+	MemoryDB       bool // the in-memory template store of the unit suite instead of a file-backed SQLite database
+	BatchProbes    bool // the batch enqueue-to-start probes; without them the scheduler still runs and holds its backlog
 }
 
-// soakParseVariant reads APP_CAPACITY_SOAK_VARIANT: empty, or a comma separated list of memory-db and no-batch-probes.
+// soakParseVariant reads APP_CAPACITY_SOAK_VARIANT: empty, or a comma separated list of memory-db, no-batch-probes and skip-image-store.
 func soakParseVariant(env string) (soakVariant, error) {
 	v := soakVariant{Name: env, BatchProbes: true}
 	for _, part := range strings.Split(env, ",") {
@@ -390,6 +391,8 @@ func soakParseVariant(env string) (soakVariant, error) {
 			v.MemoryDB = true
 		case "no-batch-probes":
 			v.BatchProbes = false
+		case "skip-image-store":
+			v.SkipImageStore = true
 		default:
 			return soakVariant{}, fmt.Errorf("unknown soak variant %q", part)
 		}
@@ -672,6 +675,7 @@ func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
 		{"memory-db", true, true, true},
 		{"no-batch-probes", false, false, true},
 		{"memory-db,no-batch-probes", true, false, true},
+		{"skip-image-store", false, true, true},
 		{"unknown", false, false, false},
 	} {
 		v, err := soakParseVariant(tc.env)
