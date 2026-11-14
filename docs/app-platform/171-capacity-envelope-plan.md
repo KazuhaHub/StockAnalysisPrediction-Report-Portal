@@ -1038,6 +1038,29 @@ is evidence for OPS-08.
     The CPU profile puts 58% of the loaded minute in the relay's admitted requests. Nothing was tuned in response; the 120 minute run on this shape
     would fail all four series. Whether PostgreSQL on a separate host (as the owner runs it) passes is not measured: the reference host has one.
 
+    **Lowering the runner CPU budget (non-evidence PostgreSQL runs, owner decision 2026-11-14).** The `soak_cpu_percent` input overrides the
+    runner's `capacity.cpu_percent` (default 50) in the soak runner's config; the backends are still sized from the budget the runner reports (eight
+    of them, so each CPU share shrinks), and the value is recorded in the evidence. A run with an override is evidence only if it equals the default. The
+    default was not changed. Five-minute runs on PostgreSQL (idle / pooled loaded / bound, microseconds; windows 1 to 5):
+
+    | | 50% (run 43598019520) | 37% (run 43599586089) | 25% (run 43599595728) |
+    | --- | --- | --- | --- |
+    | runner CPU budget / each backend | 2000 / 240 millis | 1480 / 180 | 1000 / 120 |
+    | host busy during the load, mean / max | 80% to 85% | 70.1% / 71.6% | 63.2% / 64.5% |
+    | summed backend CPU, mean | about 1900 millis | 1440 | 960 |
+    | home | 1764 / 10055 / 6764 fail | 2062 / 10518 / 7062 fail | 1746 / 9288 / 6746 fail |
+    | report | 3781 / 33989 / 8781 fail | 2383 / 9077 / 7383 fail | 2972 / 17676 / 7972 fail |
+    | dispatch@200 | 989 / 9573 / 5989 fail | 884 / 3206 / 5884 pass | 946 / 3882 / 5946 pass |
+    | batch start | 11284 / 72222 / 16926 fail | 9172 / 20910 / 14172 fail | 11169 / 43752 / 16753 fail |
+
+    Per-window p95 at 37%: home 9352, 12446, 9518, 10662, 10814; report 8557, 10001, 8284, 10296, 8462; dispatch 2965, 3798, 2771, 3506, 2750; batch
+    start 27363, 19966, 16459, 21560, 19989. At 25%: home 11290, 8304, 8749, 8435, 10289; report 13302, 19721, 11621, 22926, 14706; dispatch 3705, 3494,
+    3611, 5005, 4372; batch start 43752, 69933, 20640, 47459, 27345. Every backend still used at least 0.998 of its quota, held at least 0.996 of its
+    memory and reached 0.89 to 0.94 of its PIDs, with every other check green. No level passes, so no stability rerun was made. Lowering the backends'
+    share removes most of the load's growth in the dispatch series, but home and report stay at about 9 to 10 ms against bounds of about 7 ms: the host stays
+    63% to 70% busy at 25% and 37%, so the Portal's own competitors (PostgreSQL, the flood process, the runner, Docker and the Portal) are still more than
+    the idle host's.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
