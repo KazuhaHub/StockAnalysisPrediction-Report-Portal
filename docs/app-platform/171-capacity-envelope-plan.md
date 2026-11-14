@@ -1117,6 +1117,27 @@ is evidence for OPS-08.
     their bounds, so the contention does not scale with the host's idle share alone: PostgreSQL's own share is 0.1% to 0.2%, so the round trips to it are waiting
     on the scheduler behind the backends' cgroup-limited threads, not on its CPU.
 
+    **Production cgroup layout and the app containers' CPU weight (#442, `fcacdb37`; PostgreSQL, 5 minutes, default 50%, dispatch 43648480436 on `15832cd4`, not
+    evidence).** The soak now starts the measured Portal (`soak-portal.scope`) and the runner (`soak-runner.scope`) each in a transient scope under `system.slice` at
+    `CPUWeight=100` (`systemd-run --scope`, the Portal dropping to its uid inside the scope with `setpriv`; the job fails if `systemd-run` cannot do this, it does not fake
+    the layout), so they are siblings of the backends' `docker-<id>.scope` as production's compose containers and systemd unit are. PostgreSQL is the runner image's own
+    `postgresql@16-main.service` under `system-postgresql.slice`. The flood generator is started by the Portal and so shares its scope (about 0.5% of the host). The
+    sampler records `/proc/<pid>/cgroup` of each group and `cpu.weight` along each path (`cgroup_layout` in the evidence). Recorded: `/system.slice` 100; Portal and
+    flood `/system.slice/soak-portal.scope` 100; runner `/system.slice/soak-runner.scope` 100; PostgreSQL `/system.slice/system-postgresql.slice` 100 and its service
+    unit with no `cpu.weight` file of its own; a backend `/system.slice/docker-<id>.scope` **35** (CpuShares 256). Without #442 the backend scope read 100.
+
+    | Series (us) | idle / pooled / bound | windows 1 to 5 |
+    | --- | --- | --- |
+    | home | 1776 / 20384 / 6776 fail | 20696, 12235, 19126, 23221, 23997 |
+    | report | 3196 / 32884 / 8196 fail | 25525, 40229, 29084, 48803, 21646 |
+    | dispatch@200 | 1055 / 7123 / 6055 fail | 7438, 5348, 9687, 5460, 7610 |
+    | batch start | 29868 / 64991 / 44802 fail | 58512, 72330, 32162, 72872, 33035 |
+
+    CPU by group, mean of windows 1 to 5 (percent of the host): host busy 83.6, Portal 7.3, flood 0.5, PostgreSQL 0.3, runner 11.6, docker 4.8, backends 48.0, other 11.2;
+    admitted 7.7 and refused 114 requests per second. Every other check passes (backends at 0.998 of their quota). The weight changed nothing visible: the host is 83% busy, not
+    saturated, so the run queue is not where the Portal's time goes and a weight that only arbitrates a contended CPU has little to arbitrate. The latency is as before, and
+    this run's idle batch start (29868 us) is itself much slower than earlier runs' (5000 to 11000), which moves its bound; no tuning was done.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
