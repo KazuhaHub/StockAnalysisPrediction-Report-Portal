@@ -5,11 +5,14 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -88,6 +91,47 @@ func verifyNativeCandidateResourceBounds(
 		Transport: transport,
 		Timeout:   10 * time.Second,
 	}
+
+	// The daemon reports the shares the runner set, and runc must have converted them to a cgroup v2
+	// cpu.weight below the default of 100. The hard quota is checked by the limits reader.
+	var weight struct {
+		HostConfig struct{ CpuShares int64 }
+		State      struct{ Pid int }
+	}
+	if err := readJSON(
+		ctx, daemon,
+		"/v"+APIVersion+"/containers/"+nativeID+"/json",
+		&weight,
+	); err != nil || weight.HostConfig.CpuShares != 256 || weight.State.Pid <= 0 {
+		t.Fatalf("native container CpuShares = %d pid %d, want 256: %v",
+			weight.HostConfig.CpuShares, weight.State.Pid, err)
+	}
+	cgroupLine, err := os.ReadFile(
+		fmt.Sprintf("/proc/%d/cgroup", weight.State.Pid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cgroupPath string
+	for _, line := range strings.Split(string(cgroupLine), "\n") {
+		if rest, ok := strings.CutPrefix(line, "0::"); ok {
+			cgroupPath = rest
+		}
+	}
+	if !strings.HasPrefix(cgroupPath, "/") {
+		t.Fatalf("container is not in a cgroup v2 hierarchy: %q", cgroupLine)
+	}
+	weightRaw, err := os.ReadFile(
+		filepath.Join("/sys/fs/cgroup", cgroupPath, "cpu.weight"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cpuWeight, err := strconv.Atoi(strings.TrimSpace(string(weightRaw)))
+	if err != nil || cpuWeight < 1 || cpuWeight >= 100 {
+		t.Fatalf("cgroup cpu.weight = %q, want below the default of 100: %v",
+			weightRaw, err)
+	}
+	t.Logf("NATIVE_APP_CPU_WEIGHT cpu.weight=%d (CpuShares=256)", cpuWeight)
+	t.Log("NATIVE_APP_CPU_WEIGHT_LOW")
 
 	var tmp struct {
 		Bytes     int64 `json:"bytes"`

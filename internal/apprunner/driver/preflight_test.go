@@ -19,7 +19,7 @@ func versionFixture() map[string]any {
 }
 func infoFixture() map[string]any {
 	return map[string]any{"ServerVersion": "28.5.0", "OSType": "linux", "Architecture": "x86_64", "Driver": "overlay2", "CgroupVersion": "2", "CgroupDriver": "systemd",
-		"MemoryLimit": true, "SwapLimit": true, "CpuCfsPeriod": true, "CpuCfsQuota": true, "PidsLimit": true, "NCPU": 2, "MemTotal": int64(1 << 30),
+		"MemoryLimit": true, "SwapLimit": true, "CpuCfsPeriod": true, "CpuCfsQuota": true, "CPUShares": true, "PidsLimit": true, "NCPU": 2, "MemTotal": int64(1 << 30),
 		"SecurityOptions": []string{"name=seccomp,profile=builtin", "name=apparmor"}, "HttpProxy": "fixture-sensitive", "Labels": []string{"fixture-sensitive"}}
 }
 
@@ -78,7 +78,7 @@ func TestInspectionRefusesIncompatibleDaemonClaims(t *testing.T) {
 		name, key string
 		value     any
 	}{
-		{"memory", "MemoryLimit", false}, {"swap", "SwapLimit", false}, {"cpu", "CpuCfsQuota", false}, {"cpu_period", "CpuCfsPeriod", false}, {"pids", "PidsLimit", false},
+		{"memory", "MemoryLimit", false}, {"swap", "SwapLimit", false}, {"cpu", "CpuCfsQuota", false}, {"cpu_period", "CpuCfsPeriod", false}, {"cpu_shares", "CPUShares", false}, {"pids", "PidsLimit", false},
 		{"cgroup_v1", "CgroupVersion", "1"}, {"unknown_cgroup_driver", "CgroupDriver", "unknown"}, {"driver", "Driver", "unverified"}, {"wrong_arch", "Architecture", "aarch64"},
 		{"rootless", "SecurityOptions", []string{"name=seccomp,profile=builtin", "name=rootless"}},
 		{"userns", "SecurityOptions", []string{"name=seccomp,profile=builtin", "name=userns"}},
@@ -152,5 +152,26 @@ func TestCancellationAndUpstreamErrorsAreBounded(t *testing.T) {
 	})
 	if _, err := inspectHTTP(context.Background(), client, "amd64"); !errors.Is(err, ErrUnavailable) || strings.Contains(err.Error(), "fixture-sensitive") {
 		t.Fatalf("unsafe upstream error: %v", err)
+	}
+}
+
+func TestInspectionNamesMissingCPUSharesSupport(t *testing.T) {
+	info := infoFixture()
+	info["CPUShares"] = false
+	client, _ := fixtureClient(t, versionFixture(), info)
+	report, err := inspectHTTP(context.Background(), client, "amd64")
+	if err != nil || report.MetadataCompatible {
+		t.Fatal("a daemon without CPU shares support was admitted", err)
+	}
+	found := false
+	for _, finding := range report.Findings {
+		if finding.Code == "cpu_shares" {
+			found = finding.State == "unsupported"
+		} else if finding.State == "unsupported" {
+			t.Fatal("unrelated finding failed", finding)
+		}
+	}
+	if !found {
+		t.Fatal("no typed cpu_shares finding", report.Findings)
 	}
 }
