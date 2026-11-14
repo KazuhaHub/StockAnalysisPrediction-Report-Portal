@@ -69,6 +69,8 @@ type platformUpdateStartRegistrationRows struct {
 	fresh                                       bool
 	count, baseEffects                          int
 	sealed                                      string
+	// sealedErr is the error reading the sealed seed, kept until the effect row has been judged.
+	sealedErr error
 }
 
 func checkPlatformUpdateStartRegistrationSource(lease platformOperationLease, start platformUpdateStartIntent) error {
@@ -139,10 +141,7 @@ func readPlatformUpdateStartRegistrationRows(e migExec, lease platformOperationL
 			r.baseEffects += quiesce
 		}
 	}
-	r.sealed, err = platformReadSealedIdentitySeed(e, lease.installationID)
-	if err != nil {
-		return r, err
-	}
+	r.sealed, r.sealedErr = platformReadSealedIdentitySeed(e, lease.installationID)
 	return r, nil
 }
 
@@ -155,14 +154,16 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 	if err != nil {
 		return zero, false, err
 	}
-	result, err := buildPlatformUpdateStartRegistration(rows, lease, start, runtime, dek, now, create)
+	built, err := buildPlatformUpdateStartRegistration(rows, lease, start, runtime, dek, now, create)
 	if err != nil {
 		return zero, false, err
 	}
+	// The built registration owns a derived private key; it is closed on every failure, whatever
+	// the completion step returns.
 	failed := true
 	defer func() {
 		if failed {
-			result.registration.Close()
+			built.registration.Close()
 		}
 	}()
 	if rows.fresh {
@@ -171,18 +172,22 @@ func loadPlatformUpdateStartRegistration(e migExec, lease platformOperationLease
 			runtime_id,controller_epoch,admitted_fence,observed_fence,state,
 			receipt_json,created_ms,updated_ms)
 			VALUES(?,'activate',1,?,'update-start-registration',?,?,?,?,0,'prepared','{}',?,?)`,
-			lease.id, result.command.EffectID, result.command.PayloadSHA256, runtime.id,
+			lease.id, built.command.EffectID, built.command.PayloadSHA256, runtime.id,
 			lease.controllerEpoch, lease.fence, now, now); err != nil {
 			return zero, false, err
 		}
 	}
-	result, err = completePlatformUpdateStartRegistration(rows, result, lease, start, seed, now)
+	result, err := completePlatformUpdateStartRegistration(rows, built, lease, start, seed, now)
 	if err != nil {
 		return zero, false, err
 	}
 	failed = false
 	return result, rows.fresh, nil
 }
+
+// platformUpdateRegistrationBuiltHook is a test seam, nil in production: it receives every
+// registration the build step derives.
+var platformUpdateRegistrationBuiltHook func(appplatform.BackendRegistration)
 
 // buildPlatformUpdateStartRegistration judges the registration effect's row and derives the
 // registration and its command from the rows alone: no database access.
@@ -233,6 +238,9 @@ func buildPlatformUpdateStartRegistration(r platformUpdateStartRegistrationRows,
 				errAppPlatformStageEvidence)
 		}
 	}
+	if r.sealedErr != nil {
+		return zero, r.sealedErr
+	}
 	registration, err := platformBackendRegistrationFromSealedSeed(
 		platformManagedSource{
 			operationID: lease.id, installationID: lease.installationID,
@@ -250,6 +258,9 @@ func buildPlatformUpdateStartRegistration(r platformUpdateStartRegistrationRows,
 			registration.Close()
 		}
 	}()
+	if platformUpdateRegistrationBuiltHook != nil {
+		platformUpdateRegistrationBuiltHook(registration)
+	}
 	document, err := registration.Document()
 	if err != nil {
 		return zero, err

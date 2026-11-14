@@ -138,7 +138,23 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 // access (session, account, trust, epoch, installation tuple, audience, activation, release rows,
 // capability rows, history rows) is read inside; the work afterwards decodes and verifies those
 // values and reads nothing.
+//
+// Two orderings of the original are kept. A callback that runs in the transaction (it may open
+// secrets) runs only after the stored release has been verified there. And a release that fails
+// verification is always reported as such: when an earlier-looking failure ends the transaction
+// first, the rows already read are verified and, if they fail, that is the error returned.
 func platformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load platformBackendHistoryLoad[T], inTx func(migExec, platformBackendAccess[T], []byte) error, pure func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
+	var releaseCheck func() error
+	result, err := platformBackendReadTx(s, ctx, session, installationID, load, inTx, pure, &releaseCheck)
+	if err != nil && releaseCheck != nil {
+		if releaseErr := releaseCheck(); releaseErr != nil {
+			return platformBackendAccess[T]{}, releaseErr
+		}
+	}
+	return result, err
+}
+
+func platformBackendReadTx[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load platformBackendHistoryLoad[T], inTx func(migExec, platformBackendAccess[T], []byte) error, pure func(platformBackendAccess[T], []byte) error, releaseCheck *func() error) (platformBackendAccess[T], error) {
 	var zero platformBackendAccess[T]
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -263,6 +279,26 @@ func platformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.C
 			errAppPlatformLaunchUnavailable)
 	}
 	releaseNow := now
+	verifyRelease := func() error {
+		platformPureStep("release-verify")
+		verified, err := verifyPlatformStoredReleaseRows(releaseRows, release, trustRevision, trust, releaseNow)
+		if err != nil || verified.appID != appID || verified.publisherID != publisher {
+			return fmt.Errorf(
+				"backend access stored release: %w",
+				errAppPlatformLaunchUnavailable)
+		}
+		return nil
+	}
+	releaseVerified := false
+	if inTx != nil {
+		// The callback may open secrets: verify the release first, in the transaction.
+		if err := verifyRelease(); err != nil {
+			return zero, err
+		}
+		releaseVerified = true
+	} else {
+		*releaseCheck = verifyRelease
+	}
 	var descriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release).Scan(&descriptor); err != nil {
 		return zero, fmt.Errorf(
@@ -335,12 +371,10 @@ func platformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.C
 		return zero, err
 	}
 	// The transaction has ended: what remains decodes and verifies what it read.
-	platformPureStep("release-verify")
-	verified, err := verifyPlatformStoredReleaseRows(releaseRows, release, trustRevision, trust, releaseNow)
-	if err != nil || verified.appID != appID || verified.publisherID != publisher {
-		return zero, fmt.Errorf(
-			"backend access stored release: %w",
-			errAppPlatformLaunchUnavailable)
+	if !releaseVerified {
+		if err := verifyRelease(); err != nil {
+			return zero, err
+		}
 	}
 	if !built {
 		if err := buildIntent(); err != nil {

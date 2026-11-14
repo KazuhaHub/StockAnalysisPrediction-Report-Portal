@@ -81,6 +81,9 @@ func platformDataCommandForSource(e migExec, source platformManagedSource, runti
 type platformDataCommandRows struct {
 	plan, target string
 	descriptor   []byte
+	// targetErr is the error of the second query, kept until the first row has been judged so a
+	// refused profile is still reported as such.
+	targetErr error
 }
 
 func platformReadDataCommandRows(e migExec, operation string) (platformDataCommandRows, error) {
@@ -88,8 +91,8 @@ func platformReadDataCommandRows(e migExec, operation string) (platformDataComma
 	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, operation).Scan(&r.plan); err != nil {
 		return r, err
 	}
-	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, operation).Scan(&r.target, &r.descriptor)
-	return r, err
+	r.targetErr = e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, operation).Scan(&r.target, &r.descriptor)
+	return r, nil
 }
 
 // platformDataCommandFromRows is the pure half: it parses and derives, touching no database.
@@ -100,6 +103,9 @@ func platformDataCommandFromRows(rows platformDataCommandRows, source platformMa
 	}
 	if profile != platformNativeInstallFormat && !platformManagedFormat(profile) {
 		return control.Command{}, errAppPlatformStageEvidence
+	}
+	if rows.targetErr != nil {
+		return control.Command{}, rows.targetErr
 	}
 	target, raw := rows.target, rows.descriptor
 	parsed, err := appplatform.ParseDescriptor(raw)

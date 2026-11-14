@@ -150,24 +150,21 @@ func (s *Server) loadPlatformWritableBackendHistoryPhased(e migExec, b platformB
 	if err != nil {
 		return nil, err
 	}
-	sealed, err := platformReadSealedIdentitySeed(e, b.installation)
-	if err != nil {
-		return nil, err
-	}
+	sealed, sealedErr := platformReadSealedIdentitySeed(e, b.installation)
 	regEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "activate", "activate", 1, completed)
 	if err != nil {
 		return nil, err
 	}
 	return func() (platformWritableRegistrationIntent, error) {
 		platformPureStep("history-build")
-		return finishPlatformWritableInstallHistory(b, runtime, seed, dek, now, issued, source, completed, rawPlan, plan, descriptor, w, used, dataRows, dataEffect, writerEffect, startEffect, regEffect, sealed)
+		return finishPlatformWritableInstallHistory(b, runtime, seed, dek, now, issued, source, completed, rawPlan, plan, descriptor, w, used, dataRows, dataEffect, writerEffect, startEffect, regEffect, sealed, sealedErr)
 	}, nil
 }
 
 // finishPlatformWritableInstallHistory checks the stored descriptor, plan and receipts, signs the
 // access envelopes and derives the registration, all from rows already read. It reads no database
 // and keeps every check the inline loader made, in order.
-func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now, issued int64, source platformManagedSource, completed int64, rawPlan string, plan platformInstallProjection, descriptor []byte, w platformWriterIntent, used int64, dataRows platformDataCommandRows, dataEffect, writerEffect, startEffect, regEffect platformWritableHistoryEffect, sealed string) (platformWritableRegistrationIntent, error) {
+func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now, issued int64, source platformManagedSource, completed int64, rawPlan string, plan platformInstallProjection, descriptor []byte, w platformWriterIntent, used int64, dataRows platformDataCommandRows, dataEffect, writerEffect, startEffect, regEffect platformWritableHistoryEffect, sealed string, sealedErr error) (platformWritableRegistrationIntent, error) {
 	var zero platformWritableRegistrationIntent
 	canonical, _ := json.Marshal(plan)
 	parsed, err := appplatform.ParseDescriptor(descriptor)
@@ -238,6 +235,9 @@ func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runti
 	start.raw, start.signature, err = control.SignWritableCandidate(start.command, key, w.authority, issued)
 	if err != nil {
 		return zero, err
+	}
+	if sealedErr != nil {
+		return zero, sealedErr
 	}
 	registration, err := platformBackendRegistrationFromSealedSeed(source, runtime, descriptor, b.release, 1, dek, sealed)
 	if err != nil {

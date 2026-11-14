@@ -94,25 +94,24 @@ func TestVerifyCacheRekeyedAuthorityIsReverifiedAndRefused(t *testing.T) {
 	}
 	other := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{77}, 32)).Public().(ed25519.PublicKey)
 	sum := sha256.Sum256(other)
-	rotated := a
-	rotated.PublicKey, rotated.Fingerprint = other, hex.EncodeToString(sum[:])
+	// Each field of the authority on its own: every one is part of the cache key, so a cached
+	// verification can never answer for an authority that differs in just that field.
+	changes := map[string]func(*Authority){
+		"deployment":       func(x *Authority) { x.DeploymentID = "9" + x.DeploymentID[1:] },
+		"epoch":            func(x *Authority) { x.ControllerEpoch = "9" + x.ControllerEpoch[1:] },
+		"control revision": func(x *Authority) { x.ControlRevision++ },
+		"fingerprint":      func(x *Authority) { x.Fingerprint = hex.EncodeToString(sum[:]) },
+		"public key":       func(x *Authority) { x.PublicKey = other },
+		"key and fingerprint": func(x *Authority) {
+			x.PublicKey, x.Fingerprint = other, hex.EncodeToString(sum[:])
+		},
+	}
 	hitsBefore, _, _ := VerifyCacheStats()
-	if _, err := VerifyWritableBackendRegistration(raw, sig, rotated, now); err == nil {
-		t.Fatal("a rotated verifying key accepted a cached verification")
-	}
-	revised := a
-	revised.ControlRevision++
-	if _, err := VerifyWritableBackendRegistration(raw, sig, revised, now); err == nil {
-		t.Fatal("a new control revision accepted a cached verification")
-	}
-	for _, change := range []func(*Authority){
-		func(x *Authority) { x.DeploymentID = "9" + x.DeploymentID[1:] },
-		func(x *Authority) { x.ControllerEpoch = "9" + x.ControllerEpoch[1:] },
-	} {
+	for name, change := range changes {
 		changed := a
 		change(&changed)
 		if _, err := VerifyWritableBackendRegistration(raw, sig, changed, now); err == nil {
-			t.Fatal("a changed authority tuple accepted a cached verification")
+			t.Fatalf("a changed %s accepted a cached verification", name)
 		}
 	}
 	if h, _, _ := VerifyCacheStats(); h != hitsBefore {
