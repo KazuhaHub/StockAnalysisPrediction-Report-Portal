@@ -726,3 +726,62 @@ namespace-sized plan fits a budget of exactly one namespace.
 variants are left to CI. The native lifecycle (`app_platform_data_native_linux_test.go`) does not include a refused-then-removed
 install: its runner has no capacity budget, so a refusal needs a configured budget and a second installation through the whole
 harness, which is not a cheap addition and would run only in CI.
+
+## Resolution (relay admission before session reads)
+
+This closes the Portal defect the soak branch (`feat/app-platform-capacity-soak`, resolutions 63 to 72 and its findings
+table) recorded: the report page and the batch scheduler missed their latency bounds on a file-backed SQLite Portal while
+the message flood ran.
+
+**Cause.** Every backend relay attempt paid the session reads before it reached its admission budget, and about 91% of
+attempts under the flood ended in the budget's 429. On SQLite the reads queue on the pool's single connection, so a refused
+attempt delayed everything else. Counting the driver's operations, one refused attempt issued 10 statements over 9 connection
+acquisitions: the cookie check and user read in `currentActiveUser`, the activity stamp when due, the enrolment gate's
+policy transaction (two reads) and setting read, then the `platformHTTPReader` reads (user, session, account generation).
+
+**Decision.** `platformBudgetPrecheck` wraps every session route guarded by a `platformDocumentBudget`, outside
+`requireUserJSON`: the backend, network and network stream relays, and the launch, status, apps, reports, objects and
+document routes. When the route's budget is full it answers that route's own 429 (the same function writes it from the
+authoritative path, so status, headers and body are one definition) before any database read. `full()` is a non-blocking
+capacity read.
+
+- It never takes a slot. A slot held before authentication could be held by an anonymous client, so the authoritative
+  `acquire` stays after the session reads, and a request that passes the pre-check and loses the race to another request
+  gets the same 429 as before.
+- **401 or 429 for a full budget.** Answering 429 before authentication would turn an anonymous client's 401 into a 429 and
+  tell it that the budget is full. The pre-check therefore answers 429 only for a request carrying a session cookie this
+  server signed and that has not expired (`platformSessionCookieSigned`: the HMAC, the expiry and the session message
+  shapes `verify` routes, `v2|`, `v1|` and the legacy `user|exp`; no database read, which `verify` cannot offer because it
+  reads the session row). The signing key also signs the owner attribution token, so a valid signature alone does not
+  qualify: that token has a different shape and is refused the pre-check. Every other request, whether with no cookie, a
+  malformed one, a forged one, an expired one or an attribution token, takes the unchanged path and gets the unchanged 401.
+  A caller learns that the budget is full only if it already holds a credential the server issued.
+- **The visible change.** A properly signed session cookie is answered with 429 while the budget is full even when the
+  unchanged path would have refused it differently: a revoked session, a disabled account, an expired account
+  (`accountExpired`), a stale `SessionRev` after a password change, and a cookie the enrolment gate would refuse (403, or 503
+  when the policy cannot be read). The next attempt after the budget frees is refused as before. The client learns nothing
+  about the session. No authorization outcome changes: nothing is admitted that was refused.
+- **Activity tracking.** A request refused by the pre-check skips `touchSeen` and the `user_sessions.last_seen` stamp. Neither
+  is security-relevant: session expiry uses the signed `expires_at` and the revision, never `last_seen`, and no idle timeout
+  exists. `last_seen` is shown in the sessions list and the administrator user list (and orders the former), and a refused
+  attempt is not activity the application served. A user whose only traffic is refused relay attempts is not otherwise
+  affected, because the page and every other route still stamp it.
+- Validation refusals that precede authentication today (origin, content type, path) are likewise not reached by a signed
+  client while the budget is full. They are not authorization outcomes, and the same request is refused the same way once a
+  slot is free.
+- Routes that take the slot deep inside an administrator handler (`platformManagementSlot`) are unchanged: they sit behind
+  the administrator permission gate and carry no flood.
+
+**Statement cache.** The two session reads named in the defect, and the cookie check and user read of `currentActiveUser`,
+already run through the statement cache (prepared once, never on the driver's direct path). The enrolment gate's policy read
+(`loadOUPolicySubject`, a read-only transaction on the raw pool) does not: its two statements run on the driver's direct
+path on every request. It is no longer on the refused path, and is left for a separate change because it is the shared
+authentication gate of every session route.
+
+**Tests** (`app_platform_admission_test.go`). A full budget with a signed cookie answers the identical 429 on all nine routes
+with zero database operations (recording spy driver); an unsigned, malformed, mis-signed, wrong-key or expired cookie gets
+exactly the answer it gets with a free budget; the pre-check never holds a slot, an unauthenticated client never leaves one
+held, and a request that passes the pre-check and loses the acquire gets the same 429; the session reads use the cache.
+`BenchmarkPlatformRelayFloodSmallReadP95` (file-backed SQLite, one connection, about 3500 paced relay attempts a second
+against a full budget, 2000 small reads): small-read p95 263 to 776 microseconds with authentication first, 76 to 98
+microseconds with admission first (p50 37 to 83, against 33 to 42).

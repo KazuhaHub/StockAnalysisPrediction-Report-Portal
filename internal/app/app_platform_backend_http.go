@@ -100,8 +100,7 @@ func (s *Server) apiPlatformBackend(w http.ResponseWriter, r *http.Request, user
 	}
 	release, ok := s.platformBackendRequests.acquire()
 	if !ok {
-		w.Header().Set("Retry-After", "1")
-		jsonErrorCode(w, 429, "app_platform_busy", "application busy")
+		platformJSONBusy(w)
 		return
 	}
 	defer release()
