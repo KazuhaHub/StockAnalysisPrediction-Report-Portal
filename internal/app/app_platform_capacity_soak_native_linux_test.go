@@ -166,6 +166,9 @@ func TestPlatformCapacitySoak(t *testing.T) {
 
 	// The development image profile: the soak backend is a local reference image from the job's own registry.
 	// The runner keeps its declared default budgets, the 8 GiB disk budget included.
+	if os.Getenv("APP_CAPACITY_SOAK_SCOPES") == "systemd" {
+		t.Setenv("APP_RUNNER_SERVICE_SCOPE", "soak-runner")
+	}
 	t.Setenv("APP_RUNNER_SERVICE_TEST_TIMEOUT", soakRunnerServiceTimeout(minutes, baseline))
 	cpuPercent, err := soakParseCPUPercent(os.Getenv("APP_CAPACITY_SOAK_CPU_PERCENT"))
 	if err != nil {
@@ -224,7 +227,16 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment),
 		"TMPDIR=" + childData, "HOME=" + childData,
 	}
-	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
+	if os.Getenv("APP_CAPACITY_SOAK_SCOPES") == "systemd" {
+		// The Portal runs in its own transient scope under system.slice at the default weight, as the compose container of
+		// production sits among its siblings; its flood generator, started by it, shares that scope (about 0.5% of the host).
+		argv := soakScopeCommand("soak-portal", 41001, binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
+		dir, env := child.Dir, child.Env
+		child = exec.Command(argv[0], argv[1:]...)
+		child.Dir, child.Env = dir, append(env, "PATH=/usr/sbin:/usr/bin:/sbin:/bin")
+	} else {
+		child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
+	}
 	var output platformSyncBuffer
 	child.Stdout, child.Stderr = &output, &output
 	if err := child.Start(); err != nil {

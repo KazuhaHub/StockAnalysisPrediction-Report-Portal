@@ -728,6 +728,56 @@ def self_kwargs():
     return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
 
 
+class CgroupLayoutTests(unittest.TestCase):
+    def test_the_layout_names_each_process_group_its_cgroup_and_the_cpu_weight_along_its_path(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc, fs = Path(root) / "proc", Path(root) / "cgroup"
+            proc.mkdir()
+            child = ["/t/portal.test", "-test.run=^TestPlatformCapacitySoakChild$"]
+            flood = ["/t/portal.test", "-test.run=^TestPlatformCapacitySoakFlood$"]
+            runner = ["/t/portal.test", "-test.run=^TestPlatformRunnerServiceChild$"]
+            write_process(proc, 10, "portal.test", child, (1, 1), cgroup="0::/system.slice/soak-portal.scope")
+            write_process(proc, 11, "portal.test", flood, (1, 1), cgroup="0::/system.slice/soak-portal.scope")
+            write_process(proc, 12, "portal.test", runner, (1, 1), cgroup="0::/system.slice/soak-runner.scope")
+            write_process(proc, 13, "postgres", ["postgres: x"], (1, 1), cgroup="0::/system.slice/system-postgresql.slice/postgresql@16-main.service")
+            for path, weight in (("system.slice", "100"), ("system.slice/soak-portal.scope", "100"), ("system.slice/soak-runner.scope", "100"),
+                                 ("system.slice/system-postgresql.slice", "100"), ("system.slice/system-postgresql.slice/postgresql@16-main.service", "100"),
+                                 ("system.slice/docker-" + "f" * 64 + ".scope", "100")):
+                (fs / path).mkdir(parents=True)
+                (fs / path / "cpu.weight").write_text(weight + "\n")
+            (fs / "system.slice/soak-portal.scope/cpu.weight").write_text("50\n")
+            layout = soak.cgroup_layout(proc, fs, {"f" * 64}, "/system.slice")
+        self.assertEqual(layout["portal"]["cgroup"], "/system.slice/soak-portal.scope")
+        self.assertEqual(layout["portal"]["cpu_weights"], {"/system.slice": "100", "/system.slice/soak-portal.scope": "50"})
+        self.assertEqual(layout["flood"]["cgroup"], "/system.slice/soak-portal.scope")
+        self.assertEqual(layout["runner"]["cgroup"], "/system.slice/soak-runner.scope")
+        self.assertEqual(layout["postgres"]["cpu_weights"]["/system.slice/system-postgresql.slice/postgresql@16-main.service"], "100")
+        self.assertEqual(layout["backend"]["cgroup"], "/system.slice/docker-" + "f" * 64 + ".scope")
+        self.assertEqual(layout["backend"]["cpu_weights"]["/system.slice/docker-" + "f" * 64 + ".scope"], "100")
+        self.assertEqual(layout["portal"]["pid"], 10)
+
+    def test_a_missing_group_is_reported_as_absent_not_invented(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc = Path(root) / "proc"
+            proc.mkdir()
+            layout = soak.cgroup_layout(proc, Path(root) / "cgroup", set(), "/system.slice")
+        self.assertEqual(layout, {})
+
+    def test_the_scope_probe_names_what_failed_instead_of_faking_a_layout(self):
+        calls = []
+
+        def failing(*args):
+            calls.append(args)
+            raise RuntimeError("Failed to connect to bus")
+
+        with self.assertRaises(RuntimeError) as raised:
+            soak.require_systemd_scopes(failing)
+        self.assertIn("systemd-run", str(raised.exception))
+        self.assertIn("--scope", " ".join(calls[0]))
+        self.assertIn("CPUWeight=100", " ".join(calls[0]))
+        soak.require_systemd_scopes(lambda *a: "")
+
+
 class CPUBudgetTests(unittest.TestCase):
     def kwargs(self):
         return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}

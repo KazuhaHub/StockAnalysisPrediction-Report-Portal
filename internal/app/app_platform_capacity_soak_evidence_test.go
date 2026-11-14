@@ -328,6 +328,17 @@ const soakSamplesPerWindow = 100
 
 func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEvery == 0 }
 
+// soakScopeCommand is the argv that starts command in its own transient scope under system.slice at the default CPU weight, as a
+// compose container or a systemd unit of production sits among its siblings. uid >= 0 drops root inside the scope. systemd-run
+// itself is root; the scope exists before the process runs, so the process is born in it.
+func soakScopeCommand(unit string, uid int, command ...string) []string {
+	argv := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=" + unit, "-p", "CPUWeight=100", "--"}
+	if uid >= 0 {
+		argv = append(argv, "setpriv", "--reuid="+strconv.Itoa(uid), "--regid="+strconv.Itoa(uid), "--groups="+strconv.Itoa(uid))
+	}
+	return append(argv, command...)
+}
+
 // soakParseCPUPercent reads APP_CAPACITY_SOAK_CPU_PERCENT: empty leaves the runner's own default, else an override of its
 // capacity.cpu_percent. The backends are still sized from the budget the runner reports, so a lower budget shrinks each one.
 func soakParseCPUPercent(env string) (*int, error) {
@@ -764,6 +775,22 @@ func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
 		if _, err := soakParseCPUPercent(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeight(t *testing.T) {
+	got := soakScopeCommand("soak-runner", -1, "/t/portal.test", "-test.run=^X$")
+	want := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-runner", "-p", "CPUWeight=100", "--",
+		"/t/portal.test", "-test.run=^X$"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %q", got)
+	}
+	// An unprivileged process drops root inside the scope, after systemd has placed it: systemd-run itself runs as root.
+	got = soakScopeCommand("soak-portal", 41001, "/t/portal.test", "-test.v")
+	want = []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-portal", "-p", "CPUWeight=100", "--",
+		"setpriv", "--reuid=41001", "--regid=41001", "--groups=41001", "/t/portal.test", "-test.v"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("argv = %q", got)
 	}
 }
 

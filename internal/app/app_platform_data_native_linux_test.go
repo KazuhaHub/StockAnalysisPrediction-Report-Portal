@@ -868,6 +868,10 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 		timeout = override
 	}
 	fixture := &platformServiceFixture{cmd: exec.Command(binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout), done: make(chan error, 1), root: root, ipcRoot: ipcRoot, socket: socket}
+	if scope := os.Getenv("APP_RUNNER_SERVICE_SCOPE"); scope != "" { // a long acceptance places the service in its own systemd scope
+		argv := soakScopeCommand(scope, -1, binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout)
+		fixture.cmd = exec.Command(argv[0], argv[1:]...)
+	}
 	fixture.cmd.Env = append(os.Environ(), "PORTAL_RUNNER_SERVICE_CHILD=1", "PORTAL_RUNNER_SERVICE_CONFIG="+configPath)
 	fixture.cmd.Stdout = &fixture.output
 	fixture.cmd.Stderr = &fixture.output

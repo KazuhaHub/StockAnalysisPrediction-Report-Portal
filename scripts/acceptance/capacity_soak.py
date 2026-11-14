@@ -175,6 +175,56 @@ def classify_process(comm, cmdline):
     return "other"
 
 
+def _read_cgroup_path(proc, pid):
+    for line in (Path(proc) / str(pid) / "cgroup").read_text().splitlines():
+        if line.startswith("0::"):
+            return line[3:]
+    return None
+
+
+def _weights_along(cgroup_fs, path):
+    """cpu.weight of every cgroup on the path, from the top slice down (the root cgroup has none)."""
+    weights, current = {}, ""
+    for part in [p for p in path.split("/") if p]:
+        current += "/" + part
+        try:
+            weights[current] = (Path(cgroup_fs) / current.lstrip("/") / "cpu.weight").read_text().strip()
+        except OSError:
+            weights[current] = None
+    return weights
+
+
+def cgroup_layout(proc, cgroup_fs, backend_full_ids, docker_slice):
+    """Where each process group sits in the cgroup tree and the cpu.weight along its path: the measured Portal, the flood, the runner,
+    PostgreSQL and one backend container. A weight arbitrates only between sibling cgroups, so this is what says whether a weight set on
+    the app containers can reach the processes it is meant to yield to. A group that is not running is absent, never invented."""
+    layout = {}
+    for folder in sorted((p for p in Path(proc).iterdir() if p.name.isdigit()), key=lambda p: int(p.name)):
+        try:
+            stat = (folder / "stat").read_text()
+            comm = stat[stat.index("(") + 1:stat.rindex(")")]
+            cmdline = (folder / "cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+            group = classify_process(comm, cmdline)
+            path = _read_cgroup_path(proc, folder.name)
+        except (OSError, ValueError):
+            continue
+        if group in ("portal", "flood", "runner", "postgres") and group not in layout and path:
+            layout[group] = {"pid": int(folder.name), "cgroup": path, "cpu_weights": _weights_along(cgroup_fs, path)}
+    for full_id in sorted(backend_full_ids)[:1]:
+        path = f"{docker_slice.rstrip('/')}/docker-{full_id}.scope"
+        layout["backend"] = {"cgroup": path, "cpu_weights": _weights_along(cgroup_fs, path)}
+    return layout
+
+
+def require_systemd_scopes(run):
+    """The soak mirrors production by starting the Portal and the runner in their own scopes under system.slice. If systemd-run cannot do that
+    here the run stops: a layout is never faked."""
+    try:
+        run("systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-probe-" + str(os.getpid()), "-p", "CPUWeight=100", "--", "true")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("systemd-run cannot start a transient scope under system.slice on this host; the soak will not fake the production cgroup layout: " + str(error)) from error
+
+
 # ---- sampling ----
 
 class Sampler:
@@ -188,8 +238,10 @@ class Sampler:
         self._backend_full_ids = set()
         self._process_ticks = {}
         self._previous_at = None
+        self.layout = {}
         self.run, self.proc, self.mountpoint, self.image_id, self.clock = run, Path(proc), Path(mountpoint), image_id, clock
         self.cgroup_root = Path(cgroup_root)
+        self.cgroup_fs = Path("/sys/fs/cgroup")
         self._cpu = None
         self._cgroup = {}
 
@@ -321,6 +373,12 @@ class Sampler:
         running_tasks, total_tasks = parse_loadavg_tasks((self.proc / "loadavg").read_text())
         volume = os.statvfs(self.mountpoint)
         backends, log_bytes = self._backends(now)
+        try:
+            fresh = cgroup_layout(self.proc, self.cgroup_fs, self._backend_full_ids, str(self.cgroup_root).replace("/sys/fs/cgroup", "") or "/")
+            if len(fresh) >= len(self.layout):
+                self.layout = fresh  # the fullest picture seen: the flood and the backends exist only once the load runs
+        except OSError:
+            pass
         shares = self._cpu_groups(now, percent, backends["cpu_millis"] if backends.get("cpu_source") == "cgroup" else 0.0)
         row = {
             "at_ms": int(now * 1000), "mem_total_kib": memory["total_kib"], "mem_available_kib": memory["available_kib"],
@@ -842,6 +900,7 @@ def main(argv):
         if not Path(path).is_absolute():
             raise RuntimeError("paths must be absolute")
     require_disposable_environment(os.environ, os.geteuid(), sys.platform, shutil.which)
+    require_systemd_scopes(run_command)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     socket = os.path.realpath("/var/run/docker.sock")
@@ -901,7 +960,7 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent,
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent, APP_CAPACITY_SOAK_SCOPES="systemd",
                         APP_CAPACITY_SOAK_POSTGRES_DSN=os.environ.get("APP_CAPACITY_SOAK_POSTGRES_DSN", ""))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
@@ -962,7 +1021,7 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
+        "unit_tests": unit_tests, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -970,6 +1029,7 @@ def main(argv):
                "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"],
                "achieved_fractions": {name: {"min": value.get("min"), "max": value.get("max")} for name, value in verdict["achieved_fractions"].items()}, "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
+    print("cgroup layout:", json.dumps(report["host"].get("cgroup_layout") or report.get("cgroup_layout"), sort_keys=True))
     print(json.dumps(summary, indent=2, sort_keys=True))
     step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if step_summary:
