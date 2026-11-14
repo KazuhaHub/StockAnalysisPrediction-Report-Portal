@@ -331,21 +331,6 @@ jobs:
             echo "APP_LIFECYCLE_BROWSER_RUNNER=$RUNNER_TEMP/app-platform-lifecycle-browser.cjs"
             echo "APP_LIFECYCLE_BROWSER_EVIDENCE=$RUNNER_TEMP/app-platform-lifecycle-browser"
           } >> "$GITHUB_ENV"
-      - name: Start a fresh PostgreSQL 16 for the measured Portal
-        # The measured Portal runs on PostgreSQL, as production does. It is the runner image's own PostgreSQL 16, not a service
-        # container: the runner's data writer inspects every container on the host and refuses one it did not start (the first
-        # run with a postgres:16 service container failed every install at the data writer with "invalid application runtime
-        # response"). The database is dropped and created for every run.
-        run: |
-          set -euo pipefail
-          sudo systemctl start postgresql.service
-          for _ in $(seq 1 30); do sudo -u postgres pg_isready -q && break; sleep 1; done
-          sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<'SQL'
-          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'portal') THEN CREATE ROLE portal LOGIN PASSWORD 'portal'; END IF; END $$;
-          DROP DATABASE IF EXISTS reports_soak;
-          CREATE DATABASE reports_soak OWNER portal;
-          SQL
-          sudo -u postgres psql -tAc 'SHOW server_version' | tee "$RUNNER_TEMP/postgres-version.txt"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
@@ -583,6 +568,21 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/capacity-soak"
           { df -B1 / /tmp /var/lib/docker 2>&1; docker info --format 'docker root: {{.DockerRootDir}}' 2>&1; } | tee "$RUNNER_TEMP/capacity-soak/disk-before.txt"
+      - name: Start a fresh PostgreSQL 16 for the measured Portal
+        # The measured Portal runs on PostgreSQL, as production does. It is the runner image's own PostgreSQL 16, not a service
+        # container: the runner's data writer inspects every container on the host and refuses one it did not start (the first
+        # run with a postgres:16 service container failed every install at the data writer with "invalid application runtime
+        # response"). The database is dropped and created for every run.
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql.service
+          for _ in $(seq 1 30); do sudo -u postgres pg_isready -q && break; sleep 1; done
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<'SQL'
+          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'portal') THEN CREATE ROLE portal LOGIN PASSWORD 'portal'; END IF; END $$;
+          DROP DATABASE IF EXISTS reports_soak;
+          CREATE DATABASE reports_soak OWNER portal;
+          SQL
+          sudo -u postgres psql -tAc 'SHOW server_version' | tee "$RUNNER_TEMP/postgres-version.txt"
       - name: Install ephemeral filesystem acceptance tools
         run: |
           sudo apt-get update -qq
