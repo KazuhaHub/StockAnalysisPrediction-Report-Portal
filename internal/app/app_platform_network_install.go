@@ -80,7 +80,7 @@ func (s *Server) consumePlatformNetworkWritableInstallReview(ctx context.Context
 	// Routing hint only; the authoritative consumer repeats actor, full canonical
 	// review/hash, signature/trust/runtime/audience and current profile checks.
 	var raw string
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT plan_json FROM app_platform_review_plans WHERE id=?`), plan).Scan(&raw); err != nil || len(raw) > 65536 {
+	if err := s.st.queryRowContext(ctx, `SELECT plan_json FROM app_platform_review_plans WHERE id=?`, plan).Scan(&raw); err != nil || len(raw) > 65536 {
 		return platformRemovalCommit{}, errAppPlatformPlanChanged
 	}
 	var p platformInstallProjection

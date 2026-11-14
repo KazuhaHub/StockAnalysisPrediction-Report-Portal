@@ -36,11 +36,11 @@ const platformRecoveryReconcileInterval = 30 * time.Second
 // platformRecoveryImportCandidates lists finished imports whose effect is still unsettled, as the
 // read-only identity of the operation each belongs to.
 func (s *Server) platformRecoveryImportCandidates(ctx context.Context) ([]platformOperationLease, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision
+	rows, err := s.st.queryContext(ctx, `SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision
 		FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='restore_data' AND f.effect_number=1
 		WHERE o.action='restore_import' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
 		AND f.kind='import-checkpoint' AND f.state IN ('prepared','unknown')
-		ORDER BY o.completed_ms,o.id LIMIT 8`))
+		ORDER BY o.completed_ms,o.id LIMIT 8`)
 	if err != nil {
 		return nil, err
 	}

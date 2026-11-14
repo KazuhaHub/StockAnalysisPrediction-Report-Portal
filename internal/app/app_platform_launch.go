@@ -121,7 +121,7 @@ func (s *Server) withPlatformLaunchAccountReadContext(ctx context.Context, sessi
 	// Routing hint only. Both concrete transaction paths revalidate the actual
 	// runtime and current source under their own complete lock/authority boundary.
 	var runtime sql.NullString
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT runtime_id FROM app_platform_installations WHERE id=?`), installationID).Scan(&runtime); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT runtime_id FROM app_platform_installations WHERE id=?`, installationID).Scan(&runtime); err != nil {
 		if ctx.Err() != nil {
 			return platformLaunchAccess{}, ctx.Err()
 		}
