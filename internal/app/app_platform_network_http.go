@@ -106,8 +106,7 @@ func (s *Server) apiPlatformNetwork(w http.ResponseWriter, r *http.Request, user
 	}
 	release, ok := s.platformNetworkRequests.acquire()
 	if !ok {
-		w.Header().Set("Retry-After", "1")
-		jsonErrorCode(w, 429, "app_platform_busy", "application busy")
+		platformJSONBusy(w)
 		return
 	}
 	defer release()
@@ -258,8 +257,7 @@ func (s *Server) apiPlatformNetworkStream(w http.ResponseWriter, r *http.Request
 	}
 	release, ok := s.platformNetworkStreams.acquire()
 	if !ok {
-		w.Header().Set("Retry-After", "1")
-		jsonErrorCode(w, 429, "app_platform_busy", "application busy")
+		platformJSONBusy(w)
 		return
 	}
 	defer release()
