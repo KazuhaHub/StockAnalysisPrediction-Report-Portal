@@ -20,11 +20,11 @@ import (
 
 // platformHeldStartCandidates lists the finished enables and repairs whose start effect is still open.
 func (s *Server) platformHeldStartCandidates(ctx context.Context) ([]string, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id FROM app_platform_operations o
+	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
 		WHERE o.action IN ('enable','repair') AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND f.kind='enable-start' AND f.state IN ('prepared','unknown')
-		ORDER BY o.completed_ms,o.id LIMIT 8`))
+		ORDER BY o.completed_ms,o.id LIMIT 8`)
 	if err != nil {
 		return nil, err
 	}

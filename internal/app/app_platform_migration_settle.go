@@ -178,11 +178,11 @@ func platformMigrationSettlementReason(e migExec, operation string) (string, err
 
 // platformMigrationSettlementCandidates lists the finished updates whose migration is not yet settled.
 func (s *Server) platformMigrationSettlementCandidates(ctx context.Context) ([]string, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id FROM app_platform_operations o
+	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
 		WHERE o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='migrate' AND f.effect_number=2)
 		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='settled' AND f.state='applied')
-		ORDER BY o.completed_ms,o.id LIMIT 8`))
+		ORDER BY o.completed_ms,o.id LIMIT 8`)
 	if err != nil {
 		return nil, err
 	}

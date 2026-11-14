@@ -71,7 +71,7 @@ func (s *Server) recordPlatformCapacityRefusal(ctx context.Context, lease platfo
 	if err != nil {
 		return err
 	}
-	_, err = s.st.db.ExecContext(ctx, s.st.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.capacity_refused','app_platform_operation',?,?,'')`),
+	_, err = s.st.execContext(ctx, `INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.capacity_refused','app_platform_operation',?,?,'')`,
 		time.Now().UTC().Format(time.RFC3339), lease.id, string(detail))
 	return err
 }

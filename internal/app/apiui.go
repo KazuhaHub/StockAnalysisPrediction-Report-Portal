@@ -580,9 +580,16 @@ func groupsJSON(gs []Group) []map[string]any {
 
 func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	symbol := r.PathValue("symbol")
-	all, _ := s.st.NewBySymbol(symbol, s.viewerScope(user))
+	// The reads that decide which report is shown (the symbol's reports, the type and version
+	// registries, the report body and the reader's OU for the read audit) share one read snapshot
+	// and one connection acquisition. Nothing between here and endSnapshot may touch the pool.
+	scope := s.viewerScope(user)
+	snap, endSnapshot := s.st.beginReadSnapshot(r.Context())
+	defer endSnapshot()
+	all, _ := s.st.newBySymbolFrom(snap, symbol, scope)
 	all = dropInternal(all) // cache/plumbing entries are not reports; see internalTypes
 	if len(all) == 0 {
+		endSnapshot()
 		jsonErrorCode(w, http.StatusNotFound, "no_reports_for_symbol", "该标的暂无报告")
 		return
 	}
@@ -650,11 +657,22 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	for i := range kindReps {
 		kindReps[i].Label = tabLabel(kindReps[i])
 	}
-	kindReps, defID := s.orderAndDefault(kindReps)
+	kindReps, defID := s.orderAndDefaultWith(kindReps, s.st.typeConfigsFrom(snap), func() []ReportVersion { return s.st.versionsFrom(snap) })
 	if !repInList(kindReps, selID) {
 		selID = defID
 	}
-	rep := s.loadRep(r, user, selID)
+	var rep *Rep
+	var readerOU int64
+	if selID > 0 {
+		rep, _ = s.st.getNewFrom(snap, selID, scope)
+		if rep != nil {
+			readerOU = s.st.primaryGroupOfFrom(snap, user)
+		}
+	}
+	endSnapshot()
+	if rep != nil {
+		s.recordReportReadAs(r, user, readerOU, rep)
+	}
 	predictedDates := s.forecastTimelineDates(user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {

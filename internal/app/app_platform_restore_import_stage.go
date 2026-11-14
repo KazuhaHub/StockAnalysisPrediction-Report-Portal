@@ -517,13 +517,13 @@ func (s *Server) replayPlatformRestoreImport(ctx context.Context, operationID st
 	}
 	var stage, effectState, stored, digest, grantState string
 	var effectUpdated, consumed sql.NullInt64
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT o.stage,f.state,f.receipt_json,f.payload_sha256,f.updated_ms
+	if err := s.st.queryRowContext(ctx, `SELECT o.stage,f.state,f.receipt_json,f.payload_sha256,f.updated_ms
 		FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='restore_data' AND f.effect_number=1
-		WHERE o.id=? AND o.action='restore_import' AND f.effect_id=?`), operationID, intent.effectID).
+		WHERE o.id=? AND o.action='restore_import' AND f.effect_id=?`, operationID, intent.effectID).
 		Scan(&stage, &effectState, &stored, &digest, &effectUpdated); err != nil {
 		return errAppPlatformStageEvidence
 	}
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT state,consumed_ms FROM app_platform_import_grants WHERE id=?`), intent.command.Payload.GrantID).
+	if err := s.st.queryRowContext(ctx, `SELECT state,consumed_ms FROM app_platform_import_grants WHERE id=?`, intent.command.Payload.GrantID).
 		Scan(&grantState, &consumed); err != nil {
 		return errAppPlatformStageEvidence
 	}

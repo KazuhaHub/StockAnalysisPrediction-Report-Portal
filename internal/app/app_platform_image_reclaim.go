@@ -114,7 +114,7 @@ func (s *Server) resolveOpenRemoval(ctx context.Context, endpoint platformRuntim
 	}
 	defer signer.close()
 	var descriptor []byte
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT descriptor FROM app_platform_releases WHERE sha256=?`, t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
 		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
 	}
 	call, err := signer.removeCall(t, descriptor)
@@ -313,9 +313,9 @@ func platformReferencedConfigDigestsIn(e migExec) (map[string]bool, error) {
 // of each config digest, unless an applied removal is at least as recent. A runtime with a load that has no verdict
 // is left out whole: that load may be introducing any image.
 func (s *Server) platformLoadedImages(ctx context.Context) ([]platformLoadedImage, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT f.kind,f.state,COALESCE(f.runtime_id,''),f.operation_id,o.installation_id,f.effect_id,f.updated_ms,f.receipt_json
+	rows, err := s.st.queryContext(ctx, `SELECT f.kind,f.state,COALESCE(f.runtime_id,''),f.operation_id,o.installation_id,f.effect_id,f.updated_ms,f.receipt_json
 		FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
-		WHERE f.kind IN ('load_image','remove_image') ORDER BY f.updated_ms,f.effect_id`))
+		WHERE f.kind IN ('load_image','remove_image') ORDER BY f.updated_ms,f.effect_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -394,9 +394,9 @@ func (s *Server) platformOpenRemovalsFor(ctx context.Context, runtimeID, configD
 
 // platformOpenRemovals lists the removal rows that have no verdict, rebuilt from the intent each recorded.
 func (s *Server) platformOpenRemovals(ctx context.Context) ([]platformReclaimTarget, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT f.operation_id,o.installation_id,COALESCE(f.runtime_id,''),f.effect_id,f.effect_number,f.state,f.receipt_json
+	rows, err := s.st.queryContext(ctx, `SELECT f.operation_id,o.installation_id,COALESCE(f.runtime_id,''),f.effect_id,f.effect_number,f.state,f.receipt_json
 		FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id
-		WHERE f.kind='remove_image' AND f.state IN ('prepared','unknown') ORDER BY f.updated_ms,f.effect_id`))
+		WHERE f.kind='remove_image' AND f.state IN ('prepared','unknown') ORDER BY f.updated_ms,f.effect_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -431,7 +431,7 @@ type platformRemovalOutcome struct {
 }
 
 func (s *Server) platformRemovalRows(ctx context.Context) (map[string][]platformRemovalRow, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT COALESCE(runtime_id,''),state,updated_ms,receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`))
+	rows, err := s.st.queryContext(ctx, `SELECT COALESCE(runtime_id,''),state,updated_ms,receipt_json FROM app_platform_operation_effects WHERE kind='remove_image'`)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +593,7 @@ func (s *Server) platformReclaimTargets(ctx context.Context) (targets []platform
 		}
 		effect := platformRemoveImageEffectID(host, image.effectID, attempts)
 		var exists int
-		if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE effect_id=?`), effect).Scan(&exists); err != nil {
+		if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE effect_id=?`, effect).Scan(&exists); err != nil {
 			return nil, nil, err
 		}
 		if exists != 0 {
@@ -837,7 +837,7 @@ func (s *Server) reclaimPlatformImage(ctx context.Context, endpoint platformRunt
 		return false, nil
 	}
 	var descriptor []byte
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT descriptor FROM app_platform_releases WHERE sha256=?`, t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
 		return false, err
 	}
 	if t.effectNumber == 0 {
@@ -942,7 +942,7 @@ func (s *Server) recordPlatformRemoval(ctx context.Context, signer *platformImag
 
 func (s *Server) auditPlatformImageRemoval(ctx context.Context, lease platformOperationLease, command control.RemoveImageCommand, state string) {
 	detail := fmt.Sprintf(`{"effect_id":%q,"release_sha256":%q,"platform":%q,"state":%q}`, command.EffectID, command.Payload.ReleaseSHA256, command.Payload.Platform, state)
-	if _, err := s.st.db.ExecContext(ctx, s.st.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.image_removed','app_platform_operation',?,?,'')`),
+	if _, err := s.st.execContext(ctx, `INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.image_removed','app_platform_operation',?,?,'')`,
 		time.Now().UTC().Format(time.RFC3339), lease.id, detail); err != nil {
 		log.Printf("app-platform image removal audit: %v", err)
 	}
@@ -958,7 +958,7 @@ func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRun
 	// One cheap question first: a Portal that never loaded a managed image has nothing to reclaim, and the idle tick
 	// asks this every time.
 	var images int
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE kind IN ('load_image','remove_image')`)).Scan(&images); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE kind IN ('load_image','remove_image')`).Scan(&images); err != nil {
 		return 0, err
 	}
 	if images == 0 {

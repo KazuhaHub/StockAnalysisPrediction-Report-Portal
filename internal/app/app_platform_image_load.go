@@ -157,9 +157,9 @@ func (s *Server) verifyPlatformImageBlobs(target *platformImageTarget) error {
 func (s *Server) loadPlatformImageDescriptorTarget(ctx context.Context, lease platformOperationLease) (*platformImageTarget, error) {
 	var sha string
 	var descriptor []byte
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT r.sha256,r.descriptor FROM app_platform_operations o
+	if err := s.st.queryRowContext(ctx, `SELECT r.sha256,r.descriptor FROM app_platform_operations o
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`), lease.id).Scan(&sha, &descriptor); err != nil {
+		JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, lease.id).Scan(&sha, &descriptor); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errAppPlatformStageEvidence
 		}
@@ -518,7 +518,7 @@ func (s *Server) uploadPlatformImageBlob(ctx context.Context, signer *platformIm
 
 func (s *Server) auditPlatformImageLoad(ctx context.Context, lease platformOperationLease, command control.LoadImageCommand) {
 	detail := fmt.Sprintf(`{"effect_id":%q,"release_sha256":%q,"platform":%q}`, command.EffectID, command.Payload.ReleaseSHA256, command.Payload.Platform)
-	if _, err := s.st.db.ExecContext(ctx, s.st.bind(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.image_loaded','app_platform_operation',?,?,'')`),
+	if _, err := s.st.execContext(ctx, `INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,'app_platform.image_loaded','app_platform_operation',?,?,'')`,
 		time.Now().UTC().Format(time.RFC3339), lease.id, detail); err != nil {
 		log.Printf("app-platform image audit: %v", err)
 	}

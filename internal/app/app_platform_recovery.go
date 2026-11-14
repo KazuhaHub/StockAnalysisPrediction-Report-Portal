@@ -89,6 +89,6 @@ func (s *Server) endPlatformRecoveryContext(ctx context.Context, session platfor
 // counts as not paused: the ordinary selectors then refuse on it themselves.
 func (s *Server) platformRecoveryPaused(ctx context.Context) bool {
 	var paused string
-	err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT v FROM meta WHERE k='app_platform_restore_paused'`)).Scan(&paused)
+	err := s.st.queryRowContext(ctx, `SELECT v FROM meta WHERE k='app_platform_restore_paused'`).Scan(&paused)
 	return err == nil && paused == "1"
 }

@@ -57,7 +57,7 @@ func platformParseInstallProfile(raw string) (string, error) {
 }
 func (s *Store) platformInstallProfile(ctx context.Context, operation string) (string, error) {
 	var raw string
-	if err := s.db.QueryRowContext(ctx, s.bind(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`), operation).Scan(&raw); err != nil {
+	if err := s.queryRowContext(ctx, `SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, operation).Scan(&raw); err != nil {
 		return "", err
 	}
 	return platformParseInstallProfile(raw)

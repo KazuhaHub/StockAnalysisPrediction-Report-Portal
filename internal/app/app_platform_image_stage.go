@@ -151,7 +151,7 @@ func (s *Server) platformPinnedBlobSet(ctx context.Context, p *platformImageStor
 	pinned := map[string]bool{}
 	for sha := range pins {
 		var descriptor []byte
-		if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), sha).Scan(&descriptor); err != nil {
+		if err := s.st.queryRowContext(ctx, `SELECT descriptor FROM app_platform_releases WHERE sha256=?`, sha).Scan(&descriptor); err != nil {
 			return nil, fmt.Errorf("pinned release %s: %w", sha, err)
 		}
 		digests, err := p.releaseBlobs(descriptor)
@@ -167,9 +167,9 @@ func (s *Server) platformPinnedBlobSet(ctx context.Context, p *platformImageStor
 
 // platformReleaseInstallations names the installations a release belongs to, for a log line.
 func (s *Server) platformReleaseInstallations(ctx context.Context, sha string) string {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT DISTINCT installation_id FROM app_platform_activations WHERE release_sha256=?
+	rows, err := s.st.queryContext(ctx, `SELECT DISTINCT installation_id FROM app_platform_activations WHERE release_sha256=?
 		UNION SELECT DISTINCT o.installation_id FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE p.source_release_sha256=? OR p.target_release_sha256=?`), sha, sha, sha)
+		WHERE p.source_release_sha256=? OR p.target_release_sha256=?`, sha, sha, sha)
 	if err != nil {
 		return "unknown"
 	}

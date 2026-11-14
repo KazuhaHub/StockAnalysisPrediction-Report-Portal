@@ -161,14 +161,14 @@ func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64
 // A row it cannot settle (a fence that moved, an epoch that was rotated) is left out of the window, so it cannot
 // starve the others, and is returned in skipped so the caller can say so.
 func (s *Server) platformLoadSettlementCandidates(ctx context.Context) (ids, skipped []string, err error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id,
+	rows, err := s.st.queryContext(ctx, `SELECT o.id,
 		CASE WHEN i.control_fence=o.fence AND i.controller_epoch=o.controller_epoch
 		AND o.controller_epoch=COALESCE((SELECT v FROM meta WHERE k='app_platform_controller_epoch'),'') THEN 1 ELSE 0 END
 		FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='stage' AND f.effect_number=1 AND f.kind='load_image'
 		JOIN app_platform_installations i ON i.id=o.installation_id
 		WHERE o.managed=1 AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
-		AND f.state IN ('prepared','unknown') ORDER BY o.completed_ms,o.id LIMIT 256`))
+		AND f.state IN ('prepared','unknown') ORDER BY o.completed_ms,o.id LIMIT 256`)
 	if err != nil {
 		return nil, nil, err
 	}

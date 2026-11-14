@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -57,16 +58,57 @@ type migExec struct {
 
 func (s *Store) poolExec() migExec { return migExec{s: s, ex: s.db} }
 
+// The three statement methods route through the store's statement cache when the executor is the pool
+// (plain or context-bound) or a transaction begun on it; any other executor runs as before.
 func (e migExec) exec(q string, args ...any) (sql.Result, error) {
-	return e.ex.Exec(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db {
+			return e.s.execBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.execBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.s.txExecContext(context.Background(), x, q, args...)
+	}
+	return e.ex.Exec(q, args...)
 }
 
 func (e migExec) queryRow(q string, args ...any) *sql.Row {
-	return e.ex.QueryRow(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db {
+			return e.s.queryRowBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.queryRowBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.s.txQueryRowContext(context.Background(), x, q, args...)
+	}
+	return e.ex.QueryRow(q, args...)
 }
 
 func (e migExec) query(q string, args ...any) (*sql.Rows, error) {
-	return e.ex.Query(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db {
+			return e.s.queryBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.queryBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.s.txQueryContext(context.Background(), x, q, args...)
+	}
+	return e.ex.Query(q, args...)
 }
 
 func (e migExec) setting(k string) string {
