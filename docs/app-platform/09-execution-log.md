@@ -82,6 +82,14 @@ server `beta` configuration is changed by this implementation. The planning PR
 passed required checks and merged before this implementation branch was based
 on main. Implementation still requires its own review and exact-source CI.
 
+## Frontend artifact inspection
+
+The new `InspectFrontend` helper and `cmd/app-inspect` command validate a bounded
+frontend ZIP against the declared digest and return public metadata without
+extracting or executing it. See [the inspection contract](12-frontend-inspection.md)
+for provisional limits, refusal behavior, tests and remaining envelope/trust work.
+This is frontend integrity only; it is not a trusted package or install admission.
+
 ## Next steps
 
 1. Add the v2 generated JSON Schema and expand shared Go/TypeScript refusal cases.
