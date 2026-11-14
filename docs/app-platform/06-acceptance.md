@@ -189,10 +189,13 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
 - **What the job does:** on a GitHub-hosted `ubuntu-24.04` runner (4 vCPU, 16 GiB) with a 16 GiB XFS project-quota
   loop volume it owns, a real root runner runs fifty installations (forty-two static, eight managed backends of a
   soak fixture image, each sized from the memory and CPU budgets the runner reports in its readiness facts). The measured
-  Portal is production-shaped: a file-backed SQLite database opened as the server opens it, running its real batch
-  scheduler against a local stub Dify that answers at once. It does not run the platform task worker or the event delivery
-  coordinator, no request originates from a backend (the fixture has no outbound channel to the platform), and it does not
-  run on PostgreSQL; these are stated gaps, recorded in the evidence.
+  Portal runs on PostgreSQL (a fresh `postgres:16` service for every run, opened with `OpenStore`; owner decision 2026-11-14: the evidence shape is
+  the production one), running its real batch scheduler against a local stub Dify that answers at once. It does not run the platform task worker or the event delivery
+  coordinator, no request originates from a backend (the fixture has no outbound channel to the platform), and these are stated gaps, recorded in the evidence. The evidence records `db_driver` and the server version, and only a PostgreSQL run counts.
+- **SQLite is a recorded known limit, not evidence.** The `soak_db=sqlite-file` input measures the file-backed SQLite Portal. On it, sustained
+  app-backend relay traffic raises page and scheduler latency beyond the gate, because the single connection is occupied about a third of the time by the
+  two always-admitted relay requests (smokes 43568339184, 43570051027, 43571196806, 43590645282 and dispatch 43570060321 in doc 171, resolution 73). A
+  SQLite read pool is a tracked follow-up and blocks any claim that the SQLite envelope is proven.
 - **Backends at their limits, as achieved:** each backend holds 85% of its memory limit (the Go soft limit at 95% keeps the
   collector ahead of the kernel), burns its CPU quota, parks threads up to its PID limit less 8, writes 1 MiB/s to its log and
   fills its data namespace to the quota. "At the limit" is not claimed: the verdict reads each backend's own cgroup counters

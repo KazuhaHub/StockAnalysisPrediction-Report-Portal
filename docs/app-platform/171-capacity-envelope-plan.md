@@ -1000,6 +1000,35 @@ is evidence for OPS-08.
 72. **Diagnostic variants.** The dispatch run takes a `soak_variant` input (`memory-db`, `no-batch-probes`) that removes one part of the scenario
     to tell their shares apart. A variant is recorded in the evidence and never counts as OPS-08 evidence.
 
+73. **OPS-08 evidence is a PostgreSQL run; SQLite is a recorded known limit (owner decision 2026-11-14).** The owner runs the Portal on
+    PostgreSQL in production, so the evidence run measures that shape. The `capacity-soak` job starts a `postgres:16-alpine` service (the health
+    check and DSN form of `test.yml`) and the measured Portal opens it with `OpenStore("postgres", dsn)`, the code the server runs. The soak
+    drops and recreates the schema before it starts (only on a loopback DSN, `soakPostgresLocal`), so every run begins empty, and the evidence
+    records `db_driver` and the server version. Everything else is unchanged: runner, backends, floods, probes, the real batch scheduler against
+    the stub Dify, the verdict and the diagnostics. A `soak_db` input (`postgres` by default, `sqlite-file`) keeps the file-backed SQLite
+    measurement runnable; a SQLite run never sets `counts_as_ops08_evidence` (`TestSoakDatabaseIsPostgresByDefault...`,
+    `DatabaseTests`). The pull request smoke runs PostgreSQL and gates; no separate SQLite smoke runs on pull requests. The diagnostic minute
+    reports the pool wait count and total, the share of 2 ms samples with every connection in use, and the mean occupancy of the pool (10
+    connections on PostgreSQL, 1 on SQLite).
+
+    **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
+    gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
+    one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
+    13.8% idle, 6111 to 31948 pool waits a minute). Measured this round, five-minute pull request smokes and dispatch runs, none evidence
+    (idle / pooled loaded / bound, microseconds):
+
+    | Run | report page | batch start |
+    | --- | --- | --- |
+    | 43568339184 (`3e3d591`) | 3523 / 50611 / 8523 fail | 7852 / 112261 / 12852 fail |
+    | 43570051027 (`edfcb92`) | 1795 / 8102 / 6795 fail | 5532 / 16334 / 10532 fail |
+    | 43570060321 (`edfcb92`, no batch probes) | 1863 / 12681 / 6863 fail | not run |
+    | 43571196806 (`56e6881a`) | 1770 / 5552 / 6770 pass | 5758 / 26467 / 10758 fail |
+    | 43590645282 (`85376438`, with #440) | 3147 / 14924 / 8147 fail | 9598 / 48249 / 14598 fail |
+
+    The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
+    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. A SQLite read pool is a tracked follow-up, and
+    until it lands no claim is made that the SQLite envelope is proven.
+
 ### Findings of the revised harness: the latency bound on a production-shaped Portal (not evidence)
 
 Everything in the harness passes in the smokes of this round except two latency series, and that is a finding about the Portal, not the
