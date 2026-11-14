@@ -109,11 +109,13 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['go-test','web typecheck + build','web lint + typecheck + build','workflow lint',
+                ['go-test','go test (checks + other packages)','web typecheck + build','web lint + typecheck + build','workflow lint',
                  'docker image (font gate + smoke)','go race full (other packages)',
                  'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
+        self.assertFalse(ci_ready(jobs))
+        jobs += [{'name':f'go test ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertTrue(ci_ready(jobs))
 
     def test_ci_ready_matches_test_workflow(self):
@@ -146,6 +148,23 @@ class GuardTests(unittest.TestCase):
         self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
         self.assertIn('test -n "$regex"', block)
 
+    def test_go_test_shards_agree_on_their_count(self):
+        # The same two-places count as the race shards, for the ordinary internal/app run that the
+        # required check "go-test" summarises. The partition must read the matrix, the shards must
+        # be numbered 1..N, a shard dealt nothing must fail, and each shard needs the database the
+        # package's PostgreSQL variants run against, or they skip and the shard passes without them.
+        block = job_block(read_workflow('test.yml'), 'go-test-shard')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        partition = re.search(r'awk -v s="\$\{\{ matrix\.shard \}\}" -v m=("[^"]*"|\S+)', block)
+        self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
+        self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
+        self.assertIn('test -n "$regex"', block)
+        self.assertIn('TEST_POSTGRES_DSN', block)
+        self.assertIn('image: postgres:16', block)
+
     def test_web_test_shards_agree_on_their_count(self):
         # The same two-places count as the race shards: the matrix deals the files out through
         # vitest's --shard, and the "(N/3)" in the name is what ci_ready waits for.
@@ -161,7 +180,7 @@ class GuardTests(unittest.TestCase):
         # shards. A job whose `needs` failed is skipped unless it says always(), and a skipped
         # required check counts as passed, so each must run always() and test every result itself.
         workflow = read_workflow('test.yml')
-        for job_id in ('go-race', 'web-build'):
+        for job_id in ('go-race', 'go-test', 'web-build'):
             with self.subTest(job=job_id):
                 block = job_block(workflow, job_id)
                 self.assertRegex(re.search(r'^    if: (.+?)\s*$', block, re.M)[1], r'^always\(\)')
