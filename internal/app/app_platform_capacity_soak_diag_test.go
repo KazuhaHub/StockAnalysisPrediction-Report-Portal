@@ -44,6 +44,22 @@ func TestSoakConnectionUtilizationIsTheShareOfSamplesWithTheConnectionInUse(t *t
 	}
 }
 
+func TestSoakMeanOccupancyIsTheAverageShareOfTheConnectionsInUse(t *testing.T) {
+	// A pool of ten with two connections in use for most of the time is 20% occupied, and never saturated.
+	if got := soakMeanOccupancy([]int{2, 2, 2, 2}, 10); got != 0.2 {
+		t.Fatalf("occupancy = %v", got)
+	}
+	if got := soakMeanOccupancy([]int{0, 1, 1, 0}, 1); got != 0.5 {
+		t.Fatalf("single connection = %v", got)
+	}
+	if soakMeanOccupancy(nil, 10) != 0 || soakMeanOccupancy([]int{1}, 0) != 0 {
+		t.Fatal("no samples or no pool")
+	}
+	if soakUtilization([]int{2, 2, 2, 2}, 10) != 0 {
+		t.Fatal("a pool of ten with two in use is not saturated")
+	}
+}
+
 func TestSoakHistogramPercentileReadsOnlyWhatHappenedBetweenTwoReadings(t *testing.T) {
 	buckets := []float64{0, 0.001, 0.01, 0.1, math.Inf(1)}
 	before := &metrics.Float64Histogram{Buckets: buckets, Counts: []uint64{100, 0, 0, 0}}
@@ -103,6 +119,18 @@ func soakUtilization(inUse []int, maxOpen int) float64 {
 		}
 	}
 	return float64(busy) / float64(len(inUse))
+}
+
+// soakMeanOccupancy is the average share of the pool's connections in use over the samples.
+func soakMeanOccupancy(inUse []int, maxOpen int) float64 {
+	if len(inUse) == 0 || maxOpen < 1 {
+		return 0
+	}
+	total := 0
+	for _, n := range inUse {
+		total += n
+	}
+	return float64(total) / float64(len(inUse)) / float64(maxOpen)
 }
 
 // soakHistogramPercentile is the q-quantile (upper bucket bound, seconds) of the events a runtime histogram gained

@@ -562,7 +562,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     passed = all(c["passed"] for c in checks)
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
-        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant, "variant": variant, "checks": checks,
+        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres",
+        "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
     }
@@ -610,6 +611,13 @@ def soak_variant(value):
     if not re.fullmatch(r"(memory-db|no-batch-probes)(,(memory-db|no-batch-probes))*|", value or ""):
         raise RuntimeError("the soak variant is empty or a list of memory-db and no-batch-probes")
     return value or ""
+
+
+def soak_database(value):
+    """The measured Portal's database: PostgreSQL (the evidence shape, owner decision 2026-11-14) or the file-backed SQLite variant."""
+    if value not in ("", "postgres", "sqlite-file"):
+        raise RuntimeError("the soak database is postgres or sqlite-file")
+    return value or "postgres"
 
 
 def image_store_mode(free_bytes):
@@ -700,6 +708,7 @@ def main(argv):
     minutes = duration_minutes(args.duration_minutes)
     image = soak_image(os.environ.get("APP_CAPACITY_SOAK_IMAGE"))
     variant = soak_variant(os.environ.get("APP_CAPACITY_SOAK_VARIANT", ""))
+    database = soak_database(os.environ.get("APP_CAPACITY_SOAK_DB", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
     for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
         if not Path(path).is_absolute():
@@ -764,7 +773,8 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant)
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database,
+                        APP_CAPACITY_SOAK_POSTGRES_DSN=os.environ.get("APP_CAPACITY_SOAK_POSTGRES_DSN", ""))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
             soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
@@ -824,7 +834,7 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests, "variant": variant,
+        "unit_tests": unit_tests, "variant": variant, "database": database,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

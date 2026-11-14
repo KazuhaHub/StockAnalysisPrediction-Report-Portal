@@ -205,6 +205,8 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"APP_CAPACITY_SOAK_MINUTES=" + strconv.Itoa(minutes), "APP_CAPACITY_SOAK_BASELINE_SECONDS=" + strconv.Itoa(baseline),
 		"APP_CAPACITY_SOAK_DIAGNOSE=" + os.Getenv("APP_CAPACITY_SOAK_DIAGNOSE"),
 		"APP_CAPACITY_SOAK_VARIANT=" + os.Getenv("APP_CAPACITY_SOAK_VARIANT"),
+		"APP_CAPACITY_SOAK_DB=" + os.Getenv("APP_CAPACITY_SOAK_DB"),
+		"APP_CAPACITY_SOAK_POSTGRES_DSN=" + os.Getenv("APP_CAPACITY_SOAK_POSTGRES_DSN"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE_REASON=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"),
 		"APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=" + os.Getenv("APP_CAPACITY_SOAK_DOCKER_FREE_BYTES"),
@@ -328,12 +330,26 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	}
 	var s *Server
 	var session platformActorSession
+	dbDriver, dbVersion := "sqlite", "in-memory template store"
 	if variant.MemoryDB { // a diagnostic variant only
 		s, session = platformTrustTestServer(t, false)
 	} else {
-		store, err := OpenStore("sqlite", filepath.Join(dir, "portal.db"))
+		driver, source, err := soakDatabase(os.Getenv("APP_CAPACITY_SOAK_DB"), os.Getenv("APP_CAPACITY_SOAK_POSTGRES_DSN"), dir)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if driver == "postgres" {
+			soakResetPostgres(t, source) // fresh for every run
+		}
+		store, err := OpenStore(driver, source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dbDriver = driver
+		if driver == "postgres" {
+			dbVersion = scalar[string](t, store, `SHOW server_version`)
+		} else {
+			dbVersion = scalar[string](t, store, `SELECT sqlite_version()`)
 		}
 		t.Cleanup(func() { _ = store.Close() })
 		s, session = platformActorTestServerWithStore(t, store)
@@ -357,6 +373,8 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	}
 	c.rec.SetSession(session.expires)
 	c.rec.SetVariant(variant.Name)
+	c.rec.SetDatabase(dbDriver, dbVersion)
+	t.Logf("SOAK_DATABASE %s %s", dbDriver, dbVersion)
 	c.rec.SetPortal(soakPortalEvidence{
 		Database: "file-backed SQLite opened with OpenStore, as the server opens it",
 		Running: []string{"the batch scheduler (scheduleTick, and scheduleLoop every 30 seconds) with the real Dify provider against a local stub",
@@ -433,6 +451,22 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	t.Log("SOAK_EXCESS_PROBES_REFUSED")
 	c.load(minutes)
 	t.Log("SOAK_LOAD_FINISHED")
+}
+
+// soakResetPostgres empties the job's own PostgreSQL database so the run starts from nothing, whatever an earlier step left.
+func soakResetPostgres(t *testing.T, dsn string) {
+	t.Helper()
+	if !soakPostgresLocal(dsn) {
+		t.Fatal("refusing to reset a database that is not the job's own loopback service")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal("reset the soak database:", err)
+	}
 }
 
 func soakBudgetsOf(c transport.ManagedRuntimeCapacity) (soakBudgets, error) {

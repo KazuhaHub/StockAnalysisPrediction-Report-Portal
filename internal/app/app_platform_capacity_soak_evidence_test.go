@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -327,6 +328,34 @@ const soakSamplesPerWindow = 100
 
 func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEvery == 0 }
 
+// soakPostgresLocal reports whether a DSN names the job's own loopback service: the only database the soak resets.
+func soakPostgresLocal(dsn string) bool {
+	u, err := url.Parse(dsn)
+	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") {
+		return false
+	}
+	switch u.Hostname() {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+// soakDatabase chooses the measured Portal's store. PostgreSQL is the default and the shape OPS-08 evidence is run on
+// (owner decision 2026-11-14); the file-backed SQLite store is a named variant that never counts as evidence.
+func soakDatabase(db, postgresDSN, dir string) (driver, source string, err error) {
+	switch db {
+	case "", "postgres":
+		if !soakPostgresLocal(postgresDSN) {
+			return "", "", fmt.Errorf("the soak's PostgreSQL is the job's own loopback service, got %q", postgresDSN)
+		}
+		return "postgres", postgresDSN, nil
+	case "sqlite-file":
+		return "sqlite", filepath.Join(dir, "portal.db"), nil
+	}
+	return "", "", fmt.Errorf("unknown soak database %q", db)
+}
+
 // soakImageProbeMemoryMiB is the memory the image store probe's two installs declare: one MiB more than the runner's whole
 // memory budget, so the runner refuses their start for memory after it has loaded their images. A budget at or beyond the
 // descriptor maximum cannot be exceeded by any valid descriptor, so the probe cannot run there.
@@ -401,6 +430,9 @@ type soakEvidence struct {
 	Markers         []string       `json:"markers"`
 	// SessionExpiresMS is when the soak's session and cookie expire; the verdict requires it to be after the load.
 	SessionExpiresMS int64 `json:"session_expires_ms"`
+	// DBDriver and DBVersion say what the measured Portal ran on: "postgres" with the server's version, or "sqlite".
+	DBDriver  string `json:"db_driver"`
+	DBVersion string `json:"db_version"`
 	// Variant names the diagnostic variant of the run, empty for an evidence run.
 	Variant    string                 `json:"variant"`
 	ImageStore soakImageStoreEvidence `json:"image_store"`
@@ -470,6 +502,9 @@ func (r *soakRecorder) SetLoaded(pooled soakSamples) {
 }
 func (r *soakRecorder) SetSession(expires time.Time) {
 	r.update(func(e *soakEvidence) { e.SessionExpiresMS = expires.UnixMilli() })
+}
+func (r *soakRecorder) SetDatabase(driver, version string) {
+	r.update(func(e *soakEvidence) { e.DBDriver, e.DBVersion = driver, version })
 }
 func (r *soakRecorder) SetVariant(name string) { r.update(func(e *soakEvidence) { e.Variant = name }) }
 func (r *soakRecorder) SetImageStore(v soakImageStoreEvidence) {
@@ -661,6 +696,39 @@ func TestSoakImageStoreProbeAsksForOneMiBMoreThanTheBudgetSoNoContainerIsEverCre
 	for _, budget := range []int64{appplatform.MaxBackendMemoryMiB, appplatform.MaxBackendMemoryMiB + 1000, 0} {
 		if memory, err := soakImageProbeMemoryMiB(budget); err == nil {
 			t.Errorf("budget %d: asked for %d MiB, a request no budget can refuse", budget, memory)
+		}
+	}
+}
+
+func TestSoakDatabaseIsPostgresByDefaultAndSQLiteIsTheNamedVariant(t *testing.T) {
+	const dsn = "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
+	driver, source, err := soakDatabase("", dsn, "/tmp/child")
+	if err != nil || driver != "postgres" || source != dsn {
+		t.Fatalf("default = %q %q %v", driver, source, err)
+	}
+	if driver, source, err = soakDatabase("postgres", dsn, "/tmp/child"); err != nil || driver != "postgres" || source != dsn {
+		t.Fatalf("postgres = %q %q %v", driver, source, err)
+	}
+	if driver, source, err = soakDatabase("sqlite-file", "", "/tmp/child"); err != nil || driver != "sqlite" || source != "/tmp/child/portal.db" {
+		t.Fatalf("sqlite-file = %q %q %v", driver, source, err)
+	}
+	for _, bad := range []struct{ db, dsn string }{{"postgres", ""}, {"mysql", dsn}, {"sqlite", ""},
+		{"postgres", "postgres://portal:portal@db.example.com:5432/reports?sslmode=require"}} {
+		if _, _, err := soakDatabase(bad.db, bad.dsn, "/tmp/child"); err == nil {
+			t.Errorf("accepted %+v", bad)
+		}
+	}
+}
+
+func TestSoakPostgresIsOnlyEverResetOnTheJobsOwnLoopbackService(t *testing.T) {
+	for _, dsn := range []string{"postgres://portal:portal@localhost:5432/reports_test?sslmode=disable", "postgres://portal@127.0.0.1/x", "postgres://u@[::1]:5432/x"} {
+		if !soakPostgresLocal(dsn) {
+			t.Errorf("%s is the job's own service", dsn)
+		}
+	}
+	for _, dsn := range []string{"", "postgres://portal@db.example.com/x", "postgres://localhost.evil.com/x", "not a url", "postgres://portal@10.0.0.5:5432/x"} {
+		if soakPostgresLocal(dsn) {
+			t.Errorf("%s is not loopback", dsn)
 		}
 	}
 }

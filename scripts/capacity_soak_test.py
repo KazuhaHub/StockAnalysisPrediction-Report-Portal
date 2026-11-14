@@ -238,6 +238,7 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
         "windows": [window(m, 1.2) for m in range(1, windows + 1)],
         "load_started_ms": LOAD_START_MS, "load_finished_ms": LOAD_START_MS + PERIOD_MS * windows, "duration_minutes": windows,
         "session_expires_ms": LOAD_START_MS + PERIOD_MS * windows + 3_600_000,
+        "db_driver": "postgres", "db_version": "16.4",
         "markers": ["load_finished"],
     }
 
@@ -628,6 +629,31 @@ class VariantTests(unittest.TestCase):
         for bad in ("memory", "no-batch-probes;x", "a b"):
             with self.assertRaises(RuntimeError):
                 soak.soak_variant(bad)
+
+
+class DatabaseTests(unittest.TestCase):
+    def kwargs(self):
+        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+
+    def test_only_a_postgres_run_counts_as_ops08_evidence(self):
+        # Owner decision 2026-11-14: the evidence is a run on PostgreSQL; a SQLite run is a known-limit measurement.
+        samples = load_samples(120)
+        self.assertTrue(soak.evaluate(child_evidence(windows=120), samples, **self.kwargs())["counts_as_ops08_evidence"])
+        for driver in ("sqlite", "", None):
+            evidence = child_evidence(windows=120)
+            evidence["db_driver"] = driver
+            verdict = soak.evaluate(evidence, samples, **self.kwargs())
+            self.assertTrue(verdict["passed"], driver)
+            self.assertFalse(verdict["counts_as_ops08_evidence"], driver)
+            self.assertEqual(verdict["db_driver"], driver or "")
+
+    def test_the_database_choice_is_a_closed_list(self):
+        self.assertEqual(soak.soak_database(""), "postgres")
+        self.assertEqual(soak.soak_database("postgres"), "postgres")
+        self.assertEqual(soak.soak_database("sqlite-file"), "sqlite-file")
+        for bad in ("sqlite", "mysql", "postgres;x"):
+            with self.assertRaises(RuntimeError):
+                soak.soak_database(bad)
 
 
 class UnitTestResultTests(unittest.TestCase):
