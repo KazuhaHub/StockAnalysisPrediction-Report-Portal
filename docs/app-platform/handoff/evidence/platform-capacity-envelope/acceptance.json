@@ -26,7 +26,6 @@
     "memory_mib": null,
     "cpu_millis": null,
     "disk_bytes": null,
-    "disk_bytes_note": "raised from the 8 GiB default to 10 GiB for the run: refused probe installs leave their namespace reserved",
     "image_store_bytes": null,
     "running_backends": 8,
     "estimated_rows": null
@@ -109,7 +108,7 @@
   "unproven_until_the_dispatch_run": [
     "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
     "that the eight backends, flooding their limits, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted",
-    "that a refused install can free its data namespace: it cannot (production gap, doc 171 resolution 53); the run raises the runner disk budget to 10 GiB instead",
+    "that each refused probe installation releases its namespace through the managed uninstall on the declared 8 GiB disk budget (each probe records retired: managed_uninstall)",
     "that the per-application task quota (1000) is reached natively; it is proven at its boundary at unit level only"
   ]
 }

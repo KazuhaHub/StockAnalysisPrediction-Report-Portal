@@ -142,7 +142,8 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, flood_ok=100
         "format": "portal.capacity-soak.child/1-dev.1",
         "budgets": {"memory_mib": 3993, "cpu_millis": 2000, "disk_bytes": 8 << 30, "image_store_bytes": 10 << 30, "running_backends": 8},
         "sizing": {"MemoryMiB": 497, "CPUMillis": 246},
-        "probes": [{"name": name, "expected": "x", "observed": "x", "passed": True, "native": True} for name in soak.REQUIRED_PROBES]
+        "probes": [{"name": name, "expected": "x", "observed": "x", "passed": True, "native": True,
+                    **({"retired": "managed_uninstall"} if name in soak.RETIRED_PROBES else {})} for name in soak.REQUIRED_PROBES]
                   + [{"name": "task_over_application_quota", "expected": "y", "observed": "y", "passed": True, "native": False}],
         "idle": window(0, 1.0),
         "windows": [window(m, 1.2) for m in range(1, windows + 1)],
@@ -224,6 +225,16 @@ class EvaluateTests(unittest.TestCase):
         evidence = child_evidence()
         evidence["probes"] = [p for p in evidence["probes"] if p["name"] != "ninth_backend"]
         self.assertIn("every_required_probe_ran", self.failing(self.verdict(evidence)))
+
+    def test_every_backend_probe_must_be_retired_through_the_managed_uninstall(self):
+        for retired in ("refused", "workaround", None):
+            evidence = child_evidence()
+            probe = next(p for p in evidence["probes"] if p["name"] == "memory_over_budget")
+            if retired is None:
+                del probe["retired"]
+            else:
+                probe["retired"] = retired
+            self.assertEqual(self.failing(self.verdict(evidence)), {"probes_retired_through_the_managed_uninstall"}, retired)
 
     def test_an_unrefused_probe_fails_and_unit_level_probes_are_listed(self):
         evidence = child_evidence()

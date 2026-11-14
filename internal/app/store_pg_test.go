@@ -2,8 +2,11 @@ package app
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
 
 // likeOp must yield the case-insensitive operator on Postgres (whose LIKE is
@@ -130,6 +133,13 @@ func pgStore(t *testing.T, tables ...string) *Store {
 		t.Fatalf("OpenStore postgres: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	// State that outlives a test and that the named tables do not cover: the ledger's settings (the
+	// write-once start above all) and the machine tokens. A fresh database has neither.
+	for _, stmt := range []string{`DELETE FROM meta WHERE k LIKE 'forecast\_%'`, `DELETE FROM api_tokens`} {
+		if _, err := st.exec(stmt); err != nil {
+			t.Fatalf("reset shared state: %v", err)
+		}
+	}
 	for _, tbl := range tables {
 		if _, err := st.exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
@@ -351,5 +361,101 @@ func TestPostgresStockFavorites(t *testing.T) {
 	}
 	if got := st.StockFavorites("favorite-pg"); len(got) != 0 {
 		t.Fatalf("favorites survived account deletion: %+v", got)
+	}
+}
+
+// The dispatch decision's queries on Postgres: the single-query producer windows must equal the
+// per-job reads they replace (concurrency 0, 1 and 3, with a row in flight), SchedulableJobs must
+// report the in-flight counts, and the full candidate set must match the per-job reference. The
+// database is shared, so the test only compares rows of its own jobs and removes them afterwards.
+func TestPostgresDispatchDecision(t *testing.T) {
+	st := pgStore(t)
+	const user, slug = "pg_dispatch", "pg_dispatch_plugin"
+	// Everything the test inserts is keyed by its own user, plugin slug and target, so it removes
+	// exactly that and no shared row is ever overwritten.
+	clean := func() {
+		st.exec(`DELETE FROM notification_source_cycles WHERE source_key IN (SELECT 'job:' || CAST(id AS TEXT) FROM batch_jobs WHERE created_by=?)`, user)
+		st.exec(`DELETE FROM batch_items WHERE job_id IN (SELECT id FROM batch_jobs WHERE created_by=?)`, user)
+		st.exec(`DELETE FROM batch_jobs WHERE created_by=?`, user)
+		st.exec(`DELETE FROM batch_targets WHERE plugin_slug=?`, slug)
+		st.exec(`DELETE FROM plugins WHERE slug=?`, slug)
+	}
+	clean()
+	t.Cleanup(clean)
+	if err := st.UpsertPlugin(slug, "PG dispatch", "1.0.0", "{}", "test"); err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := st.CreateTarget(slug, "PG dispatch", `{"base_url":"x","api_key":"k"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ids, want := windowFixture(t, st, targetID, user)
+	checkQueuedItemWindows(t, st, ids, want)
+
+	now := dispatchNow()
+	s := &Server{st: st}
+	mine := map[int64]bool{}
+	for _, id := range ids {
+		mine[id] = true
+	}
+	wantC, wantM := s.refItemCandidates(now)
+	gotC, gotM := s.itemCandidatesAt(now)
+	keep := func(c []queue.Item, m map[int64]candMeta) ([]queue.Item, map[int64]candMeta) {
+		var oc []queue.Item
+		om := map[int64]candMeta{}
+		for _, it := range c {
+			if mine[m[it.ID].job.ID] {
+				oc = append(oc, it)
+				om[it.ID] = m[it.ID]
+			}
+		}
+		return oc, om
+	}
+	wc, wm := keep(wantC, wantM)
+	gc, gm := keep(gotC, gotM)
+	if len(wc) == 0 {
+		t.Fatal("degenerate: no candidates from the fixture jobs")
+	}
+	if !reflect.DeepEqual(wc, gc) || !reflect.DeepEqual(wm, gm) {
+		t.Fatalf("candidates differ on Postgres\nwant %+v\n got %+v", wc, gc)
+	}
+	// The queued-job view, restricted to the test's own jobs (its item id is the job id).
+	own := func(items []queue.Item) []queue.Item {
+		var out []queue.Item
+		for _, it := range items {
+			if mine[it.ID] {
+				out = append(out, it)
+			}
+		}
+		return out
+	}
+	w, g := own(s.refQueuedItems(now)), own(s.queuedItemsAt(now))
+	if len(w) == 0 || !reflect.DeepEqual(w, g) {
+		t.Fatalf("queuedItems differ on Postgres\nwant %+v\n got %+v", w, g)
+	}
+}
+
+// pgStore is how every Postgres test gets a clean database, and the database is one that all of
+// them share, in whatever order the package or one of its shards runs them. Settings and
+// credentials that a test leaves behind must not reach the next one: a ledger start written by one
+// test turns every set another seeds before it into a pre-live row, and a query token left behind
+// collides with the next test that creates the same one.
+func TestPgStoreStartsWithoutSettingsOrTokensLeftByEarlierTests(t *testing.T) {
+	st := pgStore(t)
+	if err := st.SetSetting(setForecastPopulationFrom, "2099-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateToken("leaked-by-an-earlier-test", "leak", "all", ""); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st = pgStore(t)
+	var n int
+	if err := st.queryRow(`SELECT COUNT(*) FROM meta WHERE k LIKE 'forecast\_%'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("forecast settings survived into the next test: %d, %v", n, err)
+	}
+	if err := st.queryRow(`SELECT COUNT(*) FROM api_tokens`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tokens survived into the next test: %d, %v", n, err)
 	}
 }

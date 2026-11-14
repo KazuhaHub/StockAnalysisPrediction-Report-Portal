@@ -178,6 +178,22 @@ func (o Operation) Settle(expectedRevision uint64) (Operation, error) {
 	return o, nil
 }
 
+// SettleNeverStarted closes the failed install of an installation that never started, when the removal of that
+// installation has deleted what the install prepared. It is the install action only; Settle stays limited to the
+// restore actions. Like Settle it cannot judge the evidence: the caller proves that every effect of the install is
+// reverted or applied-and-removed. The result must be a state OperationFromSnapshot restores, so a failure from
+// so late a stage that the closed state would be out of range is refused.
+func (o Operation) SettleNeverStarted(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	if o.action != ActionInstall || o.stage != StageRecoveryRequired || o.revision+1 > uint64(len(operationStages(o.action, o.managed))) {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageFailed, o.revision+1
+	return o, nil
+}
+
 // Recover completes an operation that ended recovery_required once evidence shows its effect was applied.
 // The result must be a state OperationFromSnapshot restores, which refuses a failure from too early a
 // stage to have done the work. Like Settle it cannot judge the evidence itself.

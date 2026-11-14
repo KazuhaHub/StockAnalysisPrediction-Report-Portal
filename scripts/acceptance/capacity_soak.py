@@ -29,6 +29,7 @@ VOLUME_BYTES = 16 * 1024 * 1024 * 1024
 RATIO_LIMIT_NUMERATOR, RATIO_LIMIT_DENOMINATOR = 3, 2  # 1.5x
 OPS08_MINUTES = 120
 SAMPLE_INTERVAL_SECONDS = 30
+RETIRED_PROBES = ("ninth_backend", "memory_over_budget", "cpu_over_budget")
 REQUIRED_PROBES = (
     "fifty_first_installation",
     "ninth_backend",
@@ -279,6 +280,9 @@ def evaluate(evidence, samples, parent_passed, min_samples=1):
                          {"missing": sorted(set(REQUIRED_PROBES) - names)}))
     failed = [{"name": p["name"], "expected": p.get("expected"), "observed": p.get("observed")} for p in probes if not p.get("passed")]
     checks.append(_check("every_excess_request_refused_with_its_typed_error", probes and not failed, {"failed": failed}))
+    retired = {p["name"]: p.get("retired") for p in probes if p["name"] in RETIRED_PROBES}
+    checks.append(_check("probes_retired_through_the_managed_uninstall",
+                         set(retired) == set(RETIRED_PROBES) and all(v == "managed_uninstall" for v in retired.values()), {"retired": retired}))
     checks.append(_check("no_runner_crash", parent_passed, "the Go acceptance, which owns the runner, ended cleanly" if parent_passed else "the Go acceptance failed"))
     checks.append(_check("load_completed", "load_finished" in evidence.get("markers", []), {"markers": evidence.get("markers", [])}))
     idle = evidence.get("idle", {})

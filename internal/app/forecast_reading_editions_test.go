@@ -31,7 +31,7 @@ func eachReaderServer(t *testing.T, run func(t *testing.T, s *Server)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { run(t, newV1Server(t)) })
 	t.Run("postgres", func(t *testing.T) {
-		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users")
+		st := pgStore(t, "prediction_marks", "prediction_claims", "prediction_sets", "report_viewers", "reports", "users", "api_tokens")
 		if err := st.CreateToken("tok-all", "test", "all", ""); err != nil {
 			t.Fatal(err)
 		}

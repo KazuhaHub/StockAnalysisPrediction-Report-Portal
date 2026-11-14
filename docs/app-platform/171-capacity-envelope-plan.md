@@ -634,6 +634,99 @@ leaves work for an administrator. None of them may remain when the integration b
   absence (item 51). Fix: prove absence from the daemon's event stream, or leave the reservation held until
   the next reconcile has seen the resource absent twice, across the gate.
 
+## Resolution (refused install removal)
+
+This closes the gap recorded in resolution 53 on the soak branch (`feat/app-platform-capacity-soak`): a managed install the
+runner refused for capacity had already prepared its data namespace, which holds 768 MiB of the runner's disk budget, and
+no flow could release it. Eight such refusals exhausted the budget for good. Items here are unnumbered on purpose: the soak
+branch continues the numbering at 52, and the two sequences are joined when the branches meet.
+
+**What the refused install looks like.** The trace in resolution 53 names the phase `review_required`. The code ends such an
+install in `recovery_required`, with the install operation at stage `recovery_required`:
+`finalizePlatformInstallForReview` treats any install that already owns a resource (here the namespace and the applied
+`prepare_data` effect) as an unknown outcome, and `review_required` is reached only by an install that owns none. The
+variant therefore admits both phases, and a test pins the phase the refusal really produces. Either phase is admitted only on
+the evidence below, never on the phase.
+
+**Eligibility** (`platformLoadNeverStartedEvidence`, `app_platform_removal_never_started.go`). It runs in the review and again
+in the consuming transaction, because both load the removal projection, and a third time at every later stage through
+`validatePlatformAdmittedRemoval`, which compares what it loads with the evidence the review named. All of it must hold:
+
+- the action is uninstall, the installation is managed, enabled at generation 1, and its phase is `review_required` or
+  `recovery_required`; no active activation exists;
+- the installation has exactly one operation, its first-generation install, which ended
+  `recovery_required` with an error code and no lease. Stage `failed` is not admitted: an install that owns a namespace
+  always ends `recovery_required` (the resource makes its outcome unknown), so `failed` with a namespace is not
+  reachable, and the close below accepts only `recovery_required`, so the two cannot disagree;
+- every start-bearing effect of that operation (`start-candidate`, which is both the candidate and the writable candidate,
+  `update-start`, `enable-start`, `restore-start`) is `reverted`. An applied start may have run; an unknown or merely
+  prepared one may have, so they are refused too. This is stricter than "not applied or unknown" on purpose;
+- every other effect is settled, none lies past the start stage (`load_image` and `remove_image` effects included: an
+  unsettled one blocks the variant and the close alike, a settled one does not), and the `prepare_data` effect is applied,
+  on this runtime and epoch, at a fence no newer than the install operation's own, with a receipt that names the
+  installation's namespace and data format;
+- the namespace is the installation's only one and is `active`.
+
+Each condition refuses for its own reason, and an installation in `review_required` or `recovery_required` that is not
+eligible gets `errAppPlatformPlanChanged` for every cause, as before the variant existed. Anything else fails closed with
+`errAppPlatformPlanChanged`, the error the ordinary review gives. An install whose start is
+unsettled stays refused until the orphan settlement (item 39) has reverted the start; the real settlement is tested to open
+the variant. The review carries the evidence (`never_started` in the projection: the install operation, the release and the
+`prepare_data` effect id, digest, receipt digest and admitted fence), so consumption detects a change. The field is omitted
+from every ordinary review, whose JSON is unchanged.
+
+**Steps.** The operation passes the stages in the model's order and runs no runner effect for `stop` and `remove_code`
+(`advancePlatformNeverStartedRemoval`; the model is untouched). The delete-data intent takes the release, the review, the
+fence, the namespace identity and the preparation receipt from the failed install and its applied `prepare_data` effect
+instead of from a completed install and an activation, and signs the existing `delete-data` command. Admission also retires
+the install's candidate activation. The ordinary settlement then marks the namespace deleted, the installation removed and
+the operation complete, in one transaction. Effects are validated by a variant of the removal rule that allows only the
+`delete-data` effect.
+
+**Runner.** One change was needed, contrary to the preference for none. `loadDeleteDataSource` binds the deletion to the
+namespace's container and refuses with "container history" when there is none, and a start refused at admission leaves no
+container resource row behind (the plan's Admission section: a refusal leaves no resource or reservation row). When the namespace has no container, the deletion is now bound to the volume
+(`requireDeleteDataNeverStarted`): the installation has no container resource at all, no command past the data stage is
+anything but reverted, and the release, the generation (+1) and the writer fence (+1) match the volume the install
+prepared. A namespace with any container keeps the container binding unchanged. The signed command format is unchanged and
+verifies with the existing control verification. `settleDeleteData` was split so that its journal half
+(`settleDeleteDataSnapshot`, which releases the reservation) is reachable by a journal test without a native data root.
+
+**Closing the failed install.** The settlement of the never-started removal also moves the failed install operation from
+`recovery_required` to `failed`, in the same transaction, keeping its error code and writing the audit entry
+`app_platform.never_started_install_closed` with the removal's operation id (`closePlatformNeverStartedInstall`). The
+transition is a new, explicit model method, `Operation.SettleNeverStarted`, limited to the install action and to
+`recovery_required`; `Settle` is unchanged and still limited to the restore actions, and `platformNoPriorInstall` is
+unchanged. It runs only on the removal's own reviewed never-started evidence, verified at the top of the same
+transaction, and refuses while any effect of the install is unsettled. Because it shares the transaction, a failure of the
+closing rolls the removal back and the application stays occupied (fail closed); the same receipt converges on retry. After the removal the
+application can be installed again, with a fresh namespace.
+
+**Not changed.** The uninstall of a started installation (its install operation stays `complete`) and its plan check and
+phase gate; the standalone delete-data review, which still requires a retired activation and a completed install (the
+uninstall is the way out for a refused install).
+
+**Recovery bundle and trust quarantine.** Neither treats this installation specially. The quarantine considers only
+installations in phase `ready` with an active activation and asks for a disable, which the variant refuses. The bundle's
+`unrecovered` release pin excludes installations whose desired state is removed, which admission sets, and the retired
+candidate activation is not pinned.
+
+**Tests.** Portal (`app_platform_refused_install_removal_test.go`): an install refused at capacity is uninstalled through
+the review and consumption API and ends removed, with no stop or remove-code effect and the delete-data command bound to
+the install's preparation receipt; the scheduler loop passes the two stages; an unsettled start (prepared, unknown,
+applied) is refused and a reverted one admitted, including through the real orphan settlement; each eligibility condition
+fails closed on its own; a started install keeps the ordinary path and review; a replayed consumption admits one operation;
+a settlement failure rolls everything back and the retry settles; the failed install is closed with the removal, atomically, and the application can be installed again with a fresh namespace; an ordinary removal leaves its install complete; a crash after the prepared effect fails closed to
+recovery without a second runner command. Runner (`delete_data_never_started_test.go`): a namespace with no container is
+accepted only with reverted starts, the volume binding holds for each field, a container keeps the container binding, and a
+signed command is admitted and settled so that the namespace is absent and its reservation released, after which a
+namespace-sized plan fits a budget of exactly one namespace.
+
+**Not proven here.** PostgreSQL: the local database refuses the migration with a permission error, so the PostgreSQL
+variants are left to CI. The native lifecycle (`app_platform_data_native_linux_test.go`) does not include a refused-then-removed
+install: its runner has no capacity budget, so a refusal needs a configured budget and a second installation through the whole
+harness, which is not a cheap addition and would run only in CI.
+
 ## PR 4b implementation notes
 
 PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending and SEC-09
@@ -680,28 +773,17 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     `running_backends`. Leaving 16 MiB and 25 millis free lets a minimum ninth backend fit memory and CPU and be refused
     by the count itself; the memory-over and CPU-over probes then ask for one unit more than what remains. The eight
     together still fit, a ninth does not, and the result is checked to lie inside the descriptor ranges unclamped.
-53. **A refused install leaves its data namespace reserved, and no ordinary flow frees it (production gap, found by the
-    smoke).** Eight managed namespaces reserve 6 GiB of the 8 GiB disk budget (768 MiB each). A backend refused for memory,
-    CPU or the count has already prepared its namespace (the data stage precedes the start), the install ends
-    `review_required`, and then both the ordinary managed uninstall and the standalone delete-data review are refused with
-    `application review plan changed`: the installation can only be left counted, and its reservation is never released.
-    The third probe in the smoke was refused with `disk` for exactly this reason. The soak therefore marks each probe
-    installation removed (so the 50-installation count stays exact; the cap's own tests do the same) and raises the runner's
-    disk budget to 10 GiB for the run, which the evidence reports. The attempts to retire through the product are logged
-    on every run. Whether a refused install should offer an uninstall that destroys its namespace is a product decision
-    for the owner; nothing was changed here.
-    **Root cause (traced, not yet fixed).** The first refusal is `platformLoadRemovalProjection`
-    (`app_platform_removal_review.go:183-187`), which admits only the phases `pending`, `setup_required`, `ready` and
-    `disabled`; a refused install is `review_required` (`finalizePlatformInstallForReview`), so the review is refused as a
-    changed plan. Admitting that phase there is not enough, because the whole removal pipeline assumes an install that
-    completed and started: the worker claim wants `i.phase='pending'` and a managed runner effect for `stop` and
-    `remove_code` (`app_platform_managed_removal.go:665`, `:156-186`), the removal intent and the delete-data intent both
-    read a *completed* install operation with no error code and an active activation (`app_platform_managed_removal.go:186`,
-    `app_platform_data_delete.go:129-176`), and the standalone delete-data review does the same
-    (`app_platform_delete_data_review.go:127-140`). A refused install has none of these, only an applied `prepare_data`
-    effect and its namespace. A complete fix is a variant of the uninstall for a never-started installation that skips
-    `stop` and `remove_code`, and sources the namespace deletion from the failed install's `prepare_data` effect. It touches
-    the removal state machine and the delete-data command binding, so it is held for the owner's review of its design.
+53. **Refused probe installations are retired through the real managed uninstall, on the declared envelope.** Eight managed
+    namespaces reserve 6 GiB of the 8 GiB disk budget (768 MiB each), and a backend refused for memory, CPU or the count has
+    already prepared its namespace (the data stage precedes the start). The first smokes found that nothing could remove such an
+    install (the review plan was refused, so the third probe was refused with `disk`), and the soak worked around it by marking
+    the rows removed and raising the disk budget to 10 GiB. The never-started removal (resolution "refused install removal"
+    above, #434) closes that gap, and both workarounds are gone: each probe's installation is retired by the ordinary
+    managed uninstall (`retire`), which must complete and leave the installation `removed`; a refusal fails the soak and is
+    recorded as `retired: "refused"` with the refusal in the probe's detail. The evidence records `retired:
+    "managed_uninstall"` per probe and the verdict checks it. The runner runs on its declared 8 GiB disk budget, so a `disk`
+    refusal of a later probe would show a namespace that was not released. Static installations use the frontend profile
+    and hold no runner namespace, as in production.
 54. **Task quotas.** The per-installation quota is reached on seven managed installations and the global quota on the
     eighth, after a backlog of waiting tasks attributed to the static installations (inserted with the columns the
     admission itself writes, since a static installation has no backend and cannot schedule tasks) brings the Portal to

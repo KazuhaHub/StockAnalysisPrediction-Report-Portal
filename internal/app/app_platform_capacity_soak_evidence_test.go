@@ -90,8 +90,8 @@ type soakProbeResult struct {
 	Passed   bool   `json:"passed"`
 	Native   bool   `json:"native"`
 	Detail   string `json:"detail,omitempty"`
-	// Retired says how a refused probe installation was taken out of the count: "managed_uninstall" when the ordinary
-	// uninstall accepted it, "workaround" when it was refused and the soak marked the row removed instead.
+	// Retired says how a refused probe installation was taken out of the count: "managed_uninstall" through the
+	// ordinary uninstall, or "refused" when that was refused (the soak then fails; there is no other path).
 	Retired string `json:"retired,omitempty"`
 }
 

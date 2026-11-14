@@ -47,6 +47,10 @@ type platformRemovalProjection struct {
 	// retired by a restore. Its code and data lived on a host that is gone, so the removal changes
 	// Portal rows only and calls no runner.
 	PortalSide bool `json:"portal_side,omitempty"`
+	// NeverStarted marks the uninstall of a managed installation whose install the runner refused before
+	// anything started (see app_platform_removal_never_started.go). It names the failed install's applied
+	// prepare_data effect, which the namespace deletion is bound to. Absent from every ordinary removal.
+	NeverStarted *platformRemovalNeverStarted `json:"never_started,omitempty"`
 }
 
 type platformRemovalData struct {
@@ -150,6 +154,22 @@ func platformRemovalGrantsDigestAt(e migExec, installation string, rebase int64)
 }
 
 func platformLoadRemovalProjection(e migExec, id string, action appplatform.Action, actor platformActorFacts, control platformActorControl) (platformRemovalProjection, error) {
+	var attempted bool
+	p, err := platformLoadRemovalProjectionAttempt(e, id, action, actor, control, &attempted)
+	if err != nil && attempted {
+		// An installation in review_required or recovery_required was refused before this variant existed with
+		// errAppPlatformPlanChanged, whatever else was true of it. Every refusal keeps that error type here, so a
+		// started install is told nothing new by the evidence that now runs first. Infrastructure errors pass.
+		if errors.Is(err, errAppPlatformOperationConflict) || errors.Is(err, sql.ErrNoRows) {
+			return platformRemovalProjection{}, errAppPlatformPlanChanged
+		}
+	}
+	return p, err
+}
+
+// platformLoadRemovalProjectionAttempt reports through attempted that the installation is in a phase only the
+// never-started variant admits, so the caller can keep the refusal type of the other installations in that phase.
+func platformLoadRemovalProjectionAttempt(e migExec, id string, action appplatform.Action, actor platformActorFacts, control platformActorControl, attempted *bool) (platformRemovalProjection, error) {
 	var p platformRemovalProjection
 	if !platformValidUUID(id) || (action != appplatform.ActionDisable && action != appplatform.ActionUninstall) {
 		return p, errAppPlatformPlanChanged
@@ -180,8 +200,17 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 	if currentRuntime != runtime || p.ControllerEpoch != control.epoch || p.DesiredState == "removed" || p.Generation == math.MaxInt64 || p.InstallationRevision == math.MaxInt64 || fence == math.MaxInt64 {
 		return p, errAppPlatformPlanChanged
 	}
+	// A managed installation that ended its install in review_required or recovery_required is admitted only for
+	// the uninstall of a never-started installation, and only on the evidence loaded below.
+	neverStarted := false
 	switch p.Phase {
 	case "pending", "setup_required", "ready", "disabled":
+	case "review_required", "recovery_required":
+		if action != appplatform.ActionUninstall || !runtime.Valid {
+			return p, errAppPlatformPlanChanged
+		}
+		neverStarted = true
+		*attempted = true
 	default:
 		return p, errAppPlatformPlanChanged
 	}
@@ -214,6 +243,16 @@ func platformLoadRemovalProjection(e migExec, id string, action appplatform.Acti
 			return p, errAppPlatformPlanChanged
 		}
 		p.Data = &data
+	}
+	if neverStarted {
+		if p.DesiredState != "enabled" || p.Generation != 1 || p.Data == nil || p.SourceReleaseSHA256 != "" {
+			return p, errAppPlatformPlanChanged
+		}
+		evidence, err := platformLoadNeverStartedEvidence(e, id, p.ControllerEpoch, runtime.String, p.Data.ID, p.Data.Format, "")
+		if err != nil {
+			return p, err
+		}
+		p.NeverStarted = &evidence
 	}
 	p.GrantsSHA256, err = platformRemovalGrantsDigest(e, id)
 	if err != nil {
@@ -446,6 +485,12 @@ func (s *Server) consumePlatformRemovalReviewContext(ctx context.Context, sessio
 		}
 		if _, err := e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=? WHERE installation_id=? AND state='active'`, control.nowMS, p.InstallationID); err != nil {
 			return err
+		}
+		if p.NeverStarted != nil {
+			// The candidate activation of an install that never ran is retired with the installation.
+			if _, err := e.exec(`UPDATE app_platform_activations SET state='retired',updated_ms=? WHERE installation_id=? AND state='candidate'`, control.nowMS, p.InstallationID); err != nil {
+				return err
+			}
 		}
 		if action == appplatform.ActionUninstall {
 			if err := cleanupPlatformInstallationObjects(e, p.InstallationID, control.nowMS); err != nil {

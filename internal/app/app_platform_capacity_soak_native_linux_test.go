@@ -154,14 +154,8 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	}
 
 	// The development image profile: the soak backend is a local reference image from the job's own registry.
-	// The disk budget is raised from its 8 GiB default to 10 GiB: a refused backend probe leaves the data namespace
-	// it had already prepared reserved, and no ordinary flow frees it (resolution 53), so three probes would
-	// otherwise exhaust the budget that eight backends fill to 6 GiB. Disk is not a probed dimension of the soak.
-	disk := int64(10 << 30)
-	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
-		c.AllowLocalReferenceImages = true
-		c.Capacity = &service.CapacityConfig{DiskBytes: &disk}
-	})
+	// The runner keeps its declared default budgets, the 8 GiB disk budget included.
+	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) { c.AllowLocalReferenceImages = true })
 	defer func() {
 		runner.stop(t)
 		removePlatformServiceFixtureRoot(t, runner.root)
@@ -616,50 +610,30 @@ func (c *soakChild) installStatic(app string) string {
 }
 
 // retire takes a refused probe installation out of the count and its data namespace out of the runner's disk
-// reservation. The ordinary managed uninstall is tried first; a failed install has no review for it (the review
-// plan is refused), so the installation row is then marked removed, as the cap's own tests do, and the namespace
-// is destroyed through the standalone delete-data flow. It reports each step.
-func (c *soakChild) retire(installation string) string {
+// reservation through the ordinary managed uninstall, which removes a capacity-refused install that never started.
+// There is no other path: a refusal of the uninstall is returned, and the soak fails on it.
+func (c *soakChild) retire(installation string) error {
 	ctx := c.ctx
-	var steps []string
 	removal, err := c.s.createPlatformRemovalReview(c.session, installation, appplatform.ActionUninstall)
-	if err == nil {
-		var commit platformRemovalCommit
-		if commit, err = c.s.consumePlatformRemovalReview(c.session, removal.ID, removal.SHA256, c.id()); err == nil {
-			var claim platformInstallSelection
-			if claim, err = c.s.claimNextPlatformManagedUninstall(ctx, c.id()); err == nil && claim.lease.id == commit.OperationID {
-				var run platformInstallRun
-				if run, err = c.s.runPlatformManagedUninstall(ctx, claim.lease, c.endpoint); err == nil && run.lease.snapshot.Stage == appplatform.StageComplete {
-					return "uninstall"
-				}
-			}
-		}
+	if err != nil {
+		return fmt.Errorf("uninstall review refused: %w", err)
 	}
-	steps = append(steps, fmt.Sprintf("uninstall refused: %v", err))
-	namespace := ""
-	var found sql.NullString
-	if err := c.s.st.queryRow(`SELECT id FROM app_platform_data_namespaces WHERE origin_installation_id=?`, installation).Scan(&found); err == nil && found.Valid {
-		namespace = found.String
+	commit, err := c.s.consumePlatformRemovalReview(c.session, removal.ID, removal.SHA256, c.id())
+	if err != nil {
+		return fmt.Errorf("uninstall admission refused: %w", err)
 	}
-	mustExec(c.t, c.s.st, `UPDATE app_platform_installations SET phase='removed',desired_state='removed' WHERE id=?`, installation)
-	steps = append(steps, "installation marked removed")
-	if namespace == "" {
-		return strings.Join(append(steps, "no data namespace"), "; ")
+	claim, err := c.s.claimNextPlatformManagedUninstall(ctx, c.id())
+	if err != nil || claim.lease.id != commit.OperationID {
+		return fmt.Errorf("uninstall claim refused: %v", err)
 	}
-	review, err := c.s.createPlatformDeleteDataReview(ctx, c.session, installation, namespace)
-	if err == nil {
-		var commit platformRemovalCommit
-		if commit, err = c.s.consumePlatformDeleteDataReview(c.session, review.ID, review.SHA256, c.id()); err == nil {
-			var claim platformInstallSelection
-			if claim, err = c.s.claimNextPlatformDeleteData(ctx, c.id()); err == nil && claim.lease.id == commit.OperationID {
-				var run platformInstallRun
-				if run, err = c.s.runPlatformDeleteData(ctx, claim.lease, c.endpoint); err == nil && run.lease.snapshot.Stage == appplatform.StageComplete {
-					return strings.Join(append(steps, "namespace deleted by delete-data"), "; ")
-				}
-			}
-		}
+	run, err := c.s.runPlatformManagedUninstall(ctx, claim.lease, c.endpoint)
+	if err != nil || run.lease.snapshot.Stage != appplatform.StageComplete {
+		return fmt.Errorf("uninstall did not complete: %v", err)
 	}
-	return strings.Join(append(steps, fmt.Sprintf("delete-data refused: %v", err)), "; ")
+	if phase := scalar[string](c.t, c.s.st, `SELECT phase FROM app_platform_installations WHERE id=?`, installation); phase != "removed" {
+		return fmt.Errorf("the installation is %q after its uninstall", phase)
+	}
+	return nil
 }
 
 // --- the excess probes ---
@@ -670,15 +644,17 @@ func (c *soakChild) probeBackends() {
 	for _, p := range soakBackendProbes(c.sizing) {
 		app := "notes-soak-p-" + strings.ReplaceAll(p.Name, "_", "-")
 		installation, code := c.installManagedWithCode(app, p.MemoryMiB, p.CPUMillis)
-		cleanup := c.retire(installation)
-		retiredBy := "workaround"
-		if cleanup == "uninstall" {
-			retiredBy = "managed_uninstall"
+		retired, retiredBy := c.retire(installation), "managed_uninstall"
+		detail := fmt.Sprintf("requested %d MiB and %d millis against %d MiB and %d millis remaining", p.MemoryMiB, p.CPUMillis, c.sizing.RemainingMemoryMiB, c.sizing.RemainingCPUMillis)
+		if retired != nil {
+			// A refused uninstall leaves the namespace reserved: the soak records the refusal and fails.
+			retiredBy, detail = "refused", detail+"; retirement: "+retired.Error()
 		}
-		c.t.Logf("SOAK_PROBE_RETIRED %s: %s (code %s)", p.Name, cleanup, code)
-		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Native: true,
-			Retired: retiredBy,
-			Detail:  fmt.Sprintf("requested %d MiB and %d millis against %d MiB and %d millis remaining; residue: %s", p.MemoryMiB, p.CPUMillis, c.sizing.RemainingMemoryMiB, c.sizing.RemainingCPUMillis, cleanup)})
+		c.t.Logf("SOAK_PROBE_RETIRED %s: %s (code %s)", p.Name, retiredBy, code)
+		c.rec.AddProbe(soakProbeResult{Name: p.Name, Expected: "capacity_exhausted_" + p.Dimension, Observed: code, Native: true, Retired: retiredBy, Detail: detail})
+		if retired != nil {
+			c.t.Fatalf("the refused install %s could not be uninstalled: %v", p.Name, retired)
+		}
 	}
 }
 

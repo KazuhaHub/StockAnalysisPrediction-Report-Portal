@@ -332,6 +332,7 @@ func soakQueuedItems(s *Server, limit int) []queue.Item {
 	loc := s.panelLocation()
 	w := s.prioWeights()
 	usage := s.userUsage(now)
+	ageHours := s.prioAgeHours()
 	jobs := s.st.QueuedJobs()
 	if len(jobs) > limit {
 		jobs = jobs[:limit]
@@ -341,7 +342,7 @@ func soakQueuedItems(s *Server, limit int) []queue.Item {
 		if !runAtDue(j.RunAt, now) || invertBlocksNow(j.RunPreset, now, loc) {
 			continue
 		}
-		f := s.jobFactors(j, now, usage)
+		f := jobFactorsWith(j, now, usage, ageHours)
 		items = append(items, queue.Item{ID: j.ID, Score: w.Score(f), Urgent: f.Urgent})
 	}
 	return items
