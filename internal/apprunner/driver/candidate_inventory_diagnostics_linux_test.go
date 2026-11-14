@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -31,7 +32,7 @@ func TestInventoryRejectionsNameTheEntryAndTheField(t *testing.T) {
 		"mounts not array": {entry(`{}`), "Mounts is not an array"},
 		"unknown type":     {entry(`[{"Type":"image","Source":"/x"}]`), `mount 0: unsupported type "image"`},
 		"relative bind":    {entry(`[{"Type":"bind","Source":"rel"}]`), `mount 0: type "bind" source "rel"`},
-		"empty volume":     {entry(`[{"Type":"tmpfs"},{"Type":"volume","Source":""}]`), `mount 1: type "volume" source ""`},
+		"relative volume":  {entry(`[{"Type":"tmpfs"},{"Type":"volume","Source":"rel"}]`), `mount 1: type "volume" source "rel"`},
 		"absent source":    {entry(`[{"Type":"bind"}]`), `source "<absent>"`},
 		"tmpfs source":     {entry(`[{"Type":"tmpfs","Source":"/x"}]`), `tmpfs with source "/x"`},
 		"duplicate key":    {`[{"Id":"` + id + `","Id":"` + id + `","Mounts":[]}]`, "projection rejected"},
@@ -57,5 +58,49 @@ func TestInventoryErrorBoundsTheSource(t *testing.T) {
 	_, err := readCandidateIPCInventory(context.Background(), inventoryClient(string(raw)))
 	if !errors.Is(err, ErrInvalidResponse) || len(err.Error()) > 400 {
 		t.Fatalf("unbounded or wrong error: %v", err)
+	}
+}
+
+// The payload is what Docker 28.0.4 (API 1.48) returned on a GitHub-hosted
+// runner for a postgres:16-alpine service container: the list endpoint reports
+// an anonymous volume with an empty Source, while the inspect endpoint reports
+// its path under the Docker root.
+func TestInventoryAdmitsDockerListedAnonymousVolume(t *testing.T) {
+	raw, err := os.ReadFile("testdata/docker28-postgres-service-containers.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := readCandidateIPCInventory(context.Background(), inventoryClient(string(raw)))
+	if err != nil {
+		t.Fatalf("a foreign container with an anonymous volume refused the inventory: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries %d", len(entries))
+	}
+	data := t.TempDir()
+	if err := requireNoContainerMountReferences(context.Background(), inventoryClient(string(raw)), data); err != nil {
+		t.Fatalf("an unrelated container refused the writer: %v", err)
+	}
+}
+
+func TestInventoryEmptyVolumeSourceDoesNotWeakenBindOrOverlap(t *testing.T) {
+	id := strings.Repeat("e", 64)
+	for name, mounts := range map[string]string{
+		"bind without source":       `[{"Type":"bind","Source":""}]`,
+		"bind with absent source":   `[{"Type":"bind"}]`,
+		"unknown type empty source": `[{"Type":"image","Source":""}]`,
+		"relative volume source":    `[{"Type":"volume","Source":"rel"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := readCandidateIPCInventory(context.Background(), inventoryClient(`[{"Id":"`+id+`","Mounts":`+mounts+`}]`))
+			if !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("want ErrInvalidResponse, got %v", err)
+			}
+		})
+	}
+	data := t.TempDir()
+	body := `[{"Id":"` + id + `","Mounts":[{"Type":"volume","Source":""},{"Type":"bind","Source":"` + data + `"}]}]`
+	if err := requireNoContainerMountReferences(context.Background(), inventoryClient(body), data); !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("an overlapping mount beside an anonymous volume was admitted: %v", err)
 	}
 }

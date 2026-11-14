@@ -320,7 +320,16 @@ func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 			return nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
 		}
 		switch m.Type {
-		case "bind", "volume":
+		case "volume":
+			// The list endpoint reports a daemon-managed volume (an anonymous
+			// volume from an image VOLUME line) with an empty Source: its host
+			// path is not part of that projection, so it names no path that
+			// could overlap the data root. A non-empty Source is still checked.
+			if m.Source != nil && *m.Source == "" {
+				continue
+			}
+			fallthrough
+		case "bind":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {
 				return nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
 			}
