@@ -122,6 +122,16 @@ func parseCandidate(raw []byte) (CandidateCommand, error) {
 // trusted controller snapshot. It does not admit a journal effect, prove native
 // paths/quotas, create/start a container or grant active data-write authority.
 func VerifyCandidate(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCandidateCommand, error) {
+	return cachedVerify("candidate", raw, signature, authority, nowMS, func() (VerifiedCandidateCommand, int64, error) {
+		v, err := verifyCandidateUncached(raw, signature, authority, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.command.ExpiresMS), nil
+	})
+}
+
+func verifyCandidateUncached(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCandidateCommand, error) {
 	fail := func() (VerifiedCandidateCommand, error) { return VerifiedCandidateCommand{}, ErrInvalidCommand }
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 || nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return fail()

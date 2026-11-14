@@ -19,9 +19,16 @@ import (
 // registration evidence used by the live transaction. The fresh envelopes are
 // access-capability proofs only; they cannot mutate the completed operation.
 func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformWritableRegistrationIntent, error) {
-	var zero platformWritableRegistrationIntent
+	finish, err := s.loadPlatformWritableUpdateBackendHistoryPhased(e, b, runtime, seed, dek, now)
+	if err != nil {
+		return platformWritableRegistrationIntent{}, err
+	}
+	return finish()
+}
+
+func (s *Server) loadPlatformWritableUpdateBackendHistoryPhased(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
 	if b.generation < 2 || len(seed) != ed25519.SeedSize {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history generation: %w", errAppPlatformLaunchUnavailable)
 	}
 	var operationID, planRaw, planSHA, historyAction string
@@ -45,14 +52,14 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 			&completed, &created, &updated, &fence); err != nil ||
 		created < 0 || completed < created || updated < completed ||
 		updated > now || fence < 1 || fence > b.fence {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history operation err=%v created=%d completed=%d updated=%d fence=%d/%d: %w",
 			err, created, completed, updated, fence, b.fence,
 			errAppPlatformLaunchUnavailable)
 	}
 	if !platformValidUUID(operationID) ||
 		platformDigest([]byte(planRaw)) != planSHA {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history operation tuple: %w", errAppPlatformLaunchUnavailable)
 	}
 	var plan platformManagedUpdatePlan
@@ -73,7 +80,7 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		plan.SourceGeneration+1 != plan.TargetGeneration ||
 		plan.TargetRuntime == nil ||
 		plan.TargetRuntime.RuntimeID != runtime.id {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history plan tuple: %w", errAppPlatformLaunchUnavailable)
 	}
 	revision := uint64(11)
@@ -95,7 +102,7 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 	checkpoint, _, err := loadPlatformUpdateStartCheckpoint(
 		e, expected, plan)
 	if err != nil {
-		return zero, fmt.Errorf("update history checkpoint: %w", err)
+		return nil, fmt.Errorf("update history checkpoint: %w", err)
 	}
 	var startEffect, effectKind, startDigest, startState, runningRaw string
 	expectedStartKind := "update-start"
@@ -109,7 +116,7 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		&startState, &runningRaw); err != nil ||
 		!platformValidUUID(startEffect) || effectKind != expectedStartKind ||
 		startState != "applied" || !platformValidSHA(startDigest) {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history start effect: %w", errAppPlatformLaunchUnavailable)
 	}
 	running, err := journal.ParseUpdateStartRunningReceipt([]byte(runningRaw))
@@ -118,43 +125,43 @@ func (s *Server) loadPlatformWritableUpdateBackendHistory(e migExec, b platformB
 		running.TargetReleaseSHA256 != plan.TargetReleaseSHA256 ||
 		mustPlatformCheckpointInt(running.TargetGeneration) != b.generation ||
 		running.Claim.Preflight == nil {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history running receipt: %w", errAppPlatformLaunchUnavailable)
 	}
 	source, err := loadCompletedUpdateHistorySource(
 		e, expected, plan, checkpoint, running, runtime, descriptor, now)
 	if err != nil {
-		return zero, fmt.Errorf("update history source: %w", err)
+		return nil, fmt.Errorf("update history source: %w", err)
 	}
 	verifiedPlan, verifiedDescriptor, err := loadPlatformManagedUpdatePlan(
 		e, expected, source)
 	if err != nil {
-		return zero, fmt.Errorf("update history verified plan: %w", err)
+		return nil, fmt.Errorf("update history verified plan: %w", err)
 	}
 	if verifiedPlan.TargetReleaseSHA256 != plan.TargetReleaseSHA256 ||
 		!bytes.Equal(verifiedDescriptor, descriptor) {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history plan drift: %w", errAppPlatformLaunchUnavailable)
 	}
 	plan, descriptor = verifiedPlan, verifiedDescriptor
 	start, err := loadPlatformCompletedUpdateStartActivation(
 		e, expected, runtime, source, checkpoint, plan)
 	if err != nil {
-		return zero, fmt.Errorf("update history activation: %w", err)
+		return nil, fmt.Errorf("update history activation: %w", err)
 	}
-	return platformWritableHistoryFromStart(
+	return platformWritableHistoryFromStartPhased(
 		e, b, expected, runtime, seed, dek, now, start, descriptor)
 }
 
-// platformWritableHistoryFromStart turns a completed operation's proven start evidence into the
+// platformWritableHistoryFromStartPhased turns a completed operation's proven start evidence into the
 // access intent: it binds the evidence to the active activation and signs fresh envelopes that serve
-// as access proofs only.
-func platformWritableHistoryFromStart(e migExec, b platformBackendHistoryBinding, expected platformOperationLease, runtime platformRuntimeRegistration, seed, dek []byte, now int64, start platformUpdateStartIntent, descriptor []byte) (platformWritableRegistrationIntent, error) {
-	var zero platformWritableRegistrationIntent
-	var err error
+// as access proofs only. It reads everything the registration needs in the caller's
+// transaction and returns the rest (signing the start envelope, deriving and signing the
+// registration, assembling the intent) as a finish step that reads no database.
+func platformWritableHistoryFromStartPhased(e migExec, b platformBackendHistoryBinding, expected platformOperationLease, runtime platformRuntimeRegistration, seed, dek []byte, now int64, start platformUpdateStartIntent, descriptor []byte) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
 	if start.running == nil || start.readiness == nil ||
 		start.resourceID != b.activation || start.running.NativeID == "" {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history activation tuple: %w", errAppPlatformLaunchUnavailable)
 	}
 	start.targetDescriptor = bytes.Clone(descriptor)
@@ -164,17 +171,33 @@ func platformWritableHistoryFromStart(e migExec, b platformBackendHistoryBinding
 		start.plan.targetDataFormat() != b.format ||
 		start.activationObserved != b.observed ||
 		string(readiness) != b.readiness {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history activation evidence: %w", errAppPlatformLaunchUnavailable)
 	}
 	issued := time.Now().UnixMilli()
 	if issued < now-1000 || issued > now+1000 ||
 		issued > math.MaxInt64-25000 {
-		return zero, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"update history start clock: %w", errAppPlatformLaunchUnavailable)
 	}
 	start.command.IssuedMS = strconv.FormatInt(issued, 10)
 	start.command.ExpiresMS = strconv.FormatInt(issued+25000, 10)
+	if err := checkPlatformUpdateStartRegistrationSource(expected, start); err != nil {
+		return nil, fmt.Errorf("update history registration: %w", err)
+	}
+	rows, err := readPlatformUpdateStartRegistrationRows(e, expected)
+	if err != nil {
+		return nil, fmt.Errorf("update history registration: %w", err)
+	}
+	return func() (platformWritableRegistrationIntent, error) {
+		platformPureStep("history-build")
+		return finishPlatformWritableUpdateHistory(b, expected, runtime, seed, dek, now, issued, start, descriptor, rows)
+	}, nil
+}
+
+func finishPlatformWritableUpdateHistory(b platformBackendHistoryBinding, expected platformOperationLease, runtime platformRuntimeRegistration, seed, dek []byte, now, issued int64, start platformUpdateStartIntent, descriptor []byte, rows platformUpdateStartRegistrationRows) (platformWritableRegistrationIntent, error) {
+	var zero platformWritableRegistrationIntent
+	var err error
 	key := ed25519.NewKeyFromSeed(seed)
 	start.raw, start.signature, err = control.SignUpdateStart(
 		start.command, key, start.authority, issued)
@@ -182,9 +205,13 @@ func platformWritableHistoryFromStart(e migExec, b platformBackendHistoryBinding
 	if err != nil {
 		return zero, fmt.Errorf("update history start sign: %w", err)
 	}
-	registration, _, err := loadPlatformUpdateStartRegistration(
-		e, expected, start, runtime, seed, dek, now, false)
+	built, err := buildPlatformUpdateStartRegistration(rows, expected, start, runtime, dek, now, false)
 	if err != nil {
+		return zero, fmt.Errorf("update history registration: %w", err)
+	}
+	registration, err := completePlatformUpdateStartRegistration(rows, built, expected, start, seed, now)
+	if err != nil {
+		built.registration.Close()
 		return zero, fmt.Errorf("update history registration: %w", err)
 	}
 	if registration.start.running == nil || !registration.applied {

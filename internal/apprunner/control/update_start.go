@@ -217,7 +217,13 @@ func parseUpdateStart(raw []byte) (UpdateStartCommand, error) {
 }
 
 func VerifyUpdateStart(raw, signature []byte, authority Authority, nowMS int64) (VerifiedUpdateStartCommand, error) {
-	return verifyUpdateStart(raw, signature, authority, nowMS, updateStartSignaturePurpose)
+	return cachedVerify("update-start", raw, signature, authority, nowMS, func() (VerifiedUpdateStartCommand, int64, error) {
+		v, err := verifyUpdateStart(raw, signature, authority, nowMS, updateStartSignaturePurpose)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.command.ExpiresMS), nil
+	})
 }
 
 // VerifyUpdateStartRead checks a read-receipt command. It is signed under its own purpose and valid for
