@@ -736,9 +736,10 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
 ### What was added
 
 - `capacity-soak` job in `.github/workflows/app-project-quota-probe.yml`: `workflow_dispatch` with `duration_minutes`
-  (default 120, `timeout-minutes` 170) and `soak_only`; five minutes on pull requests touching the capacity code or the
-  soak (the path filters gained `internal/app/app_platform_capacity*`, `internal/app/app_platform_installation_capacity*`
-  and the soak's Python test). The existing two jobs are skipped when `soak_only` is set.
+  (default 120, at most 140, `timeout-minutes` 170), `soak_only` and the diagnostic `soak_variant`; five minutes, with a diagnosis, on pull
+  requests touching the capacity code, the code behind the latency fixes or the soak (the path filters gained
+  `internal/app/app_platform_capacity*`, `internal/app/app_platform_installation_capacity*`, the soak's Python test and, in round 1,
+  `internal/apprunner/**` and the relay, store, batch and queue files of resolution 71). The existing two jobs are skipped when `soak_only` is set.
 - `scripts/acceptance/capacity_soak.py` (with `scripts/capacity_soak_test.py`): builds the owned 16 GiB XFS volume with the
   quota probe's ownership checks, prepares the runner's journal with the existing native journal test, runs the Go
   acceptance while sampling the host every thirty seconds, then judges the Go evidence and the samples together.
@@ -804,10 +805,23 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     minimum of answered requests in every window, a typed refusal for the rest (no 5xx, no transport error) and a live flood
     process with a fresh heartbeat throughout (resolution 65). "As many messages as the platform lets a backend send" is not
     exercised as a backend-originated flood; this is a stated gap.
-56. **Image store: unit level.** A descriptor declares at most 4 GiB of layers for one image (`maxBackendImageUncompressedBytes`),
-    so the 10 GiB store is reached only by loading three distinct 4 GiB images into the Docker daemon, which the reference
-    host cannot hold. The first version declared eleven 1 GiB layers in one image and the descriptor parser refused it. The
-    probe is recorded as unit level, citing the PR 4a admission tests.
+56. **Image store: native when the daemon disk holds it, unit level otherwise.** The first version claimed the store needs "three
+    real 4 GiB images". The refusal happens when the third is reserved, so two loaded images (8 GiB declared) are enough, and the
+    probe now runs natively. A descriptor declares at most 4 GiB of layers for one image and at most 1 GiB for one layer (the first
+    version declared eleven 1 GiB layers and the descriptor parser refused it), so each probe image is the soak backend's executable
+    as a first layer and four filler layers of zeros that bring the declared total to the maximum less 1 MiB (4293918720 bytes). A
+    layer of zeros compresses to a few MiB, so what crosses the Portal's offline import and the control socket is small while the
+    daemon holds the real bytes; layers differ by seed so no two images share a blob. The images are imported through the real
+    offline route and installed through the ordinary writable install worker, with a memory declaration one MiB over the runner's
+    whole budget: the runner loads the image (the load precedes the start's admission) and refuses the start for memory, so no
+    container is ever created from a 4 GiB image (the first native attempt started them, and the daemon's container create timed out
+    on one of three smokes). Two images load and reserve 8 GiB; the third is refused `capacity_exhausted_image_store` at its load. The
+    three installs are retired through the managed uninstall and the image reclaim removes both images. The harness measures the free
+    disk of the Docker store before the run (the job also records `df`); the probe runs natively only when it holds 8 GiB plus
+    6 GiB of headroom, and otherwise stays at unit level citing `TestLoadImageReservesTheDeclaredBytesOnce`,
+    `TestLoadImageRefusedRunsNothingAndReplays` and the image store case of `TestAdmissionRefusesEachDimensionByOneUnit`, with the
+    measured free bytes as the recorded reason. The hosted runners had 90 to 94 GB free on `/dev/root` (the daemon store and the
+    loop volume's backing file share it), so the probe ran natively in every smoke of this round.
 57. **Staging cap.** One upload is bounded at 384 MiB (`MaxManagedOfflineEnvelopeBytes`) and at most two management
     requests run at once, so no upload can exceed 2 GiB and two in-flight uploads cannot reach it. The cap guards the sum
     of what is held and in flight. The soak reserves 384 MiB at a time against its own real store until the sixth is
@@ -861,6 +875,96 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     times the namespace filled to ENOSPC). The last window's statuses must show every backend held at least half of its memory
     limit, started at least eight threads, burned CPU, wrote its log and filled its data namespace; a backend that answered
     the readiness probe and did nothing would otherwise pass.
+
+### Resolutions (PR 4b, review round 1)
+
+The numbering continues from 62. Evidence runs of this round are pull request smokes and five-minute diagnostic dispatch runs; none
+is evidence for OPS-08.
+
+63. **The session outlives the run (blocker).** The session and cookie of the soak child expired an hour after it started
+    (`platformActorTestServer`), 55 minutes into a 120 minute load, after which every home and stock request and the flood would
+    answer 401. The child now writes the session with `soakSessionLifetime(minutes, baseline)`, the run plus an hour, to the
+    session table and signs the cookie with that expiry; the evidence records `session_expires_ms` and the verdict requires it to be
+    after the load. `TestSoakSessionOutlivesTheRun` pins the derivation.
+64. **The runner service outlives the run (found by the first smoke of this round).** The shared fixture starts the runner service as a
+    test process with `-test.timeout=10m`. The first smokes ended before ten minutes, but with the three minute baseline the service
+    was killed in the middle of the load, and a 120 minute run would have lost it after ten minutes. The fixture takes
+    `APP_RUNNER_SERVICE_TEST_TIMEOUT` (test code, no production change) and the soak sets `soakRunnerServiceTimeout`: the run, the
+    baseline and half an hour.
+65. **The message flood is checked in every window.** The old check needed `sum(ok) > 0` over the run. Now every one-minute window
+    must show at least 20 answered requests, a typed `429 app_platform_busy` for the rest (the evidence keeps every outcome by status
+    and code per window; a 5xx, an untyped answer or a transport error fails), and a live flood process whose counters file was
+    written within ten seconds (the flood writes a heartbeat once a second; the child records whether the process is alive when each
+    window ends).
+66. **The backends are checked in every window from their own cgroup counters.** The host sampler reads each backend's `cpu.stat`,
+    `memory.current`, `memory.max`, `cpu.max`, `pids.current` and `pids.max` every thirty seconds. In every one-minute window each
+    backend must have used at least 70% of its CPU quota (from the counter's delta over the window's intervals), held `memory.current`
+    at least 85% of its limit, and its own status counters (log bytes and requests served) must advance between windows. Over the run
+    each backend's PIDs must reach 85% of its limit. A backend that missed a status request is judged across the gap, and missing more
+    than max(1, 2%) of the windows fails. The achieved fractions per backend are in the verdict and the step summary.
+67. **Backends at their declared limits, as achieved.** The fixture holds 85% of its memory limit (60% before) and sets a Go soft memory
+    limit at 95% of the cgroup's, so the collector runs before the kernel kills the container; it parks threads up to the PID limit
+    less 8 (24 before). In the smokes of this round (eight backends, 497 MiB, 240 millis, 64 PIDs each): CPU used 0.998 of the quota at
+    the lowest in every window; `memory.current` at least 0.997 of the limit (it includes the page cache of the storage flood, so
+    the held 85% is the floor, not the figure); PIDs at 57 to 60 of 64, 0.89 to 0.94 (41, 0.64, before). The achieved numbers, not
+    "at the limit", are what the dispatch run's evidence and the docs cite.
+68. **Unit level probes are reported as such.** `image_beyond_the_image_store` (when it stays at unit level) and
+    `task_over_application_quota` are recorded `level: "unit"` with `observed: null`, no pass, and the names of their tests; the
+    old records set `Observed` equal to `Expected`. They are excluded from the native "every excess request refused" check and listed
+    separately, and the job runs the cited tests (`go test -json`) before the soak and hands the result to the verdict, which fails if a
+    cited test did not pass.
+69. **The measured Portal is production-shaped and runs the real batch scheduler (SEC-09).** The measured Portal is a file-backed SQLite
+    database opened with `OpenStore`, as the server opens it (the first version used the in-memory template store of the unit
+    suite). It runs the real scheduler: `scheduleTick` (and `scheduleLoop`) with the real Dify provider against a local stub Dify, a
+    standing backlog of 200 queued jobs and three long runs that hold the budget's slots, as a busy queue does. A scheduler admits what
+    it can, so the backlog is kept in place by that: every slot is held, and each probe job (priority 90 against the backlog's 50)
+    is given exactly one extra slot for its own lifetime (the budget setting is raised by one and lowered again before the probe's run
+    ends), so the admission that starts it is the scheduler's own and the backlog is never drained
+    (`TestSoakBatchProbeIsStartedByTheRealSchedulerAndLeavesTheBacklogQueued`, which fails if the budget is not lowered). A job is
+    enqueued every three seconds; its enqueue-to-start latency is the time from before `CreateBatchJob` to the request reaching the stub,
+    pooled and judged with the same floor rule as the pages (`batch_start`), idle baseline included. The task worker and the event
+    delivery coordinator are not started: the soak's tasks are admitted with a run time an hour out, so none is due, and the event
+    subscription is fenced and its source events kept; running them under the load is not done and stays a stated gap, as are
+    backend-originated requests (the fixture has no outbound channel) and PostgreSQL.
+70. **Probe descriptions say what they drive.** The staging probe is a store-level probe (384 MiB reservations against the real staging store,
+    the refusal mapped by the real error handler); driving the upload route would write gigabytes of unpinned packages, since the route
+    holds at most 768 MiB at once. The event probe floods 64 source events at a subscription that allows one delivery in flight and asserts the
+    fence (`review_required`, reason `inflight_limit` in the audit log), every source event kept and one delivery task. The task probes call
+    `admitPlatformTask` in the Portal process, the function the backend task route calls after it verifies the service identity; no backend sends
+    them. The layer probe is the Portal's offline import route; the runner's refusal of the same bytes is covered by the blob channel unit tests.
+71. **Sampling and host checks.** A window's 100 samples are spread evenly across its minute (one every 600 ms) instead of a burst; the
+    host samples must number at least 90% of those expected and failed samples are counted from the error rows; host free memory must stay
+    above 10% (the container caps sit below the budgets, so the two budget checks alone cannot fail); the dispatch configuration's baseline
+    (three minutes) is the smoke's too; `duration_minutes` is capped at 140 and validated in the job; the pull request path filters gained the
+    code behind the latency fixes (`internal/apprunner/**`, `app_platform_backend_http*`, `app_platform_managed_access*`,
+    `app_platform_writable_request*`, `store.go`, `store_stmtcache*`, `batch_run.go`, `internal/queue/**`) and lost `go.mod` and `go.sum`.
+72. **Diagnostic variants.** The dispatch run takes a `soak_variant` input (`memory-db`, `no-batch-probes`) that removes one part of the scenario
+    to tell their shares apart. A variant is recorded in the evidence and never counts as OPS-08 evidence.
+
+### Findings of the revised harness: the latency bound on a production-shaped Portal (not evidence)
+
+Everything in the harness passes in the smokes of this round except two latency series, and that is a finding about the Portal, not the
+harness. Runs, all five minutes, none is evidence:
+
+| Run | Portal | home idle / pooled loaded / bound (us) | report | dispatch | batch start |
+| --- | --- | --- | --- | --- | --- |
+| smoke 43570051027 (`edfcb92`) | file-backed, probes | 678 / 3853 / 5678 pass | 1795 / 8102 / 6795 **fail** | 614 / 3829 / 5614 pass | 5532 / 16334 / 10532 **fail** |
+| smoke 43568339184 (`3e3d591`) | file-backed, probes | passes | 3523 / 50611 / 8523 **fail** | passes | 7852 / 112261 / 12852 **fail** |
+| dispatch 43570060321 (`edfcb92`, `no-batch-probes`) | file-backed, no probes | 674 / 4955 / 5674 pass | 1863 / 12681 / 6863 **fail** | 602 / 4901 / 5602 pass | not run |
+| dispatch 43568354287 (`3e3d591`, `memory-db`) | in-memory, probes | 804 / 6343 / 5804 **fail** | 1040 / 4520 / 6040 pass | 863 / 4224 / 5863 pass | 4174 / 16911 / 9174 **fail** |
+
+The runs vary a great deal (the report page's pooled p95 ranged from 8 to 51 ms), but three things are stable. (1) On the file-backed
+database the report page misses its bound with and without the batch probes, by 1.3 ms in the best run; the same flood on the in-memory
+store passes it, which is why the first smokes, which used the in-memory store, passed with a large margin. (2) The real scheduler's enqueue-to-start
+p95 is 5 to 8 ms idle and 16 to 112 ms under the flood; it misses the floor rule on both stores, so the executor stays available (a job
+starts within a fifth of a second at the worst) but not within the bound. (3) The flood is the cause, not the soak's own work (the variant without probes shows it): in the diagnosis of smoke 43568339184 the block
+profile of the loaded minute attributes 31.7 s of goroutine blocking to `database/sql.(*DB).conn` (the single SQLite connection), 19.5 s of it
+to `currentActiveUser`. Every flood attempt, the 429 refusals included, pays two session reads (`requireUserJSON`'s `currentActiveUser` and
+`platformHTTPReader`) before the relay's admission cap is applied in `apiPlatformBackend`, at 120 to 230 attempts a second; the CPU profile puts
+56% of the loaded minute's CPU in the relay, with `_sqlite3RunParser` (statement preparation in the relay's read transactions, which the statement
+cache does not cover) at 18%. Moving the admission cap ahead of the session check, or
+the relay's read statements onto the cache, are production changes: this PR makes none. The decision is the owner's, and the 120 minute run
+will fail these two checks on the same code. SEC-09 therefore stays partial even after a run.
 
 ### Diagnosis of the home page latency under load (smoke run 43541609397)
 
@@ -972,16 +1076,17 @@ reduction is available there, but nothing about the gate needs it.
 
 ### Evidence files
 
-`capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity, host facts, the Go child's evidence with every
-probe and window, every host sample, the runner log series and the verdict with each check), `samples.jsonl`,
-`child-evidence.json`, `runner-log.jsonl`, `portal-parent.log`, `portal-child.log` and `runner.log`, uploaded as the
-`capacity-soak-evidence` artifact (90 days for a dispatch run).
+`capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity including the branch, the commit and the event, host
+facts including the Docker store's free disk, the Go child's evidence with every probe, window and flood class, every host sample with each
+backend's cgroup counters, the unit test results, the runner log series and the verdict with each check and the achieved fractions),
+`samples.jsonl`, `child-evidence.json`, `unit-tests.json`, `disk-before.txt`, `runner-log.jsonl`, `portal-parent.log`, `portal-child.log` and
+`runner.log`, uploaded as the `capacity-soak-evidence` artifact (90 days for a dispatch run).
 
 ### Not proven until the 120-minute run
 
-- Nothing in this change ran against Docker: the native scenario, the soak backend inside a container, the sampler and the
-  loop-volume setup run only in CI, and no run of them is cited here.
-- That the latency ratios hold for two hours on shared hardware, that the eight backends stay inside the budgets and none
-  is OOM-killed or restarted, and the image store probe natively (resolution 56).
-- The per-application task quota natively, a backend-originated message flood, the runner's own refusal of an over-declared
-  layer over the control socket, and PostgreSQL (the soak drives a SQLite Portal).
+- That the latency bound holds for two hours: on the production-shaped Portal it does not hold in the smokes (see the findings above).
+- That the eight backends stay inside the budgets and none is OOM-killed or restarted for two hours; the five-minute smokes held every
+  backend at the fractions of resolution 67 with no restart.
+- The task worker and the event delivery coordinator under the load, a backend-originated message or task flood, the per-application
+  task quota natively, the runner's own refusal of an over-declared layer over the control socket, and PostgreSQL (the soak drives a
+  SQLite Portal).
