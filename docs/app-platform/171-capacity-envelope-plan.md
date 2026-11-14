@@ -853,6 +853,58 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     limit, started at least eight threads, burned CPU, wrote its log and filled its data namespace; a backend that answered
     the readiness probe and did nothing would otherwise pass.
 
+### Diagnosis of the home page latency under load (smoke run 43541609397)
+
+The pull request smoke profiles the measured process for one idle and one loaded minute (`APP_CAPACITY_SOAK_DIAGNOSE=1`: CPU,
+block and mutex profiles, a goroutine dump, per-phase timings of the home and report pages as wall time against thread CPU
+time, database pool statistics, a 2 ms sample of the connection in use, garbage collector and scheduler figures; artifact
+files under `diag/`). The home page failed the pooled gate in two of three earlier runs with 11 to 19 ms windows against a
+0.7 ms idle. This run passed the gate, but its loaded diagnostic minute reproduced the tail, and it says where it comes from.
+
+| | idle minute | loaded minute |
+| --- | --- | --- |
+| home, wall p50 / p95 / max | 650 / 753 / 1827 us | 883 / **22898** / 81361 us |
+| home, CPU p95 | 632 us | 967 us |
+| home, off-CPU p95 (wall minus thread CPU) | 693 us | **22070 us** |
+| report, wall p95 / off-CPU p95 | 913 / 776 us | 4151 / 2875 us |
+| database pool: waits for a connection / total wait | 0 / 0 ms | **43439 / 43529 ms** in 60 s |
+| the single connection in use (share of 2 ms samples) | 5% | **38%** |
+| GC cycles / total pause / p99 pause | 49 / 3.7 ms / 0.23 ms | 304 / 165 ms / 2.6 ms |
+| scheduler latency p50 / p99 | 0.06 / 0.13 ms | 0.004 / 5.2 ms |
+| mutex profile, total | | 43 ms |
+
+**What dominates.** Waiting for the database connection, not computing and not the host. A home request's CPU time is the
+same loaded as idle (under 1 ms); the whole increase is off-CPU, and the block profile puts it in `database/sql` waiting for a
+connection (`chanrecv1`/`selectgo` under `QueryRow`, `QueryContext`, `BeginTx`, `Exec`: 116 s of blocked time in the minute,
+over the callers of every flood and page). `connectStore` opens SQLite with `SetMaxOpenConns(1)` (`store.go:136`), so every
+read and write of every request queues for one connection, and each of home's ten reads (`viewerScope`, `SearchNewLatest`,
+`NewTypes`, `ReportKinds`, `presentVersions`, `LinkGroups`, `Links`, `KindColors`, plus the session reads) can wait. Their own
+cost is unchanged (7 to 160 us p95 idle) and none of them reads installations, tasks or events: home issues the same ten
+reads however many there are, so it is not the N+1 class of the dispatch decision.
+
+**Who holds the connection.** The backend request relay. 66% of the process's CPU in the loaded minute (17.1 of 26 s) is
+`apiPlatformBackend`, and 11.8 s of it runs inside `withPlatformBackendRead`, a database transaction, per
+`withPlatformWritableBackendAccess`, three of which run for every relayed request
+(`app_platform_writable_request.go:63-120`). Inside those transactions the Portal verifies the signed registration
+(`control.VerifyWritableBackendRegistration`, 7.1 s: ed25519 and strict JSON decoding of the same documents on every request),
+loads the backend's history (`loadPlatformWritableBackendHistory`, 5.8 s) and parses descriptors. 23% of the process's
+CPU is SQLite statement preparation (`sqlite3Prepare`): the statements are prepared on each call. The connection is
+therefore held for CPU-bound work, and 38% of the time it is held while a page waits.
+
+**What it is not.** The Go mutex profile is empty (43 ms). The garbage collector paused 165 ms in the minute (p99 2.6 ms), an
+order of magnitude below the 22 ms tail. Scheduler latency p99 is 5 ms. The goroutine dump (one instant) caught no waiter.
+The soak's database is in-memory SQLite, so a WAL checkpoint plays no part here; the pool limit and the work done under it
+are the same as production's.
+
+**Is it a Portal defect?** Yes, in the class "work done while holding the only SQLite connection": on a production SQLite
+Portal a busy app backend slows every page by queueing it behind that app's request verification. It is invisible on
+PostgreSQL (ten connections). Minimal fixes, none implemented here: (1) in `withPlatformBackendRead` read the rows in the
+transaction, release it, and verify and decode afterwards; or (2) verify the registration once per
+`(installation, generation, release digest, policy)` and reuse the result, since the same documents are verified on every
+request; either removes most of the hold time. A larger one is a read-only pool beside the writer for file-backed SQLite.
+The 120-minute run will show whether the tail is bounded at the pooled p95; until a fix lands, a pass depends on how hard the
+flood leans on the connection (this soak keeps one request in flight per backend).
+
 ### Evidence files
 
 `capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity, host facts, the Go child's evidence with every
