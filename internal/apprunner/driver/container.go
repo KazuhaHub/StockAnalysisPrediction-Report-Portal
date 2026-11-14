@@ -59,12 +59,16 @@ type containerMount struct {
 	}
 }
 
-// appContainerCPUShares is the Docker CpuShares (cgroup v2 cpu.weight) of every container the runner
-// creates for app code: a quarter of Docker's default of 1024. It sets scheduling priority only and is
-// not a cap. When the host is contended the kernel serves the Portal and the runner first; when the
-// host is idle an app still gets its full NanoCpus quota, which stays the hard limit. Every create path
-// (candidate, writable candidate, update start, migration job) derives from planCandidateContainer, so
-// the weight is part of the policy digest of each of them.
+// appContainerCPUShares is the Docker CpuShares of every container the runner creates for app code. It is
+// scheduling priority, not a cap: NanoCpus stays the hard limit, so an app on an idle host still gets its
+// full quota. On cgroup v2 runc converts shares to cpu.weight, 256 becoming about 10 under the classic
+// linear formula (possibly about 35 under the newer runc mapping), against 100 for a container with no
+// shares set. The weight only divides CPU among sibling cgroups under the same parent. It helps the Portal
+// and the runner when they sit beside the app containers, as the Portal, PostgreSQL and the runner do in
+// system.slice in the production compose layout; it promises nothing in a layout where they are not
+// siblings. Every create path (candidate, writable candidate, update start, migration job) derives from
+// planCandidateContainer, and validContainerPlan refuses any other value, so the weight is part of the
+// policy digest of each of them.
 const appContainerCPUShares = 256
 
 type containerHostConfig struct {
@@ -139,7 +143,7 @@ func validContainerPlan(plan containerPlan) bool {
 		return false
 	}
 	var request containerCreate
-	if json.Unmarshal(plan.body, &request) != nil {
+	if json.Unmarshal(plan.body, &request) != nil || request.HostConfig.CpuShares != appContainerCPUShares {
 		return false
 	}
 	labels := ownerContainerLabels(plan.owner)

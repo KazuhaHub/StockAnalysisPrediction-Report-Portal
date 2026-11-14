@@ -56,21 +56,29 @@ func TestEveryAppContainerPlanCarriesLowCPUWeight(t *testing.T) {
 	assertAppCPUWeight(t, "migration", migration.body)
 }
 
-// The weight is part of the policy digest: a plan whose weight differs from the reviewed constant is
-// refused, so a stored or replayed body cannot lower or raise it unnoticed.
-func TestContainerPlanRefusesAnotherCPUWeight(t *testing.T) {
+// A plan whose weight differs from the reviewed constant is refused even when its policy-digest label is
+// recomputed to match, so the check does not rest on the digest alone. The plan carries no descriptor, so
+// the hard limits stay bound to it only through the builder and the digest.
+func TestContainerPlanRefusesAnotherCPUWeightEvenWithMatchingDigest(t *testing.T) {
 	plan := containerFixture(t)
-	for _, shares := range []int64{0, 2, 1024} {
+	for name, mutate := range map[string]func(*containerHostConfig){
+		"unset weight":   func(h *containerHostConfig) { h.CpuShares = 0 },
+		"minimum weight": func(h *containerHostConfig) { h.CpuShares = 2 },
+		"default weight": func(h *containerHostConfig) { h.CpuShares = 1024 },
+	} {
 		var request containerCreate
 		if err := json.Unmarshal(plan.body, &request); err != nil {
 			t.Fatal(err)
 		}
-		request.HostConfig.CpuShares = shares
+		mutate(&request.HostConfig)
+		delete(request.Labels, containerLabelPrefix+"policy-sha256")
+		policy, _ := json.Marshal(request)
+		request.Labels[containerLabelPrefix+"policy-sha256"] = containerHash(policy)
 		body, _ := json.Marshal(request)
 		changed := plan
 		changed.body, changed.bodySHA = body, containerHash(body)
 		if validContainerPlan(changed) {
-			t.Fatalf("plan with CpuShares %d passed the policy digest", shares)
+			t.Fatalf("%s: plan with a consistent digest was accepted", name)
 		}
 	}
 }
