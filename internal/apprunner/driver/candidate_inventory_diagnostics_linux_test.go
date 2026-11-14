@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func inventoryClient(body string) *http.Client {
@@ -205,6 +206,69 @@ func TestVolumeWithAbsoluteSourceOverlappingTheDataRootConflicts(t *testing.T) {
 			var asked []string
 			if err := requireNoContainerMountReferences(context.Background(), routedClient(listing, nil, &asked), data); !errors.Is(err, ErrContainerConflict) {
 				t.Fatalf("overlap through a volume admitted: %v", err)
+			}
+		})
+	}
+}
+
+func TestPendingVolumeNeedsAnAbsoluteDestination(t *testing.T) {
+	id := strings.Repeat("9", 64)
+	for name, destination := range map[string]string{"absent": "", "relative": `,"Destination":"db"`, "empty": `,"Destination":""`} {
+		t.Run(name, func(t *testing.T) {
+			listing := `[{"Id":"` + id + `","Mounts":[{"Type":"volume","Source":"","Driver":"rexray"` + destination + `}]}]`
+			var asked []string
+			err := requireNoContainerMountReferences(context.Background(), routedClient(listing, map[string]string{id: `{"Mounts":[{"Type":"volume","Source":"/x","Destination":""}]}`}, &asked), t.TempDir())
+			if !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("want ErrInvalidResponse, got %v", err)
+			}
+			if len(asked) != 1 {
+				t.Fatalf("a volume without a destination was inspected: %v", asked)
+			}
+		})
+	}
+}
+
+// A container can vanish between the list and the inspect, and the daemon can
+// fail or stall. Those are an unavailable daemon, not a malformed response.
+func TestFailedInspectIsUnavailableNotInvalid(t *testing.T) {
+	id, listing := pluginVolumeFixture("rexray")
+	serve := func(inspect func(*http.Request) (*http.Response, error)) transportFunc {
+		return func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path == "/v"+APIVersion+"/containers/json" {
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(listing))}, nil
+			}
+			if !strings.Contains(r.URL.Path, id) {
+				t.Errorf("unexpected request %s", r.URL.Path)
+			}
+			return inspect(r)
+		}
+	}
+	status := func(code int) transportFunc {
+		return serve(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader("{}"))}, nil
+		})
+	}
+	expired, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	for name, tc := range map[string]struct {
+		ctx       context.Context
+		transport transportFunc
+		want      error
+	}{
+		"container removed (404)": {context.Background(), status(404), ErrUnavailable},
+		"daemon error (500)":      {context.Background(), status(500), ErrUnavailable},
+		"timeout": {expired, serve(func(r *http.Request) (*http.Response, error) {
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		}), context.DeadlineExceeded},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := requireNoContainerMountReferences(tc.ctx, daemonClient(tc.transport), t.TempDir())
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+			if errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("a failed inspect was reported as an invalid response: %v", err)
 			}
 		})
 	}

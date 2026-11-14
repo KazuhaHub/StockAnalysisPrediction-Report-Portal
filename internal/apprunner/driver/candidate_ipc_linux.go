@@ -353,6 +353,9 @@ func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPending
 				if m.Driver != nil && *m.Driver == "local" {
 					continue
 				}
+				if !filepath.IsAbs(m.Destination) {
+					return nil, nil, fmt.Errorf("%w: mount %d: volume without a source has destination %q, not an absolute path", ErrInvalidResponse, i, boundedString(m.Destination))
+				}
 				pending = append(pending, candidateIPCPendingVolume{index: i, destination: m.Destination})
 				continue
 			}
@@ -375,7 +378,7 @@ func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPending
 
 // candidateIPCContainerSources returns every host path a container mounts. A
 // volume the list reports without a path (a non-local driver) is resolved with
-// one inspect of that container; one that stays empty or relative is refused.
+// one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
 func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
 	sources, pending, err := candidateIPCMountPlan(container.Mounts)
 	if err != nil {
