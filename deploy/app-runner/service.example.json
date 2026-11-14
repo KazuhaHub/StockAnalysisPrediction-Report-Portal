@@ -20,7 +20,8 @@
     "cpu_percent": 50,
     "disk_bytes": 8589934592,
     "running_backends": 8,
-    "image_store_bytes": 10737418240
+    "image_store_bytes": 10737418240,
+    "reserved_cpus": 1
   },
   "controller": {
     "deployment_id": "10000000-0000-4000-8000-000000000001",

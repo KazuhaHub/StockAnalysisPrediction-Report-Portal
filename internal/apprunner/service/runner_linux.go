@@ -77,7 +77,12 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	// The declared capacity envelope turns percentages of the host into absolute budgets. A fact that cannot be
 	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
-	budgets, err := DeriveBudgets(cfg.Capacity.Resolve(), HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot)})
+	// A reserved CPU needs the online list, the runner's own allowed set and a daemon that can pin containers; a
+	// reading that fails is left empty and, when a reservation depends on it, makes the runner not ready.
+	facts := HostFacts{VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot)}
+	facts.OnlineCPUs, _ = onlineCPUs()
+	facts.AffinityCPUs, _ = allowedCPUs()
+	budgets, options, err := planCapacity(cfg, report, facts)
 	if err != nil {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {
@@ -93,7 +98,6 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	if err != nil {
 		return ErrNotReady
 	}
-	var options []driver.RuntimeOption
 	if cfg.AllowLocalReferenceImages {
 		options = append(options, driver.WithLocalReferenceImages())
 	}

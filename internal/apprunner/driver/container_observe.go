@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
@@ -83,13 +84,24 @@ func inspectContainerState(ctx context.Context, client *http.Client, nativeID st
 	if json.Unmarshal(actual.Config, &config) != nil || json.Unmarshal(actual.HostConfig, &host) != nil {
 		return none, ErrContainerConflict
 	}
-	if config.Image != expected.Image || config.User != expected.User || config.Hostname != expected.Hostname || config.WorkingDir != expected.WorkingDir || config.StopSignal != expected.StopSignal || config.StopTimeout != expected.StopTimeout || config.NetworkDisabled != expected.NetworkDisabled || config.AttachStdin || config.AttachStdout || config.AttachStderr || config.OpenStdin || config.StdinOnce || config.Tty || !reflect.DeepEqual(config.Healthcheck.Test, expected.Healthcheck.Test) || !reflect.DeepEqual(host, expected.HostConfig) {
+	// A container that differs from the plan in its cpuset alone, with the policy digest of the same plan under
+	// that cpuset, was created under another reservation. It is named, never adopted: nothing here pins it again.
+	cpusetChanged := false
+	if host.CpusetCpus != expected.HostConfig.CpusetCpus {
+		probe := host
+		probe.CpusetCpus = expected.HostConfig.CpusetCpus
+		cpusetChanged = reflect.DeepEqual(probe, expected.HostConfig) && policyUnderCPUSet(expected, host.CpusetCpus) == config.Labels[containerLabelPrefix+"policy-sha256"]
+	}
+	if config.Image != expected.Image || config.User != expected.User || config.Hostname != expected.Hostname || config.WorkingDir != expected.WorkingDir || config.StopSignal != expected.StopSignal || config.StopTimeout != expected.StopTimeout || config.NetworkDisabled != expected.NetworkDisabled || config.AttachStdin || config.AttachStdout || config.AttachStderr || config.OpenStdin || config.StdinOnce || config.Tty || !reflect.DeepEqual(config.Healthcheck.Test, expected.Healthcheck.Test) || (!reflect.DeepEqual(host, expected.HostConfig) && !cpusetChanged) {
 		return none, ErrContainerConflict
 	}
 	if len(expected.Entrypoint) > 0 && (!reflect.DeepEqual(config.Entrypoint, expected.Entrypoint) || len(config.Cmd) != len(expected.Cmd) || (len(expected.Cmd) > 0 && !reflect.DeepEqual(config.Cmd, expected.Cmd))) {
 		return none, ErrContainerConflict
 	}
 	for label, value := range expected.Labels {
+		if cpusetChanged && label == containerLabelPrefix+"policy-sha256" {
+			continue
+		}
 		if config.Labels[label] != value {
 			return none, ErrContainerConflict
 		}
@@ -173,6 +185,9 @@ func inspectContainerState(ctx context.Context, client *http.Client, nativeID st
 			return none, ErrContainerConflict
 		}
 	}
+	if cpusetChanged {
+		return none, &CPUSetChangedError{Live: host.CpusetCpus, Planned: expected.HostConfig.CpusetCpus}
+	}
 	var state containerStateInspection
 	if !validProjection(actual.State, &state) || json.Unmarshal(actual.State, &state) != nil {
 		return none, ErrContainerConflict
@@ -218,4 +233,39 @@ func removeCandidateContainerHTTP(ctx context.Context, client *http.Client, nati
 		return errors.Join(ErrContainerUncertain, err)
 	}
 	return nil
+}
+
+// policyUnderCPUSet is the policy digest the same plan would carry with another cpuset.
+func policyUnderCPUSet(expected containerCreate, cpus string) string {
+	variant := expected
+	variant.Labels = map[string]string{}
+	for name, value := range expected.Labels {
+		if name != containerLabelPrefix+"policy-sha256" {
+			variant.Labels[name] = value
+		}
+	}
+	variant.HostConfig.CpusetCpus = cpus
+	policy, err := json.Marshal(variant)
+	if err != nil {
+		return ""
+	}
+	return containerHash(policy)
+}
+
+// CPUSetChangedReason names the conflict of a container created under another cpuset.
+const CPUSetChangedReason = "cpuset_changed"
+
+// ErrContainerCPUSetChanged matches a container whose only difference from its plan is the CPU set it is pinned
+// to: the host's online CPUs or reserved_cpus changed after it was created. It is also an ErrContainerConflict, so
+// nothing adopts, starts or removes it.
+var ErrContainerCPUSetChanged = errors.New(CPUSetChangedReason)
+
+// CPUSetChangedError carries both sets. An empty set means the container, or the plan, is not pinned.
+type CPUSetChangedError struct{ Live, Planned string }
+
+func (e *CPUSetChangedError) Error() string {
+	return fmt.Sprintf("%s: container is pinned to %q but the app set is %q: %v", CPUSetChangedReason, e.Live, e.Planned, ErrContainerConflict)
+}
+func (e *CPUSetChangedError) Is(target error) bool {
+	return target == ErrContainerConflict || target == ErrContainerCPUSetChanged
 }

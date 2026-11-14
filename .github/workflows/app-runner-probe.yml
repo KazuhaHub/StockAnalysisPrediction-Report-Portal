@@ -297,6 +297,13 @@ jobs:
           sudo -n grep -q NATIVE_MANAGED_SERVICE_PROFILE_VERIFIED "$root/observer-second.log"
           stop_service
           sudo -n grep -q 'app-runner ready profile=linux-docker-rootful-projectquota/v1-dev platform=linux/' "$root/service.log"
+          # With 4 or more CPUs the default reserves one, so the line must show a real reservation, not the
+          # reserved_cpus=none app_cpus=all of a host that reserves nothing.
+          if [ "$(nproc --all)" -ge 4 ]; then
+            sudo -n grep -Eq 'app-runner ready .* capacity=.* reserved_cpus=0 app_cpus=[0-9]' "$root/service.log"
+          else
+            sudo -n grep -Eq 'app-runner ready .* capacity=.* reserved_cpus=[^ ]+ app_cpus=[^ ]+ ' "$root/service.log"
+          fi
 
       - name: Verify closed candidate container policy on the disposable daemon
         shell: bash
