@@ -20,6 +20,10 @@ type CapacityBudgets struct {
 	DiskBytes       int64
 	ImageStoreBytes int64
 	RunningBackends int64
+	// ReservedCPUs and AppCPUs are the CPU lists app containers may not and may run on, in the kernel's list
+	// notation ("0" and "1-3"). Both are empty when no CPU is reserved. They describe the placement the runner
+	// gives every app container; admission itself counts only CPUMillis.
+	ReservedCPUs, AppCPUs string
 }
 
 func (b CapacityBudgets) valid() bool {

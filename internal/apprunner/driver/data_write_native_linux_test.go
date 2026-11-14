@@ -81,7 +81,8 @@ func TestNativeDataWriterContainer(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	native, err := OpenCandidateRuntime(ctx, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, sockets, root, pin, WithLocalReferenceImages())
+	appCPUs := nativeAppCPUSet(t)
+	native, err := OpenCandidateRuntime(ctx, os.Getenv("APP_CANDIDATE_DOCKER_SOCKET"), rootPath, sockets, root, pin, WithLocalReferenceImages(), WithAppCPUSet(appCPUs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +168,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages())
+	other, err := OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages(), WithAppCPUSet(appCPUs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +287,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 	if _, err := native.StartWritableCandidate(ctx, writableLaunch); err == nil {
 		t.Fatal("native writable start repeated")
 	}
-	other, err = OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages())
+	other, err = OpenCandidateRuntime(ctx, native.socket, rootPath, sockets, root, pin, WithLocalReferenceImages(), WithAppCPUSet(appCPUs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -310,7 +311,7 @@ func TestNativeDataWriterContainer(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	verifyNativeCandidateResourceBounds(
-		t, ctx, client, nativeID, socket)
+		t, ctx, client, nativeID, socket, appCPUs)
 	if state, err := stopCandidateContainerHTTP(ctx, client, nativeID, plan); err != nil || state != "exited" {
 		t.Fatal("stop before host data inspection", state, err)
 	}

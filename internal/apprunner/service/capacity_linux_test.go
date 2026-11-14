@@ -37,3 +37,23 @@ func TestSameFilesystem(t *testing.T) {
 		t.Fatal("an unreadable path was treated as the same filesystem")
 	}
 }
+
+func TestHostCPUListsAreReadAndConsistent(t *testing.T) {
+	online, err := onlineCPUs()
+	if err != nil || len(online) == 0 {
+		t.Fatalf("online CPUs = %v, %v", online, err)
+	}
+	allowed, err := allowedCPUs()
+	if err != nil || len(allowed) == 0 || len(allowed) > len(online) {
+		t.Fatalf("allowed CPUs = %v, %v (online %v)", allowed, err, online)
+	}
+	member := map[int]bool{}
+	for _, cpu := range online {
+		member[cpu] = true
+	}
+	for _, cpu := range allowed {
+		if !member[cpu] {
+			t.Fatalf("allowed CPU %d is not online (%v)", cpu, online)
+		}
+	}
+}

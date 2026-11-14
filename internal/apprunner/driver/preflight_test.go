@@ -19,7 +19,7 @@ func versionFixture() map[string]any {
 }
 func infoFixture() map[string]any {
 	return map[string]any{"ServerVersion": "28.5.0", "OSType": "linux", "Architecture": "x86_64", "Driver": "overlay2", "CgroupVersion": "2", "CgroupDriver": "systemd",
-		"MemoryLimit": true, "SwapLimit": true, "CpuCfsPeriod": true, "CpuCfsQuota": true, "CPUShares": true, "PidsLimit": true, "NCPU": 2, "MemTotal": int64(1 << 30),
+		"MemoryLimit": true, "SwapLimit": true, "CpuCfsPeriod": true, "CpuCfsQuota": true, "CPUShares": true, "CPUSet": true, "PidsLimit": true, "NCPU": 2, "MemTotal": int64(1 << 30),
 		"SecurityOptions": []string{"name=seccomp,profile=builtin", "name=apparmor"}, "HttpProxy": "fixture-sensitive", "Labels": []string{"fixture-sensitive"}}
 }
 
@@ -173,5 +173,24 @@ func TestInspectionNamesMissingCPUSharesSupport(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("no typed cpu_shares finding", report.Findings)
+	}
+}
+
+// cpuset support only matters to a host that reserves CPUs, so its absence is reported, not a metadata failure.
+func TestInspectionReportsCPUSetSupportWithoutRequiringIt(t *testing.T) {
+	for _, supported := range []bool{true, false} {
+		info := infoFixture()
+		info["CPUSet"] = supported
+		client, _ := fixtureClient(t, versionFixture(), info)
+		report, err := inspectHTTP(context.Background(), client, "amd64")
+		if err != nil || !report.MetadataCompatible || report.CPUSetSupported != supported {
+			t.Fatalf("CPUSet=%v: report %+v, %v", supported, report, err)
+		}
+	}
+	info := infoFixture()
+	delete(info, "CPUSet")
+	client, _ := fixtureClient(t, versionFixture(), info)
+	if report, err := inspectHTTP(context.Background(), client, "amd64"); err != nil || report.CPUSetSupported {
+		t.Fatalf("an absent CPUSet claim read as support: %+v, %v", report, err)
 	}
 }

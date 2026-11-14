@@ -186,8 +186,8 @@ func TestExampleConfigDeclaresTheDefaultCapacity(t *testing.T) {
 	if err := decodeStrict(raw, &cfg); err != nil {
 		t.Fatalf("example config does not decode strictly: %v", err)
 	}
-	if !cfg.Capacity.valid() || cfg.Capacity.Resolve() != (*CapacityConfig)(nil).Resolve() {
-		t.Fatalf("example capacity %+v is not the defaults", cfg.Capacity.Resolve())
+	if !cfg.Capacity.valid() || cfg.Capacity.ResolveFor(4) != (*CapacityConfig)(nil).ResolveFor(4) {
+		t.Fatalf("example capacity %+v is not the defaults", cfg.Capacity.ResolveFor(4))
 	}
 }
 
