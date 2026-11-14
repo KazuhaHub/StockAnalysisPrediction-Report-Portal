@@ -137,6 +137,10 @@ it('lets administrators choose report metrics and persists them with the layout'
   await waitFor(()=>expect(screen.getByRole('button',{name:/manage.dashboard.customize/}).hasAttribute('disabled')).toBe(false))
   fireEvent.click(screen.getByRole('button',{name:/manage.dashboard.customize/}))
   const report=document.querySelector('[data-dashboard-block="reports"]') as HTMLElement
+  // The reports snapshot is requested only once the layout is known, so the customize button
+  // enabling does not mean the card has data: until it arrives the card is a skeleton with no
+  // metric labels. Wait for a label of the default metrics instead of assuming the order.
+  expect(await within(report).findByText('manage.dashboard.totalReports')).toBeTruthy()
   fireEvent.click(within(report).getByRole('button',{name:'manage.dashboard.chooseMetrics'}))
   fireEvent.click(screen.getByRole('checkbox',{name:'manage.dashboard.yesterdayReports'}))
   fireEvent.click(screen.getByRole('checkbox',{name:'manage.dashboard.yearReports'}))

@@ -133,6 +133,13 @@ func pgStore(t *testing.T, tables ...string) *Store {
 		t.Fatalf("OpenStore postgres: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
+	// State that outlives a test and that the named tables do not cover: the ledger's settings (the
+	// write-once start above all) and the machine tokens. A fresh database has neither.
+	for _, stmt := range []string{`DELETE FROM meta WHERE k LIKE 'forecast\_%'`, `DELETE FROM api_tokens`} {
+		if _, err := st.exec(stmt); err != nil {
+			t.Fatalf("reset shared state: %v", err)
+		}
+	}
 	for _, tbl := range tables {
 		if _, err := st.exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
@@ -426,5 +433,29 @@ func TestPostgresDispatchDecision(t *testing.T) {
 	w, g := own(s.refQueuedItems(now)), own(s.queuedItemsAt(now))
 	if len(w) == 0 || !reflect.DeepEqual(w, g) {
 		t.Fatalf("queuedItems differ on Postgres\nwant %+v\n got %+v", w, g)
+	}
+}
+
+// pgStore is how every Postgres test gets a clean database, and the database is one that all of
+// them share, in whatever order the package or one of its shards runs them. Settings and
+// credentials that a test leaves behind must not reach the next one: a ledger start written by one
+// test turns every set another seeds before it into a pre-live row, and a query token left behind
+// collides with the next test that creates the same one.
+func TestPgStoreStartsWithoutSettingsOrTokensLeftByEarlierTests(t *testing.T) {
+	st := pgStore(t)
+	if err := st.SetSetting(setForecastPopulationFrom, "2099-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateToken("leaked-by-an-earlier-test", "leak", "all", ""); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st = pgStore(t)
+	var n int
+	if err := st.queryRow(`SELECT COUNT(*) FROM meta WHERE k LIKE 'forecast\_%'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("forecast settings survived into the next test: %d, %v", n, err)
+	}
+	if err := st.queryRow(`SELECT COUNT(*) FROM api_tokens`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("tokens survived into the next test: %d, %v", n, err)
 	}
 }
