@@ -127,6 +127,16 @@ func parseUpdateStartRegistration(raw []byte) (UpdateStartRegistrationCommand, e
 }
 
 func VerifyUpdateStartRegistration(raw, signature []byte, a Authority, nowMS int64) (VerifiedUpdateStartRegistrationCommand, error) {
+	return cachedVerify("update-start-registration", raw, signature, a, nowMS, func() (VerifiedUpdateStartRegistrationCommand, int64, error) {
+		v, err := verifyUpdateStartRegistrationUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.start.command.ExpiresMS), nil
+	})
+}
+
+func verifyUpdateStartRegistrationUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedUpdateStartRegistrationCommand, error) {
 	var zero VerifiedUpdateStartRegistrationCommand
 	if len(signature) != ed25519.SignatureSize {
 		return zero, ErrInvalidCommand

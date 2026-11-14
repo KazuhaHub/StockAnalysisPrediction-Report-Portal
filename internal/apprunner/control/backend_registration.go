@@ -88,6 +88,16 @@ func parseBackendRegistration(raw []byte) (BackendRegistrationCommand, error) {
 }
 
 func VerifyBackendRegistration(raw, signature []byte, a Authority, nowMS int64) (VerifiedBackendRegistrationCommand, error) {
+	return cachedVerify("backend-registration", raw, signature, a, nowMS, func() (VerifiedBackendRegistrationCommand, int64, error) {
+		v, err := verifyBackendRegistrationUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.candidate.ExpiresMS), nil
+	})
+}
+
+func verifyBackendRegistrationUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedBackendRegistrationCommand, error) {
 	var zero VerifiedBackendRegistrationCommand
 	if len(signature) != ed25519.SignatureSize {
 		return zero, ErrInvalidCommand

@@ -180,6 +180,16 @@ func parse(raw []byte) (Command, error) {
 // at the supplied trusted-clock sample. It never admits a replay/fence or dispatches
 // an effect; the journal and OS peer boundary must still authorize the request.
 func Verify(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCommand, error) {
+	return cachedVerify("command", raw, signature, authority, nowMS, func() (VerifiedCommand, int64, error) {
+		v, err := verifyUncached(raw, signature, authority, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.command.ExpiresMS), nil
+	})
+}
+
+func verifyUncached(raw, signature []byte, authority Authority, nowMS int64) (VerifiedCommand, error) {
 	fail := func() (VerifiedCommand, error) { return VerifiedCommand{}, ErrInvalidCommand }
 	if len(authority.PublicKey) != ed25519.PublicKeySize || authority.ControlRevision < 1 || nowMS < 0 || len(signature) != ed25519.SignatureSize {
 		return fail()

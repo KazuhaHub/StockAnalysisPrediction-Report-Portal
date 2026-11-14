@@ -94,6 +94,16 @@ func parseWritableBackendRegistration(raw []byte) (WritableBackendRegistrationCo
 	return c, nil
 }
 func VerifyWritableBackendRegistration(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableBackendRegistrationCommand, error) {
+	return cachedVerify("writable-backend-registration", raw, signature, a, nowMS, func() (VerifiedWritableBackendRegistrationCommand, int64, error) {
+		v, err := verifyWritableBackendRegistrationUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.candidate.writer.data.ExpiresMS), nil
+	})
+}
+
+func verifyWritableBackendRegistrationUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableBackendRegistrationCommand, error) {
 	var zero VerifiedWritableBackendRegistrationCommand
 	if len(signature) != ed25519.SignatureSize {
 		return zero, ErrInvalidCommand

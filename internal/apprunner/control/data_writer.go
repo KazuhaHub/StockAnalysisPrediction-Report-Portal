@@ -103,6 +103,16 @@ func parseDataWriter(raw []byte) (DataWriterCommand, error) {
 }
 
 func VerifyDataWriter(raw, signature []byte, a Authority, nowMS int64) (VerifiedDataWriterCommand, error) {
+	return cachedVerify("data-writer", raw, signature, a, nowMS, func() (VerifiedDataWriterCommand, int64, error) {
+		v, err := verifyDataWriterUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.data.ExpiresMS), nil
+	})
+}
+
+func verifyDataWriterUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedDataWriterCommand, error) {
 	var zero VerifiedDataWriterCommand
 	if len(signature) != ed25519.SignatureSize {
 		return zero, ErrInvalidCommand
