@@ -219,8 +219,9 @@ answers again.
 The mode is `on`, the set's frozen benchmark is planned, but no hand check is recorded for that code,
 so nothing is written for it.
 
-- Hand-check one would-be d5 for that code: the stock's and the index's closes on `base_date` and on
-  the due session, against the exchange's published closes.
+- Hand-check one would-be d5 for that code against the published closes: the stock's close on
+  `base_date` and on the due session, and the index's close on `s0_date` and on the due session (the
+  benchmark leg starts at S0, never at `base_date`).
 - Record the check in the card's form. It is audited (`forecast.dry_gate`) and stored per code.
 
 ### `predictions.store_failed` (Email + Slack, each occurrence)
