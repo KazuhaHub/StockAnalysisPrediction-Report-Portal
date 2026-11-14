@@ -101,6 +101,16 @@ func parseWritableCandidate(raw []byte) (WritableCandidateCommand, error) {
 }
 
 func VerifyWritableCandidate(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableCandidateCommand, error) {
+	return cachedVerify("writable-candidate", raw, signature, a, nowMS, func() (VerifiedWritableCandidateCommand, int64, error) {
+		v, err := verifyWritableCandidateUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		return v, expiryMS(v.writer.data.ExpiresMS), nil
+	})
+}
+
+func verifyWritableCandidateUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableCandidateCommand, error) {
 	var zero VerifiedWritableCandidateCommand
 	if len(signature) != ed25519.SignatureSize {
 		return zero, ErrInvalidCommand

@@ -19,14 +19,13 @@ func platformCompletedResumeAt(e migExec, installation string, generation int64)
 	return n > 0, nil
 }
 
-// loadPlatformWritableResumeBackendHistory reconstructs a completed recovery resume from the same
+// loadPlatformWritableResumeBackendHistoryPhased reads the evidence to reconstruct a completed recovery resume from the same
 // signed start and registration evidence the live operation used, so a resumed managed installation
 // is admitted exactly like an updated one. The fresh envelopes are access proofs only; nothing here
 // can change the completed operation. Any gap in the evidence refuses access.
-func (s *Server) loadPlatformWritableResumeBackendHistory(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformWritableRegistrationIntent, error) {
-	var zero platformWritableRegistrationIntent
-	fail := func(stage string, err error) (platformWritableRegistrationIntent, error) {
-		return zero, fmt.Errorf("resume history %s (%v): %w", stage, err, errAppPlatformLaunchUnavailable)
+func (s *Server) loadPlatformWritableResumeBackendHistoryPhased(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
+	fail := func(stage string, err error) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
+		return nil, fmt.Errorf("resume history %s (%v): %w", stage, err, errAppPlatformLaunchUnavailable)
 	}
 	if b.generation < 2 {
 		return fail("generation", nil)
@@ -87,5 +86,5 @@ func (s *Server) loadPlatformWritableResumeBackendHistory(e migExec, b platformB
 	if err != nil {
 		return fail("activation", err)
 	}
-	return platformWritableHistoryFromStart(e, b, expected, runtime, seed, dek, now, start, ev.descriptor)
+	return platformWritableHistoryFromStartPhased(e, b, expected, runtime, seed, dek, now, start, ev.descriptor)
 }
