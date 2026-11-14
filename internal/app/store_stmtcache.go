@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"strings"
 	"sync"
+	"time"
 )
 
 // stmtCacheCap bounds the prepared-statement cache. Some SQL is built with variable-length IN lists,
@@ -17,7 +18,8 @@ const stmtCacheCap = 256
 // stmtDrainPerCall bounds how many of them one pool-level call prepares.
 const (
 	stmtPendingCap   = 64
-	stmtDrainPerCall = 4
+	stmtDrainPerCall = 1
+	stmtDrainTimeout = 2 * time.Second
 )
 
 // stmtCache is a bounded LRU of prepared statements keyed by the final SQL text (after placeholder
@@ -33,7 +35,10 @@ const (
 //   - A text is prepared at most once at a time: a concurrent caller for the same text waits for the
 //     first one's prepare instead of preparing a duplicate.
 //   - An entry is reference counted. Eviction (or Close) marks it and the statement is closed when the
-//     last in-flight call releases it, so a statement is never closed under a running caller.
+//     last in-flight call releases it, so the cache itself never closes a statement a call is about to
+//     use. A statement whose Rows are still open stays alive for a different reason: database/sql
+//     registers the Rows as a dependent of the Stmt (addDep), so Stmt.Close only takes effect once
+//     they are closed.
 //   - A prepare that fails (including a cancelled context) is never cached; the caller falls back to
 //     the plain path, which reports the same error, and the next caller prepares afresh.
 //   - Only data-manipulation text is cached. DDL, PRAGMA and the like run uncached, so schema work never
@@ -130,8 +135,11 @@ func (c *stmtCache) acquireNoDrain(ctx context.Context, q string) (*sql.Stmt, fu
 		}
 		e := &stmtEntry{key: q, ready: make(chan struct{}), refs: 1}
 		c.entries[q] = c.order.PushFront(e)
-		c.evictLocked()
+		toClose := c.evictLocked()
 		c.mu.Unlock()
+		for _, old := range toClose {
+			c.closeEntry(old) // outside c.mu: Stmt.Close takes the connection's lock
+		}
 
 		st, err := c.prepare(ctx, q)
 
@@ -177,8 +185,9 @@ func (c *stmtCache) want(q string) {
 	}
 }
 
-// drainPending prepares a few noted texts. It runs only from pool-level calls, which already hold no
-// connection, and takes the connection for each prepare like any other pool caller.
+// drainPending prepares at most stmtDrainPerCall noted texts, so no caller pays for more than one
+// prepare. It runs only from pool-level calls, which hold no connection, and takes the connection
+// for the prepare like any other pool caller.
 func (c *stmtCache) drainPending(ctx context.Context) {
 	c.mu.Lock()
 	if len(c.pending) == 0 || c.closed {
@@ -194,8 +203,12 @@ func (c *stmtCache) drainPending(ctx context.Context) {
 		}
 	}
 	c.mu.Unlock()
+	// The prepare is not the caller's: it must neither be cut short by that caller's cancellation (the
+	// note would be lost) nor wait on it. A failure drops the note; the next transaction re-notes it.
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stmtDrainTimeout)
+	defer cancel()
 	for _, q := range todo {
-		if st, release := c.acquireNoDrain(ctx, q); st != nil {
+		if st, release := c.acquireNoDrain(dctx, q); st != nil {
 			release()
 		}
 	}
@@ -231,9 +244,10 @@ func (c *stmtCache) acquireExisting(q string) (*sql.Stmt, func()) {
 	return e.stmt, func() { c.release(e) }
 }
 
-// evictLocked drops least recently used entries until the cache is within its cap. An entry that is
-// still being prepared or used is only unlinked; whoever holds the last reference closes it.
-func (c *stmtCache) evictLocked() {
+// evictLocked unlinks least recently used entries until the cache is within its cap and returns the
+// ones nobody holds, which the caller closes after releasing c.mu. An entry still being prepared or
+// used is only unlinked; whoever holds the last reference closes it.
+func (c *stmtCache) evictLocked() (idle []*stmtEntry) {
 	for c.order.Len() > c.max {
 		el := c.order.Back()
 		e := el.Value.(*stmtEntry)
@@ -241,9 +255,10 @@ func (c *stmtCache) evictLocked() {
 		delete(c.entries, e.key)
 		e.evicted = true
 		if e.refs == 0 {
-			c.closeEntry(e)
+			idle = append(idle, e)
 		}
 	}
+	return idle
 }
 
 // release gives back one reference and closes the statement if it was evicted meanwhile.

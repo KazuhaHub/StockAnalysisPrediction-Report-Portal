@@ -200,7 +200,7 @@ func (s *Store) bind(q string) string {
 }
 
 func (s *Store) exec(q string, args ...any) (sql.Result, error) {
-	return s.execContext(context.Background(), s.bind(q), args...)
+	return s.execContext(context.Background(), q, args...)
 }
 
 // insertID runs an INSERT and returns the new row's id, portable across sqlite
@@ -219,16 +219,30 @@ func (s *Store) insertID(q string, args ...any) (int64, error) {
 	return res.LastInsertId()
 }
 func (s *Store) query(q string, args ...any) (*sql.Rows, error) {
-	return s.queryContext(context.Background(), s.bind(q), args...)
+	return s.queryContext(context.Background(), q, args...)
 }
 func (s *Store) queryRow(q string, args ...any) *sql.Row {
-	return s.queryRowContext(context.Background(), s.bind(q), args...)
+	return s.queryRowContext(context.Background(), q, args...)
 }
 
-// execContext, queryContext and queryRowContext run already-bound SQL on the pool, through the
-// statement cache where there is one. They are the single executor every pool-level read and write
-// goes through; a call the cache does not take runs on the pool unchanged.
+// execContext, queryContext and queryRowContext are the pool executor. They take the query with "?"
+// placeholders and rewrite it for the dialect themselves, exactly once, so a call site cannot forget
+// to. They run through the statement cache where there is one; a call the cache does not take runs on
+// the pool unchanged. The *Bound variants take SQL that is already rewritten, for a caller (migExec)
+// that binds on its own.
 func (s *Store) execContext(ctx context.Context, q string, args ...any) (sql.Result, error) {
+	return s.execBound(ctx, s.bind(q), args...)
+}
+
+func (s *Store) queryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+	return s.queryBound(ctx, s.bind(q), args...)
+}
+
+func (s *Store) queryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+	return s.queryRowBound(ctx, s.bind(q), args...)
+}
+
+func (s *Store) execBound(ctx context.Context, q string, args ...any) (sql.Result, error) {
 	if st, release := s.stmts.acquire(ctx, q); st != nil {
 		defer release()
 		return st.ExecContext(ctx, args...)
@@ -236,7 +250,7 @@ func (s *Store) execContext(ctx context.Context, q string, args ...any) (sql.Res
 	return s.db.ExecContext(ctx, q, args...)
 }
 
-func (s *Store) queryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
+func (s *Store) queryBound(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
 	if st, release := s.stmts.acquire(ctx, q); st != nil {
 		defer release()
 		return st.QueryContext(ctx, args...)
@@ -244,7 +258,7 @@ func (s *Store) queryContext(ctx context.Context, q string, args ...any) (*sql.R
 	return s.db.QueryContext(ctx, q, args...)
 }
 
-func (s *Store) queryRowContext(ctx context.Context, q string, args ...any) *sql.Row {
+func (s *Store) queryRowBound(ctx context.Context, q string, args ...any) *sql.Row {
 	if st, release := s.stmts.acquire(ctx, q); st != nil {
 		defer release()
 		return st.QueryRowContext(ctx, args...)

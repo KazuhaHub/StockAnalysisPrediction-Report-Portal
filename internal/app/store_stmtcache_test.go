@@ -366,16 +366,14 @@ func TestStmtCacheIsBypassedOnPostgres(t *testing.T) {
 	if c.size() != 0 {
 		t.Fatal("nil cache has a size")
 	}
-	// A store built for PostgreSQL carries no cache, so every call reaches the pool exactly as before.
-	db, err := sql.Open("pgx", "postgres://invalid@127.0.0.1:1/none?sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	pg := &Store{db: db, driver: "postgres", stmts: newStmtCache("postgres", db)}
+	// A PostgreSQL store carries no cache, and a placeholder query through every entry point reaches
+	// the driver rewritten once and unprepared.
+	pg, rec := recordStore(t, "postgres")
 	if pg.stmts != nil {
 		t.Fatal("PostgreSQL store has a statement cache")
 	}
+	checkEntryPointsRewrite(t, "postgres")
+	_ = rec
 }
 
 // A text that only ever runs inside transactions (the backend request relay) cannot be prepared by
@@ -425,5 +423,37 @@ func TestStmtCachePendingNotesAreBounded(t *testing.T) {
 	st.stmts.mu.Unlock()
 	if n > stmtPendingCap {
 		t.Fatalf("%d pending notes, cap %d", n, stmtPendingCap)
+	}
+}
+
+// Draining the notes must cost the unrelated caller at most one prepare, and a caller that is already
+// cancelled must neither lose the notes nor be what they are prepared under.
+func TestStmtCacheDrainIsOnePerCallAndSurvivesCancelledCaller(t *testing.T) {
+	st, d := cacheTestStore(t)
+	texts := []string{
+		`SELECT COUNT(*) FROM cache_t WHERE id<?`,
+		`SELECT COUNT(*) FROM cache_t WHERE id>?`,
+		`SELECT COUNT(*) FROM cache_t WHERE id=?`,
+	}
+	for _, q := range texts {
+		st.stmts.want(q)
+	}
+	prepared := func() int {
+		n := 0
+		for _, q := range texts {
+			n += d.preparesOf(q)
+		}
+		return n
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	st.stmts.drainPending(cancelled)
+	if n := prepared(); n != 1 {
+		t.Fatalf("one drain by a cancelled caller prepared %d texts, want exactly 1", n)
+	}
+	st.stmts.drainPending(context.Background())
+	st.stmts.drainPending(context.Background())
+	if n := prepared(); n != 3 {
+		t.Fatalf("three drains prepared %d texts, want 3", n)
 	}
 }

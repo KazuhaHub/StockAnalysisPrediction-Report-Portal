@@ -65,11 +65,11 @@ func (e migExec) exec(q string, args ...any) (sql.Result, error) {
 	switch x := e.ex.(type) {
 	case *sql.DB:
 		if x == e.s.db {
-			return e.s.execContext(context.Background(), q, args...)
+			return e.s.execBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
-			return e.s.execContext(x.ctx, q, args...)
+			return e.s.execBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
 		return e.s.txExecContext(context.Background(), x, q, args...)
@@ -82,11 +82,11 @@ func (e migExec) queryRow(q string, args ...any) *sql.Row {
 	switch x := e.ex.(type) {
 	case *sql.DB:
 		if x == e.s.db {
-			return e.s.queryRowContext(context.Background(), q, args...)
+			return e.s.queryRowBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
-			return e.s.queryRowContext(x.ctx, q, args...)
+			return e.s.queryRowBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
 		return e.s.txQueryRowContext(context.Background(), x, q, args...)
@@ -99,11 +99,11 @@ func (e migExec) query(q string, args ...any) (*sql.Rows, error) {
 	switch x := e.ex.(type) {
 	case *sql.DB:
 		if x == e.s.db {
-			return e.s.queryContext(context.Background(), q, args...)
+			return e.s.queryBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
-			return e.s.queryContext(x.ctx, q, args...)
+			return e.s.queryBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
 		return e.s.txQueryContext(context.Background(), x, q, args...)
