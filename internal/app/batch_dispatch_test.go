@@ -408,7 +408,7 @@ func TestDispatchDecisionMatchesReference(t *testing.T) {
 	}
 }
 
-// admitAt must start exactly the runs the reference chooses.
+// admitAtLocked must start exactly the runs the reference chooses.
 func TestAdmitStartsSameRunsAsReference(t *testing.T) {
 	now := dispatchNow()
 	st := newTestStore(t)
@@ -452,7 +452,7 @@ func TestAdmitStartsSameRunsAsReference(t *testing.T) {
 	if len(want) == 0 {
 		t.Fatal("degenerate: reference admitted nothing")
 	}
-	s.admitAt(now)
+	s.admitAtLocked(now)
 	got := map[int64]bool{}
 	for id := range runningIDs() {
 		if !before[id] {
@@ -467,10 +467,10 @@ func TestAdmitStartsSameRunsAsReference(t *testing.T) {
 // ---------- window query ----------
 
 // windowFixture seeds jobs that pin down exactly which rows QueuedItemWindows returns, and returns
-// the expected row ids per job (by position). user scopes the rows on a shared database.
-func windowFixture(t testing.TB, st *Store, user string) (jobIDs []int64, want map[int64][]int64) {
+// the expected row ids per job (by position), under target tgt. user scopes the rows on a shared
+// database.
+func windowFixture(t testing.TB, st *Store, tgt int64, user string) (jobIDs []int64, want map[int64][]int64) {
 	t.Helper()
-	tgt := seedDispatchTarget(t, st)
 	want = map[int64][]int64{}
 	mk := func(conc, rows int, status string, running int, wantQueued int) {
 		data := make([]map[string]string, rows)
@@ -536,6 +536,10 @@ func checkQueuedItemWindows(t testing.TB, st *Store, jobIDs []int64, want map[in
 		if n := len(want[id]); n > len(per) {
 			t.Fatalf("job %d: fixture wants %d rows, only %d queued", id, n, len(per))
 		} else if n > 0 {
+			if len(got[id]) != n {
+				t.Errorf("job %d: window has %d rows, want %d", id, len(got[id]), n)
+				continue
+			}
 			for i, it := range per[:n] {
 				if got[id][i].ID != it.ID || got[id][i].RowIndex != it.RowIndex || !reflect.DeepEqual(got[id][i].Inputs, it.Inputs) {
 					t.Errorf("job %d row %d: window %+v != per-job %+v", id, i, got[id][i], it)
@@ -571,7 +575,7 @@ func checkQueuedItemWindows(t testing.TB, st *Store, jobIDs []int64, want map[in
 
 func TestQueuedItemWindowsReturnsExactlyTheWindow(t *testing.T) {
 	st := newTestStore(t)
-	ids, want := windowFixture(t, st, "win")
+	ids, want := windowFixture(t, st, seedDispatchTarget(t, st), "win")
 	checkQueuedItemWindows(t, st, ids, want)
 }
 

@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
@@ -364,25 +363,37 @@ func TestPostgresStockFavorites(t *testing.T) {
 // database is shared, so the test only compares rows of its own jobs and removes them afterwards.
 func TestPostgresDispatchDecision(t *testing.T) {
 	st := pgStore(t)
-	const user = "pg_dispatch"
+	const user, slug = "pg_dispatch", "pg_dispatch_plugin"
+	// Everything the test inserts is keyed by its own user, plugin slug and target, so it removes
+	// exactly that and no shared row is ever overwritten.
 	clean := func() {
+		st.exec(`DELETE FROM notification_source_cycles WHERE source_key IN (SELECT 'job:' || CAST(id AS TEXT) FROM batch_jobs WHERE created_by=?)`, user)
 		st.exec(`DELETE FROM batch_items WHERE job_id IN (SELECT id FROM batch_jobs WHERE created_by=?)`, user)
 		st.exec(`DELETE FROM batch_jobs WHERE created_by=?`, user)
+		st.exec(`DELETE FROM batch_targets WHERE plugin_slug=?`, slug)
+		st.exec(`DELETE FROM plugins WHERE slug=?`, slug)
 	}
 	clean()
 	t.Cleanup(clean)
+	if err := st.UpsertPlugin(slug, "PG dispatch", "1.0.0", "{}", "test"); err != nil {
+		t.Fatal(err)
+	}
+	targetID, err := st.CreateTarget(slug, "PG dispatch", `{"base_url":"x","api_key":"k"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	ids, want := windowFixture(t, st, user)
+	ids, want := windowFixture(t, st, targetID, user)
 	checkQueuedItemWindows(t, st, ids, want)
 
-	now := time.Now()
+	now := dispatchNow()
 	s := &Server{st: st}
-	wantC, wantM := s.refItemCandidates(now)
-	gotC, gotM := s.itemCandidatesAt(now)
 	mine := map[int64]bool{}
 	for _, id := range ids {
 		mine[id] = true
 	}
+	wantC, wantM := s.refItemCandidates(now)
+	gotC, gotM := s.itemCandidatesAt(now)
 	keep := func(c []queue.Item, m map[int64]candMeta) ([]queue.Item, map[int64]candMeta) {
 		var oc []queue.Item
 		om := map[int64]candMeta{}
@@ -402,8 +413,18 @@ func TestPostgresDispatchDecision(t *testing.T) {
 	if !reflect.DeepEqual(wc, gc) || !reflect.DeepEqual(wm, gm) {
 		t.Fatalf("candidates differ on Postgres\nwant %+v\n got %+v", wc, gc)
 	}
-	// The queued-job view is the same on both paths too.
-	if w, g := s.refQueuedItems(now), s.queuedItemsAt(now); !reflect.DeepEqual(w, g) {
-		t.Fatalf("queuedItems differ on Postgres")
+	// The queued-job view, restricted to the test's own jobs (its item id is the job id).
+	own := func(items []queue.Item) []queue.Item {
+		var out []queue.Item
+		for _, it := range items {
+			if mine[it.ID] {
+				out = append(out, it)
+			}
+		}
+		return out
+	}
+	w, g := own(s.refQueuedItems(now)), own(s.queuedItemsAt(now))
+	if len(w) == 0 || !reflect.DeepEqual(w, g) {
+		t.Fatalf("queuedItems differ on Postgres\nwant %+v\n got %+v", w, g)
 	}
 }

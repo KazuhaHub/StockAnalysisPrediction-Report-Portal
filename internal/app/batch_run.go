@@ -531,10 +531,11 @@ type candMeta struct {
 
 // admitLocked is the body of scheduleTick; the caller holds schedMu. It fills the free
 // slots (budget − running runs) with the highest-priority runnable runs and starts them.
-func (s *Server) admitLocked() { s.admitAt(time.Now()) }
+func (s *Server) admitLocked() { s.admitAtLocked(time.Now()) }
 
-// admitAt is admitLocked with the decision evaluated at an explicit instant.
-func (s *Server) admitAt(now time.Time) {
+// admitAtLocked is admitLocked with the decision evaluated at an explicit instant. Like
+// admitLocked, the caller must hold schedMu.
+func (s *Server) admitAtLocked(now time.Time) {
 	budget := s.batchBudget()
 	running := s.st.RunningItemCount("")
 	if budget-running <= 0 {
