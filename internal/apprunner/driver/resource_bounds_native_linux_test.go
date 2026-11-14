@@ -15,7 +15,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
 )
+
+// nativeAppCPUSet is the app set the native trials reserve: the lowest online CPU is held back, as the runner's
+// own default does on a host with enough CPUs. The trials need at least two.
+func nativeAppCPUSet(t *testing.T) string {
+	t.Helper()
+	online, err := cpuset.ReadFile("/sys/devices/system/cpu/online")
+	if err != nil || len(online) < 2 {
+		t.Fatalf("the native CPU reservation trial needs two online CPUs: %v %v", online, err)
+	}
+	return cpuset.Format(online[1:])
+}
 
 func fixtureContainerPost(
 	t *testing.T,
@@ -73,7 +86,7 @@ func verifyNativeCandidateResourceBounds(
 	t *testing.T,
 	ctx context.Context,
 	daemon *http.Client,
-	nativeID, socket string,
+	nativeID, socket, appCPUs string,
 ) {
 	t.Helper()
 	transport := &http.Transport{
@@ -95,8 +108,11 @@ func verifyNativeCandidateResourceBounds(
 	// The daemon reports the shares the runner set, and runc must have converted them to a cgroup v2
 	// cpu.weight below the default of 100. The hard quota is checked by the limits reader.
 	var weight struct {
-		HostConfig struct{ CpuShares int64 }
-		State      struct{ Pid int }
+		HostConfig struct {
+			CpuShares  int64
+			CpusetCpus string
+		}
+		State struct{ Pid int }
 	}
 	if err := readJSON(
 		ctx, daemon,
@@ -132,6 +148,24 @@ func verifyNativeCandidateResourceBounds(
 	}
 	t.Logf("NATIVE_APP_CPU_WEIGHT cpu.weight=%d (CpuShares=256)", cpuWeight)
 	t.Log("NATIVE_APP_CPU_WEIGHT_LOW")
+
+	// The reserved CPUs are not just requested: the kernel's effective cpuset of the container's cgroup is the
+	// app set, so the container can never be scheduled on a reserved CPU.
+	if weight.HostConfig.CpusetCpus != appCPUs {
+		t.Fatalf("native container CpusetCpus = %q, want the app set %q",
+			weight.HostConfig.CpusetCpus, appCPUs)
+	}
+	want, err := cpuset.Parse(appCPUs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := cpuset.ReadFile(
+		filepath.Join("/sys/fs/cgroup", cgroupPath, "cpuset.cpus.effective"))
+	if err != nil || !cpuset.Equal(effective, want) {
+		t.Fatalf("cgroup cpuset.cpus.effective = %v, want the app set %v: %v",
+			effective, want, err)
+	}
+	t.Logf("NATIVE_APP_CPUSET %s", cpuset.Format(effective))
 
 	var tmp struct {
 		Bytes     int64 `json:"bytes"`

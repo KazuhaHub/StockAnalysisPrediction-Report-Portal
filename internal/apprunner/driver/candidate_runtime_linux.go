@@ -88,7 +88,10 @@ func OpenCandidateRuntime(ctx context.Context, socket, dataPath, socketsPath str
 	for _, option := range options {
 		option(&configuration)
 	}
-	return &CandidateRuntime{socket: socket, imagePolicy: configuration.imagePolicy, roots: containerRoots{Data: dataPath, Sockets: socketsPath}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}}, nil
+	if err := checkAppCPUSet(report, configuration.appCPUs); err != nil {
+		return nil, err
+	}
+	return &CandidateRuntime{socket: socket, imagePolicy: configuration.imagePolicy, roots: containerRoots{Data: dataPath, Sockets: socketsPath, AppCPUs: configuration.appCPUs}, root: root, rootIdentity: expected, launches: map[*candidateLaunchState]struct{}{}}, nil
 }
 func (r *CandidateRuntime) Close() error {
 	if r == nil {

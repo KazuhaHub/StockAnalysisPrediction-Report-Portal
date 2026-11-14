@@ -41,6 +41,7 @@ fields are refused. When a field is absent, its default applies.
 | `disk_bytes` | 8 GiB | 1 GiB up to the volume size |
 | `running_backends` | 8 | 1–64 |
 | `image_store_bytes` | 10 GiB | 1 GiB – 1 TiB |
+| `reserved_cpus` | 1 on a host with at least 4 online CPUs, otherwise 0 | 0 – NCPU-1 |
 
 At startup the runner turns the percentages into absolute budgets. It uses `MemTotal` and `NCPU`
 from the Docker `/info` read it already makes. It also reads the size of the XFS data volume with
@@ -53,6 +54,41 @@ from the Docker `/info` read it already makes. It also reads the size of the XFS
 
 The ready line and the readiness facts report the effective budgets, so the evidence can observe
 them.
+
+### Reserved CPUs
+
+`reserved_cpus` is the number of the lowest-numbered online CPUs that no app container may run on.
+The Portal, PostgreSQL and the runner keep them. A lower CPU weight did not fix the Portal's
+latency under load (#442): quota-limited containers with many threads are released together each
+period and the Portal queues behind them on the run queue, so the apps are kept off those CPUs
+instead.
+
+- **Derivation.** The runner reads the online CPU list from `/sys/devices/system/cpu/online` and
+  its own allowed set from `sched_getaffinity`. The reserved set is the lowest `reserved_cpus`
+  online CPUs and the app set is the rest, for example `0` and `1-3` on 4 CPUs. If the online
+  list, the allowed set and `NCPU` from Docker `/info` do not agree, the runner is not ready
+  (`online_cpus_disagree_with_reported`). If the online list cannot be read, the allowed set
+  stands in for it.
+- **Budget.** The effective CPU budget is `min(cpu_percent × NCPU, app CPUs × 1000)` millis, so
+  the apps are never budgeted more CPU than the CPUs they may run on.
+- **Create.** Every app container's `HostConfig.CpusetCpus` is the app set. A candidate, a
+  writable candidate, the update-start plans (update, restore and enable starts) and a migration job
+  all derive from `planCandidateContainer`, and `validContainerPlan` refuses a body whose `CpusetCpus` is not
+  the set the plan was built for, even with a recomputed digest. Inspect equality compares
+  `CpusetCpus` as an exact string, which is how Docker echoes it.
+- **Policy digest.** A non-empty `CpusetCpus` is part of the create policy and so of the
+  `policy-sha256` label. A runner that reserves CPUs computes different digests than one that does
+  not, and so does one with a different app set. A container created under another setting is a
+  conflict, never adopted: after changing `reserved_cpus`, or after a host's online CPUs change,
+  an existing app container no longer matches its plan.
+- **Preflight.** A reservation needs a daemon that can pin containers to CPUs. The runner reads
+  the `CPUSet` flag of Docker `/info`, which on cgroup v2 means the `cpuset` controller is enabled
+  for its containers, and is not ready without it (`cpuset_controller_unavailable`). A value
+  outside 0 to NCPU-1 is not ready either (`reserved_cpus_outside_host_range`).
+- **Nothing reserved.** With `reserved_cpus` 0, `CpusetCpus` is left out of the create body, no
+  CPU fact is read and no daemon flag is required. Behaviour and policy digests are as before.
+- **Reported.** The ready line ends with `reserved_cpus=<list|none> app_cpus=<list|all>`, and the
+  managed runtime profile's `capacity` carries `reserved_cpus` and `app_cpus`.
 
 ### The reservation table (journal v3)
 

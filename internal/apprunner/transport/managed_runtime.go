@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
 )
 
 const ManagedRunnerProtocol = "1.0.0-dev.1"
@@ -41,6 +42,23 @@ type ManagedRuntimeCapacity struct {
 	ImageStoreBytes string `json:"image_store_bytes,omitempty"`
 	RunningBackends string `json:"running_backends,omitempty"`
 	EstimatedRows   string `json:"estimated_rows,omitempty"`
+	// ReservedCPUs and AppCPUs are the CPU lists no app container may run on and the one every app container is
+	// pinned to, in the kernel's list notation. Both are absent when the runner reserves no CPU.
+	ReservedCPUs string `json:"reserved_cpus,omitempty"`
+	AppCPUs      string `json:"app_cpus,omitempty"`
+}
+
+// validCPUSets accepts no sets, or a reserved list entirely below a disjoint app list, both in canonical form.
+func validCPUSets(reserved, app string) bool {
+	if reserved == "" && app == "" {
+		return true
+	}
+	if !cpuset.Valid(reserved) || !cpuset.Valid(app) {
+		return false
+	}
+	low, _ := cpuset.Parse(reserved)
+	high, _ := cpuset.Parse(app)
+	return low[len(low)-1] < high[0]
 }
 
 func validManagedCapacity(c ManagedRuntimeCapacity) bool {
@@ -52,7 +70,7 @@ func validManagedCapacity(c ManagedRuntimeCapacity) bool {
 		return err == nil && n >= 0 && (!positive || n > 0) && strconv.FormatInt(n, 10) == v
 	}
 	return decimal(c.MemoryMiB, true) && decimal(c.CPUMillis, true) && decimal(c.DiskBytes, true) && decimal(c.ImageStoreBytes, true) &&
-		decimal(c.RunningBackends, true) && decimal(c.EstimatedRows, false)
+		decimal(c.RunningBackends, true) && decimal(c.EstimatedRows, false) && validCPUSets(c.ReservedCPUs, c.AppCPUs)
 }
 
 type managedRuntimeWire struct {

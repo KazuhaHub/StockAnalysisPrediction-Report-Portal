@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
 )
 
 var (
@@ -33,7 +34,11 @@ type containerOwner struct {
 	DeploymentID, ControllerEpoch, InstallationID, OperationID, ResourceID, NamespaceID string
 	ReleaseSHA256, Generation, ControlFence, WriterFence                                string
 }
-type containerRoots struct{ Data, Sockets string }
+
+// containerRoots are the infrastructure values every plan is built from. AppCPUs is the CPU list every app
+// container is pinned to, or empty when the runner reserves no CPU; it reaches each create path because every
+// path takes its roots from the runtime.
+type containerRoots struct{ Data, Sockets, AppCPUs string }
 
 // These package-private bytes are produced only by the closed policy builder.
 // They are not signed execution authority. No production caller dispatches them
@@ -47,6 +52,9 @@ type containerPlan struct {
 	updateStart *UpdateStartBinding
 	migration   *MigrationBinding
 	profile     string
+	// cpuset is the app CPU list the plan was built for. The body must pin exactly this set (or none, when it is
+	// empty), so a body edited after planning, digest recomputed, is not the plan.
+	cpuset string
 }
 type containerMount struct {
 	Type        string
@@ -69,6 +77,14 @@ type containerMount struct {
 // siblings. Every create path (candidate, writable candidate, update start, migration job) derives from
 // planCandidateContainer, and validContainerPlan refuses any other value, so the weight is part of the
 // policy digest of each of them.
+//
+// CpusetCpus is the other CPU policy, and the stronger one: the CPUs app containers may run on at all. The
+// runner reserves the lowest-numbered CPUs for the Portal, PostgreSQL and itself and pins every app container
+// to the rest, because many quota-limited threads released together each period queue the Portal behind them no
+// matter what weight it has. It is empty when nothing is reserved, and then it is not on the wire. A non-empty
+// value joins the policy digest, so a runner that reserves CPUs computes different digests, and so builds
+// different plans, than one that does not: a container created under one setting is a conflict under another
+// and is replaced, not adopted.
 const appContainerCPUShares = 256
 
 type containerHostConfig struct {
@@ -77,6 +93,7 @@ type containerHostConfig struct {
 	CapDrop, SecurityOpt                                []string
 	Memory, MemorySwap, NanoCpus, PidsLimit, ShmSize    int64
 	CpuShares                                           int64
+	CpusetCpus                                          string `json:"CpusetCpus,omitempty"`
 	CgroupnsMode, IpcMode, PidMode, UTSMode, UsernsMode string
 	Init                                                bool
 	Mounts                                              []containerMount
@@ -143,7 +160,8 @@ func validContainerPlan(plan containerPlan) bool {
 		return false
 	}
 	var request containerCreate
-	if json.Unmarshal(plan.body, &request) != nil || request.HostConfig.CpuShares != appContainerCPUShares {
+	if json.Unmarshal(plan.body, &request) != nil || request.HostConfig.CpuShares != appContainerCPUShares ||
+		request.HostConfig.CpusetCpus != plan.cpuset || (plan.cpuset != "" && !cpuset.Valid(plan.cpuset)) {
 		return false
 	}
 	labels := ownerContainerLabels(plan.owner)
@@ -209,6 +227,9 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 			declared = true
 		}
 	}
+	if roots.AppCPUs != "" && !cpuset.Valid(roots.AppCPUs) {
+		return empty, ErrInvalidResponse
+	}
 	if !declared || !validContainerRoot(roots.Data) || !validContainerRoot(roots.Sockets) || roots.Data == roots.Sockets || strings.HasPrefix(roots.Data, roots.Sockets+"/") || strings.HasPrefix(roots.Sockets, roots.Data+"/") {
 		return empty, ErrInvalidResponse
 	}
@@ -230,6 +251,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	h.MemorySwap = h.Memory
 	h.NanoCpus = int64(limits.CPUMillis) * 1000000
 	h.CpuShares = appContainerCPUShares
+	h.CpusetCpus = roots.AppCPUs
 	h.PidsLimit = int64(limits.PIDs)
 	h.ShmSize = 16 << 20
 	h.CgroupnsMode = "private"
@@ -257,7 +279,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	if err != nil || len(body) > 32768 {
 		return empty, ErrInvalidResponse
 	}
-	return containerPlan{name: "portal-app-" + owner.ResourceID, body: body, bodySHA: containerHash(body), owner: owner}, nil
+	return containerPlan{name: "portal-app-" + owner.ResourceID, body: body, bodySHA: containerHash(body), owner: owner, cpuset: roots.AppCPUs}, nil
 }
 
 // createCandidateContainerHTTP is deliberately package-private and unwired from

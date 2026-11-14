@@ -37,15 +37,18 @@ type Finding struct {
 }
 
 type Report struct {
-	Profile             string    `json:"profile"`
-	API                 string    `json:"api"`
-	EngineVersion       string    `json:"engine_version,omitempty"`
-	Platform            string    `json:"platform,omitempty"`
-	ReportedCPUs        int       `json:"reported_cpus,omitempty"`
-	ReportedMemoryBytes int64     `json:"reported_memory_bytes,omitempty"`
-	MetadataCompatible  bool      `json:"metadata_compatible"`
-	ExecutionReady      bool      `json:"execution_ready"`
-	Findings            []Finding `json:"findings"`
+	Profile             string `json:"profile"`
+	API                 string `json:"api"`
+	EngineVersion       string `json:"engine_version,omitempty"`
+	Platform            string `json:"platform,omitempty"`
+	ReportedCPUs        int    `json:"reported_cpus,omitempty"`
+	ReportedMemoryBytes int64  `json:"reported_memory_bytes,omitempty"`
+	// CPUSetSupported is the daemon's claim that it can pin containers to CPUs (on cgroup v2, that the cpuset
+	// controller is enabled for them). A runner that reserves CPUs requires it; one that does not ignores it.
+	CPUSetSupported    bool      `json:"cpuset_supported"`
+	MetadataCompatible bool      `json:"metadata_compatible"`
+	ExecutionReady     bool      `json:"execution_ready"`
+	Findings           []Finding `json:"findings"`
 }
 
 func initialReport() Report {
@@ -85,12 +88,12 @@ type versionResponse struct {
 	Arch          string
 }
 type infoResponse struct {
-	OSType, Architecture, ServerVersion, Driver, CgroupVersion, CgroupDriver string
-	MemoryLimit, SwapLimit, CpuCfsPeriod, CpuCfsQuota, CPUShares, PidsLimit  bool
-	NCPU                                                                     int
-	MemTotal                                                                 int64
-	SecurityOptions                                                          []string
-	DriverStatus                                                             [][]string
+	OSType, Architecture, ServerVersion, Driver, CgroupVersion, CgroupDriver        string
+	MemoryLimit, SwapLimit, CpuCfsPeriod, CpuCfsQuota, CPUShares, CPUSet, PidsLimit bool
+	NCPU                                                                            int
+	MemTotal                                                                        int64
+	SecurityOptions                                                                 []string
+	DriverStatus                                                                    [][]string
 }
 
 func canonicalArch(value string) string {
@@ -110,6 +113,7 @@ func assess(v versionResponse, info infoResponse, hostArch string) Report {
 		r.Platform = info.OSType + "/" + canonicalArch(info.Architecture)
 	}
 	r.ReportedCPUs, r.ReportedMemoryBytes = info.NCPU, info.MemTotal
+	r.CPUSetSupported = info.CPUSet
 	r.MetadataCompatible = true
 	check := func(code string, ok bool) {
 		state := "supported"

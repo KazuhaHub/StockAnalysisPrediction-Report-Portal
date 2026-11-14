@@ -68,6 +68,7 @@ func (s *Server) handleManagedRuntime(ctx context.Context, conn *net.UnixConn) {
 			MemoryMiB: strconv.FormatInt(budgets.MemoryMiB, 10), CPUMillis: strconv.FormatInt(budgets.CPUMillis, 10),
 			DiskBytes: strconv.FormatInt(budgets.DiskBytes, 10), ImageStoreBytes: strconv.FormatInt(budgets.ImageStoreBytes, 10),
 			RunningBackends: strconv.FormatInt(budgets.RunningBackends, 10), EstimatedRows: strconv.Itoa(estimated),
+			ReservedCPUs: budgets.ReservedCPUs, AppCPUs: budgets.AppCPUs,
 		}
 	}
 	w := managedRuntimeWire{Format: "portal.runner.managed-profile/1-dev.1", Controller: controller, Profile: ManagedRuntimeProfile{Capacity: capacity, Protocol: ManagedRunnerProtocol, Platform: config.Platform, BackendProtocol: ManagedBackendProtocol, SandboxProfile: config.SandboxProfile, WritableSandboxProfile: control.WritableCandidateSandboxProfile, RootFilesystemUUID: config.Root.FilesystemUUID, RootInode: strconv.FormatUint(config.Root.Inode, 10)}, ObservedMS: strconv.FormatInt(time.Now().UnixMilli(), 10)}
