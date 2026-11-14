@@ -1138,6 +1138,45 @@ is evidence for OPS-08.
     saturated, so the run queue is not where the Portal's time goes and a weight that only arbitrates a contended CPU has little to arbitrate. The latency is as before, and
     this run's idle batch start (29868 us) is itself much slower than earlier runs' (5000 to 11000), which moves its bound; no tuning was done.
 
+    **Where the Portal's off-CPU time goes: pressure, disks and PostgreSQL (dispatch 43649765859 on `26af2c2c`, PostgreSQL, default 50%, production-mirroring layout; not
+    evidence).** The host sampler now reads, every thirty seconds, `/proc/pressure/{cpu,io,memory}` (some and full, avg10 and the total's delta as the stalled share of the
+    interval) and the same three files under the Portal scope, the PostgreSQL unit and one backend scope; `/proc/diskstats` for the device of PostgreSQL's data directory
+    and the XFS loop device (utilisation from I/O ticks, await, IOPS, write rate); `procs_running`, `procs_blocked`, I/O wait, dirty and writeback pages; and PostgreSQL's
+    commit rate, WAL syncs per second and mean WAL sync time (`pg_stat_wal`, with `track_wal_io_timing` on in the soak's own PostgreSQL). Series, pooled loaded against
+    bound (us): home 2466 idle / 17735 / 7466, report 4475 / 27011 / 9475, dispatch@200 1559 / 10083 / 6559, batch start 15159 / 55567 / 22738; all four fail.
+
+    Layout: PostgreSQL's data directory `/var/lib/postgresql/16/main`, the XFS loop volume's backing file and Docker's root all live on `sda1` (8:1), one disk; the XFS
+    mount is `loop0` (7:0) on that backing file, so the backends' storage flood and PostgreSQL write to the same device.
+
+    | Signal | idle mean / max | loaded mean / max |
+    | --- | --- | --- |
+    | host CPU pressure, some avg10 (percent of time) | 5.6 / 33.2 | **90.6 / 91.5** |
+    | host I/O pressure, some avg10 | 0.09 / 0.5 | 0.18 / 0.9 |
+    | host memory pressure, some avg10 | 0 / 0 | 0 / 0 |
+    | Portal scope CPU pressure, some / full avg10 | 0 / 0 | **12.8 / 9.7** (max 13.2 / 10.2) |
+    | Portal scope I/O and memory pressure | 0 | 0 |
+    | PostgreSQL unit CPU pressure, some / full | 0 / 0 | 6.6 / 6.1 |
+    | PostgreSQL unit I/O pressure | 0.03 | 0 |
+    | one backend scope CPU pressure, some | none | 24.6 (its quota's throttling) |
+    | backend scope I/O pressure | none | 0.005 |
+    | `sda1` utilisation / await (ms) | 0.3 / 0.83 | 1.2 / 0.31 (max 2.9 / 0.65) |
+    | `sda1` IOPS / write KiB/s | 13 / 859 | 61 / 19238 (max 170 / 67275) |
+    | `loop0` utilisation / await (ms) | 0 / 0.22 | 1.5 / 1.37 (max 5.2 / 2.8) |
+    | `procs_running` | 1 / 1 | 10.8 / 17 |
+    | I/O wait (percent of CPU time) | 0.06 / 0.26 | 0.13 / 0.68 |
+    | dirty pages (KiB) | 17033 / 94004 | 13814 / 22248 |
+    | PostgreSQL commits / WAL syncs per second | 97 / 7.1 | 291 / 36.5 |
+    | PostgreSQL mean WAL sync time (ms) | 0.18 / 0.22 | 0.34 / 0.39 |
+
+    CPU pressure dominates, I/O and memory do not. During the load the host has at least one runnable task waiting for a CPU 91% of the time, with 11 tasks running on 4 vCPUs on
+    average (17 at most), and the Portal scope itself waits for CPU 12.8% of the time and has nothing running 9.7% of the time, against 0 idle; its I/O and memory pressure stay at
+    0. The disk is nowhere near busy: 1% to 3% utilised, 0.3 ms await, no writeback backlog (dirty pages are lower loaded than idle, where the setup's writes sit). The XFS volume's
+    storage flood writes 18 MiB/s on average (66 MiB/s peak) through `loop0` onto `sda1` without saturating it. PostgreSQL's commit latency does not rise materially: its mean WAL sync
+    goes from 0.18 to 0.34 ms at three times the commits, and its own CPU pressure (6.6%) is larger than its I/O pressure (0). Disk contention is not the candidate: the Portal's
+    off-CPU time is run-queue waiting. That is not a CPU-share problem the weight could fix, since the Portal scope is at weight 100 against the backends' 35 and still waits: with
+    quota-limited containers, 24 to 56 threads each, being released at the same moment of each scheduling period, the Portal's wake-ups queue behind a burst of runnable threads,
+    which a weight does not shorten (this explanation is an inference from the pressure figures, not tested).
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
