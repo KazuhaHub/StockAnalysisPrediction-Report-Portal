@@ -341,3 +341,64 @@ func TestRecoveryStatesAreRestoredOnlyForTheActionsThatWriteThem(t *testing.T) {
 		}
 	}
 }
+
+// The removal of a never-started installation closes its failed install by one explicit transition. It is
+// the install action only, it needs recovery_required, and it produces a state the model restores from a snapshot.
+// Settle itself stays limited to the restore actions.
+func TestSettleNeverStartedClosesOnlyAFailedInstall(t *testing.T) {
+	op, err := NewOperation(ActionInstall, true, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stages := operationStages(ActionInstall, true)
+	for _, stage := range stages[1:] {
+		if stage == StageStart {
+			break
+		}
+		if op, err = op.Advance(op.Snapshot().Revision, stage); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if op, err = op.Advance(op.Snapshot().Revision, StageStart); err != nil {
+		t.Fatal(err)
+	}
+	unsettled, err := op.Fail(op.Snapshot().Revision, EffectsUnknown)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unsettled.Settle(unsettled.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("Settle accepted an install")
+	}
+	closed, err := unsettled.SettleNeverStarted(unsettled.Snapshot().Revision)
+	if err != nil || closed.Snapshot().Stage != StageFailed || closed.Snapshot().Revision != unsettled.Snapshot().Revision+1 {
+		t.Fatalf("install not closed: %+v %v", closed.Snapshot(), err)
+	}
+	if _, err := OperationFromSnapshot(closed.Snapshot()); err != nil {
+		t.Fatalf("closed snapshot is not a model state: %v", err)
+	}
+	if _, err := unsettled.SettleNeverStarted(unsettled.Snapshot().Revision + 1); !errors.Is(err, ErrRevisionConflict) {
+		t.Fatal("stale close accepted")
+	}
+	if _, err := closed.SettleNeverStarted(closed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("closed install closed twice")
+	}
+	if _, err := op.SettleNeverStarted(op.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatal("a running install was closed")
+	}
+	for _, action := range []Action{ActionUpdate, ActionEnable, ActionRepair, ActionUninstall, ActionDisable, ActionDeleteData, ActionRestore, ActionRestoreImport} {
+		other, err := NewOperation(action, true, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if other, err = other.Advance(other.Snapshot().Revision, operationStages(action, true)[1]); err != nil {
+			t.Fatal(err)
+		}
+		failed, err := other.Fail(other.Snapshot().Revision, EffectsUnknown)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := failed.SettleNeverStarted(failed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("%s was closed as a never-started install", action)
+		}
+	}
+}

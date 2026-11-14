@@ -741,6 +741,15 @@ func (s *Server) runPlatformManagedUninstall(ctx context.Context, expected platf
 		return zero, errAppPlatformStageEvidence
 	}
 	result := expected
+	// A never-started uninstall has no code resource: stop and remove_code are passed without a runner command.
+	neverStarted := false
+	if expected.snapshot.Action == appplatform.ActionUninstall {
+		never, err := platformOperationNeverStarted(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}, expected.id)
+		if err != nil {
+			return zero, err
+		}
+		neverStarted = never != nil
+	}
 	for result.snapshot.Stage != appplatform.StageComplete {
 		switch result.snapshot.Stage {
 		case appplatform.StageQueued, appplatform.StageValidate:
@@ -756,6 +765,14 @@ func (s *Server) runPlatformManagedUninstall(ctx context.Context, expected platf
 			}
 			result = next
 		case appplatform.StageStop, appplatform.StageRemoveCode:
+			if neverStarted {
+				next, err := s.advancePlatformNeverStartedRemoval(ctx, result)
+				if err != nil {
+					return platformInstallRun{lease: result}, err
+				}
+				result = next
+				continue
+			}
 			intent, err := s.preparePlatformManagedRemovalIntent(ctx, result)
 			if err != nil {
 				return platformInstallRun{lease: result}, err

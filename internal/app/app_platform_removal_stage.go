@@ -68,6 +68,10 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 	if p.DataEffect != dataEffect || (p.DesiredState != "enabled" && !(p.Action == appplatform.ActionUninstall && p.DesiredState == "disabled")) {
 		return errAppPlatformStageEvidence
 	}
+	if p.NeverStarted != nil && (p.Action != appplatform.ActionUninstall || !p.Managed || p.DesiredState != "enabled" || p.Generation != 1 || p.PortalSide || p.Data == nil ||
+		p.SourceReleaseSHA256 != "" || p.NeverStarted.OperationID == "") {
+		return errAppPlatformStageEvidence
+	}
 	var currentApp, currentPublisher, currentDesired, currentPhase string
 	var generation, currentRevision, currentPolicy int64
 	if err := e.queryRow(`SELECT app_id,publisher_id,desired_state,phase,generation,revision,policy_revision FROM app_platform_installations WHERE id=?`, lease.installationID).
@@ -85,7 +89,7 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 		return errAppPlatformStageEvidence
 	}
 	if lease.snapshot.Managed {
-		if err := validatePlatformManagedRemovalEffects(e, lease); err != nil {
+		if err := validatePlatformManagedRemovalEffects(e, lease, p.NeverStarted != nil); err != nil {
 			return err
 		}
 	} else {
@@ -113,10 +117,26 @@ func validatePlatformAdmittedRemoval(e migExec, lease platformOperationLease, fa
 		p.Data.WriterFence < 0 || p.Data.WriterFence == math.MaxInt64 || data.Revision < p.Data.Revision+1 || data.WriterFence < p.Data.WriterFence+1 {
 		return errAppPlatformStageEvidence
 	}
+	if p.NeverStarted != nil {
+		// The evidence the review named must still be exactly what the database holds.
+		current, err := platformLoadNeverStartedEvidence(e, lease.installationID, lease.controllerEpoch, facts.runtimeID.String, data.ID, data.Format, lease.id)
+		if err != nil {
+			if errors.Is(err, errAppPlatformPlanChanged) {
+				return errAppPlatformStageEvidence
+			}
+			return err
+		}
+		if current != *p.NeverStarted {
+			return errAppPlatformStageEvidence
+		}
+	}
 	return nil
 }
 
-func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLease) error {
+func validatePlatformManagedRemovalEffects(e migExec, lease platformOperationLease, neverStarted bool) error {
+	if neverStarted {
+		return validatePlatformNeverStartedRemovalEffects(e, lease)
+	}
 	if lease.snapshot.Action == appplatform.ActionDisable {
 		rows, err := e.query(`SELECT stage,effect_number,kind,state FROM app_platform_operation_effects WHERE operation_id=? ORDER BY stage`, lease.id)
 		if err != nil {
@@ -311,4 +331,52 @@ func (s *Store) advancePlatformRemovalControl(expected platformOperationLease) (
 		return zero, err
 	}
 	return result, nil
+}
+
+// validatePlatformNeverStartedRemovalEffects is the effect rule of an uninstall that skips stop and remove_code:
+// the operation holds no effect until its delete-data command is prepared, and then only that one.
+func validatePlatformNeverStartedRemovalEffects(e migExec, lease platformOperationLease) error {
+	if lease.snapshot.Action != appplatform.ActionUninstall {
+		return errAppPlatformStageEvidence
+	}
+	rows, err := e.query(`SELECT stage,effect_number,kind,state FROM app_platform_operation_effects WHERE operation_id=?`, lease.id)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	count, applied := 0, 0
+	for rows.Next() {
+		var stage, kind, state string
+		var number int
+		if err := rows.Scan(&stage, &number, &kind, &state); err != nil {
+			return err
+		}
+		if stage != "remove_data" || number != 1 || kind != "delete-data" || (state != "prepared" && state != "applied" && state != "unknown") {
+			return errAppPlatformStageEvidence
+		}
+		count++
+		if state == "applied" {
+			applied++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	switch lease.snapshot.Stage {
+	case appplatform.StageQueued, appplatform.StageValidate, appplatform.StageRevoke, appplatform.StageStop, appplatform.StageRemoveCode:
+		if count != 0 {
+			return errAppPlatformStageEvidence
+		}
+	case appplatform.StageRemoveData:
+		if count > 1 {
+			return errAppPlatformStageEvidence
+		}
+	case appplatform.StageComplete:
+		if count != 1 || applied != 1 {
+			return errAppPlatformStageEvidence
+		}
+	default:
+		return errAppPlatformStageEvidence
+	}
+	return nil
 }
