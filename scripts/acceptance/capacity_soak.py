@@ -152,6 +152,29 @@ def cpu_millis_between(previous_usec, current_usec, seconds):
     return (current_usec - previous_usec) / (seconds * 1000.0)
 
 
+# ---- who uses the CPU ----
+
+CPU_GROUPS = ("portal", "flood", "postgres", "runner", "docker", "backends", "other")
+
+
+def classify_process(comm, cmdline):
+    """The group of a host process: the measured Portal, the flood generator, the app runner (the three test processes of the
+    soak binary, told apart by their -test.run), PostgreSQL, Docker's daemons, or everything else. The eight backends are not
+    classified here: they are read from their cgroups."""
+    args = " ".join(cmdline)
+    if "-test.run=^TestPlatformCapacitySoakChild$" in args:
+        return "portal"
+    if "-test.run=^TestPlatformCapacitySoakFlood$" in args:
+        return "flood"
+    if "-test.run=^TestPlatformRunnerServiceChild$" in args:
+        return "runner"
+    if comm in ("postgres", "postmaster") or (cmdline and cmdline[0].startswith("/usr/lib/postgresql")):
+        return "postgres"
+    if comm in ("dockerd", "containerd", "runc") or comm.startswith("containerd-shim"):
+        return "docker"
+    return "other"
+
+
 # ---- sampling ----
 
 class Sampler:
@@ -159,7 +182,12 @@ class Sampler:
 
     `run` runs a command and returns its text (injected so the parsing is tested without a Docker daemon)."""
 
-    def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice"):
+    def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice", cpus=None, ticks_per_second=None):
+        self.cpus = cpus or os.cpu_count() or 1
+        self.ticks_per_second = ticks_per_second or os.sysconf("SC_CLK_TCK")
+        self._backend_full_ids = set()
+        self._process_ticks = {}
+        self._previous_at = None
         self.run, self.proc, self.mountpoint, self.image_id, self.clock = run, Path(proc), Path(mountpoint), image_id, clock
         self.cgroup_root = Path(cgroup_root)
         self._cpu = None
@@ -190,6 +218,7 @@ class Sampler:
                     log_bytes += os.path.getsize(candidate)
                 except OSError:
                     pass
+        self._backend_full_ids = set(full_ids.values())
         if running:
             rows = [parse_docker_stats_row(line) for line in
                     self.run("docker", "stats", "--no-stream", "--format", "{{json .}}", *running).splitlines() if line.strip()]
@@ -242,6 +271,47 @@ class Sampler:
             return None
         return sum(cpu_millis_between(previous[c][0], current[c][0], current[c][1] - previous[c][1]) for c in current)
 
+    def _group_ticks(self):
+        """CPU ticks (utime + stime) by group since each process started, for every process outside a backend container.
+        A process that exits between samples is not counted here; the rest of the host's busy time lands in "other"."""
+        groups = {}
+        for folder in self.proc.iterdir():
+            if not folder.name.isdigit():
+                continue
+            try:
+                stat = (folder / "stat").read_text()
+                fields = stat[stat.rindex(")") + 2:].split()
+                ticks = int(fields[11]) + int(fields[12])
+                comm = stat[stat.index("(") + 1:stat.rindex(")")]
+                cgroup = (folder / "cgroup").read_text()
+                if any(full_id in cgroup for full_id in self._backend_full_ids):
+                    continue  # inside a backend container: counted from the container's own cgroup
+                cmdline = (folder / "cmdline").read_bytes().decode("utf-8", "replace").split("\0")
+            except (OSError, ValueError, IndexError):
+                continue
+            group = classify_process(comm, cmdline)
+            groups.setdefault(group, {})[int(folder.name)] = ticks
+        return groups
+
+    def _cpu_groups(self, now, host_percent, backend_millis):
+        """Each group's share of the host's CPU between this sample and the previous one, in percent of all CPUs."""
+        groups = self._group_ticks()
+        flat = {pid: ticks for members in groups.values() for pid, ticks in members.items()}
+        previous, self._process_ticks = self._process_ticks, flat
+        seconds = None if self._previous_at is None else now - self._previous_at
+        self._previous_at = now
+        if not previous or not seconds or seconds <= 0 or host_percent is None:
+            return None
+        capacity = seconds * self.ticks_per_second * self.cpus
+        shares = {name: 100.0 * sum(max(t - previous.get(pid, 0), 0) for pid, t in members.items()) / capacity
+                  for name, members in groups.items() if name != "other"}
+        for name in ("portal", "flood", "postgres", "runner", "docker"):
+            shares.setdefault(name, 0.0)
+        shares["backends"] = backend_millis / (self.cpus * 10.0)
+        shares["host_busy"] = host_percent
+        shares["other"] = max(0.0, host_percent - sum(v for k, v in shares.items() if k != "host_busy"))
+        return shares
+
     def sample(self):
         now = self.clock()
         memory = parse_meminfo((self.proc / "meminfo").read_text())
@@ -251,13 +321,17 @@ class Sampler:
         running_tasks, total_tasks = parse_loadavg_tasks((self.proc / "loadavg").read_text())
         volume = os.statvfs(self.mountpoint)
         backends, log_bytes = self._backends(now)
-        return {
+        shares = self._cpu_groups(now, percent, backends["cpu_millis"] if backends.get("cpu_source") == "cgroup" else 0.0)
+        row = {
             "at_ms": int(now * 1000), "mem_total_kib": memory["total_kib"], "mem_available_kib": memory["available_kib"],
             "host_cpu_percent": percent, "tasks_running": running_tasks, "tasks_total": total_tasks,
             "xfs_total_bytes": volume.f_blocks * volume.f_frsize,
             "xfs_used_bytes": (volume.f_blocks - volume.f_bfree) * volume.f_frsize,
             "docker_log_bytes": log_bytes, "backends": backends,
         }
+        if shares is not None:
+            row["cpu_groups"] = shares
+        return row
 
 
 # ---- judging ----
@@ -322,6 +396,15 @@ def render_summary(evidence, verdict):
                   "| minute | window p95 (us) | threshold (us) | over |", "| --- | --- | --- | --- |"]
         for row in d["window_thresholds"]:
             lines.append(f"| {row['minute']} | {row['p95_us']} | {row['threshold_us']} | {'' if row['passed'] else 'over'} |")
+    breakdown = verdict.get("cpu_breakdown") or {}
+    if breakdown.get("windows"):
+        names = ("host_busy",) + CPU_GROUPS
+        lines += ["", "### CPU by group (percent of all CPUs)", "", "| period | " + " | ".join(names) + " | admitted/s | refused/s |",
+                  "| --- |" + " --- |" * (len(names) + 2)]
+        rows = [("idle", breakdown.get("idle", {}), None)] + [(f"minute {w['minute']}", w, r) for w, r in zip(breakdown["windows"], breakdown["flood_rates"])]
+        for label, shares, rate in rows:
+            cells = " | ".join(str(shares.get(n, "")) for n in names)
+            lines.append(f"| {label} | {cells} | {rate['admitted_per_second'] if rate else ''} | {rate['refused_per_second'] if rate else ''} |")
     achieved = verdict.get("achieved_fractions") or {}
     if achieved:
         lines += ["", "### Backend fractions achieved (lowest backend)", ""]
@@ -503,6 +586,34 @@ def _probe_checks(probes, unit_tests):
     return checks, reported
 
 
+def _mean_shares(rows):
+    if not rows:
+        return {}
+    return {name: round(sum(r.get(name, 0.0) for r in rows) / len(rows), 2) for name in ("host_busy",) + CPU_GROUPS}
+
+
+def cpu_breakdown(evidence, samples):
+    """Each group's share of the host CPU (percent of all CPUs) for the idle period and for every loaded window, and the flood's
+    admitted and refused request rates per second for every window."""
+    with_groups = [s for s in samples if s.get("cpu_groups")]
+    idle_windows = evidence.get("idle_windows") or []
+    idle = []
+    if idle_windows:
+        start = min(w.get("started_ms", 0) for w in idle_windows)
+        end = max(w.get("ended_ms", 0) for w in idle_windows)
+        idle = [s["cpu_groups"] for s in with_groups if start < s["at_ms"] <= end]
+    windows, rates = [], []
+    for minute, start, end in _window_bounds(evidence):
+        mean = _mean_shares([s["cpu_groups"] for s in with_groups if start < s["at_ms"] <= end])
+        windows.append({"minute": minute, **mean})
+    for window in evidence.get("windows", []):
+        flood = window.get("flood") or {}
+        span = max((window.get("ended_ms", 0) - window.get("started_ms", 0)) / 1000.0, 1.0)
+        rates.append({"minute": window["minute"], "admitted_per_second": round(flood.get("backend_requests_ok", 0) / span, 1),
+                      "refused_per_second": round(flood.get("backend_requests_busy", 0) / span, 1)})
+    return {"idle": _mean_shares(idle), "windows": windows, "flood_rates": rates}
+
+
 def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent=""):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
@@ -565,12 +676,13 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     busy_values = [s["host_cpu_percent"] for s in load if s.get("host_cpu_percent") is not None]
     busy = {"mean": round(sum(busy_values) / len(busy_values), 1), "max": max(busy_values)} if busy_values else {}
     backend_cpu_mean = round(sum(s["backends"]["cpu_millis"] for s in cpu_samples) / len(cpu_samples), 1) if cpu_samples else 0.0
+    breakdown = cpu_breakdown(evidence, samples)
     passed = all(c["passed"] for c in checks)
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
         and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)),
-        "cpu_percent_override": cpu_percent, "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
+        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),

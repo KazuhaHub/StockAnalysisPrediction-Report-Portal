@@ -657,6 +657,77 @@ class DatabaseTests(unittest.TestCase):
                 soak.soak_database(bad)
 
 
+def write_process(proc, pid, comm, args, ticks, cgroup="0::/system.slice/x.service"):
+    folder = Path(proc) / str(pid)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "stat").write_text(f"{pid} ({comm}) S 1 1 1 0 -1 0 0 0 0 0 {ticks[0]} {ticks[1]} 0 0 20 0 1 0 1 1 1\n")
+    (folder / "cmdline").write_bytes("\0".join(args).encode() + b"\0")
+    (folder / "cgroup").write_text(cgroup + "\n")
+
+
+class CPUBreakdownTests(unittest.TestCase):
+    def test_processes_are_grouped_by_what_they_are(self):
+        c = soak.classify_process
+        self.assertEqual(c("portal-soak-nati", ["/tmp/x/portal.test", "-test.run=^TestPlatformCapacitySoakChild$"]), "portal")
+        self.assertEqual(c("portal.test", ["/tmp/x/portal.test", "-test.run=^TestPlatformCapacitySoakFlood$", "-test.v"]), "flood")
+        self.assertEqual(c("portal.test", ["/tmp/x/portal.test", "-test.run=^TestPlatformRunnerServiceChild$"]), "runner")
+        self.assertEqual(c("portal.test", ["/tmp/x/portal.test", "-test.run=^TestPlatformCapacitySoak$"]), "other")
+        for comm in ("postgres", "postmaster"):
+            self.assertEqual(c(comm, ["postgres: 16/main: portal reports_soak 127.0.0.1(5) idle"]), "postgres")
+        self.assertEqual(c("dockerd", ["/usr/bin/dockerd"]), "docker")
+        self.assertEqual(c("containerd", ["/usr/bin/containerd"]), "docker")
+        self.assertEqual(c("containerd-shim", ["/usr/bin/containerd-shim-runc-v2"]), "docker")
+        self.assertEqual(c("bash", ["bash"]), "other")
+
+    def test_a_sample_reports_each_groups_share_of_the_host_and_the_rest_as_other(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc = Path(root) / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            (Path(root) / "mount").mkdir()
+            child = ["/t/portal.test", "-test.run=^TestPlatformCapacitySoakChild$"]
+            flood = ["/t/portal.test", "-test.run=^TestPlatformCapacitySoakFlood$"]
+            ticks = {"n": 0}
+
+            def lay(n):
+                # four CPUs at 100 ticks a second: a host second is 400 ticks. Between samples (10 s) the host spends 2000 busy of 4000.
+                (proc / "stat").write_text(f"cpu  {1000 + n * 2000} 0 0 {9000 + n * 2000} 0 0 0 0 0 0\n")
+                write_process(proc, 100, "portal.test", child, (100 + n * 400, 0))      # 400 ticks = 10% of 4000
+                write_process(proc, 101, "portal.test", flood, (50 + n * 200, 0))       # 5%
+                write_process(proc, 102, "postgres", ["postgres: x"], (0 + n * 100, 100 * n))  # 5%
+                write_process(proc, 103, "portal.test", ["/t/portal.test", "-test.run=^TestPlatformRunnerServiceChild$"], (n * 40, 0))  # 1%
+                write_process(proc, 104, "dockerd", ["dockerd"], (n * 60, 0))
+                write_process(proc, 105, "containerd-shim", ["containerd-shim"], (n * 20, 0))
+                write_process(proc, 106, "other-thing", ["x"], (n * 80, 0))              # 2%
+                write_process(proc, 107, "soak-app", ["/soak-app"], (n * 700, 0), cgroup="0::/system.slice/docker-" + "f" * 64 + ".scope")  # inside a backend
+
+            def run(*args):
+                return "" if args[:2] == ("docker", "ps") else (_ for _ in ()).throw(AssertionError(args))
+
+            moments = iter([1000.0, 1010.0])
+            sampler = soak.Sampler(run=run, proc=proc, mountpoint=Path(root) / "mount", image_id="sha256:" + "b" * 64, clock=lambda: next(moments),
+                                   cpus=4, ticks_per_second=100)
+            lay(0)
+            first = sampler.sample()
+            self.assertNotIn("cpu_groups", first)
+            lay(1)
+            sampler._backend_full_ids = {"f" * 64}
+            # The backends' summed cgroup CPU: 400 millis of the host's 4000 is 10%.
+            sampler._backends = lambda now: ({"total": 8, "running": 8, "restarting": 0, "exited": 0, "oom_killed": 0, "restart_count": 0,
+                                              "memory_bytes": 0, "cpu_millis": 400.0, "pids": 0, "cpu_source": "cgroup"}, 0)
+            second = sampler.sample()
+        shares = second["cpu_groups"]
+        self.assertEqual(round(shares["host_busy"], 1), 50.0)
+        self.assertEqual({k: round(v, 1) for k, v in shares.items() if k not in ("host_busy", "other")},
+                         {"portal": 10.0, "flood": 5.0, "postgres": 5.0, "runner": 1.0, "docker": 2.0, "backends": 10.0})
+        self.assertEqual(round(shares["other"], 1), 50.0 - 33.0 + 0.0)
+
+
+def self_kwargs():
+    return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+
+
 class CPUBudgetTests(unittest.TestCase):
     def kwargs(self):
         return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
@@ -679,6 +750,26 @@ class CPUBudgetTests(unittest.TestCase):
             self.assertTrue(verdict["passed"])
             self.assertFalse(verdict["counts_as_ops08_evidence"], override)
             self.assertEqual(verdict["cpu_percent_override"], override)
+
+    def test_the_verdict_breaks_the_cpu_down_by_group_for_the_idle_period_and_every_window(self):
+        evidence = child_evidence(windows=3)
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": LOAD_START_MS - 90_000, "ended_ms": LOAD_START_MS - 30_000}]
+        samples = load_samples(3)
+        for sample in samples:
+            at = sample["at_ms"]
+            idle = at <= LOAD_START_MS
+            sample["cpu_groups"] = {"host_busy": 5.0 if idle else 80.0, "portal": 1.0 if idle else 8.0, "flood": 0.0 if idle else 10.0,
+                                    "postgres": 0.5 if idle else 12.0, "runner": 0.1, "docker": 0.2, "backends": 0.0 if idle else 48.0, "other": 3.2 if idle else 1.7}
+        flood = evidence["windows"][0]["flood"]
+        flood.update(backend_requests_ok=600, backend_requests_busy=7200)
+        breakdown = soak.evaluate(evidence, samples, **self_kwargs())["cpu_breakdown"]
+        self.assertEqual(breakdown["idle"]["portal"], 1.0)
+        self.assertEqual(len(breakdown["windows"]), 3)
+        self.assertEqual(breakdown["windows"][0]["flood"], 10.0)
+        self.assertEqual(breakdown["windows"][0]["host_busy"], 80.0)
+        self.assertEqual(breakdown["flood_rates"][0], {"minute": 1, "admitted_per_second": 10.0, "refused_per_second": 120.0})
+        text = soak.render_summary(evidence, soak.evaluate(evidence, samples, **self_kwargs()))
+        self.assertIn("CPU by group", text)
 
     def test_host_busy_and_the_backends_cpu_are_recorded_over_the_load(self):
         samples = load_samples(3)
