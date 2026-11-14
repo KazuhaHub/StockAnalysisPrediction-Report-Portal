@@ -328,6 +328,19 @@ const soakSamplesPerWindow = 100
 
 func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEvery == 0 }
 
+// soakParseCPUPercent reads APP_CAPACITY_SOAK_CPU_PERCENT: empty leaves the runner's own default, else an override of its
+// capacity.cpu_percent. The backends are still sized from the budget the runner reports, so a lower budget shrinks each one.
+func soakParseCPUPercent(env string) (*int, error) {
+	if env == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(env)
+	if err != nil || n < 1 || n > 100 || strconv.Itoa(n) != env {
+		return nil, fmt.Errorf("the runner CPU percent is empty or an integer from 1 to 100, got %q", env)
+	}
+	return &n, nil
+}
+
 // soakPostgresLocal reports whether a DSN names the job's own loopback service: the only database the soak resets.
 func soakPostgresLocal(dsn string) bool {
 	u, err := url.Parse(dsn)
@@ -733,6 +746,23 @@ func TestSoakPostgresIsOnlyEverResetOnTheJobsOwnLoopbackService(t *testing.T) {
 	for _, dsn := range []string{"", "postgres://portal@db.example.com/x", "postgres://localhost.evil.com/x", "not a url", "postgres://portal@10.0.0.5:5432/x"} {
 		if soakPostgresLocal(dsn) {
 			t.Errorf("%s is not loopback", dsn)
+		}
+	}
+}
+
+func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
+	if got, err := soakParseCPUPercent(""); err != nil || got != nil {
+		t.Fatalf("empty = %v, %v", got, err)
+	}
+	for _, want := range []int{1, 25, 37, 100} {
+		got, err := soakParseCPUPercent(strconv.Itoa(want))
+		if err != nil || got == nil || *got != want {
+			t.Errorf("%d = %v, %v", want, got, err)
+		}
+	}
+	for _, bad := range []string{"0", "101", "x", "-1", "37.5", " 37"} {
+		if _, err := soakParseCPUPercent(bad); err == nil {
+			t.Errorf("accepted %q", bad)
 		}
 	}
 }

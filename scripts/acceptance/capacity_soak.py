@@ -48,6 +48,9 @@ PIDS_REACHED_FRACTION = 0.85
 IMAGE_STORE_HEADROOM_BYTES = 6 * 1024 ** 3
 IMAGE_STORE_NATIVE_BYTES = 8 * 1024 ** 3 + IMAGE_STORE_HEADROOM_BYTES
 MEBIBYTE = 1024 ** 2
+# The runner's own default of capacity.cpu_percent (internal/apprunner/service/capacity.go). A run that overrides it measures a
+# different budget and is evidence only if it names this value.
+RUNNER_DEFAULT_CPU_PERCENT = 50
 RETIRED_PROBES = ("ninth_backend", "memory_over_budget", "cpu_over_budget")
 REQUIRED_PROBES = (
     "fifty_first_installation",
@@ -500,7 +503,7 @@ def _probe_checks(probes, unit_tests):
     return checks, reported
 
 
-def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant=""):
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent=""):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
@@ -559,10 +562,15 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     shallow_idle = max(idle.get("dispatch_shallow", {}).get("p95_us", 0), 1)
     shallow = [w["dispatch_shallow"]["p95_us"] for w in windows if w.get("dispatch_shallow")]
     shallow_ratio = round(max(shallow) / shallow_idle, 3) if shallow else None
+    busy_values = [s["host_cpu_percent"] for s in load if s.get("host_cpu_percent") is not None]
+    busy = {"mean": round(sum(busy_values) / len(busy_values), 1), "max": max(busy_values)} if busy_values else {}
+    backend_cpu_mean = round(sum(s["backends"]["cpu_millis"] for s in cpu_samples) / len(cpu_samples), 1) if cpu_samples else 0.0
     passed = all(c["passed"] for c in checks)
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
-        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres",
+        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
+        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)),
+        "cpu_percent_override": cpu_percent, "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
@@ -610,6 +618,13 @@ def soak_variant(value):
     """The diagnostic variants of the Go soak: a closed list, empty for an evidence run."""
     if not re.fullmatch(r"(memory-db|no-batch-probes|skip-image-store)(,(memory-db|no-batch-probes|skip-image-store))*|", value or ""):
         raise RuntimeError("the soak variant is empty or a list of memory-db and no-batch-probes")
+    return value or ""
+
+
+def soak_cpu_percent(value):
+    """An override of the runner's capacity.cpu_percent for a diagnostic run: empty or an integer 1 to 100."""
+    if value and not (re.fullmatch(r"[0-9]{1,3}", value) and 1 <= int(value) <= 100 and str(int(value)) == value):
+        raise RuntimeError("soak_cpu_percent is empty or an integer from 1 to 100")
     return value or ""
 
 
@@ -708,6 +723,7 @@ def main(argv):
     minutes = duration_minutes(args.duration_minutes)
     image = soak_image(os.environ.get("APP_CAPACITY_SOAK_IMAGE"))
     variant = soak_variant(os.environ.get("APP_CAPACITY_SOAK_VARIANT", ""))
+    cpu_percent = soak_cpu_percent(os.environ.get("APP_CAPACITY_SOAK_CPU_PERCENT", ""))
     database = soak_database(os.environ.get("APP_CAPACITY_SOAK_DB", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
     for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
@@ -773,7 +789,7 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database,
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent,
                         APP_CAPACITY_SOAK_POSTGRES_DSN=os.environ.get("APP_CAPACITY_SOAK_POSTGRES_DSN", ""))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
@@ -819,7 +835,7 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent)
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -834,7 +850,7 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests, "variant": variant, "database": database,
+        "unit_tests": unit_tests, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

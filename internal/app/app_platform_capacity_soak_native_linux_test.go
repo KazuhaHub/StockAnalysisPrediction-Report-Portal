@@ -167,7 +167,16 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	// The development image profile: the soak backend is a local reference image from the job's own registry.
 	// The runner keeps its declared default budgets, the 8 GiB disk budget included.
 	t.Setenv("APP_RUNNER_SERVICE_TEST_TIMEOUT", soakRunnerServiceTimeout(minutes, baseline))
-	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) { c.AllowLocalReferenceImages = true })
+	cpuPercent, err := soakParseCPUPercent(os.Getenv("APP_CAPACITY_SOAK_CPU_PERCENT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
+		c.AllowLocalReferenceImages = true
+		if cpuPercent != nil { // a diagnostic override of the runner's CPU budget; the backends are sized from what it reports
+			c.Capacity = &service.CapacityConfig{CPUPercent: cpuPercent}
+		}
+	})
 	defer func() {
 		runner.stop(t)
 		removePlatformServiceFixtureRoot(t, runner.root)

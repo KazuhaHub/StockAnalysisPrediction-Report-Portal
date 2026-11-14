@@ -657,6 +657,40 @@ class DatabaseTests(unittest.TestCase):
                 soak.soak_database(bad)
 
 
+class CPUBudgetTests(unittest.TestCase):
+    def kwargs(self):
+        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+
+    def test_the_cpu_percent_is_empty_or_one_to_one_hundred(self):
+        self.assertEqual(soak.soak_cpu_percent(""), "")
+        self.assertEqual(soak.soak_cpu_percent("37"), "37")
+        for bad in ("0", "101", "x", "-5", "37.5", "50 "):
+            with self.assertRaises(RuntimeError):
+                soak.soak_cpu_percent(bad)
+
+    def test_an_override_of_the_runner_cpu_budget_is_evidence_only_when_it_equals_the_default(self):
+        self.assertEqual(soak.RUNNER_DEFAULT_CPU_PERCENT, 50)
+        samples = load_samples(120)
+        evidence = child_evidence(windows=120)
+        self.assertTrue(soak.evaluate(evidence, samples, **self.kwargs())["counts_as_ops08_evidence"])
+        self.assertTrue(soak.evaluate(evidence, samples, cpu_percent="50", **self.kwargs())["counts_as_ops08_evidence"])
+        for override in ("37", "25"):
+            verdict = soak.evaluate(evidence, samples, cpu_percent=override, **self.kwargs())
+            self.assertTrue(verdict["passed"])
+            self.assertFalse(verdict["counts_as_ops08_evidence"], override)
+            self.assertEqual(verdict["cpu_percent_override"], override)
+
+    def test_host_busy_and_the_backends_cpu_are_recorded_over_the_load(self):
+        samples = load_samples(3)
+        for i, sample in enumerate(samples):
+            sample["host_cpu_percent"] = 80.0 if i % 2 else 60.0
+        verdict = soak.evaluate(child_evidence(windows=3), samples, **self.kwargs())
+        busy = verdict["host_busy_percent"]
+        self.assertEqual(busy["max"], 80.0)
+        self.assertTrue(60.0 < busy["mean"] < 80.0)
+        self.assertEqual(verdict["backend_cpu_millis_mean"], 1900.0)
+
+
 class UnitTestResultTests(unittest.TestCase):
     def test_go_test_json_results_are_read_by_test_name(self):
         lines = "\n".join(json.dumps(e) for e in [
