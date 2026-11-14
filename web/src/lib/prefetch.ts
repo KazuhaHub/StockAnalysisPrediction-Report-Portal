@@ -72,6 +72,14 @@ export function rememberPrefetched(url: string, data: unknown): void {
   cache.set(url, { at: Date.now(), data })
 }
 
+/**
+ * The warm-up for `url` still on the wire, if there is one. Settles when it does, never rejects;
+ * read the answer with `readPrefetched` afterwards (a failed warm-up leaves nothing to read).
+ */
+export function prefetchInFlight(url: string): Promise<void> | undefined {
+  return inFlight.get(url)
+}
+
 /** The warm answer for `url` if one was stored within `maxAgeMs`, otherwise undefined. */
 export function readPrefetched<T>(url: string, maxAgeMs: number): T | undefined {
   const hit = cache.get(url)

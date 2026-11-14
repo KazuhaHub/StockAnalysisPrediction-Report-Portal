@@ -2282,9 +2282,28 @@ body {
   .ant-checkbox-wrapper:not(:has(> .ant-checkbox + span)) { padding: 10px; margin: -10px; }
   .ant-input-number-actions { display: none; }
 }
-/* A spinning status icon holds still for readers who ask for less motion. */
+/* A Spin over content taller than the screen (a report body). antd centres its ring in the whole
+   block, which for a long report is thousands of pixels below the fold: the content dims and nothing
+   says why. Here the ring sits near the top of the block and stays in view while it is scrolled. */
+.ant-spin.rp-spin-tall > .ant-spin-section {
+  inset: 0;
+  width: auto;
+  height: auto;
+  transform: none;
+  display: block;
+  padding-top: 96px;
+}
+.ant-spin.rp-spin-tall > .ant-spin-section > .ant-spin-dot {
+  position: sticky;
+  top: 40vh;
+  display: block;
+  margin-inline: auto;
+}
+/* A spinning status icon holds still for readers who ask for less motion. Content under a Spin
+   (the reading page's report while the next one loads) dims at once instead of fading. */
 @media (prefers-reduced-motion: reduce) {
   .anticon-spin, .anticon-spin::before { animation: none; }
+  .ant-spin-container, .ant-spin-container::after { transition: none; }
 }
 
 /* Every antd tab row that does not fit scrolls (antd's own swipe and wheel) and fades at the side
