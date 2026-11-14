@@ -1009,6 +1009,7 @@ harness. Runs, all five minutes, none is evidence:
 | --- | --- | --- | --- | --- | --- |
 | smoke 43570051027 (`edfcb92`) | file-backed, probes | 678 / 3853 / 5678 pass | 1795 / 8102 / 6795 **fail** | 614 / 3829 / 5614 pass | 5532 / 16334 / 10532 **fail** |
 | smoke 43571196806 (`56e6881a`) | file-backed, probes | 658 / 3338 / 5658 pass | 1770 / 5552 / 6770 pass | 587 / 3220 / 5587 pass | 5758 / 26467 / 10758 **fail** |
+| smoke 43590645282 (`85376438`, with #440) | file-backed, probes | 1069 / 5853 / 6069 pass | 3147 / 14924 / 8147 **fail** | 906 / 5604 / 5906 pass | 9598 / 48249 / 14598 **fail** |
 | smoke 43568339184 (`3e3d591`) | file-backed, probes | passes | 3523 / 50611 / 8523 **fail** | passes | 7852 / 112261 / 12852 **fail** |
 | dispatch 43570060321 (`edfcb92`, `no-batch-probes`) | file-backed, no probes | 674 / 4955 / 5674 pass | 1863 / 12681 / 6863 **fail** | 602 / 4901 / 5602 pass | not run |
 | dispatch 43568354287 (`3e3d591`, `memory-db`) | in-memory, probes | 804 / 6343 / 5804 **fail** | 1040 / 4520 / 6040 pass | 863 / 4224 / 5863 pass | 4174 / 16911 / 9174 **fail** |
@@ -1133,6 +1134,44 @@ Per window (home, report, dispatch p95 in us): 1164 1474 1577; 3244 1044 1443; 9
 of each series also fell (home 234, report 389, dispatch 480 us). Statement preparation is still 22.7% of the CPU: the relay's
 read transactions (`platformBackendReadTx`, 60% of CPU cumulative) still prepare a share of their statements, so a further
 reduction is available there, but nothing about the gate needs it.
+
+### After #440 (`0874b426`, admission before session reads): smoke 43590645282 on `85376438` (not evidence)
+
+The branch merged `integration/app-platform` and nothing else changed: verdict, diagnostics and fixture are those of `56e6881a`
+(run 43571196806). Both failed only the batch start series; the new run also failed the report page.
+
+| Series (us) | `56e6881a`: idle / pooled / bound | windows 1 to 5 | `85376438`: idle / pooled / bound | windows 1 to 5 |
+| --- | --- | --- | --- | --- |
+| home | 658 / 3338 / 5658 pass | 3573, 2795, 3258, 3704, 2658 | 1069 / 5853 / 6069 pass | 5460, 6766, 5574, 5706, 6109 |
+| report | 1770 / 5552 / 6770 pass | 5133, 6044, 5660, 6255, 4764 | 3147 / 14924 / 8147 **fail** | 13995, 13583, 14287, 15080, 15589 |
+| dispatch@200 | 587 / 3220 / 5587 pass | 1720, 3182, 3394, 3691, 2373 | 906 / 5604 / 5906 pass | 3999, 5680, 4754, 5668, 5285 |
+| batch start | 5758 / 26467 / 10758 **fail** | 26467, 26393, 15813, 20345, 27340 | 9598 / 48249 / 14598 **fail** | 58980, 42529, 39836, 47715, 42724 |
+
+Diagnostic minute (pages only, back to back), idle then loaded, `56e6881a` against `85376438`:
+
+| | `56e6881a` | `85376438` |
+| --- | --- | --- |
+| idle home / report p95 (us) | 396 / 1260 | 950 / 3242 |
+| loaded home / report p95 (us) | 3463 / 6843 | 5978 / 12859 |
+| pool waits, loaded minute (count, total) | 31948, 9556 ms | 6111, 6666 ms |
+| connection occupied, idle / loaded (share of 2 ms samples) | 5.6% / 26.5% | 13.8% / 33.5% |
+| block profile, `database/sql.(*DB).conn` | 8.39 s | 5.93 s |
+| block profile, `currentActiveUser` | 4.36 s | 1.71 s |
+| CPU profile, share in the relay's `apiPlatformBackend` | 66% | 63% |
+| flood answered / refused per minute | about 670 / 6870 | about 395 / 6950 |
+
+What #440 did, measured: the refused attempt no longer touches the database. The CPU profile attributes 0.05 s (`platformJSONBusy`) and
+0.03 s (`platformSessionCookieSigned`) to the pre-check over a minute of about 6950 refusals, roughly 11 microseconds each and no connection
+acquisition, against ten statements over nine acquisitions before. Pool waits fell by 81% and the blocked time on the connection by 29%.
+
+What it did not do: the p95 of the pages and of the batch start did not improve in this run, because the second run's host was slower in
+every figure including the idle ones (idle home 1069 us against 658, idle report 3147 against 1770, connection occupancy 13.8% idle against
+5.6%), and what remains in the loaded minute is the work of the requests the relay does admit. At the cap, two admitted relay requests are in
+flight at all times (395 to 670 a minute, each about 14 ms of CPU and eight read statements in one read transaction, with Ed25519 signing and
+JSON); the CPU profile puts 63% of the minute in `apiPlatformBackend` under `requireUserJSON`, with statement preparation and the JSON decode
+the largest flat entries. This is the profile of the failing series; nothing in the harness was tuned in response. The two figures to compare
+across runs are therefore the pool wait count and the refused-attempt cost; the latency series vary with the host by more than the effect of the
+change (the report page's pooled p95 has ranged from 5.5 to 51 ms across the runs of this round).
 
 ### Evidence files
 
