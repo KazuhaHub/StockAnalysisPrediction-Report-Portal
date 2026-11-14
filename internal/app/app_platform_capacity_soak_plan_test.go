@@ -381,3 +381,6 @@ func TestSoakDispatchBacklogs(t *testing.T) {
 		t.Fatalf("backlogs = %d and %d", soakQueueBacklog, soakQueueBacklogShallow)
 	}
 }
+
+// soakSamples are the latency samples of one window, or of the whole loaded period when pooled.
+type soakSamples struct{ home, report, dispatch, dispatchShallow []time.Duration }

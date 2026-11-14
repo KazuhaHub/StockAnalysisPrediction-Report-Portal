@@ -66,8 +66,18 @@
       "report_p95_us": null,
       "dispatch_p95_us": null
     },
-    "latency_rule": "Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured process",
+    "latency_rule": "Owner decision 2026-11-13: pooled loaded p95 within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured process; per-window p95 are diagnostics",
     "latency_floor_us": 5000,
+    "pooled_loaded_p95_us": {
+      "home": null,
+      "report": null,
+      "dispatch": null
+    },
+    "windows_over_the_threshold_diagnostic": {
+      "home": null,
+      "report": null,
+      "dispatch": null
+    },
     "worst_load_window_ratio_to_idle": {
       "home": null,
       "report": null,
@@ -106,7 +116,7 @@
     }
   },
   "unproven_until_the_dispatch_run": [
-    "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is strict per one-minute window)",
+    "that p95 of GET /api/home, of the report page and of the queue's dispatch decision stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is the pooled loaded p95; per-window values are diagnostics)",
     "that the eight backends, flooding their limits, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted",
     "that each refused probe installation releases its namespace through the managed uninstall on the declared 8 GiB disk budget (each probe records retired: managed_uninstall)",
     "that the per-application task quota (1000) is reached natively; it is proven at its boundary at unit level only"

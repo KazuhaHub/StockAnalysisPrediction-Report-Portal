@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,6 +114,14 @@ type soakWindow struct {
 	Backends []soakBackendStatus `json:"backends,omitempty"`
 }
 
+// soakLoaded holds the pooled summary of each latency series over the whole loaded period.
+type soakLoaded struct {
+	Home            soakStats `json:"home"`
+	Report          soakStats `json:"report"`
+	Dispatch        soakStats `json:"dispatch"`
+	DispatchShallow soakStats `json:"dispatch_shallow"`
+}
+
 type soakBackendStatus struct {
 	Installation string `json:"installation"`
 	Answered     bool   `json:"answered"`
@@ -154,19 +163,21 @@ type soakFlood struct {
 }
 
 type soakEvidence struct {
-	Format          string            `json:"format"`
-	Budgets         soakBudgets       `json:"budgets"`
-	Sizing          soakSizing        `json:"sizing"`
-	Installations   map[string]int    `json:"installations"`
-	Probes          []soakProbeResult `json:"probes"`
-	Idle            soakWindow        `json:"idle"`
-	IdleWindows     []soakWindow      `json:"idle_windows"`
-	Windows         []soakWindow      `json:"windows"`
-	Floods          map[string]any    `json:"floods"`
-	LoadStartedMS   int64             `json:"load_started_ms"`
-	LoadFinishedMS  int64             `json:"load_finished_ms"`
-	DurationMinutes int               `json:"duration_minutes"`
-	Markers         []string          `json:"markers"`
+	Format        string            `json:"format"`
+	Budgets       soakBudgets       `json:"budgets"`
+	Sizing        soakSizing        `json:"sizing"`
+	Installations map[string]int    `json:"installations"`
+	Probes        []soakProbeResult `json:"probes"`
+	Idle          soakWindow        `json:"idle"`
+	// Loaded is the p95 of every loaded sample of the run pooled together: the figure the latency verdict judges.
+	Loaded          soakLoaded     `json:"loaded"`
+	IdleWindows     []soakWindow   `json:"idle_windows"`
+	Windows         []soakWindow   `json:"windows"`
+	Floods          map[string]any `json:"floods"`
+	LoadStartedMS   int64          `json:"load_started_ms"`
+	LoadFinishedMS  int64          `json:"load_finished_ms"`
+	DurationMinutes int            `json:"duration_minutes"`
+	Markers         []string       `json:"markers"`
 }
 
 // soakRecorder keeps the evidence and rewrites its file after every update, through a temporary file and a
@@ -224,6 +235,12 @@ func (r *soakRecorder) AddWindow(w soakWindow) {
 func (r *soakRecorder) AddIdleWindow(w soakWindow) {
 	r.update(func(e *soakEvidence) { e.IdleWindows = append(e.IdleWindows, w) })
 }
+func (r *soakRecorder) SetLoaded(pooled soakSamples) {
+	r.update(func(e *soakEvidence) {
+		e.Loaded = soakLoaded{Home: soakSummarize(pooled.home), Report: soakSummarize(pooled.report),
+			Dispatch: soakSummarize(pooled.dispatch), DispatchShallow: soakSummarize(pooled.dispatchShallow)}
+	})
+}
 func (r *soakRecorder) SetIdle(w soakWindow) { r.update(func(e *soakEvidence) { e.Idle = w }) }
 func (r *soakRecorder) SetLoad(startedMS, finishedMS int64, minutes int) {
 	r.update(func(e *soakEvidence) {
@@ -243,5 +260,39 @@ func TestSoakBackendStatusParsesWhatTheFixtureReports(t *testing.T) {
 		if got := soakParseBackendStatus("installation-2", bad); got.Answered || got.Installation != "installation-2" {
 			t.Errorf("an unusable answer %q was taken as a status: %+v", bad, got)
 		}
+	}
+}
+
+func TestSoakRecorderKeepsThePooledLoadedP95OfEveryWindowTogether(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "e.json")
+	r := newSoakRecorder(path)
+	var pooled soakSamples
+	for window := 0; window < 3; window++ {
+		var one soakSamples
+		for i := 1; i <= 100; i++ {
+			// Window 2 is slow in every sample; the pooled p95 must still weigh all 300 samples, not one window.
+			scale := time.Millisecond
+			if window == 1 {
+				scale = 10 * time.Millisecond
+			}
+			one.home = append(one.home, time.Duration(i)*scale)
+		}
+		pooled.home = append(pooled.home, one.home...)
+		r.SetLoaded(pooled)
+	}
+	var read soakEvidence
+	raw, _ := os.ReadFile(path)
+	if err := json.Unmarshal(raw, &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.Loaded.Home.Count != 300 {
+		t.Fatalf("pooled count = %d", read.Loaded.Home.Count)
+	}
+	sorted := soakSummarize(pooled.home)
+	if read.Loaded.Home.P95Micros != sorted.P95Micros || read.Loaded.Home.P95Micros <= 95_000 {
+		t.Fatalf("pooled p95 = %d", read.Loaded.Home.P95Micros)
+	}
+	if !strings.Contains(string(raw), `"loaded"`) || !strings.Contains(string(raw), `"dispatch_shallow"`) {
+		t.Fatal("the pooled loaded p95 is not under the keys the verdict reads")
 	}
 }

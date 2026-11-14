@@ -818,13 +818,21 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     (`soakQueuedItems`, the same pricing and filters) and records it as `dispatch_shallow`, so the effect of the backlog
     is visible; only the 200-job decision is judged, and if it fails the gate the finding goes to the owner rather than
     to a tuned fixture. A smoke at 50 jobs passed with ratios of about 5; the 200-job figure is the real one. The baseline pools the idle windows (100 samples of each series
-    per window); each load minute is judged on its own 100 samples.
+    per window); the loaded samples of every minute are pooled for the verdict (see the interpretation below).
     **Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured
     process.** The first smoke measured p95 of 3 to 25 ms against a sub-millisecond idle baseline (9 to 18 times), and
     with the soak's own flood goroutines paused the ratios fell to 1.4 to 2.0: a ratio alone cannot judge a baseline
     that small, and the generator shared the measured process. The verdict is now `latency_threshold_us(idle) =
     max(idle * 3 / 2, idle + LATENCY_FLOOR_US)` with `LATENCY_FLOOR_US = 5000`, tested at both rules and where they meet
-    (10 ms), and the evidence records the effective threshold of every window. The flood generator is a second process
+    (10 ms), and the evidence records the effective threshold of every window.
+    **Interpretation (owner, after the first smokes): pooled p95 over the loaded period, per doc 167's wording; per-window
+    p95 recorded as diagnostics.** Doc 167 asks for the p95 over the soak, one figure, so the verdict pools every loaded
+    sample of the run into one p95 per series and compares it with the threshold from the idle p95 (itself pooled over the
+    idle windows). For every series the evidence and the job's step summary list each window's p95 and its threshold, the
+    count of windows over it and the worst window; none is hidden and none decides. The strict rule that judged every
+    one-minute window was the earlier implementation choice, stricter than the criterion and hostage to one scheduler
+    hiccup in about a hundred samples on a shared runner (two smokes failed on single windows, once by 281 microseconds);
+    it was replaced before the 120-minute evidence run for that reason. The flood generator is a second process
     (`TestPlatformCapacitySoakFlood`, started by the child) that drives the Portal's real
     `POST /api/app-platform/installations/{id}/backend` route over loopback, one request in flight per backend, so the
     measured process carries the platform's work for those requests and none of the generator's. The refusal flood of

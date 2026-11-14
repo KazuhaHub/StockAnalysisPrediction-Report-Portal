@@ -206,9 +206,12 @@ def _check(name, passed, detail):
     return {"name": name, "passed": bool(passed), "detail": detail}
 
 
-# Owner decision 2026-11-13: a window passes when its p95 is within max(1.5x the idle p95, the idle p95 plus
-# 5 ms). A ratio alone is meaningless against a sub-millisecond baseline; the load is generated outside the
-# measured process, so the measured process sees only platform load.
+# Owner decision 2026-11-13: the p95 of the loaded period must be within max(1.5x the idle p95, the idle p95 plus
+# 5 ms). A ratio alone is meaningless against a sub-millisecond baseline; the load is generated outside the measured
+# process, so the measured process sees only platform load. Doc 167 asks for one p95 over the soak, so the verdict is
+# the p95 of every loaded sample of the run pooled together (the idle p95 is pooled the same way). The p95 of each
+# one-minute window, its threshold, the count over it and the worst window are diagnostics: none is hidden or
+# dropped, none decides.
 LATENCY_FLOOR_US = 5000
 
 
@@ -219,17 +222,41 @@ def latency_threshold_us(idle_p95_us):
 def _latency_check(name, series, evidence):
     baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 0)
     threshold = latency_threshold_us(baseline)
-    rows, over, worst = [], [], 0
+    pooled = evidence.get("loaded", {}).get(series, {})
+    pooled_p95, pooled_count = pooled.get("p95_us", 0), pooled.get("count", 0)
+    rows, over, worst = [], [], None
     for window in evidence.get("windows", []):
         p95 = window[series]["p95_us"]
-        worst = max(worst, p95)
         ok = p95 <= threshold
         rows.append({"minute": window["minute"], "p95_us": p95, "threshold_us": threshold, "passed": ok})
         if not ok:
             over.append(window["minute"])
-    return _check(name, not over and rows, {
-        "idle_p95_us": baseline, "threshold_us": threshold, "worst_window_p95_us": worst,
-        "worst_ratio": round(worst / max(baseline, 1), 3), "windows_over_the_threshold": over[:20], "window_thresholds": rows})
+        if worst is None or p95 > worst["p95_us"]:
+            worst = {"minute": window["minute"], "p95_us": p95}
+    return _check(name, pooled_count > 0 and pooled_p95 <= threshold, {
+        "idle_p95_us": baseline, "threshold_us": threshold, "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
+        "pooled_ratio": round(pooled_p95 / max(baseline, 1), 3), "worst_ratio": round((worst or {"p95_us": 0})["p95_us"] / max(baseline, 1), 3),
+        "worst_window": worst, "windows": len(rows), "windows_over_count": len(over), "windows_over_the_threshold": over[:200],
+        "window_thresholds": rows})
+
+
+def render_summary(evidence, verdict):
+    """Markdown for the job's step summary: the verdict per series and every window of every series."""
+    lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {'passed' if verdict['passed'] else 'FAILED'}",
+             "", "Latency verdict: the pooled loaded p95 must be at most max(1.5 x idle p95, idle p95 + 5 ms). Windows are diagnostics."]
+    for series in ("home", "report", "dispatch"):
+        check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
+        if check is None:
+            continue
+        d = check["detail"]
+        lines += ["", f"### {series}", "",
+                  f"idle p95 {d['idle_p95_us']} us, threshold {d['threshold_us']} us, **pooled loaded p95 {d['pooled_p95_us']} us** over "
+                  f"{d['pooled_samples']} samples ({'pass' if check['passed'] else 'FAIL'}); {d['windows_over_count']} of {d['windows']} windows over "
+                  f"the threshold, worst window {d['worst_window']}", "",
+                  "| minute | window p95 (us) | threshold (us) | over |", "| --- | --- | --- | --- |"]
+        for row in d["window_thresholds"]:
+            lines.append(f"| {row['minute']} | {row['p95_us']} | {row['threshold_us']} | {'' if row['passed'] else 'over'} |")
+    return "\n".join(lines) + "\n"
 
 
 def _loads_check(evidence):
@@ -523,6 +550,10 @@ def main(argv):
                "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"], "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
     print(json.dumps(summary, indent=2, sort_keys=True))
+    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        with open(step_summary, "a", encoding="utf-8") as sink:
+            sink.write(render_summary(evidence, verdict))
     return 0 if verdict["passed"] else 1
 
 

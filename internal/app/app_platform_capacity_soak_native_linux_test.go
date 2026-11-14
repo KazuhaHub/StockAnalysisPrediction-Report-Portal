@@ -437,8 +437,6 @@ func (c *soakChild) dispatch(limit int) time.Duration {
 	return time.Since(began)
 }
 
-type soakSamples struct{ home, report, dispatch, dispatchShallow []time.Duration }
-
 func (c *soakChild) sample(into *soakSamples, n int) {
 	for i := 0; i < n; i++ {
 		if code, took := c.get("/api/home"); code == http.StatusOK {
@@ -1018,6 +1016,7 @@ func (c *soakChild) load(minutes int) {
 	stop, read := c.startFlood(minutes)
 	defer stop()
 	var previous soakFloodCounters
+	var pooled soakSamples
 	for minute := 1; ; minute++ {
 		next := started.Add(time.Duration(minute) * time.Minute)
 		if final := started.Add(time.Duration(minutes) * time.Minute); next.After(final) {
@@ -1027,6 +1026,9 @@ func (c *soakChild) load(minutes int) {
 		var samples soakSamples
 		c.sample(&samples, soakSamplesPerWindow)
 		window := samples.window(minute)
+		pooled.home, pooled.report = append(pooled.home, samples.home...), append(pooled.report, samples.report...)
+		pooled.dispatch, pooled.dispatchShallow = append(pooled.dispatch, samples.dispatch...), append(pooled.dispatchShallow, samples.dispatchShallow...)
+		c.rec.SetLoaded(pooled)
 		current := read()
 		window.Flood = soakFlood{BackendRequests: current.Requests - previous.Requests, BackendRequestsOK: current.OK - previous.OK, BackendRequestErrors: current.Errors - previous.Errors}
 		previous = current
