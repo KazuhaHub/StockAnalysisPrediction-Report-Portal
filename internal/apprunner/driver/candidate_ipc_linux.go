@@ -258,7 +258,7 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	}
 	var entries []json.RawMessage
 	if json.Unmarshal(raw, &entries) != nil || entries == nil {
-		return nil, ErrInvalidResponse
+		return nil, fmt.Errorf("%w: candidate IPC inventory is not a JSON array", ErrInvalidResponse)
 	}
 	defer func() {
 		for _, entry := range entries {
@@ -268,49 +268,86 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	result := make([]candidateIPCContainer, 0, len(entries))
 	for _, entry := range entries {
 		var container candidateIPCContainer
-		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil || !containerSHA.MatchString(container.ID) {
-			return nil, ErrInvalidResponse
+		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil {
+			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: projection rejected", ErrInvalidResponse, inventoryEntryLabel(entry))
+		}
+		if !containerSHA.MatchString(container.ID) {
+			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
 		if _, err := candidateIPCMountSources(container.Mounts); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
 		result = append(result, container)
 	}
 	return result, nil
 }
 
+// shortContainerID names a container in an error without the full identifier.
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// inventoryEntryLabel names an entry whose Id cannot be trusted: the first
+// twelve characters of a string Id, or a fixed marker. It never echoes more.
+func inventoryEntryLabel(entry json.RawMessage) string {
+	var probe struct {
+		ID string `json:"Id"`
+	}
+	if json.Unmarshal(entry, &probe) != nil || probe.ID == "" {
+		return "(no Id)"
+	}
+	return fmt.Sprintf("%q", shortContainerID(probe.ID))
+}
+
 func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
-		return nil, ErrInvalidResponse
+		return nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
 	var mounts []json.RawMessage
 	if json.Unmarshal(raw, &mounts) != nil {
-		return nil, ErrInvalidResponse
+		return nil, fmt.Errorf("%w: Mounts is not an array", ErrInvalidResponse)
 	}
 	sources := make([]string, 0, len(mounts))
-	for _, entry := range mounts {
+	for i, entry := range mounts {
 		var m struct {
 			Type   string  `json:"Type"`
 			Source *string `json:"Source"`
 		}
 		if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
-			return nil, ErrInvalidResponse
+			return nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
 		}
 		switch m.Type {
 		case "bind", "volume":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {
-				return nil, ErrInvalidResponse
+				return nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
 			}
 			sources = append(sources, *m.Source)
 		case "tmpfs":
 			if m.Source != nil && *m.Source != "" {
-				return nil, ErrInvalidResponse
+				return nil, fmt.Errorf("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
 			}
 		default:
-			return nil, ErrInvalidResponse
+			return nil, fmt.Errorf("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
 		}
 	}
 	return sources, nil
+}
+
+func boundedSource(source *string) string {
+	if source == nil {
+		return "<absent>"
+	}
+	return boundedString(*source)
+}
+
+func boundedString(s string) string {
+	if len(s) > 96 {
+		return s[:96] + "..."
+	}
+	return s
 }
 
 func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {

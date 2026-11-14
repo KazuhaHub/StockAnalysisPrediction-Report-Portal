@@ -1,0 +1,68 @@
+name: app runner foreign container
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'internal/apprunner/driver/**'
+      - '.github/workflows/app-runner-foreign-container.yml'
+permissions:
+  contents: read
+concurrency:
+  group: app-runner-foreign-container-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  foreign-container-beside-writer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The same service the capacity soak declared: a database container the runner did not start.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: portal
+          POSTGRES_DB: reports_soak
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U portal -d reports_soak"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Record what the daemon reports about the service container
+        run: |
+          mkdir -p "$RUNNER_TEMP/foreign"
+          sock=$(readlink -f /var/run/docker.sock)
+          sudo curl -sS --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' | tee "$RUNNER_TEMP/foreign/containers.json"
+          echo
+          id=$(sudo curl -sS --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])')
+          sudo curl -sS --unix-socket "$sock" "http://localhost/v1.47/containers/$id/json" > "$RUNNER_TEMP/foreign/container-inspect.json"
+          docker version --format '{{.Server.Version}} api {{.Server.APIVersion}}' | tee "$RUNNER_TEMP/foreign/docker-version.txt"
+      - name: Run the writer's container inventory beside the service container
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          go test -c -o "$RUNNER_TEMP/driver-foreign.test" ./internal/apprunner/driver
+          chmod 0500 "$RUNNER_TEMP/driver-foreign.test"
+          sock=$(readlink -f /var/run/docker.sock)
+          cd internal/apprunner/driver
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
+            PORTAL_APP_RUNNER_FOREIGN_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$sock" \
+            "$RUNNER_TEMP/driver-foreign.test" -test.v -test.timeout=60s \
+            -test.run='^TestDockerAcceptanceForeignContainerBesideDataWriterInventory$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
+      - name: Preserve the daemon payload and the test output
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: foreign-container-payload
+          path: ${{ runner.temp }}/foreign
+          if-no-files-found: warn
+          retention-days: 14
