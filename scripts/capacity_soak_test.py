@@ -816,6 +816,57 @@ class StallTests(unittest.TestCase):
         self.assertEqual(summary["loaded"]["vm.dirty_kib"]["max"], 90_000)
 
 
+class CpusetTests(unittest.TestCase):
+    def test_per_cpu_busy_comes_from_the_per_cpu_lines_of_proc_stat(self):
+        before = "cpu  0 0 0 0 0 0 0 0\ncpu0 100 0 0 900 0 0 0 0\ncpu1 0 0 0 1000 0 0 0 0\ncpu2 500 0 100 400 0 0 0 0\n"
+        after = "cpu  0 0 0 0 0 0 0 0\ncpu0 150 0 0 1850 0 0 0 0\ncpu1 900 0 0 1100 0 0 0 0\ncpu2 1000 0 100 900 0 0 0 0\n"
+        self.assertEqual(soak.per_cpu_busy(soak.parse_per_cpu(before), soak.parse_per_cpu(after)), {"cpu0": 5.0, "cpu1": 90.0, "cpu2": 50.0})
+        self.assertEqual(soak.per_cpu_busy({}, soak.parse_per_cpu(after)), {})
+
+    def test_the_ready_line_names_the_reserved_and_the_app_cpus(self):
+        line = "2026/11/14 12:30:17 app-runner ready profile=x platform=linux/amd64 capacity=memory_mib=3995 cpu_millis=2000 reserved_cpus=0 app_cpus=1-3 refined_rows=0"
+        self.assertEqual(soak.parse_ready_cpus(line), {"reserved_cpus": "0", "app_cpus": "1-3"})
+        self.assertEqual(soak.parse_ready_cpus("no ready line"), {})
+
+    def test_the_sample_carries_per_cpu_busy_and_the_backends_effective_cpuset(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            proc = root / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            (root / "mount").mkdir()
+            moments = iter([1.0, 11.0])
+            sampler = soak.Sampler(run=lambda *a: "", proc=proc, mountpoint=root / "mount", image_id="sha256:" + "b" * 64, clock=lambda: next(moments), cpus=2, ticks_per_second=100)
+            (proc / "stat").write_text("cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 100 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0\n")
+            sampler.sample()
+            (proc / "stat").write_text("cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 200 0 0 0 0\ncpu1 100 0 0 100 0 0 0 0\n")
+            second = sampler.sample()
+        self.assertEqual(second["cpu_per_core"], {"cpu0": 0.0, "cpu1": 100.0})
+
+    def test_the_cgroup_reader_records_the_cpuset_a_container_really_runs_on(self):
+        with tempfile.TemporaryDirectory() as root:
+            base = Path(root) / ("docker-" + "a" * 64 + ".scope")
+            base.mkdir()
+            for name, text in {"cpu.stat": "usage_usec 5\n", "memory.current": "1\n", "memory.max": "2\n", "cpu.max": "24000 100000\n", "pids.current": "1\n",
+                               "pids.max": "64\n", "cpuset.cpus.effective": "1-3\n"}.items():
+                (base / name).write_text(text)
+            sampler = soak.Sampler(run=lambda *a: "", proc=Path(root), mountpoint=Path(root), image_id="x", clock=lambda: 1.0, cgroup_root=root, cpus=4, ticks_per_second=100)
+            row = sampler._read_cgroup("a" * 64)
+        self.assertEqual(row["cpuset_effective"], "1-3")
+
+    def test_the_verdict_summarises_each_cpu_for_idle_and_the_load(self):
+        evidence = child_evidence(windows=3)
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": LOAD_START_MS - 90_000, "ended_ms": LOAD_START_MS - 30_000}]
+        samples = load_samples(3)
+        for sample in samples:
+            idle = sample["at_ms"] <= LOAD_START_MS
+            sample["cpu_per_core"] = {"cpu0": 1.0 if idle else 40.0, "cpu1": 1.0 if idle else 97.0}
+        summary = soak.evaluate(evidence, samples, **self_kwargs())["per_cpu_busy"]
+        self.assertEqual(summary["idle"]["cpu0"], {"mean": 1.0, "max": 1.0})
+        self.assertEqual(summary["loaded"]["cpu1"], {"mean": 97.0, "max": 97.0})
+
+
 class CgroupLayoutTests(unittest.TestCase):
     def test_the_layout_names_each_process_group_its_cgroup_and_the_cpu_weight_along_its_path(self):
         with tempfile.TemporaryDirectory() as root:

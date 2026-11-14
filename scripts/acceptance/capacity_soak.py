@@ -152,6 +152,31 @@ def cpu_millis_between(previous_usec, current_usec, seconds):
     return (current_usec - previous_usec) / (seconds * 1000.0)
 
 
+# ---- which CPUs ----
+
+def parse_per_cpu(text):
+    """{"cpu0": (busy, total), ...} jiffies from the per-cpu lines of /proc/stat."""
+    cores = {}
+    for line in text.splitlines():
+        f = line.split()
+        if f and re.fullmatch(r"cpu[0-9]+", f[0]) and len(f) >= 9:
+            user, nice, system, idle, iowait, irq, softirq, steal = (int(v) for v in f[1:9])
+            busy = user + nice + system + irq + softirq + steal
+            cores[f[0]] = (busy, busy + idle + iowait)
+    return cores
+
+
+def per_cpu_busy(before, after):
+    return {name: round(100.0 * (b - before[name][0]) / (t - before[name][1]), 2) for name, (b, t) in sorted(after.items())
+            if name in before and t > before[name][1]}
+
+
+def parse_ready_cpus(text):
+    """reserved_cpus and app_cpus of the runner's ready line."""
+    match = re.search(r"app-runner ready .*?reserved_cpus=(\S+) app_cpus=(\S+)", text)
+    return {"reserved_cpus": match.group(1), "app_cpus": match.group(2)} if match else {}
+
+
 # ---- where the time goes: stalls, disks, PostgreSQL ----
 
 def parse_pressure(text):
@@ -318,7 +343,7 @@ class Sampler:
     def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice", cpus=None, ticks_per_second=None,
                  disk_devices=None, postgres=False):
         self.disk_devices, self.postgres = disk_devices or {}, postgres
-        self._disks, self._pg, self._iowait = None, None, None
+        self._disks, self._pg, self._iowait, self._cores = None, None, None, None
         self.cpus = cpus or os.cpu_count() or 1
         self.ticks_per_second = ticks_per_second or os.sysconf("SC_CLK_TCK")
         self._backend_full_ids = set()
@@ -380,6 +405,10 @@ class Sampler:
                "cpu_quota_millis": parse_cpu_max_millis((base / "cpu.max").read_text()),
                "pids_current": parse_cgroup_number((base / "pids.current").read_text()),
                "pids_max": parse_cgroup_number((base / "pids.max").read_text())}
+        try:
+            row["cpuset_effective"] = (base / "cpuset.cpus.effective").read_text().strip()
+        except OSError:
+            pass
         for name, key in (("memory.peak", "memory_peak"), ("pids.peak", "pids_peak")):
             try:  # the peak files exist from kernel 5.19 and 6.1; the sampled current values stand in where they do not
                 row[key] = parse_cgroup_number((base / name).read_text())
@@ -467,6 +496,10 @@ class Sampler:
         except OSError:
             pass
         extra = self._stalls(now, memory_text, stat_text)
+        cores = parse_per_cpu(stat_text)
+        previous_cores, self._cores = self._cores, cores
+        if previous_cores:
+            extra["cpu_per_core"] = per_cpu_busy(previous_cores, cores)
         shares = self._cpu_groups(now, percent, backends["cpu_millis"] if backends.get("cpu_source") == "cgroup" else 0.0)
         row = {
             "at_ms": int(now * 1000), "mem_total_kib": memory["total_kib"], "mem_available_kib": memory["available_kib"],
@@ -833,6 +866,18 @@ def stall_summary(evidence, samples):
     return {"idle": _summarise(idle), "loaded": _summarise(loaded)}
 
 
+def per_cpu_summary(evidence, samples):
+    """Each CPU's busy percent, mean and max, for the idle period and the load."""
+    rows = [(s["at_ms"], dict(s["cpu_per_core"])) for s in sorted(samples, key=lambda s: s["at_ms"]) if s.get("cpu_per_core")]
+    idle_windows = evidence.get("idle_windows") or []
+    idle = []
+    if idle_windows:
+        start, end = min(w.get("started_ms", 0) for w in idle_windows), max(w.get("ended_ms", 0) for w in idle_windows)
+        idle = [r for r in rows if start < r[0] <= end]
+    loaded = [r for r in rows if evidence.get("load_started_ms", 0) < r[0] <= evidence.get("load_finished_ms", 0)]
+    return {"idle": _summarise(idle), "loaded": _summarise(loaded)}
+
+
 def cpu_breakdown(evidence, samples):
     """Each group's share of the host CPU (percent of all CPUs) for the idle period and for every loaded window, and the flood's
     admitted and refused request rates per second for every window."""
@@ -923,7 +968,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
         and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)),
-        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
+        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
@@ -1215,7 +1260,9 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests, "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
+        "unit_tests": unit_tests, "runner_cpus": parse_ready_cpus((out / "runner.log").read_text(errors="replace")) if (out / "runner.log").exists() else {},
+        "backend_cpusets": {r["id"]: r.get("cpuset_effective") for sample in samples[-1:] for r in (sample.get("backends") or {}).get("per_backend", [])},
+        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
