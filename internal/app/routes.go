@@ -515,18 +515,18 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.platformAdminRoute(mux, "POST /api/admin/app-platform/control/abandon-runtime", s.apiPlatformAbandonRuntime)
 	// V2 documents remain session-only and inherit the enrolment wall. Response
 	// policy wraps that wall too, so authentication failures cannot be cached.
-	s.route(mux, "GET /api/app-platform/apps", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformApps)))
-	s.route(mux, "GET /api/app-platform/installations/{installation}/status", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformInstallationStatus)))
-	s.route(mux, "GET /api/app-platform/installations/{installation}/launch", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformLaunch)))
-	s.route(mux, "POST /api/app-platform/installations/{installation}/backend", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformBackend)))
-	s.route(mux, "POST /api/app-platform/installations/{installation}/network", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformNetwork)))
-	s.route(mux, "POST /api/app-platform/installations/{installation}/network/stream", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformNetworkStream)))
+	s.route(mux, "GET /api/app-platform/apps", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformApps))))
+	s.route(mux, "GET /api/app-platform/installations/{installation}/status", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformInstallationStatus))))
+	s.route(mux, "GET /api/app-platform/installations/{installation}/launch", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformLaunch))))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/backend", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformBackendRequests, platformJSONBusy, s.requireUserJSON(s.apiPlatformBackend))))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/network", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformNetworkRequests, platformJSONBusy, s.requireUserJSON(s.apiPlatformNetwork))))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/network/stream", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformNetworkStreams, platformJSONBusy, s.requireUserJSON(s.apiPlatformNetworkStream))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/notifications", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformNotificationPublish)))
 	s.public(mux, "POST /api/app-platform/installations/{installation}/notifications/background", platformDocumentHeaders(s.rateLimitV1(s.apiPlatformServiceNotificationPublish)))
 	s.public(mux, "POST /api/app-platform/installations/{installation}/tasks/background", platformDocumentHeaders(s.rateLimitV1(s.apiPlatformServiceTaskSchedule)))
-	s.route(mux, "POST /api/app-platform/installations/{installation}/reports", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformReports)))
-	s.route(mux, "POST /api/app-platform/installations/{installation}/objects", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformObjects)))
-	s.route(mux, "GET /app-documents/{installation}/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.platformAppDocument)))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/reports", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformReports))))
+	s.route(mux, "POST /api/app-platform/installations/{installation}/objects", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformObjects))))
+	s.route(mux, "GET /app-documents/{installation}/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.platformAppDocument))))
 	s.public(mux, "GET /site-assets/{name}", s.siteAsset)
 
 	// ---- Outbound event webhooks (extension point; see docs/adr/0002-extension-architecture.md) ----

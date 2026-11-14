@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -22,8 +23,18 @@ type platformDocumentBudget struct {
 	slots chan struct{}
 }
 
+func (b *platformDocumentBudget) init() { b.once.Do(func() { b.slots = make(chan struct{}, 2) }) }
+
+// full reports, without blocking and without taking a slot, whether every slot is held right now.
+// It is advisory: a slot can be released or taken the instant after, so it only ever short-circuits
+// a refusal that acquire would very likely give, and acquire stays the authoritative decision.
+func (b *platformDocumentBudget) full() bool {
+	b.init()
+	return len(b.slots) == cap(b.slots)
+}
+
 func (b *platformDocumentBudget) acquire() (func(), bool) {
-	b.once.Do(func() { b.slots = make(chan struct{}, 2) })
+	b.init()
 	select {
 	case b.slots <- struct{}{}:
 		var once sync.Once
@@ -32,6 +43,68 @@ func (b *platformDocumentBudget) acquire() (func(), bool) {
 		return nil, false
 	}
 }
+
+// platformHTTPBusy and platformJSONBusy are the one 429 each family of budgeted routes answers, both
+// from the authoritative acquire and from the pre-check, so the two can never drift apart.
+func platformHTTPBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "application busy", http.StatusTooManyRequests)
+}
+func platformJSONBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	jsonErrorCode(w, 429, "app_platform_busy", "application busy")
+}
+
+// platformSessionCookieSigned reports whether the request carries a session cookie this server
+// signed and that has not expired, using only the signing key: no database read, which is the whole
+// point, since the session reads are what the pre-check below exists to avoid. It proves the cookie
+// was minted here, not that its session is still live (a revoked or disabled one still passes).
+func (s *Server) platformSessionCookieSigned(r *http.Request) bool {
+	cookie, err := r.Cookie(cookieName)
+	if err != nil || !s.hasSigningKey() {
+		return false
+	}
+	parts := strings.SplitN(cookie.Value, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || !hmac.Equal([]byte(s.hmac(string(raw))), []byte(parts[1])) {
+		return false
+	}
+	end := strings.LastIndexByte(string(raw), '|')
+	if end < 0 {
+		return false
+	}
+	expiry, err := strconv.ParseInt(string(raw[end+1:]), 10, 64)
+	return err == nil && time.Now().Unix() < expiry
+}
+
+// platformBudgetPrecheck answers a budget's own 429 before the session reads when the budget is
+// already full. Under a flood the great majority of attempts end in that 429, and each used to pay
+// two session reads first; on SQLite those queue on the single connection and delay everything else
+// (capacity envelope plan, resolution "relay admission before session reads").
+//
+// It never takes a slot: a slot held before authentication could be held by an anonymous client.
+// The authoritative acquire still runs after authentication, so a request that passes the pre-check
+// and then loses the race gets the same 429 it always did.
+//
+// Anonymous clients keep their 401. The 429 is given only to a request carrying a cookie this server
+// signed (platformSessionCookieSigned), so the only thing it tells a caller is that the budget is
+// full, and only to a caller who already held a credential the server issued. Anything else falls
+// through to the unchanged authentication path. A validly signed cookie whose session was revoked
+// or whose account was disabled now sees 429 instead of 401 while the budget is full; it learns
+// nothing about the session and the next attempt after the budget frees gets the 401.
+func (s *Server) platformBudgetPrecheck(budget *platformDocumentBudget, busy func(http.ResponseWriter), next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if budget.full() && s.platformSessionCookieSigned(r) {
+			busy(w)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func platformDocumentHeaders(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -102,8 +175,7 @@ func (s *Server) platformHTTPAdmission(w http.ResponseWriter, r *http.Request, u
 	}
 	release, ok := s.platformDocuments.acquire()
 	if !ok {
-		w.Header().Set("Retry-After", "1")
-		http.Error(w, "application busy", http.StatusTooManyRequests)
+		platformHTTPBusy(w)
 		return platformActorSession{}, nil, false
 	}
 	return session, release, true
