@@ -935,6 +935,32 @@ transactions still run per relayed request, each re-reading the install history.
 is therefore queueing behind those queries (home off-CPU p95 6.7 ms, down from 22 ms). Nothing here was tuned: the soak is
 unchanged, and the gate on report is reported as it came out.
 
+#### After the second fix (#438, `185ab15d`): smoke run 43563565682
+
+#438 adds a SQLite-only prepared-statement LRU at the store's executor (no change on PostgreSQL) and makes `GET /api/stock/{symbol}`
+read its decision data in one snapshot (9 connection acquisitions down to 4 for a page with a report). The smoke, with the verdict,
+diagnostics and fixture unchanged, passed every check.
+
+| | after #437 | after #438 |
+| --- | --- | --- |
+| pooled loaded p95: home (threshold) | 5417 (5772) us | **1605 (5234) us** |
+| pooled loaded p95: report (threshold) | 6386 (6239) us, fail | **1915 (5389) us** |
+| pooled loaded p95: dispatch at 200 jobs (threshold) | 4131 (5761) us | **1757 (5480) us** |
+| windows over the threshold, home / report / dispatch | 1 / 3 / 0 of 5 | **0 / 0 / 0 of 5** |
+| worst window p95, home / report / dispatch | 7905 / 7849 / 5497 us | 3244 / 2320 / 2666 us |
+| diagnostic minute: waits for a connection | 34300 | **22073** |
+| total wait for the connection | 16179 ms | **4234 ms** |
+| the single connection in use | 34% | **15.5%** |
+| home off-CPU p95 | 6663 us | **2224 us** |
+| report off-CPU p95 | 6910 us | **810 us** |
+| statement preparation (`sqlite3Prepare`) share of CPU | 35% | **22.7%** |
+| process CPU in the minute | 29.7 s | 18.7 s |
+
+Per window (home, report, dispatch p95 in us): 1164 1474 1577; 3244 1044 1443; 980 2320 2509; 2038 2169 2666; 651 1462 922. The idle p95
+of each series also fell (home 234, report 389, dispatch 480 us). Statement preparation is still 22.7% of the CPU: the relay's
+read transactions (`platformBackendReadTx`, 60% of CPU cumulative) still prepare a share of their statements, so a further
+reduction is available there, but nothing about the gate needs it.
+
 ### Evidence files
 
 `capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity, host facts, the Go child's evidence with every
