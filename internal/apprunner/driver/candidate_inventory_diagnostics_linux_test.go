@@ -136,6 +136,12 @@ func pluginVolumeFixture(driver string) (id, listing string) {
 
 func TestPluginVolumeWithoutSourceIsResolvedByInspect(t *testing.T) {
 	data := t.TempDir()
+	// A source that does not exist cannot reach anything and is not a
+	// reference (see the missing case of the data writer inventory test), so the
+	// child must exist for it to overlap.
+	if err := os.Mkdir(filepath.Join(data, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	for name, driver := range map[string]string{"plugin": "rexray", "empty": "", "absent": "-"} {
 		t.Run(name+" overlapping", func(t *testing.T) {
 			id, listing := pluginVolumeFixture(driver)
@@ -200,6 +206,10 @@ func TestLocalAnonymousVolumeIsSkippedWithoutInspect(t *testing.T) {
 
 func TestVolumeWithAbsoluteSourceOverlappingTheDataRootConflicts(t *testing.T) {
 	data := t.TempDir()
+	// Same reason as the plugin volume test: an absent source is not a reference.
+	if err := os.Mkdir(filepath.Join(data, "child"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	for name, source := range map[string]string{"equal": data, "ancestor": filepath.Dir(data), "child": filepath.Join(data, "child")} {
 		t.Run(name, func(t *testing.T) {
 			listing := `[{"Id":"` + strings.Repeat("b", 64) + `","Mounts":[{"Type":"volume","Driver":"local","Source":"` + source + `","Destination":"/db"}]}]`
@@ -271,5 +281,17 @@ func TestFailedInspectIsUnavailableNotInvalid(t *testing.T) {
 				t.Fatalf("a failed inspect was reported as an invalid response: %v", err)
 			}
 		})
+	}
+}
+
+// A source that is absent is not a reference, by design: nothing is mounted
+// from it. Pin that, so the existing-child tests above cannot be mistaken for
+// the whole rule.
+func TestVolumeWithAbsentSourceUnderTheDataRootIsNotAReference(t *testing.T) {
+	data := t.TempDir()
+	listing := `[{"Id":"` + strings.Repeat("7", 64) + `","Mounts":[{"Type":"volume","Driver":"local","Source":"` + filepath.Join(data, "absent") + `","Destination":"/db"}]}]`
+	var asked []string
+	if err := requireNoContainerMountReferences(context.Background(), routedClient(listing, nil, &asked), data); err != nil {
+		t.Fatal(err)
 	}
 }
