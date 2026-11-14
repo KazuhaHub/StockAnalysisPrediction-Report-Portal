@@ -30,51 +30,79 @@ func loadPlatformWritableHistoryEffect(e migExec, source platformManagedSource, 
 // Completed history selects immutable execution identity; it is not a fabricated
 // live worker lease. Current session/OU/audience/trust comes from the outer gate.
 func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformWritableRegistrationIntent, error) {
-	var zero platformWritableRegistrationIntent
+	finish, err := s.loadPlatformWritableBackendHistoryPhased(e, b, runtime, seed, dek, now)
+	if err != nil {
+		return platformWritableRegistrationIntent{}, err
+	}
+	return finish()
+}
+
+// platformBackendHistoryFinish completes a history load with CPU-bound work only: it reads no
+// database, so a caller holding the only SQLite connection can release it first.
+type platformBackendHistoryFinish[T any] func() (T, error)
+
+// platformDoneHistory wraps an intent built inline, in the transaction, as an already finished load.
+func platformDoneHistory[T any](intent T) platformBackendHistoryFinish[T] {
+	return func() (T, error) { return intent, nil }
+}
+
+// loadPlatformWritableLaterBackendHistory reads the history of a generation after the first
+// (resume, restore or update); all three share the update-start registration path.
+func (s *Server) loadPlatformWritableLaterBackendHistory(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
+	if resumed, err := platformCompletedResumeAt(e, b.installation, b.generation); err != nil {
+		return nil, errAppPlatformLaunchUnavailable
+	} else if resumed {
+		return s.loadPlatformWritableResumeBackendHistoryPhased(
+			e, b, runtime, seed, dek, now)
+	}
+	if restored, err := platformCompletedRestoreAt(e, b.installation, b.generation); err != nil {
+		return nil, errAppPlatformLaunchUnavailable
+	} else if restored {
+		return s.loadPlatformWritableRestoreBackendHistoryPhased(
+			e, b, runtime, seed, dek, now)
+	}
+	return s.loadPlatformWritableUpdateBackendHistoryPhased(
+		e, b, runtime, seed, dek, now)
+}
+
+// loadPlatformWritableBackendHistoryPhased performs every database read of the history in the
+// caller's transaction, with the same checks and in the same snapshot as before, and returns the
+// remaining work (signing the access envelopes, deriving the registration) as a finish step that
+// reads nothing. Every writable history is phased: the initial install here, later generations
+// (update, restore, resume) in their own loaders.
+func (s *Server) loadPlatformWritableBackendHistoryPhased(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
 	if len(seed) != ed25519.SeedSize || b.observed < 0 || b.observed > now+1000 || b.observed > time.Now().UnixMilli() {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if b.generation < 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if b.generation > 1 {
-		if resumed, err := platformCompletedResumeAt(e, b.installation, b.generation); err != nil {
-			return zero, errAppPlatformLaunchUnavailable
-		} else if resumed {
-			return s.loadPlatformWritableResumeBackendHistory(
-				e, b, runtime, seed, dek, now)
-		}
-		if restored, err := platformCompletedRestoreAt(e, b.installation, b.generation); err != nil {
-			return zero, errAppPlatformLaunchUnavailable
-		} else if restored {
-			return s.loadPlatformWritableRestoreBackendHistory(
-				e, b, runtime, seed, dek, now)
-		}
-		return s.loadPlatformWritableUpdateBackendHistory(
-			e, b, runtime, seed, dek, now)
+		return s.loadPlatformWritableLaterBackendHistory(e, b, runtime, seed, dek, now)
 	}
 	source := platformManagedSource{installationID: b.installation, epoch: b.epoch, generation: 1, fence: b.fence}
 	var count int
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operations WHERE installation_id=?`, b.installation).Scan(&count); err != nil || count != 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	var rawPlan, planSHA string
 	var descriptor []byte
 	var completed, created, updated int64
 	if err := e.queryRow(`SELECT o.id,p.plan_json,p.plan_sha256,r.descriptor,o.completed_ms,o.created_ms,o.updated_ms FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.installation_id=? AND o.action='install' AND o.managed=1 AND o.source_generation=0 AND o.target_generation=1 AND o.stage='complete' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL AND o.lease_until_ms IS NULL AND o.error_code IS NULL AND o.controller_epoch=? AND o.fence=? AND p.action='install' AND p.app_id=r.app_id AND p.publisher_id=r.publisher_id AND p.target_release_sha256=? AND p.controller_epoch=? AND p.consumed_ms IS NOT NULL`, b.installation, b.epoch, b.fence, b.release, b.epoch).Scan(&source.operationID, &rawPlan, &planSHA, &descriptor, &completed, &created, &updated); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if !platformValidUUID(source.operationID) || created < 0 || completed < created || b.observed > completed+1000 || updated != completed || updated > now || platformDigest([]byte(rawPlan)) != planSHA {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	var plan platformInstallProjection
 	if json.Unmarshal([]byte(rawPlan), &plan) != nil || plan.Format != platformWritableInstallFormat || plan.ControllerEpoch != b.epoch || plan.ReleaseSHA256 != b.release || plan.Runtime == nil || plan.DataQuotaBytes != 256<<20 {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
-	canonical, _ := json.Marshal(plan)
-	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || !bytes.Equal(canonical, []byte(rawPlan)) || parsed.SHA256 != b.release || parsed.Manifest.ID != plan.AppID || parsed.Manifest.Publisher != plan.PublisherID || int64(parsed.Manifest.Data.Schema) != b.format || installRequirementsForTarget(parsed.Manifest, plan.Format, plan.Runtime) != nil || validateManagedInstallTarget(e, plan.Runtime, b.epoch) != nil || plan.Runtime.RuntimeID != runtime.id {
-		return zero, errAppPlatformLaunchUnavailable
+	// The runtime binding row is the one database read this part of the history needs; the
+	// descriptor and canonical-plan checks that used to share its condition are pure and run in
+	// the finish step.
+	if validateManagedInstallTarget(e, plan.Runtime, b.epoch) != nil {
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	var w platformWriterIntent
 	w.namespaceID, w.resourceID, w.runtime, w.authority, w.descriptor = b.namespace, b.activation, runtime, platformRuntimeAuthority(runtime), bytes.Clone(descriptor)
@@ -83,30 +111,70 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	var format, quota, used, writer, revision int64
 	var retained, deleted sql.NullInt64
 	if err := e.queryRow(`SELECT origin_installation_id,owner_installation_id,state,data_format,quota_bytes,observed_bytes,writer_fence,revision,retained_ms,deleted_ms,created_ms,updated_ms FROM app_platform_data_namespaces WHERE id=?`, b.namespace).Scan(&origin, &owner, &state, &format, &quota, &used, &writer, &revision, &retained, &deleted, &w.namespaceCreated, &w.namespaceUpdated); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if origin != b.installation || !owner.Valid || owner.String != b.installation || state != "active" || format != b.format || quota != 256<<20 || used < 0 || used > quota || writer != 1 || revision != 3 || retained.Valid || deleted.Valid || w.namespaceCreated < 0 || w.namespaceUpdated < w.namespaceCreated || w.namespaceUpdated > completed {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	w.namespaceRevision = revision
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_data_namespaces WHERE origin_installation_id=? OR owner_installation_id=?`, b.installation, b.installation).Scan(&count); err != nil || count != 1 {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND kind NOT IN ('load_image','remove_image')`, source.operationID).Scan(&count); err != nil || count != 4 {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if err := e.queryRow(`SELECT created_ms,updated_ms FROM app_platform_activations WHERE id=? AND installation_id=? AND release_sha256=? AND data_namespace_id=? AND generation=1 AND data_format=? AND state='active' AND readiness_evidence=? AND observed_ms=?`, b.activation, b.installation, b.release, b.namespace, b.format, b.readiness, b.observed).Scan(&w.activationCreated, &w.activationUpdated); err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	if w.activationCreated < 0 || w.activationUpdated < completed || w.activationUpdated > now {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	w.activationReadiness, w.activationObserved = b.readiness, sql.NullInt64{Valid: true, Int64: b.observed}
 	dataEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "prepare_data", "prepare-data", 1, completed)
 	if err != nil {
-		return zero, err
+		return nil, err
 	}
-	dataCommand, err := platformDataCommandForSource(e, source, runtime, b.namespace, dataEffect.id)
+	dataRows, err := platformReadDataCommandRows(e, source.operationID)
+	if err != nil {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	writerEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "prepare_data", "activate", 2, completed)
+	if err != nil {
+		return nil, err
+	}
+	issued := time.Now().UnixMilli()
+	if issued < now-1000 || issued > now+1000 {
+		return nil, errAppPlatformLaunchUnavailable
+	}
+	startEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "start", "start-candidate", 1, completed)
+	if err != nil {
+		return nil, err
+	}
+	sealed, err := platformReadSealedIdentitySeed(e, b.installation)
+	if err != nil {
+		return nil, err
+	}
+	regEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "activate", "activate", 1, completed)
+	if err != nil {
+		return nil, err
+	}
+	return func() (platformWritableRegistrationIntent, error) {
+		platformPureStep("history-build")
+		return finishPlatformWritableInstallHistory(b, runtime, seed, dek, now, issued, source, completed, rawPlan, plan, descriptor, w, used, dataRows, dataEffect, writerEffect, startEffect, regEffect, sealed)
+	}, nil
+}
+
+// finishPlatformWritableInstallHistory checks the stored descriptor, plan and receipts, signs the
+// access envelopes and derives the registration, all from rows already read. It reads no database
+// and keeps every check the inline loader made, in order.
+func finishPlatformWritableInstallHistory(b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now, issued int64, source platformManagedSource, completed int64, rawPlan string, plan platformInstallProjection, descriptor []byte, w platformWriterIntent, used int64, dataRows platformDataCommandRows, dataEffect, writerEffect, startEffect, regEffect platformWritableHistoryEffect, sealed string) (platformWritableRegistrationIntent, error) {
+	var zero platformWritableRegistrationIntent
+	canonical, _ := json.Marshal(plan)
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || !bytes.Equal(canonical, []byte(rawPlan)) || parsed.SHA256 != b.release || parsed.Manifest.ID != plan.AppID || parsed.Manifest.Publisher != plan.PublisherID || int64(parsed.Manifest.Data.Schema) != b.format || installRequirementsForTarget(parsed.Manifest, plan.Format, plan.Runtime) != nil || plan.Runtime.RuntimeID != runtime.id {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	dataCommand, err := platformDataCommandFromRows(dataRows, source, runtime, b.namespace, dataEffect.id)
 	if err != nil || dataCommand.PayloadSHA256 != dataEffect.digest {
 		return zero, errAppPlatformLaunchUnavailable
 	}
@@ -123,10 +191,6 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.dataCreated, w.dataUpdated, w.dataSHA = dataEffect.created, dataEffect.updated, platformDigest([]byte(dataEffect.receipt))
-	writerEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "prepare_data", "activate", 2, completed)
-	if err != nil {
-		return zero, err
-	}
 	if writerEffect.created < dataEffect.updated || w.namespaceUpdated != writerEffect.updated || w.activationCreated != writerEffect.created || b.activation == dataEffect.id || b.activation == b.namespace || writerEffect.id == b.namespace {
 		return zero, errAppPlatformLaunchUnavailable
 	}
@@ -136,10 +200,6 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.applied = true
-	issued := time.Now().UnixMilli()
-	if issued < now-1000 || issued > now+1000 {
-		return zero, errAppPlatformLaunchUnavailable
-	}
 	dataCommand.IssuedMS, dataCommand.ExpiresMS = strconv.FormatInt(issued, 10), strconv.FormatInt(issued+30000, 10)
 	key := ed25519.NewKeyFromSeed(seed)
 	defer clear(key)
@@ -155,10 +215,6 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 		return zero, errAppPlatformLaunchUnavailable
 	}
 	w.raw, w.signature, err = control.SignDataWriter(w.command, key, w.authority, issued)
-	if err != nil {
-		return zero, err
-	}
-	startEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "start", "start-candidate", 1, completed)
 	if err != nil {
 		return zero, err
 	}
@@ -183,7 +239,7 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 	if err != nil {
 		return zero, err
 	}
-	registration, err := platformBackendRegistrationForRelease(e, source, runtime, descriptor, b.release, 1, dek)
+	registration, err := platformBackendRegistrationFromSealedSeed(source, runtime, descriptor, b.release, 1, dek, sealed)
 	if err != nil {
 		return zero, err
 	}
@@ -198,10 +254,6 @@ func (s *Server) loadPlatformWritableBackendHistory(e migExec, b platformBackend
 		return zero, err
 	}
 	defer clear(document)
-	regEffect, err := loadPlatformWritableHistoryEffect(e, source, runtime.id, "activate", "activate", 1, completed)
-	if err != nil {
-		return zero, err
-	}
 	if regEffect.created < startEffect.updated {
 		return zero, errAppPlatformLaunchUnavailable
 	}

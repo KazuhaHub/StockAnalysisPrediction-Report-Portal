@@ -75,31 +75,70 @@ func (s *Server) preparePlatformManagedBackendAccess(ctx context.Context, sessio
 // The private optional callback may only perform bounded local cryptography or
 // reads. Its buffered output must not escape before the final checks/commit.
 func (s *Server) withPlatformManagedBackendAccess(ctx context.Context, session platformActorSession, installationID string, read func(platformManagedBackendAccess, []byte) error) (platformManagedBackendAccess, error) {
-	return withPlatformBackendAccess(s, ctx, session, installationID, func(e migExec, b platformBackendHistoryBinding, r platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendDeliveryIntent, error) {
+	return withPlatformBackendAccess(s, ctx, session, installationID, platformInlineHistory(func(e migExec, b platformBackendHistoryBinding, r platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendDeliveryIntent, error) {
 		return s.loadPlatformManagedBackendHistory(e, b.installation, b.activation, b.release, b.namespace, b.epoch, b.format, b.fence, b.observed, b.readiness, r, seed, dek, now)
-	}, read)
+	}), read)
 }
 func (s *Server) preparePlatformWritableBackendAccess(ctx context.Context, session platformActorSession, installationID string) (platformWritableBackendAccess, error) {
 	return s.withPlatformWritableBackendAccess(ctx, session, installationID, nil)
 }
 func (s *Server) withPlatformWritableBackendAccess(ctx context.Context, session platformActorSession, installationID string, read func(platformWritableBackendAccess, []byte) error) (platformWritableBackendAccess, error) {
-	return withPlatformBackendAccess(s, ctx, session, installationID, s.loadPlatformWritableBackendHistory, read)
+	return withPlatformBackendAccess(s, ctx, session, installationID, s.loadPlatformWritableBackendHistoryPhased, read)
 }
 
 // Both families share the current account/OU/audience/trust transaction. Their
 // independently checked execution histories and signed domains remain distinct.
-func withPlatformBackendAccess[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error), read func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
-	return withPlatformBackendRead(s, ctx, session, installationID, load, func(_ migExec, a platformBackendAccess[T], seed []byte) error {
-		if read != nil {
-			return read(a, seed)
+// The optional callback has no database handle, so it runs after the transaction
+// that admitted the access has ended; its output stays buffered like any other.
+func withPlatformBackendAccess[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load platformBackendHistoryLoad[T], read func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
+	return platformBackendRead(s, ctx, session, installationID, load, nil, read)
+}
+
+// platformBackendHistoryLoad reads a history in the admission transaction and returns the pure
+// remainder as a finish step (see platformBackendHistoryFinish).
+type platformBackendHistoryLoad[T platformBackendAccessIntent] func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (platformBackendHistoryFinish[T], error)
+
+// platformInlineHistory adapts a loader that builds its whole intent in the transaction.
+func platformInlineHistory[T platformBackendAccessIntent](load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error)) platformBackendHistoryLoad[T] {
+	return func(e migExec, b platformBackendHistoryBinding, r platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[T], error) {
+		intent, err := load(e, b, r, seed, dek, now)
+		if err != nil {
+			return nil, err
 		}
-		return nil
-	})
+		return platformDoneHistory(intent), nil
+	}
+}
+
+// platformBackendPureStepHook is a test seam, nil in production. Every CPU-bound step that must
+// not hold the database connection (signature checks, descriptor and archive verification,
+// envelope signing) reports its name here as it starts.
+var platformBackendPureStepHook func(step string)
+
+func platformPureStep(step string) {
+	if hook := platformBackendPureStepHook; hook != nil {
+		hook(step)
+	}
 }
 
 // The optional transaction callback performs only bounded local reads/crypto.
 // Source/authority checks and buffered-result release remain shared by all users.
+// A callback that reads the database needs the whole intent inside the transaction, so
+// the history finish step runs there too; without one, the transaction only reads.
 func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load func(migExec, platformBackendHistoryBinding, platformRuntimeRegistration, []byte, []byte, int64) (T, error), read func(migExec, platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
+	return platformBackendRead(s, ctx, session, installationID, platformInlineHistory(load), read, nil)
+}
+
+// platformBackendRead admits an access in one read transaction and then does the CPU-bound work
+// outside it. SQLite serves every request through a single connection, so anything computed while
+// the transaction is open delays every other request of the process.
+//
+// Inside the transaction: every database read, in one snapshot, and only cheap comparisons. After
+// it: signature and archive verification of the stored release (from the rows read), the history
+// finish step, the identity verification and the optional pure callback. Every value that decides
+// access (session, account, trust, epoch, installation tuple, audience, activation, release rows,
+// capability rows, history rows) is read inside; the work afterwards decodes and verifies those
+// values and reads nothing.
+func platformBackendRead[T platformBackendAccessIntent](s *Server, ctx context.Context, session platformActorSession, installationID string, load platformBackendHistoryLoad[T], inTx func(migExec, platformBackendAccess[T], []byte) error, pure func(platformBackendAccess[T], []byte) error) (platformBackendAccess[T], error) {
 	var zero platformBackendAccess[T]
 	if !platformValidUUID(installationID) {
 		return zero, errAppPlatformLaunchUnavailable
@@ -217,12 +256,13 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 			trustRevision, _ = strconv.ParseInt(p.Revision, 10, 64)
 		}
 	}
-	verified, err := platformVerifyStoredRelease(e, release, trustRevision, trust, now)
-	if err != nil || verified.appID != appID || verified.publisherID != publisher {
+	releaseRows, err := platformReadStoredRelease(e, release)
+	if err != nil {
 		return zero, fmt.Errorf(
 			"backend access stored release: %w",
 			errAppPlatformLaunchUnavailable)
 	}
+	releaseNow := now
 	var descriptor []byte
 	if err := e.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release).Scan(&descriptor); err != nil {
 		return zero, fmt.Errorf(
@@ -238,23 +278,35 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 	if err := verifyPlatformLaunchCapabilitySnapshot(e, installationID, release, epoch, policy, parsed.Manifest); err != nil {
 		return zero, fmt.Errorf("backend access capabilities: %w", err)
 	}
-	intent, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, generation: generation, readiness: readiness}, runtime, seed, dek, now)
+	finish, err := load(e, platformBackendHistoryBinding{installation: installationID, activation: activation, release: release, namespace: namespace, epoch: epoch, format: format, fence: fence, observed: observed, generation: generation, readiness: readiness}, runtime, seed, dek, now)
 	if err != nil {
 		return zero, fmt.Errorf("backend access history: %w", err)
 	}
-	failed := true
-	defer func() {
-		if failed {
-			intent.closePlatformBackendIdentity()
-		}
-	}()
 	viewer, err := s.platformViewerIdentity(e, account, installationID, appID)
 	if err != nil {
 		return zero, fmt.Errorf("backend access viewer: %w", err)
 	}
-	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
-	if read != nil {
-		if err := read(e, result, seed); err != nil {
+	var intent T
+	var built, failed bool
+	defer func() {
+		if built && failed {
+			intent.closePlatformBackendIdentity()
+		}
+	}()
+	buildIntent := func() error {
+		var err error
+		if intent, err = finish(); err != nil {
+			return fmt.Errorf("backend access history: %w", err)
+		}
+		built, failed = true, true
+		return nil
+	}
+	if inTx != nil {
+		// A callback that reads the database needs the whole intent in the transaction.
+		if err := buildIntent(); err != nil {
+			return zero, err
+		}
+		if err := inTx(e, platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}, seed); err != nil {
 			return zero, fmt.Errorf("backend access read: %w", err)
 		}
 	}
@@ -268,7 +320,8 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 			"backend access final session: %w",
 			errAppPlatformLaunchUnavailable)
 	}
-	if _, err := platformVerifyStoredRelease(e, release, trustRevision, trust, now); err != nil {
+	finalRelease, err := platformReadStoredRelease(e, release)
+	if err != nil {
 		return zero, fmt.Errorf(
 			"backend access final release: %w",
 			errAppPlatformLaunchUnavailable)
@@ -278,12 +331,39 @@ func withPlatformBackendRead[T platformBackendAccessIntent](s *Server, ctx conte
 			"backend access final markers: %w",
 			errAppPlatformLaunchUnavailable)
 	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	// The transaction has ended: what remains decodes and verifies what it read.
+	platformPureStep("release-verify")
+	verified, err := verifyPlatformStoredReleaseRows(releaseRows, release, trustRevision, trust, releaseNow)
+	if err != nil || verified.appID != appID || verified.publisherID != publisher {
+		return zero, fmt.Errorf(
+			"backend access stored release: %w",
+			errAppPlatformLaunchUnavailable)
+	}
+	if !built {
+		if err := buildIntent(); err != nil {
+			return zero, err
+		}
+	}
+	platformPureStep("release-verify")
+	if _, err := verifyPlatformStoredReleaseRows(finalRelease, release, trustRevision, trust, now); err != nil {
+		return zero, fmt.Errorf(
+			"backend access final release: %w",
+			errAppPlatformLaunchUnavailable)
+	}
+	platformPureStep("identity-verify")
 	if err := intent.verifyPlatformBackendIdentity(time.Now().UnixMilli()); err != nil {
 		return zero, fmt.Errorf(
 			"backend access identity: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
+	result := platformBackendAccess[T]{intent: intent, viewer: viewer, account: account, policy: policy, fence: fence, activationID: activation}
+	if pure != nil {
+		platformPureStep("access-read")
+		if err := pure(result, seed); err != nil {
+			return zero, fmt.Errorf("backend access read: %w", err)
+		}
 	}
 	failed = false
 	return result, nil

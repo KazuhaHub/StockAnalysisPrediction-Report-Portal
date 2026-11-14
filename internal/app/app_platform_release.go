@@ -176,37 +176,59 @@ func (s *Server) recheckPlatformStagedReleaseContext(
 	return result, nil
 }
 
-func platformVerifyStoredRelease(e migExec, sha string, expectedTrustRevision int64, trust appplatform.PublisherTrust, now int64) (platformStagedRelease, error) {
-	var raw, envelope, archive []byte
-	var appID, publisher, version, keyID, frontendSHA string
-	var managed int
-	var archiveBytes int64
+// platformStoredReleaseRows is a stored release exactly as the database holds it. Reading it needs
+// the connection; verifying it (signature, canonical descriptor, frontend archive inspection) is
+// pure, so a caller that holds the only SQLite connection can release it before verifying.
+type platformStoredReleaseRows struct {
+	raw, envelope, archive           []byte
+	appID, publisher, version, keyID string
+	frontendSHA                      string
+	managed                          int
+	archiveBytes                     int64
+}
+
+func platformReadStoredRelease(e migExec, sha string) (platformStoredReleaseRows, error) {
+	var r platformStoredReleaseRows
 	lock := ""
 	if e.s.driver == "postgres" {
 		lock = " FOR SHARE OF r,f"
 	}
-	err := e.queryRow(`SELECT r.app_id,r.publisher_id,r.version,r.descriptor,r.signature,r.verification_key_id,r.frontend_sha256,r.managed,f.content,f.archive_bytes FROM app_platform_releases r JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256 WHERE r.sha256=?`+lock, sha).Scan(&appID, &publisher, &version, &raw, &envelope, &keyID, &frontendSHA, &managed, &archive, &archiveBytes)
+	err := e.queryRow(`SELECT r.app_id,r.publisher_id,r.version,r.descriptor,r.signature,r.verification_key_id,r.frontend_sha256,r.managed,f.content,f.archive_bytes FROM app_platform_releases r JOIN app_platform_frontend_artifacts f ON f.sha256=r.frontend_sha256 WHERE r.sha256=?`+lock, sha).Scan(&r.appID, &r.publisher, &r.version, &r.raw, &r.envelope, &r.keyID, &r.frontendSHA, &r.managed, &r.archive, &r.archiveBytes)
 	if errors.Is(err, sql.ErrNoRows) {
-		return platformStagedRelease{}, errAppPlatformReleaseConflict
+		return platformStoredReleaseRows{}, errAppPlatformReleaseConflict
 	}
 	if err != nil {
-		return platformStagedRelease{}, err
+		return platformStoredReleaseRows{}, err
 	}
-	verified, err := appplatform.VerifyPublisherDescriptor(raw, envelope, trust, strconv.FormatInt(now, 10))
+	return r, nil
+}
+
+// verifyPlatformStoredReleaseRows is the pure half of platformVerifyStoredRelease: it touches no
+// database and may run after the transaction that read the rows has ended.
+func verifyPlatformStoredReleaseRows(r platformStoredReleaseRows, sha string, expectedTrustRevision int64, trust appplatform.PublisherTrust, now int64) (platformStagedRelease, error) {
+	verified, err := appplatform.VerifyPublisherDescriptor(r.raw, r.envelope, trust, strconv.FormatInt(now, 10))
 	if err != nil {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
 	result := platformStagedIdentity(verified)
 	m := verified.Descriptor.Manifest
-	if result.sha256 != sha || m.ID != appID || m.Publisher != publisher || m.Version != version || verified.KeyID != keyID || m.Frontend.SHA256 != frontendSHA || boolInt(m.Backend != nil) != managed || result.trustRevision != expectedTrustRevision {
+	if result.sha256 != sha || m.ID != r.appID || m.Publisher != r.publisher || m.Version != r.version || verified.KeyID != r.keyID || m.Frontend.SHA256 != r.frontendSHA || boolInt(m.Backend != nil) != r.managed || result.trustRevision != expectedTrustRevision {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
 	result.managed = m.Backend != nil
-	inspected, err := appplatform.InspectFrontend(m, archive)
-	if err != nil || inspected.ArchiveBytes != archiveBytes {
+	inspected, err := appplatform.InspectFrontend(m, r.archive)
+	if err != nil || inspected.ArchiveBytes != r.archiveBytes {
 		return platformStagedRelease{}, errAppPlatformReleaseConflict
 	}
 	return result, nil
+}
+
+func platformVerifyStoredRelease(e migExec, sha string, expectedTrustRevision int64, trust appplatform.PublisherTrust, now int64) (platformStagedRelease, error) {
+	rows, err := platformReadStoredRelease(e, sha)
+	if err != nil {
+		return platformStagedRelease{}, err
+	}
+	return verifyPlatformStoredReleaseRows(rows, sha, expectedTrustRevision, trust, now)
 }
 
 // Only database writes may occur before this final check. All required resource

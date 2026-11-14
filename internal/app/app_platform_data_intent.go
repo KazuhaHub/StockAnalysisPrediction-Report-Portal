@@ -70,19 +70,38 @@ type platformManagedSource struct {
 }
 
 func platformDataCommandForSource(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, namespace, effect string) (control.Command, error) {
-	profile, profileErr := platformInstallProfileInTransaction(e, source.operationID)
-	if profileErr != nil {
-		return control.Command{}, profileErr
+	rows, err := platformReadDataCommandRows(e, source.operationID)
+	if err != nil {
+		return control.Command{}, err
+	}
+	return platformDataCommandFromRows(rows, source, runtime, namespace, effect)
+}
+
+// platformDataCommandRows is what building a source's prepare-data command reads from the database.
+type platformDataCommandRows struct {
+	plan, target string
+	descriptor   []byte
+}
+
+func platformReadDataCommandRows(e migExec, operation string) (platformDataCommandRows, error) {
+	var r platformDataCommandRows
+	if err := e.queryRow(`SELECT p.plan_json FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, operation).Scan(&r.plan); err != nil {
+		return r, err
+	}
+	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, operation).Scan(&r.target, &r.descriptor)
+	return r, err
+}
+
+// platformDataCommandFromRows is the pure half: it parses and derives, touching no database.
+func platformDataCommandFromRows(rows platformDataCommandRows, source platformManagedSource, runtime platformRuntimeRegistration, namespace, effect string) (control.Command, error) {
+	profile, err := platformParseInstallProfile(rows.plan)
+	if err != nil {
+		return control.Command{}, err
 	}
 	if profile != platformNativeInstallFormat && !platformManagedFormat(profile) {
 		return control.Command{}, errAppPlatformStageEvidence
 	}
-	var target string
-	var raw []byte
-	err := e.queryRow(`SELECT p.target_release_sha256,r.descriptor FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id JOIN app_platform_releases r ON r.sha256=p.target_release_sha256 WHERE o.id=?`, source.operationID).Scan(&target, &raw)
-	if err != nil {
-		return control.Command{}, err
-	}
+	target, raw := rows.target, rows.descriptor
 	parsed, err := appplatform.ParseDescriptor(raw)
 	if err != nil {
 		return control.Command{}, errAppPlatformStageEvidence

@@ -93,13 +93,32 @@ func platformBackendRegistrationForSource(e migExec, source platformManagedSourc
 
 func platformBackendRegistrationForRelease(e migExec, source platformManagedSource, runtime platformRuntimeRegistration, descriptor []byte, release string, policyRevision int64, dek []byte) (appplatform.BackendRegistration, error) {
 	var zero appplatform.BackendRegistration
+	if policyRevision < 1 {
+		return zero, errAppPlatformStageEvidence
+	}
+	sealed, err := platformReadSealedIdentitySeed(e, source.installationID)
+	if err != nil {
+		return zero, err
+	}
+	return platformBackendRegistrationFromSealedSeed(source, runtime, descriptor, release, policyRevision, dek, sealed)
+}
+
+// platformReadSealedIdentitySeed is the only database read of backend registration derivation.
+func platformReadSealedIdentitySeed(e migExec, installationID string) (string, error) {
+	var sealed string
+	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=?`, installationID).Scan(&sealed); err != nil {
+		return "", err
+	}
+	return sealed, nil
+}
+
+// platformBackendRegistrationFromSealedSeed is the pure half: it decrypts the sealed seed and
+// derives the registration, touching no database.
+func platformBackendRegistrationFromSealedSeed(source platformManagedSource, runtime platformRuntimeRegistration, descriptor []byte, release string, policyRevision int64, dek []byte, sealed string) (appplatform.BackendRegistration, error) {
+	var zero appplatform.BackendRegistration
 	parsed, err := appplatform.ParseDescriptor(descriptor)
 	if err != nil || parsed.SHA256 != release || policyRevision < 1 {
 		return zero, errAppPlatformStageEvidence
-	}
-	var sealed string
-	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=?`, source.installationID).Scan(&sealed); err != nil {
-		return zero, err
 	}
 	if !strings.HasPrefix(sealed, sealPrefix) {
 		return zero, errAppPlatformStageEvidence
@@ -113,6 +132,5 @@ func platformBackendRegistrationForRelease(e migExec, source platformManagedSour
 	if err != nil {
 		return zero, err
 	}
-
 	return registration, nil
 }

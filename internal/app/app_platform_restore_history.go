@@ -120,13 +120,12 @@ func platformRestoreHistorySource(e migExec, running journal.UpdateStartRunningR
 	return source, nil
 }
 
-// loadPlatformWritableRestoreBackendHistory reconstructs a completed roll back from the signed start and
+// loadPlatformWritableRestoreBackendHistoryPhased reads the evidence to reconstruct a completed roll back from the signed start and
 // registration evidence the live operation used, so a rolled back installation is admitted exactly like an
 // updated one. The fresh envelopes are access proofs only. Any gap in the evidence refuses access.
-func (s *Server) loadPlatformWritableRestoreBackendHistory(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformWritableRegistrationIntent, error) {
-	var zero platformWritableRegistrationIntent
-	fail := func(stage string, err error) (platformWritableRegistrationIntent, error) {
-		return zero, fmt.Errorf("restore history %s (%v): %w", stage, err, errAppPlatformLaunchUnavailable)
+func (s *Server) loadPlatformWritableRestoreBackendHistoryPhased(e migExec, b platformBackendHistoryBinding, runtime platformRuntimeRegistration, seed, dek []byte, now int64) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
+	fail := func(stage string, err error) (platformBackendHistoryFinish[platformWritableRegistrationIntent], error) {
+		return nil, fmt.Errorf("restore history %s (%v): %w", stage, err, errAppPlatformLaunchUnavailable)
 	}
 	if b.generation < 2 {
 		return fail("generation", nil)
@@ -177,5 +176,5 @@ func (s *Server) loadPlatformWritableRestoreBackendHistory(e migExec, b platform
 	if err != nil {
 		return fail("activation", err)
 	}
-	return platformWritableHistoryFromStart(e, b, expected, runtime, seed, dek, now, start, source.descriptor)
+	return platformWritableHistoryFromStartPhased(e, b, expected, runtime, seed, dek, now, start, source.descriptor)
 }
