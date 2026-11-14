@@ -379,7 +379,7 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/foreign"
           sock=$(readlink -f /var/run/docker.sock)
-          sudo curl -sSf --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' > "$RUNNER_TEMP/foreign/containers.json"
+          sudo curl -sSf --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' | tee "$RUNNER_TEMP/foreign/containers.json" > /dev/null
           jq -c '.[] | {Id, Image, Mounts}' "$RUNNER_TEMP/foreign/containers.json"
           # Select the service by its image, never by position, and keep only the fields the diagnosis needs: the
           # container's environment (the service password) is never stored.
