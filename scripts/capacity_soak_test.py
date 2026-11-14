@@ -728,6 +728,94 @@ def self_kwargs():
     return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
 
 
+class StallTests(unittest.TestCase):
+    PRESSURE = ("some avg10=1.50 avg60=0.80 avg300=0.20 total=1000\nfull avg10=0.25 avg60=0.10 avg300=0.05 total=400\n")
+
+    def test_pressure_files_give_some_and_full_with_avg10_and_the_running_total(self):
+        self.assertEqual(soak.parse_pressure(self.PRESSURE), {"some": {"avg10": 1.5, "total_us": 1000}, "full": {"avg10": 0.25, "total_us": 400}})
+        # The host's cpu file has no full line on older kernels.
+        self.assertEqual(soak.parse_pressure("some avg10=0.00 avg60=0.00 avg300=0.00 total=7\n"), {"some": {"avg10": 0.0, "total_us": 7}})
+        with self.assertRaises(ValueError):
+            soak.parse_pressure("garbage")
+
+    def test_diskstats_are_read_by_device_number_and_turned_into_utilisation_and_await(self):
+        # major minor name reads rd_merged rd_sectors rd_ms writes wr_merged wr_sectors wr_ms in_flight io_ticks weighted
+        text = " 8  1 sda1 100 0 800 50 200 0 1600 400 0 700 450\n 7 0 loop0 1 0 8 1 2 0 16 2 0 3 3\n"
+        stats = soak.parse_diskstats(text)
+        self.assertEqual(stats["8:1"]["name"], "sda1")
+        self.assertEqual((stats["8:1"]["reads"], stats["8:1"]["writes"], stats["8:1"]["io_ticks_ms"]), (100, 200, 700))
+        later = soak.parse_diskstats(" 8  1 sda1 150 0 1200 90 300 0 2400 900 1 1700 1100\n")
+        delta = soak.disk_delta(stats["8:1"], later["8:1"], seconds=10.0)
+        self.assertEqual(delta["utilisation_percent"], 10.0)                 # 1000 ms of I/O in 10 s
+        self.assertAlmostEqual(delta["await_ms"], (40 + 500) / 150, places=3)  # (read ms + write ms) over I/Os
+        self.assertEqual(delta["iops"], 15.0)
+        self.assertEqual(delta["write_kib_per_second"], 40.0)                 # 800 sectors of 512 bytes in 10 s
+        self.assertEqual(soak.disk_delta(stats["8:1"], stats["8:1"], seconds=10.0)["await_ms"], 0.0)
+
+    def test_the_sample_carries_pressure_dirty_pages_and_the_cpu_wait_counters(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            proc = root / "proc"
+            (proc / "pressure").mkdir(parents=True)
+            (proc / "meminfo").write_text(MEMINFO + "Dirty: 2048 kB\nWriteback: 512 kB\n")
+            (proc / "stat").write_text("cpu  100 0 100 700 100 0 0 0 0 0\nprocs_running 5\nprocs_blocked 2\n")
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            for name in ("cpu", "io", "memory"):
+                (proc / "pressure" / name).write_text(self.PRESSURE)
+            (root / "mount").mkdir()
+            sampler = soak.Sampler(run=lambda *a: "", proc=proc, mountpoint=root / "mount", image_id="sha256:" + "b" * 64, clock=lambda: 1.0, cpus=4, ticks_per_second=100)
+            sample = sampler.sample()
+        self.assertEqual(sample["pressure"]["host"]["io"]["some"]["avg10"], 1.5)
+        self.assertEqual(sample["pressure"]["host"]["memory"]["full"]["total_us"], 400)
+        self.assertEqual(sample["vm"], {"procs_running": 5, "procs_blocked": 2, "dirty_kib": 2048, "writeback_kib": 512})
+
+    def test_a_group_cgroups_pressure_is_read_where_the_layout_says_it_lives(self):
+        with tempfile.TemporaryDirectory() as root:
+            fs = Path(root)
+            scope = fs / "system.slice" / "soak-portal.scope"
+            scope.mkdir(parents=True)
+            for name in ("cpu", "io", "memory"):
+                (scope / f"{name}.pressure").write_text(self.PRESSURE)
+            got = soak.read_group_pressure(fs, "/system.slice/soak-portal.scope")
+            self.assertEqual(got["cpu"]["some"]["avg10"], 1.5)
+            self.assertEqual(soak.read_group_pressure(fs, "/system.slice/missing.scope"), {})
+
+    def test_the_storage_layout_says_which_devices_the_volumes_live_on_and_whether_they_share_a_disk(self):
+        devices = {"8:1": {"name": "sda1"}, "7:0": {"name": "loop0"}}
+        layout = soak.storage_layout({"postgres_data": "8:1", "xfs_mount": "7:0", "xfs_backing_file": "8:1", "docker_root": "8:1"}, devices,
+                                     {"postgres_data_dir": "/var/lib/postgresql/16/main"})
+        self.assertEqual(layout["postgres_data"]["device"], "sda1")
+        self.assertEqual(layout["xfs_mount"]["device"], "loop0")
+        self.assertTrue(layout["postgres_and_xfs_backing_share_a_disk"])
+        other = soak.storage_layout({"postgres_data": "8:1", "xfs_mount": "7:0", "xfs_backing_file": "8:16", "docker_root": "8:1"}, devices, {})
+        self.assertFalse(other["postgres_and_xfs_backing_share_a_disk"])
+
+    def test_postgres_wal_sync_counters_become_commit_rate_and_the_mean_fsync_time(self):
+        before = soak.parse_pg_wal("1000|200|40.0\n")
+        after = soak.parse_pg_wal("1600|500|190.0\n")
+        self.assertEqual(soak.pg_delta(before, after, seconds=30.0), {"commits_per_second": 20.0, "wal_syncs_per_second": 10.0, "mean_wal_sync_ms": 0.5})
+        self.assertEqual(soak.pg_delta(before, before, seconds=30.0)["mean_wal_sync_ms"], 0.0)
+
+    def test_the_verdict_summarises_each_stall_signal_for_the_idle_period_and_the_load(self):
+        evidence = child_evidence(windows=3)
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": LOAD_START_MS - 90_000, "ended_ms": LOAD_START_MS - 30_000}]
+        samples = load_samples(3)
+        for sample in samples:
+            idle = sample["at_ms"] <= LOAD_START_MS
+            some = lambda v: {"some": {"avg10": v, "total_us": int(v * 1000)}, "full": {"avg10": v / 2, "total_us": int(v * 500)}}
+            sample["pressure"] = {"host": {"cpu": some(1.0 if idle else 30.0), "io": some(0.5 if idle else 20.0), "memory": some(0.0)},
+                                  "portal": {"cpu": some(0.1 if idle else 40.0), "io": some(0.0 if idle else 2.0), "memory": some(0.0)}}
+            sample["vm"] = {"procs_running": 1 if idle else 9, "procs_blocked": 0, "dirty_kib": 100 if idle else 90_000, "writeback_kib": 0}
+            sample["disk"] = {"postgres_data": {"utilisation_percent": 1.0 if idle else 95.0, "await_ms": 0.5 if idle else 12.0, "iops": 3.0, "write_kib_per_second": 10.0}}
+            sample["pg"] = {"commits_per_second": 2.0 if idle else 400.0, "wal_syncs_per_second": 1.0, "mean_wal_sync_ms": 0.4 if idle else 6.0}
+        summary = soak.evaluate(evidence, samples, **self_kwargs())["stall_summary"]
+        self.assertEqual(summary["idle"]["pressure.portal.cpu.some.avg10"], {"mean": 0.1, "max": 0.1})
+        self.assertEqual(summary["loaded"]["pressure.portal.cpu.some.avg10"], {"mean": 40.0, "max": 40.0})
+        self.assertEqual(summary["loaded"]["disk.postgres_data.await_ms"]["max"], 12.0)
+        self.assertEqual(summary["loaded"]["pg.mean_wal_sync_ms"]["mean"], 6.0)
+        self.assertEqual(summary["loaded"]["vm.dirty_kib"]["max"], 90_000)
+
+
 class CgroupLayoutTests(unittest.TestCase):
     def test_the_layout_names_each_process_group_its_cgroup_and_the_cpu_weight_along_its_path(self):
         with tempfile.TemporaryDirectory() as root:

@@ -587,6 +587,8 @@ jobs:
           DROP DATABASE IF EXISTS reports_soak;
           CREATE DATABASE reports_soak OWNER portal;
           SQL
+          # The soak's own database: time the WAL syncs so the evidence can say whether commit latency rises under the disk load.
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -q -c 'ALTER SYSTEM SET track_wal_io_timing = on' -c 'SELECT pg_reload_conf()' > /dev/null
           sudo -u postgres psql -tAc 'SHOW server_version' | tee "$RUNNER_TEMP/postgres-version.txt"
       - name: Install ephemeral filesystem acceptance tools
         run: |

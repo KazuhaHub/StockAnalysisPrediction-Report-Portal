@@ -152,6 +152,83 @@ def cpu_millis_between(previous_usec, current_usec, seconds):
     return (current_usec - previous_usec) / (seconds * 1000.0)
 
 
+# ---- where the time goes: stalls, disks, PostgreSQL ----
+
+def parse_pressure(text):
+    """/proc/pressure/* or a cgroup's *.pressure: {"some": {"avg10", "total_us"}, "full": ...}."""
+    result = {}
+    for line in text.splitlines():
+        match = re.match(r"^(some|full) avg10=([0-9.]+) avg60=[0-9.]+ avg300=[0-9.]+ total=([0-9]+)$", line.strip())
+        if match:
+            result[match.group(1)] = {"avg10": float(match.group(2)), "total_us": int(match.group(3))}
+    if not result:
+        raise ValueError("no pressure lines")
+    return result
+
+
+def read_group_pressure(cgroup_fs, path):
+    """cpu, io and memory pressure of one cgroup; empty when its files are not there."""
+    result = {}
+    for resource in ("cpu", "io", "memory"):
+        try:
+            result[resource] = parse_pressure((Path(cgroup_fs) / path.lstrip("/") / f"{resource}.pressure").read_text())
+        except (OSError, ValueError):
+            pass
+    return result
+
+
+def parse_diskstats(text):
+    """/proc/diskstats keyed by "major:minor"."""
+    stats = {}
+    for line in text.splitlines():
+        f = line.split()
+        if len(f) >= 14:
+            stats[f"{f[0]}:{f[1]}"] = {"name": f[2], "reads": int(f[3]), "rd_sectors": int(f[5]), "rd_ms": int(f[6]), "writes": int(f[7]),
+                                       "wr_sectors": int(f[9]), "wr_ms": int(f[10]), "io_ticks_ms": int(f[12])}
+    return stats
+
+
+def disk_delta(before, after, seconds):
+    """Utilisation (share of the interval the device had I/O in flight), mean await, IOPS and write rate between two readings."""
+    ios = (after["reads"] - before["reads"]) + (after["writes"] - before["writes"])
+    wait_ms = (after["rd_ms"] - before["rd_ms"]) + (after["wr_ms"] - before["wr_ms"])
+    return {"utilisation_percent": round(100.0 * (after["io_ticks_ms"] - before["io_ticks_ms"]) / (seconds * 1000.0), 2),
+            "await_ms": round(wait_ms / ios, 3) if ios else 0.0, "iops": round(ios / seconds, 2),
+            "write_kib_per_second": round((after["wr_sectors"] - before["wr_sectors"]) * 512 / 1024.0 / seconds, 1)}
+
+
+def storage_layout(devices, stats, extra):
+    """Which device each volume lives on, and whether PostgreSQL's data and the XFS loop volume's backing file share a disk."""
+    layout = {name: {"major_minor": dev, "device": (stats.get(dev) or {}).get("name")} for name, dev in devices.items()}
+    layout["postgres_and_xfs_backing_share_a_disk"] = devices.get("postgres_data") is not None and devices.get("postgres_data") == devices.get("xfs_backing_file")
+    layout.update(extra)
+    return layout
+
+
+PG_WAL_QUERY = "SELECT (SELECT sum(xact_commit) FROM pg_stat_database) || '|' || wal_sync || '|' || wal_sync_time FROM pg_stat_wal"
+
+
+def parse_pg_wal(text):
+    commits, syncs, sync_ms = text.strip().split("|")
+    return {"commits": float(commits), "syncs": float(syncs), "sync_ms": float(sync_ms)}
+
+
+def pg_delta(before, after, seconds):
+    syncs = after["syncs"] - before["syncs"]
+    return {"commits_per_second": round((after["commits"] - before["commits"]) / seconds, 2), "wal_syncs_per_second": round(syncs / seconds, 2),
+            "mean_wal_sync_ms": round((after["sync_ms"] - before["sync_ms"]) / syncs, 3) if syncs else 0.0}
+
+
+def _meminfo_kib(text, key):
+    match = re.search(rf"^{key}:\s+([0-9]+) kB$", text, re.MULTILINE)
+    return int(match.group(1)) if match else 0
+
+
+def _stat_counter(text, key):
+    match = re.search(rf"^{key} ([0-9]+)$", text, re.MULTILINE)
+    return int(match.group(1)) if match else 0
+
+
 # ---- who uses the CPU ----
 
 CPU_GROUPS = ("portal", "flood", "postgres", "runner", "docker", "backends", "other")
@@ -216,6 +293,12 @@ def cgroup_layout(proc, cgroup_fs, backend_full_ids, docker_slice):
     return layout
 
 
+def device_number(path):
+    """"major:minor" of the device a path lives on."""
+    st = os.stat(path)
+    return f"{os.major(st.st_dev)}:{os.minor(st.st_dev)}"
+
+
 def require_systemd_scopes(run):
     """The soak mirrors production by starting the Portal and the runner in their own scopes under system.slice. If systemd-run cannot do that
     here the run stops: a layout is never faked."""
@@ -232,7 +315,10 @@ class Sampler:
 
     `run` runs a command and returns its text (injected so the parsing is tested without a Docker daemon)."""
 
-    def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice", cpus=None, ticks_per_second=None):
+    def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice", cpus=None, ticks_per_second=None,
+                 disk_devices=None, postgres=False):
+        self.disk_devices, self.postgres = disk_devices or {}, postgres
+        self._disks, self._pg, self._iowait = None, None, None
         self.cpus = cpus or os.cpu_count() or 1
         self.ticks_per_second = ticks_per_second or os.sysconf("SC_CLK_TCK")
         self._backend_full_ids = set()
@@ -366,8 +452,9 @@ class Sampler:
 
     def sample(self):
         now = self.clock()
-        memory = parse_meminfo((self.proc / "meminfo").read_text())
-        cpu = parse_proc_stat((self.proc / "stat").read_text())
+        memory_text, stat_text = (self.proc / "meminfo").read_text(), (self.proc / "stat").read_text()
+        memory = parse_meminfo(memory_text)
+        cpu = parse_proc_stat(stat_text)
         percent = None if self._cpu is None else cpu_percent(self._cpu, cpu)
         self._cpu = cpu
         running_tasks, total_tasks = parse_loadavg_tasks((self.proc / "loadavg").read_text())
@@ -379,6 +466,7 @@ class Sampler:
                 self.layout = fresh  # the fullest picture seen: the flood and the backends exist only once the load runs
         except OSError:
             pass
+        extra = self._stalls(now, memory_text, stat_text)
         shares = self._cpu_groups(now, percent, backends["cpu_millis"] if backends.get("cpu_source") == "cgroup" else 0.0)
         row = {
             "at_ms": int(now * 1000), "mem_total_kib": memory["total_kib"], "mem_available_kib": memory["available_kib"],
@@ -389,7 +477,55 @@ class Sampler:
         }
         if shares is not None:
             row["cpu_groups"] = shares
+        row.update(extra)
         return row
+
+    def _stalls(self, now, memory_text, stat_text):
+        """Pressure-stall, I/O-wait, dirty-page, disk and PostgreSQL WAL sync readings of this sample."""
+        extra = {"vm": {"procs_running": _stat_counter(stat_text, "procs_running"), "procs_blocked": _stat_counter(stat_text, "procs_blocked"),
+                        "dirty_kib": _meminfo_kib(memory_text, "Dirty"), "writeback_kib": _meminfo_kib(memory_text, "Writeback")}}
+        pressure = {}
+        host = {}
+        for resource in ("cpu", "io", "memory"):
+            try:
+                host[resource] = parse_pressure((self.proc / "pressure" / resource).read_text())
+            except (OSError, ValueError):
+                pass
+        if host:
+            pressure["host"] = host
+        for group in ("portal", "postgres", "backend"):
+            path = (self.layout.get(group) or {}).get("cgroup")
+            found = read_group_pressure(self.cgroup_fs, path) if path else {}
+            if found:
+                pressure[group] = found
+        if pressure:
+            extra["pressure"] = pressure
+        iowait_line = [l for l in stat_text.splitlines() if l.startswith("cpu ")]
+        if iowait_line:
+            iowait = int(iowait_line[0].split()[5])
+            total = parse_proc_stat(stat_text)[1]
+            if self._iowait is not None and total > self._iowait[1]:
+                extra["vm"]["iowait_percent"] = round(100.0 * (iowait - self._iowait[0]) / (total - self._iowait[1]), 2)
+            self._iowait = (iowait, total)
+        if self.disk_devices:
+            try:
+                stats = parse_diskstats((self.proc / "diskstats").read_text())
+            except OSError:
+                stats = {}
+            previous, self._disks = self._disks, (now, stats)
+            if previous and now > previous[0]:
+                extra["disk"] = {name: disk_delta(previous[1][dev], stats[dev], now - previous[0])
+                                 for name, dev in self.disk_devices.items() if dev in stats and dev in previous[1]}
+        if self.postgres:
+            try:
+                reading = parse_pg_wal(self.run("runuser", "-u", "postgres", "--", "psql", "-tAXc", PG_WAL_QUERY))
+            except Exception:  # noqa: BLE001 - a failed query is a missing reading, not a failed sample
+                reading = None
+            if reading is not None:
+                previous, self._pg = self._pg, (now, reading)
+                if previous and now > previous[0]:
+                    extra["pg"] = pg_delta(previous[1], reading, now - previous[0])
+        return extra
 
 
 # ---- judging ----
@@ -650,6 +786,53 @@ def _mean_shares(rows):
     return {name: round(sum(r.get(name, 0.0) for r in rows) / len(rows), 2) for name in ("host_busy",) + CPU_GROUPS}
 
 
+def _flatten(prefix, value, out):
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            _flatten(f"{prefix}.{key}" if prefix else key, inner, out)
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        out[prefix] = value
+
+
+def _stall_metrics(samples):
+    """Every numeric stall reading of every sample, flat, plus each pressure file's stalled share of the interval since the previous sample."""
+    rows, previous = [], None
+    for sample in samples:
+        flat = {}
+        for key in ("pressure", "vm", "disk", "pg"):
+            _flatten(key, sample.get(key) or {}, flat)
+        if previous is not None and sample["at_ms"] > previous["at_ms"]:
+            seconds = (sample["at_ms"] - previous["at_ms"]) / 1000.0
+            for group, resources in (sample.get("pressure") or {}).items():
+                for resource, kinds in resources.items():
+                    for kind, reading in kinds.items():
+                        before = ((previous.get("pressure") or {}).get(group, {}).get(resource, {}).get(kind) or {}).get("total_us")
+                        if before is not None:
+                            flat[f"pressure.{group}.{resource}.{kind}.stall_percent"] = round(100.0 * (reading["total_us"] - before) / (seconds * 1e6), 2)
+        rows.append((sample["at_ms"], flat))
+        previous = sample
+    return rows
+
+
+def _summarise(rows):
+    names = {name for _, flat in rows for name in flat}
+    return {name: {"mean": round(sum(f[name] for _, f in rows if name in f) / sum(1 for _, f in rows if name in f), 3),
+                   "max": max(f[name] for _, f in rows if name in f)} for name in sorted(names)}
+
+
+def stall_summary(evidence, samples):
+    """Idle against loaded: pressure (avg10 and the stalled share of each interval), I/O wait, dirty pages, disk utilisation and await, and
+    PostgreSQL's commit rate and mean WAL sync time, each as mean and max over the period."""
+    rows = _stall_metrics(sorted(samples, key=lambda s: s["at_ms"]))
+    idle_windows = evidence.get("idle_windows") or []
+    idle = []
+    if idle_windows:
+        start, end = min(w.get("started_ms", 0) for w in idle_windows), max(w.get("ended_ms", 0) for w in idle_windows)
+        idle = [r for r in rows if start < r[0] <= end]
+    loaded = [r for r in rows if evidence.get("load_started_ms", 0) < r[0] <= evidence.get("load_finished_ms", 0)]
+    return {"idle": _summarise(idle), "loaded": _summarise(loaded)}
+
+
 def cpu_breakdown(evidence, samples):
     """Each group's share of the host CPU (percent of all CPUs) for the idle period and for every loaded window, and the flood's
     admitted and refused request rates per second for every window."""
@@ -740,7 +923,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
         and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)),
-        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
+        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
@@ -965,7 +1148,18 @@ def main(argv):
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
             soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
-        sampler = Sampler(run_command, "/proc", mountpoint, image_id)
+        devices, extra = {}, {}
+        try:
+            data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
+            extra["postgres_data_dir"] = data_dir
+            devices["postgres_data"] = device_number(data_dir)
+        except (RuntimeError, OSError, subprocess.SubprocessError):
+            pass  # not a PostgreSQL run
+        devices["xfs_mount"], devices["xfs_backing_file"], devices["docker_root"] = device_number(mountpoint), device_number(volume), device_number(docker_root)
+        storage = storage_layout(devices, parse_diskstats(Path("/proc/diskstats").read_text()), extra)
+        print("storage layout:", json.dumps(storage, sort_keys=True), file=sys.stderr)
+        tracked = {name: dev for name, dev in devices.items() if name != "docker_root"}
+        sampler = Sampler(run_command, "/proc", mountpoint, image_id, disk_devices=tracked, postgres="postgres_data" in devices)
         stop = threading.Event()
         collected, failed_counter = [], [0]
 
@@ -1021,7 +1215,7 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
+        "unit_tests": unit_tests, "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
