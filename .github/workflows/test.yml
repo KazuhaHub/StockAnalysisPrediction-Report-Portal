@@ -185,12 +185,6 @@ jobs:
           name: go-test-output
           path: go-test-output.txt
           retention-days: 7
-      # The shards restore this job's build cache and cannot save one (a key is written once), so
-      # the internal/app test package they all compile is put into it here, under the flags they
-      # build with. Only a main push saves, so only a main push pays for it.
-      - name: Compile the app test binary for the shards' cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: go test -c -o /dev/null ./internal/app
       # A SAVE KEEPS ONLY WHAT ITS RUN USED. Each save carries forward all that its restore
       # brought, and Go's own trim drops only what went unused for five days: that bounds an
       # object's age, not the cache's size. Nearly every main push rebuilds internal/app (its
@@ -250,10 +244,14 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       # The build cache pair go-test-checks explains, restore half only and under its key: the
-      # shards compile the same objects, and go-test-checks saves them.
+      # shards compile the same objects (its focused steps already build the internal/app test
+      # package), and go-test-checks saves them. The path list must be the one the save uses:
+      # actions/cache folds it into the cache version, and a different list never matches.
       - uses: actions/cache/restore@v6
         with:
-          path: ~/.cache/go-build
+          path: |
+            ~/.cache/go-build
+            ~/.cache/staticcheck
           key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
           restore-keys: |
             go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
@@ -268,7 +266,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tests=$(go test -list '^Test' ./internal/app/ | grep '^Test' | grep -v '^TestMain$')
+          # Fuzz targets are listed too: an ordinary run executes their seed corpus as a test.
+          tests=$(go test -list '^(Test|Fuzz)' ./internal/app/ | grep -E '^(Test|Fuzz)' | grep -v '^TestMain$')
           regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
           test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
           go test -v -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-test-shard-${{ matrix.shard }}.txt"
