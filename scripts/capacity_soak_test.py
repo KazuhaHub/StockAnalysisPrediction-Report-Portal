@@ -816,6 +816,26 @@ class StallTests(unittest.TestCase):
         self.assertEqual(summary["loaded"]["vm.dirty_kib"]["max"], 90_000)
 
 
+class ReservedCPUTests(unittest.TestCase):
+    def test_the_reserved_cpus_override_is_empty_or_a_small_integer(self):
+        self.assertEqual(soak.soak_reserved_cpus(""), "")
+        for good in ("0", "1", "2", "3"):
+            self.assertEqual(soak.soak_reserved_cpus(good), good)
+        for bad in ("-1", "x", "1.5", "01", "65", " 2"):
+            with self.assertRaises(RuntimeError):
+                soak.soak_reserved_cpus(bad)
+
+    def test_an_override_of_the_reserved_cpus_is_evidence_only_when_it_equals_the_default(self):
+        self.assertEqual(soak.RUNNER_DEFAULT_RESERVED_CPUS, 1)
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        evidence, samples = child_evidence(windows=120), load_samples(120)
+        self.assertTrue(soak.evaluate(evidence, samples, reserved_cpus="1", **kwargs)["counts_as_ops08_evidence"])
+        verdict = soak.evaluate(evidence, samples, reserved_cpus="2", **kwargs)
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertEqual(verdict["reserved_cpus_override"], "2")
+
+
 class CpusetTests(unittest.TestCase):
     def test_per_cpu_busy_comes_from_the_per_cpu_lines_of_proc_stat(self):
         before = "cpu  0 0 0 0 0 0 0 0\ncpu0 100 0 0 900 0 0 0 0\ncpu1 0 0 0 1000 0 0 0 0\ncpu2 500 0 100 400 0 0 0 0\n"

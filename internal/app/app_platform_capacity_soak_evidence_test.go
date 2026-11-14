@@ -352,6 +352,19 @@ func soakParseCPUPercent(env string) (*int, error) {
 	return &n, nil
 }
 
+// soakParseReservedCPUs reads APP_CAPACITY_SOAK_RESERVED_CPUS: empty leaves the runner's default, else an override of its
+// capacity.reserved_cpus (the runner refuses a value outside 0 to NCPU-1).
+func soakParseReservedCPUs(env string) (*int, error) {
+	if env == "" {
+		return nil, nil
+	}
+	n, err := strconv.Atoi(env)
+	if err != nil || n < 0 || n > 64 || strconv.Itoa(n) != env {
+		return nil, fmt.Errorf("the runner reserved CPUs is empty or an integer from 0 to 64, got %q", env)
+	}
+	return &n, nil
+}
+
 // soakPostgresLocal reports whether a DSN names the job's own loopback service: the only database the soak resets.
 func soakPostgresLocal(dsn string) bool {
 	u, err := url.Parse(dsn)
@@ -791,6 +804,23 @@ func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeigh
 		"setpriv", "--reuid=41001", "--regid=41001", "--groups=41001", "/t/portal.test", "-test.v"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q", got)
+	}
+}
+
+func TestSoakReservedCPUsIsEmptyOrASmallNonNegativeInteger(t *testing.T) {
+	if got, err := soakParseReservedCPUs(""); err != nil || got != nil {
+		t.Fatalf("empty = %v, %v", got, err)
+	}
+	for _, want := range []int{0, 1, 2, 3} {
+		got, err := soakParseReservedCPUs(strconv.Itoa(want))
+		if err != nil || got == nil || *got != want {
+			t.Errorf("%d = %v, %v", want, got, err)
+		}
+	}
+	for _, bad := range []string{"-1", "x", "1.5", "01", "65", " 2"} {
+		if _, err := soakParseReservedCPUs(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
 	}
 }
 

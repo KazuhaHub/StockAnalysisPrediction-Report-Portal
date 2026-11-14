@@ -174,10 +174,14 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	reservedCPUs, err := soakParseReservedCPUs(os.Getenv("APP_CAPACITY_SOAK_RESERVED_CPUS"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
 		c.AllowLocalReferenceImages = true
-		if cpuPercent != nil { // a diagnostic override of the runner's CPU budget; the backends are sized from what it reports
-			c.Capacity = &service.CapacityConfig{CPUPercent: cpuPercent}
+		if cpuPercent != nil || reservedCPUs != nil { // diagnostic overrides of the runner's CPU budget and reservation; the backends are sized from what it reports
+			c.Capacity = &service.CapacityConfig{CPUPercent: cpuPercent, ReservedCPUs: reservedCPUs}
 		}
 	})
 	defer func() {

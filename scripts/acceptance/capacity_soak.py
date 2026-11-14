@@ -51,6 +51,8 @@ MEBIBYTE = 1024 ** 2
 # The runner's own default of capacity.cpu_percent (internal/apprunner/service/capacity.go). A run that overrides it measures a
 # different budget and is evidence only if it names this value.
 RUNNER_DEFAULT_CPU_PERCENT = 50
+# The runner's default of capacity.reserved_cpus on a host of four or more CPUs (internal/apprunner/service/capacity.go).
+RUNNER_DEFAULT_RESERVED_CPUS = 1
 RETIRED_PROBES = ("ninth_backend", "memory_over_budget", "cpu_over_budget")
 REQUIRED_PROBES = (
     "fifty_first_installation",
@@ -900,7 +902,7 @@ def cpu_breakdown(evidence, samples):
     return {"idle": _mean_shares(idle), "windows": windows, "flood_rates": rates}
 
 
-def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent=""):
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus=""):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
@@ -967,7 +969,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
-        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)),
+        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)) and reserved_cpus in ("", str(RUNNER_DEFAULT_RESERVED_CPUS)),
+        "reserved_cpus_override": reserved_cpus,
         "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
@@ -1023,6 +1026,13 @@ def soak_cpu_percent(value):
     """An override of the runner's capacity.cpu_percent for a diagnostic run: empty or an integer 1 to 100."""
     if value and not (re.fullmatch(r"[0-9]{1,3}", value) and 1 <= int(value) <= 100 and str(int(value)) == value):
         raise RuntimeError("soak_cpu_percent is empty or an integer from 1 to 100")
+    return value or ""
+
+
+def soak_reserved_cpus(value):
+    """An override of the runner's capacity.reserved_cpus for a diagnostic run: empty or a non-negative integer."""
+    if value and not (re.fullmatch(r"[0-9]{1,2}", value) and int(value) <= 64 and str(int(value)) == value):
+        raise RuntimeError("soak_reserved_cpus is empty or an integer from 0 to 64")
     return value or ""
 
 
@@ -1122,6 +1132,7 @@ def main(argv):
     image = soak_image(os.environ.get("APP_CAPACITY_SOAK_IMAGE"))
     variant = soak_variant(os.environ.get("APP_CAPACITY_SOAK_VARIANT", ""))
     cpu_percent = soak_cpu_percent(os.environ.get("APP_CAPACITY_SOAK_CPU_PERCENT", ""))
+    reserved_cpus = soak_reserved_cpus(os.environ.get("APP_CAPACITY_SOAK_RESERVED_CPUS", ""))
     database = soak_database(os.environ.get("APP_CAPACITY_SOAK_DB", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
     for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
@@ -1188,7 +1199,7 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent, APP_CAPACITY_SOAK_SCOPES="systemd",
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent, APP_CAPACITY_SOAK_RESERVED_CPUS=reserved_cpus, APP_CAPACITY_SOAK_SCOPES="systemd",
                         APP_CAPACITY_SOAK_POSTGRES_DSN=os.environ.get("APP_CAPACITY_SOAK_POSTGRES_DSN", ""))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
@@ -1245,7 +1256,7 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent, reserved_cpus=reserved_cpus)
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -1262,7 +1273,7 @@ def main(argv):
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
         "unit_tests": unit_tests, "runner_cpus": parse_ready_cpus((out / "runner.log").read_text(errors="replace")) if (out / "runner.log").exists() else {},
         "backend_cpusets": {r["id"]: r.get("cpuset_effective") for sample in samples[-1:] for r in (sample.get("backends") or {}).get("per_backend", [])},
-        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent,
+        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent, "runner_reserved_cpus_override": reserved_cpus,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
