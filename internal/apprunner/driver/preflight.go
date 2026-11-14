@@ -86,7 +86,7 @@ type versionResponse struct {
 }
 type infoResponse struct {
 	OSType, Architecture, ServerVersion, Driver, CgroupVersion, CgroupDriver string
-	MemoryLimit, SwapLimit, CpuCfsPeriod, CpuCfsQuota, PidsLimit             bool
+	MemoryLimit, SwapLimit, CpuCfsPeriod, CpuCfsQuota, CPUShares, PidsLimit  bool
 	NCPU                                                                     int
 	MemTotal                                                                 int64
 	SecurityOptions                                                          []string
@@ -123,6 +123,8 @@ func assess(v versionResponse, info infoResponse, hostArch string) Report {
 	check("cgroup_v2", info.CgroupVersion == "2" && (info.CgroupDriver == "systemd" || info.CgroupDriver == "cgroupfs"))
 	check("memory_and_swap_limits", info.MemoryLimit && info.SwapLimit)
 	check("cpu_quota_limits", info.CpuCfsPeriod && info.CpuCfsQuota)
+	// Without CPU shares support every container would inspect CpuShares 0 and conflict with its plan.
+	check("cpu_shares", info.CPUShares)
 	check("pid_limits", info.PidsLimit)
 	check("image_storage_profile", info.Driver == "overlay2" || info.Driver == "overlayfs")
 	rootless, userns, seccomp, valid := false, false, false, len(info.SecurityOptions) <= 32

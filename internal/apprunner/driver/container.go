@@ -58,11 +58,25 @@ type containerMount struct {
 		CreateMountpoint bool
 	}
 }
+
+// appContainerCPUShares is the Docker CpuShares of every container the runner creates for app code. It is
+// scheduling priority, not a cap: NanoCpus stays the hard limit, so an app on an idle host still gets its
+// full quota. On cgroup v2 runc converts shares to cpu.weight, 256 becoming about 10 under the classic
+// linear formula (possibly about 35 under the newer runc mapping), against 100 for a container with no
+// shares set. The weight only divides CPU among sibling cgroups under the same parent. It helps the Portal
+// and the runner when they sit beside the app containers, as the Portal, PostgreSQL and the runner do in
+// system.slice in the production compose layout; it promises nothing in a layout where they are not
+// siblings. Every create path (candidate, writable candidate, update start, migration job) derives from
+// planCandidateContainer, and validContainerPlan refuses any other value, so the weight is part of the
+// policy digest of each of them.
+const appContainerCPUShares = 256
+
 type containerHostConfig struct {
 	NetworkMode                                         string
 	ReadonlyRootfs, Privileged, AutoRemove              bool
 	CapDrop, SecurityOpt                                []string
 	Memory, MemorySwap, NanoCpus, PidsLimit, ShmSize    int64
+	CpuShares                                           int64
 	CgroupnsMode, IpcMode, PidMode, UTSMode, UsernsMode string
 	Init                                                bool
 	Mounts                                              []containerMount
@@ -129,7 +143,7 @@ func validContainerPlan(plan containerPlan) bool {
 		return false
 	}
 	var request containerCreate
-	if json.Unmarshal(plan.body, &request) != nil {
+	if json.Unmarshal(plan.body, &request) != nil || request.HostConfig.CpuShares != appContainerCPUShares {
 		return false
 	}
 	labels := ownerContainerLabels(plan.owner)
@@ -215,6 +229,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	h.Memory = int64(limits.MemoryMiB) << 20
 	h.MemorySwap = h.Memory
 	h.NanoCpus = int64(limits.CPUMillis) * 1000000
+	h.CpuShares = appContainerCPUShares
 	h.PidsLimit = int64(limits.PIDs)
 	h.ShmSize = 16 << 20
 	h.CgroupnsMode = "private"

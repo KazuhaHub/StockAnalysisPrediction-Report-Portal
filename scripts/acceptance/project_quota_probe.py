@@ -438,6 +438,7 @@ def main(args):
                         "NATIVE_DATA_PROJECT_QUOTA_FULL_AND_NEIGHBOR_HEALTHY",
                         "NATIVE_TMP_VOLUME_BOUNDED_AND_RECOVERED",
                         "NATIVE_LOG_VOLUME_BOUNDED",
+                        "NATIVE_APP_CPU_WEIGHT_LOW",
                     ):
                         if marker not in writer.stdout:
                             raise RuntimeError(
@@ -445,6 +446,7 @@ def main(args):
                     report["native_data_project_quota_full_and_neighbor_healthy"] = True
                     report["native_tmp_volume_bounded_and_recovered"] = True
                     report["native_log_volume_bounded"] = True
+                    report["native_app_cpu_weight_low"] = True
         journal_root = None
         if len(args) in (7,9,11):
             journal_root = mountpoint / "journal-data"
