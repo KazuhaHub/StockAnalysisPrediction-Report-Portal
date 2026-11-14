@@ -274,7 +274,7 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		if !containerSHA.MatchString(container.ID) {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
-		if _, err := candidateIPCMountSources(container.Mounts); err != nil {
+		if _, _, err := candidateIPCMountPlan(container.Mounts); err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
 		result = append(result, container)
@@ -302,45 +302,121 @@ func inventoryEntryLabel(entry json.RawMessage) string {
 	return fmt.Sprintf("%q", shortContainerID(probe.ID))
 }
 
+// candidateIPCPendingVolume is a volume mount the container list reports
+// without a host path and that is not a local-driver volume: only the inspect
+// endpoint can say where it lives.
+type candidateIPCPendingVolume struct {
+	index       int
+	destination string
+}
+
+// candidateIPCMountSources is the closed, list-only projection: any mount whose
+// host path cannot be read from the list alone is refused.
 func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
+	sources, pending, err := candidateIPCMountPlan(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(pending) != 0 {
+		return nil, fmt.Errorf("%w: mount %d: volume without a source needs inspection", ErrInvalidResponse, pending[0].index)
+	}
+	return sources, nil
+}
+
+func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
 	if len(raw) == 0 {
-		return nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
+		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
 	var mounts []json.RawMessage
 	if json.Unmarshal(raw, &mounts) != nil {
-		return nil, fmt.Errorf("%w: Mounts is not an array", ErrInvalidResponse)
+		return nil, nil, fmt.Errorf("%w: Mounts is not an array", ErrInvalidResponse)
 	}
 	sources := make([]string, 0, len(mounts))
+	var pending []candidateIPCPendingVolume
 	for i, entry := range mounts {
 		var m struct {
-			Type   string  `json:"Type"`
-			Source *string `json:"Source"`
+			Type        string  `json:"Type"`
+			Source      *string `json:"Source"`
+			Driver      *string `json:"Driver"`
+			Destination string  `json:"Destination"`
 		}
 		if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
-			return nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
+			return nil, nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
 		}
 		switch m.Type {
 		case "volume":
-			// The list endpoint reports a daemon-managed volume (an anonymous
-			// volume from an image VOLUME line) with an empty Source: its host
-			// path is not part of that projection, so it names no path that
-			// could overlap the data root. A non-empty Source is still checked.
+			// The list endpoint reports a daemon-managed volume with an empty
+			// Source. A local-driver volume lives under the Docker root, so the
+			// empty Source names no path that could overlap the data root. Any
+			// other driver (or none) is resolved through inspect instead.
 			if m.Source != nil && *m.Source == "" {
+				if m.Driver != nil && *m.Driver == "local" {
+					continue
+				}
+				pending = append(pending, candidateIPCPendingVolume{index: i, destination: m.Destination})
 				continue
 			}
 			fallthrough
 		case "bind":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {
-				return nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
+				return nil, nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
 			}
 			sources = append(sources, *m.Source)
 		case "tmpfs":
 			if m.Source != nil && *m.Source != "" {
-				return nil, fmt.Errorf("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
+				return nil, nil, fmt.Errorf("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
 			}
 		default:
-			return nil, fmt.Errorf("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
+			return nil, nil, fmt.Errorf("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
 		}
+	}
+	return sources, pending, nil
+}
+
+// candidateIPCContainerSources returns every host path a container mounts. A
+// volume the list reports without a path (a non-local driver) is resolved with
+// one inspect of that container; one that stays empty or relative is refused.
+func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
+	sources, pending, err := candidateIPCMountPlan(container.Mounts)
+	if err != nil {
+		return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+	}
+	if len(pending) == 0 {
+		return sources, nil
+	}
+	var inspected struct {
+		Mounts json.RawMessage `json:"Mounts"`
+	}
+	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/"+container.ID+"/json", &inspected); err != nil {
+		return nil, fmt.Errorf("container %s: inspect for a volume without a source: %w", shortContainerID(container.ID), err)
+	}
+	var mounts []json.RawMessage
+	if json.Unmarshal(inspected.Mounts, &mounts) != nil {
+		return nil, fmt.Errorf("%w: container %s: inspected Mounts is not an array", ErrInvalidResponse, shortContainerID(container.ID))
+	}
+	for _, want := range pending {
+		resolved := ""
+		matched := 0
+		for _, entry := range mounts {
+			var m struct {
+				Type        string  `json:"Type"`
+				Source      *string `json:"Source"`
+				Destination string  `json:"Destination"`
+			}
+			if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
+				return nil, fmt.Errorf("%w: container %s: inspected mount projection rejected", ErrInvalidResponse, shortContainerID(container.ID))
+			}
+			if m.Type == "volume" && m.Destination == want.destination {
+				matched++
+				if m.Source != nil {
+					resolved = *m.Source
+				}
+			}
+		}
+		if matched != 1 || !filepath.IsAbs(resolved) {
+			return nil, fmt.Errorf("%w: container %s: mount %d: volume source %q unresolved after inspect", ErrInvalidResponse, shortContainerID(container.ID), want.index, boundedString(resolved))
+		}
+		sources = append(sources, resolved)
 	}
 	return sources, nil
 }

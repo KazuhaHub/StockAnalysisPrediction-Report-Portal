@@ -4,6 +4,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,12 +33,30 @@ func TestDockerAcceptanceForeignContainerBesideDataWriterInventory(t *testing.T)
 	if len(entries) == 0 {
 		t.Fatal("the foreign service container is not in the inventory")
 	}
+	skipped := 0
 	for _, entry := range entries {
-		sources, err := candidateIPCMountSources(entry.Mounts)
+		var mounts []struct {
+			Type, Driver string
+			Source       *string
+		}
+		if err := json.Unmarshal(entry.Mounts, &mounts); err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range mounts {
+			if m.Type == "volume" && m.Source != nil && *m.Source == "" && m.Driver == "local" {
+				skipped++
+			}
+		}
+		sources, err := candidateIPCContainerSources(context.Background(), client, entry)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Logf("foreign container %s mounts %v", shortContainerID(entry.ID), sources)
+	}
+	// Without this the job could pass on a daemon that lists the volume with a
+	// path, and never exercise the skip.
+	if skipped == 0 {
+		t.Fatal("the listing carries no local volume with an empty Source: the skip was not exercised")
 	}
 	root, err := os.MkdirTemp("/run", "portal-foreign-")
 	if err != nil {

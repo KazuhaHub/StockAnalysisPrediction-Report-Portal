@@ -376,12 +376,15 @@ jobs:
           cache: false
       - name: Record what the daemon reports about the service container
         run: |
+          set -euo pipefail
           mkdir -p "$RUNNER_TEMP/foreign"
           sock=$(readlink -f /var/run/docker.sock)
-          sudo curl -sS --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' | tee "$RUNNER_TEMP/foreign/containers.json"
-          echo
-          id=$(sudo curl -sS --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["Id"])')
-          sudo curl -sS --unix-socket "$sock" "http://localhost/v1.47/containers/$id/json" > "$RUNNER_TEMP/foreign/container-inspect.json"
+          sudo curl -sSf --unix-socket "$sock" 'http://localhost/v1.47/containers/json?all=1' > "$RUNNER_TEMP/foreign/containers.json"
+          jq -c '.[] | {Id, Image, Mounts}' "$RUNNER_TEMP/foreign/containers.json"
+          # Select the service by its image, never by position, and keep only the fields the diagnosis needs: the
+          # container's environment (the service password) is never stored.
+          id=$(jq -er '[.[] | select(.Image == "postgres:16-alpine")][0].Id' "$RUNNER_TEMP/foreign/containers.json")
+          sudo curl -sSf --unix-socket "$sock" "http://localhost/v1.47/containers/$id/json" | jq '{Id, Name, Mounts}' > "$RUNNER_TEMP/foreign/container-inspect.json"
           docker version --format '{{.Server.Version}} api {{.Server.APIVersion}}' | tee "$RUNNER_TEMP/foreign/docker-version.txt"
       - name: Run the writer's container inventory beside the service container
         env:

@@ -422,6 +422,27 @@ settlement modelled on `update_start_settle.go`: prove the native resource absen
 settle and release in one transaction.
 
 
+### Follow-up that blocks the integration to main merge: inventory overlap by device and inode
+
+`candidateIPCReferenced` (`internal/apprunner/driver/candidate_ipc_linux.go`) decides whether a container mounts a data
+namespace by comparing path strings after `filepath.EvalSymlinks`. `EvalSymlinks` does not follow bind mounts, so the
+comparison cannot see through one. A local volume created with `type=none,o=bind,device=<data root>` is reported by the
+daemon with a `/var/lib/docker/volumes/<id>/_data` source. That path names no overlap, the check passes, and a container
+the runner did not start can mount a data namespace without being detected. Every caller of the inventory has the same
+gap: the data writer, its recovery, and the writable candidate recovery.
+
+Not fixed in the PR that admitted local anonymous volumes (a daemon-managed volume the list reports with an empty
+`Source`); that change only stopped refusing the host for a shape it cannot misuse.
+
+The fix is to compare identity, not names. `stat` each mount source and the namespace together with each of its
+ancestors up to the data root, and report an overlap when any `st_dev`/`st_ino` pair of a source equals a pair of the
+namespace or of one of its ancestors, or the source lies inside the namespace by the same measure (an ancestor walk of the
+source reaches the namespace's `st_dev`/`st_ino`). A bind-backed local volume then resolves to the real directory it
+mounts. A source that cannot be stat-ed for a reason other than absence stays a refusal, as it is today.
+
+Native test required: a disposable runner creates a local volume with `type=none,o=bind,device=<namespace>` and a
+container using it, and the writer must return `ErrContainerConflict`.
+
 ## Resolutions (PR 4c)
 
 These close the two follow-ups above that blocked the integration to main merge: image removal and candidate orphan
