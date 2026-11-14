@@ -949,12 +949,13 @@ harness. Runs, all five minutes, none is evidence:
 | Run | Portal | home idle / pooled loaded / bound (us) | report | dispatch | batch start |
 | --- | --- | --- | --- | --- | --- |
 | smoke 43570051027 (`edfcb92`) | file-backed, probes | 678 / 3853 / 5678 pass | 1795 / 8102 / 6795 **fail** | 614 / 3829 / 5614 pass | 5532 / 16334 / 10532 **fail** |
+| smoke 43571196806 (`56e6881a`) | file-backed, probes | 658 / 3338 / 5658 pass | 1770 / 5552 / 6770 pass | 587 / 3220 / 5587 pass | 5758 / 26467 / 10758 **fail** |
 | smoke 43568339184 (`3e3d591`) | file-backed, probes | passes | 3523 / 50611 / 8523 **fail** | passes | 7852 / 112261 / 12852 **fail** |
 | dispatch 43570060321 (`edfcb92`, `no-batch-probes`) | file-backed, no probes | 674 / 4955 / 5674 pass | 1863 / 12681 / 6863 **fail** | 602 / 4901 / 5602 pass | not run |
 | dispatch 43568354287 (`3e3d591`, `memory-db`) | in-memory, probes | 804 / 6343 / 5804 **fail** | 1040 / 4520 / 6040 pass | 863 / 4224 / 5863 pass | 4174 / 16911 / 9174 **fail** |
 
 The runs vary a great deal (the report page's pooled p95 ranged from 8 to 51 ms), but three things are stable. (1) On the file-backed
-database the report page misses its bound with and without the batch probes, by 1.3 ms in the best run; the same flood on the in-memory
+database the report page misses its bound in three of four runs, with and without the batch probes, and passes by 1.2 ms in the fourth; the same flood on the in-memory
 store passes it, which is why the first smokes, which used the in-memory store, passed with a large margin. (2) The real scheduler's enqueue-to-start
 p95 is 5 to 8 ms idle and 16 to 112 ms under the flood; it misses the floor rule on both stores, so the executor stays available (a job
 starts within a fifth of a second at the worst) but not within the bound. (3) The flood is the cause, not the soak's own work (the variant without probes shows it): in the diagnosis of smoke 43568339184 the block
