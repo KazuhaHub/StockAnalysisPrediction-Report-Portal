@@ -166,6 +166,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 
 	// The development image profile: the soak backend is a local reference image from the job's own registry.
 	// The runner keeps its declared default budgets, the 8 GiB disk budget included.
+	t.Setenv("APP_RUNNER_SERVICE_TEST_TIMEOUT", soakRunnerServiceTimeout(minutes, baseline))
 	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) { c.AllowLocalReferenceImages = true })
 	defer func() {
 		runner.stop(t)
@@ -203,6 +204,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"PORTAL_CAPACITY_SOAK_IMAGE=" + image,
 		"APP_CAPACITY_SOAK_MINUTES=" + strconv.Itoa(minutes), "APP_CAPACITY_SOAK_BASELINE_SECONDS=" + strconv.Itoa(baseline),
 		"APP_CAPACITY_SOAK_DIAGNOSE=" + os.Getenv("APP_CAPACITY_SOAK_DIAGNOSE"),
+		"APP_CAPACITY_SOAK_VARIANT=" + os.Getenv("APP_CAPACITY_SOAK_VARIANT"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE_REASON=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"),
 		"APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=" + os.Getenv("APP_CAPACITY_SOAK_DOCKER_FREE_BYTES"),
@@ -288,6 +290,7 @@ type soakChild struct {
 	batch    *soakBatch
 	minutes  int
 	baseline int
+	variant  soakVariant
 }
 
 func (c *soakChild) id() string {
@@ -319,14 +322,24 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	}
 	// The measured Portal is production-shaped: a file-backed SQLite database opened as the server opens it (the
 	// production driver's connection setup, WAL included), not the in-memory template store of the unit suite.
-	store, err := OpenStore("sqlite", filepath.Join(dir, "portal.db"))
+	variant, err := soakParseVariant(os.Getenv("APP_CAPACITY_SOAK_VARIANT"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = store.Close() })
-	s, session := platformActorTestServerWithStore(t, store)
-	if err := s.initializeAppPlatformControl(session); err != nil {
-		t.Fatal(err)
+	var s *Server
+	var session platformActorSession
+	if variant.MemoryDB { // a diagnostic variant only
+		s, session = platformTrustTestServer(t, false)
+	} else {
+		store, err := OpenStore("sqlite", filepath.Join(dir, "portal.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = store.Close() })
+		s, session = platformActorTestServerWithStore(t, store)
+		if err := s.initializeAppPlatformControl(session); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The session and its cookie must outlive the run: the actor fixture's hour would expire 55 minutes into the load
 	// and every home and stock request, and the flood, would answer 401.
@@ -340,9 +353,10 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	s.platformBackendEndpoint.Store(&endpoint)
 	c := &soakChild{
 		t: t, ctx: context.Background(), s: s, session: session, endpoint: endpoint, image: os.Getenv("PORTAL_CAPACITY_SOAK_IMAGE"),
-		rec: newSoakRecorder(filepath.Join(dir, soakChildFile)), nextID: 9000, symbol: "600000", minutes: minutes, baseline: baseline,
+		rec: newSoakRecorder(filepath.Join(dir, soakChildFile)), nextID: 9000, symbol: "600000", minutes: minutes, baseline: baseline, variant: variant,
 	}
 	c.rec.SetSession(session.expires)
+	c.rec.SetVariant(variant.Name)
 	c.rec.SetPortal(soakPortalEvidence{
 		Database: "file-backed SQLite opened with OpenStore, as the server opens it",
 		Running: []string{"the batch scheduler (scheduleTick, and scheduleLoop every 30 seconds) with the real Dify provider against a local stub",
@@ -498,7 +512,7 @@ func (c *soakChild) sampleOnce(into *soakSamples, iteration int) {
 	}
 	into.dispatch = append(into.dispatch, c.dispatch(0))
 	into.dispatchShallow = append(into.dispatchShallow, c.dispatch(soakQueueBacklogShallow))
-	if soakBatchProbeDue(iteration) {
+	if c.variant.BatchProbes && soakBatchProbeDue(iteration) {
 		if took, err := c.batch.probe(); err != nil {
 			c.t.Errorf("batch probe under measurement: %v", err)
 		} else {

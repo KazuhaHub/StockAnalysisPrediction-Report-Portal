@@ -325,6 +325,37 @@ const soakSamplesPerWindow = 100
 
 func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEvery == 0 }
 
+// soakRunnerServiceTimeout is the -test.timeout of the runner service process the soak starts: the whole run and its installs and
+// baseline, and half an hour more. The shared fixture's ten minutes would end the service in the middle of the load.
+func soakRunnerServiceTimeout(minutes, baselineSeconds int) string {
+	return fmt.Sprintf("%dm", minutes+baselineSeconds/60+30)
+}
+
+// soakVariant is a diagnostic switch for explaining a failing run, never part of an evidence run: it measures the same
+// scenario with one part removed so the part's share of a latency can be told apart.
+type soakVariant struct {
+	Name        string
+	MemoryDB    bool // the in-memory template store of the unit suite instead of a file-backed SQLite database
+	BatchProbes bool // the batch enqueue-to-start probes; without them the scheduler still runs and holds its backlog
+}
+
+// soakParseVariant reads APP_CAPACITY_SOAK_VARIANT: empty, or a comma separated list of memory-db and no-batch-probes.
+func soakParseVariant(env string) (soakVariant, error) {
+	v := soakVariant{Name: env, BatchProbes: true}
+	for _, part := range strings.Split(env, ",") {
+		switch part {
+		case "":
+		case "memory-db":
+			v.MemoryDB = true
+		case "no-batch-probes":
+			v.BatchProbes = false
+		default:
+			return soakVariant{}, fmt.Errorf("unknown soak variant %q", part)
+		}
+	}
+	return v, nil
+}
+
 // soakImageStoreEvidence records how the image store probe ran, or why it stayed at unit level.
 type soakImageStoreEvidence struct {
 	Mode            string `json:"mode"`
@@ -357,9 +388,11 @@ type soakEvidence struct {
 	DurationMinutes int            `json:"duration_minutes"`
 	Markers         []string       `json:"markers"`
 	// SessionExpiresMS is when the soak's session and cookie expire; the verdict requires it to be after the load.
-	SessionExpiresMS int64                  `json:"session_expires_ms"`
-	ImageStore       soakImageStoreEvidence `json:"image_store"`
-	Portal           soakPortalEvidence     `json:"portal"`
+	SessionExpiresMS int64 `json:"session_expires_ms"`
+	// Variant names the diagnostic variant of the run, empty for an evidence run.
+	Variant    string                 `json:"variant"`
+	ImageStore soakImageStoreEvidence `json:"image_store"`
+	Portal     soakPortalEvidence     `json:"portal"`
 }
 
 // soakRecorder keeps the evidence and rewrites its file after every update, through a temporary file and a
@@ -426,6 +459,7 @@ func (r *soakRecorder) SetLoaded(pooled soakSamples) {
 func (r *soakRecorder) SetSession(expires time.Time) {
 	r.update(func(e *soakEvidence) { e.SessionExpiresMS = expires.UnixMilli() })
 }
+func (r *soakRecorder) SetVariant(name string) { r.update(func(e *soakEvidence) { e.Variant = name }) }
 func (r *soakRecorder) SetImageStore(v soakImageStoreEvidence) {
 	r.update(func(e *soakEvidence) { e.ImageStore = v })
 }
@@ -563,6 +597,40 @@ func TestSoakProbeEveryNthIterationSpacesTheBatchProbes(t *testing.T) {
 	}
 	if perMinute < 10 || perMinute > 30 {
 		t.Fatalf("%d batch probes in a window of %d samples", perMinute, soakSamplesPerWindow)
+	}
+}
+
+func TestSoakRunnerServiceOutlastsTheRun(t *testing.T) {
+	// The runner service is a test process with its own timeout, ten minutes by default; the first smokes with a three
+	// minute baseline found it killed mid-load, and a 120 minute run would have lost it after ten.
+	for _, tc := range []struct{ minutes, baseline int }{{5, 180}, {120, 180}, {140, 180}} {
+		timeout, err := time.ParseDuration(soakRunnerServiceTimeout(tc.minutes, tc.baseline))
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := time.Duration(tc.minutes)*time.Minute + time.Duration(tc.baseline)*time.Second
+		if timeout < run+30*time.Minute {
+			t.Errorf("%d minutes: the runner service times out after %v", tc.minutes, timeout)
+		}
+	}
+}
+
+func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		env                  string
+		memoryDB, batchProbe bool
+		ok                   bool
+	}{
+		{"", false, true, true},
+		{"memory-db", true, true, true},
+		{"no-batch-probes", false, false, true},
+		{"memory-db,no-batch-probes", true, false, true},
+		{"unknown", false, false, false},
+	} {
+		v, err := soakParseVariant(tc.env)
+		if (err == nil) != tc.ok || (tc.ok && (v.MemoryDB != tc.memoryDB || v.BatchProbes != tc.batchProbe)) {
+			t.Errorf("variant %q = %+v, %v", tc.env, v, err)
+		}
 	}
 }
 

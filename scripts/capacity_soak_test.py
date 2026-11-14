@@ -611,6 +611,25 @@ class EvaluateTests(unittest.TestCase):
         self.assertTrue(full["counts_as_ops08_evidence"])
 
 
+class VariantTests(unittest.TestCase):
+    def test_a_diagnostic_variant_never_counts_as_ops08_evidence_even_when_it_passes_for_two_hours(self):
+        evidence = child_evidence(windows=120)
+        samples = load_samples(120)
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        self.assertTrue(soak.evaluate(evidence, samples, **kwargs)["counts_as_ops08_evidence"])
+        verdict = soak.evaluate(evidence, samples, variant="memory-db", **kwargs)
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertEqual(verdict["variant"], "memory-db")
+
+    def test_the_variant_is_a_closed_list(self):
+        self.assertEqual(soak.soak_variant(""), "")
+        self.assertEqual(soak.soak_variant("memory-db,no-batch-probes"), "memory-db,no-batch-probes")
+        for bad in ("memory", "no-batch-probes;x", "a b"):
+            with self.assertRaises(RuntimeError):
+                soak.soak_variant(bad)
+
+
 class UnitTestResultTests(unittest.TestCase):
     def test_go_test_json_results_are_read_by_test_name(self):
         lines = "\n".join(json.dumps(e) for e in [

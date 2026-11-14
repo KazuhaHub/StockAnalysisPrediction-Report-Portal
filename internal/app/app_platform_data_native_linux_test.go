@@ -862,7 +862,12 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 	if err := os.WriteFile(configPath, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	fixture := &platformServiceFixture{cmd: exec.Command(binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout=10m"), done: make(chan error, 1), root: root, ipcRoot: ipcRoot, socket: socket}
+	// The service is a test process with its own timeout; a long acceptance (the capacity soak) names a longer one.
+	timeout := "10m"
+	if override := os.Getenv("APP_RUNNER_SERVICE_TEST_TIMEOUT"); override != "" {
+		timeout = override
+	}
+	fixture := &platformServiceFixture{cmd: exec.Command(binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout), done: make(chan error, 1), root: root, ipcRoot: ipcRoot, socket: socket}
 	fixture.cmd.Env = append(os.Environ(), "PORTAL_RUNNER_SERVICE_CHILD=1", "PORTAL_RUNNER_SERVICE_CONFIG="+configPath)
 	fixture.cmd.Stdout = &fixture.output
 	fixture.cmd.Stderr = &fixture.output

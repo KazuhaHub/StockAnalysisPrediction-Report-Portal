@@ -18,6 +18,10 @@ on:
         description: Run only the capacity soak, not the quota and image delivery jobs
         type: boolean
         default: false
+      soak_variant:
+        description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
+        type: string
+        default: ''
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
@@ -528,6 +532,7 @@ jobs:
       SOAK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.duration_minutes || '5' }}
       # The pull request smoke also profiles the measured process (see the diagnosis in doc 171); the dispatch run does not.
       APP_CAPACITY_SOAK_DIAGNOSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+      APP_CAPACITY_SOAK_VARIANT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_variant || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -568,7 +573,7 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \

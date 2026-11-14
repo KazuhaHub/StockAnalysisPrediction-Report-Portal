@@ -500,7 +500,7 @@ def _probe_checks(probes, unit_tests):
     return checks, reported
 
 
-def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None):
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant=""):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
@@ -561,7 +561,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     shallow_ratio = round(max(shallow) / shallow_idle, 3) if shallow else None
     passed = all(c["passed"] for c in checks)
     return {
-        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES, "checks": checks,
+        # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
+        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant, "variant": variant, "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
     }
@@ -602,6 +603,13 @@ def duration_minutes(value):
     if not re.fullmatch(r"[0-9]+", value or "") or not 1 <= int(value) <= MAX_DURATION_MINUTES:
         raise RuntimeError(f"the duration is 1 to {MAX_DURATION_MINUTES} minutes")
     return int(value)
+
+
+def soak_variant(value):
+    """The diagnostic variants of the Go soak: a closed list, empty for an evidence run."""
+    if not re.fullmatch(r"(memory-db|no-batch-probes)(,(memory-db|no-batch-probes))*|", value or ""):
+        raise RuntimeError("the soak variant is empty or a list of memory-db and no-batch-probes")
+    return value or ""
 
 
 def image_store_mode(free_bytes):
@@ -691,6 +699,7 @@ def main(argv):
     args = parser.parse_args(argv)
     minutes = duration_minutes(args.duration_minutes)
     image = soak_image(os.environ.get("APP_CAPACITY_SOAK_IMAGE"))
+    variant = soak_variant(os.environ.get("APP_CAPACITY_SOAK_VARIANT", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
     for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
         if not Path(path).is_absolute():
@@ -755,7 +764,7 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary)
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant)
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
             soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
@@ -800,7 +809,7 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant)
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -815,7 +824,7 @@ def main(argv):
         "host": {"kernel": os.uname().release, "architecture": os.uname().machine, "cpus": os.cpu_count(),
                  "volume_bytes": VOLUME_BYTES, "image": image, "image_id": image_id, "docker_root": docker_root,
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
-        "unit_tests": unit_tests,
+        "unit_tests": unit_tests, "variant": variant,
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

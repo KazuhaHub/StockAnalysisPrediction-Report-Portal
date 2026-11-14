@@ -211,8 +211,8 @@ A `capacity-soak` job in `app-project-quota-probe.yml`.
     30 seconds.
 - **Pass:**
   - every excess request is refused with its typed error;
-  - both p95 values stay within 1.5× of the idle baseline;
-  - dispatch latency stays within 1.5× of its baseline, which is how "unchanged" is defined;
+  - both p95 values stay within 1.5× of the idle baseline (superseded by the owner's floor, resolution 59);
+  - dispatch latency stays within 1.5× of its baseline, which is how "unchanged" is defined (the same bound, resolution 59);
   - the summed backend memory and CPU never exceed the runner budgets.
 - **Evidence** is uploaded as JSON with every sample. `06-acceptance.md`, the OPS-08 and SEC-09
   rows and a new `handoff/evidence/platform-capacity-envelope/acceptance.json` cite only the
@@ -795,9 +795,15 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     review grants itself: the real grant path. Direct grant rows, which the first version used, do not satisfy the event
     subscription and are not used.
 55. **Messages.** The fixture has no outbound channel to the platform, so the message flood is the platform's inbound
-    signed request path, driven from a separate process over the Portal's HTTP route (one request in flight to each backend for the whole load), plus the backends' log lines. The
-    counts per minute, answered and failed, are in the evidence. "As many messages as the platform lets a backend send"
-    is therefore not exercised as a backend-originated flood; this is a stated gap.
+    signed request path, driven from a separate process over the Portal's HTTP route, plus the backends' log lines. The
+    relay is driven at the Portal's admission cap of 2 concurrent requests (`platformDocumentBudget`, `app_platform_http.go`);
+    excess attempts are refused 429 `app_platform_busy`, about 92% of the attempts of the first smokes. That is the real
+    production admission behaviour, so the load stays as it is, and it is described as it is: one attempt is in flight per
+    backend, at most two are admitted Portal-wide, and the rest are typed refusals. The evidence records, for every window, the
+    attempts, the answered and the busy counts and every other outcome by status and code (`classes`); the verdict requires a
+    minimum of answered requests in every window, a typed refusal for the rest (no 5xx, no transport error) and a live flood
+    process with a fresh heartbeat throughout (resolution 65). "As many messages as the platform lets a backend send" is not
+    exercised as a backend-originated flood; this is a stated gap.
 56. **Image store: unit level.** A descriptor declares at most 4 GiB of layers for one image (`maxBackendImageUncompressedBytes`),
     so the 10 GiB store is reached only by loading three distinct 4 GiB images into the Docker daemon, which the reference
     host cannot hold. The first version declared eleven 1 GiB layers in one image and the descriptor parser refused it. The
@@ -812,12 +818,13 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     bytes (`uncompressed_bound`) is proven by the blob channel tests; the soak does not sign a blob command of its own.
 59. **Latency.** Home and the report page are `GET /api/home` and `GET /api/stock/{symbol}` of a seeded report, served
     in process through the real routed handler with a session cookie. Batch queue dispatch latency is the
-    queue's admission decision over a backlog of 50 queued jobs (`queuedItems` and `queue.Admit`), the measurement the existing
-    isolation test uses, not the duration of a Dify run. The backlog is 200 queued jobs, the figure fixed in the
-    plan before any measurement. The same run also times the decision over the first 50 of them
+    queue's admission decision over a backlog of queued jobs (`queuedItems` and `queue.Admit`), the measurement the existing
+    isolation test uses, not the duration of a Dify run. The first version used a backlog of 50 jobs, the figure of the existing
+    isolation test; the backlog is 200 queued jobs, chosen in commit `5017f1aa` after the first smoke at 50 and before the
+    evidence run. The same run also times the decision over the first 50 of them
     (`soakQueuedItems`, the same pricing and filters) and records it as `dispatch_shallow`, so the effect of the backlog
     is visible; only the 200-job decision is judged, and if it fails the gate the finding goes to the owner rather than
-    to a tuned fixture. A smoke at 50 jobs passed with ratios of about 5; the 200-job figure is the real one. The baseline pools the idle windows (100 samples of each series
+    to a tuned fixture. A smoke at 50 jobs passed with ratios of about 5 (before the floor); the 200-job figure is the one judged. The baseline pools the idle windows (100 samples of each series
     per window); the loaded samples of every minute are pooled for the verdict (see the interpretation below).
     **Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured
     process.** The first smoke measured p95 of 3 to 25 ms against a sub-millisecond idle baseline (9 to 18 times), and
@@ -825,8 +832,10 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     that small, and the generator shared the measured process. The verdict is now `latency_threshold_us(idle) =
     max(idle * 3 / 2, idle + LATENCY_FLOOR_US)` with `LATENCY_FLOOR_US = 5000`, tested at both rules and where they meet
     (10 ms), and the evidence records the effective threshold of every window.
-    **Interpretation (owner, after the first smokes): pooled p95 over the loaded period, per doc 167's wording; per-window
-    p95 recorded as diagnostics.** Doc 167 asks for the p95 over the soak, one figure, so the verdict pools every loaded
+    **Verdict computation (engineering decision, not the owner's): pooled p95 over the loaded period; per-window p95 are
+    diagnostics.** The owner decided only the floor. Pooling is the engineering lead's reading of the sentence "Portal p95
+    latency ... within 1.5x of the idle baseline" of doc 167 section 4, adopted after the first smokes and before the evidence
+    run; doc 167 records the two separately. Doc 167 asks for the p95 over the soak, one figure, so the verdict pools every loaded
     sample of the run into one p95 per series and compares it with the threshold from the idle p95 (itself pooled over the
     idle windows). For every series the evidence and the job's step summary list each window's p95 and its threshold, the
     count of windows over it and the worst window; none is hidden and none decides. The strict rule that judged every
