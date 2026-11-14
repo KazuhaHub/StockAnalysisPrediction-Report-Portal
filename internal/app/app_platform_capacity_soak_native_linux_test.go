@@ -813,12 +813,20 @@ func (c *soakChild) probeImageStore() {
 		c.t.Fatal(err)
 	}
 	fillers := soakFillerFileBytes(binaryTar)
-	resources := appplatform.Resources{MemoryMiB: 128, CPUMillis: 100, PIDs: 64}
+	// The two images that load ask for one MiB more memory than the runner has, so each start is refused after the load: the
+	// 4 GiB images are loaded and reserved but no container is ever created from them, and the installs retire like any
+	// other refused probe.
+	memory, err := soakImageProbeMemoryMiB(c.budgets.MemoryMiB)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	resources := appplatform.Resources{MemoryMiB: memory, CPUMillis: 100, PIDs: 64}
 	var installed []string
 	codes := map[string]string{}
 	var third string
-	// Two images load into the daemon (each declares about 4 GiB of zero-filled layers; the blobs that cross are a few MiB);
-	// the third is the one the 10 GiB store refuses at its load, before a byte of it is written.
+	// Two images load into the daemon (each declares about 4 GiB of zero-filled layers; the blobs that cross are a few MiB) and
+	// their starts are refused for memory; the third is the one the 10 GiB store refuses at its load, before a byte of it is
+	// written.
 	for i, seed := range []string{"a", "b", "c"} {
 		app := "notes-soak-i-" + seed
 		began := time.Now()

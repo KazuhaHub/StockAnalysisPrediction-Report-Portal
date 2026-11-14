@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
 func TestSoakRecorderWritesEveryUpdateAtomicallyAndKeepsPartialEvidence(t *testing.T) {
@@ -325,6 +327,16 @@ const soakSamplesPerWindow = 100
 
 func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEvery == 0 }
 
+// soakImageProbeMemoryMiB is the memory the image store probe's two installs declare: one MiB more than the runner's whole
+// memory budget, so the runner refuses their start for memory after it has loaded their images. A budget at or beyond the
+// descriptor maximum cannot be exceeded by any valid descriptor, so the probe cannot run there.
+func soakImageProbeMemoryMiB(budgetMiB int64) (int, error) {
+	if budgetMiB < 1 || budgetMiB+1 > appplatform.MaxBackendMemoryMiB {
+		return 0, fmt.Errorf("a runner memory budget of %d MiB cannot be exceeded by a valid descriptor", budgetMiB)
+	}
+	return int(budgetMiB) + 1, nil
+}
+
 // soakRunnerServiceTimeout is the -test.timeout of the runner service process the soak starts: the whole run and its installs and
 // baseline, and half an hour more. The shared fixture's ten minutes would end the service in the middle of the load.
 func soakRunnerServiceTimeout(minutes, baselineSeconds int) string {
@@ -630,6 +642,25 @@ func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
 		v, err := soakParseVariant(tc.env)
 		if (err == nil) != tc.ok || (tc.ok && (v.MemoryDB != tc.memoryDB || v.BatchProbes != tc.batchProbe)) {
 			t.Errorf("variant %q = %+v, %v", tc.env, v, err)
+		}
+	}
+}
+
+func TestSoakImageStoreProbeAsksForOneMiBMoreThanTheBudgetSoNoContainerIsEverCreatedFromAFourGiBImage(t *testing.T) {
+	// The images load before the start is admitted, so a start refused for memory leaves the 4 GiB image loaded, reserved
+	// and unused. Starting a container from it timed out in the daemon on one of three smokes.
+	for _, budget := range []int64{3925, 3995, 4000} {
+		memory, err := soakImageProbeMemoryMiB(budget)
+		if err != nil || int64(memory) != budget+1 {
+			t.Errorf("budget %d: %d, %v", budget, memory, err)
+		}
+		if memory > appplatform.MaxBackendMemoryMiB || memory < appplatform.MinBackendMemoryMiB {
+			t.Errorf("budget %d: %d MiB is outside the descriptor range", budget, memory)
+		}
+	}
+	for _, budget := range []int64{appplatform.MaxBackendMemoryMiB, appplatform.MaxBackendMemoryMiB + 1000, 0} {
+		if memory, err := soakImageProbeMemoryMiB(budget); err == nil {
+			t.Errorf("budget %d: asked for %d MiB, a request no budget can refuse", budget, memory)
 		}
 	}
 }
