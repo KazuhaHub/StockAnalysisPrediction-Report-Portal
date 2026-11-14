@@ -211,8 +211,8 @@ A `capacity-soak` job in `app-project-quota-probe.yml`.
     30 seconds.
 - **Pass:**
   - every excess request is refused with its typed error;
-  - both p95 values stay within 1.5× of the idle baseline;
-  - dispatch latency stays within 1.5× of its baseline, which is how "unchanged" is defined;
+  - both p95 values stay within 1.5× of the idle baseline (superseded by the owner's floor, resolution 59);
+  - dispatch latency stays within 1.5× of its baseline, which is how "unchanged" is defined (the same bound, resolution 59);
   - the summed backend memory and CPU never exceed the runner budgets.
 - **Evidence** is uploaded as JSON with every sample. `06-acceptance.md`, the OPS-08 and SEC-09
   rows and a new `handoff/evidence/platform-capacity-envelope/acceptance.json` cite only the
@@ -785,3 +785,486 @@ held, and a request that passes the pre-check and loses the acquire gets the sam
 `BenchmarkPlatformRelayFloodSmallReadP95` (file-backed SQLite, one connection, about 3500 paced relay attempts a second
 against a full budget, 2000 small reads): small-read p95 263 to 776 microseconds with authentication first, 76 to 98
 microseconds with admission first (p50 37 to 83, against 33 to 42).
+
+## PR 4b implementation notes
+
+PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending and SEC-09
+partial until a real 120-minute dispatch run has passed; the records are written so that only the run URL and the
+numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.json`).
+
+### What was added
+
+- `capacity-soak` job in `.github/workflows/app-project-quota-probe.yml`: `workflow_dispatch` with `duration_minutes`
+  (default 120, at most 140, `timeout-minutes` 170), `soak_only` and the diagnostic `soak_variant`; five minutes, with a diagnosis, on pull
+  requests touching the capacity code, the code behind the latency fixes or the soak (the path filters gained
+  `internal/app/app_platform_capacity*`, `internal/app/app_platform_installation_capacity*`, the soak's Python test and, in round 1,
+  `internal/apprunner/**` and the relay, store, batch and queue files of resolution 71). The existing two jobs are skipped when `soak_only` is set.
+- `scripts/acceptance/capacity_soak.py` (with `scripts/capacity_soak_test.py`): builds the owned 16 GiB XFS volume with the
+  quota probe's ownership checks, prepares the runner's journal with the existing native journal test, runs the Go
+  acceptance while sampling the host every thirty seconds, then judges the Go evidence and the samples together.
+- `scripts/acceptance/soak_app/` (backend fixture, `Dockerfile`, `build-image.sh`, `cleanup-image.sh`): the soak backend
+  and its disposable local registry. It reads its limits from its own cgroup, so the soak needs no control channel
+  into the container.
+- `internal/app/app_platform_capacity_soak_native_linux_test.go`: the parent (root, owns the runner service, as the image
+  delivery acceptance does) and the Portal child. `app_platform_capacity_soak_plan_test.go` and
+  `app_platform_capacity_soak_evidence_test.go` hold the helpers and run in the ordinary suite in milliseconds; the native
+  scenario is gated on `APP_CAPACITY_SOAK_IMAGE` and skips otherwise, so the package's test time does not change.
+
+### Requirement to implementation
+
+| Requirement | Where it is met |
+| --- | --- |
+| 50 installations, 42 static and 8 managed | `installStatic` (frontend install through the ordinary scheduler path) and `installManaged` (the writable install worker, a real runner) |
+| Eight backends sized from the reported budget | `soakBackendSizing` over `ManagedRuntimeProfile.Capacity` (item 23) |
+| Backend holds memory, burns CPU, forks to its PID limit, floods logs and storage | `scripts/acceptance/soak_app/soak.go` |
+| Messages | the flood process sends every backend a signed request through the Portal's HTTP route continuously (`startFlood`); see resolution 55 |
+| Tasks and events to their quotas | `floodQuotas`; the per-application quota is unit level (resolution 54) |
+| Over-declared layer upload | `probeLayers`, through the offline import route |
+| Excess probes | `probeBackends`, `probeLayers`, `probeStaging`, `probeInstallationCap`, `floodQuotas` |
+| Idle baseline, then per-minute p95 and dispatch latency | `measureIdle`, `load`, `soakSummarize` |
+| 30-second host samples | `Sampler` in `capacity_soak.py` |
+| Pass criteria | `evaluate` in `capacity_soak.py`, tested in `capacity_soak_test.py` |
+
+### Resolutions (PR 4b)
+
+52. **Sizing leaves one minimum backend unreserved.** Each backend declares `floor((budget - one minimum backend) / 8)`,
+    not `floor(budget / 8)`. The runner names the first overflowing dimension in the order memory, CPU, disk, image store,
+    running backends (item 6), so with the budgets exactly filled a ninth backend is refused as `memory`, never as
+    `running_backends`. Leaving 16 MiB and 25 millis free lets a minimum ninth backend fit memory and CPU and be refused
+    by the count itself; the memory-over and CPU-over probes then ask for one unit more than what remains. The eight
+    together still fit, a ninth does not, and the result is checked to lie inside the descriptor ranges unclamped.
+53. **Refused probe installations are retired through the real managed uninstall, on the declared envelope.** Eight managed
+    namespaces reserve 6 GiB of the 8 GiB disk budget (768 MiB each), and a backend refused for memory, CPU or the count has
+    already prepared its namespace (the data stage precedes the start). The first smokes found that nothing could remove such an
+    install (the review plan was refused, so the third probe was refused with `disk`), and the soak worked around it by marking
+    the rows removed and raising the disk budget to 10 GiB. The never-started removal (resolution "refused install removal"
+    above, #434) closes that gap, and both workarounds are gone: each probe's installation is retired by the ordinary
+    managed uninstall (`retire`), which must complete and leave the installation `removed`; a refusal fails the soak and is
+    recorded as `retired: "refused"` with the refusal in the probe's detail. The evidence records `retired:
+    "managed_uninstall"` per probe and the verdict checks it. The runner runs on its declared 8 GiB disk budget, so a `disk`
+    refusal of a later probe would show a namespace that was not released. Static installations use the frontend profile
+    and hold no runner namespace, as in production.
+54. **Task quotas.** The per-installation quota is reached on seven managed installations and the global quota on the
+    eighth, after a backlog of waiting tasks attributed to the static installations (inserted with the columns the
+    admission itself writes, since a static installation has no backend and cannot schedule tasks) brings the Portal to
+    9999 active tasks: one more is admitted and the next is refused although its installation holds about 100 and its
+    application far fewer, so only the global quota can have refused it. The per-application quota (1000) needs four
+    installations of one application and the cap holds fifty applications, so it is proven at its boundary by
+    `TestTaskQuotasRefuseAtTheirOwnBoundary` and recorded as a unit-level probe. The managed releases declare
+    `background.run`, `tasks.schedule`, `events.subscribe` and `reports.read` as required capabilities, which the install
+    review grants itself: the real grant path. Direct grant rows, which the first version used, do not satisfy the event
+    subscription and are not used.
+55. **Messages.** The fixture has no outbound channel to the platform, so the message flood is the platform's inbound
+    signed request path, driven from a separate process over the Portal's HTTP route, plus the backends' log lines. The
+    relay is driven at the Portal's admission cap of 2 concurrent requests (`platformDocumentBudget`, `app_platform_http.go`);
+    excess attempts are refused 429 `app_platform_busy`, about 92% of the attempts of the first smokes. That is the real
+    production admission behaviour, so the load stays as it is, and it is described as it is: one attempt is in flight per
+    backend, at most two are admitted Portal-wide, and the rest are typed refusals. The evidence records, for every window, the
+    attempts, the answered and the busy counts and every other outcome by status and code (`classes`); the verdict requires a
+    minimum of answered requests in every window, a typed refusal for the rest (no 5xx, no transport error) and a live flood
+    process with a fresh heartbeat throughout (resolution 65). "As many messages as the platform lets a backend send" is not
+    exercised as a backend-originated flood; this is a stated gap.
+56. **Image store: native when the daemon disk holds it, unit level otherwise.** The first version claimed the store needs "three
+    real 4 GiB images". The refusal happens when the third is reserved, so two loaded images (8 GiB declared) are enough, and the
+    probe now runs natively. A descriptor declares at most 4 GiB of layers for one image and at most 1 GiB for one layer (the first
+    version declared eleven 1 GiB layers and the descriptor parser refused it), so each probe image is the soak backend's executable
+    as a first layer and four filler layers of zeros that bring the declared total to the maximum less 1 MiB (4293918720 bytes). A
+    layer of zeros compresses to a few MiB, so what crosses the Portal's offline import and the control socket is small while the
+    daemon holds the real bytes; layers differ by seed so no two images share a blob. The images are imported through the real
+    offline route and installed through the ordinary writable install worker, with a memory declaration one MiB over the runner's
+    whole budget: the runner loads the image (the load precedes the start's admission) and refuses the start for memory, so no
+    container is ever created from a 4 GiB image (the first native attempt started them, and the daemon's container create timed out
+    on one of three smokes). Two images load and reserve 8 GiB; the third is refused `capacity_exhausted_image_store` at its load. The
+    three installs are retired through the managed uninstall and the image reclaim removes both images. The harness measures the free
+    disk of the Docker store before the run (the job also records `df`); the probe runs natively only when it holds 8 GiB plus
+    6 GiB of headroom, and otherwise stays at unit level citing `TestLoadImageReservesTheDeclaredBytesOnce`,
+    `TestLoadImageRefusedRunsNothingAndReplays` and the image store case of `TestAdmissionRefusesEachDimensionByOneUnit`, with the
+    measured free bytes as the recorded reason. The hosted runners had 90 to 94 GB free on `/dev/root` (the daemon store and the
+    loop volume's backing file share it), so the probe ran natively in every smoke of this round.
+57. **Staging cap.** One upload is bounded at 384 MiB (`MaxManagedOfflineEnvelopeBytes`) and at most two management
+    requests run at once, so no upload can exceed 2 GiB and two in-flight uploads cannot reach it. The cap guards the sum
+    of what is held and in flight. The soak reserves 384 MiB at a time against its own real store until the sixth is
+    refused and checks the typed 507 `app_platform_storage_full`; `TestStagingCapIsTwoGiBAndRefusesTheOneThatDoesNotFit` proves the
+    exact boundary of the production value without writing a byte.
+58. **Over-declared layer.** The crafted package declares one byte less than its first layer holds and is refused by the
+    import route with HTTP 400 `app_platform_invalid_request`, storing no release. The runner's refusal of the same
+    bytes (`uncompressed_bound`) is proven by the blob channel tests; the soak does not sign a blob command of its own.
+59. **Latency.** Home and the report page are `GET /api/home` and `GET /api/stock/{symbol}` of a seeded report, served
+    in process through the real routed handler with a session cookie. Batch queue dispatch latency is the
+    queue's admission decision over a backlog of queued jobs (`queuedItems` and `queue.Admit`), the measurement the existing
+    isolation test uses, not the duration of a Dify run. The first version used a backlog of 50 jobs, the figure of the existing
+    isolation test; the backlog is 200 queued jobs, chosen in commit `5017f1aa` after the first smoke at 50 and before the
+    evidence run. The same run also times the decision over the first 50 of them
+    (`soakQueuedItems`, the same pricing and filters) and records it as `dispatch_shallow`, so the effect of the backlog
+    is visible; only the 200-job decision is judged, and if it fails the gate the finding goes to the owner rather than
+    to a tuned fixture. A smoke at 50 jobs passed with ratios of about 5 (before the floor); the 200-job figure is the one judged. The baseline pools the idle windows (100 samples of each series
+    per window); the loaded samples of every minute are pooled for the verdict (see the interpretation below).
+    **Owner decision 2026-11-13: within max(1.5x idle, idle + 5 ms), measured with load generated outside the measured
+    process.** The first smoke measured p95 of 3 to 25 ms against a sub-millisecond idle baseline (9 to 18 times), and
+    with the soak's own flood goroutines paused the ratios fell to 1.4 to 2.0: a ratio alone cannot judge a baseline
+    that small, and the generator shared the measured process. The verdict is now `latency_threshold_us(idle) =
+    max(idle * 3 / 2, idle + LATENCY_FLOOR_US)` with `LATENCY_FLOOR_US = 5000`, tested at both rules and where they meet
+    (10 ms), and the evidence records the effective threshold of every window.
+    **Verdict computation (engineering decision, not the owner's): pooled p95 over the loaded period; per-window p95 are
+    diagnostics.** The owner decided only the floor. Pooling is the engineering lead's reading of the sentence "Portal p95
+    latency ... within 1.5x of the idle baseline" of doc 167 section 4, adopted after the first smokes and before the evidence
+    run; doc 167 records the two separately. Doc 167 asks for the p95 over the soak, one figure, so the verdict pools every loaded
+    sample of the run into one p95 per series and compares it with the threshold from the idle p95 (itself pooled over the
+    idle windows). For every series the evidence and the job's step summary list each window's p95 and its threshold, the
+    count of windows over it and the worst window; none is hidden and none decides. The strict rule that judged every
+    one-minute window was the earlier implementation choice, stricter than the criterion and hostage to one scheduler
+    hiccup in about a hundred samples on a shared runner (two smokes failed on single windows, once by 281 microseconds);
+    it was replaced before the 120-minute evidence run for that reason. The flood generator is a second process
+    (`TestPlatformCapacitySoakFlood`, started by the child) that drives the Portal's real
+    `POST /api/app-platform/installations/{id}/backend` route over loopback, one request in flight per backend, so the
+    measured process carries the platform's work for those requests and none of the generator's. The refusal flood of
+    task admissions that ran in the measured process is gone from the load; the quotas are still driven to their limits
+    and probed once, before the load, by `floodQuotas`. The quiet windows of the first smoke were removed.
+60. **Host budget judged on the kernel's counters.** Summed backend CPU is the cgroup `usage_usec` delta over each
+    thirty-second interval when it can be read (a rate sampled over a second can read a few percent above a quota the
+    kernel enforces exactly over longer windows) and Docker's own figure otherwise; the evidence says which. Memory is
+    Docker's usage without reclaimable cache.
+61. **Journal and defaults.** The runner uses its default budgets (25% of memory, 50% of CPUs, 8 GiB disk, 10 GiB image
+    store, eight backends) on a journal prepared with the existing native journal test, which holds no reservations
+    because that store configures no budgets.
+
+62. **Proof that the backends ran their loads.** The backend's own log is the flooded stream and rotates in seconds, so it is
+    no channel. Each minute, after the window's samples, the child asks every backend for its status through a signed request
+    (`GET /v1/soak/status`: memory held, threads started, CPU burners, log bytes written, storage written and the number of
+    times the namespace filled to ENOSPC). The last window's statuses must show every backend held at least half of its memory
+    limit, started at least eight threads, burned CPU, wrote its log and filled its data namespace; a backend that answered
+    the readiness probe and did nothing would otherwise pass.
+
+### Resolutions (PR 4b, review round 1)
+
+The numbering continues from 62. Evidence runs of this round are pull request smokes and five-minute diagnostic dispatch runs; none
+is evidence for OPS-08.
+
+63. **The session outlives the run (blocker).** The session and cookie of the soak child expired an hour after it started
+    (`platformActorTestServer`), 55 minutes into a 120 minute load, after which every home and stock request and the flood would
+    answer 401. The child now writes the session with `soakSessionLifetime(minutes, baseline)`, the run plus an hour, to the
+    session table and signs the cookie with that expiry; the evidence records `session_expires_ms` and the verdict requires it to be
+    after the load. `TestSoakSessionOutlivesTheRun` pins the derivation.
+64. **The runner service outlives the run (found by the first smoke of this round).** The shared fixture starts the runner service as a
+    test process with `-test.timeout=10m`. The first smokes ended before ten minutes, but with the three minute baseline the service
+    was killed in the middle of the load, and a 120 minute run would have lost it after ten minutes. The fixture takes
+    `APP_RUNNER_SERVICE_TEST_TIMEOUT` (test code, no production change) and the soak sets `soakRunnerServiceTimeout`: the run, the
+    baseline and half an hour.
+65. **The message flood is checked in every window.** The old check needed `sum(ok) > 0` over the run. Now every one-minute window
+    must show at least 20 answered requests, a typed `429 app_platform_busy` for the rest (the evidence keeps every outcome by status
+    and code per window; a 5xx, an untyped answer or a transport error fails), and a live flood process whose counters file was
+    written within ten seconds (the flood writes a heartbeat once a second; the child records whether the process is alive when each
+    window ends).
+66. **The backends are checked in every window from their own cgroup counters.** The host sampler reads each backend's `cpu.stat`,
+    `memory.current`, `memory.max`, `cpu.max`, `pids.current` and `pids.max` every thirty seconds. In every one-minute window each
+    backend must have used at least 70% of its CPU quota (from the counter's delta over the window's intervals), held `memory.current`
+    at least 85% of its limit, and its own status counters (log bytes and requests served) must advance between windows. Over the run
+    each backend's PIDs must reach 85% of its limit. A backend that missed a status request is judged across the gap, and missing more
+    than max(1, 2%) of the windows fails. The achieved fractions per backend are in the verdict and the step summary.
+67. **Backends at their declared limits, as achieved.** The fixture holds 85% of its memory limit (60% before) and sets a Go soft memory
+    limit at 95% of the cgroup's, so the collector runs before the kernel kills the container; it parks threads up to the PID limit
+    less 8 (24 before). In the smokes of this round (eight backends, 497 MiB, 240 millis, 64 PIDs each): CPU used 0.998 of the quota at
+    the lowest in every window; `memory.current` at least 0.997 of the limit (it includes the page cache of the storage flood, so
+    the held 85% is the floor, not the figure); PIDs at 57 to 60 of 64, 0.89 to 0.94 (41, 0.64, before). The achieved numbers, not
+    "at the limit", are what the dispatch run's evidence and the docs cite.
+68. **Unit level probes are reported as such.** `image_beyond_the_image_store` (when it stays at unit level) and
+    `task_over_application_quota` are recorded `level: "unit"` with `observed: null`, no pass, and the names of their tests; the
+    old records set `Observed` equal to `Expected`. They are excluded from the native "every excess request refused" check and listed
+    separately, and the job runs the cited tests (`go test -json`) before the soak and hands the result to the verdict, which fails if a
+    cited test did not pass.
+69. **The measured Portal is production-shaped and runs the real batch scheduler (SEC-09).** The measured Portal is a file-backed SQLite
+    database opened with `OpenStore`, as the server opens it (the first version used the in-memory template store of the unit
+    suite). It runs the real scheduler: `scheduleTick` (and `scheduleLoop`) with the real Dify provider against a local stub Dify, a
+    standing backlog of 200 queued jobs and three long runs that hold the budget's slots, as a busy queue does. A scheduler admits what
+    it can, so the backlog is kept in place by that: every slot is held, and each probe job (priority 90 against the backlog's 50)
+    is given exactly one extra slot for its own lifetime (the budget setting is raised by one and lowered again before the probe's run
+    ends), so the admission that starts it is the scheduler's own and the backlog is never drained
+    (`TestSoakBatchProbeIsStartedByTheRealSchedulerAndLeavesTheBacklogQueued`, which fails if the budget is not lowered). A job is
+    enqueued every three seconds; its enqueue-to-start latency is the time from before `CreateBatchJob` to the request reaching the stub,
+    pooled and judged with the same floor rule as the pages (`batch_start`), idle baseline included. The task worker and the event
+    delivery coordinator are not started: the soak's tasks are admitted with a run time an hour out, so none is due, and the event
+    subscription is fenced and its source events kept; running them under the load is not done and stays a stated gap, as are
+    backend-originated requests (the fixture has no outbound channel) and PostgreSQL.
+70. **Probe descriptions say what they drive.** The staging probe is a store-level probe (384 MiB reservations against the real staging store,
+    the refusal mapped by the real error handler); driving the upload route would write gigabytes of unpinned packages, since the route
+    holds at most 768 MiB at once. The event probe floods 64 source events at a subscription that allows one delivery in flight and asserts the
+    fence (`review_required`, reason `inflight_limit` in the audit log), every source event kept and one delivery task. The task probes call
+    `admitPlatformTask` in the Portal process, the function the backend task route calls after it verifies the service identity; no backend sends
+    them. The layer probe is the Portal's offline import route; the runner's refusal of the same bytes is covered by the blob channel unit tests.
+71. **Sampling and host checks.** A window's 100 samples are spread evenly across its minute (one every 600 ms) instead of a burst; the
+    host samples must number at least 90% of those expected and failed samples are counted from the error rows; host free memory must stay
+    above 10% (the container caps sit below the budgets, so the two budget checks alone cannot fail); the dispatch configuration's baseline
+    (three minutes) is the smoke's too; `duration_minutes` is capped at 140 and validated in the job; the pull request path filters gained the
+    code behind the latency fixes (`internal/apprunner/**`, `app_platform_backend_http*`, `app_platform_managed_access*`,
+    `app_platform_writable_request*`, `store.go`, `store_stmtcache*`, `batch_run.go`, `internal/queue/**`) and lost `go.mod` and `go.sum`.
+72. **Diagnostic variants.** The dispatch run takes a `soak_variant` input (`memory-db`, `no-batch-probes`) that removes one part of the scenario
+    to tell their shares apart. A variant is recorded in the evidence and never counts as OPS-08 evidence.
+
+73. **OPS-08 evidence is a PostgreSQL run; SQLite is a recorded known limit (owner decision 2026-11-14).** The owner runs the Portal on
+    PostgreSQL in production, so the evidence run measures that shape. The `capacity-soak` job starts a `postgres:16-alpine` service (the health
+    check and DSN form of `test.yml`) and the measured Portal opens it with `OpenStore("postgres", dsn)`, the code the server runs. The soak
+    drops and recreates the schema before it starts (only on a loopback DSN, `soakPostgresLocal`), so every run begins empty, and the evidence
+    records `db_driver` and the server version. Everything else is unchanged: runner, backends, floods, probes, the real batch scheduler against
+    the stub Dify, the verdict and the diagnostics. A `soak_db` input (`postgres` by default, `sqlite-file`) keeps the file-backed SQLite
+    measurement runnable; a SQLite run never sets `counts_as_ops08_evidence` (`TestSoakDatabaseIsPostgresByDefault...`,
+    `DatabaseTests`). The pull request smoke runs PostgreSQL and gates; no separate SQLite smoke runs on pull requests. The diagnostic minute
+    reports the pool wait count and total, the share of 2 ms samples with every connection in use, and the mean occupancy of the pool (10
+    connections on PostgreSQL, 1 on SQLite).
+
+    **PostgreSQL runs natively on the runner, not as a service container.** The first runs with a `postgres:16` service container failed every
+    managed install at the runner's data writer (`data writer access requires reconciliation: invalid application runtime response`), SQLite
+    runs included, because the container was present on the host: the writer inspects every container for mount references and refuses one the
+    runner did not start. The job therefore starts the runner image's own PostgreSQL 16 (`systemctl start postgresql`, role and database created
+    fresh each run, version recorded: 16.15). The image store probe's installs also run the soak executable as their data writer before their start
+    is refused, so the fixture runs no load in a container whose memory limit exceeds 1 GiB (`loadsEnabled`).
+
+    **First PostgreSQL smoke (run 43598019520, `4d8cd626`; not evidence).** Every probe, flood, backend and host check passes (probe codes:
+    `image_store` native `capacity_exhausted_image_store` with the two images' starts refused `capacity_exhausted_memory`, `ninth_backend`
+    `capacity_exhausted_running_backends`, `memory_over_budget`, `cpu_over_budget`, `app_platform_invalid_request`, `app_platform_storage_full`, `installation_capacity`,
+    `review_required:inflight_limit`, `task_capacity` twice; achieved fractions CPU 0.997 to 0.999, memory current 0.997, PIDs 0.875 to 0.922). All four
+    latency series fail (idle / pooled loaded / bound, microseconds; windows 1 to 5):
+
+    | Series | idle / pooled / bound | windows |
+    | --- | --- | --- |
+    | home | 1764 / 10055 / 6764 fail | 10320, 10039, 8589, 8967, 11885 |
+    | report | 3781 / 33989 / 8781 fail | 42216, 20316, 44054, 24433, 33580 |
+    | dispatch@200 | 989 / 9573 / 5989 fail | 5166, 13302, 9318, 10359, 9573 |
+    | batch start | 11284 / 72222 / 16926 fail | 62217, 40275, 84492, 50795, 55303 |
+
+    The pool is not the cause: in the diagnostic minute the pool of 10 had 0 waits, 0% of samples with every connection in use and a mean occupancy of
+    2.6% idle and 11.5% loaded. The Portal's own CPU per home request is unchanged (p95 0.84 ms idle, 1.04 ms loaded) while the wall p95 goes from
+    1.9 to 23 ms, so the time is spent off CPU in the round trips to PostgreSQL: the host is 80% to 85% busy for the whole load (4 vCPU shared by the
+    eight backends at about 1.9 cores, the PostgreSQL server processes, the Portal, the flood process, the runner and Docker; 1% before the load).
+    The CPU profile puts 58% of the loaded minute in the relay's admitted requests. Nothing was tuned in response; the 120 minute run on this shape
+    would fail all four series. Whether PostgreSQL on a separate host (as the owner runs it) passes is not measured: the reference host has one.
+
+    **Lowering the runner CPU budget (non-evidence PostgreSQL runs, owner decision 2026-11-14).** The `soak_cpu_percent` input overrides the
+    runner's `capacity.cpu_percent` (default 50) in the soak runner's config; the backends are still sized from the budget the runner reports (eight
+    of them, so each CPU share shrinks), and the value is recorded in the evidence. A run with an override is evidence only if it equals the default. The
+    default was not changed. Five-minute runs on PostgreSQL (idle / pooled loaded / bound, microseconds; windows 1 to 5):
+
+    | | 50% (run 43598019520) | 37% (run 43599586089) | 25% (run 43599595728) |
+    | --- | --- | --- | --- |
+    | runner CPU budget / each backend | 2000 / 240 millis | 1480 / 180 | 1000 / 120 |
+    | host busy during the load, mean / max | 80% to 85% | 70.1% / 71.6% | 63.2% / 64.5% |
+    | summed backend CPU, mean | about 1900 millis | 1440 | 960 |
+    | home | 1764 / 10055 / 6764 fail | 2062 / 10518 / 7062 fail | 1746 / 9288 / 6746 fail |
+    | report | 3781 / 33989 / 8781 fail | 2383 / 9077 / 7383 fail | 2972 / 17676 / 7972 fail |
+    | dispatch@200 | 989 / 9573 / 5989 fail | 884 / 3206 / 5884 pass | 946 / 3882 / 5946 pass |
+    | batch start | 11284 / 72222 / 16926 fail | 9172 / 20910 / 14172 fail | 11169 / 43752 / 16753 fail |
+
+    Per-window p95 at 37%: home 9352, 12446, 9518, 10662, 10814; report 8557, 10001, 8284, 10296, 8462; dispatch 2965, 3798, 2771, 3506, 2750; batch
+    start 27363, 19966, 16459, 21560, 19989. At 25%: home 11290, 8304, 8749, 8435, 10289; report 13302, 19721, 11621, 22926, 14706; dispatch 3705, 3494,
+    3611, 5005, 4372; batch start 43752, 69933, 20640, 47459, 27345. Every backend still used at least 0.998 of its quota, held at least 0.996 of its
+    memory and reached 0.89 to 0.94 of its PIDs, with every other check green. No level passes, so no stability rerun was made. Lowering the backends'
+    share removes most of the load's growth in the dispatch series, but home and report stay at about 9 to 10 ms against bounds of about 7 ms: the host stays
+    63% to 70% busy at 25% and 37%, so the Portal's own competitors (PostgreSQL, the flood process, the runner, Docker and the Portal) are still more than
+    the idle host's.
+
+    **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
+    gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
+    one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
+    13.8% idle, 6111 to 31948 pool waits a minute). Measured this round, five-minute pull request smokes and dispatch runs, none evidence
+    (idle / pooled loaded / bound, microseconds):
+
+    | Run | report page | batch start |
+    | --- | --- | --- |
+    | 43568339184 (`3e3d591`) | 3523 / 50611 / 8523 fail | 7852 / 112261 / 12852 fail |
+    | 43570051027 (`edfcb92`) | 1795 / 8102 / 6795 fail | 5532 / 16334 / 10532 fail |
+    | 43570060321 (`edfcb92`, no batch probes) | 1863 / 12681 / 6863 fail | not run |
+    | 43571196806 (`56e6881a`) | 1770 / 5552 / 6770 pass | 5758 / 26467 / 10758 fail |
+    | 43590645282 (`85376438`, with #440) | 3147 / 14924 / 8147 fail | 9598 / 48249 / 14598 fail |
+
+    The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
+    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. A SQLite read pool is a tracked follow-up, and
+    until it lands no claim is made that the SQLite envelope is proven.
+
+### Findings of the revised harness: the latency bound on a production-shaped Portal (not evidence)
+
+Everything in the harness passes in the smokes of this round except two latency series, and that is a finding about the Portal, not the
+harness. Runs, all five minutes, none is evidence:
+
+| Run | Portal | home idle / pooled loaded / bound (us) | report | dispatch | batch start |
+| --- | --- | --- | --- | --- | --- |
+| smoke 43570051027 (`edfcb92`) | file-backed, probes | 678 / 3853 / 5678 pass | 1795 / 8102 / 6795 **fail** | 614 / 3829 / 5614 pass | 5532 / 16334 / 10532 **fail** |
+| smoke 43571196806 (`56e6881a`) | file-backed, probes | 658 / 3338 / 5658 pass | 1770 / 5552 / 6770 pass | 587 / 3220 / 5587 pass | 5758 / 26467 / 10758 **fail** |
+| smoke 43590645282 (`85376438`, with #440) | file-backed, probes | 1069 / 5853 / 6069 pass | 3147 / 14924 / 8147 **fail** | 906 / 5604 / 5906 pass | 9598 / 48249 / 14598 **fail** |
+| smoke 43568339184 (`3e3d591`) | file-backed, probes | passes | 3523 / 50611 / 8523 **fail** | passes | 7852 / 112261 / 12852 **fail** |
+| dispatch 43570060321 (`edfcb92`, `no-batch-probes`) | file-backed, no probes | 674 / 4955 / 5674 pass | 1863 / 12681 / 6863 **fail** | 602 / 4901 / 5602 pass | not run |
+| dispatch 43568354287 (`3e3d591`, `memory-db`) | in-memory, probes | 804 / 6343 / 5804 **fail** | 1040 / 4520 / 6040 pass | 863 / 4224 / 5863 pass | 4174 / 16911 / 9174 **fail** |
+
+The runs vary a great deal (the report page's pooled p95 ranged from 8 to 51 ms), but three things are stable. (1) On the file-backed
+database the report page misses its bound in three of four runs, with and without the batch probes, and passes by 1.2 ms in the fourth; the same flood on the in-memory
+store passes it, which is why the first smokes, which used the in-memory store, passed with a large margin. (2) The real scheduler's enqueue-to-start
+p95 is 5 to 8 ms idle and 16 to 112 ms under the flood; it misses the floor rule on both stores, so the executor stays available (a job
+starts within a fifth of a second at the worst) but not within the bound. (3) The flood is the cause, not the soak's own work (the variant without probes shows it): in the diagnosis of smoke 43568339184 the block
+profile of the loaded minute attributes 31.7 s of goroutine blocking to `database/sql.(*DB).conn` (the single SQLite connection), 19.5 s of it
+to `currentActiveUser`. Every flood attempt, the 429 refusals included, pays two session reads (`requireUserJSON`'s `currentActiveUser` and
+`platformHTTPReader`) before the relay's admission cap is applied in `apiPlatformBackend`, at 120 to 230 attempts a second; the CPU profile puts
+56% of the loaded minute's CPU in the relay, with `_sqlite3RunParser` (statement preparation in the relay's read transactions, which the statement
+cache does not cover) at 18%. Moving the admission cap ahead of the session check, or
+the relay's read statements onto the cache, are production changes: this PR makes none. The decision is the owner's, and the 120 minute run
+will fail these two checks on the same code. SEC-09 therefore stays partial even after a run.
+
+### Diagnosis of the home page latency under load (smoke run 43541609397)
+
+The pull request smoke profiles the measured process for one idle and one loaded minute (`APP_CAPACITY_SOAK_DIAGNOSE=1`: CPU,
+block and mutex profiles, a goroutine dump, per-phase timings of the home and report pages as wall time against thread CPU
+time, database pool statistics, a 2 ms sample of the connection in use, garbage collector and scheduler figures; artifact
+files under `diag/`). The home page failed the pooled gate in two of three earlier runs with 11 to 19 ms windows against a
+0.7 ms idle. This run passed the gate, but its loaded diagnostic minute reproduced the tail, and it says where it comes from.
+
+| | idle minute | loaded minute |
+| --- | --- | --- |
+| home, wall p50 / p95 / max | 650 / 753 / 1827 us | 883 / **22898** / 81361 us |
+| home, CPU p95 | 632 us | 967 us |
+| home, off-CPU p95 (wall minus thread CPU) | 693 us | **22070 us** |
+| report, wall p95 / off-CPU p95 | 913 / 776 us | 4151 / 2875 us |
+| database pool: waits for a connection / total wait | 0 / 0 ms | **43439 / 43529 ms** in 60 s |
+| the single connection in use (share of 2 ms samples) | 5% | **38%** |
+| GC cycles / total pause / p99 pause | 49 / 3.7 ms / 0.23 ms | 304 / 165 ms / 2.6 ms |
+| scheduler latency p50 / p99 | 0.06 / 0.13 ms | 0.004 / 5.2 ms |
+| mutex profile, total | | 43 ms |
+
+**What dominates.** Waiting for the database connection, not computing and not the host. A home request's CPU time is the
+same loaded as idle (under 1 ms); the whole increase is off-CPU, and the block profile puts it in `database/sql` waiting for a
+connection (`chanrecv1`/`selectgo` under `QueryRow`, `QueryContext`, `BeginTx`, `Exec`: 116 s of blocked time in the minute,
+over the callers of every flood and page). `connectStore` opens SQLite with `SetMaxOpenConns(1)` (`store.go:136`), so every
+read and write of every request queues for one connection, and each of home's ten reads (`viewerScope`, `SearchNewLatest`,
+`NewTypes`, `ReportKinds`, `presentVersions`, `LinkGroups`, `Links`, `KindColors`, plus the session reads) can wait. Their own
+cost is unchanged (7 to 160 us p95 idle) and none of them reads installations, tasks or events: home issues the same ten
+reads however many there are, so it is not the N+1 class of the dispatch decision.
+
+**Who holds the connection.** The backend request relay. 66% of the process's CPU in the loaded minute (17.1 of 26 s) is
+`apiPlatformBackend`, and 11.8 s of it runs inside `withPlatformBackendRead`, a database transaction, per
+`withPlatformWritableBackendAccess`, three of which run for every relayed request
+(`app_platform_writable_request.go:63-120`). Inside those transactions the Portal verifies the signed registration
+(`control.VerifyWritableBackendRegistration`, 7.1 s: ed25519 and strict JSON decoding of the same documents on every request),
+loads the backend's history (`loadPlatformWritableBackendHistory`, 5.8 s) and parses descriptors. 23% of the process's
+CPU is SQLite statement preparation (`sqlite3Prepare`): the statements are prepared on each call. The connection is
+therefore held for CPU-bound work, and 38% of the time it is held while a page waits.
+
+**What it is not.** The Go mutex profile is empty (43 ms). The garbage collector paused 165 ms in the minute (p99 2.6 ms), an
+order of magnitude below the 22 ms tail. Scheduler latency p99 is 5 ms. The goroutine dump (one instant) caught no waiter.
+The soak's database is in-memory SQLite, so a WAL checkpoint plays no part here; the pool limit and the work done under it
+are the same as production's.
+
+**Is it a Portal defect?** Yes, in the class "work done while holding the only SQLite connection": on a production SQLite
+Portal a busy app backend slows every page by queueing it behind that app's request verification. It is invisible on
+PostgreSQL (ten connections). Minimal fixes, none implemented here: (1) in `withPlatformBackendRead` read the rows in the
+transaction, release it, and verify and decode afterwards; or (2) verify the registration once per
+`(installation, generation, release digest, policy)` and reuse the result, since the same documents are verified on every
+request; either removes most of the hold time. A larger one is a read-only pool beside the writer for file-backed SQLite.
+The 120-minute run will show whether the tail is bounded at the pooled p95; until a fix lands, a pass depends on how hard the
+flood leans on the connection (this soak keeps one request in flight per backend).
+
+#### After the fix (#437, `ffb697ba`): smoke run 43548154827
+
+#437 releases the single SQLite connection before a relayed backend access verifies, decodes or signs, and caches successful
+control-command verifications for their validity window. The same smoke (the verdict, the diagnostics and the profiling
+unchanged) measured:
+
+| diagnostic minute, loaded | before | after |
+| --- | --- | --- |
+| waits for a database connection | 43439 | 34300 |
+| total wait for the connection | 43529 ms | **16179 ms** |
+| the single connection in use (2 ms samples) | 38% | **34%** |
+| home wall p95 | 22898 us | **7704 us** |
+| home off-CPU p95 | 22070 us | **6663 us** |
+| report wall p95 / off-CPU p95 | 4151 / 2875 us | 8873 / 6910 us |
+| GC total pause / scheduler p99 | 165 ms / 5.2 ms | 141 ms / 5.2 ms |
+
+The pooled verdict of the run (idle p95, threshold, pooled loaded p95): home 772 us, 5772 us, **5417 us (pass)**; report 1239 us,
+6239 us, **6386 us (fail by 147 us)**; dispatch at 200 jobs 761 us, 5761 us, **4131 us (pass)**. Per window (home, report,
+dispatch p95 in us): 3626 6325 4131; 3836 6203 3135; 4333 6099 3971; 5030 6259 5497; 7905 7849 3958. Home and dispatch pass; report
+sits at about 6.2 ms in every window, 5 ms above its idle p95, and the pooled figure is just over its threshold.
+
+**What dominates now.** The relay still occupies the connection a third of the time, and the profile says with what: the work
+under the connection is no longer verification but the SQL itself. 57.6% of the loaded process's CPU is still
+`apiPlatformBackend`, 13.9 s of it inside the read transactions (`platformBackendReadTx`), and the largest part of that is
+SQLite statement preparation and parsing (`sqlite3Prepare`, 35% of all CPU; statements are prepared on every call, as
+before), above all in `loadPlatformWritableBackendHistoryPhase` and `finishPlatformWritableInstallHistory` (6.2 s). Three read
+transactions still run per relayed request, each re-reading the install history. The remaining cost of a page under relay load
+is therefore queueing behind those queries (home off-CPU p95 6.7 ms, down from 22 ms). Nothing here was tuned: the soak is
+unchanged, and the gate on report is reported as it came out.
+
+#### After the second fix (#438, `185ab15d`): smoke run 43563565682
+
+#438 adds a SQLite-only prepared-statement LRU at the store's executor (no change on PostgreSQL) and makes `GET /api/stock/{symbol}`
+read its decision data in one snapshot (9 connection acquisitions down to 4 for a page with a report). The smoke, with the verdict,
+diagnostics and fixture unchanged, passed every check.
+
+| | after #437 | after #438 |
+| --- | --- | --- |
+| pooled loaded p95: home (threshold) | 5417 (5772) us | **1605 (5234) us** |
+| pooled loaded p95: report (threshold) | 6386 (6239) us, fail | **1915 (5389) us** |
+| pooled loaded p95: dispatch at 200 jobs (threshold) | 4131 (5761) us | **1757 (5480) us** |
+| windows over the threshold, home / report / dispatch | 1 / 3 / 0 of 5 | **0 / 0 / 0 of 5** |
+| worst window p95, home / report / dispatch | 7905 / 7849 / 5497 us | 3244 / 2320 / 2666 us |
+| diagnostic minute: waits for a connection | 34300 | **22073** |
+| total wait for the connection | 16179 ms | **4234 ms** |
+| the single connection in use | 34% | **15.5%** |
+| home off-CPU p95 | 6663 us | **2224 us** |
+| report off-CPU p95 | 6910 us | **810 us** |
+| statement preparation (`sqlite3Prepare`) share of CPU | 35% | **22.7%** |
+| process CPU in the minute | 29.7 s | 18.7 s |
+
+Per window (home, report, dispatch p95 in us): 1164 1474 1577; 3244 1044 1443; 980 2320 2509; 2038 2169 2666; 651 1462 922. The idle p95
+of each series also fell (home 234, report 389, dispatch 480 us). Statement preparation is still 22.7% of the CPU: the relay's
+read transactions (`platformBackendReadTx`, 60% of CPU cumulative) still prepare a share of their statements, so a further
+reduction is available there, but nothing about the gate needs it.
+
+### After #440 (`0874b426`, admission before session reads): smoke 43590645282 on `85376438` (not evidence)
+
+The branch merged `integration/app-platform` and nothing else changed: verdict, diagnostics and fixture are those of `56e6881a`
+(run 43571196806). Both failed only the batch start series; the new run also failed the report page.
+
+| Series (us) | `56e6881a`: idle / pooled / bound | windows 1 to 5 | `85376438`: idle / pooled / bound | windows 1 to 5 |
+| --- | --- | --- | --- | --- |
+| home | 658 / 3338 / 5658 pass | 3573, 2795, 3258, 3704, 2658 | 1069 / 5853 / 6069 pass | 5460, 6766, 5574, 5706, 6109 |
+| report | 1770 / 5552 / 6770 pass | 5133, 6044, 5660, 6255, 4764 | 3147 / 14924 / 8147 **fail** | 13995, 13583, 14287, 15080, 15589 |
+| dispatch@200 | 587 / 3220 / 5587 pass | 1720, 3182, 3394, 3691, 2373 | 906 / 5604 / 5906 pass | 3999, 5680, 4754, 5668, 5285 |
+| batch start | 5758 / 26467 / 10758 **fail** | 26467, 26393, 15813, 20345, 27340 | 9598 / 48249 / 14598 **fail** | 58980, 42529, 39836, 47715, 42724 |
+
+Diagnostic minute (pages only, back to back), idle then loaded, `56e6881a` against `85376438`:
+
+| | `56e6881a` | `85376438` |
+| --- | --- | --- |
+| idle home / report p95 (us) | 396 / 1260 | 950 / 3242 |
+| loaded home / report p95 (us) | 3463 / 6843 | 5978 / 12859 |
+| pool waits, loaded minute (count, total) | 31948, 9556 ms | 6111, 6666 ms |
+| connection occupied, idle / loaded (share of 2 ms samples) | 5.6% / 26.5% | 13.8% / 33.5% |
+| block profile, `database/sql.(*DB).conn` | 8.39 s | 5.93 s |
+| block profile, `currentActiveUser` | 4.36 s | 1.71 s |
+| CPU profile, share in the relay's `apiPlatformBackend` | 66% | 63% |
+| flood answered / refused per minute | about 670 / 6870 | about 395 / 6950 |
+
+What #440 did, measured: the refused attempt no longer touches the database. The CPU profile attributes 0.05 s (`platformJSONBusy`) and
+0.03 s (`platformSessionCookieSigned`) to the pre-check over a minute of about 6950 refusals, roughly 11 microseconds each and no connection
+acquisition, against ten statements over nine acquisitions before. Pool waits fell by 81% and the blocked time on the connection by 29%.
+
+What it did not do: the p95 of the pages and of the batch start did not improve in this run, because the second run's host was slower in
+every figure including the idle ones (idle home 1069 us against 658, idle report 3147 against 1770, connection occupancy 13.8% idle against
+5.6%), and what remains in the loaded minute is the work of the requests the relay does admit. At the cap, two admitted relay requests are in
+flight at all times (395 to 670 a minute, each about 14 ms of CPU and eight read statements in one read transaction, with Ed25519 signing and
+JSON); the CPU profile puts 63% of the minute in `apiPlatformBackend` under `requireUserJSON`, with statement preparation and the JSON decode
+the largest flat entries. This is the profile of the failing series; nothing in the harness was tuned in response. The two figures to compare
+across runs are therefore the pool wait count and the refused-attempt cost; the latency series vary with the host by more than the effect of the
+change (the report page's pooled p95 has ranged from 5.5 to 51 ms across the runs of this round).
+
+### Evidence files
+
+`capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity including the branch, the commit and the event, host
+facts including the Docker store's free disk, the Go child's evidence with every probe, window and flood class, every host sample with each
+backend's cgroup counters, the unit test results, the runner log series and the verdict with each check and the achieved fractions),
+`samples.jsonl`, `child-evidence.json`, `unit-tests.json`, `disk-before.txt`, `runner-log.jsonl`, `portal-parent.log`, `portal-child.log` and
+`runner.log`, uploaded as the `capacity-soak-evidence` artifact (90 days for a dispatch run).
+
+### Not proven until the 120-minute run
+
+- That the latency bound holds for two hours: on the production-shaped Portal it does not hold in the smokes (see the findings above).
+- That the eight backends stay inside the budgets and none is OOM-killed or restarted for two hours; the five-minute smokes held every
+  backend at the fractions of resolution 67 with no restart.
+- The task worker and the event delivery coordinator under the load, a backend-originated message or task flood, the per-application
+  task quota natively, the runner's own refusal of an over-declared layer over the control socket, and PostgreSQL (the soak drives a
+  SQLite Portal).

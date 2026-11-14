@@ -282,6 +282,18 @@ with a typed error; Portal p95 latency for the home page and report detail
 within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
+Owner decision 2026-11-13: the latency bound is max(1.5x idle p95, idle p95 + 5 ms), for the home page, the report page and
+the queue's dispatch decision, measured with load generated outside the measured process. The owner decided only that floor.
+
+Verdict computation (engineering decision, not the owner's): the p95 over the loaded period, pooled over every loaded sample of
+the run, is compared with the bound; per-window values are diagnostics. The pooling is the engineering lead's reading of the
+sentence "Portal p95 latency ... within 1.5x of the idle baseline" above, adopted before the evidence run.
+
+Added by the same harness, as engineering decisions, not the owner's: the real batch scheduler's enqueue-to-start latency is judged
+by the same bound (it is what "Portal business executor capacity remains available" of SEC-09 is measured with), and every
+one-minute window must show the backends and the message flood alive (answered requests, typed refusals, CPU and memory
+held), so that a bound met by a flood that stopped does not pass.
+
 ## 5. DATA-08: retention defaults
 
 **Decision: adopt the doc 05 proposal values, corrected so retention never

@@ -1,0 +1,238 @@
+{
+  "format": "portal.capacity-envelope-acceptance/1-dev.1",
+  "status": "pending-dispatch-run",
+  "plan": "docs/app-platform/171-capacity-envelope-plan.md",
+  "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 4",
+  "note": "Fill the nulls below from the capacity-soak-evidence artifact of one passing 120-minute workflow_dispatch run of app-project-quota-probe.yml (job capacity-soak), started on the branch feat/app-platform-capacity-soak at the reviewed commit with soak_only=true. Nothing here may cite a pull request smoke run: it is five minutes and is never evidence. Until then OPS-08 stays pending and SEC-09 stays partial. The measured Portal runs on PostgreSQL (owner decision 2026-11-14); a sqlite-file run never counts.",
+  "dispatch_run": {
+    "url": null,
+    "run_id": null,
+    "branch": "feat/app-platform-capacity-soak",
+    "commit": null,
+    "event": "workflow_dispatch",
+    "soak_only": true,
+    "requested_minutes": 120,
+    "elapsed_seconds": null,
+    "artifact": "capacity-soak-evidence",
+    "verdict_passed": null,
+    "counts_as_ops08_evidence": null,
+    "soak_db": "postgres"
+  },
+  "reference_host": {
+    "runner": "GitHub-hosted ubuntu-24.04",
+    "vcpus": 4,
+    "memory": "16 GiB",
+    "volume": "16 GiB XFS project-quota loop volume created and owned by the job",
+    "kernel": null,
+    "docker_cgroup_driver": null,
+    "database": {
+      "driver": "postgres",
+      "server_version": null
+    }
+  },
+  "budgets_reported_by_the_runner": {
+    "memory_mib": null,
+    "cpu_millis": null,
+    "disk_bytes": null,
+    "image_store_bytes": null,
+    "running_backends": 8,
+    "estimated_rows": null
+  },
+  "backend_sizing": {
+    "backends": 8,
+    "memory_mib_each": null,
+    "cpu_millis_each": null,
+    "pids_each": 64,
+    "remaining_memory_mib": null,
+    "remaining_cpu_millis": null,
+    "rule": "floor((budget - one minimum backend) / 8), computed from the budgets the runner reports in its readiness facts"
+  },
+  "load": {
+    "installations": 50,
+    "static_installations": 42,
+    "managed_backends": 8,
+    "backend_workload": "each backend holds 85% of its memory limit (a Go soft limit at 95% keeps the collector ahead of the kernel), burns its CPU quota, parks threads up to its PID limit minus 8, writes 1 MiB/s to its log and fills its data namespace to ENOSPC; the achieved fractions are measured from each backend's own cgroup counters and recorded, not assumed",
+    "platform_workload": "the relay is driven at the Portal's admission cap of 2 concurrent requests: a flood process outside the measured one keeps one attempt in flight per backend through the Portal HTTP route, at most two are admitted Portal-wide and excess attempts are refused 429 app_platform_busy (about 92% of attempts in the smokes); both counts and every other outcome class are recorded per window. Before the load, a task backlog to the global quota and an event subscription flooded past its in-flight bound",
+    "batch_workload": "the Portal's real batch scheduler (scheduleTick and scheduleLoop) runs against a local stub Dify that answers at once; a standing backlog of 200 queued jobs is held behind long runs that occupy the budget, and a batch job is enqueued every three seconds and given one extra slot; enqueue-to-start latency is measured against the idle baseline with the same bound",
+    "portal": "PostgreSQL (fresh postgres:16 service per run, OpenStore); running: the batch scheduler, the relay, installs and uninstalls through the ordinary workers; not exercised: the task worker and event delivery coordinator, a backend-originated message or task request",
+    "measurement_windows": null
+  },
+  "probes": {
+    "fifty_first_installation": {
+      "expected": "installation_capacity (HTTP 429)",
+      "level": "native",
+      "observed": null
+    },
+    "ninth_backend": {
+      "expected": "capacity_exhausted_running_backends",
+      "level": "native",
+      "observed": null
+    },
+    "memory_over_budget": {
+      "expected": "capacity_exhausted_memory",
+      "level": "native",
+      "observed": null
+    },
+    "cpu_over_budget": {
+      "expected": "capacity_exhausted_cpu",
+      "level": "native",
+      "observed": null
+    },
+    "image_beyond_the_image_store": {
+      "expected": "capacity_exhausted_image_store",
+      "level": "native-or-unit",
+      "observed": null,
+      "level_note": "native when the daemon disk holds two 4 GiB images with 6 GiB of headroom (measured by the job and recorded as image_store_probe and docker_root_free_bytes), else unit level with the measured free space as the reason",
+      "unit_tests": [
+        "TestLoadImageReservesTheDeclaredBytesOnce",
+        "TestLoadImageRefusedRunsNothingAndReplays",
+        "TestAdmissionRefusesEachDimensionByOneUnit"
+      ]
+    },
+    "layer_beyond_its_declaration": {
+      "expected": "app_platform_invalid_request (HTTP 400, nothing stored)",
+      "level": "native",
+      "observed": null,
+      "note": "the Portal's offline import route; the runner's own refusal of the same bytes is covered by the blob channel unit tests"
+    },
+    "staging_over_two_gib": {
+      "expected": "app_platform_storage_full (HTTP 507)",
+      "level": "native",
+      "observed": null,
+      "note": "store level: 384 MiB reservations against the real staging store, the refusal mapped by the real error handler; not driven through the upload route"
+    },
+    "task_over_installation_quota": {
+      "expected": "task_capacity",
+      "level": "native",
+      "observed": null,
+      "note": "in-process admitPlatformTask, the function the backend task route calls; the soak backends have no outbound channel"
+    },
+    "task_over_global_quota": {
+      "expected": "task_capacity",
+      "level": "native",
+      "observed": null,
+      "note": "in-process admitPlatformTask"
+    },
+    "event_subscription_over_quota": {
+      "expected": "review_required:inflight_limit, 64 source events kept, one delivery task",
+      "level": "native",
+      "observed": null
+    },
+    "task_over_application_quota": {
+      "expected": "task_capacity",
+      "level": "unit",
+      "observed": null,
+      "unit_tests": [
+        "TestTaskQuotasRefuseAtTheirOwnBoundary"
+      ],
+      "observed_note": "not observed in this run: unit level probes record observed null and the tests that prove them, which the job runs"
+    }
+  },
+  "measurements": {
+    "idle_baseline": {
+      "home_p95_us": null,
+      "report_p95_us": null,
+      "dispatch_p95_us": null,
+      "batch_start_p95_us": null
+    },
+    "latency_rule": "Owner decision 2026-11-13: the bound is max(1.5x idle p95, idle p95 + 5 ms), measured with load generated outside the measured process. Verdict computation (engineering decision, not the owner's): the pooled loaded p95; per-window p95 are diagnostics",
+    "latency_floor_us": 5000,
+    "pooled_loaded_p95_us": {
+      "home": null,
+      "report": null,
+      "dispatch": null,
+      "batch_start": null
+    },
+    "windows_over_the_threshold_diagnostic": {
+      "home": null,
+      "report": null,
+      "dispatch": null,
+      "batch_start": null
+    },
+    "worst_load_window_ratio_to_idle": {
+      "home": null,
+      "report": null,
+      "dispatch": null,
+      "batch_start": null
+    },
+    "effective_threshold_us": {
+      "home": null,
+      "report": null,
+      "dispatch": null,
+      "batch_start": null
+    },
+    "peak_summed_backend_memory_bytes": null,
+    "peak_summed_backend_cpu_millis": null,
+    "peak_docker_log_bytes": null,
+    "peak_xfs_used_bytes": null,
+    "peak_runner_log_bytes": null,
+    "lowest_host_mem_available_kib": null,
+    "message_flood": {
+      "answered_total": null,
+      "busy_refusals_total": null,
+      "other_classes": null,
+      "windows_below_the_minimum": null
+    },
+    "achieved_fractions": {
+      "memory_current_min": null,
+      "memory_current_peak": null,
+      "pids_peak": null,
+      "cpu_window_min": null
+    },
+    "docker_root_free_bytes": null,
+    "image_store_probe": null
+  },
+  "assertions": {
+    "every_excess_request_refused_with_its_typed_error": null,
+    "home_p95_within_threshold_of_idle": null,
+    "report_p95_within_threshold_of_idle": null,
+    "dispatch_within_threshold_of_idle": null,
+    "backend_memory_within_runner_budget": null,
+    "backend_cpu_within_runner_budget": null,
+    "no_backend_crash": null,
+    "no_runner_crash": null,
+    "batch_start_within_threshold_of_idle": null,
+    "session_outlives_the_run": null,
+    "message_flood_answered_in_every_window": null,
+    "message_flood_refusals_are_typed": null,
+    "message_flood_alive_throughout": null,
+    "backends_ran_every_declared_load": null,
+    "backends_held_their_limits_in_every_window": null,
+    "backends_reached_their_pid_limit": null,
+    "host_memory_headroom": null,
+    "host_samples_cover_the_load": null,
+    "unit_level_probe_tests_passed": null
+  },
+  "requirements": {
+    "OPS-08": {
+      "status": "pending",
+      "closes_when": "a 120-minute dispatch run passes every assertion above"
+    },
+    "SEC-09": {
+      "status": "partial",
+      "closes_with": "OPS-08: the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load"
+    }
+  },
+  "unproven_until_the_dispatch_run": [
+    "that p95 of GET /api/home, of the report page, of the queue's dispatch decision and of the batch scheduler's enqueue-to-start latency stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is the pooled loaded p95; per-window values are diagnostics)",
+    "that the eight backends, held at 85% of their memory and their PID limit less a margin, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted, with every backend using at least 70% of its CPU quota in every minute",
+    "that the message flood answers requests in every minute at the Portal's admission cap and every other attempt is a typed 429 app_platform_busy",
+    "that each refused probe installation releases its namespace through the managed uninstall on the declared 8 GiB disk budget (each probe records retired: managed_uninstall)",
+    "the per-application task quota (1000) natively; it is proven at its boundary at unit level only, and the unit tests run in the dispatch job",
+    "the task worker and event delivery coordinator under the load, and a backend-originated message or task flood: none runs in the soak"
+  ],
+  "known_limits": {
+    "sqlite": {
+      "decision": "OPS-08 evidence is a PostgreSQL run (owner, 2026-11-14); SQLite is a recorded known limit and never evidence",
+      "statement": "On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the gate; the cause is the single connection, occupied about a third of the time by the two always-admitted relay requests",
+      "runs_not_evidence": {
+        "43568339184": "report 50611us vs bound 8523, batch start 112261 vs 12852",
+        "43570051027": "report 8102 vs 6795, batch start 16334 vs 10532",
+        "43570060321": "no batch probes: report 12681 vs 6863",
+        "43571196806": "report 5552 vs 6770 (pass), batch start 26467 vs 10758",
+        "43590645282": "with #440: report 14924 vs 8147, batch start 48249 vs 14598"
+      },
+      "follow_up": "a SQLite read pool; until it lands the SQLite envelope is not claimed proven"
+    }
+  }
+}

@@ -175,6 +175,71 @@ what.
 | OPS-07 | Present unsupported legacy app/container for managed adoption | No automatic takeover; old installation continues under legacy rules |
 | OPS-08 | Repeat test at declared maximum apps/tasks/resource envelope | Measured capacity/latency recorded, quotas reject excess and reserve host headroom |
 
+### Declared capacity envelope status (OPS-08, SEC-09)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
+[doc 171](171-capacity-envelope-plan.md). **OPS-08 is pending and SEC-09 stays partial until one 120-minute
+`workflow_dispatch` run of the `capacity-soak` job has passed; no result is cited before then.** Only that run counts. The
+job exists on the branch `feat/app-platform-capacity-soak`, which targets `integration/app-platform`, not on `main`, so the
+evidence run is a `workflow_dispatch` of that branch at the reviewed commit with `soak_only=true`; the evidence records the
+branch (`GITHUB_REF_NAME`), the commit and the event. The same configuration runs for five minutes, with a diagnosis added, on
+pull requests that touch the capacity code, the code behind the latency fixes or the soak, so it cannot rot; that smoke is never
+evidence. The run is at most 140 minutes (the step timeout is 160).
+
+- **What the job does:** on a GitHub-hosted `ubuntu-24.04` runner (4 vCPU, 16 GiB) with a 16 GiB XFS project-quota
+  loop volume it owns, a real root runner runs fifty installations (forty-two static, eight managed backends of a
+  soak fixture image, each sized from the memory and CPU budgets the runner reports in its readiness facts). The measured
+  Portal runs on PostgreSQL (a fresh `postgres:16` service for every run, opened with `OpenStore`; owner decision 2026-11-14: the evidence shape is
+  the production one), running its real batch scheduler against a local stub Dify that answers at once. It does not run the platform task worker or the event delivery
+  coordinator, no request originates from a backend (the fixture has no outbound channel to the platform), and these are stated gaps, recorded in the evidence. The evidence records `db_driver` and the server version, and only a PostgreSQL run counts.
+- **SQLite is a recorded known limit, not evidence.** The `soak_db=sqlite-file` input measures the file-backed SQLite Portal. On it, sustained
+  app-backend relay traffic raises page and scheduler latency beyond the gate, because the single connection is occupied about a third of the time by the
+  two always-admitted relay requests (smokes 43568339184, 43570051027, 43571196806, 43590645282 and dispatch 43570060321 in doc 171, resolution 73). A
+  SQLite read pool is a tracked follow-up and blocks any claim that the SQLite envelope is proven.
+- **Backends at their limits, as achieved:** each backend holds 85% of its memory limit (the Go soft limit at 95% keeps the
+  collector ahead of the kernel), burns its CPU quota, parks threads up to its PID limit less 8, writes 1 MiB/s to its log and
+  fills its data namespace to the quota. "At the limit" is not claimed: the verdict reads each backend's own cgroup counters
+  every minute and records the achieved fractions (memory current, PIDs, CPU used against the quota) in the evidence, and the
+  dispatch run's numbers are the ones to cite.
+- **Message flood, as driven:** the relay is driven at the Portal's admission cap of 2 concurrent requests (one attempt in
+  flight per backend; at most two are admitted Portal-wide); excess attempts are refused 429 `app_platform_busy`, about 90% of the
+  attempts. Both counts, and every other outcome by status and code, are recorded for every minute.
+- **Excess probes, each refused with its typed error:** the 51st installation (HTTP 429 `installation_capacity`), a
+  ninth backend (`running_backends`), a backend over the remaining memory and over the remaining CPU (`memory`,
+  `cpu`), a third image against the 10 GiB image store (`image_store`, native when the daemon disk holds two 4 GiB images, see
+  below), a task over the installation and over the global quota (the Portal's own `admitPlatformTask`, the function the backend task
+  route calls; no backend sends it), an event subscription flooded with 64 source events past its in-flight bound (fenced
+  `review_required`, all events kept, one delivery task), a layer beyond its declaration (the Portal's import route, HTTP 400, nothing
+  stored) and a staging reservation beyond 2 GiB (store level, not through the upload route: HTTP 507 `app_platform_storage_full`).
+- **Unit level, reported separately:** a probe proven only by unit tests is recorded `level: "unit"` with `observed: null` and
+  the names of its tests; it is not in the native "every excess request refused" check, and the job runs those tests so the
+  evidence run includes their pass. Today that is the per-application task quota (1000; no application has more than one
+  installation) and, when the daemon disk cannot hold the images, the image store probe, with the measured free space as the reason.
+- **Measured:** an idle baseline of three minutes first, then for every one-minute window (100 samples spread evenly, one every
+  600 ms, so a window is not a burst) the p95 of `GET /api/home`, of the report page (`GET /api/stock/{symbol}` of a seeded
+  report) through the real handler, of the batch queue's dispatch decision over a standing backlog of 200 queued jobs (also timed at
+  50, recorded, not judged) and of the real batch scheduler's enqueue-to-start latency (a job enqueued every three seconds, the
+  time until its request reaches the stub Dify); every thirty seconds host memory and CPU, tasks, the runner and Docker log sizes,
+  XFS usage and the summed memory and CPU of the backends, with each backend's own cgroup counters.
+- **Pass:** every native probe refused with its typed error and every unit level probe's tests passed; the pooled p95 of all
+  loaded samples of each latency series within max(1.5x idle p95, idle p95 + 5 ms) (owner decision 2026-11-13: the floor; the pooling
+  is an engineering decision, not the owner's, recorded as such in doc 167; per-window p95 are recorded as diagnostics and shown in the
+  step summary); in every one-minute window, for the message flood at least 20 answered requests, every other attempt a typed busy
+  refusal (no 5xx, no transport error) and a live flood process; for each backend at least 70% of its CPU quota used, memory current at
+  least 85% of its limit and status counters (log bytes, requests) advancing; each backend's PIDs reached at least 85% of its limit;
+  at least 90% of the expected host samples taken; summed backend memory and CPU never above the runner budgets and host free memory
+  never below 10%; no backend or runner crash; the session outliving the run. The evidence is uploaded as JSON with every sample
+  (artifact `capacity-soak-evidence`).
+- **Image store:** the probe loads two images of about 4 GiB each (zero-filled layers that compress to a few MiB, the soak backend's
+  executable as the first layer) through the real offline import and install worker, their starts refused for memory so that no container is
+  created from them, then asks for a third and expects `capacity_exhausted_image_store` at its load; the three installs are retired through the
+  managed uninstall and the images reclaimed. The job measures the Docker store's free disk first and runs the probe natively only
+  when it holds 8 GiB plus 6 GiB of headroom.
+- **Proven at unit level only, by design:** the per-application task quota and the exact 2 GiB staging cap without writing a byte. The runner's
+  own refusal of an over-declared layer is covered by the blob channel unit tests; the soak drives the Portal's import route.
+- **Records:** `handoff/evidence/platform-capacity-envelope/acceptance.json` (to be filled from the dispatch run) and the
+  OPS-08 and SEC-09 rows of `handoff/acceptance-checklist.csv`.
+
 ## 7. Developer and delivery verification
 
 | ID | Steps | Required result |
