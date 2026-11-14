@@ -72,12 +72,48 @@ func (s *Server) platformSessionCookieSigned(r *http.Request) bool {
 	if err != nil || !hmac.Equal([]byte(s.hmac(string(raw))), []byte(parts[1])) {
 		return false
 	}
-	end := strings.LastIndexByte(string(raw), '|')
-	if end < 0 {
+	return platformSessionMessageShape(string(raw), time.Now())
+}
+
+// platformSessionMessageShape reports whether a signed message has the shape of a session cookie, and
+// is unexpired, routed the way verify routes it: the "v2|user|rev|id|exp" and "v1|user|rev|exp"
+// forms, and the legacy "user|exp" form. The signing key also signs other tokens, the owner
+// attribution token among them (injected into every workflow run's inputs), so a valid signature
+// and a future expiry alone must not qualify.
+func platformSessionMessageShape(msg string, now time.Time) bool {
+	expSep := strings.LastIndexByte(msg, '|')
+	if expSep < 0 {
 		return false
 	}
-	expiry, err := strconv.ParseInt(string(raw[end+1:]), 10, 64)
-	return err == nil && time.Now().Unix() < expiry
+	exp, err := strconv.ParseInt(msg[expSep+1:], 10, 64)
+	if err != nil || now.Unix() >= exp {
+		return false
+	}
+	body := msg[:expSep]
+	switch {
+	case strings.HasPrefix(msg, "v2|"):
+		idSep := strings.LastIndexByte(body, '|')
+		if idSep < 3 || idSep == len(body)-1 {
+			return false
+		}
+		revSep := strings.LastIndexByte(body[:idSep], '|')
+		if revSep < 3 {
+			return false
+		}
+		_, err := strconv.ParseInt(body[revSep+1:idSep], 10, 64)
+		return err == nil
+	case strings.HasPrefix(msg, "v1|"):
+		revSep := strings.LastIndexByte(body, '|')
+		if revSep < len("v1|") {
+			return false
+		}
+		rev, err := strconv.ParseInt(body[revSep+1:], 10, 64)
+		return err == nil && rev >= 0
+	default:
+		// Legacy "user|exp": one non-empty name and no further field, which also excludes the
+		// "ot1|ou|user|exp" owner token.
+		return body != "" && !strings.Contains(body, "|")
+	}
 }
 
 // platformBudgetPrecheck answers a budget's own 429 before the session reads when the budget is

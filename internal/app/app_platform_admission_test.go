@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -122,6 +123,10 @@ func TestPlatformBudgetFullDoesNotChangeUnsignedClients(t *testing.T) {
 		"bad mac":   strings.SplitN(good, ".", 2)[0] + ".00",
 		"no mac":    strings.SplitN(good, ".", 2)[0],
 		"expired":   s0.managedCookie(*s0.st.GetUser("alice"), "sid", time.Now().Add(-time.Hour).Unix()),
+		"owner attribution token": func() string {
+			msg := fmt.Sprintf("%s|%d|%s|%d", ownerTokenPrefix, 1, "alice", time.Now().Add(time.Hour).Unix())
+			return encodeSessionMessage(msg) + "." + s0.hmac(msg)
+		}(),
 		"other key": func() string {
 			o := &Server{cfg: &config.Config{SecretKey: "ffffffffffffffffffffffffffffffff"}}
 			return o.managedCookie(User{Username: "alice"}, "sid", time.Now().Add(time.Hour).Unix())
@@ -319,5 +324,33 @@ func BenchmarkPlatformRelayFloodSmallReadP95(b *testing.B) {
 			b.ReportMetric(float64(samples[len(samples)/2].Microseconds()), "p50_us")
 			b.ReportMetric(float64(floods.Load()), "flood_attempts")
 		})
+	}
+}
+
+// A cookie this server signed passes the pre-check even when its session is no longer live, so while
+// a budget is full such a client sees the budget's 429 where a free budget would give it a 401. The
+// documented visible change of the pre-check.
+func TestPlatformBudgetFullRefusesDeadSessionsWith429AndFreeBudgetWith401(t *testing.T) {
+	route := admissionRoutes()[6] // the backend relay
+	cases := map[string]func(*Server, string){
+		"revoked session": func(s *Server, _ string) { mustExec(t, s.st, `UPDATE user_sessions SET revoked=1`) },
+		"disabled account": func(s *Server, _ string) {
+			mustExec(t, s.st, `UPDATE users SET active=0 WHERE username='alice'`)
+		},
+		"stale session revision": func(s *Server, _ string) {
+			mustExec(t, s.st, `UPDATE users SET session_rev=session_rev+1 WHERE username='alice'`)
+		},
+	}
+	for name, kill := range cases {
+		s, _, mux := admissionServer(t)
+		cookie := managedTestCookie(t, s, "alice", "Chrome/130.0", time.Hour)
+		kill(s, cookie)
+		if w := admissionCall(mux, route, cookie); w.Code != 401 {
+			t.Fatalf("%s: free budget answered %d, want 401", name, w.Code)
+		}
+		fillBudget(t, route.budget(s))
+		if w := admissionCall(mux, route, cookie); w.Code != 429 {
+			t.Fatalf("%s: full budget answered %d, want 429", name, w.Code)
+		}
 	}
 }
