@@ -20,6 +20,14 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
 )
 
+// AppCPUsUnavailableReason names a create refused because a CPU of the app set is no longer online.
+const AppCPUsUnavailableReason = "app_cpus_unavailable"
+
+// ErrAppCPUsUnavailable is Docker's "Requested CPUs are not available" on create: the host's online CPUs
+// changed after the runner derived its app set. Readiness only reads the online list at start, so the runner
+// must be restarted to derive the set again.
+var ErrAppCPUsUnavailable = errors.New(AppCPUsUnavailableReason)
+
 var (
 	ErrContainerConflict  = errors.New("managed container identity conflict")
 	ErrContainerUncertain = errors.New("managed container effect requires reconciliation")
@@ -83,8 +91,9 @@ type containerMount struct {
 // to the rest, because many quota-limited threads released together each period queue the Portal behind them no
 // matter what weight it has. It is empty when nothing is reserved, and then it is not on the wire. A non-empty
 // value joins the policy digest, so a runner that reserves CPUs computes different digests, and so builds
-// different plans, than one that does not: a container created under one setting is a conflict under another
-// and is replaced, not adopted.
+// different plans, than one that does not. A container created under one setting is a conflict under another,
+// reported as ErrContainerCPUSetChanged when the cpuset is its only difference, and is never adopted, started or
+// removed by the runner; the operator recovery is in doc 171.
 const appContainerCPUShares = 256
 
 type containerHostConfig struct {
@@ -308,9 +317,14 @@ func createCandidateContainerHTTP(ctx context.Context, client *http.Client, plan
 		return "", ErrContainerConflict
 	}
 	if response.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf(
+		failure := fmt.Errorf(
 			"container create status %d: %w",
 			response.StatusCode, ErrContainerUncertain)
+		// The host lost a CPU after the app set was derived. Say so; the effect stays uncertain like any refusal.
+		if body, _ := io.ReadAll(io.LimitReader(response.Body, 4096)); strings.Contains(string(body), "Requested CPUs are not available") {
+			return "", errors.Join(ErrAppCPUsUnavailable, failure)
+		}
+		return "", failure
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 65537))
 	var created struct {

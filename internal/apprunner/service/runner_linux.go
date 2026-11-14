@@ -79,14 +79,10 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	// read, a volume smaller than the disk budget, or a budget below one minimum backend is not ready.
 	// A reserved CPU needs the online list, the runner's own allowed set and a daemon that can pin containers; a
 	// reading that fails is left empty and, when a reservation depends on it, makes the runner not ready.
-	facts := HostFacts{MemoryBytes: report.ReportedMemoryBytes, CPUs: report.ReportedCPUs, VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot), CPUSetSupported: report.CPUSetSupported}
+	facts := HostFacts{VolumeBytes: volumeBytes(cfg.DataRoot), CheckpointSeparate: !sameFilesystem(cfg.DataRoot, cfg.CheckpointRoot), CheckpointVolumeBytes: volumeBytes(cfg.CheckpointRoot)}
 	facts.OnlineCPUs, _ = onlineCPUs()
 	facts.AffinityCPUs, _ = allowedCPUs()
-	if facts.OnlineCPUs == nil {
-		// Sysfs unreadable: the runner's own allowed set stands in for it.
-		facts.OnlineCPUs = facts.AffinityCPUs
-	}
-	budgets, err := DeriveBudgets(cfg.Capacity.ResolveFor(report.ReportedCPUs), facts)
+	budgets, options, err := planCapacity(cfg, report, facts)
 	if err != nil {
 		var notReady *NotReadyError
 		if errors.As(err, &notReady) {
@@ -101,10 +97,6 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	images, err := imagestore.Open(cfg.ImageRoot)
 	if err != nil {
 		return ErrNotReady
-	}
-	var options []driver.RuntimeOption
-	if budgets.AppCPUs != "" {
-		options = append(options, driver.WithAppCPUSet(budgets.AppCPUs))
 	}
 	if cfg.AllowLocalReferenceImages {
 		options = append(options, driver.WithLocalReferenceImages())

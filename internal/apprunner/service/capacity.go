@@ -6,7 +6,9 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 // ErrNotReady is the runner's readiness refusal. Every capacity failure wraps it.
@@ -28,6 +30,11 @@ type CapacityConfig struct {
 	// smaller one; 0 turns the reservation off. The valid range, 0 to NCPU-1, depends on the host and is checked
 	// when the budgets are derived.
 	ReservedCPUs *int `json:"reserved_cpus,omitempty"`
+	// AppCPUs pins the app set explicitly, in the kernel's canonical list notation ("1-3"), instead of deriving
+	// it as every online CPU above the reserved ones. It is how an operator keeps every installed container's
+	// plan unchanged across a resize of the host. It must name online CPUs, none of them reserved, and it needs a
+	// reservation: with reserved_cpus 0 it is refused when the budgets are derived.
+	AppCPUs string `json:"app_cpus,omitempty"`
 }
 
 const (
@@ -55,6 +62,7 @@ type ResolvedCapacity struct {
 	RunningBackends int
 	ImageStoreBytes int64
 	ReservedCPUs    int
+	AppCPUs         string
 }
 
 // Resolve applies the defaults for a host whose CPU count is not known, which reserves no CPU. A nil receiver
@@ -88,6 +96,7 @@ func (c *CapacityConfig) ResolveFor(cpus int) ResolvedCapacity {
 	if c.ReservedCPUs != nil {
 		r.ReservedCPUs = *c.ReservedCPUs
 	}
+	r.AppCPUs = c.AppCPUs
 	return r
 }
 
@@ -100,7 +109,7 @@ func (c *CapacityConfig) valid() bool {
 	// The upper bound of disk_bytes is the volume size, which is only known at startup.
 	return in(c.MemoryPercent, 1, 90) && in(c.CPUPercent, 1, 100) && big(c.DiskBytes, gibibyte, int64(1)<<62) &&
 		in(c.RunningBackends, 1, 64) && big(c.ImageStoreBytes, gibibyte, maxImageStoreBytes) &&
-		in(c.ReservedCPUs, 0, maxConfiguredReservedCPUs)
+		in(c.ReservedCPUs, 0, maxConfiguredReservedCPUs) && (c.AppCPUs == "" || cpuset.Valid(c.AppCPUs))
 }
 
 // HostFacts are the readings the budgets derive from. A zero reading means
@@ -140,6 +149,11 @@ const (
 	NotReadyOnlineCPUs = "online_cpus_disagree_with_reported"
 	// NotReadyCPUSetUnsupported is a daemon that cannot pin containers to CPUs, which a reservation requires.
 	NotReadyCPUSetUnsupported = "cpuset_controller_unavailable"
+	// NotReadyAppCPUs is an explicit app_cpus that is not online, overlaps the reserved CPUs, or has no
+	// reservation to belong to.
+	NotReadyAppCPUs = "app_cpus_invalid_for_host"
+	// NotReadyProfileTooLarge is a managed runtime profile that would exceed the Portal's size cap.
+	NotReadyProfileTooLarge = "managed_profile_exceeds_size_cap"
 )
 
 // NotReadyError carries the typed reason. It matches ErrNotReady.
@@ -167,7 +181,7 @@ func DeriveBudgets(c ResolvedCapacity, h HostFacts) (journal.CapacityBudgets, er
 			return zero, &NotReadyError{NotReadyCheckpointVolume}
 		}
 	}
-	reserved, app, err := splitCPUs(c.ReservedCPUs, h)
+	reserved, app, err := splitCPUs(c.ReservedCPUs, c.AppCPUs, h)
 	if err != nil {
 		return zero, err
 	}
@@ -190,11 +204,14 @@ func DeriveBudgets(c ResolvedCapacity, h HostFacts) (journal.CapacityBudgets, er
 // splitCPUs places the reservation: the lowest-numbered online CPUs are reserved and the rest are the app set.
 // With nothing reserved it reads no CPU fact and returns no sets, so the apps run wherever the daemon puts them,
 // exactly as before the reservation existed.
-func splitCPUs(reserve int, h HostFacts) (reserved, app []int, err error) {
+func splitCPUs(reserve int, explicitApp string, h HostFacts) (reserved, app []int, err error) {
 	if reserve < 0 || reserve >= h.CPUs {
 		return nil, nil, &NotReadyError{NotReadyReservedCPUs}
 	}
 	if reserve == 0 {
+		if explicitApp != "" {
+			return nil, nil, &NotReadyError{NotReadyAppCPUs}
+		}
 		return nil, nil, nil
 	}
 	if !h.CPUSetSupported {
@@ -206,7 +223,29 @@ func splitCPUs(reserve int, h HostFacts) (reserved, app []int, err error) {
 	if !ascending(h.OnlineCPUs) || len(h.OnlineCPUs) != h.CPUs || (h.AffinityCPUs != nil && !cpuset.Equal(h.AffinityCPUs, h.OnlineCPUs)) {
 		return nil, nil, &NotReadyError{NotReadyOnlineCPUs}
 	}
-	return h.OnlineCPUs[:reserve:reserve], h.OnlineCPUs[reserve:], nil
+	reserved, app = h.OnlineCPUs[:reserve:reserve], h.OnlineCPUs[reserve:]
+	if explicitApp != "" {
+		pinned, perr := cpuset.Parse(explicitApp)
+		if perr != nil || !subset(pinned, app) {
+			return nil, nil, &NotReadyError{NotReadyAppCPUs}
+		}
+		app = pinned
+	}
+	return reserved, app, nil
+}
+
+// subset reports whether every CPU of small is in big. Both are ascending.
+func subset(small, big []int) bool {
+	i := 0
+	for _, cpu := range small {
+		for i < len(big) && big[i] < cpu {
+			i++
+		}
+		if i == len(big) || big[i] != cpu {
+			return false
+		}
+	}
+	return true
 }
 
 func ascending(cpus []int) bool {
@@ -225,4 +264,28 @@ func FormatBudgets(b journal.CapacityBudgets) string {
 		reserved, app = "none", "all"
 	}
 	return fmt.Sprintf("memory_mib=%d cpu_millis=%d disk_bytes=%d image_store_bytes=%d running_backends=%d reserved_cpus=%s app_cpus=%s", b.MemoryMiB, b.CPUMillis, b.DiskBytes, b.ImageStoreBytes, b.RunningBackends, reserved, app)
+}
+
+// planCapacity turns the declared capacity and what the runner read of the host into the budgets it admits
+// against and the options that pin the driver to the app CPUs. The facts carry what only the caller can read
+// (the volumes and the CPU lists); the daemon's report supplies the rest. The runner calls nothing else to derive
+// capacity, so a default resolved without the host, or an app set that never reaches the driver, fails its test.
+func planCapacity(cfg Config, report driver.Report, facts HostFacts) (journal.CapacityBudgets, []driver.RuntimeOption, error) {
+	facts.MemoryBytes, facts.CPUs, facts.CPUSetSupported = report.ReportedMemoryBytes, report.ReportedCPUs, report.CPUSetSupported
+	if facts.OnlineCPUs == nil {
+		// Sysfs unreadable: the runner's own allowed set stands in for it.
+		facts.OnlineCPUs = facts.AffinityCPUs
+	}
+	budgets, err := DeriveBudgets(cfg.Capacity.ResolveFor(report.ReportedCPUs), facts)
+	if err != nil {
+		return journal.CapacityBudgets{}, nil, err
+	}
+	if !transport.ManagedProfileFits(budgets) {
+		return journal.CapacityBudgets{}, nil, &NotReadyError{NotReadyProfileTooLarge}
+	}
+	var options []driver.RuntimeOption
+	if budgets.AppCPUs != "" {
+		options = append(options, driver.WithAppCPUSet(budgets.AppCPUs))
+	}
+	return budgets, options, nil
 }

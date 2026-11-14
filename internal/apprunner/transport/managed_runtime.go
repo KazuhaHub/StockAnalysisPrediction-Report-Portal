@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/cpuset"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
 const ManagedRunnerProtocol = "1.0.0-dev.1"
 const ManagedBackendProtocol = "portal.backend/1"
 const MaxManagedRuntimeAge = 3 * time.Second
+
+// maxManagedRuntimeBytes is the largest profile the Portal's decoder accepts.
+const maxManagedRuntimeBytes = 4096
 
 var ErrManagedRuntimeObservation = errors.New("authenticated managed runtime profile unavailable")
 
@@ -89,7 +94,7 @@ func decodeManagedRuntime(raw []byte) (managedRuntimeWire, control.Authority, er
 	fail := func() (managedRuntimeWire, control.Authority, error) {
 		return managedRuntimeWire{}, control.Authority{}, ErrManagedRuntimeObservation
 	}
-	if len(raw) == 0 || len(raw) > 4096 || json.Unmarshal(raw, &w) != nil || w.Format != "portal.runner.managed-profile/1-dev.1" || !validManagedProfile(w.Profile) {
+	if len(raw) == 0 || len(raw) > maxManagedRuntimeBytes || json.Unmarshal(raw, &w) != nil || w.Format != "portal.runner.managed-profile/1-dev.1" || !validManagedProfile(w.Profile) {
 		return fail()
 	}
 	encoded, err := json.Marshal(w)
@@ -135,3 +140,27 @@ func (o ManagedRuntimeObservation) Controller() control.Authority {
 }
 func (o ManagedRuntimeObservation) Endpoint() CandidateReceiptEndpoint { return o.endpoint }
 func (o ManagedRuntimeObservation) ReceivedAt() time.Time              { return o.receivedAt }
+
+// worstCaseManagedWire is the profile with every field at its widest, around the given capacity.
+func worstCaseManagedWire(b journal.CapacityBudgets) managedRuntimeWire {
+	wide := func(n int) string { return strings.Repeat("9", n) }
+	return managedRuntimeWire{
+		Format: "portal.runner.managed-profile/1-dev.1",
+		Controller: enrollmentWire{Format: strings.Repeat("f", 64), DeploymentID: strings.Repeat("a", 36), ControllerEpoch: strings.Repeat("a", 36),
+			ControlRevision: wide(20), PublicKey: strings.Repeat("A", 64), Fingerprint: strings.Repeat("a", 64)},
+		Profile: ManagedRuntimeProfile{Protocol: ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: ManagedBackendProtocol,
+			SandboxProfile: control.CandidateSandboxProfile, WritableSandboxProfile: control.WritableCandidateSandboxProfile,
+			RootFilesystemUUID: strings.Repeat("a", 36), RootInode: wide(20),
+			Capacity: ManagedRuntimeCapacity{MemoryMiB: wide(19), CPUMillis: wide(19), DiskBytes: wide(19), ImageStoreBytes: wide(19), RunningBackends: wide(19), EstimatedRows: wide(19),
+				ReservedCPUs: b.ReservedCPUs, AppCPUs: b.AppCPUs}},
+		ObservedMS: wide(19),
+	}
+}
+
+// ManagedProfileFits reports whether the managed runtime profile for these budgets stays within what the
+// Portal's decoder accepts, at the widest every other field can be. The runner checks it before it is ready: a
+// profile over the cap would fail every managed operation, and only a very sparse CPU list can reach it.
+func ManagedProfileFits(b journal.CapacityBudgets) bool {
+	raw, err := json.Marshal(worstCaseManagedWire(b))
+	return err == nil && len(raw) <= maxManagedRuntimeBytes
+}

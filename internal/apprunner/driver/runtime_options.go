@@ -38,3 +38,12 @@ func checkAppCPUSet(report Report, appCPUs string) error {
 	}
 	return nil
 }
+
+// RuntimeAppCPUSet is the app CPU list the options configure, or empty when they pin nothing.
+func RuntimeAppCPUSet(options ...RuntimeOption) string {
+	var configuration runtimeOptions
+	for _, option := range options {
+		option(&configuration)
+	}
+	return configuration.appCPUs
+}

@@ -234,3 +234,76 @@ func TestAppCPUSetRequiresDaemonSupport(t *testing.T) {
 		t.Fatal("WithAppCPUSet does not configure the runtime")
 	}
 }
+
+func inspectLiveAgainst(t *testing.T, live, planned containerPlan, mutate func(map[string]any)) (int, error) {
+	t.Helper()
+	v := containerInspectFixture(t, live)
+	if mutate != nil {
+		mutate(v)
+	}
+	calls := 0
+	client := daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.Method != "GET" {
+			t.Fatal("a cpuset conflict caused a mutation", r.Method)
+		}
+		raw, _ := json.Marshal(v)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	}))
+	err := removeCandidateContainerHTTP(context.Background(), client, strings.Repeat("c", 64), planned)
+	return calls, err
+}
+
+func TestInspectionNamesACPUSetChangeAndNeverAdoptsIt(t *testing.T) {
+	for name, tc := range map[string]struct{ live, planned string }{
+		"host grew":         {"1-3", "1-7"},
+		"host shrank":       {"1-7", "1-3"},
+		"reservation added": {"", "1-3"},
+		"reservation gone":  {"1-3", ""},
+	} {
+		live := cpusetPlans(t, tc.live)["candidate"]
+		planned := cpusetPlans(t, tc.planned)["candidate"]
+		calls, err := inspectLiveAgainst(t, live, planned, nil)
+		var changed *CPUSetChangedError
+		if !errors.Is(err, ErrContainerConflict) || !errors.Is(err, ErrContainerCPUSetChanged) || !errors.As(err, &changed) ||
+			changed.Live != tc.live || changed.Planned != tc.planned || !strings.Contains(err.Error(), CPUSetChangedReason) || calls != 1 {
+			t.Fatalf("%s: err = %v (calls %d)", name, err, calls)
+		}
+	}
+	// A container that differs in anything besides the cpuset, and the policy digest that carries it, is a plain
+	// conflict: naming the cpuset would hide the real cause.
+	live, planned := cpusetPlans(t, "1-3")["candidate"], cpusetPlans(t, "1-7")["candidate"]
+	_, err := inspectLiveAgainst(t, live, planned, func(v map[string]any) { v["HostConfig"].(map[string]any)["NetworkMode"] = "host" })
+	if !errors.Is(err, ErrContainerConflict) || errors.Is(err, ErrContainerCPUSetChanged) {
+		t.Fatalf("a foreign network was reported as a cpuset change: %v", err)
+	}
+	_, err = inspectLiveAgainst(t, live, planned, func(v map[string]any) {
+		v["Config"].(map[string]any)["Labels"].(map[string]any)[containerLabelPrefix+"generation"] = "99"
+	})
+	if !errors.Is(err, ErrContainerConflict) || errors.Is(err, ErrContainerCPUSetChanged) {
+		t.Fatalf("another generation was reported as a cpuset change: %v", err)
+	}
+	// An exact match is still observed.
+	if err := inspectWith(t, live, func(map[string]any) {}); err != nil {
+		t.Fatalf("an exact match was refused: %v", err)
+	}
+}
+
+func TestCreateNamesUnavailableCPUs(t *testing.T) {
+	plan := cpusetPlans(t, testAppCPUs)["candidate"]
+	reply := func(status int, body string) *http.Client {
+		return daemonClient(transportFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+		}))
+	}
+	_, err := createCandidateContainerHTTP(context.Background(), reply(400, `{"message":"Requested CPUs are not available - requested 1-3, available: 0-2"}`), plan)
+	if !errors.Is(err, ErrAppCPUsUnavailable) || !errors.Is(err, ErrContainerUncertain) || !strings.Contains(err.Error(), AppCPUsUnavailableReason) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, other := range []string{`{"message":"no space left on device"}`, ``, `not json`} {
+		_, err := createCandidateContainerHTTP(context.Background(), reply(500, other), plan)
+		if errors.Is(err, ErrAppCPUsUnavailable) || !errors.Is(err, ErrContainerUncertain) {
+			t.Fatalf("body %q: err = %v", other, err)
+		}
+	}
+}

@@ -61,34 +61,96 @@ them.
 The Portal, PostgreSQL and the runner keep them. A lower CPU weight did not fix the Portal's
 latency under load (#442): quota-limited containers with many threads are released together each
 period and the Portal queues behind them on the run queue, so the apps are kept off those CPUs
-instead.
+instead. `app_cpus` is an optional explicit app set (see the runbook).
 
 - **Derivation.** The runner reads the online CPU list from `/sys/devices/system/cpu/online` and
   its own allowed set from `sched_getaffinity`. The reserved set is the lowest `reserved_cpus`
   online CPUs and the app set is the rest, for example `0` and `1-3` on 4 CPUs. If the online
   list, the allowed set and `NCPU` from Docker `/info` do not agree, the runner is not ready
   (`online_cpus_disagree_with_reported`). If the online list cannot be read, the allowed set
-  stands in for it.
+  stands in for it. An explicit `app_cpus` replaces the derived app set; it must be online, must
+  not overlap the reserved CPUs and needs `reserved_cpus` above 0, or the runner is not ready
+  (`app_cpus_invalid_for_host`).
 - **Budget.** The effective CPU budget is `min(cpu_percent × NCPU, app CPUs × 1000)` millis, so
   the apps are never budgeted more CPU than the CPUs they may run on.
 - **Create.** Every app container's `HostConfig.CpusetCpus` is the app set. A candidate, a
-  writable candidate, the update-start plans (update, restore and enable starts) and a migration job
-  all derive from `planCandidateContainer`, and `validContainerPlan` refuses a body whose `CpusetCpus` is not
-  the set the plan was built for, even with a recomputed digest. Inspect equality compares
-  `CpusetCpus` as an exact string, which is how Docker echoes it.
+  writable candidate, the update-start plans (update, restore and enable starts) and a migration
+  job all derive from `planCandidateContainer`, and `validContainerPlan` refuses a body whose
+  `CpusetCpus` is not the set the plan was built for, even with a recomputed digest. Inspect
+  equality compares `CpusetCpus` as an exact string, which is how Docker echoes it.
 - **Policy digest.** A non-empty `CpusetCpus` is part of the create policy and so of the
   `policy-sha256` label. A runner that reserves CPUs computes different digests than one that does
   not, and so does one with a different app set. A container created under another setting is a
-  conflict, never adopted: after changing `reserved_cpus`, or after a host's online CPUs change,
-  an existing app container no longer matches its plan.
-- **Preflight.** A reservation needs a daemon that can pin containers to CPUs. The runner reads
-  the `CPUSet` flag of Docker `/info`, which on cgroup v2 means the `cpuset` controller is enabled
-  for its containers, and is not ready without it (`cpuset_controller_unavailable`). A value
-  outside 0 to NCPU-1 is not ready either (`reserved_cpus_outside_host_range`).
+  conflict and is never adopted, started or removed by the runner.
+- **Preflight.** The runner is not ready when the value is outside 0 to NCPU-1
+  (`reserved_cpus_outside_host_range`) or when the managed runtime profile would exceed the
+  Portal's 4096-byte decoder cap (`managed_profile_exceeds_size_cap`; only a very sparse online
+  list can reach it). A reservation also reads the `CPUSet` flag of Docker `/info`
+  (`cpuset_controller_unavailable`), but that check is **advisory**: dockerd derives the flag from
+  the root `cgroup.controllers`, not from the controllers delegated to the slice its containers
+  run in, so it can say yes where containers cannot be pinned and, rarely, no where they can.
+  The enforcement is runc: it fails a container start when the container's cgroup has no cpuset
+  file. systemd 244 and later enable the cpuset controller up the slice chain when `AllowedCPUs`
+  is set on a unit, which is how a host that does not delegate cpuset by default is fixed (for
+  example `AllowedCPUs=` on `system.slice` or the Docker unit). The native trial reads
+  `cpuset.cpus.effective` from a container's cgroup, which is the proof.
 - **Nothing reserved.** With `reserved_cpus` 0, `CpusetCpus` is left out of the create body, no
   CPU fact is read and no daemon flag is required. Behaviour and policy digests are as before.
 - **Reported.** The ready line ends with `reserved_cpus=<list|none> app_cpus=<list|all>`, and the
   managed runtime profile's `capacity` carries `reserved_cpus` and `app_cpus`.
+
+#### Upgrade: the Portal and the runner together
+
+The Portal decodes the managed runtime profile strictly: it re-encodes what it decoded and refuses
+any difference. A runner that reports `reserved_cpus` and `app_cpus` therefore makes an older
+Portal fail every managed operation. **Upgrade the Portal and the runner together.** A runner with
+`reserved_cpus` 0 omits both fields and stays readable by an older Portal.
+
+#### In-flight operations
+
+An install or update records the managed runtime profile it started against and compares it with the
+live profile again when it settles. The comparison includes the CPU sets, as it already includes
+`cpu_millis`. Changing `reserved_cpus` or `app_cpus`, resizing the host, or upgrading the runner to
+this version while an operation is in flight therefore conflicts that operation
+(`errAppPlatformRuntimeConflict`); start it again once the change is complete. Make the change
+when no operation is running.
+
+#### Runbook: the CPU set changed under installed apps
+
+When the online CPUs change (a resize from 4 to 8 CPUs moves the derived app set from `1-3` to
+`1-7`) or `reserved_cpus` is changed, every container created earlier no longer matches its plan.
+The runner reports the cause: a container whose only difference from its plan is the CPU set is
+refused with `cpuset_changed` (`driver.ErrContainerCPUSetChanged`, also an
+`ErrContainerConflict`; the text names the live and planned sets). It is never adopted, started
+or removed by the runner. The repair, enable and removal paths all observe the container through
+the same plan, so they refuse it the same way: **the repair path cannot recreate a container under
+the new CPU set**, because it has to remove the old container first and removal needs an exact
+match.
+
+To avoid it, before resizing set `capacity.app_cpus` to the set the installed containers already
+use (read it from the ready line's `app_cpus=`), for example `"app_cpus": "1-3"` with the default
+`reserved_cpus`. The app set, and every plan and digest, then stay the same across the resize; the
+new CPUs stay unused until `app_cpus` is changed deliberately.
+
+To recover once the set has changed:
+
+1. Either restore the old set, by setting `app_cpus` to the value in the `cpuset_changed` text's
+   container side and restarting the runner (no container is touched), or move to the new set:
+2. Stop the affected apps in the Portal, so no container is running.
+3. Remove each stopped container by hand with the Docker CLI as root on the host:
+   `docker rm portal-app-<resource id>`. This is the only step outside the runner; it needs the
+   container to be stopped and does not use `-f`. Data is not in the container, so nothing is lost.
+4. Start or reinstall the app. The runner now finds no container, creates one under the new set
+   and adopts it.
+
+The manual removal in step 3 and the runner's handling of an absent container are not covered by
+the CI native trial, which does not change the CPU set under a live container.
+
+**CPUs offlined after start.** The online list is read when the runner starts. A CPU taken offline
+later is caught at the next runner restart. Until then a create that names it fails with Docker's
+"Requested CPUs are not available", which the runner reports as `app_cpus_unavailable`
+(`driver.ErrAppCPUsUnavailable`, an uncertain effect like any refused create). Restart the runner
+so it derives the set again, then follow the runbook above if the set moved.
 
 ### The reservation table (journal v3)
 
