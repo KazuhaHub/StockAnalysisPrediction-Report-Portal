@@ -120,7 +120,7 @@ func (s *Server) startPlatformWritableInstall(ctx context.Context, lease platfor
 	// effect. The start path independently verifies the complete current writer
 	// and exact sole start source before any native IO; this count grants nothing.
 	var starts int
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`), lease.id).Scan(&starts); err != nil {
+	if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND stage='start'`, lease.id).Scan(&starts); err != nil {
 		return platformOperationLease{}, err
 	}
 	if starts == 0 {

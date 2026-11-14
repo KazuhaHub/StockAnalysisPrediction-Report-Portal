@@ -1014,7 +1014,12 @@ func seedDefaultKindColors(st *Store) int {
 }
 
 func (s *Server) orderAndDefault(members []Rep) ([]Rep, int64) {
-	cfg := s.st.TypeConfigs()
+	return s.orderAndDefaultWith(members, s.st.TypeConfigs(), s.st.Versions)
+}
+
+// orderAndDefaultWith is orderAndDefault over a type registry the caller already read, and a
+// version-registry reader it calls only when the members need version labels.
+func (s *Server) orderAndDefaultWith(members []Rep, cfg map[string]TypeConfig, versions func() []ReportVersion) ([]Rep, int64) {
 	ord := func(r Rep) int {
 		if c, ok := cfg[r.RType]; ok {
 			return c.Ord
@@ -1072,7 +1077,7 @@ func (s *Server) orderAndDefault(members []Rep) ([]Rep, int64) {
 		versioned[out[i].Label][v] = true
 	}
 	verLabel := map[string]string{}
-	for _, v := range s.st.Versions() {
+	for _, v := range versions() {
 		verLabel[v.Name] = firstNonEmpty(v.Label, v.Name)
 	}
 	// The number counts DISTINCT REPORTS sharing a label, not rows, so every written form of one
@@ -1272,6 +1277,16 @@ func (s *Server) loadRep(r *http.Request, user string, id int64) *Rep {
 	return rep
 }
 
+// recordReportReadAs is recordReportRead for a caller that already knows the reader's OU.
+func (s *Server) recordReportReadAs(r *http.Request, user string, ou int64, rep *Rep) {
+	s.st.WriteAudit(AuditEntry{
+		Actor: user, ActorOU: ou, Action: AuditReportRead,
+		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
+		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),
+		IP:     s.auditIP(r),
+	})
+}
+
 // recordReportRead logs that `user` was served this report's body.
 //
 // Only successful reads. A refusal is a different question — someone probing versus someone
@@ -1282,12 +1297,7 @@ func (s *Server) recordReportRead(r *http.Request, user string, rep *Rep) {
 	if rep == nil {
 		return
 	}
-	s.st.WriteAudit(AuditEntry{
-		Actor: user, ActorOU: s.st.PrimaryGroupOf(user), Action: AuditReportRead,
-		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
-		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),
-		IP:     s.auditIP(r),
-	})
+	s.recordReportReadAs(r, user, s.st.PrimaryGroupOf(user), rep)
 }
 
 // ---------- Export ----------

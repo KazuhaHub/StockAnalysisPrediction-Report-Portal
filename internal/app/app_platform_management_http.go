@@ -656,7 +656,7 @@ func (s *Server) apiPlatformInstallCommit(w http.ResponseWriter, r *http.Request
 	}
 	defer releaseSlot()
 	var action, planRaw string
-	if err := s.st.db.QueryRowContext(r.Context(), s.st.bind(`SELECT action,plan_json FROM app_platform_review_plans WHERE id=? AND username=? AND account_created=? AND account_generation=?`), id, actor.username, actor.created, actor.generation).Scan(&action, &planRaw); err != nil {
+	if err := s.st.queryRowContext(r.Context(), `SELECT action,plan_json FROM app_platform_review_plans WHERE id=? AND username=? AND account_created=? AND account_generation=?`, id, actor.username, actor.created, actor.generation).Scan(&action, &planRaw); err != nil {
 		platformManagementError(w, errAppPlatformPlanChanged)
 		return
 	}

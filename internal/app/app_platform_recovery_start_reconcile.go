@@ -108,12 +108,12 @@ type platformRecoveryStartCandidate struct {
 
 // platformRecoveryStartCandidates lists finished resumes whose start effect is still unknown.
 func (s *Server) platformRecoveryStartCandidates(ctx context.Context) ([]platformRecoveryStartCandidate, error) {
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(`SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision,o.completed_ms
+	rows, err := s.st.queryContext(ctx, `SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision,o.completed_ms
 		FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
 		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
 		WHERE o.action='restore' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
 		AND f.kind='restore-start' AND f.state='unknown' AND p.plan_json LIKE ?
-		ORDER BY o.completed_ms,o.id LIMIT 8`), platformResumePlanPrefix())
+		ORDER BY o.completed_ms,o.id LIMIT 8`, platformResumePlanPrefix())
 	if err != nil {
 		return nil, err
 	}

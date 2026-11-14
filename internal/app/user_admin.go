@@ -432,8 +432,14 @@ func (s *Store) SetPrimaryGroup(username string, groupID int64) error {
 // PrimaryGroupOf returns a user's primary group id, or 0 if they inherit the Default (a NULL
 // group_id, or a missing user, reads back as 0).
 func (s *Store) PrimaryGroupOf(username string) int64 {
+	return s.primaryGroupOfFrom(s.poolExec(), username)
+}
+
+// primaryGroupOfFrom is PrimaryGroupOf on a given executor, so a caller can run it inside a read
+// transaction.
+func (s *Store) primaryGroupOfFrom(e migExec, username string) int64 {
 	var id sql.NullInt64
-	s.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&id)
+	e.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&id)
 	return id.Int64
 }
 

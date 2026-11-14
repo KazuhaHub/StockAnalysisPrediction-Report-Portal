@@ -116,8 +116,11 @@ func isManualVersion(name string) bool { return normalizeVersion(name) == manual
 func (s *Store) DefaultVersion() string { return defaultVersionName }
 
 // Versions lists the registry in display order.
-func (s *Store) Versions() []ReportVersion {
-	rows, err := s.query(`SELECT name, COALESCE(label,''), COALESCE(ord,0), COALESCE(visibility,'')
+func (s *Store) Versions() []ReportVersion { return s.versionsFrom(s.poolExec()) }
+
+// versionsFrom is Versions on a given executor, so a caller can run it inside a read transaction.
+func (s *Store) versionsFrom(e migExec) []ReportVersion {
+	rows, err := e.query(`SELECT name, COALESCE(label,''), COALESCE(ord,0), COALESCE(visibility,'')
 		FROM report_versions ORDER BY ord, name`)
 	if err != nil {
 		return nil
