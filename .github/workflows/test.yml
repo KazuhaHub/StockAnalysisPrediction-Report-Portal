@@ -27,12 +27,18 @@ env:
   GOTOOLCHAIN: "local"
 
 jobs:
-  go-test:
-    name: go-test
+  # THE GO TESTS ARE THREE KINDS OF JOB, AND ONE REQUIRED CHECK. This job carries everything that
+  # runs once: formatting, build, vet, the focused named steps, staticcheck, govulncheck and every
+  # package except internal/app. The app package's ordinary run is dealt over the go-test-shard
+  # jobs below, because its PostgreSQL variants put it at 16 to 20 minutes on a runner, which hit
+  # the package timeout on pull requests with an unrelated test running when it fired. The
+  # required check "go-test" is the summary job after them.
+  go-test-checks:
+    name: go test (checks + other packages)
     runs-on: ubuntu-latest
     # Includes the focused SQL diagnostics and the ordinary full PostgreSQL run.
     # The latter now executes after the repaired vulnerability gate.
-    timeout-minutes: 35
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
@@ -167,10 +173,11 @@ jobs:
       - run: scripts/govulncheck-released-saml.sh
       # -count=1 disables Go's test result cache: the build cache is restored between runs, and a
       # cached "ok" from a previous run would let a flaky test report green without executing.
+      # internal/app is not here: go-test-shard runs it, in pieces.
       - name: Test
         run: |
           set -o pipefail
-          go test -count=1 -timeout=20m ./... 2>&1 | tee go-test-output.txt
+          go list ./... | grep -v '/internal/app$' | xargs go test -count=1 -timeout=20m 2>&1 | tee go-test-output.txt
       - name: Upload test output
         if: failure()
         uses: actions/upload-artifact@v7
@@ -202,6 +209,112 @@ jobs:
             ~/.cache/staticcheck
           key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
 
+  # internal/app's ordinary run, dealt round-robin over four shards the way go-race-full deals its
+  # race run: the Go toolchain has no -shard flag, so the deterministic test list is split by
+  # position and each shard passes its share to -run. A new test lands in exactly one shard
+  # without editing this file. Every shard has its own PostgreSQL service because the PostgreSQL
+  # variants are most of the package's time, and the tests of one shard must not share a database
+  # with another's. The shard count comes from the matrix (strategy.job-total) so the partition
+  # cannot fall out of step with it; a shard dealt nothing fails rather than pass green.
+  # release_guard_test.py holds the job name, this matrix and release_guard.ci_ready to one count.
+  go-test-shard:
+    name: go test (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: portal
+          POSTGRES_DB: reports_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U portal -d reports_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_test?sslmode=disable"
+    steps:
+      - uses: actions/checkout@v6
+      # The build cache pair go-test-checks explains, restore half only and under its key: the
+      # shards compile the same objects (its focused steps already build the internal/app test
+      # package), and go-test-checks saves them. The path list must be the one the save uses:
+      # actions/cache folds it into the cache version, and a different list never matches.
+      - uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/.cache/staticcheck
+          key: go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-${{ github.run_id }}
+          restore-keys: |
+            go-build-test-${{ runner.os }}-${{ hashFiles('go.sum') }}-
+            go-build-test-${{ runner.os }}-
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      # -v so that every top-level test reports its own duration; the next step ranks them. The
+      # list is built with the same flags as the run, so the run reuses its compile.
+      - name: Test shard ${{ matrix.shard }}/${{ strategy.job-total }} of internal/app
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fuzz targets are listed too: an ordinary run executes their seed corpus as a test.
+          tests=$(go test -list '^(Test|Fuzz)' ./internal/app/ | grep -E '^(Test|Fuzz)' | grep -v '^TestMain$')
+          regex=$(printf '%s\n' "$tests" | awk -v s="${{ matrix.shard }}" -v m="${{ strategy.job-total }}" 'NR % m == s % m' | paste -sd'|' -)
+          test -n "$regex" || { echo "::error::shard ${{ matrix.shard }}/${{ strategy.job-total }} was given no tests"; exit 1; }
+          go test -v -count=1 -timeout=20m -run "^(${regex})$" ./internal/app/ 2>&1 | tee "go-test-shard-${{ matrix.shard }}.txt"
+      # The slowest top-level tests of this shard, so a test that is becoming the long pole shows
+      # up in the run summary and in the uploaded artifact before it times a shard out.
+      - name: Slowest tests
+        if: always()
+        shell: bash
+        run: |
+          f="go-test-shard-${{ matrix.shard }}.txt"
+          test -f "$f" || exit 0
+          awk '/^--- (PASS|FAIL|SKIP): /{d=$4; gsub(/[()s]/,"",d); printf "%9.2fs  %s\n", d, $3}' "$f" | sort -rn > "go-test-timings-${{ matrix.shard }}.txt"
+          {
+            echo "### Shard ${{ matrix.shard }}/${{ strategy.job-total }}: slowest tests"
+            echo '```'
+            head -25 "go-test-timings-${{ matrix.shard }}.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test output
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-test-shard-${{ matrix.shard }}-output
+          path: go-test-shard-${{ matrix.shard }}.txt
+          retention-days: 7
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-test-shard-${{ matrix.shard }}-timings
+          path: go-test-timings-${{ matrix.shard }}.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The required check. A job that `needs` a failed shard is skipped unless it says always(), and
+  # branch protection counts a skipped required check as passed, so this must run and fail itself.
+  go-test:
+    name: go-test
+    if: always()
+    needs: [go-test-checks, go-test-shard]
+    runs-on: ubuntu-latest
+    steps:
+      - name: The checks and every test shard passed
+        run: |
+          test "${{ needs.go-test-checks.result }}" = success
+          test "${{ needs.go-test-shard.result }}" = success
+
   # The race detector on the concurrent core, split by event: full `-race ./...` is dominated by
   # internal/app (one big test binary), which used to put 6+ minutes on every PR. A PR runs the
   # packages where concurrency actually lives plus the app package's scheduler/engine/webhook
@@ -220,7 +333,7 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v6
-      # The build cache pair go-test explains, restore half only: this job never runs on main, so
+      # The build cache pair go-test-checks explains, restore half only: this job never runs on main, so
       # a key of its own could never be saved. It reads the full shards' key, whose race objects
       # for internal/app and its dependencies are most of what it compiles.
       - uses: actions/cache/restore@v6
@@ -277,7 +390,7 @@ jobs:
   # without editing this file. Four is the point of diminishing returns: every shard pays the same
   # ~45s race-instrumented compile, so eight shards saved only ~20s more wall clock at twice the
   # jobs. (Measured on main: 4x~3m, 8x~2m40s, unsplit 6m30s.) Those numbers predate the per-job
-  # build cache (see go-test), which takes most of that compile off every shard; the count has
+  # build cache (see go-test-checks), which takes most of that compile off every shard; the count has
   # not been retuned since.
   go-race-others:
     name: go race full (other packages)
@@ -286,7 +399,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      # The build cache pair go-test explains, under a key of its own: no other job builds these
+      # The build cache pair go-test-checks explains, under a key of its own: no other job builds these
       # packages' race-instrumented tests.
       - uses: actions/cache/restore@v6
         with:
@@ -330,7 +443,7 @@ jobs:
         shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v6
-      # The build cache pair go-test explains, one key for all four shards: they compile the same
+      # The build cache pair go-test-checks explains, one key for all four shards: they compile the same
       # objects, since the partition changes only which tests run, so shard 1 alone saves it. The
       # PR-only go race job restores this key too.
       - uses: actions/cache/restore@v6
@@ -388,7 +501,7 @@ jobs:
           go-version-file: go.mod
           # Uncached, and that is the fix rather than an omission. This job finishes first, so with
           # setup-go's cache on it saved the key every Go job shared, and froze 24 MB of actionlint
-          # objects as their build cache (see go-test). Compiling actionlint cold costs it ~10s.
+          # objects as their build cache (see go-test-checks). Compiling actionlint cold costs it ~10s.
           cache: false
       - run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
       # actionlint's shellcheck sees only the run: blocks, not the scripts they call. Those carry
@@ -494,7 +607,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
-      # The build cache pair go-test explains, under a key of its own: CGO_ENABLED=0 and -trimpath
+      # The build cache pair go-test-checks explains, under a key of its own: CGO_ENABLED=0 and -trimpath
       # give this binary's objects action IDs no other job produces.
       - uses: actions/cache/restore@v6
         with:
@@ -517,7 +630,7 @@ jobs:
         run: |
           npm ci
           npm run build
-      # The web half of go-test's govulncheck gate. dompurify sanitises report HTML and mermaid
+      # The web half of go-test-checks' govulncheck gate. dompurify sanitises report HTML and mermaid
       # parses report diagrams, content the portal did not author (.github/dependabot.yml reviews
       # their bumps one at a time), and nothing kept a merge from landing while either carried a
       # published advisory: Dependabot reports one beside the merge, not in its way. Production
