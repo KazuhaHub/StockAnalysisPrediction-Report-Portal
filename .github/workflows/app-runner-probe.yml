@@ -396,7 +396,7 @@ jobs:
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
             PORTAL_APP_RUNNER_FOREIGN_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$sock" \
             "$RUNNER_TEMP/driver-foreign.test" -test.v -test.timeout=60s \
-            -test.run='^TestDockerAcceptanceForeignContainerBesideDataWriterInventory$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
+            -test.run='^(TestDockerAcceptanceForeignContainerBesideDataWriterInventory|TestInventory.*)$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
       - name: Preserve the daemon payload and the test output
         if: always()
         uses: actions/upload-artifact@v7
