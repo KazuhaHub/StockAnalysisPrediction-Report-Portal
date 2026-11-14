@@ -519,6 +519,8 @@ jobs:
     timeout-minutes: 170
     env:
       SOAK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.duration_minutes || '5' }}
+      # The pull request smoke also profiles the measured process (see the diagnosis in doc 171); the dispatch run does not.
+      APP_CAPACITY_SOAK_DIAGNOSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -543,7 +545,7 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,APP_CAPACITY_SOAK_IMAGE \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_IMAGE \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \

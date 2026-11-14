@@ -191,6 +191,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"GOMAXPROCS=2", "PORTAL_CAPACITY_SOAK_CHILD=1", "PORTAL_CAPACITY_SOAK_DIR=" + childData,
 		"PORTAL_CAPACITY_SOAK_IMAGE=" + image,
 		"APP_CAPACITY_SOAK_MINUTES=" + strconv.Itoa(minutes), "APP_CAPACITY_SOAK_BASELINE_SECONDS=" + strconv.Itoa(baseline),
+		"APP_CAPACITY_SOAK_DIAGNOSE=" + os.Getenv("APP_CAPACITY_SOAK_DIAGNOSE"),
 		"PORTAL_DATA_SOCKET=" + runner.socket,
 		"PORTAL_DATA_ENROLLMENT=" + base64.RawStdEncoding.EncodeToString(enrollment),
 		"TMPDIR=" + childData, "HOME=" + childData,
@@ -213,6 +214,15 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		_ = os.WriteFile(filepath.Join(out, "runner.log"), []byte(runner.output.String()), 0o644)
 		if raw, err := os.ReadFile(filepath.Join(childData, soakChildFile)); err == nil {
 			_ = os.WriteFile(filepath.Join(out, soakChildFile), raw, 0o644)
+		}
+		// The diagnosis files (profiles, goroutine dumps, JSON), when APP_CAPACITY_SOAK_DIAGNOSE was set.
+		if files, err := os.ReadDir(filepath.Join(childData, "diag")); err == nil {
+			_ = os.MkdirAll(filepath.Join(out, "diag"), 0o755)
+			for _, file := range files {
+				if raw, err := os.ReadFile(filepath.Join(childData, "diag", file.Name())); err == nil {
+					_ = os.WriteFile(filepath.Join(out, "diag", file.Name()), raw, 0o644)
+				}
+			}
 		}
 	}()
 	select {
@@ -329,6 +339,9 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	// 1. The idle baseline, before any backend exists.
 	c.measureIdle(time.Duration(baseline) * time.Second)
 	t.Log("SOAK_BASELINE_MEASURED")
+	if soakDiagnosing() {
+		c.diagnose("idle", 60*time.Second)
+	}
 
 	// 2. Eight managed backends at the sizing the budgets give, then the excess probes that need them.
 	if c.writable, err = newPlatformWritableInstallScheduler(s, endpoint, c.id(), 50*time.Millisecond); err != nil {
@@ -1015,6 +1028,9 @@ func (c *soakChild) load(minutes int) {
 	c.rec.Mark("load_started")
 	stop, read := c.startFlood(minutes)
 	defer stop()
+	if soakDiagnosing() {
+		c.diagnose("loaded", 60*time.Second)
+	}
 	var previous soakFloodCounters
 	var pooled soakSamples
 	for minute := 1; ; minute++ {

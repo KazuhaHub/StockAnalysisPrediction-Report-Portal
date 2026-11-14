@@ -496,6 +496,8 @@ def main(argv):
                         APP_CAPACITY_SOAK_DESCRIPTORS=str(Path(__file__).resolve().parents[2] / "internal/appplatform/testdata/descriptors"),
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
+        if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
+            soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
         sampler = Sampler(run_command, "/proc", mountpoint, image_id)
         stop = threading.Event()
         collected = []
