@@ -77,3 +77,12 @@ func threadsToSpawn(limit, current int64, known bool) int {
 	}
 	return int(room)
 }
+
+// maxLoadedLimit is the largest memory limit of a container that runs the loads. The image store probe's images start this
+// same executable with a memory declaration over the runner's whole budget (so that their start is refused after their load):
+// they must serve their data writer and hold nothing.
+const maxLoadedLimit = 1 << 30
+
+// loadsEnabled reports whether the container runs the soak loads. An unknown limit is a soak backend of the development
+// profile.
+func loadsEnabled(limit int64, known bool) bool { return !known || limit <= maxLoadedLimit }

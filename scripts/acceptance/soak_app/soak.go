@@ -49,6 +49,9 @@ func readCgroup(name string) string {
 // the log flood, and the only output the soak needs from inside the container.
 func (s *soakState) run() {
 	limit, known := parseCgroupLimit(readCgroup("memory.max"))
+	if !loadsEnabled(limit, known) {
+		select {} // a probe image: serve, and do nothing else
+	}
 	if soft := softMemoryLimit(limit, known); soft > 0 {
 		debug.SetMemoryLimit(soft)
 	}

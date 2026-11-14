@@ -100,6 +100,22 @@ func TestThreadsToSpawnStayBelowThePIDLimit(t *testing.T) {
 	}
 }
 
+func TestAContainerWithMoreThanAGiBOfMemoryIsAProbeImageAndRunsNoLoad(t *testing.T) {
+	const mib = 1 << 20
+	// The soak backends are 16 to 4096 MiB declared, sized at about 500 MiB on the reference host. The image store probe's two
+	// installs declare the runner's whole memory budget (about 4 GiB) so that their start is refused; the data writer that
+	// runs before the start must not try to hold 85% of that.
+	for _, tc := range []struct {
+		limit int64
+		known bool
+		want  bool
+	}{{497 * mib, true, true}, {1024 * mib, true, true}, {1025 * mib, true, false}, {3996 * mib, true, false}, {0, false, true}} {
+		if got := loadsEnabled(tc.limit, tc.known); got != tc.want {
+			t.Errorf("loadsEnabled(%d,%t) = %t, want %t", tc.limit, tc.known, got, tc.want)
+		}
+	}
+}
+
 func TestThreadMarginIsSmallSoThePIDsReachTheirLimit(t *testing.T) {
 	// 64 PIDs is the soak's declared limit: a margin of eight leaves 56, 87.5 percent, above the 85 percent the verdict requires.
 	if threadMargin < 1 || threadMargin > 8 {
