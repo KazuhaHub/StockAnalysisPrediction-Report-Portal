@@ -48,7 +48,7 @@ func TestJobFactorsNormalization(t *testing.T) {
 	now := time.Date(2026, 7, 4, 12, 0, 0, 0, time.Local)
 	j := BatchJob{ID: 1, Priority: "50", CreatedBy: "u",
 		CreatedAt: now.Add(-12 * time.Hour).Format("2006-01-02 15:04:05")}
-	f := srv.jobFactors(j, now, map[string]float64{})
+	f := jobFactorsWith(j, now, map[string]float64{}, srv.prioAgeHours())
 	if f.Base != 0.5 {
 		t.Errorf("base = %v, want 0.5", f.Base)
 	}
@@ -73,7 +73,7 @@ func TestJobFactorsAgesFromRunAt(t *testing.T) {
 	j := BatchJob{ID: 1, Priority: "50", CreatedBy: "u",
 		CreatedAt: now.Format("2006-01-02 15:04:05"),
 		RunAt:     now.Add(-48 * time.Hour).Format("2006-01-02 15:04:05")}
-	if f := srv.jobFactors(j, now, nil); f.Age != 1 {
+	if f := jobFactorsWith(j, now, nil, srv.prioAgeHours()); f.Age != 1 {
 		t.Fatalf("age = %v, want 1 (aged from run_at, not created_at)", f.Age)
 	}
 }
@@ -94,8 +94,8 @@ func TestFairShareFavoursLighterUser(t *testing.T) {
 	usage := srv.userUsage(now)
 	j := BatchJob{Priority: "50", CreatedAt: now.Format("2006-01-02 15:04:05")}
 
-	heavy := srv.jobFactors(func() BatchJob { j.CreatedBy = "heavy"; return j }(), now, usage).Fair
-	light := srv.jobFactors(func() BatchJob { j.CreatedBy = "light"; return j }(), now, usage).Fair
+	heavy := jobFactorsWith(func() BatchJob { j.CreatedBy = "heavy"; return j }(), now, usage, srv.prioAgeHours()).Fair
+	light := jobFactorsWith(func() BatchJob { j.CreatedBy = "light"; return j }(), now, usage, srv.prioAgeHours()).Fair
 	if !(light > heavy) {
 		t.Fatalf("light user fair (%v) should exceed heavy user fair (%v)", light, heavy)
 	}
