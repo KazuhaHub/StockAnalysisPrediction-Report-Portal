@@ -58,11 +58,21 @@ type containerMount struct {
 		CreateMountpoint bool
 	}
 }
+
+// appContainerCPUShares is the Docker CpuShares (cgroup v2 cpu.weight) of every container the runner
+// creates for app code: a quarter of Docker's default of 1024. It sets scheduling priority only and is
+// not a cap. When the host is contended the kernel serves the Portal and the runner first; when the
+// host is idle an app still gets its full NanoCpus quota, which stays the hard limit. Every create path
+// (candidate, writable candidate, update start, migration job) derives from planCandidateContainer, so
+// the weight is part of the policy digest of each of them.
+const appContainerCPUShares = 256
+
 type containerHostConfig struct {
 	NetworkMode                                         string
 	ReadonlyRootfs, Privileged, AutoRemove              bool
 	CapDrop, SecurityOpt                                []string
 	Memory, MemorySwap, NanoCpus, PidsLimit, ShmSize    int64
+	CpuShares                                           int64
 	CgroupnsMode, IpcMode, PidMode, UTSMode, UsernsMode string
 	Init                                                bool
 	Mounts                                              []containerMount
@@ -215,6 +225,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	h.Memory = int64(limits.MemoryMiB) << 20
 	h.MemorySwap = h.Memory
 	h.NanoCpus = int64(limits.CPUMillis) * 1000000
+	h.CpuShares = appContainerCPUShares
 	h.PidsLimit = int64(limits.PIDs)
 	h.ShmSize = 16 << 20
 	h.CgroupnsMode = "private"

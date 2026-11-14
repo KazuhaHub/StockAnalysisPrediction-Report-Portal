@@ -89,6 +89,21 @@ func verifyNativeCandidateResourceBounds(
 		Timeout:   10 * time.Second,
 	}
 
+	// The daemon reports the scheduling weight the runner set; the hard quota is checked by the
+	// limits reader against the declared resources.
+	var weight struct {
+		HostConfig struct{ CpuShares int64 }
+	}
+	if err := readJSON(
+		ctx, daemon,
+		"/v"+APIVersion+"/containers/"+nativeID+"/json",
+		&weight,
+	); err != nil || weight.HostConfig.CpuShares != 256 {
+		t.Fatalf("native container CpuShares = %d, want 256: %v",
+			weight.HostConfig.CpuShares, err)
+	}
+	t.Log("NATIVE_APP_CPU_WEIGHT_LOW")
+
 	var tmp struct {
 		Bytes     int64 `json:"bytes"`
 		ENOSPC    bool  `json:"enospc"`
