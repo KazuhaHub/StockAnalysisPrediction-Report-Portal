@@ -1011,6 +1011,33 @@ is evidence for OPS-08.
     reports the pool wait count and total, the share of 2 ms samples with every connection in use, and the mean occupancy of the pool (10
     connections on PostgreSQL, 1 on SQLite).
 
+    **PostgreSQL runs natively on the runner, not as a service container.** The first runs with a `postgres:16` service container failed every
+    managed install at the runner's data writer (`data writer access requires reconciliation: invalid application runtime response`), SQLite
+    runs included, because the container was present on the host: the writer inspects every container for mount references and refuses one the
+    runner did not start. The job therefore starts the runner image's own PostgreSQL 16 (`systemctl start postgresql`, role and database created
+    fresh each run, version recorded: 16.15). The image store probe's installs also run the soak executable as their data writer before their start
+    is refused, so the fixture runs no load in a container whose memory limit exceeds 1 GiB (`loadsEnabled`).
+
+    **First PostgreSQL smoke (run 43598019520, `4d8cd626`; not evidence).** Every probe, flood, backend and host check passes (probe codes:
+    `image_store` native `capacity_exhausted_image_store` with the two images' starts refused `capacity_exhausted_memory`, `ninth_backend`
+    `capacity_exhausted_running_backends`, `memory_over_budget`, `cpu_over_budget`, `app_platform_invalid_request`, `app_platform_storage_full`, `installation_capacity`,
+    `review_required:inflight_limit`, `task_capacity` twice; achieved fractions CPU 0.997 to 0.999, memory current 0.997, PIDs 0.875 to 0.922). All four
+    latency series fail (idle / pooled loaded / bound, microseconds; windows 1 to 5):
+
+    | Series | idle / pooled / bound | windows |
+    | --- | --- | --- |
+    | home | 1764 / 10055 / 6764 fail | 10320, 10039, 8589, 8967, 11885 |
+    | report | 3781 / 33989 / 8781 fail | 42216, 20316, 44054, 24433, 33580 |
+    | dispatch@200 | 989 / 9573 / 5989 fail | 5166, 13302, 9318, 10359, 9573 |
+    | batch start | 11284 / 72222 / 16926 fail | 62217, 40275, 84492, 50795, 55303 |
+
+    The pool is not the cause: in the diagnostic minute the pool of 10 had 0 waits, 0% of samples with every connection in use and a mean occupancy of
+    2.6% idle and 11.5% loaded. The Portal's own CPU per home request is unchanged (p95 0.84 ms idle, 1.04 ms loaded) while the wall p95 goes from
+    1.9 to 23 ms, so the time is spent off CPU in the round trips to PostgreSQL: the host is 80% to 85% busy for the whole load (4 vCPU shared by the
+    eight backends at about 1.9 cores, the PostgreSQL server processes, the Portal, the flood process, the runner and Docker; 1% before the load).
+    The CPU profile puts 58% of the loaded minute in the relay's admitted requests. Nothing was tuned in response; the 120 minute run on this shape
+    would fail all four series. Whether PostgreSQL on a separate host (as the owner runs it) passes is not measured: the reference host has one.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
