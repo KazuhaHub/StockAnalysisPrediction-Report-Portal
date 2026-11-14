@@ -905,6 +905,36 @@ request; either removes most of the hold time. A larger one is a read-only pool 
 The 120-minute run will show whether the tail is bounded at the pooled p95; until a fix lands, a pass depends on how hard the
 flood leans on the connection (this soak keeps one request in flight per backend).
 
+#### After the fix (#437, `ffb697ba`): smoke run 43548154827
+
+#437 releases the single SQLite connection before a relayed backend access verifies, decodes or signs, and caches successful
+control-command verifications for their validity window. The same smoke (the verdict, the diagnostics and the profiling
+unchanged) measured:
+
+| diagnostic minute, loaded | before | after |
+| --- | --- | --- |
+| waits for a database connection | 43439 | 34300 |
+| total wait for the connection | 43529 ms | **16179 ms** |
+| the single connection in use (2 ms samples) | 38% | **34%** |
+| home wall p95 | 22898 us | **7704 us** |
+| home off-CPU p95 | 22070 us | **6663 us** |
+| report wall p95 / off-CPU p95 | 4151 / 2875 us | 8873 / 6910 us |
+| GC total pause / scheduler p99 | 165 ms / 5.2 ms | 141 ms / 5.2 ms |
+
+The pooled verdict of the run (idle p95, threshold, pooled loaded p95): home 772 us, 5772 us, **5417 us (pass)**; report 1239 us,
+6239 us, **6386 us (fail by 147 us)**; dispatch at 200 jobs 761 us, 5761 us, **4131 us (pass)**. Per window (home, report,
+dispatch p95 in us): 3626 6325 4131; 3836 6203 3135; 4333 6099 3971; 5030 6259 5497; 7905 7849 3958. Home and dispatch pass; report
+sits at about 6.2 ms in every window, 5 ms above its idle p95, and the pooled figure is just over its threshold.
+
+**What dominates now.** The relay still occupies the connection a third of the time, and the profile says with what: the work
+under the connection is no longer verification but the SQL itself. 57.6% of the loaded process's CPU is still
+`apiPlatformBackend`, 13.9 s of it inside the read transactions (`platformBackendReadTx`), and the largest part of that is
+SQLite statement preparation and parsing (`sqlite3Prepare`, 35% of all CPU; statements are prepared on every call, as
+before), above all in `loadPlatformWritableBackendHistoryPhase` and `finishPlatformWritableInstallHistory` (6.2 s). Three read
+transactions still run per relayed request, each re-reading the install history. The remaining cost of a page under relay load
+is therefore queueing behind those queries (home off-CPU p95 6.7 ms, down from 22 ms). Nothing here was tuned: the soak is
+unchanged, and the gate on report is reported as it came out.
+
 ### Evidence files
 
 `capacity-soak-evidence.json` (format `portal.capacity-soak/1-dev.1`: run identity, host facts, the Go child's evidence with every
