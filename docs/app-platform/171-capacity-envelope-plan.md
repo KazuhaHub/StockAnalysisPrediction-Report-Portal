@@ -1061,6 +1061,41 @@ is evidence for OPS-08.
     63% to 70% busy at 25% and 37%, so the Portal's own competitors (PostgreSQL, the flood process, the runner, Docker and the Portal) are still more than
     the idle host's.
 
+    **Who uses the CPU (PostgreSQL, five-minute non-evidence runs).** The host sampler now reads `/proc/<pid>/stat` (utime plus stime) every thirty
+    seconds and groups the processes: the measured Portal (`TestPlatformCapacitySoakChild`), the flood generator, PostgreSQL, the app runner
+    (`TestPlatformRunnerServiceChild`), `dockerd`, `containerd` and its shims, and the eight backends, which are summed from their cgroups' `cpu.stat`
+    (processes inside a backend container are skipped in the `/proc` pass). "Other" is the host's busy time less the named groups: it holds everything
+    not named, including kernel work, the sampler itself, the root test process, the registry container and processes that exit between samples. The
+    verdict records each group's share of all CPUs (percent of four vCPUs) for the idle period and for every loaded window, with the flood's admitted
+    and refused requests per second (`cpu_breakdown`; the step summary prints it). Runs: default 50% (dispatch 43601742346; the pull request smoke
+    43601735934 agrees), 37% (dispatch 43601752349). Mean over windows 2 to 5 (window 1 includes the backends' warm-up), percent of the host:
+
+    | Period | host busy | Portal | flood | PostgreSQL | runner | docker, containerd | 8 backends | other | admitted / refused per second |
+    | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+    | idle, 50% | 0.9 | 0.3 | 0.0 | 0.3 | 0.0 | 0.0 | 0.0 | 0.3 | none |
+    | loaded, 50% (43601742346) | 81.6 | 6.9 | 0.5 | 0.2 | 10.9 | 4.4 | 48.0 | 10.4 | 7.5 / 113 |
+    | loaded, 50% (43601735934, with diagnosis) | 85.7 | 8.1 | 0.6 | 0.2 | 12.1 | 4.7 | 48.0 | 11.9 | 6.0 / 112 |
+    | idle, 37% | 0.6 | 0.2 | 0.0 | 0.2 | 0.0 | 0.0 | 0.0 | 0.2 | none |
+    | loaded, 37% (43601752349) | 68.9 | 6.7 | 0.4 | 0.1 | 11.4 | 4.3 | 36.0 | 9.9 | 10.8 / 116 |
+
+    Per-window values at 50% (43601742346, minutes 1 to 5): host busy 81.6, 81.0, 81.4, 81.9, 82.0; Portal 7.0, 6.8, 7.0, 6.9, 7.2; runner 11.0, 10.9, 11.0,
+    10.8, 11.3; other 10.5, 10.2, 10.3, 11.1, 10.5. At 37% (43601752349): host busy 65.2, 68.8, 68.7, 69.3, 68.9; Portal 7.1, 6.6, 6.7, 6.8, 6.7; runner 9.5, 11.3,
+    11.5, 11.6, 11.4; other 26.4, 10.2, 9.6, 10.0, 9.9. Both runs fail home, report and batch start (home 19536 us against a bound of 6718 at 50%, 17800
+    against 5970 at 37%; report 47763 against 7973 and 17801 against 7050; batch start 71798 against 16674 and 38581 against 12171) and pass dispatch only at
+    37%; the pull request smoke failed home (40876 against 7391).
+
+    Would the Portal have enough headroom if the flood process and the Portal's work on refused attempts were removed? No, not from CPU. The flood generator
+    uses 0.5% to 0.6% of the host. The Portal's CPU profile for the loaded minute of the pull request smoke (23.3 s of CPU in 60 s, 8.1% of the host) puts 13.64 s
+    in the pre-check wrapper, of which 13.54 s is the admitted requests it passes on (`requireUserJSON`, then `apiPlatformBackend`); what the wrapper keeps
+    for itself, the 429 answers, is 0.10 s, and the whole of `net/http.(*conn).serve` outside the wrapper (reading and writing every request, admitted or refused)
+    is 0.51 s: at most about 0.6 s of 240 CPU-seconds, 0.25% of the host. Together that is under 1% of the host: 85.7% busy would be about 85% busy. The CPU is
+    taken by the load the soak is meant to apply: the eight backends at their quota (48% at the default budget, 36% at 37%, fixed by the budget), the runner
+    that carries the admitted relay requests and the backends' traffic (11% to 12%), Docker's daemons moving the backends' log flood (4% to 5%) and about 10% that
+    is not any named process. The refused-attempt storm is a test artifact (a remote browser would not keep eight attempt loops running), but removing it does not
+    change the contention; the admitted traffic, the backends and the runner do. At 37% the host is still 69% busy and home and report are still about 3 times
+    their bounds, so the contention does not scale with the host's idle share alone: PostgreSQL's own share is 0.1% to 0.2%, so the round trips to it are waiting
+    on the scheduler behind the backends' cgroup-limited threads, not on its CPU.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
