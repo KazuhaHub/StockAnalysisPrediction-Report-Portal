@@ -1275,6 +1275,31 @@ is evidence for OPS-08.
     quota-limited containers, 24 to 56 threads each, being released at the same moment of each scheduling period, the Portal's wake-ups queue behind a burst of runnable threads,
     which a weight does not shorten (this explanation is an inference from the pressure figures, not tested).
 
+    **Reserved CPU 0 (#443, `323d273f`; PostgreSQL, 5 minutes, default 50%, dispatch 43654065624 on `6bab151d`; not evidence).** The runner's ready line printed
+    `reserved_cpus=0 app_cpus=1-3`; the budget stayed 2000 millis (`min(2000, 3000)`), eight backends of 240 millis. Every backend container's `cpuset.cpus.effective` is `1-3`
+    (all eight recorded in `backend_cpusets`). Per-CPU busy from `/proc/stat` (percent, mean over the period, max in brackets):
+
+    | | CPU 0 | CPU 1 | CPU 2 | CPU 3 |
+    | --- | --- | --- | --- | --- |
+    | idle | 0.7 (1.3) | 0.7 (1.1) | 0.6 (1.0) | 0.7 (0.9) |
+    | loaded | 67.8 (69.9) | 83.5 (85.1) | 85.1 (86.6) | 83.0 (84.7) |
+
+    CPU 0 stays free of backend load, and carries the Portal, PostgreSQL, the runner, Docker and the flood: 68% busy, against 83% to 85% for the three app CPUs. CPU by group (mean of
+    windows 2 to 5, percent of the host): host busy 80.5, Portal 6.8, flood 0.4, PostgreSQL 0.3, runner 11.9, docker 4.3, backends 48.0, other 8.8; admitted 10 and refused 116 per second.
+
+    Series, pooled loaded against bound (us; idle / pooled / bound; windows 1 to 5), with the unreserved layout of the previous run (43649765859) for comparison:
+
+    | Series | now | windows | before |
+    | --- | --- | --- | --- |
+    | home | 2083 / 8470 / 7083 fail | 8179, 7941, 6775, 10506, 8194 | 2466 / 17735 / 7466 fail |
+    | report | 2242 / 10630 / 7242 fail | 9859, 10957, 8709, 11189, 9006 | 4475 / 27011 / 9475 fail |
+    | dispatch@200 | 856 / 3360 / 5856 pass | 3422, 2612, 4582, 3360, 3146 | 1559 / 10083 / 6559 fail |
+    | batch start | 8756 / 30176 / 13756 fail | 49282, 30176, 23983, 19270, 29653 | 15159 / 55567 / 22738 fail |
+
+    Pressure stalls (idle / loaded mean): Portal scope CPU some avg10 0 / 9.9, full 0 / 6.5, I/O and memory 0 / 0; host CPU some 0.01 / 86.8; PostgreSQL unit CPU some 0 / 5.4; a backend
+    scope CPU some none / 34.3 (the quota); processes running 1 / 8.8 (13 at most); PostgreSQL mean WAL sync 0.06 / 0.13 ms. The Portal still waits for CPU about 10% of the time, down
+    from 12.8%. Home and report fall to about 1.2 to 1.5 times their bounds (from 2.4 to 3.5 times) and dispatch passes; home, report and batch start still fail. Nothing was tuned.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
