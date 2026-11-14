@@ -258,7 +258,7 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	}
 	var entries []json.RawMessage
 	if json.Unmarshal(raw, &entries) != nil || entries == nil {
-		return nil, ErrInvalidResponse
+		return nil, fmt.Errorf("%w: candidate IPC inventory is not a JSON array", ErrInvalidResponse)
 	}
 	defer func() {
 		for _, entry := range entries {
@@ -268,49 +268,174 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	result := make([]candidateIPCContainer, 0, len(entries))
 	for _, entry := range entries {
 		var container candidateIPCContainer
-		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil || !containerSHA.MatchString(container.ID) {
-			return nil, ErrInvalidResponse
+		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil {
+			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: projection rejected", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
-		if _, err := candidateIPCMountSources(container.Mounts); err != nil {
-			return nil, err
+		if !containerSHA.MatchString(container.ID) {
+			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
+		}
+		if _, _, err := candidateIPCMountPlan(container.Mounts); err != nil {
+			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
 		result = append(result, container)
 	}
 	return result, nil
 }
 
+// shortContainerID names a container in an error without the full identifier.
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
+}
+
+// inventoryEntryLabel names an entry whose Id cannot be trusted: the first
+// twelve characters of a string Id, or a fixed marker. It never echoes more.
+func inventoryEntryLabel(entry json.RawMessage) string {
+	var probe struct {
+		ID string `json:"Id"`
+	}
+	if json.Unmarshal(entry, &probe) != nil || probe.ID == "" {
+		return "(no Id)"
+	}
+	return fmt.Sprintf("%q", shortContainerID(probe.ID))
+}
+
+// candidateIPCPendingVolume is a volume mount the container list reports
+// without a host path and that is not a local-driver volume: only the inspect
+// endpoint can say where it lives.
+type candidateIPCPendingVolume struct {
+	index       int
+	destination string
+}
+
+// candidateIPCMountSources is the closed, list-only projection: any mount whose
+// host path cannot be read from the list alone is refused.
 func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
+	sources, pending, err := candidateIPCMountPlan(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(pending) != 0 {
+		return nil, fmt.Errorf("%w: mount %d: volume without a source needs inspection", ErrInvalidResponse, pending[0].index)
+	}
+	return sources, nil
+}
+
+func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
 	if len(raw) == 0 {
-		return nil, ErrInvalidResponse
+		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
 	var mounts []json.RawMessage
 	if json.Unmarshal(raw, &mounts) != nil {
-		return nil, ErrInvalidResponse
+		return nil, nil, fmt.Errorf("%w: Mounts is not an array", ErrInvalidResponse)
 	}
 	sources := make([]string, 0, len(mounts))
-	for _, entry := range mounts {
+	var pending []candidateIPCPendingVolume
+	for i, entry := range mounts {
 		var m struct {
-			Type   string  `json:"Type"`
-			Source *string `json:"Source"`
+			Type        string  `json:"Type"`
+			Source      *string `json:"Source"`
+			Driver      *string `json:"Driver"`
+			Destination string  `json:"Destination"`
 		}
 		if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
-			return nil, ErrInvalidResponse
+			return nil, nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
 		}
 		switch m.Type {
-		case "bind", "volume":
+		case "volume":
+			// The list endpoint reports a daemon-managed volume with an empty
+			// Source. A local-driver volume lives under the Docker root, so the
+			// empty Source names no path that could overlap the data root. Any
+			// other driver (or none) is resolved through inspect instead.
+			if m.Source != nil && *m.Source == "" {
+				if m.Driver != nil && *m.Driver == "local" {
+					continue
+				}
+				if !filepath.IsAbs(m.Destination) {
+					return nil, nil, fmt.Errorf("%w: mount %d: volume without a source has destination %q, not an absolute path", ErrInvalidResponse, i, boundedString(m.Destination))
+				}
+				pending = append(pending, candidateIPCPendingVolume{index: i, destination: m.Destination})
+				continue
+			}
+			fallthrough
+		case "bind":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {
-				return nil, ErrInvalidResponse
+				return nil, nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
 			}
 			sources = append(sources, *m.Source)
 		case "tmpfs":
 			if m.Source != nil && *m.Source != "" {
-				return nil, ErrInvalidResponse
+				return nil, nil, fmt.Errorf("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
 			}
 		default:
-			return nil, ErrInvalidResponse
+			return nil, nil, fmt.Errorf("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
 		}
 	}
+	return sources, pending, nil
+}
+
+// candidateIPCContainerSources returns every host path a container mounts. A
+// volume the list reports without a path (a non-local driver) is resolved with
+// one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
+func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
+	sources, pending, err := candidateIPCMountPlan(container.Mounts)
+	if err != nil {
+		return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+	}
+	if len(pending) == 0 {
+		return sources, nil
+	}
+	var inspected struct {
+		Mounts json.RawMessage `json:"Mounts"`
+	}
+	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/"+container.ID+"/json", &inspected); err != nil {
+		return nil, fmt.Errorf("container %s: inspect for a volume without a source: %w", shortContainerID(container.ID), err)
+	}
+	var mounts []json.RawMessage
+	if json.Unmarshal(inspected.Mounts, &mounts) != nil {
+		return nil, fmt.Errorf("%w: container %s: inspected Mounts is not an array", ErrInvalidResponse, shortContainerID(container.ID))
+	}
+	for _, want := range pending {
+		resolved := ""
+		matched := 0
+		for _, entry := range mounts {
+			var m struct {
+				Type        string  `json:"Type"`
+				Source      *string `json:"Source"`
+				Destination string  `json:"Destination"`
+			}
+			if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
+				return nil, fmt.Errorf("%w: container %s: inspected mount projection rejected", ErrInvalidResponse, shortContainerID(container.ID))
+			}
+			if m.Type == "volume" && m.Destination == want.destination {
+				matched++
+				if m.Source != nil {
+					resolved = *m.Source
+				}
+			}
+		}
+		if matched != 1 || !filepath.IsAbs(resolved) {
+			return nil, fmt.Errorf("%w: container %s: mount %d: volume source %q unresolved after inspect", ErrInvalidResponse, shortContainerID(container.ID), want.index, boundedString(resolved))
+		}
+		sources = append(sources, resolved)
+	}
 	return sources, nil
+}
+
+func boundedSource(source *string) string {
+	if source == nil {
+		return "<absent>"
+	}
+	return boundedString(*source)
+}
+
+func boundedString(s string) string {
+	if len(s) > 96 {
+		return s[:96] + "..."
+	}
+	return s
 }
 
 func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
