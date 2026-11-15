@@ -197,7 +197,8 @@ var serviceTaskResources = map[string][]string{
 	appplatform.TaskHandlerEvent:   {"events.subscribe", "tasks.schedule"},
 }
 
-// fakeRunnerTaskAfterGrantChange bumps the installation's policy revision `bumps` times without a
+// fakeRunnerTaskAfterGrantChange raises (this fixture does not re-grant the capability rows; the Portal's own
+// pre-check for that is TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange) ... bumps the installation's policy revision `bumps` times without a
 // new generation (as a recovery action does), then drives one task of the handler through the
 // Portal and runner contracts without a socket: the Portal resolves the history it would use,
 // the registration signer answers the handshake as the app would, the Portal signs the task
@@ -308,7 +309,7 @@ func fakeRunnerTaskAfterGrantChange(t *testing.T, s *Server, installation, handl
 	return result, verified.RegistrationIdentity(), h.format
 }
 
-// testFakeRunnerTaskAfterGrantChange runs each handler, before and after a grant change, on
+// testFakeRunnerTaskAfterGrantChange runs each handler, before and after the revision is raised, on
 // a fresh fixture each: one installation resolves its history once.
 func testFakeRunnerTaskAfterGrantChange(t *testing.T, fixture func() (*Server, string), wantFormat string, bumpCounts ...int) {
 	t.Helper()
@@ -329,7 +330,7 @@ func testFakeRunnerTaskAfterGrantChange(t *testing.T, fixture func() (*Server, s
 	}
 }
 
-// A grant change at generation 1 followed by a task: the runner must still accept the task of a
+// A policy revision raised at generation 1, then a task: the runner must still accept the task of a
 // managed install at the new policy revision, for the backend, digest and event handlers.
 func testPlatformServiceTaskAfterGrantChangeManaged(t *testing.T, pg bool) {
 	testFakeRunnerTaskAfterGrantChange(t, func() (*Server, string) {

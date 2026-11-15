@@ -127,10 +127,12 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 				"initial registration: %w", ErrInvalidCommand)
 		}
 		candidate := verified.Candidate()
-		// The initial registration binds no policy revision. An access-grant
-		// change bumps the revision without a new generation, so the revision
-		// is taken from the signed command and must be a canonical number at
-		// least 1. The grant's own revision is compared below.
+		// The initial registration binds no policy revision. The revision can
+		// rise without a new generation (an access change raises it, and the
+		// app runs tasks again once its grants are reviewed again, which is a
+		// Portal-side requirement), so it is taken from the signed command and
+		// must be a canonical number at least 1. The grant's own revision is
+		// compared below.
 		if !policyRevisionAtLeast(c.PolicyRevision, "1") {
 			return zero, fmt.Errorf(
 				"initial registration tuple: %w", ErrInvalidCommand)
@@ -152,9 +154,11 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 				"update registration: %w", ErrInvalidCommand)
 		}
 		start := verified.Start().Command()
-		// The update was started at TargetPolicyRevision. A later access-grant
-		// change raises the revision without a new generation, so the command
-		// may carry any canonical revision at or above that floor, never below.
+		// The update was started at TargetPolicyRevision. The revision can rise
+		// later without a new generation, so the command may carry any
+		// canonical revision at or above that floor, never below. This is the
+		// runner half of a larger change: the Portal's readers still pin the
+		// target revision (doc 170, follow-up).
 		if !policyRevisionAtLeast(
 			c.PolicyRevision, start.Payload.TargetPolicyRevision) {
 			return zero, fmt.Errorf(

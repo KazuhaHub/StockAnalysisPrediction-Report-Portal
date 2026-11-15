@@ -889,18 +889,22 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   attempts (bounded backoff, state-change logging); see doc 114.
 - **Finding while building it: the runner assumed a fixed policy revision.** The runner derived the
   identity's policy revision from the registration (the constant `"1"` for the managed initial kind, the
-  update's target revision for the update-start family), but an access-grant change bumps the
-  installation's policy revision without a new generation, so every task after such a change was refused as
-  `task tuple`. The runner now takes the revision from the signed command for all three kinds and requires a
-  canonical number at or above the registration's floor (1, the update's target revision, 1); the grant's own
-  revision must equal it. This closes the runner side only. **Not closed at generation 2 and later:** the
-  Portal's update, restore and resume history readers pin the installation's and the active activation's
-  policy revision to the update's target revision, so after a grant change the Portal fails to resolve the
-  history before any runner is involved, and launch is affected the same way. Relaxing those readers changes
-  what launch and registration bind and needs an owner decision; the generation-2 regression test therefore
-  covers the runner (`TestServiceBackendTaskUpdateGenerationAcceptsPolicyRevisionAfterGrantChange`) and the
-  no-change Portal path, not a Portal task after a grant change. At generation 1 (managed and writable) the
-  Portal path is covered through a fake runner for the backend, digest and event handlers.
+  update's target revision for the update-start family). The revision can rise without a new generation
+  (an access change raises it), and the runner then refused every task as `task tuple` even when the
+  Portal would have issued one. The runner now takes the revision from the signed command for all three
+  kinds and requires a canonical number at or above the registration's floor (1, the update's target
+  revision, 1); the grant's own revision must equal it. **This is half of the fix, and the claim is
+  narrow.** The Portal requires the capability rows to sit at the installation's current revision, and
+  `invalidateAppPlatformPrincipal` raises the revision without moving them, by design: the app fails
+  closed until its grants are reviewed again. A task therefore runs after an access change **only after a
+  re-grant** (a consumed review plan carries the approved rows to the new revision, as the recovery
+  actions do). Tested end to end through the real admit and identity paths at generation 1:
+  `TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange` (refused without a re-grant, admitted
+  and issued after it; the re-grant is the recovery actions' row update, not a user review flow, which the
+  fixtures cannot drive). The runner-side acceptance is tested separately against the Portal's real
+  history and signing for the backend, digest and event handlers
+  (`TestPlatformServiceTaskAfterGrantChange*`).
+  **Not closed at generation 2 and later:** see the follow-up below.
 - **Limit: what the runner verifies of the service identity.** The runner checks the command signature, the
   registration (signature, expiry, tuple) and that the grant's installation, lease, generation, epoch, release
   and policy revision equal the command's, that its resources carry what the handler needs, and that its MAC
@@ -968,3 +972,34 @@ earlier run (42716037743) predates these changes; its claims are re-established 
    `APP_IMAGE_DELIVERY_REQUIRED=1`; with it, a missing export environment or a missing report entry fails the probe.
 9. **Other images' references.** The store-diff check compares every other image's digest references as well as
    its tags.
+
+## Follow-up: policy revision at generation 2 and later (not implemented)
+
+The runner relaxation above is half of the change. At generation 2 and later the Portal's update, restore
+and resume history readers pin the installation's and the active activation's policy revision to the
+update's target revision (`loadCompletedUpdateHistorySource` and its restore and resume counterparts), so
+after an access change plus a re-grant the Portal still fails to resolve the history, before any runner is
+involved, and launch is affected the same way. The review's design for the follow-up:
+
+- The Portal's history readers and launch move from "revision equals the target" to "revision at least the
+  target, **and** capability rows at the current revision from a consumed plan for this generation".
+- The registration stays pinned to the target revision it was derived at; only the checks around it relax.
+- The runner's verifiers for backend, session and network requests get the same floor rule the service-task
+  verifier now has (a canonical revision at or above the registration's floor, equal to the grant's).
+
+Tests it needs, test first:
+
+- the history readers accept a later revision with rows re-granted at that revision from a consumed plan,
+  and refuse it without the rows, with rows from another generation's plan, or from an unconsumed plan,
+  for update, restore and resume;
+- launch and a session request at generation 2 after an access change plus a re-grant succeed, and fail
+  closed without the re-grant;
+- the runner verifiers refuse a revision below the floor and a non-canonical one, and accept a later one,
+  for each request kind;
+- a generation-2 task after an access change plus a re-grant reaches `succeeded` through the fake runner for
+  the backend, digest and event handlers (the test that today can only run without the change).
+
+Open owner question: what does a policy-revision bump grant? Today a bump means "everything granted at the
+old revision must be re-approved"; the follow-up lets an approved re-grant carry a running generation
+forward without a new update. The owner has to say whether a re-grant may do that for every capability,
+only for those that already existed at the target revision, or never for capabilities that widen access.
