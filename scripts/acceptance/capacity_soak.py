@@ -644,14 +644,18 @@ def _check(name, passed, detail):
     return {"name": name, "passed": bool(passed), "detail": detail}
 
 
-# Owner decision 2026-11-13: the p95 of the loaded period must be within max(1.5x the idle p95, the idle p95 plus
-# 5 ms). A ratio alone is meaningless against a sub-millisecond baseline; the load is generated outside the measured
-# process, so the measured process sees only platform load. The owner decided only that floor.
+# Owner decision 2026-11-15: under full declared load on the reference host, the pooled p95 of home and report is at most 50 ms and of batch
+# start at most 100 ms. The relative floor (owner decision 2026-11-13: max(1.5x the idle p95, the idle p95 plus 5 ms)) was measured and could not be
+# met on a 2-physical-core host at full app CPU load (doc 171); dispatch@200 keeps it. For the three absolute series the relative threshold and
+# the ratio to idle stay recorded as diagnostics, with every window's p95: none is hidden, none decides.
 #
-# Verdict computation (engineering decision, not the owner's): the p95 of every loaded sample of the run pooled together
-# (the idle p95 is pooled the same way). The p95 of each one-minute window, its threshold, the count over it and the worst
-# window are diagnostics: none is hidden or dropped, none decides.
+# Verdict computation (engineering decision, not the owner's): the p95 of every loaded sample of the run pooled together; per-window values are
+# diagnostics.
 LATENCY_FLOOR_US = 5000
+HOME_P95_BOUND_US = 50_000
+REPORT_P95_BOUND_US = 50_000
+BATCH_START_P95_BOUND_US = 100_000
+ABSOLUTE_P95_BOUND_US = {"home": HOME_P95_BOUND_US, "report": REPORT_P95_BOUND_US, "batch_start": BATCH_START_P95_BOUND_US}
 LATENCY_SERIES = ("home", "report", "dispatch", "batch_start")
 
 
@@ -661,23 +665,26 @@ def latency_threshold_us(idle_p95_us):
 
 def _latency_check(name, series, evidence):
     baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 0)
-    threshold = latency_threshold_us(baseline)
+    relative = latency_threshold_us(baseline)
+    bound = ABSOLUTE_P95_BOUND_US.get(series, relative)
     pooled = evidence.get("loaded", {}).get(series, {})
     pooled_p95, pooled_count = pooled.get("p95_us", 0), pooled.get("count", 0)
     rows, over, empty, worst = [], [], [], None
     for window in evidence.get("windows", []):
         stats = window.get(series) or {}
         p95 = stats.get("p95_us", 0)
-        ok = p95 <= threshold
-        rows.append({"minute": window["minute"], "p95_us": p95, "threshold_us": threshold, "passed": ok})
+        ok = p95 <= bound
+        rows.append({"minute": window["minute"], "p95_us": p95, "threshold_us": bound, "relative_threshold_us": relative, "passed": ok})
         if not ok:
             over.append(window["minute"])
         if not stats.get("count", 0):
             empty.append(window["minute"])
         if worst is None or p95 > worst["p95_us"]:
             worst = {"minute": window["minute"], "p95_us": p95}
-    return _check(name, pooled_count > 0 and pooled_p95 <= threshold and not empty, {
-        "idle_p95_us": baseline, "threshold_us": threshold, "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
+    return _check(name, pooled_count > 0 and pooled_p95 <= bound and not empty, {
+        "idle_p95_us": baseline, "threshold_us": bound, "bound_us": bound, "bound_kind": "absolute" if series in ABSOLUTE_P95_BOUND_US else "relative",
+        "relative_threshold_us": relative, "within_relative_threshold": pooled_count > 0 and pooled_p95 <= relative,
+        "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
         "pooled_ratio": round(pooled_p95 / max(baseline, 1), 3), "worst_ratio": round((worst or {"p95_us": 0})["p95_us"] / max(baseline, 1), 3),
         "worst_window": worst, "windows": len(rows), "windows_over_count": len(over), "windows_over_the_threshold": over[:200],
         "windows_without_samples": empty[:200], "window_thresholds": rows})
@@ -686,8 +693,8 @@ def _latency_check(name, series, evidence):
 def render_summary(evidence, verdict):
     """Markdown for the job's step summary: the verdict per series and every window of every series."""
     lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {'passed' if verdict['passed'] else 'FAILED'}",
-             "", "Latency verdict (engineering decision, not the owner's): the pooled loaded p95 must be at most "
-             "max(1.5 x idle p95, idle p95 + 5 ms). Windows are diagnostics."]
+             "", "Latency verdict: home and report pooled loaded p95 at most 50 ms, batch start at most 100 ms (owner decision 2026-11-15); dispatch at most "
+             "max(1.5 x idle p95, idle p95 + 5 ms). The pooling is an engineering decision; windows, the relative threshold and the ratio to idle are diagnostics."]
     for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
         if check is None:
@@ -1015,10 +1022,10 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
                          {"windows": len(windows), "minutes": minutes}))
     checks.append(_check("session_outlives_the_run", evidence.get("session_expires_ms", 0) > evidence.get("load_finished_ms", 0) > 0,
                          {"session_expires_ms": evidence.get("session_expires_ms"), "load_finished_ms": evidence.get("load_finished_ms")}))
-    ratio_checks = {"home": _latency_check("home_p95_within_threshold_of_idle", "home", evidence),
-                    "report": _latency_check("report_p95_within_threshold_of_idle", "report", evidence),
+    ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence),
+                    "report": _latency_check("report_p95_within_absolute_bound", "report", evidence),
                     "dispatch": _latency_check("dispatch_within_threshold_of_idle", "dispatch", evidence),
-                    "batch_start": _latency_check("batch_start_within_threshold_of_idle", "batch_start", evidence)}
+                    "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence)}
     checks.extend(ratio_checks.values())
     checks.extend(_flood_checks(evidence))
 

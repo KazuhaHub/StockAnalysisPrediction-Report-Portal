@@ -289,58 +289,68 @@ class EvaluateTests(unittest.TestCase):
         self.assertTrue(verdict["passed"], verdict)
         self.assertEqual(self.failing(verdict), set())
 
-    def test_the_threshold_is_the_larger_of_one_and_a_half_times_and_five_milliseconds_more(self):
+    def test_the_relative_threshold_is_the_larger_of_one_and_a_half_times_and_five_milliseconds_more(self):
         self.assertEqual(soak.LATENCY_FLOOR_US, 5000)
         self.assertEqual(soak.latency_threshold_us(1000), 6000)      # the floor governs a sub-millisecond baseline
         self.assertEqual(soak.latency_threshold_us(10000), 15000)    # the two rules meet at 10 ms
         self.assertEqual(soak.latency_threshold_us(40000), 60000)    # the ratio governs a slow baseline
         self.assertEqual(soak.latency_threshold_us(0), 5000)         # an unmeasured baseline is not a free pass
 
-    def test_the_pooled_loaded_p95_at_the_threshold_passes_and_one_microsecond_beyond_fails(self):
-        for idle in (1000, 40000):
-            threshold = soak.latency_threshold_us(idle)
-            evidence = child_evidence(home=idle)
-            evidence["loaded"]["home"]["p95_us"] = threshold
-            self.assertTrue(self.verdict(evidence)["passed"], idle)
-            evidence["loaded"]["home"]["p95_us"] = threshold + 1
-            self.assertEqual(self.failing(self.verdict(evidence)), {"home_p95_within_threshold_of_idle"})
+    def test_the_absolute_bounds_are_the_owner_decision_of_2026_11_15(self):
+        # Under full declared load on the reference host: home and report pooled p95 at most 50 ms, batch start at most 100 ms.
+        self.assertEqual(soak.HOME_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.REPORT_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.BATCH_START_P95_BOUND_US, 100_000)
+        self.assertEqual(soak.ABSOLUTE_P95_BOUND_US, {"home": 50_000, "report": 50_000, "batch_start": 100_000})
+        self.assertNotIn("dispatch", soak.ABSOLUTE_P95_BOUND_US)   # dispatch keeps its relative gate
 
-    def test_each_latency_series_is_judged_on_its_own_pooled_p95(self):
-        for series, check in (("report", "report_p95_within_threshold_of_idle"), ("dispatch", "dispatch_within_threshold_of_idle"),
-                              ("batch_start", "batch_start_within_threshold_of_idle")):
+    def test_home_report_and_batch_start_pass_at_their_absolute_bound_and_fail_one_microsecond_beyond(self):
+        for series, bound in (("home", 50_000), ("report", 50_000), ("batch_start", 100_000)):
+            name = f"{series}_p95_within_absolute_bound"
             evidence = child_evidence()
-            evidence["loaded"][series]["p95_us"] = soak.latency_threshold_us(evidence["idle"][series]["p95_us"]) + 1
-            self.assertEqual(self.failing(self.verdict(evidence)), {check})
+            evidence["loaded"][series]["p95_us"] = bound
+            self.assertTrue(self.verdict(evidence)["passed"], series)
+            evidence["loaded"][series]["p95_us"] = bound + 1
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, series)
 
-    def test_a_pooled_pass_still_lists_the_windows_over_the_threshold_as_diagnostics(self):
+    def test_a_pooled_p95_far_over_the_old_relative_threshold_passes_when_it_is_inside_the_absolute_bound(self):
+        evidence = child_evidence(home=1000)
+        evidence["loaded"]["home"]["p95_us"] = 13_000   # 13 times idle: the relative gate would fail
+        verdict = self.verdict(evidence)
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        detail = self.check(verdict, "home_p95_within_absolute_bound")["detail"]
+        # The relative threshold and the ratio to idle stay recorded as diagnostics.
+        self.assertEqual(detail["bound_us"], 50_000)
+        self.assertEqual(detail["relative_threshold_us"], 6000)
+        self.assertFalse(detail["within_relative_threshold"])
+        self.assertEqual(detail["pooled_ratio"], 13.0)
+        self.assertEqual(detail["threshold_us"], 50_000)
+
+    def test_dispatch_keeps_the_relative_gate(self):
+        evidence = child_evidence()
+        evidence["loaded"]["dispatch"]["p95_us"] = soak.latency_threshold_us(evidence["idle"]["dispatch"]["p95_us"]) + 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"dispatch_within_threshold_of_idle"})
+
+    def test_a_pooled_pass_still_lists_the_windows_over_the_bound_as_diagnostics(self):
         evidence = child_evidence(windows=4)
-        threshold = soak.latency_threshold_us(evidence["idle"]["home"]["p95_us"])
-        evidence["windows"][1]["home"]["p95_us"] = threshold + 4000
-        evidence["windows"][3]["home"]["p95_us"] = threshold + 1
+        evidence["windows"][1]["home"]["p95_us"] = 50_001
+        evidence["windows"][3]["home"]["p95_us"] = 90_000
         verdict = self.verdict(evidence, minutes=4)
         self.assertTrue(verdict["passed"], verdict)
-        detail = self.check(verdict, "home_p95_within_threshold_of_idle")["detail"]
+        detail = self.check(verdict, "home_p95_within_absolute_bound")["detail"]
         self.assertEqual(detail["windows_over_the_threshold"], [2, 4])
         self.assertEqual(detail["windows_over_count"], 2)
-        self.assertEqual(detail["worst_window"], {"minute": 2, "p95_us": threshold + 4000})
+        self.assertEqual(detail["worst_window"], {"minute": 4, "p95_us": 90_000})
         self.assertEqual(len(detail["window_thresholds"]), 4)
         self.assertEqual(detail["pooled_p95_us"], evidence["loaded"]["home"]["p95_us"])
-
-    def test_a_pooled_failure_is_a_failure_even_when_every_window_is_inside(self):
-        evidence = child_evidence()
-        evidence["loaded"]["report"]["p95_us"] = soak.latency_threshold_us(evidence["idle"]["report"]["p95_us"]) + 1
-        verdict = self.verdict(evidence)
-        detail = self.check(verdict, "report_p95_within_threshold_of_idle")["detail"]
-        self.assertEqual(detail["windows_over_count"], 0)
-        self.assertIn("report_p95_within_threshold_of_idle", self.failing(verdict))
 
     def test_no_pooled_loaded_sample_is_not_a_pass(self):
         for loaded in ({}, {"home": {"count": 0, "p95_us": 0}}):
             evidence = child_evidence()
             evidence["loaded"] = loaded
-            self.assertIn("home_p95_within_threshold_of_idle", self.failing(self.verdict(evidence)))
+            self.assertIn("home_p95_within_absolute_bound", self.failing(self.verdict(evidence)))
 
-    def test_the_step_summary_lists_every_window_of_every_series(self):
+    def test_the_step_summary_lists_every_window_of_every_series_and_names_the_bound(self):
         evidence = child_evidence(windows=3)
         verdict = self.verdict(evidence, minutes=3)
         text = soak.render_summary(evidence, verdict)
@@ -349,12 +359,13 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(text.count("| 1 |"), 4)  # minute 1 appears once in each series table
         self.assertEqual(text.count("| 3 |"), 4)
         self.assertIn("pooled", text)
+        self.assertIn("50000 us", text)
 
-    def test_the_effective_threshold_of_every_window_is_recorded(self):
+    def test_the_effective_bound_and_the_relative_threshold_of_every_window_are_recorded(self):
         verdict = self.verdict()
-        rows = self.check(verdict, "home_p95_within_threshold_of_idle")["detail"]["window_thresholds"]
+        rows = self.check(verdict, "home_p95_within_absolute_bound")["detail"]["window_thresholds"]
         self.assertEqual(len(rows), 3)
-        self.assertEqual(rows[0], {"minute": 1, "p95_us": 1200, "threshold_us": 6000, "passed": True})
+        self.assertEqual(rows[0], {"minute": 1, "p95_us": 1200, "threshold_us": 50_000, "relative_threshold_us": 6000, "passed": True})
 
     def test_summed_backend_memory_and_cpu_must_stay_inside_the_budgets(self):
         samples = load_samples(3)

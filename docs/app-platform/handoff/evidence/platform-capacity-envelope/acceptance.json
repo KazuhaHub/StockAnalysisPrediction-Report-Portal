@@ -135,7 +135,7 @@
       "dispatch_p95_us": null,
       "batch_start_p95_us": null
     },
-    "latency_rule": "Owner decision 2026-11-13: the bound is max(1.5x idle p95, idle p95 + 5 ms), measured with load generated outside the measured process. Verdict computation (engineering decision, not the owner's): the pooled loaded p95; per-window p95 are diagnostics",
+    "latency_rule": "Owner decision 2026-11-15: under full declared load on the reference host, pooled loaded p95 of home and report at most 50 ms and of batch start at most 100 ms; dispatch@200 within max(1.5x idle p95, idle p95 + 5 ms). The relative floor of 2026-11-13 was measured and could not be met on a 2-physical-core host at full app CPU load (doc 171). Per-window p95, the relative threshold and the ratio to idle are diagnostics",
     "latency_floor_us": 5000,
     "pooled_loaded_p95_us": {
       "home": null,
@@ -180,18 +180,20 @@
       "cpu_window_min": null
     },
     "docker_root_free_bytes": null,
-    "image_store_probe": null
+    "image_store_probe": null,
+    "absolute_bounds_us": {
+      "home": 50000,
+      "report": 50000,
+      "batch_start": 100000
+    }
   },
   "assertions": {
     "every_excess_request_refused_with_its_typed_error": null,
-    "home_p95_within_threshold_of_idle": null,
-    "report_p95_within_threshold_of_idle": null,
     "dispatch_within_threshold_of_idle": null,
     "backend_memory_within_runner_budget": null,
     "backend_cpu_within_runner_budget": null,
     "no_backend_crash": null,
     "no_runner_crash": null,
-    "batch_start_within_threshold_of_idle": null,
     "session_outlives_the_run": null,
     "message_flood_answered_in_every_window": null,
     "message_flood_refusals_are_typed": null,
@@ -201,7 +203,10 @@
     "backends_reached_their_pid_limit": null,
     "host_memory_headroom": null,
     "host_samples_cover_the_load": null,
-    "unit_level_probe_tests_passed": null
+    "unit_level_probe_tests_passed": null,
+    "home_p95_within_absolute_bound": null,
+    "report_p95_within_absolute_bound": null,
+    "batch_start_p95_within_absolute_bound": null
   },
   "requirements": {
     "OPS-08": {
@@ -214,7 +219,7 @@
     }
   },
   "unproven_until_the_dispatch_run": [
-    "that p95 of GET /api/home, of the report page, of the queue's dispatch decision and of the batch scheduler's enqueue-to-start latency stay within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is the pooled loaded p95; per-window values are diagnostics)",
+    "that the pooled p95 of GET /api/home and of the report page stay within 50 ms, of the batch scheduler's enqueue-to-start within 100 ms and of the queue's dispatch decision within max(1.5x, +5 ms) of the idle baseline for two hours on shared CI hardware (the verdict is the pooled loaded p95; per-window values, the relative threshold and the ratio to idle are diagnostics)",
     "that the eight backends, held at 85% of their memory and their PID limit less a margin, stay inside the runner's memory and CPU budgets for two hours and none is OOM-killed or restarted, with every backend using at least 70% of its CPU quota in every minute",
     "that the message flood answers requests in every minute at the Portal's admission cap and every other attempt is a typed 429 app_platform_busy",
     "that each refused probe installation releases its namespace through the managed uninstall on the declared 8 GiB disk budget (each probe records retired: managed_uninstall)",

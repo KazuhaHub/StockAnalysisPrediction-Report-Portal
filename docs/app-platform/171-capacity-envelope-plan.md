@@ -1409,6 +1409,30 @@ is evidence for OPS-08.
     expensive): supported, and understated: 80 ms of runner CPU per relayed request, double work per request (handshake plus request), roughly 12% of the host for 5 relayed requests a second, plus `dockerd` at 4% to 5% moving the logs; the CPUs the platform keeps
     are 57% to 70% busy mostly with this. No run passed, so no stability rerun. Nothing was tuned.
 
+74. **The latency criterion becomes absolute under full load (owner decision 2026-11-15).** After #445 (`5defa0ab`) cut the runner's CPU per relayed request, the 5-minute PostgreSQL smoke on the default
+    configuration (production-mirroring layout, 50% budget, `reserved_cpus` 1, no pinning, no weight; run 43675027780 on `076e9ce8`) still missed the relative gate on three series:
+
+    | Series (us) | idle / pooled / relative bound | windows 1 to 5 |
+    | --- | --- | --- |
+    | home | 1744 / 13650 / 6744 | 11426, 12394, 15277, 11934, 16007 |
+    | report | 3283 / 27905 / 8283 | 31093, 11778, 30181, 14873, 30088 |
+    | dispatch@200 | 1028 / 5723 / 6028 (pass) | 5509, 4394, 6362, 5306, 6755 |
+    | batch start | 35096 / 84846 / 52644 | 74775, 30637, 112257, 32767, 94908 |
+
+    Runner CPU per relayed request fell from 80 ms (26.08 CPU-s for 324 relayed requests, run 43669177366) to **35.5 ms (15.53 CPU-s for 437 relayed requests in the 60 s profile window, 7.3 a second)**; the runner's share of
+    the host went from about 11.5% to 7.7%. Its remaining cost is dominated by the journal's SQLite reads on both the handshake and the request (`beginWritableRegistration`, `journal/writable_backend_registration_delivery.go:64`,
+    21.6%; `prepareWritableBackendExchange`, `journal/writable_backend_handshake.go:46`, 18.7%). Per-process breakdown (percent of the host, windows 2 to 5): host busy 82.3, Portal 7.9, flood 0.5, PostgreSQL 0.2, runner 7.7,
+    docker 5.1, backends 48.0, other 12.3; admitted 8.7 and refused 115 per second; per-CPU busy 68.4 / 86.7 / 86.6 / 86.1; Portal scope CPU pressure some 13.4, full 8.7. The relative gate is therefore still missed, and the
+    owner's decision applies: home and report pooled p95 at most 50 ms, batch start at most 100 ms, dispatch@200 unchanged. The verdict keeps the old relative threshold, the ratio to idle and every window as diagnostics
+    (`bound_kind`, `relative_threshold_us`, `within_relative_threshold`, `pooled_ratio`); the constants are `HOME_P95_BOUND_US`, `REPORT_P95_BOUND_US` and `BATCH_START_P95_BOUND_US`. The checks are named
+    `home_p95_within_absolute_bound`, `report_p95_within_absolute_bound` and `batch_start_p95_within_absolute_bound`.
+
+    Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
+    first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'
+    CPU weight (#442) 17.7 ms and 27.0 ms; with CPU 0 reserved (#443) 8.5 ms and 10.6 ms (dispatch passing for the first time); two reserved CPUs, platform pinning, platform weights 1000: no better (12 to 13 ms); with the cheaper
+    relay (#445) 13.7 ms and 27.9 ms in a run with the diagnosis on. The host is two physical cores (four SMT threads): the apps burn their 2 CPUs of quota continuously and the platform shares what is left, so a relative floor of
+    a few milliseconds over an idle host's 1 to 3 ms cannot hold under full declared load.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
