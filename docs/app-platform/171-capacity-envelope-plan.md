@@ -753,6 +753,61 @@ leaves work for an administrator. None of them may remain when the integration b
   absence (item 51). Fix: prove absence from the daemon's event stream, or leave the reservation held until
   the next reconcile has seen the resource absent twice, across the gate.
 
+### Resolutions: PR 4c residuals
+
+All six residuals above are closed on `fix/app-platform-4c-residuals`. None needed a schema or journal shape change.
+
+R1. **Orphaned restore start outside a recovery resume.** `platformHeldStartCandidates` now also lists a finished managed
+    restore that is not a recovery resume (a roll back of a failed update) whose `restore-start` is open, and
+    `loadPlatformSettlementStart` rebuilds that start from its own evidence (`loadPlatformRestoreSettlementStart`: the
+    snapshot checkpoint, the candidate activation and the installation policy, at the fence the effect was admitted
+    under, with no operation of the installation in flight). The existing steps then run unchanged: the runner is asked
+    to settle the orphan once, the namespace is swept, and the start is closed as never run. A resume keeps its own
+    recovery reconciliation and is excluded by its plan format. The roll back itself stays `recovery_required`; only the
+    runner's reservation is released.
+R2. **Enable or repair after its orphan settles (owner decision, 2026-11-15: auto-fail with evidence).** When a write of
+    the settlement leaves an enable or repair with its start reverted, `closePlatformSameReleaseStartNeverRan` runs in the
+    same transaction and, if the evidence holds, moves the operation to `failed` with the typed code `start_never_ran`
+    (already public, in the status view and the three locales), returns the installation from `recovery_required` to the
+    `disabled` state a clean failure leaves, and writes the audit entry `app_platform.start_never_ran_closed` carrying the
+    start effect id and the proof. The evidence follows `platformLoadNeverStartedEvidence`: a managed enable or repair in
+    `recovery_required` with a code, no lease and the installation's own fence and epoch; the installation disabled in
+    `recovery_required`; no active activation; the start an `enable-start` reverted by one of three receipts (absent with
+    no recorded reservation, the capacity refusal of exactly that start, or never-ran after the target was removed and
+    the namespace swept, which also requires the sweep applied); every effect settled and none past the start stage. Any
+    miss writes nothing and leaves `recovery_required`. The model gained `Operation.SettleStartNeverRan`, limited to
+    enable and repair failing at the start stage.
+R3. **Enable start held only as reserved.** Settled, not documented away: the reserved branch no longer returns early for
+    enable and repair. `prepareSettlementTargetRemoval` loaded an update checkpoint it only needs for a running target;
+    that load moved into the running branch, so the reserved-only stop and remove are bound to the reservation from the
+    start effect alone, and the start is closed as never run (and then closed as in R2). The candidate activation row is
+    retained as evidence for the removal effects, as for an update.
+R4. **Transient error abandoning a removal.** `platformLoadSettlementLease` and `platformLoadSettlementGuard` type only a
+    missing or unsettleable operation (and a moved fence) as the evidence or lease-conflict verdicts; any other read error
+    is returned unchanged. `resolveOpenRemoval` (and the same pattern in `reclaimPlatformImage`) abandons only on those
+    verdicts or a missing release row, and otherwise returns the error so the step is taken again.
+R5. **Held-start starvation.** The candidate read is no longer `LIMIT 8` in a fixed order: it reads up to 256 and
+    `platformHeldStartsToSettle` rotates a window of eight with `platformHeldStartCursor`, as the load settlement does.
+    The migration settlement candidates (`platformMigrationSettlementCandidates`, still `LIMIT 8`) and the recovery resume
+    candidates have the same shape and were not touched; they are not on the residual list.
+R6. **Late-create window.** Chosen: lengthen the second absence look past the daemon request timeout, with the data
+    execution gate held between the looks. It is simpler to make provable than either offered option. The event stream
+    cannot prove absence on its own: the daemon keeps a bounded in-memory history, so a quiet stream may mean lost
+    events, and it runs only on the Linux native job. Holding the reservation across separate reconciles needs a
+    persisted "seen absent once" marker, which is a runner journal change, and the candidate path has no later retry.
+    The existing two-second delay was shorter than `driver.DockerRequestTimeout` (five seconds), so it did not hold even
+    under the model the code states. The first look is taken with the gate held, so the runner can issue no further
+    create; a request issued earlier is carried out, or lost, within the timeout of its issue; a look more than the
+    timeout later therefore sees every container a create would produce. `defaultAbsenceSettleDelay` is now
+    `DockerRequestTimeout + 1s`, shared by the candidate, writable candidate and update-start settlements and the enable
+    source look; two delays (twelve seconds) fit the 30 second candidate connection bound, and a test pins both
+    properties. The remaining assumption is the stated one, that the daemon finishes a request within the timeout of its
+    issue. It is a time bound, not an observation of the daemon.
+
+Not proven here: no Docker path was run; the R4 tests of a transient read error use a cancelled context against the
+real store, and the descriptor-read branch of `resolveOpenRemoval` is not separately exercised; only a repair fixture
+(not an enable) drives R2 end to end, and the model test covers both actions.
+
 ## Resolution (refused install removal)
 
 This closes the gap recorded in resolution 53 on the soak branch (`feat/app-platform-capacity-soak`): a managed install the

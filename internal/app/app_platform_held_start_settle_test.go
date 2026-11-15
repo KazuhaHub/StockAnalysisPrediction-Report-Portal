@@ -15,9 +15,9 @@ import (
 
 // orphanedEnableFixture leaves a repair (whose start is an enable-start) that was ended for review after the
 // runner reserved its start, so the start effect is open and the runner may hold it claimed.
-func orphanedEnableFixture(t *testing.T) (*Server, string, platformRuntimeEndpoint, *platformFakeMigrationRunner) {
+func orphanedEnableFixture(t *testing.T, pg bool) (*Server, string, platformRuntimeEndpoint, *platformFakeMigrationRunner) {
 	t.Helper()
-	s, _, lease, _, _ := platformManagedRepairReviewFixture(t, false)
+	s, _, lease, _, _ := platformManagedRepairReviewFixture(t, pg)
 	ctx := context.Background()
 	current := lease
 	var err error
@@ -100,33 +100,35 @@ func (c *settleScript) install(s *Server, fake *platformFakeMigrationRunner) {
 // A claimed enable start with nothing executing it is settled by the runner, once, from the idle settlement tick,
 // and its effect is closed on what the runner then reads.
 func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
-	script.install(s, fake)
-	for range 6 {
-		if _, err := s.settlePlatformMigrations(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+		script.install(s, fake)
+		for range 6 {
+			if _, err := s.settlePlatformMigrations(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	if script.settled != 1 {
-		t.Fatalf("the runner was asked to settle the orphan %d times", script.settled)
-	}
-	if effectState(t, s, operation, "start", 1) != "reverted" {
-		t.Fatalf("the enable start was not closed: %s", effectState(t, s, operation, "start", 1))
-	}
-	if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("settle-start") != 1 {
-		t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
-	}
-	requireSameReleaseOperationClosed(t, s, operation)
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id WHERE o.id=? AND a.state='candidate'`, operation) != 0 {
-		t.Fatal("the candidate of a start that never ran was left behind")
-	}
-	// A closed start is not driven again, and the operation is not closed a second time.
-	before := script.settled
-	if progressed, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || progressed != 0 || script.settled != before {
-		t.Fatalf("a closed start was settled again: %d %v", progressed, err)
-	}
-	requireSameReleaseOperationClosed(t, s, operation)
+		if script.settled != 1 {
+			t.Fatalf("the runner was asked to settle the orphan %d times", script.settled)
+		}
+		if effectState(t, s, operation, "start", 1) != "reverted" {
+			t.Fatalf("the enable start was not closed: %s", effectState(t, s, operation, "start", 1))
+		}
+		if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("settle-start") != 1 {
+			t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
+		}
+		requireSameReleaseOperationClosed(t, s, operation)
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id WHERE o.id=? AND a.state='candidate'`, operation) != 0 {
+			t.Fatal("the candidate of a start that never ran was left behind")
+		}
+		// A closed start is not driven again, and the operation is not closed a second time.
+		before := script.settled
+		if progressed, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || progressed != 0 || script.settled != before {
+			t.Fatalf("a closed start was settled again: %d %v", progressed, err)
+		}
+		requireSameReleaseOperationClosed(t, s, operation)
+	})
 }
 
 // requireSameReleaseOperationClosed is what a start proven never to have run leaves behind: the operation failed
@@ -169,45 +171,51 @@ func requireOperationStillInRecovery(t *testing.T, s *Server, operation string) 
 
 // Nothing is settled while the runner may still be executing the start.
 func TestSettlementTickLeavesAnEnableStartThatMayBeExecuting(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	script := &settleScript{before: held("pending"), after: held("pending")}
-	script.install(s, fake)
-	for range 3 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		script := &settleScript{before: held("pending"), after: held("pending")}
+		script.install(s, fake)
+		for range 3 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	if script.settled != 0 || effectState(t, s, operation, "start", 1) != "prepared" {
-		t.Fatal("an executing start was settled")
-	}
+		if script.settled != 0 || effectState(t, s, operation, "start", 1) != "prepared" {
+			t.Fatal("an executing start was settled")
+		}
+	})
 }
 
 // A window that has not passed settles nothing either: a claim may still arrive.
 func TestSettlementTickWaitsOutTheStartWindowOfAnEnable(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	mustExec(t, s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms+3600000 WHERE id=?`, operation)
-	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
-	script.install(s, fake)
-	if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || script.settled != 0 {
-		t.Fatalf("a start inside its window was settled: %v", err)
-	}
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		mustExec(t, s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms+3600000 WHERE id=?`, operation)
+		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+		script.install(s, fake)
+		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || script.settled != 0 {
+			t.Fatalf("a start inside its window was settled: %v", err)
+		}
+	})
 }
 
 // An enable orphan the runner finds a container for is closed as applied and nothing is removed or restored.
 func TestSettlementTickClosesAnEnableStartTheRunnerFoundRunning(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	s.platformReadStartReceipt = func(_ context.Context, ep platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
-		return platformUpdateStartRunningFixture(i, *i.reservation, endpoint), nil
-	}
-	for range 2 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		s.platformReadStartReceipt = func(_ context.Context, ep platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			return platformUpdateStartRunningFixture(i, *i.reservation, endpoint), nil
 		}
-	}
-	if effectState(t, s, operation, "start", 1) != "applied" || fake.count("remove-stop") != 0 || fake.count("execute-restore") != 0 || fake.count("execute-start") != 0 {
-		t.Fatalf("running start: %s %v", effectState(t, s, operation, "start", 1), fake.calls)
-	}
-	requireOperationStillInRecovery(t, s, operation)
+		for range 2 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if effectState(t, s, operation, "start", 1) != "applied" || fake.count("remove-stop") != 0 || fake.count("execute-restore") != 0 || fake.count("execute-start") != 0 {
+			t.Fatalf("running start: %s %v", effectState(t, s, operation, "start", 1), fake.calls)
+		}
+		requireOperationStillInRecovery(t, s, operation)
+	})
 }
 
 // A resume whose restore start the runner holds claimed with nothing executing it is settled from the recovery
@@ -306,158 +314,177 @@ func cloneHeldStarts(t *testing.T, s *Server, operation string, n int) []string 
 // Eight starts that keep failing must not keep every later one from being tried. The window rotates, so every open
 // start is reached within ceil(n/8) ticks, however the first ones behave.
 func TestHeldStartSettlementReachesEveryOpenStart(t *testing.T) {
-	s, operation, _, _ := orphanedEnableFixture(t)
-	all := cloneHeldStarts(t, s, operation, 19)
-	if len(all) != 20 {
-		t.Fatal("fixture")
-	}
-	seen := map[string]int{}
-	for range 3 {
-		window, err := s.platformHeldStartsToSettle(context.Background())
-		if err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, _, _ := orphanedEnableFixture(t, pg)
+		all := cloneHeldStarts(t, s, operation, 19)
+		if len(all) != 20 {
+			t.Fatal("fixture")
 		}
-		if len(window) > platformHeldStartWindow {
-			t.Fatalf("a window of %d starts", len(window))
+		seen := map[string]int{}
+		for range 3 {
+			window, err := s.platformHeldStartsToSettle(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(window) > platformHeldStartWindow {
+				t.Fatalf("a window of %d starts", len(window))
+			}
+			for _, id := range window {
+				seen[id]++
+			}
 		}
-		for _, id := range window {
-			seen[id]++
+		for _, id := range all {
+			if seen[id] == 0 {
+				t.Fatalf("the open start of %s was not reached in three ticks: %v", id, seen)
+			}
 		}
-	}
-	for _, id := range all {
-		if seen[id] == 0 {
-			t.Fatalf("the open start of %s was not reached in three ticks: %v", id, seen)
-		}
-	}
+	})
 }
 
 // Through the real tick: the runner is asked about the start of every operation, not only the first eight.
 func TestHeldStartSettlementTickAsksAboutEveryStartNotOnlyTheFirstEight(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	cloneHeldStarts(t, s, operation, 11)
-	asked := map[string]bool{}
-	s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
-		asked[i.command.OperationID] = true
-		return nil, errors.New("the runner is unreachable")
-	}
-	_ = fake
-	for range 3 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		cloneHeldStarts(t, s, operation, 11)
+		asked := map[string]bool{}
+		s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			asked[i.command.OperationID] = true
+			return nil, errors.New("the runner is unreachable")
 		}
-	}
-	// The clones are older, so they fill the first window and carry no evidence that verifies; what is proven is
-	// that failing starts ahead of the fixture do not keep it from being reached.
-	if !asked[operation] {
-		t.Fatal("a start behind a window of failing starts was never tried")
-	}
+		_ = fake
+		for range 3 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The clones are older, so they fill the first window and carry no evidence that verifies; what is proven is
+		// that failing starts ahead of the fixture do not keep it from being reached.
+		if !asked[operation] {
+			t.Fatal("a start behind a window of failing starts was never tried")
+		}
+	})
 }
 
 // An enable or repair start the runner holds only as reserved (admitted, never claimed) leaves a pending target
 // resource. It is removed bound to the reservation, exactly as an update's is, and the start is then closed as
 // never run: the resource row is not left behind for an administrator.
 func TestSettlementTickRemovesTheTargetOfAReservedEnableStart(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	var removals []string
-	fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
-		if i.command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || i.start.running != nil || i.start.command.Kind != "enable-start" {
-			t.Errorf("the removal is not bound to the reserved enable start: %+v", i.command)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		var removals []string
+		fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+			if i.command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || i.start.running != nil || i.start.command.Kind != "enable-start" {
+				t.Errorf("the removal is not bound to the reserved enable start: %+v", i.command)
+			}
+			removals = append(removals, i.command.Stage)
+			result := "stopped"
+			if i.command.Stage == "remove_code" {
+				result = "absent"
+			}
+			return platformUpdateTargetRemovalObservationFixture(i, endpoint, result), nil
 		}
-		removals = append(removals, i.command.Stage)
-		result := "stopped"
-		if i.command.Stage == "remove_code" {
-			result = "absent"
+		script := &settleScript{before: held("reserved"), after: held("reserved")}
+		script.install(s, fake)
+		s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			if len(removals) > 0 {
+				return nil, held("never_ran")
+			}
+			return nil, held("reserved")
 		}
-		return platformUpdateTargetRemovalObservationFixture(i, endpoint, result), nil
-	}
-	script := &settleScript{before: held("reserved"), after: held("reserved")}
-	script.install(s, fake)
-	s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
-		if len(removals) > 0 {
-			return nil, held("never_ran")
+		for range 8 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
 		}
-		return nil, held("reserved")
-	}
-	for range 8 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+		if len(removals) != 2 || removals[0] != "stop" || removals[1] != "remove_code" || script.settled != 0 {
+			t.Fatalf("the reserved target was not removed by the reserved-only removal alone: %v settlements=%d", removals, script.settled)
 		}
-	}
-	if len(removals) != 2 || removals[0] != "stop" || removals[1] != "remove_code" || script.settled != 0 {
-		t.Fatalf("the reserved target was not removed by the reserved-only removal alone: %v settlements=%d", removals, script.settled)
-	}
-	if effectState(t, s, operation, "start", 1) != "reverted" || effectState(t, s, operation, "settle", 4) != "applied" || effectState(t, s, operation, "settle", 5) != "applied" ||
-		effectState(t, s, operation, "settle", 6) != "applied" {
-		t.Fatal("the start was not closed as never run after its target was removed and its namespace swept")
-	}
-	requireSameReleaseOperationClosed(t, s, operation)
-	if fake.count("execute-start") != 0 || fake.count("execute-restore") != 0 {
-		t.Fatalf("the settlement sent the start: %v", fake.calls)
-	}
+		if effectState(t, s, operation, "start", 1) != "reverted" || effectState(t, s, operation, "settle", 4) != "applied" || effectState(t, s, operation, "settle", 5) != "applied" ||
+			effectState(t, s, operation, "settle", 6) != "applied" {
+			t.Fatal("the start was not closed as never run after its target was removed and its namespace swept")
+		}
+		requireSameReleaseOperationClosed(t, s, operation)
+		if fake.count("execute-start") != 0 || fake.count("execute-restore") != 0 {
+			t.Fatalf("the settlement sent the start: %v", fake.calls)
+		}
+	})
 }
 
 // A start the runner refused for capacity never ran, whatever the signed window: the operation is closed the same way.
 func TestSettlementTickFailsAnEnableWhoseStartTheRunnerRefusedForCapacity(t *testing.T) {
-	s, operation, endpoint, _ := orphanedEnableFixture(t)
-	s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
-		id := journal.CapacityIdentityOfUpdateStart(i.command)
-		return nil, &journal.CapacityRefusalError{Receipt: journal.CapacityRefusal{
-			Format: "portal.runner.capacity-refusal/1-dev.1", DeploymentID: id.DeploymentID, ControllerEpoch: id.ControllerEpoch,
-			InstallationID: id.InstallationID, OperationID: id.OperationID, TargetGeneration: id.TargetGeneration, Stage: id.Stage,
-			EffectNumber: id.EffectNumber, EffectID: id.EffectID, Kind: id.Kind, PayloadSHA256: id.PayloadSHA256,
-			Outcome: "capacity_exhausted", Dimension: "memory", Requested: "256", Remaining: "100",
-			SettledMS: strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
-		}}
-	}
-	for range 3 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, _ := orphanedEnableFixture(t, pg)
+		s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			id := journal.CapacityIdentityOfUpdateStart(i.command)
+			return nil, &journal.CapacityRefusalError{Receipt: journal.CapacityRefusal{
+				Format: "portal.runner.capacity-refusal/1-dev.1", DeploymentID: id.DeploymentID, ControllerEpoch: id.ControllerEpoch,
+				InstallationID: id.InstallationID, OperationID: id.OperationID, TargetGeneration: id.TargetGeneration, Stage: id.Stage,
+				EffectNumber: id.EffectNumber, EffectID: id.EffectID, Kind: id.Kind, PayloadSHA256: id.PayloadSHA256,
+				Outcome: "capacity_exhausted", Dimension: "memory", Requested: "256", Remaining: "100",
+				SettledMS: strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
+			}}
 		}
-	}
-	if effectState(t, s, operation, "start", 1) != "reverted" {
-		t.Fatalf("the refused start was not reverted: %s", effectState(t, s, operation, "start", 1))
-	}
-	requireSameReleaseOperationClosed(t, s, operation)
+		for range 3 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if effectState(t, s, operation, "start", 1) != "reverted" {
+			t.Fatalf("the refused start was not reverted: %s", effectState(t, s, operation, "start", 1))
+		}
+		requireSameReleaseOperationClosed(t, s, operation)
+	})
 }
 
 // A start the runner holds no row for and that recorded no reservation was never admitted, once every window has
 // passed: the operation is closed the same way.
 func TestSettlementTickFailsAnEnableWhoseStartWasNeverAdmitted(t *testing.T) {
-	s, operation, endpoint, _ := orphanedEnableFixture(t)
-	mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}',observed_fence=0 WHERE operation_id=? AND stage='start' AND effect_number=1`, operation)
-	s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
-		return nil, errPlatformStartAbsent
-	}
-	for range 3 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, _ := orphanedEnableFixture(t, pg)
+		mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}',observed_fence=0 WHERE operation_id=? AND stage='start' AND effect_number=1`, operation)
+		s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			return nil, errPlatformStartAbsent
 		}
-	}
-	if effectState(t, s, operation, "start", 1) != "reverted" {
-		t.Fatalf("the absent start was not reverted: %s", effectState(t, s, operation, "start", 1))
-	}
-	requireSameReleaseOperationClosed(t, s, operation)
+		for range 3 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if effectState(t, s, operation, "start", 1) != "reverted" {
+			t.Fatalf("the absent start was not reverted: %s", effectState(t, s, operation, "start", 1))
+		}
+		requireSameReleaseOperationClosed(t, s, operation)
+	})
 }
 
 // The start is reverted, but another effect of the operation has no verdict: that is not proof the namespace was left
 // alone, so the operation stays in recovery for an administrator. Nothing is closed on a guess.
 func TestSettlementTickKeepsAnEnableInRecoveryWhileAnotherEffectIsUnsettled(t *testing.T) {
-	s, operation, endpoint, fake := orphanedEnableFixture(t)
-	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-		SELECT operation_id,stage,31,?,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,0,'unknown','{}',created_ms,updated_ms
-		FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'start' AND state='applied' LIMIT 1`, platformFixtureID(9990), operation)
-	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='unknown' AND stage<>'start'`, operation) != 1 {
-		t.Fatal("fixture: the unsettled effect was not added")
-	}
-	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
-	script.install(s, fake)
-	for range 6 {
-		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, endpoint, fake := orphanedEnableFixture(t, pg)
+		mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+			SELECT operation_id,stage,31,?,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,0,'unknown','{}',created_ms,updated_ms
+			FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'start' AND state='applied' LIMIT 1`, platformFixtureID(9990), operation)
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='unknown' AND stage<>'start'`, operation) != 1 {
+			t.Fatal("fixture: the unsettled effect was not added")
 		}
-	}
-	if effectState(t, s, operation, "start", 1) != "reverted" {
-		t.Fatal("the fixture did not revert the start")
-	}
-	requireOperationStillInRecovery(t, s, operation)
+		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+		script.install(s, fake)
+		for range 6 {
+			if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if effectState(t, s, operation, "start", 1) != "reverted" {
+			t.Fatal("the fixture did not revert the start")
+		}
+		requireOperationStillInRecovery(t, s, operation)
+	})
+}
+
+// eachPlatformDriver runs a test on SQLite and, when TEST_POSTGRES_DSN is set, on PostgreSQL.
+func eachPlatformDriver(t *testing.T, fn func(t *testing.T, pg bool)) {
+	t.Helper()
+	t.Run("sqlite", func(t *testing.T) { fn(t, false) })
+	t.Run("postgres", func(t *testing.T) { fn(t, true) })
 }

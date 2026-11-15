@@ -11,10 +11,10 @@ import (
 // orphanedRestoreStartFixture leaves an ordinary roll back (a managed restore that is not a recovery resume) that
 // ended for review after the runner reserved its start: the start effect is open, and the runner may hold it claimed
 // with nothing executing it.
-func orphanedRestoreStartFixture(t *testing.T) (*settleFixture, string) {
+func orphanedRestoreStartFixture(t *testing.T, pg bool) (*settleFixture, string) {
 	t.Helper()
 	platformWritableUpdateFixtures(t)
-	f := settleOrphaned(t, false)
+	f := settleOrphaned(t, pg)
 	h := newMigrationHTTP(t, f)
 	ctx := context.Background()
 	const plans, operations = "/api/admin/app-platform/plans", "/api/admin/app-platform/operations"
@@ -59,59 +59,63 @@ func orphanedRestoreStartFixture(t *testing.T) (*settleFixture, string) {
 // restore ends with the start orphaned, the idle settlement asks the runner to settle it (once), and closes the start
 // effect on what the runner then reads; the reservation is released by the runner's settlement.
 func TestSettlementTickSettlesAnOrphanedRestoreStartOutsideARecoveryResume(t *testing.T) {
-	f, operation := orphanedRestoreStartFixture(t)
-	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
-	script.install(f.s, f.fake)
-	candidates, err := f.s.platformHeldStartCandidates(context.Background())
-	if err != nil || !slices.Contains(candidates, operation) {
-		t.Fatalf("a finished roll back with an open start is not a candidate: %v %v", candidates, err)
-	}
-	for range 6 {
-		if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		f, operation := orphanedRestoreStartFixture(t, pg)
+		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+		script.install(f.s, f.fake)
+		candidates, err := f.s.platformHeldStartCandidates(context.Background())
+		if err != nil || !slices.Contains(candidates, operation) {
+			t.Fatalf("a finished roll back with an open start is not a candidate: %v %v", candidates, err)
 		}
-	}
-	if script.settled != 1 {
-		t.Fatalf("the runner was asked to settle the orphan %d times", script.settled)
-	}
-	if script.receipts[0].Outcome != "never_ran" || script.receipts[0].OperationID == "" {
-		t.Fatal("unexpected scripted receipt")
-	}
-	if effectState(t, f.s, operation, "start", 1) != "reverted" {
-		t.Fatalf("the restore start was not closed: %s", effectState(t, f.s, operation, "start", 1))
-	}
-	if effectState(t, f.s, operation, "settle", 3) != "applied" || effectState(t, f.s, operation, "settle", 6) != "applied" {
-		t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
-	}
-	if f.fake.count("execute-start") != 0 {
-		t.Fatalf("the settlement sent the start: %v", f.fake.calls)
-	}
-	// A closed start is not driven again.
-	before := script.settled
-	if progressed, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil || progressed != 0 || script.settled != before {
-		t.Fatalf("a closed start was settled again: %d %v", progressed, err)
-	}
+		for range 6 {
+			if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if script.settled != 1 {
+			t.Fatalf("the runner was asked to settle the orphan %d times", script.settled)
+		}
+		if script.receipts[0].Outcome != "never_ran" || script.receipts[0].OperationID == "" {
+			t.Fatal("unexpected scripted receipt")
+		}
+		if effectState(t, f.s, operation, "start", 1) != "reverted" {
+			t.Fatalf("the restore start was not closed: %s", effectState(t, f.s, operation, "start", 1))
+		}
+		if effectState(t, f.s, operation, "settle", 3) != "applied" || effectState(t, f.s, operation, "settle", 6) != "applied" {
+			t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
+		}
+		if f.fake.count("execute-start") != 0 {
+			t.Fatalf("the settlement sent the start: %v", f.fake.calls)
+		}
+		// A closed start is not driven again.
+		before := script.settled
+		if progressed, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil || progressed != 0 || script.settled != before {
+			t.Fatalf("a closed start was settled again: %d %v", progressed, err)
+		}
+	})
 }
 
 // Nothing is settled while the runner may still be executing the start, or inside the start's signed window.
 func TestSettlementTickLeavesARestoreStartThatMayBeExecuting(t *testing.T) {
-	f, operation := orphanedRestoreStartFixture(t)
-	script := &settleScript{before: held("pending"), after: held("pending")}
-	script.install(f.s, f.fake)
-	for range 3 {
-		if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil {
-			t.Fatal(err)
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		f, operation := orphanedRestoreStartFixture(t, pg)
+		script := &settleScript{before: held("pending"), after: held("pending")}
+		script.install(f.s, f.fake)
+		for range 3 {
+			if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil {
+				t.Fatal(err)
+			}
 		}
-	}
-	if script.settled != 0 || effectState(t, f.s, operation, "start", 1) != "prepared" {
-		t.Fatal("an executing restore start was settled")
-	}
-	mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms+7200000 WHERE id=?`, operation)
-	script = &settleScript{before: held("orphaned"), after: held("never_ran")}
-	script.install(f.s, f.fake)
-	if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil || script.settled != 0 {
-		t.Fatalf("a restore start inside its window was settled: %v", err)
-	}
+		if script.settled != 0 || effectState(t, f.s, operation, "start", 1) != "prepared" {
+			t.Fatal("an executing restore start was settled")
+		}
+		mustExec(t, f.s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms+7200000 WHERE id=?`, operation)
+		script = &settleScript{before: held("orphaned"), after: held("never_ran")}
+		script.install(f.s, f.fake)
+		if _, err := f.s.settlePlatformHeldStarts(context.Background(), f.endpoint); err != nil || script.settled != 0 {
+			t.Fatalf("a restore start inside its window was settled: %v", err)
+		}
+	})
 }
 
 // A recovery resume keeps its own path, the recovery reconciliation, which runs only while the Portal is paused: the
