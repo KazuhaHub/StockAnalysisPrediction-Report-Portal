@@ -40,6 +40,17 @@ func newIdentityFixture(t *testing.T) identityFixture {
 	return f
 }
 
+// aliasPath is a path in its own temporary directory that does not exist and that an unprivileged runner can
+// search: a lookup that cannot be examined (EACCES under /var/lib/docker, say) is a refusal, not an absence.
+func aliasPath(t *testing.T, name string) string {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(root, name)
+}
+
 func referencedFresh(t *testing.T, path, source string) (bool, error) {
 	t.Helper()
 	return candidateIPCReferenced(context.Background(), path, source)
@@ -69,7 +80,7 @@ func fakeMountInfo(t *testing.T, binds map[string]string) {
 
 func TestIdentityOverlapSemantics(t *testing.T) {
 	f := newIdentityFixture(t)
-	const alias = "/var/lib/docker/volumes/vol/_data"
+	alias := aliasPath(t, "volumes/vol/_data")
 	cases := []struct {
 		name string
 		real string // the directory the alias really is
@@ -98,7 +109,7 @@ func TestIdentityOverlapSemantics(t *testing.T) {
 // where it leads.
 func TestIdentityOverlapSeesAnAliasThatPathsDoNot(t *testing.T) {
 	f := newIdentityFixture(t)
-	const alias = "/srv/unrelated/looks-harmless"
+	alias := aliasPath(t, "unrelated/looks-harmless")
 	fakeMountInfo(t, map[string]string{alias: f.namespace})
 	if strings.HasPrefix(alias, f.namespace) || strings.HasPrefix(f.namespace, alias) {
 		t.Fatal("fixture: the alias must not overlap by name")
@@ -120,14 +131,15 @@ func TestIdentityOverlapSeesAnAliasThatPathsDoNot(t *testing.T) {
 func TestDifferentDeviceNeverOverlaps(t *testing.T) {
 	f := newIdentityFixture(t)
 	file := filepath.Join(t.TempDir(), "mountinfo")
-	body := "1 0 8:1 / / rw - ext4 /dev/vda1 rw\n2 1 9:9 / /srv/other rw - ext4 /dev/vdb rw\n"
+	other := aliasPath(t, "other")
+	body := "1 0 8:1 / / rw - ext4 /dev/vda1 rw\n2 1 9:9 / " + other + " rw - ext4 /dev/vdb rw\n"
 	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
 	old := candidateIPCMountInfoPath
 	candidateIPCMountInfoPath = file
 	t.Cleanup(func() { candidateIPCMountInfoPath = old })
-	if got, err := referencedFresh(t, f.namespace, "/srv/other/sub"); err != nil || got {
+	if got, err := referencedFresh(t, f.namespace, other+"/sub"); err != nil || got {
 		t.Fatal("a path on another device was an overlap", got, err)
 	}
 }
