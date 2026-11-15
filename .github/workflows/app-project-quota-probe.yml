@@ -31,6 +31,10 @@ on:
         description: Override of the runner's capacity.reserved_cpus (CPUs kept free of app containers; empty is the runner default, 1 on four or more CPUs). A run that overrides the default is never OPS-08 evidence
         type: string
         default: ''
+      soak_pin_platform:
+        description: Confine the measured Portal's scope, PostgreSQL and the runner to the reserved CPUs (AllowedCPUs). Diagnostic, never OPS-08 evidence
+        type: boolean
+        default: false
       soak_variant:
         description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
         type: string
@@ -549,6 +553,7 @@ jobs:
       APP_CAPACITY_SOAK_DIAGNOSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
       APP_CAPACITY_SOAK_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_cpu_percent || '' }}
       APP_CAPACITY_SOAK_RESERVED_CPUS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_reserved_cpus || '' }}
+      APP_CAPACITY_SOAK_PIN_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_pin_platform && 'true' || '' }}
       APP_CAPACITY_SOAK_VARIANT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_variant || '' }}
     steps:
       - uses: actions/checkout@v6
@@ -609,7 +614,7 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \

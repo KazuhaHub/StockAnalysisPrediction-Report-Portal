@@ -234,7 +234,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	if os.Getenv("APP_CAPACITY_SOAK_SCOPES") == "systemd" {
 		// The Portal runs in its own transient scope under system.slice at the default weight, as the compose container of
 		// production sits among its siblings; its flood generator, started by it, shares that scope (about 0.5% of the host).
-		argv := soakScopeCommand("soak-portal", 41001, binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
+		argv := soakScopeCommand("soak-portal", os.Getenv("APP_CAPACITY_SOAK_PIN_CPUS"), 41001, binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
 		dir, env := child.Dir, child.Env
 		child = exec.Command(argv[0], argv[1:]...)
 		child.Dir, child.Env = dir, append(env, "PATH=/usr/sbin:/usr/bin:/sbin:/bin")

@@ -816,6 +816,47 @@ class StallTests(unittest.TestCase):
         self.assertEqual(summary["loaded"]["vm.dirty_kib"]["max"], 90_000)
 
 
+class PinPlatformTests(unittest.TestCase):
+    def test_the_pin_set_is_the_reserved_cpus_the_runner_keeps_free_of_apps(self):
+        self.assertEqual(soak.pin_cpu_set(""), "0")        # the runner default reserves one CPU
+        self.assertEqual(soak.pin_cpu_set("1"), "0")
+        self.assertEqual(soak.pin_cpu_set("2"), "0-1")
+        self.assertEqual(soak.pin_cpu_set("3"), "0-2")
+        with self.assertRaises(RuntimeError):
+            soak.pin_cpu_set("0")                          # nothing reserved, nothing to pin to
+
+    def test_the_pin_flag_is_a_closed_boolean(self):
+        self.assertFalse(soak.soak_pin_platform(""))
+        self.assertTrue(soak.soak_pin_platform("true"))
+        self.assertFalse(soak.soak_pin_platform("false"))
+        with self.assertRaises(RuntimeError):
+            soak.soak_pin_platform("yes")
+
+    def test_a_pinned_run_is_not_evidence(self):
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        evidence, samples = child_evidence(windows=120), load_samples(120)
+        verdict = soak.evaluate(evidence, samples, pin_platform=True, **kwargs)
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertTrue(verdict["pin_platform"])
+
+    def test_the_postgres_unit_is_found_by_its_name(self):
+        out = "postgresql@16-main.service loaded active running PostgreSQL Cluster 16-main\n"
+        self.assertEqual(soak.postgres_unit(lambda *a: out), "postgresql@16-main.service")
+        with self.assertRaises(RuntimeError):
+            soak.postgres_unit(lambda *a: "")
+
+    def test_the_layout_records_each_processs_actual_affinity(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc, fs = Path(root) / "proc", Path(root) / "cgroup"
+            proc.mkdir()
+            write_process(proc, 10, "portal.test", ["/t/portal.test", "-test.run=^TestPlatformCapacitySoakChild$"], (1, 1), cgroup="0::/system.slice/soak-portal.scope")
+            (proc / "10" / "status").write_text("Name:\tportal.test\nCpus_allowed:\t3\nCpus_allowed_list:\t0-1\n")
+            (fs / "system.slice/soak-portal.scope").mkdir(parents=True)
+            layout = soak.cgroup_layout(proc, fs, set(), "/system.slice")
+        self.assertEqual(layout["portal"]["cpus_allowed"], "0-1")
+
+
 class ReservedCPUTests(unittest.TestCase):
     def test_the_reserved_cpus_override_is_empty_or_a_small_integer(self):
         self.assertEqual(soak.soak_reserved_cpus(""), "")

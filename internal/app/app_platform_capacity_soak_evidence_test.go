@@ -331,12 +331,27 @@ func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEver
 // soakScopeCommand is the argv that starts command in its own transient scope under system.slice at the default CPU weight, as a
 // compose container or a systemd unit of production sits among its siblings. uid >= 0 drops root inside the scope. systemd-run
 // itself is root; the scope exists before the process runs, so the process is born in it.
-func soakScopeCommand(unit string, uid int, command ...string) []string {
-	argv := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=" + unit, "-p", "CPUWeight=100", "--"}
+func soakScopeCommand(unit, allowedCPUs string, uid int, command ...string) []string {
+	argv := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=" + unit, "-p", "CPUWeight=100"}
+	if allowedCPUs != "" {
+		argv = append(argv, "-p", "AllowedCPUs="+allowedCPUs)
+	}
+	argv = append(argv, "--")
 	if uid >= 0 {
 		argv = append(argv, "setpriv", "--reuid="+strconv.Itoa(uid), "--regid="+strconv.Itoa(uid), "--groups="+strconv.Itoa(uid))
 	}
 	return append(argv, command...)
+}
+
+// soakReservedCPUSet is the CPU list of the reserved CPUs: the runner reserves the lowest ones.
+func soakReservedCPUSet(reserved int) string {
+	switch {
+	case reserved < 1:
+		return ""
+	case reserved == 1:
+		return "0"
+	}
+	return "0-" + strconv.Itoa(reserved-1)
 }
 
 // soakParseCPUPercent reads APP_CAPACITY_SOAK_CPU_PERCENT: empty leaves the runner's own default, else an override of its
@@ -792,14 +807,18 @@ func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
 }
 
 func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeight(t *testing.T) {
-	got := soakScopeCommand("soak-runner", -1, "/t/portal.test", "-test.run=^X$")
+	got := soakScopeCommand("soak-runner", "", -1, "/t/portal.test", "-test.run=^X$")
 	want := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-runner", "-p", "CPUWeight=100", "--",
 		"/t/portal.test", "-test.run=^X$"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q", got)
 	}
 	// An unprivileged process drops root inside the scope, after systemd has placed it: systemd-run itself runs as root.
-	got = soakScopeCommand("soak-portal", 41001, "/t/portal.test", "-test.v")
+	pinned := soakScopeCommand("soak-runner", "0-1", -1, "/t/portal.test")
+	if strings.Join(pinned[6:10], " ") != "-p CPUWeight=100 -p AllowedCPUs=0-1" && strings.Join(pinned[6:11], " ") != "-p CPUWeight=100 -p AllowedCPUs=0-1" {
+		t.Fatalf("pinned argv = %q", pinned)
+	}
+	got = soakScopeCommand("soak-portal", "", 41001, "/t/portal.test", "-test.v")
 	want = []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-portal", "-p", "CPUWeight=100", "--",
 		"setpriv", "--reuid=41001", "--regid=41001", "--groups=41001", "/t/portal.test", "-test.v"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
@@ -821,6 +840,20 @@ func TestSoakReservedCPUsIsEmptyOrASmallNonNegativeInteger(t *testing.T) {
 		if _, err := soakParseReservedCPUs(bad); err == nil {
 			t.Errorf("accepted %q", bad)
 		}
+	}
+}
+
+func TestSoakPinnedCPUSetIsTheReservedRange(t *testing.T) {
+	for _, tc := range []struct {
+		reserved int
+		want     string
+	}{{1, "0"}, {2, "0-1"}, {3, "0-2"}} {
+		if got := soakReservedCPUSet(tc.reserved); got != tc.want {
+			t.Errorf("%d reserved = %q, want %q", tc.reserved, got, tc.want)
+		}
+	}
+	if soakReservedCPUSet(0) != "" {
+		t.Error("no reserved CPU, nothing to pin to")
 	}
 }
 
