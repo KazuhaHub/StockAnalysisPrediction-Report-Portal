@@ -366,8 +366,9 @@ the gaps and the run that produced the evidence are in
 `docs/app-platform/handoff/evidence/platform-ops-deployment-drills/acceptance.json`. Three texts in the docs
 are not reconciled, and the drills do not settle them:
 
-- Section 6 above says OPS-05 deploys "the platform candidate". The drill builds and deploys the candidate
-  from the commit under test, without an app runner (the runner is a separate host service).
+- Section 6 above says OPS-05 deploys "the platform candidate" against "the database copy". The drill builds
+  and deploys the candidate from the commit under test onto an empty first-boot database, without an app
+  runner; the runner and recovery-bundle follow-up is named in doc 06 (Deployment drills status).
 - Section 9 says the beta gate requires OPS-05 and OPS-06 "passed on staging". The drills run on a CI host,
   not staging, so they do not by themselves meet that gate.
 - Docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags or

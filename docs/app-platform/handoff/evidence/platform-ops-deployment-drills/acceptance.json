@@ -110,7 +110,8 @@
       "gaps": [
         "The compose file is the repository's docker-compose.yml, not the server's own beta configuration; the server's `beta` channel reference, its env file and host-level parts are not exercised.",
         "The version-reference rule is unreconciled in the docs: docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags, while the current production procedure is a single compose file with a fixed version tag (in use since v2026.43.5). The drill follows the current procedure and checks that only the image line differs; see the engineering note in doc 167 section 6.",
-        "No app runner is deployed. The runner is a separate host service (deploy/app-runner) that needs an XFS project-quota volume and enrollment; its boot is exercised by the app-runner and app-project-quota probes, not here.",
+        "No app runner is deployed; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
+        "The candidate is deployed onto an empty first-boot database, not the database copy that doc 167 section 6 names; its migrations run from the first-boot state of the compose stack.",
         "The candidate is built with Dockerfile.release and the release web bundle for linux/amd64 only and held in a loopback registry; it is not an image published by the release workflow.",
         "Doc 167 section 9 requires OPS-05 passed on staging; this is a CI host, not staging.",
         "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending."
@@ -239,7 +240,7 @@
         "After restore the prior release is the same image as before the rollout, and the compose reference, secret_key fingerprint, keyring rows, migration ledger and fixture rows equal their pre-rollout values."
       ],
       "gaps": [
-        "The runtime half is not exercised: no app runner is on the host, so runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set. It needs a platform recovery bundle command, because writePlatformRecoveryBundle is unreachable from any command; that command is a separate pre-main item.",
+        "The runtime half is not exercised: runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
         "The recovery set is the existing logical dump plus the config directory holding secret_key, not the platform recovery bundle.",
         "The failed rollout is one injected fault (the config directory is not carried across) on top of the schema steps the candidate applies; a build that never starts, an image that cannot be pulled and a failing migration are not drilled.",
         "The stack is the repository's docker-compose.yml, not the server's beta configuration, and the host is a CI runner, not staging (doc 167 section 9).",

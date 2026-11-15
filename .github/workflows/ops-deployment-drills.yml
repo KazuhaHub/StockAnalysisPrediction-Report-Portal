@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       expected_commit:
-        description: The full SHA of the reviewed commit the run must measure. A run on a different commit is never evidence; empty is allowed but is recorded
+        description: The full SHA of the reviewed commit the run must measure (required, as for OPS-08). A run on a different commit is never evidence
         type: string
-        default: ''
+        required: true
       prior_release_tag:
         description: The released build the rollout starts from and is restored to (a pinned vYYYY.W[.R] tag, with its published release-metadata.json). Recorded in the evidence
         type: string

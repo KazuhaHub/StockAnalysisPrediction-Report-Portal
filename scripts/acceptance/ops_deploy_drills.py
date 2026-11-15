@@ -490,7 +490,7 @@ def verify_recovery_set(directory, manifest):
 
 def evidence_blockers(env):
     """Why a run does not count as evidence: empty only for a workflow_dispatch run of this repository on the
-    commit the dispatcher named (expected_commit, as OPS-08 does), with a pinned prior release."""
+    commit the dispatcher named (expected_commit is required, as OPS-08 does), with a pinned prior release."""
     blockers = []
     if env.get("GITHUB_ACTIONS") != "true":
         blockers.append("not a GitHub Actions run")
@@ -503,6 +503,8 @@ def evidence_blockers(env):
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
         blockers.append("no full commit SHA")
     expected = env.get("OPS_DRILL_EXPECTED_COMMIT", "")
+    if event == "workflow_dispatch" and not expected:
+        blockers.append("expected_commit is empty; a dispatch run must name the commit it measures, as OPS-08 does")
     if expected and not re.fullmatch(r"[0-9a-f]{40}", expected):
         blockers.append("expected_commit is not a full lower-case commit SHA")
     elif expected and expected != sha:
@@ -560,7 +562,7 @@ def ops05_checks(f):
     c.append(check_result("cli_version_matches_the_build", cli_version == build["version"] and cli_commit == f["api_commit"],
                           f["cli_version"]))
     c.append(check_result("commit_under_test_is_the_built_commit",
-                          f["run_commit"] == build["commit"] and f["expected_commit"] == build["commit"],
+                          f["run_commit"] == build["commit"] and f["expected_commit"] in ("", build["commit"]),
                           f"ran {f['run_commit'][:12]} built {build['commit'][:12]} expected {f['expected_commit'][:12]}"))
     c.append(check_result("healthy", f["healthy"], ""))
     return c
@@ -637,14 +639,15 @@ NOT_PROVEN_COMMON = [
 OPS05_GAPS = [
     "The compose file is the repository's docker-compose.yml, not the server's own beta configuration; the server's `beta` channel reference, its env file and host-level parts are not exercised.",
     "The version-reference rule is unreconciled in the docs: docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags, while the current production procedure is a single compose file with a fixed version tag (in use since v2026.43.5). The drill follows the current procedure and checks that only the image line differs; see the engineering note in doc 167 section 6.",
-    "No app runner is deployed. The runner is a separate host service (deploy/app-runner) that needs an XFS project-quota volume and enrollment; its boot is exercised by the app-runner and app-project-quota probes, not here.",
+    "No app runner is deployed; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
+    "The candidate is deployed onto an empty first-boot database, not the database copy that doc 167 section 6 names; its migrations run from the first-boot state of the compose stack.",
     "The candidate is built with Dockerfile.release and the release web bundle for linux/amd64 only and held in a loopback registry; it is not an image published by the release workflow.",
     "Doc 167 section 9 requires OPS-05 passed on staging; this is a CI host, not staging.",
     "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending.",
 ]
 
 OPS06_GAPS = [
-    "The runtime half is not exercised: no app runner is on the host, so runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set. It needs a platform recovery bundle command, because writePlatformRecoveryBundle is unreachable from any command; that command is a separate pre-main item.",
+    "The runtime half is not exercised: runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
     "The recovery set is the existing logical dump plus the config directory holding secret_key, not the platform recovery bundle.",
     "The failed rollout is one injected fault (the config directory is not carried across) on top of the schema steps the candidate applies; a build that never starts, an image that cannot be pulled and a failing migration are not drilled.",
     "The stack is the repository's docker-compose.yml, not the server's beta configuration, and the host is a CI runner, not staging (doc 167 section 9).",
@@ -1110,7 +1113,7 @@ def drill_ops05(host, rec, build):
     host.seed_fixtures(host.env.get("GITHUB_RUN_ID", "local"))  # first-run state and an admin session, through the product
     ident = host.loaded_identity()
     facts = {"mode": "candidate", "image_ref": ref, "build": build, "run_commit": host.env.get("GITHUB_SHA", ""),
-             "expected_commit": host.env.get("OPS_DRILL_EXPECTED_COMMIT") or host.env.get("GITHUB_SHA", ""),
+             "expected_commit": host.env.get("OPS_DRILL_EXPECTED_COMMIT", ""),
              "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_number": image_line,
              "registry_digest": host.tag_digest(ref), "healthy": healthy, **ident}
     return ops05_checks(facts), facts

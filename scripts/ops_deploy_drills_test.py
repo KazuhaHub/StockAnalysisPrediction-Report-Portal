@@ -496,6 +496,13 @@ class Ops05Tests(unittest.TestCase):
         facts["expected_commit"] = "b" * 40
         self.assertEqual(drills.failed_checks(drills.ops05_checks(facts)), ["commit_under_test_is_the_built_commit"])
 
+    def test_the_raw_expected_commit_input_is_compared_not_a_fallback(self):
+        facts = ops05_facts()
+        facts["expected_commit"] = ""  # the input was not given: nothing to compare, the blocker handles it
+        self.assertEqual(drills.failed_checks(drills.ops05_checks(facts)), [])
+        facts["run_commit"] = "a" * 40  # but the commit that ran must still be the one that was built
+        self.assertEqual(drills.failed_checks(drills.ops05_checks(facts)), ["commit_under_test_is_the_built_commit"])
+
     def test_cli_version_parsing(self):
         self.assertEqual(drills.parse_cli_version("2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)\n"), ("2026.46.1", "d0089c8"))
         self.assertEqual(drills.parse_cli_version("dev (none, unknown)"), ("dev", "none"))
@@ -608,7 +615,7 @@ class Ops06Tests(unittest.TestCase):
 
 class EvidenceTests(unittest.TestCase):
     ENV = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": drills.REPOSITORY, "GITHUB_EVENT_NAME": "workflow_dispatch",
-           "GITHUB_SHA": COMMIT, "GITHUB_RUN_ID": "42", "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REF_NAME": "main"}
+           "OPS_DRILL_EXPECTED_COMMIT": COMMIT, "GITHUB_SHA": COMMIT, "GITHUB_RUN_ID": "42", "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REF_NAME": "main"}
 
     def test_a_clean_dispatch_run_has_no_blockers_and_a_url(self):
         self.assertEqual(drills.evidence_blockers(self.ENV), [])
@@ -624,6 +631,11 @@ class EvidenceTests(unittest.TestCase):
     def test_a_push_run_is_not_evidence(self):
         env = dict(self.ENV, GITHUB_EVENT_NAME="push")
         self.assertTrue(any("push" in b for b in drills.evidence_blockers(env)))
+        self.assertFalse(drills.run_block(env)["counts_as_evidence"])
+
+    def test_a_dispatch_run_without_expected_commit_is_not_evidence(self):
+        env = dict(self.ENV, OPS_DRILL_EXPECTED_COMMIT="")
+        self.assertTrue(any("expected_commit is empty" in b for b in drills.evidence_blockers(env)))
         self.assertFalse(drills.run_block(env)["counts_as_evidence"])
 
     def test_an_expected_commit_that_differs_is_not_evidence(self):
@@ -679,6 +691,7 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertIn("scripts/check-release-build.sh", self.text)
 
     def test_the_expected_commit_and_prior_tag_are_inputs(self):
+        self.assertRegex(self.text, r"expected_commit:\n(?:        .*\n)*?        required: true")
         self.assertIn("expected_commit:", self.text)
         self.assertIn("prior_release_tag:", self.text)
 
@@ -729,8 +742,19 @@ class AcceptanceBuilderTests(unittest.TestCase):
 
     def test_the_unproven_runtime_half_points_at_the_bundle_command(self):
         text = json.dumps(self.build())
-        self.assertIn("writePlatformRecoveryBundle", text)
+        self.assertIn("06-acceptance.md", text)
+        self.assertNotIn("writePlatformRecoveryBundle", text)  # named once, in doc 06
         self.assertIn("not the server's beta configuration", text)
+
+    def test_the_first_boot_database_gap_is_recorded_for_ops05(self):
+        self.assertTrue(any("empty first-boot database" in g for g in drills.OPS05_GAPS))
+
+    def test_the_runner_follow_up_is_named_in_one_place_only(self):
+        doc06 = (REPO / "docs/app-platform/06-acceptance.md").read_text(encoding="utf-8")
+        self.assertEqual(doc06.count("writePlatformRecoveryBundle"), 1)
+        for text in (drills.OPS05_GAPS + drills.OPS06_GAPS):
+            self.assertNotIn("writePlatformRecoveryBundle", text)
+            self.assertNotIn("XFS", text)
 
 
 if __name__ == "__main__":
