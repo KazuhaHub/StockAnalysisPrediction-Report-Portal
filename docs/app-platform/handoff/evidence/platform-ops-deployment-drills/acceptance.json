@@ -1,0 +1,706 @@
+{
+  "format": "portal.ops-deployment-drills-acceptance/1-dev.1",
+  "status": "partial",
+  "plan": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 6 (engineering note)",
+  "run": {
+    "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43764751472",
+    "event": "push",
+    "commit": "5065abf2836e4c11aa6e826f48ca68d724f5f202",
+    "expected_commit": "",
+    "prior_release_tag": "v2026.46.1",
+    "run_id": "43764751472",
+    "attempt": "1",
+    "ref": "test/app-platform-ops-drills"
+  },
+  "counts_as_evidence": false,
+  "evidence_blockers": [
+    "the event was push, not workflow_dispatch; a push run is not evidence"
+  ],
+  "artifact": {
+    "id": 14180954956,
+    "name": "ops-deployment-drills-evidence",
+    "digest": "sha256:ce4f49a634548065e19998b47c30739f9fbf918b186978ca2b8f716aa00a69ec",
+    "size_in_bytes": 18685
+  },
+  "generated_utc": {
+    "ops05": "2026-11-15T21:40:45Z",
+    "ops06": "2026-11-15T21:41:32Z"
+  },
+  "host": {
+    "runner": "GitHub Actions 1000076617",
+    "os": "ubuntu24",
+    "docker": [
+      "28.0.4"
+    ],
+    "compose": [
+      "2.38.2"
+    ]
+  },
+  "rows": [
+    {
+      "row": "OPS-05",
+      "status": "partial",
+      "drill_result": "passed",
+      "checks": [
+        {
+          "id": "deployed_compose_differs_from_reference_only_in_the_image_line",
+          "passed": true,
+          "detail": "services.report-portal.image"
+        },
+        {
+          "id": "deployed_compose_text_changes_only_the_image_line",
+          "passed": true,
+          "detail": "lines [52]"
+        },
+        {
+          "id": "container_reference_is_the_built_reference",
+          "passed": true,
+          "detail": "localhost:5000/report-portal-candidate:drill-5065abf"
+        },
+        {
+          "id": "registry_digest_of_tag_equals_built_digest",
+          "passed": true,
+          "detail": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95 vs sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95"
+        },
+        {
+          "id": "container_image_digest_equals_registry_digest_of_tag",
+          "passed": true,
+          "detail": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95"
+        },
+        {
+          "id": "container_runs_the_built_image",
+          "passed": true,
+          "detail": "sha256:3de937b93812"
+        },
+        {
+          "id": "loaded_binary_is_the_built_binary",
+          "passed": true,
+          "detail": "8884bec8a35b432a"
+        },
+        {
+          "id": "api_version_equals_built_version",
+          "passed": true,
+          "detail": "drill-5065abf"
+        },
+        {
+          "id": "api_commit_is_the_commit_under_test",
+          "passed": true,
+          "detail": "5065abf"
+        },
+        {
+          "id": "cli_version_matches_the_build",
+          "passed": true,
+          "detail": "drill-5065abf (5065abf, 2026-11-15T21:38:35Z)"
+        },
+        {
+          "id": "commit_under_test_is_the_built_commit",
+          "passed": true,
+          "detail": "ran 5065abf2836e built 5065abf2836e expected 5065abf2836e"
+        },
+        {
+          "id": "healthy",
+          "passed": true,
+          "detail": ""
+        }
+      ],
+      "proves": [
+        "The platform candidate built from the commit under test (Dockerfile.release and the web bundle, in a loopback registry) is deployed through the repository compose with only the report-portal image line changed (checked on the rendered `docker compose config` and on the file's lines).",
+        "What runs is what was built: the container's image id, the digest its tag resolves to in the registry, the binary in the running process and the version and commit the portal reports all equal the build record written before the deploy."
+      ],
+      "gaps": [
+        "The compose file is the repository's docker-compose.yml, not the server's own beta configuration; the server's `beta` channel reference, its env file and host-level parts are not exercised.",
+        "The version-reference rule is unreconciled in the docs: docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags, while the current production procedure is a single compose file with a fixed version tag (in use since v2026.43.5). The drill follows the current procedure and checks that only the image line differs; see the engineering note in doc 167 section 6.",
+        "No app runner is deployed; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
+        "The candidate is deployed onto an empty first-boot database, not the database copy that doc 167 section 6 names; its migrations run from the first-boot state of the compose stack.",
+        "The candidate is built with Dockerfile.release and the release web bundle for linux/amd64 only and held in a loopback registry; it is not an image published by the release workflow.",
+        "Doc 167 section 9 requires OPS-05 passed on staging; this is a CI host, not staging.",
+        "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending."
+      ]
+    },
+    {
+      "row": "OPS-06",
+      "status": "partial",
+      "drill_result": "passed",
+      "checks": [
+        {
+          "id": "baseline_gate_passed",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "id": "recovery_set_verified_before_rollout",
+          "passed": true,
+          "detail": ""
+        },
+        {
+          "id": "rollout_applied_new_steps",
+          "passed": true,
+          "detail": "0015, 0016, 0017, 0018, 0019, 0020, 0021"
+        },
+        {
+          "id": "rollout_candidate_digest_verified",
+          "passed": true,
+          "detail": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95"
+        },
+        {
+          "id": "rollout_refused_by_activation_gate",
+          "passed": true,
+          "detail": "healthy process, failed ['totp_login']"
+        },
+        {
+          "id": "rollout_refused_for_the_key_reason",
+          "passed": true,
+          "detail": "totp_login failed with HTTP 401 bad_totp_code; the same account signed in under the old key"
+        },
+        {
+          "id": "prior_build_refuses_a_copy_of_the_migrated_database",
+          "passed": true,
+          "detail": "{\"status\": \"exited\", \"exit_code\": 1, \"restarts\": 0, \"health\": \"unhealthy\"}"
+        },
+        {
+          "id": "rollback_demonstration_leaves_the_live_database_alone",
+          "passed": true,
+          "detail": "run against a database copied from the migrated one"
+        },
+        {
+          "id": "newer_dump_refused_by_prior_build",
+          "passed": true,
+          "detail": "{\"exit_code\": 1, \"message\": \"2026/11/15 21:41:03 restore failed: the backup declares 21 migrations but this build has 14: it was written by a newer release. Restore it with that release, or upgrade this one\"}"
+        },
+        {
+          "id": "tampered_set_refused_by_integrity_check",
+          "passed": true,
+          "detail": "{\"integrity\": {\"dump\": \"MISMATCH\", \"config\": \"match\", \"compose\": \"match\", \"secret_key_fp\": \"match\"}, \"dry_run_exit\": 1}"
+        },
+        {
+          "id": "wrong_key_refused_by_rehearsal_gate",
+          "passed": true,
+          "detail": "{\"wrong_key_differs\": true, \"failed\": [\"totp_login\"], \"totp_login\": {\"status\": 401, \"code\": \"bad_totp_code\"}}"
+        },
+        {
+          "id": "checks_precede_activation",
+          "passed": true,
+          "detail": "all 3 checks passed before event 18 and activation (event 20) was healthy"
+        },
+        {
+          "id": "final_gate_passed",
+          "passed": true,
+          "detail": "[]"
+        },
+        {
+          "id": "prior_container_is_the_expected_image",
+          "passed": true,
+          "detail": "sha256:6342e6647563"
+        },
+        {
+          "id": "prior_container_digest_equals_release_record",
+          "passed": true,
+          "detail": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c"
+        },
+        {
+          "id": "prior_image_unchanged_from_baseline",
+          "passed": true,
+          "detail": "sha256:6342e6647563"
+        },
+        {
+          "id": "prior_version_reported_by_the_portal",
+          "passed": true,
+          "detail": "v2026.46.1"
+        },
+        {
+          "id": "version_reference_restored",
+          "passed": true,
+          "detail": "57db30c4feba -> 57db30c4feba"
+        },
+        {
+          "id": "secret_key_unchanged",
+          "passed": true,
+          "detail": "7430681ba3b4339a"
+        },
+        {
+          "id": "keyring_unchanged",
+          "passed": true,
+          "detail": "b0310057276a6e1d"
+        },
+        {
+          "id": "ledger_equals_pre_rollout",
+          "passed": true,
+          "detail": "14 steps"
+        },
+        {
+          "id": "data_rows_equal_pre_rollout",
+          "passed": true,
+          "detail": "{\"users\": 5, \"reports\": 1, \"api_tokens\": 1}"
+        }
+      ],
+      "proves": [
+        "A recovery set taken with the released prior build is verified (file digests, secret_key fingerprint, dry-run restore) before the rollout.",
+        "After a forced failed rollout the prior build refuses a copy of the migrated database, and the live database is first touched only after the restore's checks pass.",
+        "The restore refuses a dump written by the newer build, a truncated set and a set with the wrong secret_key, each at the check meant to catch it, and accepts the good set in the recorded order, ending healthy.",
+        "After restore the prior release is the same image as before the rollout, and the compose reference, secret_key fingerprint, keyring rows, migration ledger and fixture rows equal their pre-rollout values."
+      ],
+      "gaps": [
+        "The runtime half is not exercised: runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set; see the runner and recovery-bundle follow-up in docs/app-platform/06-acceptance.md.",
+        "The recovery set is the existing logical dump plus the config directory holding secret_key, not the platform recovery bundle.",
+        "The failed rollout is one injected fault (the config directory is not carried across) on top of the schema steps the candidate applies; a build that never starts, an image that cannot be pulled and a failing migration are not drilled.",
+        "The stack is the repository's docker-compose.yml, not the server's beta configuration, and the host is a CI runner, not staging (doc 167 section 9).",
+        "The two-factor sign-in is the key-recovery oracle: it proves the keyring opens under the recovered secret_key, not that every sealed secret in a real database would. The control fails with HTTP 401 bad_totp_code, which a wrong code also gives; the fixture sign-in succeeding under the old key is what ties it to the key.",
+        "The restore goes into a fresh database because the prior build refuses to open a database whose ledger it does not know.",
+        "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending."
+      ]
+    }
+  ],
+  "ops05_facts": {
+    "mode": "candidate",
+    "image_ref": "localhost:5000/report-portal-candidate:drill-5065abf",
+    "build": {
+      "ref": "localhost:5000/report-portal-candidate:drill-5065abf",
+      "image_id": "sha256:3de937b93812942e6a773fce6f4cc5bb67af6763ce11992c7a5cd1a77f50d9ed",
+      "digest": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95",
+      "binary_sha256": "8884bec8a35b432a0b97729335067d5d9e9d1d4b282bdbb8182065e7017a739d",
+      "version": "drill-5065abf",
+      "commit": "5065abf2836e4c11aa6e826f48ca68d724f5f202"
+    },
+    "run_commit": "5065abf2836e4c11aa6e826f48ca68d724f5f202",
+    "expected_commit": "5065abf2836e4c11aa6e826f48ca68d724f5f202",
+    "config_diff_paths": [
+      "services.report-portal.image"
+    ],
+    "changed_lines": [
+      52
+    ],
+    "image_line_number": 52,
+    "registry_digest": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95",
+    "healthy": true,
+    "container_image_id": "sha256:3de937b93812942e6a773fce6f4cc5bb67af6763ce11992c7a5cd1a77f50d9ed",
+    "container_config_image": "localhost:5000/report-portal-candidate:drill-5065abf",
+    "repo_digests": [
+      "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95"
+    ],
+    "loaded_binary_sha256": "8884bec8a35b432a0b97729335067d5d9e9d1d4b282bdbb8182065e7017a739d",
+    "cli_version": "drill-5065abf (5065abf, 2026-11-15T21:38:35Z)",
+    "api_version": "drill-5065abf",
+    "api_commit": "5065abf"
+  },
+  "ops05_released_prior": {
+    "checks": [
+      {
+        "id": "reference_matches_the_release_record",
+        "passed": true,
+        "detail": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal:v2026.46.1"
+      },
+      {
+        "id": "registry_digest_equals_release_record",
+        "passed": true,
+        "detail": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c vs sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c"
+      },
+      {
+        "id": "container_image_digest_equals_release_record",
+        "passed": true,
+        "detail": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c"
+      },
+      {
+        "id": "container_runs_the_expected_image",
+        "passed": true,
+        "detail": "sha256:6342e6647563"
+      },
+      {
+        "id": "container_reference_is_the_pinned_tag",
+        "passed": true,
+        "detail": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal:v2026.46.1"
+      },
+      {
+        "id": "loaded_binary_is_the_image_binary",
+        "passed": true,
+        "detail": "826e4e56c3aaec70"
+      },
+      {
+        "id": "api_version_equals_release_tag",
+        "passed": true,
+        "detail": "v2026.46.1"
+      },
+      {
+        "id": "api_commit_is_the_release_commit",
+        "passed": true,
+        "detail": "d0089c8"
+      },
+      {
+        "id": "cli_version_matches_release",
+        "passed": true,
+        "detail": "2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)"
+      },
+      {
+        "id": "healthy",
+        "passed": true,
+        "detail": ""
+      }
+    ],
+    "facts": {
+      "tag": "v2026.46.1",
+      "image_ref": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal:v2026.46.1",
+      "record": {
+        "tag": "v2026.46.1",
+        "commit": "d0089c8895d5df541776ff1002cd27341db2b2b4",
+        "image": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal",
+        "digest": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c",
+        "recorded_at": "2026-11-13T02:44:33Z"
+      },
+      "registry_digest": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c",
+      "image_id": "sha256:6342e6647563d5593c215311ec3bf76e3b12cb56e4230997ebaac02fa65a557c",
+      "image_binary_sha256": "826e4e56c3aaec70e9c7f74a00c80ee7a3f3841b7be6f2dc3169703180351d04",
+      "healthy": true,
+      "container_image_id": "sha256:6342e6647563d5593c215311ec3bf76e3b12cb56e4230997ebaac02fa65a557c",
+      "container_config_image": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal:v2026.46.1",
+      "repo_digests": [
+        "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c"
+      ],
+      "loaded_binary_sha256": "826e4e56c3aaec70e9c7f74a00c80ee7a3f3841b7be6f2dc3169703180351d04",
+      "cli_version": "2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)",
+      "api_version": "v2026.46.1",
+      "api_commit": "d0089c8"
+    },
+    "record": {
+      "tag": "v2026.46.1",
+      "commit": "d0089c8895d5df541776ff1002cd27341db2b2b4",
+      "image": "ghcr.io/kazuhahub/stockanalysisprediction-report-portal",
+      "digest": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c",
+      "recorded_at": "2026-11-13T02:44:33Z"
+    },
+    "passed": true,
+    "result": "passed",
+    "failed_checks": []
+  },
+  "ops06_events": [
+    {
+      "seq": 1,
+      "at": "2026-11-15T21:39:53Z",
+      "kind": "candidate_compose_written",
+      "ok": true,
+      "reference": "localhost:5000/report-portal-candidate:drill-5065abf",
+      "changed_lines": [
+        52
+      ]
+    },
+    {
+      "seq": 2,
+      "at": "2026-11-15T21:40:13Z",
+      "kind": "candidate_deployed",
+      "ok": true
+    },
+    {
+      "seq": 3,
+      "at": "2026-11-15T21:40:38Z",
+      "kind": "prior_deployed",
+      "ok": true,
+      "tag": "v2026.46.1"
+    },
+    {
+      "seq": 4,
+      "at": "2026-11-15T21:40:46Z",
+      "kind": "baseline_gate",
+      "ok": true,
+      "failed": []
+    },
+    {
+      "seq": 5,
+      "at": "2026-11-15T21:40:47Z",
+      "kind": "recovery_set_captured",
+      "ok": true,
+      "dump_migrations": 14,
+      "secret_key_fp": "7430681ba3b4339a",
+      "keyring_fp": "b0310057276a6e1d"
+    },
+    {
+      "seq": 6,
+      "at": "2026-11-15T21:40:47Z",
+      "kind": "recovery_set_verified_before_rollout",
+      "ok": true,
+      "exit_code": 0,
+      "summary": [
+        "DRY RUN — nothing was written. This would DELETE 18 existing rows.",
+        "Re-run with --force to apply, after stopping the portal."
+      ]
+    },
+    {
+      "seq": 7,
+      "at": "2026-11-15T21:40:47Z",
+      "kind": "rollout_started",
+      "ok": true,
+      "reference": "localhost:5000/report-portal-candidate:drill-5065abf",
+      "config_carried": false
+    },
+    {
+      "seq": 8,
+      "at": "2026-11-15T21:40:53Z",
+      "kind": "rollout_process_started",
+      "ok": true
+    },
+    {
+      "seq": 9,
+      "at": "2026-11-15T21:40:54Z",
+      "kind": "rollout_ledger_advanced",
+      "ok": true,
+      "new_steps": [
+        "0015",
+        "0016",
+        "0017",
+        "0018",
+        "0019",
+        "0020",
+        "0021"
+      ]
+    },
+    {
+      "seq": 10,
+      "at": "2026-11-15T21:41:01Z",
+      "kind": "rollout_gate",
+      "ok": false,
+      "failed": [
+        "totp_login"
+      ],
+      "totp_login": {
+        "status": 401,
+        "code": "bad_totp_code"
+      }
+    },
+    {
+      "seq": 11,
+      "at": "2026-11-15T21:41:03Z",
+      "kind": "rollback_by_tag_refused_on_a_copy",
+      "ok": true,
+      "state": {
+        "status": "exited",
+        "exit_code": 1,
+        "restarts": 0,
+        "health": "unhealthy"
+      },
+      "live_ledger_unchanged": true
+    },
+    {
+      "seq": 12,
+      "at": "2026-11-15T21:41:03Z",
+      "kind": "negative_control_compat",
+      "ok": true,
+      "exit_code": 1,
+      "message": "2026/11/15 21:41:03 restore failed: the backup declares 21 migrations but this build has 14: it was written by a newer release. Restore it with that release, or upgrade this one"
+    },
+    {
+      "seq": 13,
+      "at": "2026-11-15T21:41:04Z",
+      "kind": "negative_control_integrity",
+      "ok": true,
+      "integrity": {
+        "dump": "MISMATCH",
+        "config": "match",
+        "compose": "match",
+        "secret_key_fp": "match"
+      },
+      "dry_run_exit": 1
+    },
+    {
+      "seq": 14,
+      "at": "2026-11-15T21:41:07Z",
+      "kind": "negative_control_key",
+      "ok": true,
+      "wrong_key_differs": true,
+      "failed": [
+        "totp_login"
+      ],
+      "totp_login": {
+        "status": 401,
+        "code": "bad_totp_code"
+      }
+    },
+    {
+      "seq": 15,
+      "at": "2026-11-15T21:41:07Z",
+      "kind": "recovery_set_integrity",
+      "ok": true,
+      "dump": "match",
+      "config": "match",
+      "compose": "match",
+      "secret_key_fp": "match"
+    },
+    {
+      "seq": 16,
+      "at": "2026-11-15T21:41:08Z",
+      "kind": "restore_dry_run_compat",
+      "ok": true,
+      "exit_code": 0,
+      "summary": [
+        "DRY RUN — nothing was written. This would DELETE 18 existing rows.",
+        "Re-run with --force to apply, after stopping the portal."
+      ]
+    },
+    {
+      "seq": 17,
+      "at": "2026-11-15T21:41:11Z",
+      "kind": "rehearsal_key_gate",
+      "ok": true,
+      "healthy": true,
+      "failed": [],
+      "checks": [
+        {
+          "id": "healthz",
+          "passed": true,
+          "detail": "status 200"
+        },
+        {
+          "id": "admin_login",
+          "passed": true,
+          "detail": "status 200"
+        },
+        {
+          "id": "version",
+          "passed": true,
+          "detail": "status 200 version=v2026.46.1 commit=d0089c8"
+        },
+        {
+          "id": "users",
+          "passed": true,
+          "detail": "missing []"
+        },
+        {
+          "id": "report",
+          "passed": true,
+          "detail": "status 200"
+        },
+        {
+          "id": "totp_login",
+          "passed": true,
+          "detail": "status 200 code=",
+          "status": 200,
+          "code": ""
+        }
+      ]
+    },
+    {
+      "seq": 18,
+      "at": "2026-11-15T21:41:12Z",
+      "kind": "live_db_replaced",
+      "ok": true,
+      "kept_as": "reports_failed_rollout"
+    },
+    {
+      "seq": 19,
+      "at": "2026-11-15T21:41:12Z",
+      "kind": "live_restore",
+      "ok": true,
+      "exit_code": 0,
+      "summary": [
+        "restore complete; 18 existing rows were replaced"
+      ]
+    },
+    {
+      "seq": 20,
+      "at": "2026-11-15T21:41:18Z",
+      "kind": "activation",
+      "ok": true,
+      "healthy": true,
+      "compose_sha": "57db30c4febac0e5d523edd6e95b1d8e1b99de10a20716760b1d05b9960f7d02"
+    },
+    {
+      "seq": 21,
+      "at": "2026-11-15T21:41:31Z",
+      "kind": "final_gate",
+      "ok": true,
+      "failed": []
+    }
+  ],
+  "ops06_facts": {
+    "baseline_failed": [],
+    "precheck_set_ok": true,
+    "ledger_delta": [
+      "0015",
+      "0016",
+      "0017",
+      "0018",
+      "0019",
+      "0020",
+      "0021"
+    ],
+    "candidate_digest_ok": true,
+    "candidate_digest": "sha256:e18e2628d6b364e508f1400c7eb46dbd10e0b8ae0865b70640e56ef1bcddeb95",
+    "rollout_failed": [
+      "totp_login"
+    ],
+    "rollout_healthz": true,
+    "rollout_version": {
+      "version": "drill-5065abf",
+      "commit": "5065abf"
+    },
+    "rollout_reason_ok": true,
+    "rollout_reference": "localhost:5000/report-portal-candidate:drill-5065abf",
+    "rollback_refused": true,
+    "rollback_on_copy": true,
+    "rollback_state": "{\"status\": \"exited\", \"exit_code\": 1, \"restarts\": 0, \"health\": \"unhealthy\"}",
+    "negative_compat_refused": true,
+    "negative_compat_detail": "{\"exit_code\": 1, \"message\": \"2026/11/15 21:41:03 restore failed: the backup declares 21 migrations but this build has 14: it was written by a newer release. Restore it with that release, or upgrade this one\"}",
+    "negative_integrity_refused": true,
+    "negative_integrity_detail": "{\"integrity\": {\"dump\": \"MISMATCH\", \"config\": \"match\", \"compose\": \"match\", \"secret_key_fp\": \"match\"}, \"dry_run_exit\": 1}",
+    "negative_key_refused": true,
+    "negative_key_detail": "{\"wrong_key_differs\": true, \"failed\": [\"totp_login\"], \"totp_login\": {\"status\": 401, \"code\": \"bad_totp_code\"}}",
+    "final_failed": [],
+    "final_container_image_id": "sha256:6342e6647563d5593c215311ec3bf76e3b12cb56e4230997ebaac02fa65a557c",
+    "expected_image_id": "sha256:6342e6647563d5593c215311ec3bf76e3b12cb56e4230997ebaac02fa65a557c",
+    "baseline_container_image_id": "sha256:6342e6647563d5593c215311ec3bf76e3b12cb56e4230997ebaac02fa65a557c",
+    "final_repo_digests": [
+      "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c"
+    ],
+    "recorded_digest": "sha256:201955a9e4b28387b59b32a4d2ccc141726722b9eb4943a39c18d45b960f2f1c",
+    "final_api_version": "v2026.46.1",
+    "prior_tag": "v2026.46.1",
+    "compose_sha_baseline": "57db30c4febac0e5d523edd6e95b1d8e1b99de10a20716760b1d05b9960f7d02",
+    "compose_sha_final": "57db30c4febac0e5d523edd6e95b1d8e1b99de10a20716760b1d05b9960f7d02",
+    "key_fp_baseline": "7430681ba3b4339a",
+    "key_fp_final": "7430681ba3b4339a",
+    "keyring_fp_baseline": "b0310057276a6e1d",
+    "keyring_fp_final": "b0310057276a6e1d",
+    "ledger_baseline": [
+      "0001",
+      "0002",
+      "0003",
+      "0004",
+      "0005",
+      "0006",
+      "0007",
+      "0008",
+      "0009",
+      "0010",
+      "0011",
+      "0012",
+      "0013",
+      "0014"
+    ],
+    "ledger_final": [
+      "0001",
+      "0002",
+      "0003",
+      "0004",
+      "0005",
+      "0006",
+      "0007",
+      "0008",
+      "0009",
+      "0010",
+      "0011",
+      "0012",
+      "0013",
+      "0014"
+    ],
+    "counts_baseline": {
+      "users": 5,
+      "reports": 1,
+      "api_tokens": 1
+    },
+    "counts_final": {
+      "users": 5,
+      "reports": 1,
+      "api_tokens": 1
+    }
+  },
+  "not_proven": [
+    "No real server, production database or production secret_key is involved: the host is a GitHub-hosted runner and every credential is generated for the drill.",
+    "The stack is the repository's docker-compose.yml with only its image line replaced, not the server's beta configuration, and not the production host's reverse proxy, firewall, systemd ordering or shared PostgreSQL."
+  ]
+}
