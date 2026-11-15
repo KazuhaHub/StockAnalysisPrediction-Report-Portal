@@ -164,6 +164,23 @@ func Backup(cfgPath, path string) (tables int, rows int64, err error) {
 	return tables, rows, w.Flush()
 }
 
+// inReadSnapshot runs fn inside ONE read-only transaction: a single point in time rather than a
+// sample of a moving database. On PostgreSQL the transaction is REPEATABLE READ; on SQLite the pool is
+// one connection, so fn must read through tx and never through the pool, or it waits for the
+// connection the transaction is holding.
+func (s *Store) inReadSnapshot(fn func(tx *sql.Tx) error) error {
+	opts := &sql.TxOptions{ReadOnly: true}
+	if s.driver == "postgres" {
+		opts.Isolation = sql.LevelRepeatableRead
+	}
+	tx, err := s.db.BeginTx(context.Background(), opts)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck // read-only: rollback is the only ending
+	return fn(tx)
+}
+
 // dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
 // single point in time rather than a table-by-table sample of a moving database.
 func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
@@ -171,16 +188,19 @@ func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	opts := &sql.TxOptions{ReadOnly: true}
-	if s.driver == "postgres" {
-		opts.Isolation = sql.LevelRepeatableRead
-	}
-	tx, err := s.db.BeginTx(context.Background(), opts)
-	if err != nil {
-		return 0, 0, err
-	}
-	defer tx.Rollback() //nolint:errcheck // read-only: rollback is the only ending
+	var tables int
+	var total int64
+	err = s.inReadSnapshot(func(tx *sql.Tx) error {
+		var dumpErr error
+		tables, total, dumpErr = s.dumpTx(tx, names, w)
+		return dumpErr
+	})
+	return tables, total, err
+}
 
+// dumpTx writes the dump of the given tables from an open read snapshot. names comes from backupTables,
+// which reads through the pool, so it is taken before the snapshot begins.
+func (s *Store) dumpTx(tx *sql.Tx, names []string, w io.Writer) (int, int64, error) {
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(backupHeader{
 		Format:        backupFormat,

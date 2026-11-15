@@ -17,7 +17,7 @@ import (
 // bundlePlatformImageBlobs resolves every pending release of the inventory and writes its blobs into the
 // bundle. It refuses when a managed release's blobs are not all present and intact: a bundle that could not
 // restore the release is not written, because the operator would find out on the new host.
-func (s *Server) bundlePlatformImageBlobs(dir string, releases []platformReleaseBlob) ([]platformBundleFile, error) {
+func (s *Server) bundlePlatformImageBlobs(dir string, releases []platformReleaseBlob, descriptors map[string][]byte) ([]platformBundleFile, error) {
 	var store *platformImageStore
 	files := map[string]platformBundleFile{}
 	for i := range releases {
@@ -25,8 +25,9 @@ func (s *Server) bundlePlatformImageBlobs(dir string, releases []platformRelease
 		if release.Backend != platformBlobPending {
 			continue
 		}
-		var descriptor []byte
-		if err := s.st.db.QueryRow(s.st.bind(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`), release.ReleaseSHA256).Scan(&descriptor); err != nil {
+		// The descriptors were read in the bundle's snapshot, with the inventory that names these releases.
+		descriptor, ok := descriptors[release.ReleaseSHA256]
+		if !ok {
 			return nil, fmt.Errorf("%w: release %s is not stored", errPlatformBundle, release.ReleaseSHA256)
 		}
 		parsed, err := appplatform.ParseDescriptor(descriptor)

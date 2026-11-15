@@ -102,6 +102,12 @@ func main() {
 			}
 			printRestore(rep, force)
 			return
+		case "recovery-bundle": // report-portal recovery-bundle <write|restore> <dir> ... — carry a Portal to a fresh host
+			if err := app.RecoveryBundleCommand(configPath(), os.Args[2:], os.Stdout); err != nil {
+				fmt.Fprintf(os.Stderr, "recovery-bundle: %v\n", err)
+				os.Exit(1)
+			}
+			return
 		case "recompute-kinds": // report-portal recompute-kinds — re-derive every report's top-level kind after a taxonomy change
 			n, err := app.RecomputeKinds(configPath())
 			if err != nil {
