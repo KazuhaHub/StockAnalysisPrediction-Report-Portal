@@ -5,10 +5,9 @@
 // to src/lib/elkDisabled.ts and the ELK layout is not supported (doc 167 section 8). This check is
 // the evidence behind that: the licence gate treats elkjs as "not shipped" only while it passes.
 //
-// The markers are the Java package names the ELK engine carries in its compiled output, and names that only
-// elkjs's wrapper files use. scripts/forbid-elkjs.mjs is the primary guard (module ids); this scan is a second layer.
-//
-// (Original note:) The markers are the Java package names the ELK engine carries in its compiled output. They are
+// The markers are the Java package names the ELK engine carries in its compiled output. scripts/forbid-elkjs.mjs is
+// the primary guard (module ids, so it also catches elkjs's wrapper files); this scan of the output text is a second
+// layer and keeps to engine names that cannot appear anywhere else. They are
 // distinctive on purpose: mermaid's own option keys ("elk.layered.*", "elk.algorithm") and its small
 // loader chunk are not ELK code and must not trip the check.
 //
@@ -17,14 +16,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-export const ELK_MARKERS = [
-  'org.eclipse.elk.alg.',
-  'org.eclipse.elk.core.',
-  // elkjs's own wrappers (lib/main.js, lib/elk-api.js) carry no engine class names but name these.
-  'ELKNode',
-  'elk-worker.min.js',
-  'elk-api.js',
-]
+export const ELK_MARKERS = ['org.eclipse.elk.alg.', 'org.eclipse.elk.core.']
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {

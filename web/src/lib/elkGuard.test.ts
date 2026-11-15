@@ -138,9 +138,13 @@ describe('forbidElkjs plugin', () => {
   })
 })
 
-describe('markers for the other elkjs files', () => {
-  it('flags the wrappers that carry no engine class names', () => {
-    const dir = dist({ 'a.js': 'import w from "elkjs/lib/elk-worker.min.js"', 'b.js': 'class ELKNode{}' })
-    expect(findElk(dir).map((h) => h.file).sort()).toEqual(['a.js', 'b.js'])
+describe('marker scan scope', () => {
+  it('keeps to the engine package names and leaves generic words to the module-id guard', () => {
+    // Words such as ELKNode or elk-api.js can appear in unrelated code (a changelog, a comment, another
+    // library), and a false alarm would train people to ignore the check. The wrappers they would catch are
+    // covered by forbidElkjs, which looks at module ids.
+    expect(ELK_MARKERS).toEqual(['org.eclipse.elk.alg.', 'org.eclipse.elk.core.'])
+    const dir = dist({ 'a.js': '// see elk-api.js and elk-worker.min.js, class ELKNode', 'b.js': 'const ELKNode = 1' })
+    expect(findElk(dir)).toEqual([])
   })
 })
