@@ -194,6 +194,23 @@ func (o Operation) SettleNeverStarted(expectedRevision uint64) (Operation, error
 	return o, nil
 }
 
+// SettleStartNeverRan closes an enable or repair that ended recovery_required at its start stage, once the caller has
+// proved the start never ran: the runner holds no process for it and the start effect is reverted. It is those two
+// actions at the start stage only (a failure at a later stage follows an applied start), and like Settle it cannot
+// judge the evidence itself. The result must be a state OperationFromSnapshot restores.
+func (o Operation) SettleStartNeverRan(expectedRevision uint64) (Operation, error) {
+	if err := o.checkRevision(expectedRevision); err != nil {
+		return Operation{}, err
+	}
+	stages := operationStages(o.action, o.managed)
+	if (o.action != ActionEnable && o.action != ActionRepair) || !o.managed || o.stage != StageRecoveryRequired ||
+		o.revision < 2 || o.revision-2 >= uint64(len(stages)) || stages[o.revision-2] != StageStart || o.revision+1 > uint64(len(stages)) {
+		return Operation{}, ErrInvalidTransition
+	}
+	o.stage, o.revision = StageFailed, o.revision+1
+	return o, nil
+}
+
 // Recover completes an operation that ended recovery_required once evidence shows its effect was applied.
 // The result must be a state OperationFromSnapshot restores, which refuses a failure from too early a
 // stage to have done the work. Like Settle it cannot judge the evidence itself.

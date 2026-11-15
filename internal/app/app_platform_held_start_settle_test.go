@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -116,16 +117,53 @@ func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
 	if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("settle-start") != 1 {
 		t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
 	}
-	if scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation) != "recovery_required" {
-		t.Fatal("settling the start changed the operation")
-	}
+	requireSameReleaseOperationClosed(t, s, operation)
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id WHERE o.id=? AND a.state='candidate'`, operation) != 0 {
 		t.Fatal("the candidate of a start that never ran was left behind")
 	}
-	// A closed start is not driven again.
+	// A closed start is not driven again, and the operation is not closed a second time.
 	before := script.settled
 	if progressed, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || progressed != 0 || script.settled != before {
 		t.Fatalf("a closed start was settled again: %d %v", progressed, err)
+	}
+	requireSameReleaseOperationClosed(t, s, operation)
+}
+
+// requireSameReleaseOperationClosed is what a start proven never to have run leaves behind: the operation failed
+// with the typed reason the status view shows, the installation back to the disabled state a clean failure leaves
+// (so a new enable or repair can be reviewed), and one audit entry carrying the evidence.
+func requireSameReleaseOperationClosed(t *testing.T, s *Server, operation string) {
+	t.Helper()
+	if got := scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, operation); got != "failed:start_never_ran" {
+		t.Fatalf("the operation was not closed failed with the typed reason: %s", got)
+	}
+	if got := scalar[string](t, s.st, `SELECT i.desired_state||':'||i.phase FROM app_platform_installations i JOIN app_platform_operations o ON o.installation_id=i.id WHERE o.id=?`, operation); got != "disabled:disabled" {
+		t.Fatalf("the installation was not returned to disabled: %s", got)
+	}
+	if platformPublicOperationErrorCode("start_never_ran") != "start_never_ran" {
+		t.Fatal("the reason is not one the views show")
+	}
+	var detail string
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.start_never_ran_closed' AND target_id=?`, operation) != 1 {
+		t.Fatal("the closing left no single audit entry")
+	}
+	if err := s.st.queryRow(`SELECT detail FROM audit_log WHERE action='app_platform.start_never_ran_closed' AND target_id=?`, operation).Scan(&detail); err != nil ||
+		!strings.Contains(detail, `"start_effect_id"`) || !strings.Contains(detail, `"proof"`) {
+		t.Fatalf("the evidence was not recorded: %s %v", detail, err)
+	}
+}
+
+// requireOperationStillInRecovery is what a start that is not proven never to have run leaves: nothing closed.
+func requireOperationStillInRecovery(t *testing.T, s *Server, operation string) {
+	t.Helper()
+	if got := scalar[string](t, s.st, `SELECT stage FROM app_platform_operations WHERE id=?`, operation); got != "recovery_required" {
+		t.Fatalf("an operation whose start was not proven never to have run was closed: %s", got)
+	}
+	if got := scalar[string](t, s.st, `SELECT phase FROM app_platform_installations i JOIN app_platform_operations o ON o.installation_id=i.id WHERE o.id=?`, operation); got != "recovery_required" {
+		t.Fatalf("the installation left recovery: %s", got)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.start_never_ran_closed' AND target_id=?`, operation) != 0 {
+		t.Fatal("a closing was audited")
 	}
 }
 
@@ -169,6 +207,7 @@ func TestSettlementTickClosesAnEnableStartTheRunnerFoundRunning(t *testing.T) {
 	if effectState(t, s, operation, "start", 1) != "applied" || fake.count("remove-stop") != 0 || fake.count("execute-restore") != 0 || fake.count("execute-start") != 0 {
 		t.Fatalf("running start: %s %v", effectState(t, s, operation, "start", 1), fake.calls)
 	}
+	requireOperationStillInRecovery(t, s, operation)
 }
 
 // A resume whose restore start the runner holds claimed with nothing executing it is settled from the recovery
@@ -351,7 +390,74 @@ func TestSettlementTickRemovesTheTargetOfAReservedEnableStart(t *testing.T) {
 		effectState(t, s, operation, "settle", 6) != "applied" {
 		t.Fatal("the start was not closed as never run after its target was removed and its namespace swept")
 	}
+	requireSameReleaseOperationClosed(t, s, operation)
 	if fake.count("execute-start") != 0 || fake.count("execute-restore") != 0 {
 		t.Fatalf("the settlement sent the start: %v", fake.calls)
 	}
+}
+
+// A start the runner refused for capacity never ran, whatever the signed window: the operation is closed the same way.
+func TestSettlementTickFailsAnEnableWhoseStartTheRunnerRefusedForCapacity(t *testing.T) {
+	s, operation, endpoint, _ := orphanedEnableFixture(t)
+	s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, i platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		id := journal.CapacityIdentityOfUpdateStart(i.command)
+		return nil, &journal.CapacityRefusalError{Receipt: journal.CapacityRefusal{
+			Format: "portal.runner.capacity-refusal/1-dev.1", DeploymentID: id.DeploymentID, ControllerEpoch: id.ControllerEpoch,
+			InstallationID: id.InstallationID, OperationID: id.OperationID, TargetGeneration: id.TargetGeneration, Stage: id.Stage,
+			EffectNumber: id.EffectNumber, EffectID: id.EffectID, Kind: id.Kind, PayloadSHA256: id.PayloadSHA256,
+			Outcome: "capacity_exhausted", Dimension: "memory", Requested: "256", Remaining: "100",
+			SettledMS: strconv.FormatInt(time.Now().UTC().UnixMilli(), 10),
+		}}
+	}
+	for range 3 {
+		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if effectState(t, s, operation, "start", 1) != "reverted" {
+		t.Fatalf("the refused start was not reverted: %s", effectState(t, s, operation, "start", 1))
+	}
+	requireSameReleaseOperationClosed(t, s, operation)
+}
+
+// A start the runner holds no row for and that recorded no reservation was never admitted, once every window has
+// passed: the operation is closed the same way.
+func TestSettlementTickFailsAnEnableWhoseStartWasNeverAdmitted(t *testing.T) {
+	s, operation, endpoint, _ := orphanedEnableFixture(t)
+	mustExec(t, s.st, `UPDATE app_platform_operation_effects SET receipt_json='{}',observed_fence=0 WHERE operation_id=? AND stage='start' AND effect_number=1`, operation)
+	s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		return nil, errPlatformStartAbsent
+	}
+	for range 3 {
+		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if effectState(t, s, operation, "start", 1) != "reverted" {
+		t.Fatalf("the absent start was not reverted: %s", effectState(t, s, operation, "start", 1))
+	}
+	requireSameReleaseOperationClosed(t, s, operation)
+}
+
+// The start is reverted, but another effect of the operation has no verdict: that is not proof the namespace was left
+// alone, so the operation stays in recovery for an administrator. Nothing is closed on a guess.
+func TestSettlementTickKeepsAnEnableInRecoveryWhileAnotherEffectIsUnsettled(t *testing.T) {
+	s, operation, endpoint, fake := orphanedEnableFixture(t)
+	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
+		SELECT operation_id,stage,31,?,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,0,'unknown','{}',created_ms,updated_ms
+		FROM app_platform_operation_effects WHERE operation_id=? AND stage<>'start' AND state='applied' LIMIT 1`, platformFixtureID(9990), operation)
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE operation_id=? AND state='unknown' AND stage<>'start'`, operation) != 1 {
+		t.Fatal("fixture: the unsettled effect was not added")
+	}
+	script := &settleScript{before: held("orphaned"), after: held("never_ran")}
+	script.install(s, fake)
+	for range 6 {
+		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if effectState(t, s, operation, "start", 1) != "reverted" {
+		t.Fatal("the fixture did not revert the start")
+	}
+	requireOperationStillInRecovery(t, s, operation)
 }

@@ -479,6 +479,10 @@ func (s *Server) settleEffectRow(ctx context.Context, lease platformOperationLea
 	if err := write(e, now); err != nil {
 		return err
 	}
+	// An enable or repair whose start this write proved never ran is closed here, in the same transaction.
+	if _, err := closePlatformSameReleaseStartNeverRan(e, lease, now); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
