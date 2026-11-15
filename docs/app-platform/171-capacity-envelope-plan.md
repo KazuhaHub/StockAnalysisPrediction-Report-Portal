@@ -1510,6 +1510,9 @@ is evidence for OPS-08.
       of that host; it was not measured in any earlier run, so its bound is a reading of those idle values and is to be checked against the probe readings the smokes now record (`disk_probe` in the evidence).
     - **Known risk for the 120-minute run: variance between hosts.** Two runs of the evidence configuration on one commit (`885750fd`) measured home at 20.1 ms (43679294042) and 37.3 ms (43678298699) against the 50 ms bound, and batch start at 51.9 and 55.7 ms against 100 ms. A
       2-hour pooled p95 averages over more of that variance than a 5-minute one but is not immune to a slow host; a failure is judged as it stands, and the evidence records the precheck readings beside it for the reviewer (`precheck`, `disk_probe`).
+    - **Smoke on the hardened harness (`c47e6928`, pull request smoke 43681321227, PostgreSQL, default configuration, 5 minutes; not evidence: five minutes, a pull request, the diagnosis on).** Green on the first attempt. Pooled p95: home 17272 us (bound
+      50000), report 29677 us (50000), dispatch@200 5356 us (25000), batch start 50992 us (100000). Precheck not tripped: fsync probe median 0.261 ms, p95 0.396 ms, maximum 19.8 ms (200 writes of 4 KiB on `/var/lib/postgresql/16`); idle WAL sync mean
+      0.663 ms. PIDs held at least 0.875 of the limit in every window; the runner journal grew 0 bytes over the load (database 110 KiB, no write-ahead log pages outstanding).
 
 ### Findings of the revised harness: the latency bound on a production-shaped Portal (not evidence)
 
