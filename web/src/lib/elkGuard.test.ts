@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import ELK from './elkDisabled'
 import { ELK_MARKERS, findElk } from '../../scripts/check-no-elk.mjs'
+import { elkjsModules, forbidElkjs } from '../../scripts/forbid-elkjs.mjs'
 
 // The ELK layout engine (elkjs, EPL-2.0) must never reach the build output: doc 167 section 8 aliases
 // it to an empty module, and the licence gate's "not shipped" exclusion for elkjs is valid only while
@@ -75,5 +76,71 @@ describe('findElk', () => {
 describe('elkDisabled', () => {
   it('fails closed with a clear message when something constructs the engine', () => {
     expect(() => new ELK()).toThrow(/ELK layout is not supported/)
+  })
+})
+
+// The marker scan reads text, and two of elkjs's files (lib/elk-api.js, lib/main.js) are thin
+// wrappers that carry no engine class names. The module graph is the primary guard: any module id
+// under node_modules/elkjs/ fails the build, whatever the file contains.
+describe('elkjsModules', () => {
+  it('finds module ids under node_modules/elkjs, on any path separator and for any file', () => {
+    const ids = [
+      '/repo/web/node_modules/elkjs/lib/elk-api.js',
+      '/repo/web/node_modules/elkjs/lib/main.js',
+      'C:\\repo\\web\\node_modules\\elkjs\\lib\\elk.bundled.js',
+      '/repo/web/node_modules/mermaid/dist/mermaid.core.mjs',
+      '/repo/web/node_modules/not-elkjs/index.js',
+      '/repo/web/node_modules/elkjs-fake/index.js',
+      '/repo/web/src/lib/elkDisabled.ts',
+    ]
+    expect(elkjsModules(ids)).toEqual([ids[0], ids[1], ids[2]])
+  })
+
+  it('finds a nested copy under another package', () => {
+    expect(elkjsModules(['/r/node_modules/a/node_modules/elkjs/lib/main.js'])).toHaveLength(1)
+  })
+})
+
+describe('forbidElkjs plugin', () => {
+  const chunk = (modules: Record<string, unknown>) => ({ type: 'chunk', fileName: 'assets/x.js', modules })
+
+  it('fails the build when a chunk contains an elkjs module', () => {
+    const plugin = forbidElkjs()
+    expect(() =>
+      plugin.generateBundle({}, { 'assets/x.js': chunk({ '/r/node_modules/elkjs/lib/main.js': {} }) }),
+    ).toThrow(/elkjs/)
+  })
+
+  it('names the chunk and the module in the failure', () => {
+    const plugin = forbidElkjs()
+    expect(() =>
+      plugin.generateBundle({}, { 'assets/x.js': chunk({ '/r/node_modules/elkjs/lib/elk-api.js': {} }) }),
+    ).toThrow(/assets\/x\.js.*elk-api\.js|elk-api\.js.*assets\/x\.js/s)
+  })
+
+  it('passes a bundle without elkjs, assets included', () => {
+    const plugin = forbidElkjs()
+    expect(() =>
+      plugin.generateBundle(
+        {},
+        {
+          'assets/x.js': chunk({ '/r/src/lib/elkDisabled.ts': {}, '/r/node_modules/mermaid/dist/a.mjs': {} }),
+          'assets/y.css': { type: 'asset', fileName: 'assets/y.css' },
+        },
+      ),
+    ).not.toThrow()
+  })
+
+  it('also rejects an elkjs module as it is resolved, before anything is bundled', () => {
+    const plugin = forbidElkjs()
+    expect(() => plugin.moduleParsed({ id: '/r/node_modules/elkjs/lib/main.js' })).toThrow(/elkjs/)
+    expect(() => plugin.moduleParsed({ id: '/r/src/lib/elkDisabled.ts' })).not.toThrow()
+  })
+})
+
+describe('markers for the other elkjs files', () => {
+  it('flags the wrappers that carry no engine class names', () => {
+    const dir = dist({ 'a.js': 'import w from "elkjs/lib/elk-worker.min.js"', 'b.js': 'class ELKNode{}' })
+    expect(findElk(dir).map((h) => h.file).sort()).toEqual(['a.js', 'b.js'])
   })
 })

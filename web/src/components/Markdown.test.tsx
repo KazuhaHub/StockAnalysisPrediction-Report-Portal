@@ -11,6 +11,8 @@ const { renderMermaid, parseMermaid, initializeMermaid, loadMermaid, cacheMermai
       initialize: initializeMermaid,
       parse: parseMermaid,
       render: renderMermaid,
+      // The real detector throws for source it cannot classify; this one knows the two kinds the tests use.
+      detectType: (source: string) => (source.trimStart().startsWith('mindmap') ? 'mindmap' : 'flowchart-v2'),
     },
   }))
   const cacheMermaidSVG = vi.fn(async () => undefined)
@@ -92,6 +94,19 @@ describe('Markdown', () => {
         'light',
       ),
     )
+  })
+
+  it('lays a flowchart out with dagre but leaves a mind map on its own layout', async () => {
+    const flow = render(<Markdown md={'```mermaid\nflowchart LR\nA --> B\n```'} />)
+    await waitFor(() => expect(flow.container.querySelector('.md-mermaid svg')).not.toBeNull())
+    expect(initializeMermaid).toHaveBeenLastCalledWith(expect.objectContaining({ layout: 'dagre' }))
+    flow.unmount()
+
+    initializeMermaid.mockClear()
+    const mind = render(<Markdown md={'```mermaid\nmindmap\n  root\n    a\n```'} />)
+    await waitFor(() => expect(mind.container.querySelector('.md-mermaid svg')).not.toBeNull())
+    expect(initializeMermaid).toHaveBeenCalled()
+    expect(initializeMermaid.mock.calls[0][0]).not.toHaveProperty('layout')
   })
 
   it('uses parser-normalized source as the cache key for an indented mermaid fence', async () => {

@@ -8,6 +8,7 @@ import {
 import DOMPurify from 'dompurify'
 import { useTranslation } from 'react-i18next'
 import { loadMermaid } from '../lib/mermaid'
+import { layoutForDiagram } from '../lib/mermaidLayout'
 import { flattenMermaidSVG } from '../lib/flattenSvg'
 import { cacheMermaidSVG } from '../lib/mermaidCache'
 
@@ -111,14 +112,21 @@ export default function MermaidBlock({ source }: { source: string }) {
 
     void loadMermaid()
       .then(async ({ default: mermaid }) => {
+        let type: string | undefined
+        try {
+          type = mermaid.detectType(source)
+        } catch {
+          type = undefined // not a diagram mermaid knows; parse() below reports it
+        }
+        const layout = layoutForDiagram(type)
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: 'strict',
           htmlLabels: false,
-          // Mermaid 12 lays diagrams out with ELK unless told otherwise, and the ELK engine is
-          // aliased out of the build (vite.config.ts, doc 167 section 8). Dagre is the layout every
-          // diagram uses here; a diagram that explicitly asks for ELK fails closed.
-          layout: 'dagre',
+          // See mermaidLayout.ts: dagre for the diagrams that would default to the ELK layout, which is
+          // not in the build; a diagram that explicitly asks for ELK fails closed. Left unset for a
+          // mind map, which brings its own layout.
+          ...(layout ? { layout } : {}),
           secure: [
             'securityLevel',
             'startOnLoad',

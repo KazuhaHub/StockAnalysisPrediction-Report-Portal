@@ -2,11 +2,13 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
+import { forbidElkjs } from './scripts/forbid-elkjs.mjs'
 
 // In dev, proxy API / downloads / health check to the Go backend (:8790). The
 // production build is written to ../internal/web/dist for //go:embed.
 export default defineConfig({
-  plugins: [react()],
+  // forbidElkjs fails the build if the alias below ever stops holding: no module under node_modules/elkjs.
+  plugins: [react(), forbidElkjs()],
   resolve: {
     alias: [
       // mermaid 12 imports the ELK layout engine (elkjs, EPL-2.0) for an optional layout this
