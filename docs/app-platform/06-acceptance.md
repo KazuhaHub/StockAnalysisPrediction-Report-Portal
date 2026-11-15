@@ -222,9 +222,9 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
   time until its request reaches the stub Dify); every thirty seconds host memory and CPU, tasks, the runner and Docker log sizes,
   XFS usage and the summed memory and CPU of the backends, with each backend's own cgroup counters.
 - **Pass:** every native probe refused with its typed error and every unit level probe's tests passed; the pooled p95 of all
-  loaded samples within 50 ms for the home page and the report page and 100 ms for the batch start, and within max(1.5x idle p95, idle p95 + 5 ms) for the dispatch decision (owner decision 2026-11-15: under full
+  loaded samples within 50 ms for the home page and the report page, 25 ms for the dispatch decision and 100 ms for the batch start (owner decision 2026-11-15: under full
   declared load on the reference host the relative floor of 2026-11-13 was measured and could not be met on a 2-physical-core host at full app CPU load, doc 171; the pooling is an engineering decision, not the owner's, recorded as such
-  in doc 167; per-window p95, the relative threshold and the ratio to idle are recorded as diagnostics and shown in the step summary); in every one-minute window, for the message flood at least 20 answered requests, every other attempt a typed busy
+  in doc 167; per-window p95, the relative threshold max(1.5x idle p95, idle p95 + 5 ms) and the ratio to idle are recorded as diagnostics, and the 50-job dispatch measurement is recorded, not judged and shown in the step summary); in every one-minute window, for the message flood at least 20 answered requests, every other attempt a typed busy
   refusal (no 5xx, no transport error) and a live flood process; for each backend at least 70% of its CPU quota used, memory current at
   least 85% of its limit and status counters (log bytes, requests) advancing; each backend's PIDs reached at least 85% of its limit;
   at least 90% of the expected host samples taken; summed backend memory and CPU never above the runner budgets and host free memory

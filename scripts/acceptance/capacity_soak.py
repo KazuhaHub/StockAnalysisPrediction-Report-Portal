@@ -646,7 +646,7 @@ def _check(name, passed, detail):
 
 # Owner decision 2026-11-15: under full declared load on the reference host, the pooled p95 of home and report is at most 50 ms and of batch
 # start at most 100 ms. The relative floor (owner decision 2026-11-13: max(1.5x the idle p95, the idle p95 plus 5 ms)) was measured and could not be
-# met on a 2-physical-core host at full app CPU load (doc 171); dispatch@200 keeps it. For the three absolute series the relative threshold and
+# met on a 2-physical-core host at full app CPU load (doc 171); dispatch@200 follows on the same day. For every series the relative threshold and
 # the ratio to idle stay recorded as diagnostics, with every window's p95: none is hidden, none decides.
 #
 # Verdict computation (engineering decision, not the owner's): the p95 of every loaded sample of the run pooled together; per-window values are
@@ -655,7 +655,9 @@ LATENCY_FLOOR_US = 5000
 HOME_P95_BOUND_US = 50_000
 REPORT_P95_BOUND_US = 50_000
 BATCH_START_P95_BOUND_US = 100_000
-ABSOLUTE_P95_BOUND_US = {"home": HOME_P95_BOUND_US, "report": REPORT_P95_BOUND_US, "batch_start": BATCH_START_P95_BOUND_US}
+# Owner decision 2026-11-15: dispatch@200 pooled p95 at most 25 ms at full load (measured 6.5 to 11.4 ms; the relative floor was not reliably met).
+DISPATCH_P95_BOUND_US = 25_000
+ABSOLUTE_P95_BOUND_US = {"home": HOME_P95_BOUND_US, "report": REPORT_P95_BOUND_US, "dispatch": DISPATCH_P95_BOUND_US, "batch_start": BATCH_START_P95_BOUND_US}
 LATENCY_SERIES = ("home", "report", "dispatch", "batch_start")
 
 
@@ -693,8 +695,8 @@ def _latency_check(name, series, evidence):
 def render_summary(evidence, verdict):
     """Markdown for the job's step summary: the verdict per series and every window of every series."""
     lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {'passed' if verdict['passed'] else 'FAILED'}",
-             "", "Latency verdict: home and report pooled loaded p95 at most 50 ms, batch start at most 100 ms (owner decision 2026-11-15); dispatch at most "
-             "max(1.5 x idle p95, idle p95 + 5 ms). The pooling is an engineering decision; windows, the relative threshold and the ratio to idle are diagnostics."]
+             "", "Latency verdict (owner decision 2026-11-15): pooled loaded p95 at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start. "
+             "The pooling is an engineering decision; windows, the relative threshold max(1.5 x idle p95, idle p95 + 5 ms) and the ratio to idle are diagnostics."]
     for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
         if check is None:
@@ -1024,7 +1026,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
                          {"session_expires_ms": evidence.get("session_expires_ms"), "load_finished_ms": evidence.get("load_finished_ms")}))
     ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence),
                     "report": _latency_check("report_p95_within_absolute_bound", "report", evidence),
-                    "dispatch": _latency_check("dispatch_within_threshold_of_idle", "dispatch", evidence),
+                    "dispatch": _latency_check("dispatch_p95_within_absolute_bound", "dispatch", evidence),
                     "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence)}
     checks.extend(ratio_checks.values())
     checks.extend(_flood_checks(evidence))

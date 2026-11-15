@@ -291,6 +291,8 @@ sentence "Portal p95 latency ... within 1.5x of the idle baseline" above, adopte
 
 Owner decision 2026-11-15: under full declared load on the reference host, home and report pooled p95 ≤ 50 ms and batch start pooled p95 ≤ 100 ms; dispatch stays within max(1.5× idle, idle + 5 ms). The relative floor was measured and could not be met on a 2-physical-core host at full app CPU load; see doc 171.
 
+Owner decision 2026-11-15 (dispatch): dispatch@200 pooled p95 ≤ 25 ms (measured 6.5–11.4 ms under full load, relative floor not reliably met). This supersedes the dispatch clause of the decision above: all four series are judged on absolute pooled bounds, the relative threshold and the ratio to idle being diagnostics.
+
 Added by the same harness, as engineering decisions, not the owner's: the real batch scheduler's enqueue-to-start latency is judged
 by the same bound (it is what "Portal business executor capacity remains available" of SEC-09 is measured with), and every
 one-minute window must show the backends and the message flood alive (answered requests, typed refusals, CPU and memory

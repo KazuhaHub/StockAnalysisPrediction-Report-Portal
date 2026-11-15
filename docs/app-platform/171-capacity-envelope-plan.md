@@ -1423,7 +1423,7 @@ is evidence for OPS-08.
     the host went from about 11.5% to 7.7%. Its remaining cost is dominated by the journal's SQLite reads on both the handshake and the request (`beginWritableRegistration`, `journal/writable_backend_registration_delivery.go:64`,
     21.6%; `prepareWritableBackendExchange`, `journal/writable_backend_handshake.go:46`, 18.7%). Per-process breakdown (percent of the host, windows 2 to 5): host busy 82.3, Portal 7.9, flood 0.5, PostgreSQL 0.2, runner 7.7,
     docker 5.1, backends 48.0, other 12.3; admitted 8.7 and refused 115 per second; per-CPU busy 68.4 / 86.7 / 86.6 / 86.1; Portal scope CPU pressure some 13.4, full 8.7. The relative gate is therefore still missed, and the
-    owner's decision applies: home and report pooled p95 at most 50 ms, batch start at most 100 ms, dispatch@200 unchanged. The verdict keeps the old relative threshold, the ratio to idle and every window as diagnostics
+    owner's decision applies: home and report pooled p95 at most 50 ms, batch start at most 100 ms (and, the same day, dispatch@200 at most 25 ms, below). The verdict keeps the old relative threshold, the ratio to idle and every window as diagnostics
     (`bound_kind`, `relative_threshold_us`, `within_relative_threshold`, `pooled_ratio`); the constants are `HOME_P95_BOUND_US`, `REPORT_P95_BOUND_US` and `BATCH_START_P95_BOUND_US`. The checks are named
     `home_p95_within_absolute_bound`, `report_p95_within_absolute_bound` and `batch_start_p95_within_absolute_bound`.
 
@@ -1440,6 +1440,10 @@ is evidence for OPS-08.
     Home, report and batch start pass their absolute bounds in all three runs, with margins of 1.5 to 2.6 times on the pages and 1.7 to 3.3 times on the batch start, but the pooled p95 grew from run to run (home 21.6, 25.9, 33.1 ms) while the host got busier
     (80%, 80%, 87% busy; the Portal scope's CPU pressure 11.6% and 16.1% in the last). **Dispatch@200 fails its relative gate in all three**, by 0.6, 2.2 and 4.9 ms, after passing in the earlier runs (3.4 to 5.7 ms against bounds of 5.6 to 6.1 ms): its gate leaves
     idle + 5 ms and the pooled p95 of the decision is now 6.5 to 11.4 ms. Every other check passes. Not tuned.
+
+    **Dispatch@200 follows (owner decision 2026-11-15).** The three smokes above failed dispatch@200's relative gate by 0.6 to 4.9 ms (pooled p95 6.5, 8.5 and 11.4 ms), after passing in earlier runs, so the owner judged it on an absolute pooled
+    p95 of at most 25 ms at full load as well. The constant is `DISPATCH_P95_BOUND_US = 25000` and the check `dispatch_p95_within_absolute_bound`; its relative threshold and ratio to idle stay recorded as diagnostics, and the
+    50-job shallow measurement (`dispatch_shallow`) stays recorded and is not judged.
 
     Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
     first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'

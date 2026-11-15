@@ -301,11 +301,11 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(soak.HOME_P95_BOUND_US, 50_000)
         self.assertEqual(soak.REPORT_P95_BOUND_US, 50_000)
         self.assertEqual(soak.BATCH_START_P95_BOUND_US, 100_000)
-        self.assertEqual(soak.ABSOLUTE_P95_BOUND_US, {"home": 50_000, "report": 50_000, "batch_start": 100_000})
-        self.assertNotIn("dispatch", soak.ABSOLUTE_P95_BOUND_US)   # dispatch keeps its relative gate
+        self.assertEqual(soak.DISPATCH_P95_BOUND_US, 25_000)      # owner decision 2026-11-15, after the relative floor was not reliably met
+        self.assertEqual(soak.ABSOLUTE_P95_BOUND_US, {"home": 50_000, "report": 50_000, "dispatch": 25_000, "batch_start": 100_000})
 
     def test_home_report_and_batch_start_pass_at_their_absolute_bound_and_fail_one_microsecond_beyond(self):
-        for series, bound in (("home", 50_000), ("report", 50_000), ("batch_start", 100_000)):
+        for series, bound in (("home", 50_000), ("report", 50_000), ("dispatch", 25_000), ("batch_start", 100_000)):
             name = f"{series}_p95_within_absolute_bound"
             evidence = child_evidence()
             evidence["loaded"][series]["p95_us"] = bound
@@ -326,10 +326,24 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(detail["pooled_ratio"], 13.0)
         self.assertEqual(detail["threshold_us"], 50_000)
 
-    def test_dispatch_keeps_the_relative_gate(self):
+    def test_dispatch_is_judged_on_its_absolute_bound_and_keeps_the_relative_threshold_as_a_diagnostic(self):
         evidence = child_evidence()
-        evidence["loaded"]["dispatch"]["p95_us"] = soak.latency_threshold_us(evidence["idle"]["dispatch"]["p95_us"]) + 1
-        self.assertEqual(self.failing(self.verdict(evidence)), {"dispatch_within_threshold_of_idle"})
+        idle = evidence["idle"]["dispatch"]["p95_us"]
+        evidence["loaded"]["dispatch"]["p95_us"] = soak.latency_threshold_us(idle) + 4000   # over the old relative gate, far inside 25 ms
+        verdict = self.verdict(evidence)
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        detail = self.check(verdict, "dispatch_p95_within_absolute_bound")["detail"]
+        self.assertEqual((detail["bound_us"], detail["bound_kind"], detail["within_relative_threshold"]), (25_000, "absolute", False))
+        self.assertEqual(detail["relative_threshold_us"], soak.latency_threshold_us(idle))
+
+    def test_the_shallow_dispatch_measurement_is_recorded_and_never_judged(self):
+        evidence = child_evidence()
+        evidence["loaded"]["dispatch_shallow"]["p95_us"] = 900_000
+        for window in evidence["windows"]:
+            window["dispatch_shallow"] = stats(900_000)
+        verdict = self.verdict(evidence)
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        self.assertIsNotNone(verdict["informational_shallow_dispatch_worst_ratio"])
 
     def test_a_pooled_pass_still_lists_the_windows_over_the_bound_as_diagnostics(self):
         evidence = child_evidence(windows=4)
