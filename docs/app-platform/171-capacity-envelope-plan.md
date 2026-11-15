@@ -994,14 +994,41 @@ evidence). The single-connection shape is the same code with the pool switched o
 A read that does not touch the writer no longer waits for it. The stock page still ends in the report-read audit row, which is a write on
 the writer connection, so its tail is lowered by the removed reads and not independent of the writer (see the limits).
 
-**Not measured.** The soak: no `soak_db=sqlite-file` dispatch run has been made on this change, so none of the four series is known to pass
-on SQLite, and **no claim is made that the SQLite envelope is proven.** The relay flood against the pool, and PostgreSQL under load (the
-change is a no-op there; its test run is described in the pull request).
+**Diagnostic soak on the read pool** (run [43764872093](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43764872093),
+`workflow_dispatch` on `5f0b30a6`, `soak_db=sqlite-file`, `soak_only`, 120 minutes, every other input at its default; ext4; the reference
+host class). It is a diagnostic: a SQLite run never counts as OPS-08 evidence, and this one ended `inconclusive_slow_disk` (see below).
+Pooled p95 over the 120 loaded windows against the absolute bounds of resolution 74, microseconds:
+
+| Series | Idle p95 | Pooled loaded p95 | Bound | Samples | Within the bound |
+| --- | --- | --- | --- | --- | --- |
+| home page | 694 | 2040 | 50000 | 12000 | yes (2.0 ms) |
+| report page | 3580 | 25865 | 50000 | 12000 | yes (25.9 ms; p50 2.4 ms, worst single request 446 ms) |
+| dispatch@200 | 651 | 5975 | 25000 | 12000 | yes (6.0 ms) |
+| batch start | 108743 | 98807 | 100000 | 2400 | yes, by 1.2 ms (p50 12.9 ms, worst 482 ms) |
+
+Every check of the verdict passed (the four latency bounds, the message flood answered and typed in every window, backends at their CPU, PID
+and memory budgets, no crash, the runner journal grew 0 bytes), and the job still failed: the harness's disk precheck replaced the verdict
+with `inconclusive_slow_disk` because it read **PostgreSQL's** idle WAL sync mean (7.7 ms against its 2 ms bound) in a run whose Portal does
+not use PostgreSQL (its fsync probe was normal: median 0.22 ms). The precheck therefore says nothing about the SQLite measurement and tripped
+for a reason that does not apply to it; it is recorded here and left alone, the disk-health rule being the harness's.
+
+What the run shows for the read pool (end-of-run `database` record of the last window): the pool was `open` on `ext4`; the read pool's
+four connections waited 3826 times for 0.5 s in total over the run, while the writer's single connection waited 26535 times for 170.9 s
+(the relay's own transactions and the page writes still share it, as the limits say). **The WAL stayed at 8,380,112 bytes (8.0 MiB) in every
+one of the 120 windows**: it did not grow over the run.
+
+What this does and does not say. In this one run, all four series met the owner's absolute bounds on SQLite, where resolution 73 recorded
+two to three of four failing in every run before the read pool. It is one run on one host class that the earlier runs showed can vary by
+a factor of two between hosts; the batch start series passed by 1% of its bound (its idle baseline, 108.7 ms, was above it, so that
+series is dominated by something the load does not change); the run is inconclusive by the harness's own rule and not evidence. **No claim is made that the SQLite envelope is proven.**
+
+**Not measured.** The relay flood against the pool in isolation, and PostgreSQL under load (the change is a no-op there; its test run is
+described in the pull request).
 
 **Limits.**
 
-- **Not soaked.** The gate is judged on the soak host; this change removes the queueing that resolution 73 measured, and whether the
-  remaining latency meets the bounds is for the run to say.
+- **One diagnostic soak, not evidence.** The run above met all four bounds, with a thin margin on batch start and an inconclusive verdict;
+  a repeat, and a run the harness accepts, are what would turn this from a measurement into a claim.
 - **Writes and every transaction stay on one connection.** The relay's admitted work (launch, backend, network and document routes read and
   write inside write-capable transactions) and the report-read audit row, the activity stamp and the batch scheduler's writes still queue
   for it, so a page that writes still waits for a held writer. Moving the relay's read-only transactions, or taking the audit row off the
@@ -1602,7 +1629,7 @@ is evidence for OPS-08.
 
     The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
     the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. The SQLite read pool has since been implemented (the
-    section "Resolution (SQLite read pool)"); it has not been soaked, so no claim is made that the SQLite envelope is proven.
+    section "Resolution (SQLite read pool)"); one diagnostic soak met the absolute bounds (not evidence), so no claim is made that the SQLite envelope is proven.
 
 75. **Round 2 of the review of PR #433 (before the 120-minute run).**
 
@@ -1848,7 +1875,7 @@ Other results:
 
 **Follow-ups that still block the integration to main merge.**
 
-- **SQLite read pool: implemented, not soaked.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); what remains is a `soak_db=sqlite-file` dispatch run on it, and until that run no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
+- **SQLite read pool: implemented, one diagnostic soak.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); run 43764872093 (`soak_db=sqlite-file`, 120 minutes, not evidence, verdict `inconclusive_slow_disk` for a PostgreSQL disk reading that does not apply) met all four absolute bounds, with the WAL flat at 8.0 MiB; no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
 - **Inventory overlap by device and inode** (the follow-up above), together with an absent bind source under the data root, which is to be treated as a reference to the namespace rather than as no overlap.
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
