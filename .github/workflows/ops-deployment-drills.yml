@@ -1,16 +1,22 @@
 name: ops deployment drills
-# OPS-05 (deploy a released platform through the beta configuration) and OPS-06 (restore the protected
-# recovery set after a failed rollout), run on a disposable GitHub-hosted runner. No real server is
-# touched, nothing is pushed to ghcr.io and the job holds no secret: the registry written to is a
-# loopback one this job starts, and every credential is generated for the drill.
-# See scripts/acceptance/ops_deploy_drills.py and docs/app-platform/167-owner-decisions-remaining-acceptance.md section 6.
+# OPS-05 (deploy the platform candidate through the repository's compose and verify what is loaded) and
+# OPS-06 (restore the protected recovery set after a failed rollout), run on a disposable GitHub-hosted
+# runner. No real server is touched, nothing is pushed to ghcr.io and the job holds no secret: the
+# candidate image is built here with Dockerfile.release and held in a loopback registry this job starts,
+# and every credential is generated for the drill.
+# See scripts/acceptance/ops_deploy_drills.py and the engineering note in
+# docs/app-platform/167-owner-decisions-remaining-acceptance.md section 6.
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: Diagnostic only. Pin the released image to this tag instead of the newest published release. A run that pins a tag is never evidence
+      expected_commit:
+        description: The full SHA of the reviewed commit the run must measure. A run on a different commit is never evidence; empty is allowed but is recorded
         type: string
         default: ''
+      prior_release_tag:
+        description: The released build the rollout starts from and is restored to (a pinned vYYYY.W[.R] tag, with its published release-metadata.json). Recorded in the evidence
+        type: string
+        default: v2026.46.1
 permissions:
   contents: read
 concurrency:
@@ -19,17 +25,64 @@ concurrency:
 jobs:
   drills:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
-      OPS_DRILL_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || '' }}
+      OPS_DRILL_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit || '' }}
+      OPS_DRILL_PRIOR_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.prior_release_tag || 'v2026.46.1' }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: ""
       - name: Check the drill logic
         run: python3 -B -m unittest discover -s scripts -p ops_deploy_drills_test.py
+      - name: Build the web bundle as the release workflow does
+        working-directory: web
+        env:
+          VITE_BUILD_VERSION: drill-${{ github.sha }}
+          VITE_BUILD_COMMIT: ${{ github.sha }}
+        run: |
+          npm ci
+          npm run build
+      - name: Build the candidate binary as the release workflow does
+        run: |
+          set -euo pipefail
+          sha="$GITHUB_SHA"
+          short="${sha:0:7}"
+          mkdir -p bin/linux-amd64 "$RUNNER_TEMP/ops-drill"
+          echo "OPS_DRILL_CANDIDATE=$RUNNER_TEMP/ops-drill/candidate.json" >> "$GITHUB_ENV"
+          mod=$(go list -m)
+          ldflags="-s -w -X ${mod}/internal/version.Version=drill-${short} -X ${mod}/internal/version.Commit=${short} -X ${mod}/internal/version.BuildDate=$(date -u +%FT%TZ)"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="${ldflags}" -o bin/linux-amd64/report-portal ./cmd/report-portal
+          sh scripts/check-release-build.sh bin/linux-amd64/report-portal linux amd64 "$sha"
+          chmod +x bin/linux-amd64/report-portal
+      - name: Start the loopback registry
+        run: |
+          set -euo pipefail
+          docker run -d --label org.portal.fixture=ops-drill -p 127.0.0.1:5000:5000 registry:3@sha256:82f6ff4a7f982960c8aa51617fea3aabc485df6e55cce80d22deb1de36f1bc3c
+          for _ in $(seq 1 30); do curl -fs http://127.0.0.1:5000/v2/ && break; sleep 1; done
+      - name: Build the candidate image with the release Dockerfile and push it to the loopback registry
+        run: |
+          set -euo pipefail
+          short="${GITHUB_SHA:0:7}"
+          ref="localhost:5000/report-portal-candidate:drill-${short}"
+          docker build --platform linux/amd64 -f Dockerfile.release -t "$ref" .
+          docker push "$ref"
+          image_id=$(docker image inspect "$ref" --format '{{.Id}}')
+          digest=$(docker image inspect "$ref" --format '{{range .RepoDigests}}{{println .}}{{end}}' | sed -n 's#^localhost:5000/.*@##p' | head -n1)
+          binary_sha=$(sha256sum bin/linux-amd64/report-portal | cut -d' ' -f1)
+          # Written before any deployment: the drill checks what runs against this record.
+          jq -n --arg ref "$ref" --arg id "$image_id" --arg digest "$digest" --arg bin "$binary_sha" \
+                --arg version "drill-${short}" --arg commit "$GITHUB_SHA" \
+            '{ref:$ref, image_id:$id, digest:$digest, binary_sha256:$bin, version:$version, commit:$commit}' > "$OPS_DRILL_CANDIDATE"
+          cat "$OPS_DRILL_CANDIDATE"
       - name: Run the drills
         id: drills
         run: |
@@ -48,7 +101,7 @@ jobs:
             python3 - "$f" >> "$GITHUB_STEP_SUMMARY" <<'PY'
           import json, sys
           doc = json.load(open(sys.argv[1]))
-          print(f"result: {doc.get('result')}  blockers: {doc.get('run', {}).get('evidence_blockers')}")
+          print(f"result: {doc.get('result')}  counts as evidence: {doc.get('run', {}).get('counts_as_evidence')}  blockers: {doc.get('run', {}).get('evidence_blockers')}")
           for c in doc.get("checks", []):
               print(f"- {'pass' if c['passed'] else 'FAIL'} {c['id']}")
           PY
@@ -66,5 +119,5 @@ jobs:
         run: |
           docker compose -p opsdrill -f "$RUNNER_TEMP/ops-drill/work/beta/docker-compose.yml" down -v --remove-orphans || true
           docker ps -aq --filter label=org.portal.fixture=ops-drill | xargs -r docker rm -f
-          docker rm -f ops-rehearsal || true
+          docker rm -f ops-rehearsal ops-rollback-probe || true
           sudo rm -rf "$RUNNER_TEMP/ops-drill/work"

@@ -41,11 +41,12 @@ IMAGE = "ghcr.io/kazuhahub/stockanalysisprediction-report-portal"
 EVIDENCE_FORMAT = "portal.ops-deployment-drills/1-dev.1"
 PROJECT = "opsdrill"
 LIVE_DB = "reports"
+ROLLBACK_COPY_DB = "reports_rollback_probe"
 FAILED_DB = "reports_failed_rollout"
 REHEARSAL_DB = "reports_rehearsal"
 LEDGER_PREFIX = "mig:"
 KEYRING_KEYS = ("keyring_salt", "keyring_wrapped_dek")
-ACCEPTED_EVENTS = ("workflow_dispatch", "push")
+ACCEPTED_EVENTS = ("workflow_dispatch",)
 
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 CALVER_RE = re.compile(r"^v(\d{4})\.(\d{1,2})(?:\.(\d+))?$")
@@ -62,25 +63,6 @@ def calver_key(tag):
         return None
     year, week, revision = match.groups()
     return int(year), int(week), int(revision or 0)
-
-
-def newest_published_release(releases, channel="beta"):
-    """The tag of the newest published release. The beta channel includes pre-releases, the stable one
-    does not; a draft is never published, and a tag that is not CalVer is ignored."""
-    best = None
-    for release in releases:
-        if release.get("draft"):
-            continue
-        if channel == "stable" and release.get("prerelease"):
-            continue
-        key = calver_key(release.get("tag_name", ""))
-        if key is None:
-            continue
-        if best is None or key > best[0]:
-            best = (key, release["tag_name"])
-    if best is None:
-        raise RuntimeError(f"no published {channel} release found")
-    return best[1]
 
 
 def parse_release_metadata(text, tag):
@@ -125,8 +107,8 @@ def compose_image_ref(text):
 
 
 def render_pinned_compose(template, ref):
-    """The beta compose shape with its image reference pinned to ref. Nothing else changes: the result
-    differs from the template by exactly one line, which changed_lines asserts."""
+    """The repository's docker-compose.yml with its report-portal image reference replaced by ref. Nothing
+    else changes: the result differs from the template by exactly one line (the image line)."""
     compose_image_ref(template)
     out = []
     for line in template.splitlines(keepends=True):
@@ -138,12 +120,36 @@ def render_pinned_compose(template, ref):
     return "".join(out)
 
 
-def changed_lines(a, b):
-    """The number of lines that differ between two texts with the same line count (0 when identical)."""
+def changed_line_numbers(a, b):
+    """1-based numbers of the lines that differ between two texts. When the line counts differ the lines past
+    the shorter text count as changed."""
     la, lb = a.splitlines(), b.splitlines()
-    if len(la) != len(lb):
-        return max(len(la), len(lb))
-    return sum(1 for x, y in zip(la, lb) if x != y)
+    n = max(len(la), len(lb))
+    return [i + 1 for i in range(n) if (la[i] if i < len(la) else None) != (lb[i] if i < len(lb) else None)]
+
+
+def image_line_number(text):
+    """1-based number of the report-portal image line (the one line the procedure rewrites)."""
+    compose_image_ref(text)
+    for number, line in enumerate(text.splitlines(), 1):
+        if IMAGE_LINE_RE.match(line):
+            return number
+    raise ValueError("no image line")
+
+
+def config_diff_paths(a, b, prefix=""):
+    """Dotted paths at which two parsed `docker compose config` documents differ, sorted. A list is compared
+    whole, so a changed list is reported at the list's own path."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        paths = []
+        for key in sorted(set(a) | set(b)):
+            here = f"{prefix}.{key}" if prefix else str(key)
+            if key not in a or key not in b:
+                paths.append(here)
+            else:
+                paths.extend(config_diff_paths(a[key], b[key], here))
+        return sorted(paths)
+    return [] if a == b else [prefix]
 
 
 def sha256_hex(data):
@@ -301,8 +307,8 @@ class Fixtures:
         return sorted([self.admin_user, self.totp_user, *self.readers, "admin"])
 
 
-def check_result(name, passed, detail=""):
-    return {"id": name, "passed": bool(passed), "detail": detail}
+def check_result(name, passed, detail="", **extra):
+    return {"id": name, "passed": bool(passed), "detail": detail, **extra}
 
 
 def run_gate(base, fx, expect_version=None, expect_commit_prefix=None):
@@ -353,12 +359,20 @@ def run_gate(base, fx, expect_version=None, expect_commit_prefix=None):
         signed_in = status == 200 and me.get("user") == fx.totp_user
     else:
         signed_in = False
-    checks.append(check_result("totp_login", signed_in, f"status {status} code={body.get('code', '')}"))
+    code = body.get("code", "") if isinstance(body, dict) else ""
+    checks.append(check_result("totp_login", signed_in, f"status {status} code={code}", status=status, code=code))
     return checks
 
 
 def failed_checks(checks):
     return sorted(c["id"] for c in checks if not c["passed"])
+
+
+def failed_for(checks, check_id, status, code):
+    """True when the named check failed with exactly this HTTP status and error code, so a control that is
+    meant to fail for one reason is not satisfied by an unrelated failure (an unreachable portal is status 0)."""
+    return any(c["id"] == check_id and not c["passed"] and c.get("status") == status and c.get("code") == code
+               for c in checks)
 
 
 # ------------------------------------------------------------------ events and ordering proof
@@ -389,9 +403,11 @@ LIVE_MUTATIONS = ("live_db_replaced", "live_restore", "activation")
 
 
 def ordering_proof(events):
-    """Compatibility and key recovery are checked before activation iff every pre-activation check
-    passed and each came before the first mutation of the live stack that restores the prior version.
-    Returns (passed, explanation)."""
+    """A record of one run, not the enforcement: compatibility and key recovery were checked before
+    activation iff every pre-activation check passed and came before the first mutation of the live stack
+    that restores the prior version, and the activation itself came out healthy. What makes the order
+    impossible to get wrong is recovery_sequence, which the FakeHost tests pin; this reads the events one run
+    actually produced. Returns (passed, explanation)."""
     first_mutation = min((e["seq"] for e in events if e["kind"] in LIVE_MUTATIONS), default=None)
     if first_mutation is None:
         return False, "the restore never reached the live stack"
@@ -402,13 +418,19 @@ def ordering_proof(events):
     activation = next((e for e in events if e["kind"] == "activation"), None)
     if activation is None:
         return False, "the prior version was never activated"
-    return True, f"all {len(PRE_ACTIVATION_CHECKS)} checks passed before event {first_mutation} and activation (event {activation['seq']})"
+    if not activation.get("ok"):
+        return False, "the prior version was activated but did not become healthy"
+    return True, f"all {len(PRE_ACTIVATION_CHECKS)} checks passed before event {first_mutation} and activation (event {activation['seq']}) was healthy"
 
 
 # ------------------------------------------------------------------ recovery sequence
 
 class RecoveryRefused(Exception):
     """A pre-activation check refused the recovery set; nothing live was changed."""
+
+
+class RecoveryFailed(Exception):
+    """A live step failed after the checks passed; the later steps did not run."""
 
 
 def recovery_sequence(host, rec):
@@ -419,31 +441,56 @@ def recovery_sequence(host, rec):
     dump's migration level, schema and columns must be ones that build accepts), and a rehearsal of the
     whole restore into a scratch database with the recovered config, which signs the fixture
     two-factor account in (the keyring opens only under the recovered secret_key). Only then is the
-    live database replaced and the prior version activated.
+    live database replaced and the prior version activated. Each live step reports (ok, detail) and
+    is recorded with that real outcome; a failed step stops the sequence.
     """
-    ok, detail = host.verify_set_integrity()
-    rec.event("recovery_set_integrity", ok, **detail)
-    if not ok:
-        raise RecoveryRefused("recovery set integrity")
-    ok, detail = host.dry_run_restore()
-    rec.event("restore_dry_run_compat", ok, **detail)
-    if not ok:
-        raise RecoveryRefused("restore dry run")
-    ok, detail = host.rehearse_restore()
-    rec.event("rehearsal_key_gate", ok, **detail)
-    if not ok:
-        raise RecoveryRefused("rehearsal gate")
-    rec.event("live_db_replaced", True, **host.replace_live_database())
-    rec.event("live_restore", True, **host.restore_live())
-    rec.event("activation", True, **host.activate_prior())
+    for kind, check, refusal in (("recovery_set_integrity", host.verify_set_integrity, "recovery set integrity"),
+                                 ("restore_dry_run_compat", host.dry_run_restore, "restore dry run"),
+                                 ("rehearsal_key_gate", host.rehearse_restore, "rehearsal gate")):
+        ok, detail = check()
+        rec.event(kind, ok, **detail)
+        if not ok:
+            raise RecoveryRefused(refusal)
+    for kind, step in (("live_db_replaced", host.replace_live_database), ("live_restore", host.restore_live),
+                       ("activation", host.activate_prior)):
+        ok, detail = step()
+        rec.event(kind, ok, **detail)
+        if not ok:
+            raise RecoveryFailed(kind)
     gate = host.final_gate()
     rec.event("final_gate", not failed_checks(gate), failed=failed_checks(gate))
     return gate
 
 
+def verify_recovery_set(directory, manifest):
+    """Integrity of a recovery set against its manifest: the file digests, and the secret_key fingerprint of
+    the config file. The fingerprint is read whenever the config is readable, so a damaged dump never makes
+    the key look wrong (and a wrong key is caught even when its file hash was rewritten)."""
+    detail, ok = {}, True
+    for part in ("dump", "config", "compose"):
+        entry = manifest[part]
+        try:
+            with open(os.path.join(directory, entry["file"]), "rb") as f:
+                actual = sha256_hex(f.read())
+        except OSError:
+            actual = "unreadable"
+        same = actual == entry["sha256"]
+        detail[part] = "match" if same else "MISMATCH"
+        ok = ok and same
+    try:
+        with open(os.path.join(directory, manifest["config"]["file"]), encoding="utf-8") as f:
+            key_same = fingerprint(parse_secret_key(f.read())) == manifest["config"]["secret_key_fp"]
+    except OSError:
+        key_same = False
+    detail["secret_key_fp"] = "match" if key_same else "MISMATCH"
+    return ok and key_same, detail
+
+
 # ------------------------------------------------------------------ evidence
 
 def evidence_blockers(env):
+    """Why a run does not count as evidence: empty only for a workflow_dispatch run of this repository on the
+    commit the dispatcher named (expected_commit, as OPS-08 does), with a pinned prior release."""
     blockers = []
     if env.get("GITHUB_ACTIONS") != "true":
         blockers.append("not a GitHub Actions run")
@@ -451,21 +498,30 @@ def evidence_blockers(env):
         blockers.append("repository is not " + REPOSITORY)
     event = env.get("GITHUB_EVENT_NAME", "")
     if event not in ACCEPTED_EVENTS:
-        blockers.append(f"the event was {event or 'unknown'}, not one of {', '.join(ACCEPTED_EVENTS)}")
-    if not re.fullmatch(r"[0-9a-f]{40}", env.get("GITHUB_SHA", "")):
+        blockers.append(f"the event was {event or 'unknown'}, not {' or '.join(ACCEPTED_EVENTS)}; a push run is not evidence")
+    sha = env.get("GITHUB_SHA", "")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha):
         blockers.append("no full commit SHA")
-    if env.get("OPS_DRILL_RELEASE_TAG"):
-        blockers.append("a release tag was pinned by input, not the newest published one")
+    expected = env.get("OPS_DRILL_EXPECTED_COMMIT", "")
+    if expected and not re.fullmatch(r"[0-9a-f]{40}", expected):
+        blockers.append("expected_commit is not a full lower-case commit SHA")
+    elif expected and expected != sha:
+        blockers.append(f"expected_commit {expected[:12]} differs from the commit that ran {sha[:12]}")
+    prior = env.get("OPS_DRILL_PRIOR_TAG", "")
+    if prior and calver_key(prior) is None:
+        blockers.append("the prior release tag is not a CalVer tag")
     return blockers
 
 
 def run_block(env):
     server, repo, run = env.get("GITHUB_SERVER_URL", ""), env.get("GITHUB_REPOSITORY", ""), env.get("GITHUB_RUN_ID", "")
+    blockers = evidence_blockers(env)
     return {"event": env.get("GITHUB_EVENT_NAME", ""), "commit": env.get("GITHUB_SHA", ""),
+            "expected_commit": env.get("OPS_DRILL_EXPECTED_COMMIT", ""), "prior_release_tag": env.get("OPS_DRILL_PRIOR_TAG", ""),
             "ref": env.get("GITHUB_REF_NAME", ""), "run_id": run, "attempt": env.get("GITHUB_RUN_ATTEMPT", ""),
             "workflow_ref": env.get("GITHUB_WORKFLOW_REF", ""),
             "url": f"{server}/{repo}/actions/runs/{run}" if run else "",
-            "evidence_blockers": evidence_blockers(env)}
+            "evidence_blockers": blockers, "counts_as_evidence": not blockers}
 
 
 def verdict(checks):
@@ -473,31 +529,63 @@ def verdict(checks):
     return {"passed": not failed, "result": "passed" if not failed else "failed", "failed_checks": failed}
 
 
+def _same_commit(full, short):
+    return len(short) >= 7 and full.startswith(short)
+
+
 def ops05_checks(f):
-    """Checks for OPS-05 from the facts the host collected after deploying a released image."""
+    """OPS-05: the platform candidate built from the commit under test is deployed through the repository
+    compose with only the image line changed, and what runs is what was built. Every expected value comes
+    from the build record (written before the deploy) or from the registry, never from the deploy itself."""
+    build = f["build"]
     c = []
-    c.append(check_result("reference_pinned_by_tag", f["image_ref"] == f"{IMAGE}:{f['tag']}", f["image_ref"]))
-    c.append(check_result("compose_differs_from_beta_template_by_one_line", f["template_changed_lines"] == 1,
-                          f"{f['template_changed_lines']} lines"))
-    c.append(check_result("version_reference_unchanged_after_deploy",
-                          f["compose_sha_before"] == f["compose_sha_after"] and f["ref_before"] == f["ref_after"],
-                          f"{f['compose_sha_before'][:12]} -> {f['compose_sha_after'][:12]}"))
-    c.append(check_result("registry_digest_equals_release_record", f["registry_digest"] == f["recorded_digest"],
-                          f"{f['registry_digest']} vs {f['recorded_digest']}"))
-    c.append(check_result("pulled_image_digest_equals_release_record", f["recorded_digest"] in f["repo_digests"],
+    c.append(check_result("deployed_compose_differs_from_reference_only_in_the_image_line",
+                          f["config_diff_paths"] == ["services.report-portal.image"], ", ".join(f["config_diff_paths"])))
+    c.append(check_result("deployed_compose_text_changes_only_the_image_line",
+                          f["changed_lines"] == [f["image_line_number"]], f"lines {f['changed_lines']}"))
+    c.append(check_result("container_reference_is_the_built_reference", f["container_config_image"] == build["ref"],
+                          f["container_config_image"]))
+    c.append(check_result("registry_digest_of_tag_equals_built_digest", f["registry_digest"] == build["digest"],
+                          f"{f['registry_digest']} vs {build['digest']}"))
+    c.append(check_result("container_image_digest_equals_registry_digest_of_tag", f["registry_digest"] in f["repo_digests"],
                           ", ".join(f["repo_digests"])))
-    c.append(check_result("container_runs_the_pulled_image", f["container_image_id"] == f["image_id"],
-                          f"{f['container_image_id'][:19]}"))
+    c.append(check_result("container_runs_the_built_image", f["container_image_id"] == build["image_id"],
+                          f["container_image_id"][:19]))
+    c.append(check_result("loaded_binary_is_the_built_binary",
+                          bool(f["loaded_binary_sha256"]) and f["loaded_binary_sha256"] == build["binary_sha256"],
+                          f["loaded_binary_sha256"][:16]))
+    c.append(check_result("api_version_equals_built_version", f["api_version"] == build["version"], f["api_version"]))
+    c.append(check_result("api_commit_is_the_commit_under_test", _same_commit(build["commit"], f["api_commit"]), f["api_commit"]))
+    cli_version, cli_commit = parse_cli_version(f["cli_version"])
+    c.append(check_result("cli_version_matches_the_build", cli_version == build["version"] and cli_commit == f["api_commit"],
+                          f["cli_version"]))
+    c.append(check_result("commit_under_test_is_the_built_commit",
+                          f["run_commit"] == build["commit"] and f["expected_commit"] == build["commit"],
+                          f"ran {f['run_commit'][:12]} built {build['commit'][:12]} expected {f['expected_commit'][:12]}"))
+    c.append(check_result("healthy", f["healthy"], ""))
+    return c
+
+
+def released_checks(f):
+    """The released prior build, deployed from its pinned tag (the baseline of OPS-06) and verified against the
+    release workflow's own record of what it published."""
+    rec = f["record"]
+    c = []
+    c.append(check_result("reference_matches_the_release_record", f["image_ref"] == f"{rec['image']}:{rec['tag']}", f["image_ref"]))
+    c.append(check_result("registry_digest_equals_release_record", f["registry_digest"] == rec["digest"],
+                          f"{f['registry_digest']} vs {rec['digest']}"))
+    c.append(check_result("container_image_digest_equals_release_record", rec["digest"] in f["repo_digests"],
+                          ", ".join(f["repo_digests"])))
+    c.append(check_result("container_runs_the_expected_image", f["container_image_id"] == f["image_id"], f["container_image_id"][:19]))
     c.append(check_result("container_reference_is_the_pinned_tag", f["container_config_image"] == f["image_ref"],
                           f["container_config_image"]))
     c.append(check_result("loaded_binary_is_the_image_binary",
                           bool(f["loaded_binary_sha256"]) and f["loaded_binary_sha256"] == f["image_binary_sha256"],
                           f["loaded_binary_sha256"][:16]))
-    c.append(check_result("api_version_equals_release_tag", f["api_version"] == f["tag"], f["api_version"]))
-    c.append(check_result("api_commit_is_the_release_commit", f["recorded_commit"].startswith(f["api_commit"]) and len(f["api_commit"]) >= 7,
-                          f["api_commit"]))
+    c.append(check_result("api_version_equals_release_tag", f["api_version"] == rec["tag"], f["api_version"]))
+    c.append(check_result("api_commit_is_the_release_commit", _same_commit(rec["commit"], f["api_commit"]), f["api_commit"]))
     cli_version, cli_commit = parse_cli_version(f["cli_version"])
-    c.append(check_result("cli_version_matches_release", cli_version == f["tag"].lstrip("v") and cli_commit == f["api_commit"],
+    c.append(check_result("cli_version_matches_release", cli_version == rec["tag"].lstrip("v") and cli_commit == f["api_commit"],
                           f["cli_version"]))
     c.append(check_result("healthy", f["healthy"], ""))
     return c
@@ -513,15 +601,24 @@ def ops06_checks(f):
     c.append(check_result("rollout_refused_by_activation_gate",
                           f["rollout_failed"] == ["totp_login"] and f["rollout_healthz"],
                           f"healthy process, failed {f['rollout_failed']}"))
-    c.append(check_result("prior_build_refuses_the_migrated_database",
-                          f["rollback_refused"] and not f["rollback_healthy"], f["rollback_state"]))
+    c.append(check_result("rollout_refused_for_the_key_reason", f["rollout_reason_ok"],
+                          "totp_login failed with HTTP 401 bad_totp_code; the same account signed in under the old key"))
+    c.append(check_result("prior_build_refuses_a_copy_of_the_migrated_database", f["rollback_refused"], f["rollback_state"]))
+    c.append(check_result("rollback_demonstration_leaves_the_live_database_alone", f["rollback_on_copy"],
+                          "run against a database copied from the migrated one"))
     c.append(check_result("newer_dump_refused_by_prior_build", f["negative_compat_refused"], f["negative_compat_detail"]))
     c.append(check_result("tampered_set_refused_by_integrity_check", f["negative_integrity_refused"], f["negative_integrity_detail"]))
     c.append(check_result("wrong_key_refused_by_rehearsal_gate", f["negative_key_refused"], f["negative_key_detail"]))
     passed, why = ordering_proof(f["events"])
     c.append(check_result("checks_precede_activation", passed, why))
     c.append(check_result("final_gate_passed", not f["final_failed"], str(f["final_failed"])))
-    c.append(check_result("prior_version_loaded_by_digest", f["final_digest_ok"], f["final_digest"]))
+    c.append(check_result("prior_container_is_the_expected_image",
+                          f["final_container_image_id"] == f["expected_image_id"], f["final_container_image_id"][:19]))
+    c.append(check_result("prior_container_digest_equals_release_record", f["recorded_digest"] in f["final_repo_digests"],
+                          ", ".join(f["final_repo_digests"])))
+    c.append(check_result("prior_image_unchanged_from_baseline",
+                          f["final_container_image_id"] == f["baseline_container_image_id"], f["baseline_container_image_id"][:19]))
+    c.append(check_result("prior_version_reported_by_the_portal", f["final_api_version"] == f["prior_tag"], f["final_api_version"]))
     c.append(check_result("version_reference_restored", f["compose_sha_final"] == f["compose_sha_baseline"],
                           f"{f['compose_sha_baseline'][:12]} -> {f['compose_sha_final'][:12]}"))
     c.append(check_result("secret_key_unchanged", f["key_fp_final"] == f["key_fp_baseline"], f["key_fp_final"]))
@@ -534,19 +631,78 @@ def ops06_checks(f):
 
 NOT_PROVEN_COMMON = [
     "No real server, production database or production secret_key is involved: the host is a GitHub-hosted runner and every credential is generated for the drill.",
-    "The deployment procedure exercised is the compose procedure of the beta configuration, not the production host's reverse proxy, firewall, systemd ordering or its shared PostgreSQL.",
+    "The stack is the repository's docker-compose.yml with only its image line replaced, not the server's beta configuration, and not the production host's reverse proxy, firewall, systemd ordering or shared PostgreSQL.",
 ]
+
+OPS05_GAPS = [
+    "The compose file is the repository's docker-compose.yml, not the server's own beta configuration; the server's `beta` channel reference, its env file and host-level parts are not exercised.",
+    "The version-reference rule is unreconciled in the docs: docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags, while the current production procedure is a single compose file with a fixed version tag (in use since v2026.43.5). The drill follows the current procedure and checks that only the image line differs; see the engineering note in doc 167 section 6.",
+    "No app runner is deployed. The runner is a separate host service (deploy/app-runner) that needs an XFS project-quota volume and enrollment; its boot is exercised by the app-runner and app-project-quota probes, not here.",
+    "The candidate is built with Dockerfile.release and the release web bundle for linux/amd64 only and held in a loopback registry; it is not an image published by the release workflow.",
+    "Doc 167 section 9 requires OPS-05 passed on staging; this is a CI host, not staging.",
+    "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending.",
+]
+
+OPS06_GAPS = [
+    "The runtime half is not exercised: no app runner is on the host, so runner/Portal protocol compatibility, the runner journal, managed app data and image blobs are not in the recovery set. It needs a platform recovery bundle command, because writePlatformRecoveryBundle is unreachable from any command; that command is a separate pre-main item.",
+    "The recovery set is the existing logical dump plus the config directory holding secret_key, not the platform recovery bundle.",
+    "The failed rollout is one injected fault (the config directory is not carried across) on top of the schema steps the candidate applies; a build that never starts, an image that cannot be pulled and a failing migration are not drilled.",
+    "The stack is the repository's docker-compose.yml, not the server's beta configuration, and the host is a CI runner, not staging (doc 167 section 9).",
+    "The two-factor sign-in is the key-recovery oracle: it proves the keyring opens under the recovered secret_key, not that every sealed secret in a real database would. The control fails with HTTP 401 bad_totp_code, which a wrong code also gives; the fixture sign-in succeeding under the old key is what ties it to the key.",
+    "The restore goes into a fresh database because the prior build refuses to open a database whose ledger it does not know.",
+    "A push-triggered run is not evidence; a workflow_dispatch run on the expected commit is still pending.",
+]
+
+OPS05_PROVES = [
+    "The platform candidate built from the commit under test (Dockerfile.release and the web bundle, in a loopback registry) is deployed through the repository compose with only the report-portal image line changed (checked on the rendered `docker compose config` and on the file's lines).",
+    "What runs is what was built: the container's image id, the digest its tag resolves to in the registry, the binary in the running process and the version and commit the portal reports all equal the build record written before the deploy.",
+]
+
+OPS06_PROVES = [
+    "A recovery set taken with the released prior build is verified (file digests, secret_key fingerprint, dry-run restore) before the rollout.",
+    "After a forced failed rollout the prior build refuses a copy of the migrated database, and the live database is first touched only after the restore's checks pass.",
+    "The restore refuses a dump written by the newer build, a truncated set and a set with the wrong secret_key, each at the check meant to catch it, and accepts the good set in the recorded order, ending healthy.",
+    "After restore the prior release is the same image as before the rollout, and the compose reference, secret_key fingerprint, keyring rows, migration ledger and fixture rows equal their pre-rollout values.",
+]
+
+
+def build_acceptance(ops05, ops06, artifact, run_url):
+    """The committed acceptance document, generated from the run's evidence artifact. Both rows stay partial
+    whatever the checks say: the gaps are properties of the drill, not of one run."""
+    blockers = sorted(set(ops05["run"]["evidence_blockers"]) | set(ops06["run"]["evidence_blockers"]))
+    failed = ops05["result"] != "passed" or ops06["result"] != "passed"
+
+    def row(doc, name, proves, gaps):
+        return {"row": name, "status": "failed" if doc["result"] != "passed" else "partial", "drill_result": doc["result"],
+                "checks": [{k: v for k, v in c.items()} for c in doc["checks"]], "proves": proves, "gaps": gaps}
+
+    return {
+        "format": "portal.ops-deployment-drills-acceptance/1-dev.1",
+        "status": "failed" if failed else "partial",
+        "plan": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 6 (engineering note)",
+        "run": {"url": run_url, **{k: ops05["run"][k] for k in ("event", "commit", "expected_commit", "prior_release_tag", "run_id", "attempt", "ref")}},
+        "counts_as_evidence": not blockers, "evidence_blockers": blockers,
+        "artifact": {k: artifact[k] for k in ("id", "name", "digest", "size_in_bytes")},
+        "generated_utc": {"ops05": ops05["generated_at"], "ops06": ops06["generated_at"]},
+        "host": ops05.get("host", {}),
+        "rows": [row(ops05, "OPS-05", OPS05_PROVES, OPS05_GAPS), row(ops06, "OPS-06", OPS06_PROVES, OPS06_GAPS)],
+        "ops05_facts": ops05["facts"], "ops05_released_prior": ops05.get("released_prior", {}),
+        "ops06_events": ops06["events"],
+        "ops06_facts": {k: v for k, v in ops06["facts"].items() if k not in ("events", "rollout_gate_checks")},
+        "not_proven": NOT_PROVEN_COMMON,
+    }
 
 
 # ------------------------------------------------------------------ docker host
 
 class DockerHost:
-    """The disposable host: a compose stack in the beta shape plus the one-off containers of the drill."""
+    """The disposable host: a compose stack from the repository's docker-compose.yml plus the one-off containers of the drill."""
 
     def __init__(self, work, repo_root, env, rec):
         self.work, self.repo, self.env, self.rec = work, repo_root, env, rec
         self.beta = os.path.join(work, "beta")
         self.compose_file = os.path.join(self.beta, "docker-compose.yml")
+        self.reference_file = os.path.join(self.beta, "docker-compose.reference.yml")
         self.config_dir = os.path.join(self.beta, "config")
         self.set_dir = os.path.join(work, "recovery-set")
         self.out = os.path.join(work, "evidence")
@@ -589,7 +745,23 @@ class DockerHost:
         text = render_pinned_compose(template, ref)
         with open(self.compose_file, "w", encoding="utf-8") as f:
             f.write(text)
-        return text, changed_lines(template, text)
+        with open(self.reference_file, "w", encoding="utf-8") as f:  # verbatim, beside the deployed file so paths resolve alike
+            f.write(template)
+        return text, changed_line_numbers(template, text), image_line_number(template)
+
+    def compose_config(self, path):
+        out = self.sh(["docker", "compose", "-p", PROJECT, "--project-directory", self.beta, "-f", path, "config",
+                       "--format", "json"]).stdout
+        return json.loads(out)
+
+    def config_diff(self):
+        """Where the stack that is deployed differs from the repository's compose, as parsed by compose itself."""
+        return config_diff_paths(self.compose_config(self.reference_file), self.compose_config(self.compose_file))
+
+    def reset_stack(self):
+        """Tear the stack down with its volumes so the next deployment starts from a clean host."""
+        self.compose("down", "-v", "--remove-orphans", check=False)
+        self.sh(["rm", "-rf", self.config_dir, self.config_dir + ".not-carried"], sudo=True)
 
     def compose_sha(self):
         with open(self.compose_file, "rb") as f:
@@ -628,6 +800,14 @@ class DockerHost:
     def registry_digest(self, ref):
         out = self.sh(["docker", "buildx", "imagetools", "inspect", ref, "--format", "{{json .Manifest}}"]).stdout
         return manifest_digest(out)
+
+    def tag_digest(self, ref):
+        """The digest a tag resolves to in its registry right now: the loopback registry is asked directly,
+        any other through buildx."""
+        if ref.startswith("localhost:5000/"):
+            name, tag = ref[len("localhost:5000/"):].rsplit(":", 1)
+            return local_registry_digest(self, name, tag)
+        return self.registry_digest(ref)
 
     def image_inspect(self, ref):
         return json.loads(self.sh(["docker", "image", "inspect", ref]).stdout)[0]
@@ -717,21 +897,17 @@ class DockerHost:
         return fingerprint(parse_secret_key(text)), text
 
     # -- loaded identity
-    def loaded_identity(self, ref, expect_digest):
-        """What is actually running: the container's image, its digests, the binary in memory and what
-        the portal itself reports."""
+    def loaded_identity(self):
+        """What is actually running: the container's image id and the digests of that image, the binary in
+        memory and what the portal itself reports. The digests are those of the image the container runs,
+        looked up by its id, not those of whatever a tag points at in the local store."""
         container = self.container()
-        image = self.image_inspect(ref)
-        facts = {"container_image_id": container["Image"], "image_id": image["Id"],
-                 "container_config_image": container["Config"]["Image"],
+        image = self.image_inspect(container["Image"])
+        facts = {"container_image_id": container["Image"], "container_config_image": container["Config"]["Image"],
                  "repo_digests": [d.split("@", 1)[1] for d in image.get("RepoDigests", []) if "@" in d],
-                 "loaded_binary_sha256": self.loaded_binary_sha(), "image_binary_sha256": self.binary_sha_in_image(ref),
-                 "cli_version": self.cli("version").stdout.strip()}
-        admin = Portal(self.base)
-        admin.login(self.fx.admin_user, self.fx.admin_password)
-        _, ver = admin.req("GET", "/api/version")
-        facts.update({"api_version": ver.get("version", ""), "api_commit": ver.get("commit", ""),
-                      "digest_ok": expect_digest in facts["repo_digests"]})
+                 "loaded_binary_sha256": self.loaded_binary_sha(), "cli_version": self.cli("version").stdout.strip()}
+        reported = self.reported_version()
+        facts.update({"api_version": reported["version"], "api_commit": reported["commit"]})
         return facts
 
     # -- recovery set (a DockerHost implements the recovery_sequence interface)
@@ -768,21 +944,7 @@ class DockerHost:
             return sha256_hex(f.read())
 
     def verify_set_integrity(self, directory=None, manifest=None):
-        directory, manifest = directory or self.set_dir, manifest or self.manifest
-        detail, ok = {}, True
-        for part in ("dump", "config", "compose"):
-            entry = manifest[part]
-            try:
-                actual = self.file_sha(entry["file"], directory)
-            except OSError as err:
-                actual = f"unreadable: {err}"
-            same = actual == entry["sha256"]
-            detail[part] = "match" if same else "MISMATCH"
-            ok = ok and same
-        text = open(os.path.join(directory, "config.yaml"), encoding="utf-8").read() if ok else ""
-        key_same = bool(text) and fingerprint(parse_secret_key(text)) == manifest["config"]["secret_key_fp"]
-        detail["secret_key_fp"] = "match" if key_same else "MISMATCH"
-        return ok and key_same, detail
+        return verify_recovery_set(directory or self.set_dir, manifest or self.manifest)
 
     def scratch_db(self, name):
         self.psql_admin(f"DROP DATABASE IF EXISTS {name} WITH (FORCE)")
@@ -794,8 +956,10 @@ class DockerHost:
         return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
     def dry_run_restore(self, dump_dir=None, dump_name="dump.jsonl", scratch="dryrun"):
-        """Compatibility: the prior build reads the whole dump against an empty scratch database and
-        reports what it would load. Nothing is written; the live database is not opened."""
+        """Compatibility: the prior build reads the whole dump and reports what it would load, writing
+        nothing from the dump. It does bootstrap the empty scratch database it is pointed at (schema and the
+        18 seed rows a fresh database gets), which is why the report says it "would DELETE 18 existing rows":
+        those are the scratch database's own seed rows, not live data. The live database is never opened."""
         self.scratch_db(REHEARSAL_DB)
         rc, out = self.restore_cmd(REHEARSAL_DB, self.rehearsal_config(), dump_dir or self.set_dir, dump_name, force=False)
         self.log(f"restore-dry-run-{scratch}.txt", out)
@@ -837,15 +1001,37 @@ class DockerHost:
         self.psql_admin(f"DROP DATABASE IF EXISTS {FAILED_DB} WITH (FORCE)")
         self.psql_admin(f"ALTER DATABASE {LIVE_DB} RENAME TO {FAILED_DB}")
         self.psql_admin(f"CREATE DATABASE {LIVE_DB} OWNER portal")
-        return {"kept_as": FAILED_DB}
+        exists = self.psql_admin(f"SELECT count(*) FROM pg_database WHERE datname IN ('{FAILED_DB}','{LIVE_DB}')").strip() == "2"
+        return exists, {"kept_as": FAILED_DB}
 
     def restore_live(self):
         self.restore_config_into_live()
         rc, out = self.restore_cmd(LIVE_DB, self.config_dir, self.set_dir, "dump.jsonl", force=True)
         self.log("restore-live.txt", out)
-        if rc != 0:
-            raise RuntimeError("live restore failed: " + out[-400:])
-        return {"exit_code": rc, "summary": out.strip().splitlines()[-1:]}
+        return rc == 0, {"exit_code": rc, "summary": out.strip().splitlines()[-1:]}
+
+    def rollback_probe(self, new_steps):
+        """The obvious rollback, the prior build started against the migrated database, run against a
+        database copied from it so the live database is not touched before the restore's checks. The prior
+        build must exit non-zero with the unknown steps named."""
+        self.compose("stop", "report-portal")
+        self.psql_admin(f"DROP DATABASE IF EXISTS {ROLLBACK_COPY_DB} WITH (FORCE)")
+        self.psql_admin(f"CREATE DATABASE {ROLLBACK_COPY_DB} TEMPLATE {LIVE_DB} OWNER portal")
+        name = "ops-rollback-probe"
+        self.sh(["docker", "rm", "-f", name], check=False)
+        self.one_off(self.prior_ref, ROLLBACK_COPY_DB, self.rehearsal_config(), [], name=name, detach=True)
+        state = {}
+        for _ in range(30):
+            state = self.container_state(name)
+            if state["status"] == "exited":
+                break
+            time.sleep(1)
+        logs = (self.sh(["docker", "logs", name], check=False).stdout or "") + (self.sh(["docker", "logs", name], check=False).stderr or "")
+        self.log("rollback-probe.log", logs)
+        self.sh(["docker", "rm", "-f", name], check=False)
+        self.psql_admin(f"DROP DATABASE IF EXISTS {ROLLBACK_COPY_DB} WITH (FORCE)")
+        refused = state.get("status") == "exited" and state.get("exit_code") != 0 and refusal_names_steps(logs, new_steps)
+        return refused, state
 
     def restore_config_into_live(self):
         """Put the recovered config.yaml (secret_key) back into the bind-mounted config directory."""
@@ -860,7 +1046,7 @@ class DockerHost:
         healthy = self.wait_healthy()
         if not healthy:
             self.log("activation-failed.log", self.compose("logs", "--no-color", "--tail", "200", check=False).stdout or "")
-        return {"healthy": healthy, "compose_sha": self.compose_sha()}
+        return healthy, {"healthy": healthy, "compose_sha": self.compose_sha()}
 
     def final_gate(self):
         return run_gate(self.base, self.fx, self.prior_tag, self.prior_commit[:7])
@@ -870,53 +1056,6 @@ class DockerHost:
 
 def now_iso():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
-def resolve_release(host):
-    """Newest published release (beta channel, pre-releases included) and the independent record of what
-    it contains. The GitHub API is called with the job's own read-only token; the image is public."""
-    env = host.env
-    tag = env.get("OPS_DRILL_RELEASE_TAG") or ""
-    if not tag:
-        out = host.sh(["gh", "api", f"repos/{REPOSITORY}/releases?per_page=30"]).stdout
-        tag = newest_published_release(json.loads(out), "beta")
-    meta_dir = os.path.join(host.work, "release-metadata")
-    os.makedirs(meta_dir, exist_ok=True)
-    host.sh(["gh", "release", "download", tag, "-R", REPOSITORY, "-p", "release-metadata.json", "-D", meta_dir, "--clobber"])
-    with open(os.path.join(meta_dir, "release-metadata.json"), encoding="utf-8") as f:
-        meta = parse_release_metadata(f.read(), tag)
-    return tag, meta
-
-
-def drill_ops05(host, rec):
-    tag, meta = resolve_release(host)
-    ref = f"{IMAGE}:{tag}"
-    host.prior_ref, host.prior_digest, host.prior_tag, host.prior_commit = ref, meta["digest"], tag, meta["commit"]
-    registry = host.registry_digest(ref)
-    rec.event("release_resolved", True, tag=tag, recorded_digest=meta["digest"], registry_digest=registry)
-    host.sh(["docker", "pull", ref], timeout=600)
-    text, changed = host.write_compose(ref)
-    before_sha, before_ref = host.compose_sha(), compose_image_ref(text)
-    rec.event("compose_written", True, sha256=before_sha, reference=before_ref)
-    host.up()
-    healthy = host.wait_healthy()
-    rec.event("deployed", healthy)
-    host.log("ops05-compose-up.log", host.compose("logs", "--no-color", "--tail", "100", check=False).stdout or "")
-    if not healthy:
-        raise RuntimeError("the released image did not become healthy")
-    # First-run state is created by the product; the drill's fixtures are seeded through it as well.
-    host.seed_fixtures(host.env.get("GITHUB_RUN_ID", "local"))
-    ident = host.loaded_identity(ref, meta["digest"])
-    after_text = open(host.compose_file, encoding="utf-8").read()
-    facts = {"tag": tag, "image_ref": ref, "template_changed_lines": changed,
-             "compose_sha_before": before_sha, "compose_sha_after": host.compose_sha(),
-             "ref_before": before_ref, "ref_after": compose_image_ref(after_text),
-             "registry_digest": registry, "recorded_digest": meta["digest"], "recorded_commit": meta["commit"],
-             "healthy": healthy, **{k: ident[k] for k in (
-                 "container_image_id", "image_id", "container_config_image", "repo_digests", "loaded_binary_sha256",
-                 "image_binary_sha256", "api_version", "api_commit", "cli_version")}}
-    checks = ops05_checks(facts)
-    return checks, facts, meta
 
 
 def local_registry_digest(host, name, tag):
@@ -930,41 +1069,81 @@ def local_registry_digest(host, name, tag):
     raise RuntimeError("the local registry returned no Docker-Content-Digest")
 
 
-def candidate_image(host, rec, base_ref):
-    """The commit under test as an image in a loopback registry this job owns: the released runtime
-    layers plus a binary built from the checkout, version-stamped as a candidate. Nothing is pushed
-    to ghcr.io."""
-    sha = host.env["GITHUB_SHA"]
-    short = sha[:7]
-    build_dir = os.path.join(host.work, "candidate")
-    os.makedirs(build_dir, exist_ok=True)
-    host.sh(["bash", "-c",
-             "set -euo pipefail; mod=$(go list -m); "
-             f"CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags \"-s -w -X ${{mod}}/internal/version.Version=drill-candidate-{short} "
-             f"-X ${{mod}}/internal/version.Commit={short}\" -o {build_dir}/report-portal ./cmd/report-portal"], timeout=900)
-    with open(os.path.join(build_dir, "Dockerfile"), "w", encoding="utf-8") as f:
-        f.write(f"FROM {base_ref}\nCOPY report-portal /app/report-portal\n")
-    registry_id = host.sh(["docker", "run", "-d", "-p", "127.0.0.1:5000:5000", "--label", "org.portal.fixture=ops-drill",
-                           "registry:3"]).stdout.strip()
-    rec.event("local_registry_started", True, container=registry_id[:12])
-    ref = f"localhost:5000/report-portal-candidate:drill-{short}"
-    for _ in range(20):
-        if host.sh(["curl", "-fs", "http://127.0.0.1:5000/v2/"], check=False).returncode == 0:
-            break
-        time.sleep(0.5)
-    host.sh(["docker", "build", "-t", ref, build_dir], timeout=600)
-    host.sh(["docker", "push", ref], timeout=600)
-    pushed = host.image_inspect(ref)["RepoDigests"]
-    digest = next(d.split("@", 1)[1] for d in pushed if d.startswith("localhost:5000/"))
-    registry = local_registry_digest(host, "report-portal-candidate", f"drill-{short}")
-    return ref, digest, registry, short
+def load_candidate(env):
+    """The build record the workflow wrote when it built the platform candidate (before any deploy): the
+    reference in the loopback registry, the image id and pushed digest, the sha256 of the binary that went
+    into the image, and the version and commit stamped into it."""
+    with open(env["OPS_DRILL_CANDIDATE"], encoding="utf-8") as f:
+        build = json.load(f)
+    for key in ("ref", "image_id", "digest", "binary_sha256", "version", "commit"):
+        if not build.get(key):
+            raise RuntimeError(f"the candidate build record lacks {key}")
+    return build
 
 
-def drill_ops06(host, rec, ops05_facts):
+def resolve_release(host):
+    """The pinned prior release and the release workflow's own record of what it published (tag, commit,
+    image, digest). The tag is a required input, never chosen at run time."""
+    tag = host.env.get("OPS_DRILL_PRIOR_TAG", "")
+    if calver_key(tag) is None:
+        raise RuntimeError("OPS_DRILL_PRIOR_TAG must be a pinned CalVer release tag")
+    meta_dir = os.path.join(host.work, "release-metadata")
+    os.makedirs(meta_dir, exist_ok=True)
+    host.sh(["gh", "release", "download", tag, "-R", REPOSITORY, "-p", "release-metadata.json", "-D", meta_dir, "--clobber"])
+    with open(os.path.join(meta_dir, "release-metadata.json"), encoding="utf-8") as f:
+        meta = parse_release_metadata(f.read(), tag)
+    return tag, meta
+
+
+def drill_ops05(host, rec, build):
+    """OPS-05: deploy the platform candidate through the repository compose and verify what is loaded."""
+    ref = build["ref"]
+    host.sh(["docker", "pull", ref], timeout=600)
+    _, changed, image_line = host.write_compose(ref)
+    rec.event("candidate_compose_written", True, reference=ref, changed_lines=changed)
+    host.up()
+    healthy = host.wait_healthy()
+    rec.event("candidate_deployed", healthy)
+    host.log("ops05-candidate-up.log", host.compose("logs", "--no-color", "--tail", "100", check=False).stdout or "")
+    if not healthy:
+        raise RuntimeError("the platform candidate did not become healthy")
+    host.seed_fixtures(host.env.get("GITHUB_RUN_ID", "local"))  # first-run state and an admin session, through the product
+    ident = host.loaded_identity()
+    facts = {"mode": "candidate", "image_ref": ref, "build": build, "run_commit": host.env.get("GITHUB_SHA", ""),
+             "expected_commit": host.env.get("OPS_DRILL_EXPECTED_COMMIT") or host.env.get("GITHUB_SHA", ""),
+             "config_diff_paths": host.config_diff(), "changed_lines": changed, "image_line_number": image_line,
+             "registry_digest": host.tag_digest(ref), "healthy": healthy, **ident}
+    return ops05_checks(facts), facts
+
+
+def drill_released_prior(host, rec):
+    """Deploy the pinned prior release from ghcr.io (the baseline OPS-06 rolls forward from) and verify it
+    against the release workflow's record."""
+    tag, meta = resolve_release(host)
+    ref = f"{IMAGE}:{tag}"
+    host.prior_ref, host.prior_digest, host.prior_tag, host.prior_commit = ref, meta["digest"], tag, meta["commit"]
+    host.sh(["docker", "pull", ref], timeout=600)
+    host.write_compose(ref)
+    host.up()
+    healthy = host.wait_healthy()
+    rec.event("prior_deployed", healthy, tag=tag)
+    host.log("released-prior-up.log", host.compose("logs", "--no-color", "--tail", "100", check=False).stdout or "")
+    if not healthy:
+        raise RuntimeError("the released prior build did not become healthy")
+    host.seed_fixtures(host.env.get("GITHUB_RUN_ID", "local"))
+    ident = host.loaded_identity()
+    facts = {"tag": tag, "image_ref": ref, "record": meta, "registry_digest": host.registry_digest(ref),
+             "image_id": host.image_inspect(ref)["Id"], "image_binary_sha256": host.binary_sha_in_image(ref),
+             "healthy": healthy, **ident}
+    return released_checks(facts), facts, meta
+
+
+def drill_ops06(host, rec, build):
     fx = host.fx
     prior_ref = host.prior_ref
     baseline_sha = host.compose_sha()
     baseline_state = host.state()
+    baseline_image_id = host.container()["Image"]
     key_fp, _ = host.secret_key_fp()
     baseline_gate = run_gate(host.base, fx, host.prior_tag, host.prior_commit[:7])
     rec.event("baseline_gate", not failed_checks(baseline_gate), failed=failed_checks(baseline_gate))
@@ -977,12 +1156,10 @@ def drill_ops06(host, rec, ops05_facts):
     precheck_set_ok = ok and host.verify_set_integrity()[0]
     rec.event("recovery_set_verified_before_rollout", precheck_set_ok, **detail)
 
-    # Candidate image for the failed rollout.
-    cand_ref, cand_digest, cand_registry, short = candidate_image(host, rec, prior_ref)
-    host.sh(["docker", "pull", cand_ref], check=False)
-
-    # Forced failed rollout: the candidate is deployed by editing the pinned tag, and the config
-    # directory that holds secret_key is not carried across (a mis-mounted or recreated volume).
+    # Forced failed rollout: the candidate built in this job is deployed by editing the pinned tag, and the
+    # config directory that holds secret_key is not carried across (a mis-mounted or recreated volume).
+    cand_ref = build["ref"]
+    host.sh(["docker", "pull", cand_ref], timeout=600)
     host.compose("stop", "report-portal")
     host.write_compose(cand_ref)
     host.sh(["mv", host.config_dir, host.config_dir + ".not-carried"], sudo=True)
@@ -992,10 +1169,9 @@ def drill_ops06(host, rec, ops05_facts):
     healthy = host.wait_healthy()
     rec.event("rollout_process_started", healthy)
     host.log("rollout-candidate.log", host.compose("logs", "--no-color", "--tail", "200", check=False).stdout or "")
-    cand_loaded = host.container()["Image"]
-    cand_image_id = host.image_inspect(cand_ref)["Id"]
-    reference_ok = host.container()["Config"]["Image"] == cand_ref
-    candidate_digest_ok = reference_ok and cand_loaded == cand_image_id and cand_digest == cand_registry
+    container = host.container()
+    candidate_digest_ok = (container["Config"]["Image"] == cand_ref and container["Image"] == build["image_id"]
+                           and host.tag_digest(cand_ref) == build["digest"])
     after_state = host.state()
     delta = ledger_delta(baseline_state["ledger"], after_state["ledger"])
     rec.event("rollout_ledger_advanced", bool(delta), new_steps=delta)
@@ -1006,22 +1182,17 @@ def drill_ops06(host, rec, ops05_facts):
         subprocess.run(["docker", "compose", "-p", PROJECT, "-f", host.compose_file, "exec", "-T", "report-portal",
                         "/app/report-portal", "backup", "-"], stdout=f, stderr=subprocess.DEVNULL, timeout=300, check=False)
     rollout_gate = run_gate(host.base, fx, None, None) if healthy else []
-    rollout_version = host.reported_version()
     rollout_failed = failed_checks(rollout_gate) if healthy else ["healthz"]
-    rec.event("rollout_gate", not rollout_failed, failed=rollout_failed)
+    rollout_version = host.reported_version()
+    rec.event("rollout_gate", not rollout_failed, failed=rollout_failed,
+              totp_login={k: c.get(k) for c in rollout_gate if c["id"] == "totp_login" for k in ("status", "code")})
 
-    # Roll back by the obvious route: the prior tag against the database the candidate migrated.
+    # The obvious rollback, by tag alone, is demonstrated on a copy of the migrated database. The live
+    # database is not touched until the restore's own checks have passed.
     host.compose("stop", "report-portal")
-    host.write_compose(prior_ref)
-    host.up(wait=False)
-    time.sleep(25)
-    state = host.container_state()
-    rb_log = host.compose("logs", "--no-color", "--tail", "100", "report-portal", check=False).stdout or ""
-    host.log("rollback-without-restore.log", rb_log)
-    rb_healthy = Portal(host.base, timeout=3).req("GET", "/healthz")[0] == 200
-    rb_refused = refusal_names_steps(rb_log, delta)
-    rec.event("rollback_without_restore", rb_refused and not rb_healthy, state=state, healthy=rb_healthy)
-    host.compose("stop", "report-portal")
+    rb_refused, rb_state = host.rollback_probe(delta)
+    live_unchanged = host.state()["ledger"] == after_state["ledger"]
+    rec.event("rollback_by_tag_refused_on_a_copy", rb_refused and live_unchanged, state=rb_state, live_ledger_unchanged=live_unchanged)
 
     # Negative controls: each of the three pre-activation checks must refuse a bad set.
     neg_compat, neg_compat_detail = negative_compat(host, newer_dir)
@@ -1035,19 +1206,21 @@ def drill_ops06(host, rec, ops05_facts):
     final_gate = recovery_sequence(host, rec)
     final_state = host.state()
     final_key_fp, _ = host.secret_key_fp()
-    final_ident = host.loaded_identity(prior_ref, host.prior_digest)
+    final = host.loaded_identity()
     facts = {
         "baseline_failed": failed_checks(baseline_gate), "precheck_set_ok": precheck_set_ok,
-        "ledger_delta": delta, "candidate_digest_ok": candidate_digest_ok, "candidate_digest": cand_digest,
+        "ledger_delta": delta, "candidate_digest_ok": candidate_digest_ok, "candidate_digest": build["digest"],
         "rollout_failed": rollout_failed, "rollout_healthz": healthy, "rollout_version": rollout_version,
+        "rollout_reason_ok": failed_for(rollout_gate, "totp_login", 401, "bad_totp_code") and not baseline_failed_totp(baseline_gate),
         "rollout_reference": cand_ref, "rollout_gate_checks": rollout_gate,
-        "rollback_refused": rb_refused, "rollback_healthy": rb_healthy, "rollback_state": json.dumps(state),
+        "rollback_refused": rb_refused, "rollback_on_copy": live_unchanged, "rollback_state": json.dumps(rb_state),
         "negative_compat_refused": neg_compat, "negative_compat_detail": json.dumps(neg_compat_detail),
         "negative_integrity_refused": neg_integrity, "negative_integrity_detail": json.dumps(neg_integrity_detail),
         "negative_key_refused": neg_key, "negative_key_detail": json.dumps(neg_key_detail),
         "events": rec.events, "final_failed": failed_checks(final_gate),
-        "final_digest_ok": final_ident["digest_ok"] and final_ident["api_version"] == host.prior_tag,
-        "final_digest": host.prior_digest,
+        "final_container_image_id": final["container_image_id"], "expected_image_id": host.image_inspect(prior_ref)["Id"],
+        "baseline_container_image_id": baseline_image_id, "final_repo_digests": final["repo_digests"],
+        "recorded_digest": host.prior_digest, "final_api_version": final["api_version"], "prior_tag": host.prior_tag,
         "compose_sha_baseline": baseline_sha, "compose_sha_final": host.compose_sha(),
         "key_fp_baseline": key_fp, "key_fp_final": final_key_fp,
         "keyring_fp_baseline": baseline_state["keyring_fp"], "keyring_fp_final": final_state["keyring_fp"],
@@ -1055,6 +1228,11 @@ def drill_ops06(host, rec, ops05_facts):
         "counts_baseline": baseline_state["counts"], "counts_final": final_state["counts"],
     }
     return ops06_checks(facts), facts
+
+
+def baseline_failed_totp(gate):
+    """The same account signed in under the old key before the rollout, so the refusal is the key's doing."""
+    return any(c["id"] == "totp_login" and not c["passed"] for c in gate)
 
 
 def negative_compat(host, newer_dir):
@@ -1067,7 +1245,8 @@ def negative_compat(host, newer_dir):
 
 
 def negative_integrity(host):
-    """A recovery set whose dump was truncated must fail the integrity check and the dry run."""
+    """A recovery set whose dump was truncated must fail the integrity check and the dry run, and the key
+    fingerprint must still read as the right key."""
     bad = os.path.join(host.work, "tampered-set")
     shutil.rmtree(bad, ignore_errors=True)
     shutil.copytree(host.set_dir, bad)
@@ -1080,20 +1259,24 @@ def negative_integrity(host):
     host.scratch_db(REHEARSAL_DB)
     rc, out = host.restore_cmd(REHEARSAL_DB, host.rehearsal_config(), bad, "dump.jsonl", force=False)
     host.log("negative-integrity-dry-run.txt", out)
-    return (not integrity_ok and rc != 0), {"integrity": detail, "dry_run_exit": rc}
+    right_reason = detail["dump"] == "MISMATCH" and detail["secret_key_fp"] == "match"
+    return (not integrity_ok and right_reason and rc != 0), {"integrity": detail, "dry_run_exit": rc}
 
 
 def negative_key(host):
-    """The config that the failed rollout generated (a different secret_key) must fail the rehearsal."""
-    lost = os.path.join(host.config_dir)
-    text = host.sh(["cat", os.path.join(lost, "config.yaml")], sudo=True).stdout
+    """The config the failed rollout generated (a different secret_key) must fail the rehearsal, at the
+    two-factor sign-in with HTTP 401 bad_totp_code, while every other check of the gate passes."""
+    text = host.sh(["cat", os.path.join(host.config_dir, "config.yaml")], sudo=True).stdout
     other = os.path.join(host.work, "wrong-key-config.yaml")
     with open(other, "w", encoding="utf-8") as f:
         f.write(text)
     same_key = fingerprint(parse_secret_key(text)) == host.manifest["config"]["secret_key_fp"]
     ok, detail = host.rehearse_restore(config_source=other, label="negative-key")
-    failed = detail.get("failed", [])
-    return (not same_key and not ok and "totp_login" in failed), {"wrong_key_differs": not same_key, "failed": failed}
+    checks = detail.get("checks", [])
+    totp = next((c for c in checks if c["id"] == "totp_login"), {})
+    reason = failed_for(checks, "totp_login", 401, "bad_totp_code") and detail.get("failed") == ["totp_login"]
+    return (not same_key and not ok and reason), {"wrong_key_differs": not same_key, "failed": detail.get("failed", []),
+                                                  "totp_login": {"status": totp.get("status"), "code": totp.get("code")}}
 
 
 def write_evidence(path, row, checks, facts, env, extra):
@@ -1127,15 +1310,19 @@ def main(argv=None):
     info = host_info(host)
     exit_code = 0
     try:
-        checks5, facts5, meta = drill_ops05(host, rec)
+        build = load_candidate(env)
+        checks5, facts5 = drill_ops05(host, rec, build)
+        host.reset_stack()
+        released5, released_facts5, meta = drill_released_prior(host, rec)
+        released_doc = {"checks": released5, "facts": released_facts5, "record": meta, **verdict(released5)}
         doc5 = write_evidence(os.path.join(host.out, "ops05-evidence.json"), "OPS-05", checks5, facts5, env,
-                              {"host": info, "release_record": meta, "events": list(rec.events),
-                               "not_proven": NOT_PROVEN_COMMON})
-        print(f"OPS-05 {doc5['result']}: failed={doc5['failed_checks']}")
-        exit_code |= 0 if doc5["passed"] else 1
-        checks6, facts6 = drill_ops06(host, rec, facts5)
+                              {"host": info, "released_prior": released_doc, "events": list(rec.events),
+                               "not_proven": NOT_PROVEN_COMMON, "gaps": OPS05_GAPS})
+        print(f"OPS-05 {doc5['result']}: failed={doc5['failed_checks']}; released prior {released_doc['result']}: {released_doc['failed_checks']}")
+        exit_code |= 0 if doc5["passed"] and released_doc["passed"] else 1
+        checks6, facts6 = drill_ops06(host, rec, build)
         doc6 = write_evidence(os.path.join(host.out, "ops06-evidence.json"), "OPS-06", checks6, facts6, env,
-                              {"host": info, "events": list(rec.events), "not_proven": NOT_PROVEN_COMMON})
+                              {"host": info, "events": list(rec.events), "not_proven": NOT_PROVEN_COMMON, "gaps": OPS06_GAPS})
         print(f"OPS-06 {doc6['result']}: failed={doc6['failed_checks']}")
         exit_code |= 0 if doc6["passed"] else 1
     except Exception as err:  # the evidence of a drill that broke says so rather than being absent

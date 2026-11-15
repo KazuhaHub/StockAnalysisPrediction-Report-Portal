@@ -28,19 +28,6 @@ class ReleaseSelectionTests(unittest.TestCase):
         for bad in ("2026.46", "v2026", "v26.46", "v2026.46-beta", "latest", "", None):
             self.assertIsNone(drills.calver_key(bad), bad)
 
-    def test_newest_published_release(self):
-        releases = [
-            {"tag_name": "v2026.46", "draft": False, "prerelease": False},
-            {"tag_name": "v2026.46.1", "draft": False, "prerelease": True},
-            {"tag_name": "v2026.47", "draft": True, "prerelease": False},
-            {"tag_name": "nightly", "draft": False, "prerelease": False},
-            {"tag_name": "v2026.9", "draft": False, "prerelease": False},
-        ]
-        self.assertEqual(drills.newest_published_release(releases), "v2026.46.1")
-        self.assertEqual(drills.newest_published_release(releases, "stable"), "v2026.46")
-        with self.assertRaises(RuntimeError):
-            drills.newest_published_release([{"tag_name": "v2026.47", "draft": True}])
-
     def test_release_metadata(self):
         good = json.dumps({"tag": "v2026.46.1", "commit": COMMIT, "image": drills.IMAGE, "digest": DIGEST_A})
         self.assertEqual(drills.parse_release_metadata(good, "v2026.46.1")["digest"], DIGEST_A)
@@ -69,7 +56,7 @@ class ComposeTests(unittest.TestCase):
         ref = f"{drills.IMAGE}:v2026.46.1"
         out = drills.render_pinned_compose(self.template, ref)
         self.assertEqual(drills.compose_image_ref(out), ref)
-        self.assertEqual(drills.changed_lines(self.template, out), 1)
+        self.assertEqual(len(drills.changed_line_numbers(self.template, out)), 1)
         self.assertIn("image: postgres:16-alpine", out)
         self.assertEqual(out.replace(ref, drills.compose_image_ref(self.template)), self.template)
 
@@ -85,10 +72,25 @@ class ComposeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             drills.render_pinned_compose(two, "x")
 
-    def test_changed_lines(self):
-        self.assertEqual(drills.changed_lines("a\nb\n", "a\nb\n"), 0)
-        self.assertEqual(drills.changed_lines("a\nb\n", "a\nc\n"), 1)
-        self.assertGreater(drills.changed_lines("a\nb\n", "a\nb\nc\n"), 0)
+    def test_changed_line_numbers(self):
+        self.assertEqual(drills.changed_line_numbers("a\nb\n", "a\nb\n"), [])
+        self.assertEqual(drills.changed_line_numbers("a\nb\n", "a\nc\n"), [2])
+        self.assertTrue(drills.changed_line_numbers("a\nb\n", "a\nb\nc\n"))
+
+    def test_the_image_line_number_is_the_only_changed_line_after_rendering(self):
+        out = drills.render_pinned_compose(self.template, f"{drills.IMAGE}:v1")
+        self.assertEqual(drills.changed_line_numbers(self.template, out), [drills.image_line_number(self.template)])
+
+    def test_config_diff_paths_names_every_difference(self):
+        a = {"services": {"report-portal": {"image": "x", "ports": [1, 2]}, "db": {"image": "p"}}}
+        b = json.loads(json.dumps(a))
+        self.assertEqual(drills.config_diff_paths(a, b), [])
+        b["services"]["report-portal"]["image"] = "y"
+        self.assertEqual(drills.config_diff_paths(a, b), ["services.report-portal.image"])
+        b["services"]["report-portal"]["ports"] = [1]
+        b["services"]["db"]["extra"] = True
+        self.assertEqual(drills.config_diff_paths(a, b),
+                         ["services.db.extra", "services.report-portal.image", "services.report-portal.ports"])
 
 
 class LedgerAndKeyTests(unittest.TestCase):
@@ -245,9 +247,22 @@ class PortalClientTests(unittest.TestCase):
         self.run_gate()
         self.assertEqual(self.fx.used_steps, set())
 
-    def test_a_lost_key_fails_only_the_two_factor_login(self):
+    def test_a_lost_key_fails_only_the_two_factor_login_and_says_why(self):
         FakePortal.behaviour["wrong_key"] = True
-        self.assertEqual(drills.failed_checks(self.run_gate()), ["totp_login"])
+        checks = self.run_gate()
+        self.assertEqual(drills.failed_checks(checks), ["totp_login"])
+        failed = next(c for c in checks if c["id"] == "totp_login")
+        self.assertEqual((failed["status"], failed["code"]), (401, "bad_totp_code"))
+        self.assertTrue(drills.failed_for(checks, "totp_login", 401, "bad_totp_code"))
+        self.assertFalse(drills.failed_for(checks, "totp_login", 500, "bad_totp_code"))
+        self.assertFalse(drills.failed_for(checks, "users", 401, "bad_totp_code"))
+
+    def test_an_unreachable_portal_is_not_a_refused_code(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.server = None
+        checks = self.run_gate()
+        self.assertFalse(drills.failed_for(checks, "totp_login", 401, "bad_totp_code"))
 
     def test_the_wrong_version_fails_the_version_check(self):
         FakePortal.behaviour["version"] = "v2"
@@ -312,10 +327,14 @@ class OrderingTests(unittest.TestCase):
 
 
 class FakeHost:
-    """The recovery interface, recording every call so the order and the abort behaviour can be asserted."""
+    """The recovery interface, recording every call so the order and the abort behaviour can be asserted.
 
-    def __init__(self, refuse=None, final_failed=()):
-        self.calls, self.refuse, self.final_failed = [], refuse, final_failed
+    This fake is the real guard of the ordering: recovery_sequence is the only code that decides when the
+    live stack is touched, and these tests pin it. The recorded events (ordering_proof) are a record of what
+    one run did, not the enforcement."""
+
+    def __init__(self, refuse=None, final_failed=(), unhealthy=None):
+        self.calls, self.refuse, self.final_failed, self.unhealthy = [], refuse, final_failed, unhealthy
 
     def _check(self, name):
         self.calls.append(name)
@@ -330,17 +349,18 @@ class FakeHost:
     def rehearse_restore(self):
         return self._check("rehearse_restore")
 
+    def _live(self, name):
+        self.calls.append(name)
+        return self.unhealthy != name, {"name": name}
+
     def replace_live_database(self):
-        self.calls.append("replace_live_database")
-        return {}
+        return self._live("replace_live_database")
 
     def restore_live(self):
-        self.calls.append("restore_live")
-        return {}
+        return self._live("restore_live")
 
     def activate_prior(self):
-        self.calls.append("activate_prior")
-        return {}
+        return self._live("activate_prior")
 
     def final_gate(self):
         self.calls.append("final_gate")
@@ -364,38 +384,143 @@ class RecoverySequenceTests(unittest.TestCase):
             self.assertFalse(live & set(host.calls), refusal)
             self.assertFalse(drills.ordering_proof(rec.events)[0])
 
-    def test_a_failing_final_gate_is_recorded_and_fails_the_proof_data(self):
+    def test_a_failing_final_gate_is_recorded(self):
         host, rec = FakeHost(final_failed=("totp_login",)), drills.Recorder()
         gate = drills.recovery_sequence(host, rec)
         self.assertEqual(drills.failed_checks(gate), ["totp_login"])
         self.assertFalse(rec.first("final_gate")["ok"])
 
+    def test_live_steps_record_their_real_outcome_and_stop_on_failure(self):
+        for step, after in (("replace_live_database", ["restore_live", "activate_prior", "final_gate"]),
+                            ("restore_live", ["activate_prior", "final_gate"]), ("activate_prior", ["final_gate"])):
+            host, rec = FakeHost(unhealthy=step), drills.Recorder()
+            with self.assertRaises(drills.RecoveryFailed, msg=step):
+                drills.recovery_sequence(host, rec)
+            kind = {"replace_live_database": "live_db_replaced", "restore_live": "live_restore", "activate_prior": "activation"}[step]
+            self.assertFalse(rec.first(kind)["ok"], step)
+            self.assertFalse(set(after) & set(host.calls), step)
+
+    def test_an_activation_that_never_became_healthy_fails_the_proof(self):
+        rec = drills.Recorder(clock=lambda: 0)
+        for kind in OrderingTests.GOOD[:5]:
+            rec.event(kind, True)
+        rec.event("activation", False)
+        self.assertFalse(drills.ordering_proof(rec.events)[0])
+
+
+class RecoverySetTests(unittest.TestCase):
+    def make(self, tmp, key="k" * 64):
+        for name, data in (("dump.jsonl", b"dump-bytes"), ("config.yaml", f'secret_key: "{key}"\n'.encode()),
+                           ("docker-compose.yml", b"compose")):
+            (Path(tmp) / name).write_bytes(data)
+        return {"dump": {"file": "dump.jsonl", "sha256": drills.sha256_hex(b"dump-bytes")},
+                "config": {"file": "config.yaml", "sha256": drills.sha256_hex(f'secret_key: "{key}"\n'.encode()),
+                           "secret_key_fp": drills.fingerprint(key)},
+                "compose": {"file": "docker-compose.yml", "sha256": drills.sha256_hex(b"compose")}}
+
+    def test_a_good_set_verifies(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            ok, detail = drills.verify_recovery_set(tmp, self.make(tmp))
+            self.assertTrue(ok, detail)
+
+    def test_a_truncated_dump_does_not_make_the_key_look_wrong(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self.make(tmp)
+            (Path(tmp) / "dump.jsonl").write_bytes(b"dump")
+            ok, detail = drills.verify_recovery_set(tmp, manifest)
+            self.assertFalse(ok)
+            self.assertEqual((detail["dump"], detail["config"], detail["secret_key_fp"]), ("MISMATCH", "match", "match"))
+
+    def test_a_wrong_key_with_a_matching_file_hash_is_still_caught(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self.make(tmp)
+            manifest["config"]["secret_key_fp"] = drills.fingerprint("z" * 64)
+            ok, detail = drills.verify_recovery_set(tmp, manifest)
+            self.assertFalse(ok)
+            self.assertEqual((detail["config"], detail["secret_key_fp"]), ("match", "MISMATCH"))
+
+    def test_a_missing_file_is_reported_not_raised(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = self.make(tmp)
+            (Path(tmp) / "config.yaml").unlink()
+            ok, detail = drills.verify_recovery_set(tmp, manifest)
+            self.assertFalse(ok)
+            self.assertEqual((detail["config"], detail["secret_key_fp"]), ("MISMATCH", "MISMATCH"))
+
 
 def ops05_facts():
-    tag = "v2026.46.1"
-    return {"tag": tag, "image_ref": f"{drills.IMAGE}:{tag}", "template_changed_lines": 1,
-            "compose_sha_before": "c" * 64, "compose_sha_after": "c" * 64,
-            "ref_before": f"{drills.IMAGE}:{tag}", "ref_after": f"{drills.IMAGE}:{tag}",
-            "registry_digest": DIGEST_A, "recorded_digest": DIGEST_A, "recorded_commit": COMMIT, "healthy": True,
-            "container_image_id": "sha256:" + "1" * 64, "image_id": "sha256:" + "1" * 64,
-            "container_config_image": f"{drills.IMAGE}:{tag}", "repo_digests": [DIGEST_A],
-            "loaded_binary_sha256": "e" * 64, "image_binary_sha256": "e" * 64,
-            "api_version": tag, "api_commit": COMMIT[:7], "cli_version": f"{tag.lstrip('v')} ({COMMIT[:7]}, 2026-11-13T02:41:15Z)"}
+    sha = COMMIT
+    ref = "localhost:5000/report-portal-candidate:drill-" + sha[:7]
+    return {"mode": "candidate", "image_ref": ref, "run_commit": sha, "expected_commit": sha,
+            "build": {"ref": ref, "image_id": "sha256:" + "1" * 64, "digest": DIGEST_A, "binary_sha256": "e" * 64,
+                      "version": "drill-" + sha[:7], "commit": sha},
+            "config_diff_paths": ["services.report-portal.image"], "changed_lines": [88], "image_line_number": 88,
+            "registry_digest": DIGEST_A, "repo_digests": [DIGEST_A], "container_image_id": "sha256:" + "1" * 64,
+            "container_config_image": ref, "loaded_binary_sha256": "e" * 64, "api_version": "drill-" + sha[:7],
+            "api_commit": sha[:7], "cli_version": f"drill-{sha[:7]} ({sha[:7]}, 2026-11-15T00:00:00Z)", "healthy": True}
 
 
 class Ops05Tests(unittest.TestCase):
     def test_good_facts_pass(self):
-        self.assertEqual(drills.failed_checks(drills.ops05_checks(ops05_facts())), [])
-        self.assertTrue(drills.verdict(drills.ops05_checks(ops05_facts()))["passed"])
+        checks = drills.ops05_checks(ops05_facts())
+        self.assertEqual(drills.failed_checks(checks), [])
+        self.assertTrue(drills.verdict(checks)["passed"])
 
     def test_each_wrong_fact_fails_exactly_its_check(self):
         cases = {
-            "reference_pinned_by_tag": {"image_ref": f"{drills.IMAGE}:latest"},
-            "compose_differs_from_beta_template_by_one_line": {"template_changed_lines": 2},
-            "version_reference_unchanged_after_deploy": {"compose_sha_after": "d" * 64},
+            "deployed_compose_differs_from_reference_only_in_the_image_line": {"config_diff_paths": ["services.report-portal.image", "services.db.image"]},
+            "deployed_compose_text_changes_only_the_image_line": {"changed_lines": [88, 90]},
+            "container_reference_is_the_built_reference": {"container_config_image": "localhost:5000/other:tag"},
+            "registry_digest_of_tag_equals_built_digest": {"registry_digest": DIGEST_B, "repo_digests": [DIGEST_B]},
+            "container_image_digest_equals_registry_digest_of_tag": {"repo_digests": [DIGEST_B]},
+            "container_runs_the_built_image": {"container_image_id": "sha256:" + "2" * 64},
+            "loaded_binary_is_the_built_binary": {"loaded_binary_sha256": "f" * 64},
+            "api_version_equals_built_version": {"api_version": "v2026.45"},
+            "api_commit_is_the_commit_under_test": {"api_commit": "1234567"},
+            "cli_version_matches_the_build": {"cli_version": "dev (none, unknown)"},
+            "commit_under_test_is_the_built_commit": {"run_commit": "a" * 40},
+            "healthy": {"healthy": False},
+        }
+        for check, change in cases.items():
+            facts = ops05_facts()
+            facts.update(change)
+            self.assertIn(check, drills.failed_checks(drills.ops05_checks(facts)), check)
+        self.assertEqual(len(cases), len(drills.ops05_checks(ops05_facts())))
+
+    def test_a_wrong_expected_commit_fails(self):
+        facts = ops05_facts()
+        facts["expected_commit"] = "b" * 40
+        self.assertEqual(drills.failed_checks(drills.ops05_checks(facts)), ["commit_under_test_is_the_built_commit"])
+
+    def test_cli_version_parsing(self):
+        self.assertEqual(drills.parse_cli_version("2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)\n"), ("2026.46.1", "d0089c8"))
+        self.assertEqual(drills.parse_cli_version("dev (none, unknown)"), ("dev", "none"))
+        self.assertEqual(drills.parse_cli_version("garbage"), ("", ""))
+
+
+def released_facts():
+    tag = "v2026.46.1"
+    return {"tag": tag, "image_ref": f"{drills.IMAGE}:{tag}", "record": {"tag": tag, "image": drills.IMAGE, "digest": DIGEST_A, "commit": COMMIT},
+            "registry_digest": DIGEST_A, "repo_digests": [DIGEST_A], "container_image_id": "sha256:" + "1" * 64,
+            "image_id": "sha256:" + "1" * 64, "container_config_image": f"{drills.IMAGE}:{tag}",
+            "loaded_binary_sha256": "e" * 64, "image_binary_sha256": "e" * 64, "api_version": tag, "api_commit": COMMIT[:7],
+            "cli_version": f"{tag.lstrip('v')} ({COMMIT[:7]}, 2026-11-13T02:41:15Z)", "healthy": True}
+
+
+class ReleasedLegTests(unittest.TestCase):
+    def test_good_facts_pass(self):
+        self.assertEqual(drills.failed_checks(drills.released_checks(released_facts())), [])
+
+    def test_each_wrong_fact_fails_its_check(self):
+        cases = {
+            "reference_matches_the_release_record": {"image_ref": f"{drills.IMAGE}:v2026.45"},
             "registry_digest_equals_release_record": {"registry_digest": DIGEST_B},
-            "pulled_image_digest_equals_release_record": {"repo_digests": [DIGEST_B]},
-            "container_runs_the_pulled_image": {"container_image_id": "sha256:" + "2" * 64},
+            "container_image_digest_equals_release_record": {"repo_digests": [DIGEST_B]},
+            "container_runs_the_expected_image": {"container_image_id": "sha256:" + "2" * 64},
             "container_reference_is_the_pinned_tag": {"container_config_image": f"{drills.IMAGE}:latest"},
             "loaded_binary_is_the_image_binary": {"loaded_binary_sha256": "f" * 64},
             "api_version_equals_release_tag": {"api_version": "v2026.45"},
@@ -404,26 +529,10 @@ class Ops05Tests(unittest.TestCase):
             "healthy": {"healthy": False},
         }
         for check, change in cases.items():
-            facts = ops05_facts()
+            facts = released_facts()
             facts.update(change)
-            failed = drills.failed_checks(drills.ops05_checks(facts))
-            self.assertIn(check, failed, check)
-        self.assertEqual(len(cases), len(drills.ops05_checks(ops05_facts())))
-
-    def test_cli_version_parsing(self):
-        self.assertEqual(drills.parse_cli_version("2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)\n"), ("2026.46.1", "d0089c8"))
-        self.assertEqual(drills.parse_cli_version("dev (none, unknown)"), ("dev", "none"))
-        self.assertEqual(drills.parse_cli_version("garbage"), ("", ""))
-        facts = ops05_facts()
-        facts["cli_version"] = f"2026.46 ({COMMIT[:7]}, x)"
-        self.assertIn("cli_version_matches_release", drills.failed_checks(drills.ops05_checks(facts)))
-        facts["cli_version"] = "2026.46.1 (1234567, x)"
-        self.assertIn("cli_version_matches_release", drills.failed_checks(drills.ops05_checks(facts)))
-
-    def test_a_changed_reference_with_the_same_digest_still_fails_the_unchanged_check(self):
-        facts = ops05_facts()
-        facts["ref_after"] = f"{drills.IMAGE}:v2026.46"
-        self.assertEqual(drills.failed_checks(drills.ops05_checks(facts)), ["version_reference_unchanged_after_deploy"])
+            self.assertIn(check, drills.failed_checks(drills.released_checks(facts)), check)
+        self.assertEqual(len(cases), len(drills.released_checks(released_facts())))
 
 
 def ops06_facts():
@@ -432,12 +541,14 @@ def ops06_facts():
         rec.event(kind, True)
     ledger = ["0001", "0002"]
     return {"baseline_failed": [], "precheck_set_ok": True, "ledger_delta": ["0015"], "candidate_digest_ok": True,
-            "candidate_digest": DIGEST_B, "rollout_failed": ["totp_login"], "rollout_healthz": True,
-            "rollback_refused": True, "rollback_healthy": False, "rollback_state": "{}",
+            "candidate_digest": DIGEST_B, "rollout_failed": ["totp_login"], "rollout_reason_ok": True, "rollout_healthz": True,
+            "rollback_refused": True, "rollback_on_copy": True, "rollback_state": "{}",
             "negative_compat_refused": True, "negative_compat_detail": "{}",
             "negative_integrity_refused": True, "negative_integrity_detail": "{}",
             "negative_key_refused": True, "negative_key_detail": "{}", "events": rec.events, "final_failed": [],
-            "final_digest_ok": True, "final_digest": DIGEST_A, "compose_sha_baseline": "c" * 64,
+            "final_container_image_id": "sha256:" + "1" * 64, "expected_image_id": "sha256:" + "1" * 64,
+            "baseline_container_image_id": "sha256:" + "1" * 64, "final_repo_digests": [DIGEST_A],
+            "recorded_digest": DIGEST_A, "final_api_version": "v2026.46.1", "prior_tag": "v2026.46.1", "compose_sha_baseline": "c" * 64,
             "compose_sha_final": "c" * 64, "key_fp_baseline": "k" * 16, "key_fp_final": "k" * 16,
             "keyring_fp_baseline": "r" * 16, "keyring_fp_final": "r" * 16, "ledger_baseline": ledger,
             "ledger_final": list(ledger), "counts_baseline": {"users": 5, "reports": 1}, "counts_final": {"users": 5, "reports": 1}}
@@ -454,12 +565,17 @@ class Ops06Tests(unittest.TestCase):
             "rollout_applied_new_steps": {"ledger_delta": []},
             "rollout_candidate_digest_verified": {"candidate_digest_ok": False},
             "rollout_refused_by_activation_gate": {"rollout_failed": []},
-            "prior_build_refuses_the_migrated_database": {"rollback_healthy": True},
+            "prior_build_refuses_a_copy_of_the_migrated_database": {"rollback_refused": False},
+            "rollback_demonstration_leaves_the_live_database_alone": {"rollback_on_copy": False},
+            "rollout_refused_for_the_key_reason": {"rollout_reason_ok": False},
             "newer_dump_refused_by_prior_build": {"negative_compat_refused": False},
             "tampered_set_refused_by_integrity_check": {"negative_integrity_refused": False},
             "wrong_key_refused_by_rehearsal_gate": {"negative_key_refused": False},
             "final_gate_passed": {"final_failed": ["users"]},
-            "prior_version_loaded_by_digest": {"final_digest_ok": False},
+            "prior_container_is_the_expected_image": {"final_container_image_id": "sha256:" + "2" * 64},
+            "prior_container_digest_equals_release_record": {"final_repo_digests": [DIGEST_B]},
+            "prior_image_unchanged_from_baseline": {"baseline_container_image_id": "sha256:" + "3" * 64},
+            "prior_version_reported_by_the_portal": {"final_api_version": "v2026.45"},
             "version_reference_restored": {"compose_sha_final": "d" * 64},
             "secret_key_unchanged": {"key_fp_final": "z" * 16},
             "keyring_unchanged": {"keyring_fp_final": "z" * 16},
@@ -494,16 +610,31 @@ class EvidenceTests(unittest.TestCase):
     ENV = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": drills.REPOSITORY, "GITHUB_EVENT_NAME": "workflow_dispatch",
            "GITHUB_SHA": COMMIT, "GITHUB_RUN_ID": "42", "GITHUB_SERVER_URL": "https://github.com", "GITHUB_REF_NAME": "main"}
 
-    def test_a_clean_run_has_no_blockers_and_a_url(self):
+    def test_a_clean_dispatch_run_has_no_blockers_and_a_url(self):
         self.assertEqual(drills.evidence_blockers(self.ENV), [])
-        self.assertEqual(drills.run_block(self.ENV)["url"], f"https://github.com/{drills.REPOSITORY}/actions/runs/42")
+        block = drills.run_block(self.ENV)
+        self.assertEqual(block["url"], f"https://github.com/{drills.REPOSITORY}/actions/runs/42")
+        self.assertTrue(block["counts_as_evidence"])
 
     def test_blockers(self):
         for change in ({"GITHUB_ACTIONS": ""}, {"GITHUB_REPOSITORY": "someone/else"}, {"GITHUB_EVENT_NAME": "schedule"},
-                       {"GITHUB_SHA": "abc"}, {"OPS_DRILL_RELEASE_TAG": "v2026.40"}):
-            env = dict(self.ENV, **change)
-            self.assertTrue(drills.evidence_blockers(env), change)
-        self.assertEqual(drills.evidence_blockers(dict(self.ENV, GITHUB_EVENT_NAME="push")), [])
+                       {"GITHUB_SHA": "abc"}):
+            self.assertTrue(drills.evidence_blockers(dict(self.ENV, **change)), change)
+
+    def test_a_push_run_is_not_evidence(self):
+        env = dict(self.ENV, GITHUB_EVENT_NAME="push")
+        self.assertTrue(any("push" in b for b in drills.evidence_blockers(env)))
+        self.assertFalse(drills.run_block(env)["counts_as_evidence"])
+
+    def test_an_expected_commit_that_differs_is_not_evidence(self):
+        self.assertEqual(drills.evidence_blockers(dict(self.ENV, OPS_DRILL_EXPECTED_COMMIT=COMMIT)), [])
+        blockers = drills.evidence_blockers(dict(self.ENV, OPS_DRILL_EXPECTED_COMMIT="a" * 40))
+        self.assertTrue(any("expected_commit" in b for b in blockers))
+        self.assertTrue(drills.evidence_blockers(dict(self.ENV, OPS_DRILL_EXPECTED_COMMIT="abc")))
+
+    def test_the_prior_release_must_be_pinned_and_a_calver_tag(self):
+        self.assertEqual(drills.evidence_blockers(dict(self.ENV, OPS_DRILL_PRIOR_TAG="v2026.46.1")), [])
+        self.assertTrue(drills.evidence_blockers(dict(self.ENV, OPS_DRILL_PRIOR_TAG="latest")))
 
     def test_the_verdict_lists_what_failed(self):
         checks = [drills.check_result("a", True), drills.check_result("b", False), drills.check_result("c", False)]
@@ -533,9 +664,73 @@ class WorkflowStaticTests(unittest.TestCase):
         self.assertNotRegex(self.text, r"docker/login-action|docker login")
         self.assertNotRegex(self.text, r"docker push ghcr\.io")
 
+    def test_checkout_does_not_keep_credentials(self):
+        self.assertEqual(self.text.count("actions/checkout@"), self.text.count("persist-credentials: false"))
+
+    def test_the_loopback_registry_is_pinned_by_digest(self):
+        images = re.findall(r"\bregistry:\S+", self.text)
+        self.assertTrue(images)
+        for image in images:
+            self.assertRegex(image, r"^registry:3@sha256:[0-9a-f]{64}$")
+
+    def test_the_candidate_is_built_with_the_release_dockerfile_and_web_bundle(self):
+        self.assertIn("-f Dockerfile.release", self.text)
+        self.assertIn("npm run build", self.text)
+        self.assertIn("scripts/check-release-build.sh", self.text)
+
+    def test_the_expected_commit_and_prior_tag_are_inputs(self):
+        self.assertIn("expected_commit:", self.text)
+        self.assertIn("prior_release_tag:", self.text)
+
     def test_permissions_are_read_only(self):
         self.assertRegex(self.text, r"(?m)^permissions:\n  contents: read\n")
         self.assertNotRegex(self.text, r"(?m)^\s+(packages|contents|id-token|actions):\s*write")
+
+
+class AcceptanceBuilderTests(unittest.TestCase):
+    """The committed acceptance JSON is generated from the run's artifact, never typed."""
+
+    def setUp(self):
+        facts5 = ops05_facts()
+        self.ops05 = {"row": "OPS-05", "result": "passed", "checks": drills.ops05_checks(facts5), "facts": facts5,
+                      "run": drills.run_block(EvidenceTests.ENV), "generated_at": "2026-11-15T00:00:00Z",
+                      "host": {"docker": ["28"], "compose": ["2"]}, "released_prior": {"checks": [], "facts": {}}}
+        facts6 = ops06_facts()
+        self.ops06 = {"row": "OPS-06", "result": "passed", "checks": drills.ops06_checks(facts6), "facts": facts6,
+                      "run": drills.run_block(EvidenceTests.ENV), "generated_at": "2026-11-15T00:01:00Z", "events": facts6["events"]}
+        self.artifact = {"id": 99, "name": "ops-deployment-drills-evidence", "digest": "sha256:" + "d" * 64, "size_in_bytes": 10}
+
+    def build(self, **kw):
+        return drills.build_acceptance(self.ops05, self.ops06, self.artifact, kw.get("run_url", "https://example/run/42"))
+
+    def test_the_rows_are_partial_whatever_the_checks_say(self):
+        doc = self.build()
+        self.assertEqual(doc["status"], "partial")
+        self.assertEqual({r["row"] for r in doc["rows"]}, {"OPS-05", "OPS-06"})
+        for row in doc["rows"]:
+            self.assertEqual(row["status"], "partial")
+            self.assertTrue(row["gaps"])
+
+    def test_artifact_provenance_is_recorded(self):
+        doc = self.build()
+        self.assertEqual(doc["artifact"], {"id": 99, "name": "ops-deployment-drills-evidence", "digest": "sha256:" + "d" * 64,
+                                           "size_in_bytes": 10})
+
+    def test_a_push_run_is_marked_not_evidence_grade(self):
+        self.ops05["run"] = self.ops06["run"] = drills.run_block(dict(EvidenceTests.ENV, GITHUB_EVENT_NAME="push"))
+        doc = self.build()
+        self.assertFalse(doc["counts_as_evidence"])
+        self.assertTrue(doc["evidence_blockers"])
+
+    def test_a_failed_drill_is_reported_failed(self):
+        self.ops06["result"] = "failed"
+        self.ops06["passed"] = False
+        self.assertEqual(self.build()["status"], "failed")
+
+    def test_the_unproven_runtime_half_points_at_the_bundle_command(self):
+        text = json.dumps(self.build())
+        self.assertIn("writePlatformRecoveryBundle", text)
+        self.assertIn("not the server's beta configuration", text)
 
 
 if __name__ == "__main__":
