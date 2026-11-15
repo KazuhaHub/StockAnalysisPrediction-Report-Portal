@@ -97,6 +97,20 @@ type containerMount struct {
 // removed by the runner; the operator recovery is in doc 171.
 const appContainerCPUShares = 256
 
+// The json-file log options of every app container: max-size 5m and max-file 2, so a container's logs occupy
+// at most 10 MiB on the host and go away with the container (DATA-08, doc 172 section 5). Docker's json-file
+// driver has no age limit, so the seven-day target of the retention policy is not enforceable here; the size
+// bound is. The options are part of the plan and so of its policy digest, and validContainerPlan refuses a body
+// that differs, even with its digest recomputed.
+const (
+	appContainerLogMaxSize = "5m"
+	appContainerLogMaxFile = "2"
+)
+
+func validAppContainerLogConfig(config map[string]string, driver string) bool {
+	return driver == "json-file" && len(config) == 2 && config["max-size"] == appContainerLogMaxSize && config["max-file"] == appContainerLogMaxFile
+}
+
 type containerHostConfig struct {
 	NetworkMode                                         string
 	ReadonlyRootfs, Privileged, AutoRemove              bool
@@ -281,7 +295,8 @@ func validContainerPlanUncached(plan containerPlan) bool {
 	}
 	var request containerCreate
 	if json.Unmarshal(plan.body, &request) != nil || request.HostConfig.CpuShares != appContainerCPUShares ||
-		request.HostConfig.CpusetCpus != plan.cpuset || (plan.cpuset != "" && !cpuset.Valid(plan.cpuset)) {
+		request.HostConfig.CpusetCpus != plan.cpuset || (plan.cpuset != "" && !cpuset.Valid(plan.cpuset)) ||
+		!validAppContainerLogConfig(request.HostConfig.LogConfig.Config, request.HostConfig.LogConfig.Type) {
 		return false
 	}
 	labels := ownerContainerLabels(plan.owner)
@@ -379,7 +394,7 @@ func planCandidateContainer(raw []byte, image BackendImageInspection, owner cont
 	h.Init = true
 	h.RestartPolicy.Name = "no"
 	h.LogConfig.Type = "json-file"
-	h.LogConfig.Config = map[string]string{"max-size": "1m", "max-file": "2"}
+	h.LogConfig.Config = map[string]string{"max-size": appContainerLogMaxSize, "max-file": appContainerLogMaxFile}
 	h.Ulimits = []containerUlimit{{Name: "nofile", Soft: 1024, Hard: 1024}}
 	h.Tmpfs = map[string]string{"/tmp": "rw,nosuid,nodev,noexec,size=16777216,mode=1777"}
 	for _, m := range []struct {
