@@ -1005,7 +1005,7 @@ func (s *Server) reclaimPlatformImages(ctx context.Context, endpoint platformRun
 			return settled, ctx.Err()
 		case errors.Is(err, errPlatformImageBusy):
 			// The runner still holds it: the same effect is read again on the next tick.
-		case platformRunnerUnreachable(err):
+		case platformRunnerDown(ctx, err):
 			return settled, err
 		default:
 			log.Printf("app-platform image removal %s: %v", t.effectID, err)

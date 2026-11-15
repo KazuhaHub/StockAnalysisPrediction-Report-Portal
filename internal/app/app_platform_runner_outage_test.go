@@ -172,10 +172,10 @@ func TestPlatformSchedulerOutageLogsStateChangesOnly(t *testing.T) {
 func TestPlatformSchedulerIdleStepsTreatAnUnreachableRunnerAsBackoff(t *testing.T) {
 	buf := quiet(t)
 	w, _, _, _ := outageScheduler(t, func() bool { return true }, nil)
-	if !w.idleUnreachable(unreachableErr()) || !w.health.down {
+	if !w.idleUnreachable(context.Background(), unreachableErr()) || !w.health.down {
 		t.Fatal("an unreachable error was not recorded")
 	}
-	if w.idleUnreachable(errRunnerVerdict) {
+	if w.idleUnreachable(context.Background(), errRunnerVerdict) {
 		t.Fatal("a definite failure was treated as an outage")
 	}
 	if strings.Count(buf.String(), "\n") != 1 {
@@ -218,5 +218,82 @@ func TestPlatformRunnerBackoffIsBoundedExponentialWithJitter(t *testing.T) {
 func TestPlatformRunnerUnreachableClassification(t *testing.T) {
 	if !platformRunnerUnreachable(unreachableErr()) || platformRunnerUnreachable(errRunnerVerdict) || platformRunnerUnreachable(nil) {
 		t.Fatal("classification")
+	}
+}
+
+// A stage reaches the runner, uses up the attempt's budget, and the next dial times out: that is
+// the attempt's own deadline, not an outage. It is not classified as one, so the attempt is spent
+// and the health log never flaps between unreachable and reachable.
+func TestPlatformAttemptWithAnExhaustedBudgetIsNotAnOutage(t *testing.T) {
+	buf := quiet(t)
+	exhausted, cancel := context.WithCancel(context.Background())
+	cancel()
+	live := context.Background()
+	timedOut := fmt.Errorf("stage: %w", errors.Join(errors.New("runner intent was refused or acknowledgement unavailable"), context.Canceled))
+	for name, tc := range map[string]struct {
+		ctx  context.Context
+		err  error
+		seen bool
+		want bool
+	}{
+		"budget exhausted, even if an earlier dial was tagged": {exhausted, unreachableErr(), true, false},
+		"budget exhausted, timeout error":                      {exhausted, timedOut, false, false},
+		"live budget, tagged error":                            {live, unreachableErr(), false, true},
+		"live budget, flattened error, witness saw it":         {live, errors.New("stage evidence mismatch"), true, true},
+		"live budget, verdict":                                 {live, errRunnerVerdict, false, false},
+	} {
+		witness := &transport.UnreachableWitness{}
+		witness.Note(tc.seen)
+		if got := platformAttemptFoundRunnerDown(tc.ctx, tc.err, witness); got != tc.want {
+			t.Fatal(name, "classified", got, "want", tc.want)
+		}
+	}
+	// Spending the attempt means the engine stays out of the down state: no log lines at all.
+	w, _, _, _ := outageScheduler(t, func() bool { return false }, func(platformOperationLease) (platformInstallRun, error) {
+		return platformInstallRun{}, timedOut
+	})
+	if w.tick(context.Background()) == nil || w.attempts != 1 || w.health.down {
+		t.Fatal("an exhausted attempt did not spend the attempt", w.attempts, w.health.down)
+	}
+	if buf.Len() != 0 {
+		t.Fatal("log lines for an attempt that was not an outage:", buf.String())
+	}
+}
+
+// The witness belongs to one attempt's context: another goroutine's failed dial, under its own
+// context, never changes this attempt's verdict.
+func TestPlatformAttemptVerdictIgnoresAConcurrentFailedDial(t *testing.T) {
+	ctxA, witnessA := transport.WithUnreachableWitness(context.Background())
+	ctxB, witnessB := transport.WithUnreachableWitness(context.Background())
+	_ = ctxB
+	// Another goroutine's dial fails; it reports to its own witness only.
+	done := make(chan struct{})
+	go func() { defer close(done); witnessB.Note(true) }()
+	<-done
+	if platformAttemptFoundRunnerDown(ctxA, errRunnerVerdict, witnessA) {
+		t.Fatal("a failed dial elsewhere changed this attempt's verdict")
+	}
+}
+
+// A step that flattened the transport's error still reads as an outage through its own context's
+// witness, and only through its own.
+func TestPlatformRunnerDownReadsTheContextWitness(t *testing.T) {
+	flattened := errors.New("stage evidence mismatch")
+	ctx, witness := transport.WithUnreachableWitness(context.Background())
+	if platformRunnerDown(ctx, flattened) {
+		t.Fatal("no dial failed, yet the step read as an outage")
+	}
+	witness.Note(true)
+	if !platformRunnerDown(ctx, flattened) {
+		t.Fatal("a flattened error hid an outage")
+	}
+	other, _ := transport.WithUnreachableWitness(context.Background())
+	if platformRunnerDown(other, flattened) {
+		t.Fatal("another context's witness leaked")
+	}
+	done, cancel := context.WithCancel(ctx)
+	cancel()
+	if platformRunnerDown(done, flattened) {
+		t.Fatal("a finished context was read as an outage")
 	}
 }

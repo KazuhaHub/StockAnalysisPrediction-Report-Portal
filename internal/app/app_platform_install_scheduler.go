@@ -134,6 +134,9 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	defer cancel()
 	bulkCtx, bulkCancel := platformImportAttemptContext(parent)
 	defer bulkCancel()
+	// The idle steps and the claimed attempt each observe their own connection attempts.
+	ctx, _ = transport.WithUnreachableWitness(ctx)
+	bulkCtx, _ = transport.WithUnreachableWitness(bulkCtx)
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -167,7 +170,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				// Idle: read back any import left unsettled by an earlier attempt.
 				w.reconciledAt = time.Now()
 				if _, reconcileErr := w.server.reconcilePlatformRecoveryImports(ctx, w.endpoint); reconcileErr != nil {
-					if w.idleUnreachable(reconcileErr) {
+					if w.idleUnreachable(ctx, reconcileErr) {
 						return reconcileErr
 					}
 					log.Printf("app-platform recovery reconcile: %v", reconcileErr)
@@ -175,7 +178,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				// A resume whose start is settled as applied comes back as a lease at the probe stage, which
 				// the scheduler runs on like any claimed operation.
 				if resumed, reconcileErr := w.server.reconcilePlatformRecoveryResumes(ctx, w.endpoint, w.worker); reconcileErr != nil {
-					if w.idleUnreachable(reconcileErr) {
+					if w.idleUnreachable(ctx, reconcileErr) {
 						return reconcileErr
 					}
 					log.Printf("app-platform recovery resume reconcile: %v", reconcileErr)
@@ -238,20 +241,20 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			// Idle, in normal and in paused mode: a failed migration waiting for settlement needs no lease.
 			if w.endpoint.path != "" {
 				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
-					if w.idleUnreachable(settleErr) {
+					if w.idleUnreachable(bulkCtx, settleErr) {
 						return settleErr
 					}
 					log.Printf("app-platform migration settlement: %v", settleErr)
 				}
 				if _, settleErr := w.server.settlePlatformLoadImages(bulkCtx, w.endpoint); settleErr != nil {
-					if w.idleUnreachable(settleErr) {
+					if w.idleUnreachable(bulkCtx, settleErr) {
 						return settleErr
 					}
 					log.Printf("app-platform load-image settlement: %v", settleErr)
 				}
 				// Idle: the images of releases nothing references any more are removed, and begun removals settle.
 				if _, reclaimErr := w.server.reclaimPlatformImages(bulkCtx, w.endpoint); reclaimErr != nil {
-					if w.idleUnreachable(reclaimErr) {
+					if w.idleUnreachable(bulkCtx, reclaimErr) {
 						return reclaimErr
 					}
 					log.Printf("app-platform image reclaim: %v", reclaimErr)
@@ -282,7 +285,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		ctx = bulkCtx
 	}
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
-	dials := transport.UnreachableDials()
+	// Connection attempts under this attempt's context report to the witness, so a failure whose
+	// error was wrapped without %w by a stage can still be told from a verdict. The witness is
+	// scoped to this attempt: other goroutines' dials never touch it.
+	ctx, witness := transport.WithUnreachableWitness(ctx)
 	var result platformInstallRun
 	if w.runOverride != nil {
 		result, err = w.runOverride(ctx, w.active)
@@ -358,7 +364,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
 	}
-	if w.endpoint.path != "" && (platformRunnerUnreachable(err) || transport.UnreachableDials() != dials) {
+	if w.endpoint.path != "" && platformAttemptFoundRunnerDown(ctx, err, witness) {
 		// The runner could not be reached: nothing was sent, so this is not a verdict and spends
 		// no attempt. The operation keeps its lease and the tick backs off until it answers.
 		w.health.unreachable("app-platform scheduler")
@@ -453,10 +459,20 @@ func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode st
 	return nil
 }
 
+// platformAttemptFoundRunnerDown reports whether a failed attempt failed because the runner could
+// not be reached. An attempt whose own budget is exhausted is never an outage: the stage reached the
+// runner and ran out of time, which spends an attempt (or a busy wait) as it always did.
+func platformAttemptFoundRunnerDown(ctx context.Context, err error, witness *transport.UnreachableWitness) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return platformRunnerUnreachable(err) || witness.Seen()
+}
+
 // idleUnreachable records an idle step's failure as an unreachable runner when it is one, so the
 // step's own per-item logging stays quiet and the tick backs off.
-func (w *platformInstallScheduler) idleUnreachable(err error) bool {
-	if !platformRunnerUnreachable(err) {
+func (w *platformInstallScheduler) idleUnreachable(ctx context.Context, err error) bool {
+	if !platformRunnerDown(ctx, err) {
 		return false
 	}
 	w.health.unreachable("app-platform scheduler")

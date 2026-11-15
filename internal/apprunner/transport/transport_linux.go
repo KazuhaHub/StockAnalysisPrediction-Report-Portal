@@ -489,16 +489,20 @@ func exchangeProfile(parent context.Context, path string, profile endpointProfil
 func connectEndpoint(ctx context.Context, path string, profile endpointProfile) (*net.UnixConn, error) {
 	before, err := socketInfo(path, profile)
 	if err != nil {
-		if errors.Is(err, ErrRunnerUnreachable) {
-			noteUnreachable()
-		}
+		noteDial(ctx, errors.Is(err, ErrRunnerUnreachable))
 		return nil, err
 	}
 	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
-		noteUnreachable()
+		if ctx.Err() != nil {
+			// The caller's budget ran out before or during the dial: not a statement about the runner.
+			noteDial(ctx, false)
+			return nil, fmt.Errorf("%w: %w", ErrRefused, ctx.Err())
+		}
+		noteDial(ctx, true)
 		return nil, fmt.Errorf("%w: %w", ErrRefused, ErrRunnerUnreachable)
 	}
+	noteDial(ctx, false)
 	conn, ok := connection.(*net.UnixConn)
 	if !ok {
 		connection.Close()

@@ -233,7 +233,7 @@ func (s *Server) settlePlatformMigrations(ctx context.Context, endpoint platform
 			if ctx.Err() != nil {
 				return progressed, ctx.Err()
 			}
-			if platformRunnerUnreachable(err) {
+			if platformRunnerDown(ctx, err) {
 				return progressed, err
 			}
 			log.Printf("app-platform migration settlement %s: %v", id, err)

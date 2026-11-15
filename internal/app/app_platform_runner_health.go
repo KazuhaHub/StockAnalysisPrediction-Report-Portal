@@ -27,6 +27,16 @@ func platformRunnerUnreachable(err error) bool {
 	return err != nil && errors.Is(err, transport.ErrRunnerUnreachable)
 }
 
+// platformRunnerDown is platformRunnerUnreachable for a caller that holds the attempt's context: it
+// also consults the context's witness, which survives an intermediate layer wrapping the error
+// without %w. A finished context is never an outage.
+func platformRunnerDown(ctx context.Context, err error) bool {
+	if err == nil || ctx.Err() != nil {
+		return false
+	}
+	return platformRunnerUnreachable(err) || transport.UnreachableSeen(ctx)
+}
+
 // platformRunnerHealth is the engine's view of its runner: down since when, how many ticks in a
 // row it stayed down, and when it last said so in the log. It is used from one goroutine (the
 // scheduler's tick).
