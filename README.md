@@ -95,15 +95,15 @@ report-portal recovery-bundle write /backup/bundle \
 
 # Fresh host, with the ORIGINAL config.yaml (same secret_key) in place and the portal stopped.
 report-portal recovery-bundle restore /backup/bundle          # dry run: verify the bundle, parse the dump
-report-portal recovery-bundle restore /backup/bundle --force  # replace the database
+report-portal recovery-bundle restore /backup/bundle --force  # load it into an empty database
 ~~~
 
-- `--checkpoints` names where the runner keeps its archives (`<checkpoint id>.tar`): the checkpoint root, its `.portal-checkpoints` directory, or the archive files themselves. It may be repeated. Every retained recovery set needs exactly one archive; a missing archive, an archive that is not the checkpoint the database recorded, a stray archive, or an archive found in two places is refused, and nothing is left in the bundle directory.
+- `--checkpoints` names where the runner keeps its archives (`<checkpoint id>.tar`): the checkpoint root, its `.portal-checkpoints` directory, or the archive files themselves. It may be repeated. Every retained recovery set needs exactly one archive; a missing archive, an archive that is not the checkpoint the database recorded, an archive file you name that no retained recovery set owns, or an archive found in two places is refused, and nothing is left in the bundle directory. A directory may legitimately hold archives of deleted recovery sets (the runner cannot delete a checkpoint), so those found by searching a directory are left out and listed as ignored.
 - `--runner-journal` is the old runner's journal file. It is copied as bytes, as provenance, and never opened. Pass `--no-runner-journal` to state that the host has none; one of the two is required.
 - The database dump, the keyring, the retained recovery sets and the release inventory are read in a single read transaction, so a database that is being written to cannot produce a bundle that disagrees with itself. The retained sets are read again at the end; if they changed while the archives were being copied, the bundle is refused.
-- `restore` verifies the SHA-256 of every file in the bundle against its manifest before it touches the database, places the managed image blobs, then loads the dump exactly as `restore` does. Without `--force` it writes nothing. A restored Portal is in recovery mode: runtime bindings are retired, and tasks, subscriptions and recovery sets wait for review.
+- `restore` verifies the SHA-256 of every file in the bundle against its manifest, and that the `secret_key` in `config.yaml` opens the bundle's keyring (a wrong key is refused with "secret_key does not match the bundle"), all before it touches the database. It then places the managed image blobs and loads the dump exactly as `restore` does; the dump is hashed again while it is read, so a file swapped after verification is refused. Without `--force` it is a dry run: the target database is not opened and nothing is created. With `--force` the target database must be empty (as on a fresh host that has not been started); a database that holds data is refused unless you also pass `--replace-existing`. The command cannot detect a running Portal or runner, so stop both first. When the dump held app platform entities the restored Portal is in recovery mode: runtime bindings are retired, and tasks, subscriptions and recovery sets wait for review.
 - The command does not load the checkpoint archives or the journal. After `restore`, copy the archives it lists to the runner host and follow the import review in [doc 168](docs/app-platform/168-fresh-host-restore-plan.md).
-- The bundle does not contain `config.yaml`. Carry the original `secret_key` separately: the keyring cannot be opened without it. The directory is owner-only and holds password and token hashes, so treat it as a secret.
+- The bundle does not contain `config.yaml`. Carry the original `secret_key` separately: the keyring cannot be opened without it. The directory is made owner-only (mode 0700, files 0600) and holds password and token hashes, so treat it as a secret.
 
 ### Rotating `secret_key`
 
@@ -180,7 +180,7 @@ go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
 go run ./cmd/report-portal recovery-bundle write <dir> --checkpoints <dir-or-archive> (--runner-journal <file> | --no-runner-journal)
-go run ./cmd/report-portal recovery-bundle restore <dir> [--force]
+go run ./cmd/report-portal recovery-bundle restore <dir> [--force [--replace-existing]]
 go run ./cmd/report-portal schema-upgrade [--apply]   # optional, offline: list pending schema steps, or apply them
 go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
 go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out

@@ -152,18 +152,25 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   doc 167.
 - **Bundle command.** `writePlatformRecoveryBundle` is reachable through the operator command
   `report-portal recovery-bundle write <dir> --checkpoints <dir-or-archive>... (--runner-journal <file> |
-  --no-runner-journal)`, and the matching `report-portal recovery-bundle restore <dir> [--force]` consumes the
-  bundle on the fresh host (see the README section "Platform recovery bundle"). Paths come from flags because
-  `config.yaml` holds infrastructure only. `write` reads the dump, the retained sets, the keyring, the release
-  inventory and the managed release descriptors in one read transaction (`REPEATABLE READ` on PostgreSQL), so a
-  moving database cannot give a dump that disagrees with the manifest; the before/after retained-set comparison
-  stays as a second guard for sets that change while the host files are copied. It refuses a missing, tampered,
-  stray or ambiguous archive, an unreadable journal, and a journal with live write-ahead content, and removes
-  what it wrote. `restore` adds no semantics: it verifies every file digest, places the image blobs, loads the
-  dump through the existing `restore` path (so the Portal ends paused, in recovery mode with every runtime
-  binding retired) and checks that the restored keyring is the bundle's. It does not load the checkpoint
-  archives or open the journal; it lists the archives for the runner host, whose import review is the existing
-  flow above. Without `--force` it is a dry run.
+  --no-runner-journal)`, and the matching `report-portal recovery-bundle restore <dir> [--force
+  [--replace-existing]]` consumes the bundle on the fresh host (see the README section "Platform recovery
+  bundle"). Paths come from flags because `config.yaml` holds infrastructure only. `write` reads the table list
+  (plugin data tables included), the dump, the retained sets, the keyring, the release inventory and the managed
+  release descriptors in one read transaction (`REPEATABLE READ` on PostgreSQL), so a moving database cannot give a
+  dump that disagrees with the manifest; the before/after retained-set comparison stays as a second guard for sets
+  that change while the host files are copied. It refuses a missing, tampered or ambiguous archive, an archive file
+  no retained set owns, a checkpoint id that is not a UUID, an unreadable journal, and a journal that has live
+  write-ahead or rollback-journal content or changes while it is copied, and removes what it wrote. The bundle
+  directory is made mode 0700. `restore` adds no semantics. Before it touches any database, and in the dry run too,
+  it verifies every file digest and opens the bundle's keyring under the host's `secret_key` (a previous key is not
+  consulted), refusing with "secret_key does not match the bundle". It then places the image blobs, keeping their
+  reservation until the dump has loaded, and loads the dump through the existing `restore` path, hashing it again
+  while it reads so a file swapped after verification is refused before commit; the Portal then ends paused, in
+  recovery mode with every runtime binding retired, when the dump held app platform entities. `--force` needs an
+  empty target database (one holding only what a new database starts with) unless `--replace-existing` is passed;
+  the command has no way to detect a running Portal or runner, so it only warns. The dry run parses the dump in a
+  scratch in-memory database and does not open the target. The command does not load the checkpoint archives or
+  open the journal; it lists the archives for the runner host, whose import review is the existing flow above.
 - The runner's read-receipt answer is "receipt" or a closed connection. The Portal's import
   reconciliation therefore treats a failed read as unknown and re-sends the same effect, which the
   runner reconciles rather than repeats. A definite "no row" answer from the runner, which would
