@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,7 +37,7 @@ var candidateIPCMountInfoPath = "/proc/self/mountinfo"
 // candidateIPCMountInfoReader reads the mount table. A variable so a test can stall it.
 var candidateIPCMountInfoReader = func() ([]byte, error) {
 	if root, err := os.Readlink("/proc/self/root"); err != nil || root != "/" {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: the runner's root is %q (%v), not the host root, so its mount table is not the daemon's", ErrUnavailable, root, err)
 	}
 	return os.ReadFile(candidateIPCMountInfoPath)
 }
@@ -230,11 +231,14 @@ func candidateIPCComponents(path string) []string {
 func loadCandidateIPCMounts(ctx context.Context) (candidateIPCMounts, error) {
 	raw, err := candidateIPCSlotted(ctx, candidateIPCMountInfoReader)
 	if err != nil {
-		return nil, candidateIPCLookupError(ctx, err)
+		if errors.Is(err, ErrUnavailable) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("%w: mount table read: %v", candidateIPCLookupError(ctx, err), err)
 	}
 	mounts, err := parseCandidateIPCMountInfo(raw)
 	if err != nil {
-		return nil, ErrUnavailable
+		return nil, fmt.Errorf("%w: mount table: %v", ErrUnavailable, err)
 	}
 	return mounts, nil
 }
@@ -295,7 +299,7 @@ func (m candidateIPCMounts) place(path string) (candidateIPCPlace, error) {
 		}
 	}
 	if best < 0 {
-		return candidateIPCPlace{}, ErrUnavailable
+		return candidateIPCPlace{}, fmt.Errorf("%w: no mount covers %q", ErrUnavailable, path)
 	}
 	mount := m[best]
 	rel := strings.TrimPrefix(path, mount.point)
