@@ -197,8 +197,9 @@ var serviceTaskResources = map[string][]string{
 	appplatform.TaskHandlerEvent:   {"events.subscribe", "tasks.schedule"},
 }
 
-// fakeRunnerTaskAfterGrantChange raises (this fixture does not re-grant the capability rows; the Portal's own
-// pre-check for that is TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange) ... bumps the installation's policy revision `bumps` times without a
+// fakeRunnerTaskAfterGrantChange raises the installation's policy revision `bumps` times (this fixture does
+// not re-grant the capability rows; the Portal's own pre-check for that is
+// TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange) without a
 // new generation (as a recovery action does), then drives one task of the handler through the
 // Portal and runner contracts without a socket: the Portal resolves the history it would use,
 // the registration signer answers the handshake as the app would, the Portal signs the task
