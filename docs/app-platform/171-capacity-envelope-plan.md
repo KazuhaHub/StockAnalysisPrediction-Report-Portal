@@ -1351,6 +1351,64 @@ is evidence for OPS-08.
     on CPUs that are 59% to 60% busy and cannot wake on the saturated CPUs 2-3 at all, yet waits as much as unpinned with two reserved CPUs (12.1%). So the wait is not caused by wake-ups landing
     behind the backends. Home and report stay at 1.3 to 3 times their bounds in both runs, dispatch passes in both and batch start fails. No stability rerun: nothing passed. Nothing was tuned.
 
+    **Four hypotheses about the reserved CPUs, tested (PostgreSQL, 5-minute dispatch runs, none evidence; run IDs 43659458611, 43669177366, 43659473079, 43669219337).**
+
+    *H4, SMT and kernel.* The runner is a 4-vCPU Intel Xeon Platinum 8573C VM on kernel `7.0.0-1017-azure` (EEVDF, which is the scheduler from kernel 6.6). `lscpu` reports 2 threads per core, 2 cores, one socket,
+    and `thread_siblings_list` is `cpu0: 0-1, cpu1: 0-1, cpu2: 2-3, cpu3: 2-3`. So the four vCPUs are two physical cores, and with `reserved_cpus=1` CPU 0's sibling (CPU 1) is an app CPU spinning a
+    backend. With `reserved_cpus=2` the reserved CPUs 0-1 are one whole core and the apps hold the other, so nothing shares a core with a backend, yet the Portal still waits 12% to 13% (below). The
+    sibling sharing exists but does not explain the wait. The evidence records `topology` (kernel, `eevdf`, `smt`, `thread_siblings`, `lscpu`).
+
+    *H2, the relay is expensive: the runner's profile.* A runner-only CPU profile of the loaded diagnostic minute (new `soak_runner_profile` input; the Portal child marks the minute, the parent signals the runner to
+    start and write a pprof profile, and the flood's counters are read at both marks): 26.08 CPU-seconds in 60.06 s (43% of one CPU, 10.9% of the host), against **324 relayed (answered) requests, 5.4 a second** (6788
+    refused, 113 a second; the runner does nothing for a refused one). That is **80 ms of runner CPU per relayed request** (the whole process; 62 ms of it inside the two request handlers). No single function
+    dominates: the cost is spread across verification work repeated on every request, and it is the same work twice, because each relayed request is a handshake and a request, each about 31 ms:
+
+    | cumulative | share | function (file:line) |
+    | --- | --- | --- |
+    | 10.06 s | 38.6% | `transport.(*Server).handleWritableBackendHandshake` (`transport/writable_backend_handshake_linux.go:159`) |
+    | 9.91 s | 38.0% | `transport.(*Server).handleWritableBackendRequest` (`transport/writable_backend_request_linux.go:188`) |
+    | 4.34 s | 16.6% | `driver.validProjection` (`driver/http.go:162`): strict validation of the Docker inspect document |
+    | 3.94 s | 15.1% | `driver.inspectCandidateContainerHTTP` (`driver/container_observe.go:49`): a Docker inspect round trip, parsed with `encoding/json` |
+    | 3.39 s | 13.0% | `journal.(*Store).beginWritableRegistration` (`journal/writable_backend_registration_delivery.go:64`), with `loadWritableRegistrationSource` 3.25 s (`journal/writable_backend_registration_intent.go:53`): SQLite reads of the journal |
+    | 3.17 s | 12.2% | `driver.managedCandidateReference` (`driver/writable_candidate_recovery_linux.go:27`) |
+    | 2.91 s | 11.2% | `journal.(*Store).prepareWritableBackendExchange` (`journal/writable_backend_handshake.go:46`) |
+    | 2.06 s | 7.9% | `driver.(*candidateMountPins).validate` (`driver/mount_pins_linux.go:169`) |
+    | 2.01 s | 7.7% | `driver.readCandidateIPCInventory` (`driver/candidate_ipc_linux.go:271`) |
+    | 1.86 s | 7.1% | `path/filepath.EvalSymlinks`, 1.69 s of it under `driver.resolveCandidateIPCSource` (`driver/candidate_ipc_linux.go:483`) |
+    | 5.63 s | 21.6% | `encoding/json` decoding in all of the above; `Syscall6` alone is 10.2% flat |
+
+    The largest single item is validating a Docker inspect of the backend's container on every request (`validProjection` and `inspectCandidateContainerHTTP`, about 16% each, overlapping), then the journal's
+    registration reads and the re-resolution of the container's IPC directory and mounts. Not fixed here. The prediction of about 48 ms per request is low: measured 62 to 80 ms.
+
+    *Docker and "other".* By command name (percent of the host, loaded): `dockerd` 4.1 to 4.3, `containerd` 0.35 to 0.39, `containerd-shim` 0.28 to 0.41. The processes inside "other" that the sampler can see add up to about 1%:
+    `provjobd` 0.28 to 0.40, the sampler's own Python 0.07 to 0.11, `Runner.Worker`, `rcu_sched`, several `kworker` kinds (events, unbound, writeback, flush, loop0 at 0.02) and `ksoftirqd` each under 0.1;
+    `loop0`, `jbd2` and `xfs` threads do not appear. The other 8% to 12% of the host that the breakdown labels "other" is therefore CPU time no sampled process owns: the host's modes in the last run were user 23.2,
+    nice 48.6 (the backends' burners), system 12.9, iowait 0.5, **steal 0.0**, softirq 0.8, irq 0.0, idle 14.1. It is not hypervisor steal and not interrupt work; the likely owner is short-lived processes that exit between
+    30-second samples (the sampler's own `docker` and `psql` invocations, `systemd-run`), whose time `/proc/<pid>/stat` loses. Not verified.
+
+    *H1 and H3, priority instead of placement: `soak_platform_cpu_weight=1000`* on the Portal scope and PostgreSQL's unit (the runner's scope stays at 100), no pinning:
+
+    | | (a) `reserved_cpus=1`, weight 1000 (43659473079) | (b) `reserved_cpus=2`, weight 1000 (43669219337) | unweighted, 1 reserved (43654065624) / 2 reserved (43655116984) |
+    | --- | --- | --- | --- |
+    | per-CPU busy loaded, CPU 0 / 1 / 2 / 3 | 65.2 / 87.9 / 86.6 / 86.4 | 69.5 / 71.1 / 99.8 / 99.8 | 67.8 / 83.5 / 85.1 / 83.0; 57.0 / 57.9 / 98.2 / 98.2 |
+    | host busy; Portal, flood, PostgreSQL, runner, docker, backends, other (percent of host) | 81.7; 7.1, 0.5, 0.3, 11.5, 4.4, 48.0, 10.4 | 85.4; 8.1, 0.6, 0.3, 11.9, 5.4, 46.7, 12.4 | 80.5; 6.8, 0.4, 0.3, 11.9, 4.3, 48.0, 8.8 |
+    | Portal scope CPU pressure some / full avg10 | 9.9 / 5.7 | 12.7 / 6.9 | 9.9 / 6.5; 12.1 / 6.7 |
+    | PostgreSQL unit CPU some | 9.6 | 8.5 | 5.4; 8.0 |
+    | home idle / pooled / bound (us) | 1743 / 13021 / 6743 fail | 1931 / 12259 / 6931 fail | 2083 / 8470 / 7083 fail; 2063 / 11512 / 7063 fail |
+    | home windows | 14626, 11550, 9672, 13531, 12613 | 11574, 12279, 12621, 11038, 13030 | |
+    | report | 11797 / 30893 / 17695 fail | 3602 / 22017 / 8602 fail | 2242 / 10630 / 7242 fail; 2335 / 13552 / 7335 fail |
+    | report windows | 30937, 54033, 12531, 28414, 22716 | 16882, 29538, 15701, 32218, 15949 | |
+    | dispatch@200 | 1132 / 5164 / 6132 pass | 1048 / 5988 / 6048 pass | 856 / 3360 / 5856 pass; 796 / 4192 / 5796 pass |
+    | dispatch windows | 6036, 4600, 4251, 5164, 4548 | 4641, 6612, 5245, 5937, 5717 | |
+    | batch start | 21846 / 79605 / 32769 fail | 11972 / 51050 / 17958 fail | 8756 / 30176 / 13756 fail; 9229 / 35350 / 14229 fail |
+    | batch start windows | 79605, 77366, 40816, 64668, 76042 | 44185, 53071, 25984, 52511, 28607 | |
+
+    **Against the predictions.** H1 and H3 (the Portal queues behind the platform's own threads, a wake-up delay per round trip, fixed by priority): not supported. With a tenfold weight the Portal scope's CPU pressure stays at 9.9%
+    and 12.7%, where the prediction was well below 13%, and home stays at 12 to 13 ms (bound about 7 ms), worse than the unweighted runs; report and batch start are worse too (the batch start's wait did not improve less than the pages, it got
+    worse with both). Weights arbitrate between sibling cgroups that contend, and the Portal scope waits as much with 1000 as with 100. H4 (SMT): the premise holds, since CPU 0 shares a core with CPU 1, but `reserved_cpus=2` removes the sharing and the wait stays. H2 (the relay is
+    expensive): supported, and understated: 80 ms of runner CPU per relayed request, double work per request (handshake plus request), roughly 12% of the host for 5 relayed requests a second, plus `dockerd` at 4% to 5% moving the logs; the CPUs the platform keeps
+    are 57% to 70% busy mostly with this. No run passed, so no stability rerun. Nothing was tuned.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
