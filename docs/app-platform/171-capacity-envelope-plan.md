@@ -1427,6 +1427,20 @@ is evidence for OPS-08.
     (`bound_kind`, `relative_threshold_us`, `within_relative_threshold`, `pooled_ratio`); the constants are `HOME_P95_BOUND_US`, `REPORT_P95_BOUND_US` and `BATCH_START_P95_BOUND_US`. The checks are named
     `home_p95_within_absolute_bound`, `report_p95_within_absolute_bound` and `batch_start_p95_within_absolute_bound`.
 
+    **Smokes on the absolute bounds (`f27cd4ca`, PostgreSQL, default configuration; the pull request smoke 43676220497 with the diagnosis, dispatch runs 43676229780 and 43677201531).** Pooled p95 (us), windows 1 to 5, with the
+    bound:
+
+    | Series | 43676220497 | 43676229780 | 43677201531 | bound |
+    | --- | --- | --- | --- | --- |
+    | home | 21618 (23742, 21218, 20981, 21915, 21073) pass | 25929 (25554, 21146, 27521, 24557, 29876) pass | 33111 (34804, 37428, 26309, 34037, 25242) pass | 50000 |
+    | report | 19047 (19793, 18801, 17863, 16704, 24148) pass | 31871 (29645, 37288, 24279, 39818, 28882) pass | 39202 (30924, 45519, 41625, 39202, 32269) pass | 50000 |
+    | batch start | 30403 (30873, 26367, 30403, 27403, 21101) pass | 58929 (64889, 42165, 44948, 58929, 44681) pass | 59386 (67424, 54256, 47686, 57937, 46383) pass | 100000 |
+    | dispatch@200 (idle / pooled / relative bound) | 870 / 6459 / 5870 **fail** (5739, 7623, 7045, 4429, 6459) | 1287 / 8527 / 6287 **fail** (8452, 7024, 8255, 9855, 8280) | 1495 / 11414 / 6495 **fail** (11275, 10166, 10725, 11752, 12129) | idle + 5 ms |
+
+    Home, report and batch start pass their absolute bounds in all three runs, with margins of 1.5 to 2.6 times on the pages and 1.7 to 3.3 times on the batch start, but the pooled p95 grew from run to run (home 21.6, 25.9, 33.1 ms) while the host got busier
+    (80%, 80%, 87% busy; the Portal scope's CPU pressure 11.6% and 16.1% in the last). **Dispatch@200 fails its relative gate in all three**, by 0.6, 2.2 and 4.9 ms, after passing in the earlier runs (3.4 to 5.7 ms against bounds of 5.6 to 6.1 ms): its gate leaves
+    idle + 5 ms and the pooled p95 of the decision is now 6.5 to 11.4 ms. Every other check passes. Not tuned.
+
     Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
     first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'
     CPU weight (#442) 17.7 ms and 27.0 ms; with CPU 0 reserved (#443) 8.5 ms and 10.6 ms (dispatch passing for the first time); two reserved CPUs, platform pinning, platform weights 1000: no better (12 to 13 ms); with the cheaper
