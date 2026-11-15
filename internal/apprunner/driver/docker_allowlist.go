@@ -2,7 +2,9 @@ package driver
 
 import (
 	"errors"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 )
 
@@ -71,5 +73,26 @@ func (t allowListTransport) RoundTrip(request *http.Request) (*http.Response, er
 		}
 		return nil, ErrDockerRequestRefused
 	}
-	return t.next.RoundTrip(request)
+	if t.peer == nil {
+		return t.next.RoundTrip(request)
+	}
+	// Once the daemon has answered, it has accepted the connection and its end can be identified; a connection
+	// is kept alive for that reason (a daemon closes a "Connection: close" connection as soon as it has
+	// answered, and the closed peer has no inode left to look up). A connection is identified once, when it
+	// first answers.
+	var conn net.Conn
+	trace := &httptrace.ClientTrace{GotConn: func(info httptrace.GotConnInfo) { conn = info.Conn }}
+	response, err := t.next.RoundTrip(request.WithContext(httptrace.WithClientTrace(request.Context(), trace)))
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		response.Body.Close()
+		return nil, t.peer.refuse("the connection of the answer is unknown")
+	}
+	if err := t.peer.verifyOnce(conn); err != nil {
+		response.Body.Close()
+		return nil, err
+	}
+	return response, nil
 }

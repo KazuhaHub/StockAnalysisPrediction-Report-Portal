@@ -108,8 +108,9 @@ func TestBindBackedLocalVolumeIsJudgedByItsDevice(t *testing.T) {
 		"not a bind but names the namespace":        {`{"type":"none","o":"uid=1","device":"` + f.data + `"}`, ErrContainerConflict},
 		"overlay with an upperdir in the namespace": {`{"type":"overlay","device":"overlay","o":"lowerdir=/a,upperdir=` + f.data + `/up,workdir=` + f.data + `/w"}`, ErrContainerConflict},
 		"overlay with directories elsewhere":        {`{"type":"overlay","device":"overlay","o":"lowerdir=/a,upperdir=/b,workdir=/c"}`, ErrContainerConflict},
+		"overlay with relative directories":         {`{"type":"overlay","device":"overlay","o":"lowerdir=a,upperdir=b,workdir=c"}`, ErrContainerConflict},
+		"overlay with only an upperdir in o":        {`{"type":"overlay","o":"rw,upperdir=u"}`, ErrContainerConflict},
 		"an upperdir key":                           {`{"type":"overlay","upperdir":"` + f.data + `"}`, ErrContainerConflict},
-		"ext4 on a block device":                    {`{"type":"ext4","device":"/dev/vdb1"}`, ErrContainerConflict},
 		"a device by label":                         {`{"type":"ext4","device":"LABEL=data"}`, ErrContainerConflict},
 		"an unknown option whose value is a path":   {`{"somekey":"/srv/x"}`, ErrContainerConflict},
 		"an unknown option with a relative path":    {`{"somekey":"a/b"}`, ErrContainerConflict},
@@ -237,5 +238,103 @@ func TestVolumeInspectsAreDedupedWithinAPass(t *testing.T) {
 	}
 	if reads != 1 {
 		t.Fatalf("%d volume inspects for one volume", reads)
+	}
+}
+
+// fakeMounts gives the namespace the device 8:1 and an xfs filesystem, as the data root has.
+func fakeMountsFor(t *testing.T, f *inspectFixture, nsFSType string) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	body := "1 0 8:1 / / rw - " + nsFSType + " /dev/vda1 rw\n"
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := candidateIPCMountInfoPath
+	candidateIPCMountInfoPath = file
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
+}
+
+func fakeBlockDevice(t *testing.T, devices map[string]string) {
+	t.Helper()
+	old := candidateIPCBlockDevice
+	candidateIPCBlockDevice = func(path string) (string, error) {
+		if dev, ok := devices[path]; ok {
+			return dev, nil
+		}
+		return "", os.ErrNotExist
+	}
+	t.Cleanup(func() { candidateIPCBlockDevice = old })
+}
+
+// Network filesystem volumes elsewhere on the host do not refuse an app; they overlap only a namespace that
+// itself sits on a network filesystem.
+func TestNetworkFilesystemVolumesDoNotRefuseEveryApp(t *testing.T) {
+	f := newInspectFixture(t)
+	for name, options := range map[string]string{
+		"nfs by type":                 `{"type":"nfs","o":"addr=10.0.0.5,rw","device":":/export/data"}`,
+		"nfs4 by type":                `{"type":"nfs4","o":"addr=10.0.0.5","device":"10.0.0.5:/export"}`,
+		"nfs by a leading colon":      `{"o":"addr=10.0.0.5","device":":/export/data"}`,
+		"cifs by type":                `{"type":"cifs","o":"username=u,password=p","device":"//host/share"}`,
+		"smb3 by a double slash":      `{"type":"smb3","device":"//host/share/sub"}`,
+		"cifs by a double slash only": `{"device":"//host/share"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			f.volumes["v"] = volumeBody(options)
+			fakeMountsFor(t, f, "xfs")
+			if err := f.check(f.listing("v", "local")); err != nil {
+				t.Fatalf("a network volume refused the writer on a local data root: %v", err)
+			}
+			fakeMountsFor(t, f, "nfs4")
+			if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrContainerConflict) {
+				t.Fatalf("a network volume beside a namespace on a network filesystem passed: %v", err)
+			}
+		})
+	}
+}
+
+// A block device volume overlaps a namespace only when the namespace is on that device (major:minor).
+func TestBlockDeviceVolumesAreJudgedByDeviceNumber(t *testing.T) {
+	f := newInspectFixture(t)
+	fakeMountsFor(t, f, "xfs") // the namespace is on 8:1
+	f.volumes["v"] = volumeBody(`{"type":"ext4","device":"/dev/vdb1"}`)
+	fakeBlockDevice(t, map[string]string{"/dev/vdb1": "8:17", "/dev/vda1": "8:1"})
+	if err := f.check(f.listing("v", "local")); err != nil {
+		t.Fatalf("an ext4 device volume elsewhere on the host refused the writer: %v", err)
+	}
+	f.volumes["v"] = volumeBody(`{"type":"xfs","o":"nouuid","device":"/dev/vda1"}`)
+	if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("a volume on the device that holds the namespace passed: %v", err)
+	}
+	f.volumes["v"] = volumeBody(`{"type":"ext4","device":"/dev/missing"}`)
+	if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("an unstattable device passed: %v", err)
+	}
+	// A device path that is not under /dev is not a block device and keeps failing closed.
+	f.volumes["v"] = volumeBody(`{"type":"ext4","device":"disk.img"}`)
+	if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("a relative device passed: %v", err)
+	}
+}
+
+func TestRealBlockDeviceStat(t *testing.T) {
+	if _, err := candidateIPCBlockDevice("/definitely/not/a/device"); err == nil {
+		t.Fatal("a missing device was statted")
+	}
+	if _, err := candidateIPCBlockDevice(os.TempDir()); err == nil {
+		t.Fatal("a directory was taken for a block device")
+	}
+}
+
+func TestMountInfoCarriesTheFilesystemType(t *testing.T) {
+	mounts, err := parseCandidateIPCMountInfo([]byte("36 35 98:0 / /mnt rw,noatime master:1 - nfs4 host:/x rw\n1 0 8:1 / / rw - xfs /dev/vda1 rw\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	place, err := mounts.place("/mnt/data")
+	if err != nil || place.fstype != "nfs4" {
+		t.Fatal(place, err)
+	}
+	if _, err := parseCandidateIPCMountInfo([]byte("1 0 8:1 / / rw shared:1 ext4 /dev/vda1 rw\n")); err == nil {
+		t.Fatal("a line without the separator was accepted")
 	}
 }

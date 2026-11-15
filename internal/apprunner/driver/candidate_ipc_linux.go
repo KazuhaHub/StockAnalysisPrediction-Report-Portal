@@ -245,9 +245,6 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 			ErrUnavailable, err)
 	}
 	defer response.Body.Close()
-	if err := requireDaemonSharesMountNamespace(client); err != nil {
-		return nil, err
-	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(
 			"%w: candidate IPC inventory status %d",
@@ -462,26 +459,60 @@ func parseCandidateIPCMountPlan(raw json.RawMessage) (candidateIPCMountPlanResul
 // candidateIPCVolumeName is the name syntax the allow-list admits for a volume read.
 var candidateIPCVolumeName = regexp.MustCompile(`^` + dockerVolumeName + `$`)
 
-// candidateIPCVolumeOptionsRefusal refuses a local volume that is not a bind but whose options name a host
-// path or a block device: an overlay's lowerdir, upperdir or workdir, a device other than the literal tmpfs
-// one, or any value that looks like a path. The daemon mounts it on the host when a container uses it, so it
-// can reach the namespace in ways the list never shows. A volume with no options, or with options that name
-// no path (a size, a uid), is judged by the path the list shows, as before. nil means none of that.
-func candidateIPCVolumeOptionsRefusal(name string, options map[string]string) error {
+// The sources a local volume's options can add besides a bind device. Neither is a path.
+const (
+	// candidateIPCNetworkSource stands for a volume on a network filesystem.
+	candidateIPCNetworkSource = "netfs:"
+	// candidateIPCBlockSource is followed by the device node a volume is mounted from.
+	candidateIPCBlockSource = "blockdev:"
+)
+
+// candidateIPCVolumeOptions judges a local volume that is not a bind by what its options mount:
+//
+//   - an overlay (lowerdir, upperdir or workdir as an option or in o, whatever the paths look like) is refused,
+//     because it exposes host directories the runner cannot place;
+//   - a network filesystem (a network type, or a device starting with ":" or "//") is another host's tree and
+//     overlaps only a namespace on a network filesystem: candidateIPCNetworkSource;
+//   - a block device under /dev overlaps only a namespace on the same device: candidateIPCBlockSource + the node;
+//   - a volume with no options, or only ones that name no path (a size, a uid, device=tmpfs), keeps the path the
+//     list shows, as before: "";
+//   - anything else that names a path or a device is refused.
+func candidateIPCVolumeOptions(name string, options map[string]string) (string, error) {
 	refuse := func(key string) error {
 		return fmt.Errorf("%w: local volume %q names a host path or device in its option %q", ErrContainerConflict, boundedString(name), boundedString(key))
 	}
-	for key, value := range options {
-		switch {
-		case key == "lowerdir" || key == "upperdir" || key == "workdir":
-			return refuse(key)
-		case key == "device" && value != "" && value != "tmpfs":
-			return refuse(key)
-		case strings.Contains(value, "/"):
-			return refuse(key)
+	for key := range options {
+		if key == "lowerdir" || key == "upperdir" || key == "workdir" {
+			return "", refuse(key)
 		}
 	}
-	return nil
+	for _, option := range strings.Split(options["o"], ",") {
+		key, _, _ := strings.Cut(option, "=")
+		if key == "lowerdir" || key == "upperdir" || key == "workdir" {
+			return "", refuse("o")
+		}
+	}
+	device := options["device"]
+	switch {
+	case candidateIPCNetworkFilesystems[options["type"]] || strings.HasPrefix(device, ":") || strings.HasPrefix(device, "//"):
+		return candidateIPCNetworkSource, nil
+	case strings.HasPrefix(device, "/dev/"):
+		for key, value := range options {
+			if key != "device" && strings.Contains(value, "/") {
+				return "", refuse(key)
+			}
+		}
+		return candidateIPCBlockSource + device, nil
+	}
+	for key, value := range options {
+		switch {
+		case key == "device" && value != "" && value != "tmpfs":
+			return "", refuse(key)
+		case strings.Contains(value, "/"):
+			return "", refuse(key)
+		}
+	}
+	return "", nil
 }
 
 // volumeDevice is candidateIPCBindVolumeDevice answered once per pass for a volume name.
@@ -525,7 +556,7 @@ func candidateIPCBindVolumeDevice(ctx context.Context, client *http.Client, name
 		}
 	}
 	if !bind {
-		return "", candidateIPCVolumeOptionsRefusal(name, options)
+		return candidateIPCVolumeOptions(name, options)
 	}
 	if fsType, ok := options["type"]; ok && fsType != "none" {
 		return "", fmt.Errorf("%w: volume %q: a bind option with the filesystem type %q", ErrInvalidResponse, boundedString(name), boundedString(fsType))

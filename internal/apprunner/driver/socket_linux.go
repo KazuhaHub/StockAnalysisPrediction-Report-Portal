@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -48,7 +47,7 @@ func socketInfo(path string, owner uint32) (os.FileInfo, error) {
 	return info, nil
 }
 
-func dockerDialer(path string, peer ...*daemonPeer) func(context.Context, string, string) (net.Conn, error) {
+func dockerDialer(path string) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, _, _ string) (net.Conn, error) {
 		before, err := socketInfo(path, 0)
 		if err != nil {
@@ -62,12 +61,8 @@ func dockerDialer(path string, peer ...*daemonPeer) func(context.Context, string
 			return nil, ErrUnavailable
 		}
 		refuse := func() (net.Conn, error) { conn.Close(); return nil, ErrUnsafeSocket }
-		credential := peerCredential(conn)
-		if credential == nil || credential.Uid != 0 {
+		if !rootPeer(conn) {
 			return refuse()
-		}
-		if len(peer) > 0 && peer[0] != nil {
-			peer[0].observe(path, int(credential.Pid))
 		}
 		after, err := socketInfo(path, 0)
 		if err != nil || !os.SameFile(before, after) {
@@ -100,15 +95,4 @@ func peerCredential(conn net.Conn) *syscall.Ucred {
 		return nil
 	}
 	return credential
-}
-
-// sharesMountNamespace reports whether a process is in the runner's mount namespace. A namespace file that
-// cannot be read is not shared.
-func sharesMountNamespace(pid int) bool {
-	theirs, err := os.Stat("/proc/" + strconv.Itoa(pid) + "/ns/mnt")
-	if err != nil {
-		return false
-	}
-	ours, err := os.Stat("/proc/self/ns/mnt")
-	return err == nil && os.SameFile(ours, theirs)
 }

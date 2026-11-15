@@ -2,54 +2,42 @@ package driver
 
 import (
 	"fmt"
-	"net/http"
+	"net"
 	"sync"
-	"sync/atomic"
 )
 
-// daemonPeer records, for one client built by newDockerClient, whether the daemon behind the socket is a local
-// dockerd in the runner's mount namespace. SO_PEERCRED names the process that listened, which under socket
-// activation is systemd and behind a forwarder is the proxy, so the socket's holders are vetted instead. The mount-table overlap check reads the runner's own
-// /proc/self/mountinfo, which describes the daemon's paths only when both share a mount namespace.
+// daemonPeer identifies, for one client built by newDockerClient, the process on the other end of every
+// connection to the daemon socket (see verify). The mount-table overlap check reads the runner's own
+// /proc/self/mountinfo, which describes the daemon's paths only when the daemon is a local dockerd in the same
+// mount namespace; a forwarder to another daemon, another mount namespace and a desktop VM are refused.
 type daemonPeer struct {
-	state atomic.Int32
-
-	// The holders of the daemon socket are vetted once per client, on its first dial (see observe).
-	mu      sync.Mutex
-	scanned bool
-	holders map[int]struct{}
-	vetErr  error
-	reason  string // why the first refused dial was refused
+	mu sync.Mutex
+	// vetted are the pids this client has already found to be a dockerd in the runner's mount namespace.
+	vetted map[int]struct{}
+	// seen are the connections already identified: a connection's peer cannot change while it lives.
+	seen map[net.Conn]struct{}
 }
 
-const (
-	daemonPeerUnknown int32 = iota
-	daemonPeerSharesMountNamespace
-	daemonPeerOtherMountNamespace
-)
-
-// record keeps a "not shared" verdict: one connection to a daemon outside the namespace taints the client.
-func (p *daemonPeer) record(shared bool) {
-	if !shared {
-		p.state.Store(daemonPeerOtherMountNamespace)
-		return
-	}
-	p.state.CompareAndSwap(daemonPeerUnknown, daemonPeerSharesMountNamespace)
-}
-
-// requireDaemonSharesMountNamespace refuses an inventory whose daemon was not seen in the runner's mount
-// namespace. A client that was not built by newDockerClient has no socket peer to ask (only a test builds one),
-// and passes.
-func requireDaemonSharesMountNamespace(client *http.Client) error {
-	transport, ok := client.Transport.(allowListTransport)
-	if !ok || transport.peer == nil {
+// verifyOnce identifies the daemon behind a connection the first time it answers.
+func (p *daemonPeer) verifyOnce(conn net.Conn) error {
+	p.mu.Lock()
+	_, done := p.seen[conn]
+	p.mu.Unlock()
+	if done {
 		return nil
 	}
-	if transport.peer.state.Load() != daemonPeerSharesMountNamespace {
-		transport.peer.mu.Lock()
-		reason := transport.peer.reason
-		transport.peer.mu.Unlock()
-		return fmt.Errorf("%w: the container daemon is not a local dockerd in the runner's mount namespace, so mount sources cannot be compared (%s)", ErrUnavailable, reason)
+	if err := p.verify(conn); err != nil {
+		return err
 	}
+	p.mu.Lock()
+	if p.seen == nil || len(p.seen) >= 256 {
+		p.seen = map[net.Conn]struct{}{}
+	}
+	p.seen[conn] = struct{}{}
+	p.mu.Unlock()
 	return nil
+}
+
+func (p *daemonPeer) refuse(format string, args ...any) error {
+	return fmt.Errorf("%w: the container daemon is not a local dockerd in the runner's mount namespace, so mount sources cannot be compared (%s)", ErrUnavailable, fmt.Sprintf(format, args...))
 }

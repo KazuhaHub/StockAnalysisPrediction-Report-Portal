@@ -10,7 +10,7 @@ import (
 // clientTimeout of zero leaves the whole-request bound to the caller's context, as a streaming load needs.
 func newDockerClient(socket string, headerTimeout, clientTimeout time.Duration) (*http.Client, func()) {
 	peer := &daemonPeer{}
-	transport := &http.Transport{Proxy: nil, DisableKeepAlives: true, ResponseHeaderTimeout: headerTimeout, DialContext: dockerDialer(socket, peer)}
+	transport := &http.Transport{Proxy: nil, IdleConnTimeout: 5 * time.Second, MaxIdleConnsPerHost: 4, ResponseHeaderTimeout: headerTimeout, DialContext: dockerDialer(socket)}
 	client := &http.Client{Transport: allowListTransport{next: transport, peer: peer}, Timeout: clientTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	return client, transport.CloseIdleConnections
 }

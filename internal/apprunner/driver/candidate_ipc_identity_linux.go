@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Mount overlap is decided by where a path really lives as well as by its name. A name comparison cannot see a
@@ -46,9 +48,9 @@ var candidateIPCMountInfoReader = func() ([]byte, error) {
 var candidateIPCNamespaceResolver = candidateIPCCanonicalize
 
 // candidateIPCPlace is a path's device and its path within that device's filesystem.
-type candidateIPCPlace struct{ dev, path string }
+type candidateIPCPlace struct{ dev, path, fstype string }
 
-type candidateIPCMount struct{ id, parent, dev, root, point string }
+type candidateIPCMount struct{ id, parent, dev, root, point, fstype string }
 
 type candidateIPCMounts []candidateIPCMount
 
@@ -109,7 +111,15 @@ func (p *candidateIPCPass) referenced(ctx context.Context, path, source string) 
 	if source == "" {
 		return false, nil
 	}
-	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
+	if !filepath.IsAbs(path) {
+		return false, ErrInvalidResponse
+	}
+	switch {
+	case source == candidateIPCNetworkSource:
+		return p.networkVolumeReferences(ctx, path)
+	case strings.HasPrefix(source, candidateIPCBlockSource):
+		return p.blockVolumeReferences(ctx, path, strings.TrimPrefix(source, candidateIPCBlockSource))
+	case !filepath.IsAbs(source):
 		return false, ErrInvalidResponse
 	}
 	resolved, ok := p.sources[source]
@@ -121,59 +131,132 @@ func (p *candidateIPCPass) referenced(ctx context.Context, path, source string) 
 		resolved = candidateIPCResolution{canonical: canonical}
 		p.sources[source] = resolved
 	}
-	namespace, ok := p.namespaces[path]
-	if !ok {
-		canonical, err := resolveCandidateIPCSource(ctx, path, candidateIPCNamespaceResolver)
-		switch {
-		case err == nil:
-		case errors.Is(err, os.ErrNotExist):
-			canonical = filepath.Clean(path)
-		default:
-			return false, candidateIPCLookupError(ctx, err)
-		}
-		namespace = candidateIPCNamespace{canonical: canonical}
-		p.namespaces[path] = namespace
+	namespace, err := p.namespace(ctx, path)
+	if err != nil {
+		return false, err
 	}
 	for _, ns := range []string{path, namespace.canonical} {
 		if candidateIPCNameOverlap(resolved.canonical, ns) {
 			return true, nil
 		}
 	}
-	if p.mounts == nil {
-		mounts, err := loadCandidateIPCMounts(ctx)
-		if err != nil {
-			return false, err
-		}
-		p.mounts = mounts
+	mounts, err := p.mountTable(ctx)
+	if err != nil {
+		return false, err
 	}
 	if resolved.place == (candidateIPCPlace{}) {
-		place, err := p.mounts.place(resolved.canonical)
+		place, err := mounts.place(resolved.canonical)
 		if err != nil {
 			return false, err
 		}
 		resolved.place = place
 		p.sources[source] = resolved
 	}
-	if namespace.place == (candidateIPCPlace{}) {
-		place, err := p.mounts.place(namespace.canonical)
-		if err != nil {
-			return false, err
-		}
-		namespace.place = place
-		p.namespaces[path] = namespace
+	if namespace, err = p.namespacePlace(ctx, path); err != nil {
+		return false, err
 	}
 	if candidateIPCPlacesOverlap(resolved.place, namespace.place) {
 		return true, nil
 	}
 	// A bind is recursive unless it says otherwise, and nothing the list shows says otherwise, so the container
 	// also sees every mount below the source. Each is a tree of its own: its device and its root within it.
-	for _, mount := range p.mounts {
+	for _, mount := range mounts {
 		if mount.point != resolved.canonical && candidateIPCPathWithin(resolved.canonical, mount.point) &&
 			candidateIPCPlacesOverlap(candidateIPCPlace{dev: mount.dev, path: mount.root}, namespace.place) {
 			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// namespace resolves the namespace path once per pass.
+func (p *candidateIPCPass) namespace(ctx context.Context, path string) (candidateIPCNamespace, error) {
+	if namespace, ok := p.namespaces[path]; ok {
+		return namespace, nil
+	}
+	canonical, err := resolveCandidateIPCSource(ctx, path, candidateIPCNamespaceResolver)
+	switch {
+	case err == nil:
+	case errors.Is(err, os.ErrNotExist):
+		canonical = filepath.Clean(path)
+	default:
+		return candidateIPCNamespace{}, candidateIPCLookupError(ctx, err)
+	}
+	namespace := candidateIPCNamespace{canonical: canonical}
+	p.namespaces[path] = namespace
+	return namespace, nil
+}
+
+func (p *candidateIPCPass) mountTable(ctx context.Context) (candidateIPCMounts, error) {
+	if p.mounts == nil {
+		mounts, err := loadCandidateIPCMounts(ctx)
+		if err != nil {
+			return nil, err
+		}
+		p.mounts = mounts
+	}
+	return p.mounts, nil
+}
+
+// namespacePlace is namespace with its place on the mount table.
+func (p *candidateIPCPass) namespacePlace(ctx context.Context, path string) (candidateIPCNamespace, error) {
+	namespace, err := p.namespace(ctx, path)
+	if err != nil {
+		return namespace, err
+	}
+	if namespace.place == (candidateIPCPlace{}) {
+		mounts, err := p.mountTable(ctx)
+		if err != nil {
+			return namespace, err
+		}
+		if namespace.place, err = mounts.place(namespace.canonical); err != nil {
+			return namespace, err
+		}
+		p.namespaces[path] = namespace
+	}
+	return namespace, nil
+}
+
+// candidateIPCNetworkFilesystems are the filesystem types that live on another host.
+var candidateIPCNetworkFilesystems = map[string]bool{
+	"nfs": true, "nfs4": true, "cifs": true, "smb3": true, "smbfs": true, "ceph": true, "9p": true, "glusterfs": true, "ncpfs": true, "afs": true,
+}
+
+// networkVolumeReferences: a volume on a network filesystem mounts another host's tree, so it overlaps the
+// namespace only when the namespace itself sits on a network filesystem. The data root is a local XFS
+// project-quota filesystem (the data root is refused otherwise), which this also checks.
+func (p *candidateIPCPass) networkVolumeReferences(ctx context.Context, path string) (bool, error) {
+	namespace, err := p.namespacePlace(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	return candidateIPCNetworkFilesystems[namespace.place.fstype], nil
+}
+
+// candidateIPCBlockDevice returns the "major:minor" of a block device node. A variable so a test can fake one.
+var candidateIPCBlockDevice = func(path string) (string, error) {
+	var st unix.Stat_t
+	if err := unix.Stat(path, &st); err != nil {
+		return "", err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFBLK {
+		return "", fmt.Errorf("%s is not a block device", path)
+	}
+	return fmt.Sprintf("%d:%d", unix.Major(uint64(st.Rdev)), unix.Minor(uint64(st.Rdev))), nil
+}
+
+// blockVolumeReferences: a volume on a block device overlaps the namespace only when the namespace is on that
+// device (the same major:minor). A device that cannot be examined is a refusal.
+func (p *candidateIPCPass) blockVolumeReferences(ctx context.Context, path, device string) (bool, error) {
+	dev, err := candidateIPCSlotted(ctx, func() (string, error) { return candidateIPCBlockDevice(device) })
+	if err != nil {
+		return false, candidateIPCLookupError(ctx, err)
+	}
+	namespace, err := p.namespacePlace(ctx, path)
+	if err != nil {
+		return false, err
+	}
+	return dev == namespace.place.dev, nil
 }
 
 func candidateIPCPlacesOverlap(a, b candidateIPCPlace) bool {
@@ -289,7 +372,17 @@ func parseCandidateIPCMountInfo(raw []byte) (candidateIPCMounts, error) {
 			// It holds no directory tree, so no path can be placed on it.
 			continue
 		}
-		mounts = append(mounts, candidateIPCMount{id: fields[0], parent: fields[1], dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
+		fstype := ""
+		for i := 6; i+1 < len(fields); i++ {
+			if fields[i] == "-" {
+				fstype = fields[i+1]
+				break
+			}
+		}
+		if fstype == "" {
+			return nil, ErrInvalidResponse
+		}
+		mounts = append(mounts, candidateIPCMount{fstype: fstype, id: fields[0], parent: fields[1], dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
 	}
 	if len(mounts) == 0 {
 		return nil, ErrInvalidResponse
@@ -336,7 +429,7 @@ func (m candidateIPCMounts) place(path string) (candidateIPCPlace, error) {
 	}
 	mount := m[best]
 	rel := strings.TrimPrefix(path, mount.point)
-	return candidateIPCPlace{dev: mount.dev, path: filepath.Join(mount.root, rel)}, nil
+	return candidateIPCPlace{dev: mount.dev, path: filepath.Join(mount.root, rel), fstype: mount.fstype}, nil
 }
 
 // stackedOver reports whether a is mounted on top of b at the same mount point, by the mount tree: a's parent

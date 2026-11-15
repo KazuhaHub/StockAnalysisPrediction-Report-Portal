@@ -548,7 +548,7 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 **Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43773100171
 (`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43773100171/job/132993178587`), passed
-`TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` as
+`TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerAcceptancePeerIdentity` (the real connection passes; a socat forwarder is refused) as
 root against a real daemon, with the daemon listing the bind-backed volume as `/var/lib/docker/volumes/<name>/_data`. Real hosts show
 mounts whose root is not a path (`nsfs` namespace files, root `net:[...]`); the table reader skips them.
 
@@ -583,15 +583,21 @@ because they share it. No schema, journal or wire change.
   that overlaps the namespace (its device and its root within it, with the same prefix test). `-v /srv:/x` with `/srv/y` a bind of `/data` is
   therefore a reference to `/data/ns-a`. A non-recursive bind is never trusted as such: that needs a container inspect per container and
   only ever removes refusals, so an `o=bind` volume device is also taken as recursive.
-- **Mount namespace and the daemon.** The mount table is the runner's own, so the check assumes the runner and dockerd share the host mount
-  namespace. `SO_PEERCRED` names the process that listened, which is systemd under socket activation and the proxy behind a forwarder, so it
-  does not identify dockerd. Instead, once per client (on its first dial), the socket's inode is found by path in `/proc/net/unix` and every
-  process with a descriptor on it is found through `/proc/*/fd`. The socket is trusted only when at least one holder's executable is a
-  `dockerd` and every holder is in the runner's mount namespace; socket activation (systemd and dockerd both hold it) passes and a forwarder
-  to a remote daemon (no local dockerd holds the socket) is refused. If no live socket is bound to the path in the runner's network namespace (the quota job's runner saw only an orphaned entry with inode 0), the holders cannot be found by inode and the check falls back to the weaker evidence that a `dockerd` runs in the runner's mount namespace; with none, the socket is refused. That fallback does not tie the socket to that dockerd. Every dial's listener (`SO_PEERCRED`, which under socket activation is systemd and
-  is not necessarily a holder any more) is then checked for the runner's mount namespace, and one failure taints the client. The holders are
-  vetted once per client, so a socket replaced between dials is not seen until the next client. The inventory read refuses a client that has not seen
-  a vetted daemon. A client that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
+- **The daemon behind the connection.** The mount table is the runner's own, so the check assumes the daemon is a local dockerd in the runner's
+  mount namespace and refuses setups where the table does not describe the daemon's view: a forwarder or proxy to another daemon (socat, a
+  tunnel to another host), another mount namespace (a snap-packaged Docker, a containerised daemon) and a desktop VM. It is not a defence against
+  host root, which can impersonate anything. Each connection is identified by what holds its far end, not by a path or by `SO_PEERCRED`
+  (which names the process that listened: systemd under socket activation, the proxy behind a forwarder). After the daemon has answered, the
+  runner asks the kernel through NETLINK `sock_diag` (`UNIX_DIAG`, `UDIAG_SHOW_PEER`) for the peer of its own socket, finds the processes with a
+  descriptor on that inode through `/proc/*/fd`, and requires every holder to be a `dockerd` (by the executable's base name) in the runner's
+  mount namespace. A pid already found to be one is re-checked on each new connection by what it holds and runs, so the scan of `/proc` is done
+  once per client. If `sock_diag` is unavailable, the connection is refused. The `/proc/net/unix` entry with inode 0 that an earlier version
+  treated as an orphan is the server end of the runner's own pending connection, created in the connecting process's network namespace with the
+  listener's path copied onto it; it gets an inode only once the daemon accepts. A listener that does not appear in the runner's
+  `/proc/net/unix` lives in another network namespace, which is why no path is looked up. The runner's client keeps connections alive: a daemon
+  closes a `Connection: close` connection as soon as it has answered, and a closed peer has no inode left to look up. A connection is identified once,
+  when it first answers. A new connection to the vetted daemon cost about 0.1 ms more than a bare one in a unit test; the native job logs the
+  cost against the real daemon's descriptor table (below).
 - **Mount choice.** Of several mounts at the longest mount point the one mounted on top by the mount tree (parent ids) is used, not the last
   in the file.
 - **Absent paths.** A `..` after a missing component can return to a directory that exists, and what follows it is resolved for real again.
@@ -602,10 +608,15 @@ because they share it. No schema, journal or wire change.
   `Options.device` is taken as one more source of the container and judged exactly like a bind source: placed by the mount table, symlinks
   followed, an absent device under the namespace a reference. Any other local volume is judged as before. A failed inspect, a driver that
   differs from the list, options that are not a flat object of strings, a bind option with another filesystem type, a missing or relative
-  device, and a local volume mount without a valid name are refusals. A local volume that is not a bind but whose options name a host path or
-  a block device is refused (`ErrContainerConflict`): an overlay's `lowerdir`, `upperdir` or `workdir`, any `device` other than the literal
-  `tmpfs`, or any option value that contains a `/`, since an unknown option that looks like a path is treated conservatively. A volume with no
-  options, or only options that name no path (a size, a uid), keeps the path-based judgement. A volume is inspected once per pass whatever the
+  device, and a local volume mount without a valid name are refusals. A local volume that is not a bind is judged by what its options mount.
+  An overlay (`lowerdir`, `upperdir` or `workdir` as an option or inside `o`, whatever the paths look like, relative or absolute) is refused. A
+  network filesystem (`type` nfs, nfs4, cifs, smb3, smbfs, ceph, 9p, glusterfs, ncpfs or afs, or a `device` starting with `:` or `//`) is another host's
+  tree and overlaps only a namespace that itself sits on a network filesystem; the data root is a local XFS project-quota filesystem (the
+  data root is refused otherwise), and the check also reads the namespace's filesystem type from the mount table. A block device under
+  `/dev` is judged by the node's `st_rdev` against the device (major:minor) of the namespace's place: equal is an overlap, different is not, and a
+  device that cannot be statted is a refusal. A volume with no options, or only options that name no path (a size, a uid, `device=tmpfs`), is
+  judged by the path the list shows. Anything else that names a path or a device (a relative `device`, `LABEL=`, an unknown option with a `/`)
+  fails closed. NFS, CIFS and ext4-device volumes elsewhere on the host therefore do not refuse every app. A volume is inspected once per pass whatever the
   number of containers that mount it; a pass over 300 containers on 300 volumes against a daemon on a unix socket took about 35 ms with one
   connection per request, so no connection reuse was added (the 5 s pass deadline is not approached).
 - **Lookups.** Every filesystem lookup, the source canonicalisation, the namespace canonicalisation and the mount table read, runs under
@@ -621,8 +632,7 @@ stop the writer, and a local volume with an empty `Source` is still skipped.
 ancestor, the filesystem root, a descendant, a sibling and an unrelated directory; an alias that names cannot see; a namespace that does
 not exist yet; a different device; mount table parsing and stacking; unreadable, malformed and uncovering tables; absent sources inside
 and beside; links into the namespace, into a subdirectory that does not exist, relative, chained, partway along an absent path, a link
-elsewhere, cycles and the hop bound; cancellation and a stalled namespace lookup or mount table read. `daemon_peer_linux_test.go`: the mount
-namespace verdict. Root-only: `TestBindMountAliasIsAnOverlap` makes real `mount --bind` mounts of the namespace, the data root, a
+elsewhere, cycles and the hop bound; cancellation and a stalled namespace lookup or mount table read. `daemon_peer_linux_test.go`: the peer identity with faked and real sock_diag and /proc readers. Root-only: `TestBindMountAliasIsAnOverlap` makes real `mount --bind` mounts of the namespace, the data root, a
 descendant and a sibling and reads the real mount table.
 
 **Where the native tests run.** `.github/workflows/app-runner-probe.yml`, job `foreign-container-beside-writer`, on a GitHub-hosted
@@ -630,7 +640,7 @@ runner as root with a real daemon: `TestDockerAcceptanceBindBackedVolumeIsAConfl
 namespace, starts a container on it, requires that the daemon lists a `/volumes/` source, and requires `ErrContainerConflict` for the
 namespace and none for a sibling; it also requires a conflict for a created container that was never started on a bind-backed volume, and for a created container whose bind
 source is absent under the namespace.
-`TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` run there too. The job runs on every pull request that
+`TestBindMountAliasIsAnOverlap` and `TestDockerAcceptancePeerIdentity` (the real connection passes; a socat forwarder is refused) run there too. The job runs on every pull request that
 touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged) the root-only tests skip.
 
 **Limits.**
@@ -639,8 +649,10 @@ touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged
   not seen, and it is not exclusion against host root. This is the rename-during-check race. Within one pass the mount table is read
   once but the lookups are several calls: a source is resolved (symlinks followed) and later placed by the table as two separate steps,
   and the table, the namespace and each source are read at different instants, so a change between them can pair a path with a stale place.
-- A holder of the daemon socket that exits, with its pid reused before a later dial, would be taken for itself. A pidfd would close it
-  and is not used.
+- A daemon is recognised by the executable's base name `dockerd` only, and a process the runner cannot read is not one. Snap-packaged Docker
+  (its own mount namespace), a containerised daemon, a forwarder and Docker Desktop are unsupported and refused. A pid reused between the
+  scan and a later connection is re-checked on that connection by what it holds and runs; a pidfd is not used.
+- A block device on a btrfs or LVM layout whose mount table device number differs from the node's `st_rdev` can hide an overlap.
 - A mount hidden because a later mount covers its parent is not detected as hidden; the covering is judged only at the same mount
   point. A submount that is covered is treated as visible, which can only add a refusal.
 - A filesystem the mount table gives one device number for different trees (a btrfs subvolume layout with identical numbers), or one

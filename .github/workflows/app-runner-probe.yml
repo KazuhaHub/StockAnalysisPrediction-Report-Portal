@@ -399,6 +399,8 @@ jobs:
           # The overlap check reads the runner's mount table, so keep it with the payload.
           sudo cat /proc/self/mountinfo | tee "$RUNNER_TEMP/foreign/mountinfo.txt" > /dev/null
           sudo readlink /proc/self/root | tee "$RUNNER_TEMP/foreign/proc-self-root.txt"
+      - name: Install the forwarder the peer identity test refuses
+        run: command -v socat >/dev/null || sudo apt-get install -y --no-install-recommends socat
       - name: Run the writer's container inventory beside the service container
         env:
           GOWORK: 'off'
@@ -412,7 +414,7 @@ jobs:
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
             PORTAL_APP_RUNNER_FOREIGN_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$sock" \
             "$RUNNER_TEMP/driver-foreign.test" -test.v -test.timeout=60s \
-            -test.run='^(TestDockerAcceptanceForeignContainerBesideDataWriterInventory|TestDockerAcceptanceBindBackedVolumeIsAConflict|TestBindMountAliasIsAnOverlap|TestDockerDialerRecordsThePeerMountNamespace|TestInventory.*|TestPluginVolume.*|TestVolumeWith.*|TestPendingVolume.*|TestFailedInspect.*|TestLocalAnonymous.*)$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
+            -test.run='^(TestDockerAcceptanceForeignContainerBesideDataWriterInventory|TestDockerAcceptanceBindBackedVolumeIsAConflict|TestBindMountAliasIsAnOverlap|TestDockerAcceptancePeerIdentity|TestInventory.*|TestPluginVolume.*|TestVolumeWith.*|TestPendingVolume.*|TestFailedInspect.*|TestLocalAnonymous.*)$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
       - name: Preserve the daemon payload and the test output
         if: always()
         uses: actions/upload-artifact@v7
