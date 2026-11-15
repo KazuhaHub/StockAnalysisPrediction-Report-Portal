@@ -1009,8 +1009,13 @@ Pooled p95 over the 120 loaded windows against the absolute bounds of resolution
 Every check of the verdict passed (the four latency bounds, the message flood answered and typed in every window, backends at their CPU, PID
 and memory budgets, no crash, the runner journal grew 0 bytes), and the job still failed: the harness's disk precheck replaced the verdict
 with `inconclusive_slow_disk` because it read **PostgreSQL's** idle WAL sync mean (7.7 ms against its 2 ms bound) in a run whose Portal does
-not use PostgreSQL (its fsync probe was normal: median 0.22 ms). The precheck therefore says nothing about the SQLite measurement and tripped
-for a reason that does not apply to it; it is recorded here and left alone, the disk-health rule being the harness's.
+not use PostgreSQL (its fsync probe, taken on the PostgreSQL data device, was normal: median 0.22 ms). That was a harness defect, fixed in the
+same pull request: the precheck now judges the disk the Portal uses. A PostgreSQL run keeps the rule (idle WAL sync and the fsync probe); a
+SQLite run is judged on the fsync probe of the device that holds the SQLite file (`/tmp`, the parent of the soak's fixture directory) only, and
+PostgreSQL's idle WAL sync is recorded as a diagnostic (`precheck.signals.idle_wal_sync_ms`, `idle_wal_sync_judged: false`) and never trips it
+(`DiskPrecheckTests`, with the 7.7 ms reading of this run as a SQLite case that must not trip and as a PostgreSQL case that must). A SQLite
+verdict carries `diagnostic: true`, its step summary is headed "DIAGNOSTIC: SQLite" and says it is never OPS-08 evidence, and the evidence
+blockers are unchanged (`not postgres`, and the `soak_db` input). The run above was not repeated with the fix.
 
 What the run shows for the read pool (end-of-run `database` record of the last window): the pool was `open` on `ext4`; the read pool's
 four connections waited 3826 times for 0.5 s in total over the run, while the writer's single connection waited 26535 times for 170.9 s

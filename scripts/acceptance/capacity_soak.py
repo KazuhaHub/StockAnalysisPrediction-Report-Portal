@@ -714,17 +714,37 @@ def probe_trips(probe):
     return bool(probe) and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS
 
 
-def disk_precheck(idle_wal_ms, probe):
+def database_kind(database):
+    """The driver of the measured Portal: "sqlite" for the sqlite-file option or a sqlite driver, otherwise "postgres"."""
+    return "sqlite" if str(database or "").startswith("sqlite") else "postgres"
+
+
+def probe_directory(database, postgres_data_dir):
+    """Where the fsync probe is taken: the device that holds the database the Portal actually uses. A PostgreSQL run probes the parent of the
+    server's data directory (None when it cannot be found). A SQLite run probes /tmp, the parent of the directory the soak puts the SQLite
+    file in, whatever PostgreSQL service the host also runs."""
+    if database_kind(database) == "sqlite":
+        return "/tmp"
+    return str(Path(postgres_data_dir).parent) if postgres_data_dir else None
+
+
+def disk_precheck(idle_wal_ms, probe, database="postgres"):
     """Whether the disk was too slow before the load began to say anything about the Portal. Only readings taken before the load are given
-    to it, and a signal that was not measured cannot trip it."""
+    to it, and a signal that was not measured cannot trip it.
+
+    It judges the disk the Portal uses. A PostgreSQL run is judged on PostgreSQL's idle WAL sync and on the fsync probe. A SQLite run is judged
+    on the fsync probe of the device that holds its file only: PostgreSQL's WAL is not what that Portal writes to, so its value is recorded as a
+    diagnostic (signals.idle_wal_sync_ms, idle_wal_sync_judged false) and never trips the run."""
+    kind = database_kind(database)
+    judged = kind == "postgres"
     reasons = []
-    if idle_wal_ms is not None and idle_wal_ms > DISK_PRECHECK_WAL_SYNC_MS:
+    if judged and idle_wal_ms is not None and idle_wal_ms > DISK_PRECHECK_WAL_SYNC_MS:
         reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {DISK_PRECHECK_WAL_SYNC_MS} ms")
     if probe and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS:
         reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {DISK_PRECHECK_PROBE_P50_MS} ms")
-    return {"tripped": bool(reasons), "reasons": reasons, "thresholds": {"idle_wal_sync_ms": DISK_PRECHECK_WAL_SYNC_MS,
-                                                                           "probe_p50_ms": DISK_PRECHECK_PROBE_P50_MS},
-            "signals": {"idle_wal_sync_ms": idle_wal_ms, "probe": probe}}
+    return {"tripped": bool(reasons), "reasons": reasons, "database": kind,
+            "thresholds": {"idle_wal_sync_ms": DISK_PRECHECK_WAL_SYNC_MS, "probe_p50_ms": DISK_PRECHECK_PROBE_P50_MS},
+            "signals": {"idle_wal_sync_ms": idle_wal_ms, "idle_wal_sync_judged": judged, "probe": probe}}
 
 
 def journal_sizes(directory):
@@ -811,7 +831,12 @@ def _latency_check(name, series, evidence):
 def render_summary(evidence, verdict):
     """Markdown for the job's step summary: the verdict per series and every window of every series."""
     outcome = {RESULT_PASSED: "passed", RESULT_FAILED: "FAILED", RESULT_INCONCLUSIVE_SLOW_DISK: "INCONCLUSIVE (slow disk)"}.get(verdict.get("result"), "FAILED")
-    lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {outcome}"]
+    diagnostic = bool(verdict.get("diagnostic"))
+    lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {outcome}" + (" (DIAGNOSTIC: SQLite)" if diagnostic else "")]
+    if diagnostic:
+        lines += ["", "The measured Portal's database is SQLite: this run is a diagnostic of the known limit and is never OPS-08 evidence, whatever its "
+                  "result. PostgreSQL's WAL sync, if recorded, is a diagnostic here and does not judge the run; the fsync probe of the device holding "
+                  "the SQLite file does."]
     if verdict.get("result") == RESULT_INCONCLUSIVE_SLOW_DISK:
         lines += ["", "The disk-health precheck, judged only from readings taken before the load, tripped: this run says nothing about the Portal, is neither "
                   "passed nor failed and is never evidence. Rerun the job. Reasons: " + "; ".join(verdict["precheck"]["reasons"]) + "."]
@@ -1243,7 +1268,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     backend_cpu_mean = round(sum(s["backends"]["cpu_millis"] for s in cpu_samples) / len(cpu_samples), 1) if cpu_samples else 0.0
     breakdown = cpu_breakdown(evidence, samples)
     checks_passed = all(c["passed"] for c in checks)
-    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe)
+    driver = evidence.get("db_driver") or database
+    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe, driver)
     result = RESULT_INCONCLUSIVE_SLOW_DISK if precheck["tripped"] else (RESULT_PASSED if checks_passed else RESULT_FAILED)
     passed = {RESULT_PASSED: True, RESULT_FAILED: False}.get(result)
     diagnostic_values = {"soak_db": database, "soak_cpu_percent": cpu_percent, "soak_reserved_cpus": reserved_cpus,
@@ -1253,6 +1279,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
                                  diagnostic_values)
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
+        # A SQLite run is a diagnostic of the known limit: it is measured and reported, and it is never OPS-08 evidence (the blockers say so).
+        "diagnostic": database_kind(driver) == "sqlite",
         "result": result, "passed": passed, "counts_as_ops08_evidence": not blockers, "evidence_blockers": blockers, "precheck": precheck,
         "event": event, "commit": commit, "expected_commit": expected_commit,
         "commit_matches_expected": (expected_commit == commit) if expected_commit else None,
@@ -1442,9 +1470,9 @@ def exit_code(verdict):
     return 0 if verdict["passed"] else 1
 
 
-def end_before_the_load(out, minutes, probe):
+def end_before_the_load(out, minutes, probe, database="postgres"):
     """The fsync probe tripped before the load began: nothing was started, so say so and end without spending the soak's duration."""
-    precheck = disk_precheck(None, probe)
+    precheck = disk_precheck(None, probe, database)
     verdict = {"result": RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "counts_as_ops08_evidence": False, "precheck": precheck,
                "evidence_blockers": ["the disk-health precheck tripped before the load: the run is inconclusive, not evidence"], "checks": []}
     run = {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")}
@@ -1493,18 +1521,19 @@ def main(argv):
         run_command("systemctl", "set-property", "--runtime", postgres_unit(run_command), "AllowedCPUs=" + pin_cpus)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    # The disk-health precheck's first reading, taken before anything else runs: a short fsync probe on the PostgreSQL data device.
+    # The disk-health precheck's first reading, taken before anything else runs: a short fsync probe on the device of the database the Portal
+    # uses (the PostgreSQL data device, or the device that holds the SQLite file).
     postgres_data_dir, disk_probe = "", None
     try:
         postgres_data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
     except (RuntimeError, OSError, subprocess.SubprocessError):
         pass  # not a PostgreSQL run
-    if postgres_data_dir:
-        probe_dir = Path(postgres_data_dir).parent
+    probe_dir = probe_directory(database, postgres_data_dir)
+    if probe_dir:
         disk_probe = dict(fsync_probe(probe_dir), directory=str(probe_dir), data_directory=postgres_data_dir)
         print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
         if probe_trips(disk_probe):
-            return end_before_the_load(out, minutes, disk_probe)
+            return end_before_the_load(out, minutes, disk_probe, database)
     socket = os.path.realpath("/var/run/docker.sock")
     image_id = run_command("docker", "image", "inspect", image, "--format", "{{.Id}}").strip()
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
