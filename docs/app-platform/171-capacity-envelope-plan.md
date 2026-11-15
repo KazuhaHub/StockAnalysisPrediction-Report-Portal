@@ -1445,6 +1445,21 @@ is evidence for OPS-08.
     p95 of at most 25 ms at full load as well. The constant is `DISPATCH_P95_BOUND_US = 25000` and the check `dispatch_p95_within_absolute_bound`; its relative threshold and ratio to idle stay recorded as diagnostics, and the
     50-job shallow measurement (`dispatch_shallow`) stays recorded and is not judged.
 
+    **Smokes on all four absolute bounds (`885750fd`, PostgreSQL, default configuration, 5 minutes; none is evidence).** Three runs are green: dispatch runs 43678298699 and 43679294042 and the pull request smoke 43678283415 (its second attempt, with the
+    diagnosis on). Pooled p95 (us) and windows 1 to 5:
+
+    | Series (bound) | 43678298699 | 43679294042 | 43678283415, attempt 2 |
+    | --- | --- | --- | --- |
+    | home (50000) | 37281 (32911, 40304, 34004, 41086, 29437) | 20141 (15696, 20256, 19473, 20494, 21284) | 9634 (8053, 11974, 9171, 9753, 9264) |
+    | report (50000) | 29737 (28522, 31530, 28877, 31259, 27088) | 24568 (18258, 29615, 21598, 26509, 25178) | 9765 (10414, 9538, 9068, 8832, 10791) |
+    | dispatch@200 (25000) | 10275 (10791, 10055, 9667, 12136, 7609) | 6280 (6266, 6475, 7832, 5017, 5742) | 2815 (2575, 2624, 2815, 3904, 2744) |
+    | batch start (100000) | 55722 (54920, 65878, 40193, 57725, 43398) | 51942 (51942, 34433, 40040, 61172, 56056) | 24146 (34402, 26158, 22169, 20259, 16928) |
+
+    The first attempt of the pull request smoke failed on report (113.8 ms, windows 61874, 131780, 107772, 114556, 108778) and batch start (114.4 ms, 72797, 29467, 186577, 136527, 100177). That host's disk was the cause, not the Portal: in the
+    pressure and disk readings of that run PostgreSQL's data device was 20.7% utilised on average (46.9% at most) with a mean await of 7.0 ms, its mean WAL sync took 4.3 ms (0.1 to 0.3 ms in the green runs; 1.1 ms in 43679294042), and the host's I/O pressure
+    averaged 6.9%, while the CPU figures were those of the other runs (Portal CPU pressure 12.4%, host 79% to 80% busy). A noisy shared disk can therefore fail the gate on the report page and the batch start, which write or wait on commits; the
+    absolute bounds leave a factor of 1.3 to 5 over the green runs, not over a disk this slow.
+
     Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
     first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'
     CPU weight (#442) 17.7 ms and 27.0 ms; with CPU 0 reserved (#443) 8.5 ms and 10.6 ms (dispatch passing for the first time); two reserved CPUs, platform pinning, platform weights 1000: no better (12 to 13 ms); with the cheaper
