@@ -80,6 +80,7 @@ zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-porta
 - **备份容量**：未压缩备份的大小接近报告正文总量；5 万篇报告的基准数据约为 307 MiB。使用标准输出 `-` 可直接通过 `gzip` 压缩。
 - **恢复耗时**：在 5 万篇报告的基准数据中，导出约需 1.2 秒，恢复约需 7.6 秒，试运行校验约需 1.7 秒。恢复过程不会持续输出进度；在事务提交前中断操作，后续打开数据库时会自动回滚。
 - **敏感数据保护**：备份文件包含密码哈希和令牌哈希，文件权限设置为 `0600`。SSO 密钥在备份中保持加密，其解密依赖 `config.yaml` 中的 `secret_key`，因此应将配置目录与备份一并保存。
+- **SQLite 文件为 WAL 模式**：带有 SQLite 读连接池的版本首次启动时，会把文件型 SQLite 数据库永久切换为预写日志（WAL）模式；这不是 schema 变更，切换后页面读取不再等待写入。已提交的数据在检查点之前可能只存在于 `portal.db-wal` 中，因此**服务运行时只复制 `portal.db` 可能悄悄丢失已提交的数据**。请使用 `report-portal backup`（一致的逻辑导出，不受影响）；或先停止服务，再把 `portal.db`、`portal.db-wal` 和 `portal.db-shm` 一起复制；或使用 SQLite 在线备份。位于网络文件系统（NFS、SMB）或 FUSE 类挂载（包括 Docker Desktop 的绑定挂载）上的数据库会被识别并保持原模式、不启用读连接池，启动日志会说明，管理端存储页面也会显示该状态。`-wal` 文件超过 64 MiB 时会在检查点后被截断。PostgreSQL 不受影响。
 
 详见 [ADR 0027](docs/adr/0027-backup-and-restore.md)。
 

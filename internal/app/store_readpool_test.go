@@ -2,9 +2,13 @@ package app
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -13,6 +17,14 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
 )
+
+// readDBOf is the read pool's database, nil where there is none.
+func readDBOf(st *Store) *sql.DB {
+	if rp := st.readPoolOrNil(); rp != nil {
+		return rp.db
+	}
+	return nil
+}
 
 // openFileStore opens a file-backed SQLite store through OpenStore, the path the server takes, so it
 // carries the read pool.
@@ -43,13 +55,13 @@ func holdWriter(tb testing.TB, st *Store) (release func()) {
 
 func TestReadPoolIsOpenForAFileBackedSQLiteStore(t *testing.T) {
 	st := openFileStore(t)
-	if st.rdb == nil {
+	if readDBOf(st) == nil {
 		t.Fatal("a file-backed SQLite store must carry a read pool")
 	}
-	if st.rdb == st.db {
+	if readDBOf(st) == st.db {
 		t.Fatal("the read pool must be a different pool from the writer")
 	}
-	if got := st.rdb.Stats().MaxOpenConnections; got != sqliteReadPoolSize {
+	if got := readDBOf(st).Stats().MaxOpenConnections; got != sqliteReadPoolSize {
 		t.Fatalf("read pool size = %d, want %d", got, sqliteReadPoolSize)
 	}
 	if got := st.db.Stats().MaxOpenConnections; got != 1 {
@@ -63,7 +75,7 @@ func TestReadPoolIsOpenForAFileBackedSQLiteStore(t *testing.T) {
 
 func TestReadPoolIsAbsentWhereItCannotWork(t *testing.T) {
 	mem := newTestStore(t) // in-memory: every connection would be a different database
-	if mem.rdb != nil {
+	if readDBOf(mem) != nil {
 		t.Fatal("an in-memory store must not carry a read pool")
 	}
 	if mem.readDB() != mem.db {
@@ -166,7 +178,10 @@ func TestAWriteIsVisibleToTheNextReadPoolQuery(t *testing.T) {
 func TestReadPoolRejectsWrites(t *testing.T) {
 	st := openFileStore(t)
 	for name, run := range map[string]func() error{
-		"raw pool": func() error { _, err := st.rdb.Exec(`INSERT INTO meta(k,v) VALUES('readpool:w','1')`); return err },
+		"raw pool": func() error {
+			_, err := readDBOf(st).Exec(`INSERT INTO meta(k,v) VALUES('readpool:w','1')`)
+			return err
+		},
 		"cached exec": func() error {
 			_, err := st.readExec().exec(`INSERT INTO meta(k,v) VALUES('readpool:w','1')`)
 			return err
@@ -178,10 +193,10 @@ func TestReadPoolRejectsWrites(t *testing.T) {
 			return err
 		},
 		"pragma off": func() error {
-			if _, err := st.rdb.Exec(`PRAGMA query_only=0`); err != nil {
+			if _, err := readDBOf(st).Exec(`PRAGMA query_only=0`); err != nil {
 				return err
 			}
-			_, err := st.rdb.Exec(`INSERT INTO meta(k,v) VALUES('readpool:w','1')`)
+			_, err := readDBOf(st).Exec(`INSERT INTO meta(k,v) VALUES('readpool:w','1')`)
 			return err
 		},
 	} {
@@ -231,7 +246,11 @@ func TestReadPoolSourceDerivation(t *testing.T) {
 		{"file::memory:?cache=shared", false, ""},
 		{"file:x.db?mode=memory&cache=shared", false, ""},
 		{"data/portal.db", true, "file:data/portal.db?"},
-		{"data/we ird?#%.db", true, "file:data/we%20ird%3f%23%25.db?"},
+		{"data/we ird#%.db", true, "file:data/we%20ird%23%25.db?"},
+		// The driver cuts a plain name at its first '?' and reads the rest as parameters: the read pool opens the
+		// same file, and the operator's parameters travel with it.
+		{"data/we ird#%.db?_pragma=foreign_keys(1)", true, "file:data/we%20ird%23%25.db?_pragma=foreign_keys(1)&"},
+		{"data/p.db?_timeout=100", true, "_timeout=100"},
 		{"file:/var/lib/p.db?_pragma=busy_timeout(9000)", true, "_pragma=busy_timeout(9000)"},
 	} {
 		got, ok := sqliteReadSource(tc.in)
@@ -245,19 +264,22 @@ func TestReadPoolSourceDerivation(t *testing.T) {
 		if ok && (!strings.Contains(got, "mode=ro") || !strings.Contains(got, "query_only(1)")) {
 			t.Errorf("%q: %q is not read-only", tc.in, got)
 		}
-		if ok && strings.Count(got, "busy_timeout") != 1 {
+		if ok && !sourceSetsBusyTimeout(got) {
+			t.Errorf("%q: %q carries no busy timeout", tc.in, got)
+		}
+		if ok && strings.Count(got, "busy_timeout") > 1 {
 			t.Errorf("%q: %q must carry exactly one busy_timeout", tc.in, got)
 		}
 	}
 	// A path with characters a URI treats specially still opens, and is read back.
 	dir := t.TempDir()
 	odd := filepath.Join(dir, "a b#c%e.db")
-	st, err := OpenStore("sqlite", odd)
+	st, err := OpenStore("sqlite", odd+"?_pragma=foreign_keys(1)")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if st.rdb == nil {
+	if readDBOf(st) == nil {
 		t.Fatal("no read pool for a path with special characters")
 	}
 	if err := st.SetSetting("k", "v"); err != nil {
@@ -265,6 +287,13 @@ func TestReadPoolSourceDerivation(t *testing.T) {
 	}
 	if got := st.GetSetting("k", ""); got != "v" {
 		t.Fatalf("read through the pool on an odd path: %q", got)
+	}
+	// The writer and the readers opened the one file the driver resolved, the name before the '?'.
+	if _, err := os.Stat(odd); err != nil {
+		t.Fatalf("the database file is not where the driver puts it: %v", err)
+	}
+	if _, err := os.Stat(odd + "-wal"); err != nil && st.WALBytes() != 0 {
+		t.Fatalf("WALBytes disagrees with the file: %v", err)
 	}
 }
 
@@ -276,7 +305,7 @@ func TestStoreWithoutWALFallsBackToTheWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if st.rdb != nil {
+	if readDBOf(st) != nil {
 		var mode string
 		_ = st.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
 		t.Fatalf("read pool opened with journal_mode=%s", mode)
@@ -328,7 +357,7 @@ func TestPostgresStoreHasNoReadPool(t *testing.T) {
 	key := "readpool:pg:probe"
 	defer func() { _ = st.DeleteSetting(key); _ = st.Close() }() // the database is shared: leave no row behind
 	st.openReadPool(dsn)                                         // what OpenStore does after initialization: a no-op on PostgreSQL
-	if st.rdb != nil || st.rstmts != nil {
+	if readDBOf(st) != nil || st.readPoolOrNil() != nil {
 		t.Fatal("PostgreSQL must not carry a read pool")
 	}
 	if st.readDB() != st.db {
@@ -396,7 +425,7 @@ func TestReadsAreNotSerializedBehindTheWriter(t *testing.T) {
 	pooled := openFileStore(t)
 	single := openFileStore(t)
 	single.closeReadPool() // the same store, reads forced back onto the one connection
-	if single.rdb != nil {
+	if readDBOf(single) != nil {
 		t.Fatal("closeReadPool left the pool in place")
 	}
 	p := readLatencies(t, pooled, hold, period, 120)
@@ -538,5 +567,322 @@ func TestStockAndHomePagesAnswerOnAFileBackedStore(t *testing.T) {
 	var n int
 	if err := st.readQueryRow(`SELECT COUNT(*) FROM audit_log WHERE action=?`, AuditReportRead).Scan(&n); err != nil || n != 1 {
 		t.Fatalf("read audit rows: %d, %v", n, err)
+	}
+}
+
+func TestBusyTimeoutIsNotAddedWhenTheOperatorSetsOne(t *testing.T) {
+	for _, src := range []string{
+		"p.db?_pragma=busy_timeout(7)",
+		"p.db?_busy_timeout=7",
+		"p.db?_timeout=7",
+		"file:p.db?_timeout=7&cache=shared",
+	} {
+		if got := sqliteSource(src); got != src {
+			t.Errorf("sqliteSource(%q) = %q, want it left as written", src, got)
+		}
+		if got := sqliteWriterSource(src); strings.Contains(got, "busy_timeout(5000)") {
+			t.Errorf("sqliteWriterSource(%q) = %q added a second busy timeout", src, got)
+		}
+	}
+	if got := sqliteSource("p.db"); got != "p.db?_pragma=busy_timeout(5000)" {
+		t.Errorf("sqliteSource(plain) = %q", got)
+	}
+	if got := sqliteWriterSource("p.db?_pragma=journal_size_limit(1)"); strings.Count(got, "journal_size_limit") != 1 {
+		t.Errorf("a source that names journal_size_limit must keep its own: %q", got)
+	}
+}
+
+// ---------- filesystem ----------
+
+func TestNetworkAndFuseFilesystemsAreUnsafeForWAL(t *testing.T) {
+	for magic, want := range map[uint32]struct {
+		name   string
+		unsafe bool
+	}{
+		0x6969: {"nfs", true}, 0x517B: {"smb", true}, 0xFF534D42: {"cifs", true}, 0xFE534D42: {"smb2", true},
+		0x65735546: {"fuse", true}, 0x01021997: {"9p", true},
+		0xEF53: {"ext4", false}, 0x58465342: {"xfs", false}, 0x01021994: {"tmpfs", false}, 0x794C7630: {"overlayfs", false},
+		0x12345678: {"unlisted", false},
+	} {
+		name, unsafe := classifyLinuxFilesystem(magic)
+		if name != want.name || unsafe != want.unsafe {
+			t.Errorf("magic %#x = %q unsafe=%v, want %q unsafe=%v", magic, name, unsafe, want.name, want.unsafe)
+		}
+	}
+}
+
+func withFilesystemCheck(t *testing.T, check func(string) (string, bool, error)) {
+	t.Helper()
+	old := sqliteFilesystemCheck
+	sqliteFilesystemCheck = check
+	t.Cleanup(func() { sqliteFilesystemCheck = old })
+}
+
+func TestNoWALAndNoReadPoolOnANetworkFilesystem(t *testing.T) {
+	withFilesystemCheck(t, func(string) (string, bool, error) { return "nfs", true, nil })
+	st := openFileStore(t)
+	if st.readPoolOrNil() != nil {
+		t.Fatal("a read pool was opened on a network filesystem")
+	}
+	var mode string
+	if err := st.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode == "wal" {
+		t.Fatalf("journal_mode = %q (%v): the file must not be switched to WAL there", mode, err)
+	}
+	state := st.PoolState()
+	if state.ReadPool != readPoolDisabled || !strings.Contains(state.Reason, "nfs") || state.Reader != nil {
+		t.Fatalf("state = %+v", state)
+	}
+	if err := st.SetSetting("k", "v"); err != nil || st.GetSetting("k", "") != "v" {
+		t.Fatalf("the single connection must keep working: %v", err)
+	}
+}
+
+func TestNoWALAndNoReadPoolWhenTheFilesystemCannotBeIdentified(t *testing.T) {
+	withFilesystemCheck(t, func(string) (string, bool, error) { return "", false, errors.New("statfs: boom") })
+	st := openFileStore(t)
+	var mode string
+	_ = st.db.QueryRow("PRAGMA journal_mode").Scan(&mode)
+	if st.readPoolOrNil() != nil || mode == "wal" {
+		t.Fatalf("fail-safe: no pool and no WAL when detection errors (pool=%v mode=%s)", st.readPoolOrNil() != nil, mode)
+	}
+	if state := st.PoolState(); state.ReadPool != readPoolDisabled || !strings.Contains(state.Reason, "boom") {
+		t.Fatalf("state = %+v", state)
+	}
+}
+
+func TestTheRealFilesystemDetectionIdentifiesALocalDirectory(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("filesystem identification is implemented on Linux and macOS")
+	}
+	f := filepath.Join(t.TempDir(), "x.db")
+	if err := os.WriteFile(f, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	name, unsafe, err := detectSQLiteFilesystem(f)
+	if err != nil {
+		t.Fatalf("detection failed on a local file: %v", err)
+	}
+	if unsafe || name == "" {
+		t.Fatalf("a temp directory was classified %q unsafe=%v", name, unsafe)
+	}
+	if _, _, err := detectSQLiteFilesystem(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("a missing file must be an error (the fail-safe), not a verdict")
+	}
+}
+
+// ---------- WAL size ----------
+
+func walFileSize(t *testing.T, st *Store) int64 {
+	t.Helper()
+	info, err := os.Stat(st.walPath)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+// growWAL commits about mib MiB while a reader pins the log, so no checkpoint can finish and the log
+// grows. It returns the func that releases the reader.
+func growWAL(t *testing.T, st *Store, mib int) (release func()) {
+	t.Helper()
+	if _, err := st.exec(`CREATE TABLE IF NOT EXISTS walgrow(id INTEGER PRIMARY KEY, v BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	var seed int
+	_ = st.readQueryRow(`SELECT COUNT(*) FROM walgrow`).Scan(&seed)
+	rtx, err := readDBOf(st).Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := rtx.QueryRow(`SELECT COUNT(*) FROM walgrow`).Scan(&n); err != nil { // takes the snapshot
+		t.Fatal(err)
+	}
+	blob := make([]byte, 256<<10)
+	for i := 0; i < mib*4; i++ {
+		if _, err := st.exec(`INSERT INTO walgrow(v) VALUES(?)`, blob); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return func() { _ = rtx.Rollback() }
+}
+
+func TestTheWALShrinksAfterLoad(t *testing.T) {
+	old := sqliteJournalSizeLimit
+	sqliteJournalSizeLimit = 1 << 20
+	t.Cleanup(func() { sqliteJournalSizeLimit = old })
+	st := openFileStore(t)
+	release := growWAL(t, st, 12)
+	grown := walFileSize(t, st)
+	if grown < 8<<20 {
+		release()
+		t.Fatalf("the load did not grow the WAL (%d bytes); the test proves nothing", grown)
+	}
+	release()
+	frames, bytes, err := st.checkpointWAL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes > sqliteJournalSizeLimit {
+		t.Fatalf("after the maintenance pass the WAL is %d bytes (%d frames before), want at most %d", bytes, frames, sqliteJournalSizeLimit)
+	}
+	t.Logf("WAL %d bytes after the load, %d after the checkpoint", grown, bytes)
+}
+
+func TestJournalSizeLimitTruncatesTheLogWhenItRestarts(t *testing.T) {
+	old := sqliteJournalSizeLimit
+	sqliteJournalSizeLimit = 1 << 20
+	t.Cleanup(func() { sqliteJournalSizeLimit = old })
+	st := openFileStore(t)
+	release := growWAL(t, st, 12)
+	if walFileSize(t, st) < 8<<20 {
+		release()
+		t.Fatal("the load did not grow the WAL")
+	}
+	release()
+	// Everything copied back (a passive checkpoint), then one small write restarts the log, and the
+	// limit cuts the file back instead of leaving it at its high-water mark.
+	var busy, logFrames, done int64
+	if err := st.db.QueryRow(`PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &logFrames, &done); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.exec(`INSERT INTO walgrow(v) VALUES(x'00')`); err != nil {
+		t.Fatal(err)
+	}
+	if got := walFileSize(t, st); got > 2<<20 {
+		t.Fatalf("WAL is %d bytes after the log restarted, want about the %d byte limit", got, sqliteJournalSizeLimit)
+	}
+}
+
+func TestTheWALMaintenanceRunsOnATickerAndStopsWithTheStore(t *testing.T) {
+	oldI, oldL := walCheckpointInterval, sqliteJournalSizeLimit
+	walCheckpointInterval, sqliteJournalSizeLimit = 20*time.Millisecond, 1<<20
+	t.Cleanup(func() { walCheckpointInterval, sqliteJournalSizeLimit = oldI, oldL })
+	st, err := OpenStore("sqlite", filepath.Join(t.TempDir(), "portal.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := growWAL(t, st, 12)
+	release()
+	deadline := time.Now().Add(5 * time.Second)
+	for walFileSize(t, st) > sqliteJournalSizeLimit && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := walFileSize(t, st); got > sqliteJournalSizeLimit {
+		t.Fatalf("the ticker never brought the WAL down: %d bytes", got)
+	}
+	done := make(chan struct{})
+	go func() { _ = st.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not stop the maintenance goroutine")
+	}
+}
+
+// ---------- concurrency and failure ----------
+
+func TestClosingTheReadPoolUnderLiveReadersIsRaceFreeAndNeverPanics(t *testing.T) {
+	st := openFileStore(t)
+	if err := st.SetSetting("k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = st.GetSetting("k", "d")
+				var n int
+				_ = st.readQueryRow("SELECT COUNT(*) FROM meta").Scan(&n)
+				snap, end := st.beginReadSnapshot(context.Background())
+				_ = snap.queryRow("SELECT COUNT(*) FROM meta").Scan(&n)
+				end()
+				_ = st.PoolState()
+			}
+		}()
+	}
+	time.Sleep(50 * time.Millisecond)
+	st.closeReadPool()
+	time.Sleep(50 * time.Millisecond)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	close(stop)
+	wg.Wait()
+	// After Close every read answers with a closed-database error, not a panic.
+	var n int
+	err := st.readQueryRow("SELECT COUNT(*) FROM meta").Scan(&n)
+	if err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("read after Close = %v, want a closed-database error", err)
+	}
+	if got := st.GetSetting("k", "default"); got != "default" {
+		t.Fatalf("GetSetting after Close = %q", got)
+	}
+}
+
+func TestAReadPoolFailureIsRetriedOnTheWriterNotReturnedAsADefault(t *testing.T) {
+	st := openFileStore(t)
+	if err := st.SetSetting("notification_dispatch_paused", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertUser(User{Username: "alice", PasswordHash: "h", Role: "user"}); err != nil {
+		t.Fatal(err)
+	}
+	readDBOf(st).Close() // the read pool breaks under the store; the store still believes in it
+	if got := st.GetSetting("notification_dispatch_paused", "0"); got != "1" {
+		t.Fatalf("a broken read pool turned a set flag into its default %q", got)
+	}
+	if u := st.GetUser("alice"); u == nil || u.Username != "alice" {
+		t.Fatalf("a broken read pool made an existing account look missing: %+v", u)
+	}
+	if got := st.GetSetting("never_set", "dflt"); got != "dflt" {
+		t.Fatalf("an unset key must still return the default: %q", got)
+	}
+}
+
+// ---------- state ----------
+
+func TestPoolStateReportsTheReadPool(t *testing.T) {
+	st := openFileStore(t)
+	_ = st.GetSetting("x", "")
+	state := st.PoolState()
+	if state.ReadPool != readPoolOpen || state.Reader == nil || state.Reader.Max != sqliteReadPoolSize || state.Writer.Max != 1 {
+		t.Fatalf("state = %+v", state)
+	}
+	if state.Filesystem == "" {
+		t.Errorf("the filesystem is not reported: %+v", state)
+	}
+	if mem := newTestStore(t).PoolState(); mem.ReadPool != readPoolNotApplicable || mem.Reader != nil {
+		t.Fatalf("in-memory state = %+v", mem)
+	}
+	st.closeReadPool()
+	if got := st.PoolState().ReadPool; got != readPoolClosed {
+		t.Fatalf("after close: %q", got)
+	}
+}
+
+func TestStorageUsageEndpointReportsThePoolState(t *testing.T) {
+	st := openFileStore(t)
+	s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
+	rec := httptest.NewRecorder()
+	s.apiCleanupUsage(rec, httptest.NewRequest("GET", "/api/admin/cleanup/usage", nil), "admin")
+	var body struct {
+		Database StorePoolState `json:"database"`
+		DBBytes  int64          `json:"db_bytes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("%v: %.200s", err, rec.Body.String())
+	}
+	if body.Database.ReadPool != readPoolOpen || body.Database.Reader == nil {
+		t.Fatalf("database = %+v", body.Database)
 	}
 }

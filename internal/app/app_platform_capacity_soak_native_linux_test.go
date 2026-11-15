@@ -1311,6 +1311,8 @@ func (c *soakChild) load(minutes int) {
 		window.Flood = soakFloodWindow(previous, current, alive(), time.Now())
 		previous = current
 		window.Backends = c.backendStatuses()
+		state := c.s.st.PoolState()
+		window.Database = &state
 		c.rec.AddWindow(window)
 	}
 	c.rec.SetLoad(started.UnixMilli(), time.Now().UnixMilli(), minutes)

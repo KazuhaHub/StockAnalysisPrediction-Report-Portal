@@ -672,7 +672,7 @@ func (s *Server) verify(cookie string) (string, int64) {
 			return "", 0
 		}
 		var n int
-		if err := s.st.readQueryRow(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, rev, exp).Scan(&n); err != nil || n != 1 {
+		if err := s.st.readScan(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, []any{id, user, rev, exp}, func(scan func(...any) error) error { return scan(&n) }); err != nil || n != 1 {
 			return "", 0
 		}
 		return user, rev

@@ -47,9 +47,9 @@ func BenchmarkStockPage(b *testing.B) {
 			if !c.cache {
 				st.stmts.close()
 				st.stmts = nil
-				if st.rstmts != nil {
-					st.rstmts.close()
-					st.rstmts = nil
+				if rp := st.readPoolOrNil(); rp != nil {
+					rp.stmts.close()
+					st.rp.Store(&readPool{db: rp.db})
 				}
 			}
 			s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}

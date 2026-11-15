@@ -934,9 +934,24 @@ time, and every page read queued behind them.
   never a wrong answer.
 - **No-op elsewhere.** On PostgreSQL there is no second pool, no WAL and no second statement cache: `readDB` is `db`, the read accessors are
   the one pool, and `openReadPool` returns at its first line. The same holds for an in-memory database (each connection would be its own
-  database), a source that already names a `mode`, and a file that does not end up in WAL (a network filesystem without shared memory answers
-  the pragma with the mode it kept; the store logs one line and keeps every read on the writer rather than opening readers that would block
-  it). A source that names its own `journal_mode` is honoured: the pool opens only if that mode is WAL.
+  database) and a source that already names a `mode`. A source that names its own `journal_mode` is honoured: the pool opens only if that
+  mode is WAL.
+- **Filesystem detection, with a fail-safe.** The answer to `PRAGMA journal_mode=WAL` proves nothing about the filesystem: the Unix VFS always
+  has shared memory, so the pragma answers `wal` on NFS, SMB and Docker Desktop mounts too, and the failures (locking that does not work, a
+  shared index that is not shared) surface later, inside requests. The filesystem is therefore asked first, by type (`statfs` `f_type` on
+  Linux: NFS, SMB, CIFS, FUSE (virtiofs, gRPC FUSE, sshfs), 9p, AFS, Ceph, vboxsf and similar; `f_fstypename` on macOS), before the file is
+  switched. A network or FUSE filesystem keeps the file in its previous mode and every read on the one connection, and the store logs why.
+  **If the filesystem cannot be identified (a `statfs` error, or an OS without an implementation, which today is every platform other than
+  Linux and macOS) there is no WAL and no pool.** A type that is not in the table is treated as local: the table lists what is known to
+  fail. The result is recorded and reported (`PoolState`: `open`, `disabled` with the reason, `not_applicable`, `closed`).
+- **The pool never turns a failure into a default.** `GetSetting`, `GetUser` and the two session reads treat an error as "unset", "not
+  found" or "invalid". A read-pool error other than "no such row" is retried on the writer (`readScan`) and logged once, so a broken pool
+  cannot make `notification_dispatch_paused` or a switch like it read as its default, or an existing account look missing. The pool pointer is
+  atomic and `Close` swaps it out before closing it, so a read racing `Close` gets either a live pool or a closed-database error, never a
+  panic (`-race` test).
+- **The reader opens the file the writer opens.** The driver cuts a plain (non-`file:`) source at its first `?`; the read source is derived
+  with the same rule, so `portal.db?_pragma=...` opens `portal.db` for both. A busy timeout the operator already set (`_pragma`, `_timeout`
+  or `_busy_timeout`) is not overridden.
 - **Statement caches.** A prepared statement belongs to the pool it was prepared on, so the read pool carries its own cache
   (`rstmts`, same bound) and a `migExec` carries a flag (`ro`) that picks the cache for a transaction it wraps.
 
@@ -991,16 +1006,25 @@ change is a no-op there; its test run is described in the pull request).
   write inside write-capable transactions) and the report-read audit row, the activity stamp and the batch scheduler's writes still queue
   for it, so a page that writes still waits for a held writer. Moving the relay's read-only transactions, or taking the audit row off the
   response path, is a separate decision (the second changes when an audit row becomes durable) and was not made here.
-- **A file-level copy of a live database.** The file stays in WAL after this change. The Portal's own backup and the recovery bundle dump
-  the database logically and are unaffected; a copy of `portal.db` taken with `cp` while the Portal runs misses what is still in `portal.db-wal`
-  and must include that file and `portal.db-shm`, or use SQLite's backup API.
-- **A filesystem without shared memory** (some network mounts) keeps its rollback journal, and the Portal then runs as before, on one
-  connection, with one log line.
-- **Long read snapshots hold back the WAL checkpoint.** The snapshots here span a handler's reads, a few milliseconds. A caller that held one
-  for long would let the WAL grow.
+- **A file-level copy of a live database.** Every existing file-backed SQLite database is switched to WAL, permanently, on its first start
+  with this change. The Portal's own backup and the recovery bundle dump the database logically and are unaffected; a copy of `portal.db`
+  taken with `cp` while the Portal runs misses what is still in `portal.db-wal` and must include that file and `portal.db-shm`, or use
+  SQLite's backup API. The README, its Chinese edition and ADR 0027 say so beside the backup commands.
+- **An unlisted network filesystem.** Detection is by filesystem type and the table names what is known to fail. A type it does not list
+  (an exotic or newly introduced network filesystem) is treated as local and gets WAL. Windows and other platforms without an
+  implementation get no pool. The pool's state is reported, so an operator can see which case applies.
+- **WAL growth.** The writer carries `journal_size_limit` (64 MiB, a DSN pragma on every writer connection), so SQLite truncates the log to
+  that size when it restarts after a checkpoint, and a maintenance ticker on the writer (every 30 s: a passive checkpoint, which never waits
+  on a reader, then a truncating checkpoint if the log is fully copied and larger than the limit) retries what the automatic checkpoint
+  could not finish while short readers kept overlapping. Tests: the log grows past 12 MiB behind a pinned reader and is empty after one
+  maintenance pass, and is cut back to the limit when it restarts; the ticker is shown to bring it down on its own and to stop with the
+  store. A caller that held a read snapshot for long would still pin the log; the snapshots here span a handler's reads.
+  **What the soak should watch is the WAL size over time**: every one-minute window of the evidence records `database.wal_bytes` (and the
+  read pool's state and both pools' connection counts), so a log that only ever grows shows as a rising series.
 - **Two statement caches** of 256 entries each, and four more connections' page caches, are the memory cost.
-- **The soak's pool diagnostics** (`db.Stats()` in the diagnostic minute) describe the writer pool only; the read pool's occupancy is not
-  reported there.
+- **Where the state is reported.** The admin storage usage endpoint (`GET /api/admin/cleanup/usage`, field `database`) returns the pool
+  state, both pools' connection statistics and the WAL size; every soak window and the diagnostic minute carry the same record. The public
+  `/healthz` stays silent about detail by design and does not.
 
 ## PR 4b implementation notes
 
