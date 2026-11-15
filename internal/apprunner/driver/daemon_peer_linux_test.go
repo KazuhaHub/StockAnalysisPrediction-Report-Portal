@@ -169,7 +169,7 @@ func TestDaemonExecutableNameIsDockerd(t *testing.T) {
 	}
 }
 
-// Every dial is checked: the peer must be one of the vetted holders and in the runner's mount namespace.
+// Every dial is checked: the listener must be in the runner's mount namespace, and the socket's holders must have vetted.
 func TestPeerObservationChecksEveryDial(t *testing.T) {
 	path, _ := listenAt(t)
 	acceptExecutable(t, func(string) bool { return true })
@@ -178,10 +178,10 @@ func TestPeerObservationChecksEveryDial(t *testing.T) {
 	if err := requireDaemonSharesMountNamespace(peerClient(peer)); err != nil {
 		t.Fatal(err)
 	}
-	// A later dial answered by a process that is not a vetted holder taints the client.
+	// A later dial whose listener is not in the runner's mount namespace (here, one that cannot be read) taints the client.
 	peer.observe(path, 1<<30)
 	if requireDaemonSharesMountNamespace(peerClient(peer)) == nil {
-		t.Fatal("a dial answered by an unvetted process passed")
+		t.Fatal("a dial whose listener is out of the namespace passed")
 	}
 	// No dockerd among the holders: refused on the first dial.
 	acceptExecutable(t, func(string) bool { return false })

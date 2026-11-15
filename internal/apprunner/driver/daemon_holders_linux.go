@@ -36,9 +36,10 @@ func parseProcNetUnixInodes(raw []byte, path string) []string {
 // /proc/net/unix, then every process with a descriptor on it. The socket is trusted only when at least one holder
 // runs a dockerd binary and every holder is in the runner's mount namespace. That covers socket activation, where
 // systemd and dockerd both hold it, and refuses a forwarder to a remote daemon, which no local dockerd holds. It
-// returns the vetted pids; each dial must then be answered by one of them. A holder that exits and whose pid is
-// reused between this scan and a dial would be taken for itself: a residual window this does not close (a pidfd
-// would, and is not used).
+// returns the vetted pids. Every dial's listener is then checked for the runner's mount namespace; the listener
+// need not be a holder, because under socket activation it is systemd, which may have handed the socket to
+// dockerd and closed its own copy. A pid reused between this scan and a dial would be taken for the process it
+// was: a residual window this does not close (a pidfd would, and is not used).
 func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 	table, err := os.ReadFile("/proc/net/unix")
 	if err != nil {
@@ -87,30 +88,25 @@ func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 	return holders, nil
 }
 
-// observe records one dial's verdict: the daemon socket was vetted (once per client) and the process that
-// answered this dial is one of its holders in the runner's mount namespace. Every dial is checked, and one
-// failure taints the client.
+// observe records one dial's verdict: the daemon socket was vetted (once per client) and the listener the dial
+// reports (SO_PEERCRED, which is systemd under socket activation and not necessarily a holder any more) is in the
+// runner's mount namespace. Every dial is checked, and one failure taints the client. The holders are vetted
+// once, not per dial, so a socket replaced between dials is not seen again until the next client: a window
+// this does not close.
 func (p *daemonPeer) observe(path string, pid int) {
 	p.mu.Lock()
 	if !p.scanned {
 		p.holders, p.vetErr = vetDaemonSocketHolders(path)
 		p.scanned = true
 	}
-	holders, err := p.holders, p.vetErr
+	err := p.vetErr
 	p.mu.Unlock()
-	_, held := holders[pid]
 	reason := ""
 	switch {
 	case err != nil:
 		reason = err.Error()
-	case !held:
-		ids := make([]int, 0, len(holders))
-		for holder := range holders {
-			ids = append(ids, holder)
-		}
-		reason = fmt.Sprintf("the dial was answered by pid %d, not one of the socket holders %v", pid, ids)
 	case !sharesMountNamespace(pid):
-		reason = fmt.Sprintf("pid %d is not in the runner's mount namespace", pid)
+		reason = fmt.Sprintf("the listener of the socket (pid %d) is not in the runner's mount namespace", pid)
 	}
 	if reason != "" {
 		p.mu.Lock()

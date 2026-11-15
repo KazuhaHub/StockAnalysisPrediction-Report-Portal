@@ -588,8 +588,9 @@ because they share it. No schema, journal or wire change.
   does not identify dockerd. Instead, once per client (on its first dial), the socket's inode is found by path in `/proc/net/unix` and every
   process with a descriptor on it is found through `/proc/*/fd`. The socket is trusted only when at least one holder's executable is a
   `dockerd` and every holder is in the runner's mount namespace; socket activation (systemd and dockerd both hold it) passes and a forwarder
-  to a remote daemon (no local dockerd holds the socket) is refused. Every dial is then checked: the answering process must be one of the
-  vetted holders and in the runner's mount namespace, and one failure taints the client. The inventory read refuses a client that has not seen
+  to a remote daemon (no local dockerd holds the socket) is refused. Every dial's listener (`SO_PEERCRED`, which under socket activation is systemd and
+  is not necessarily a holder any more) is then checked for the runner's mount namespace, and one failure taints the client. The holders are
+  vetted once per client, so a socket replaced between dials is not seen until the next client. The inventory read refuses a client that has not seen
   a vetted daemon. A client that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
 - **Mount choice.** Of several mounts at the longest mount point the one mounted on top by the mount tree (parent ids) is used, not the last
   in the file.
