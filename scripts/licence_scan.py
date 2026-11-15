@@ -370,7 +370,8 @@ def _render(result, sources):
     for c in comps:
         if c["status"] == "pass" and c["via"] in ("election", "exclusion", "reviewed"):
             extra = {"election": f" -> {c.get('elected')}", "reviewed": f" reviewed as {c.get('reviewed_as')}"}.get(c["via"], "")
-            lines.append(f"  {c['via']}: {c['name']} {c['version']} [{c['declared']}]{extra}: {c['detail']}")
+            note = "" if c["via"] == "reviewed" else f": {c['detail']}"
+            lines.append(f"  {c['via']}: {c['name']} {c['version']} [{c['declared']}]{extra}{note}")
     for w in result["warnings"]:
         lines.append(f"  warning: {w}")
     for p in result["problems"]:
