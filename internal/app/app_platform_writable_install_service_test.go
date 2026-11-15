@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -76,8 +77,8 @@ func TestRunServerBindsTheRunnerEndpointBeforeStartingAndStoppingTheInstaller(t 
 // logged. Startup does not abort, because the frontend scheduler is optional for managed work
 // and aborting would take the whole Portal down for a worker-identity failure.
 func TestPlatformInstallServiceStartsTheOperationEngineWhenTheFrontendSchedulerFails(t *testing.T) {
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
+	buf := &lockedBuffer{}
+	log.SetOutput(buf)
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	calls := 0
 	old := platformInstallerUUID
@@ -135,4 +136,22 @@ func TestPlatformInstallServiceKeepsTheFrontendSchedulerWhenTheOperationEngineFa
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	stop(ctx)
+}
+
+// lockedBuffer is a log sink the engine's goroutine and the test can share.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
