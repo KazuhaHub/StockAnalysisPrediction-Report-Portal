@@ -1313,6 +1313,8 @@ def main(argv):
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
             soak_env["APP_CAPACITY_SOAK_DIAGNOSE"] = "1"
+        if os.environ.get("APP_CAPACITY_SOAK_RUNNER_PROFILE") == "1":
+            soak_env["APP_CAPACITY_SOAK_RUNNER_PROFILE"] = "1"
         devices, extra = {}, {}
         try:
             data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
