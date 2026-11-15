@@ -13,11 +13,28 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
 
+// orphanedEnable is the repair left by orphanedEnableFixture, with what a second repair of the same installation needs.
+type orphanedEnable struct {
+	s        *Server
+	op       string
+	endpoint platformRuntimeEndpoint
+	fake     *platformFakeMigrationRunner
+	actor    platformActorSession
+	plan     platformManagedUpdatePlan
+	runtime  platformRuntimeRegistration
+}
+
 // orphanedEnableFixture leaves a repair (whose start is an enable-start) that was ended for review after the
 // runner reserved its start, so the start effect is open and the runner may hold it claimed.
 func orphanedEnableFixture(t *testing.T, pg bool) (*Server, string, platformRuntimeEndpoint, *platformFakeMigrationRunner) {
 	t.Helper()
-	s, _, lease, _, _ := platformManagedRepairReviewFixture(t, pg)
+	o := orphanedEnableState(t, pg)
+	return o.s, o.op, o.endpoint, o.fake
+}
+
+// driveRepairToStart runs a claimed repair to its start stage and reserves the start.
+func driveRepairToStart(t *testing.T, s *Server, lease platformOperationLease) (platformOperationLease, platformRuntimeEndpoint, platformUpdateStartIntent) {
+	t.Helper()
 	ctx := context.Background()
 	current := lease
 	var err error
@@ -39,6 +56,14 @@ func orphanedEnableFixture(t *testing.T, pg bool) (*Server, string, platformRunt
 	if err != nil {
 		t.Fatal(err)
 	}
+	return current, endpoint, intent
+}
+
+func orphanedEnableState(t *testing.T, pg bool) orphanedEnable {
+	t.Helper()
+	s, actor, lease, plan, runtime := platformManagedRepairReviewFixture(t, pg)
+	ctx := context.Background()
+	current, endpoint, intent := driveRepairToStart(t, s, lease)
 	observation := platformUpdateStartReservationFixture(intent, endpoint)
 	reservation, ok := validPlatformUpdateStartObservation(observation, intent, endpoint)
 	if !ok {
@@ -57,7 +82,29 @@ func orphanedEnableFixture(t *testing.T, pg bool) (*Server, string, platformRunt
 	s.platformMigration = fake
 	// Every window a command for the start could have been signed for has passed.
 	mustExec(t, s.st, `UPDATE app_platform_operations SET completed_ms=completed_ms-3600000 WHERE id=?`, lease.id)
-	return s, lease.id, endpoint, fake
+	return orphanedEnable{s: s, op: lease.id, endpoint: endpoint, fake: fake, actor: actor, plan: plan, runtime: runtime}
+}
+
+// reRepair reviews and admits a second repair of the same installation and drives it to the point its start is
+// prepared. It is what an administrator does after the first one was closed; it fails the test if the start cannot be
+// prepared.
+func (o orphanedEnable) reRepair(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	installation := scalar[string](t, o.s.st, `SELECT installation_id FROM app_platform_operations WHERE id=?`, o.op)
+	review, err := o.s.createPlatformManagedRepairReviewWithRuntimeContext(ctx, o.actor, installation, o.plan.TargetRuntime, o.runtime)
+	if err != nil {
+		t.Fatalf("the closed repair left the installation unable to be repaired again: %v", err)
+	}
+	commit, err := o.s.consumePlatformManagedRepairReviewWithRuntimeContext(ctx, o.actor, review.ID, review.SHA256, platformFixtureID(1340), o.plan.TargetRuntime, o.runtime)
+	if err != nil {
+		t.Fatalf("the second repair was not admitted: %v", err)
+	}
+	selected, err := o.s.claimNextPlatformManagedRepair(ctx, platformFixtureID(1341))
+	if err != nil || selected.lease.id != commit.OperationID {
+		t.Fatal("the second repair was not claimed", selected.lease.id, err)
+	}
+	driveRepairToStart(t, o.s, selected.lease)
 }
 
 // settleScript scripts the runner for a start it holds: what the read says before and after a settlement.
@@ -132,15 +179,15 @@ func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
 }
 
 // requireSameReleaseOperationClosed is what a start proven never to have run leaves behind: the operation failed
-// with the typed reason the status view shows, the installation back to the disabled state a clean failure leaves
-// (so a new enable or repair can be reviewed), and one audit entry carrying the evidence.
+// with the typed reason the status view shows, the installation in recovery_required, the phase a repair is reviewed from
+// (so a repair can be reviewed again), and one audit entry carrying the evidence.
 func requireSameReleaseOperationClosed(t *testing.T, s *Server, operation string) {
 	t.Helper()
 	if got := scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, operation); got != "failed:start_never_ran" {
 		t.Fatalf("the operation was not closed failed with the typed reason: %s", got)
 	}
-	if got := scalar[string](t, s.st, `SELECT i.desired_state||':'||i.phase FROM app_platform_installations i JOIN app_platform_operations o ON o.installation_id=i.id WHERE o.id=?`, operation); got != "disabled:disabled" {
-		t.Fatalf("the installation was not returned to disabled: %s", got)
+	if got := scalar[string](t, s.st, `SELECT i.desired_state||':'||i.phase FROM app_platform_installations i JOIN app_platform_operations o ON o.installation_id=i.id WHERE o.id=?`, operation); got != "disabled:recovery_required" {
+		t.Fatalf("the installation left the phase a repair is reviewed from: %s", got)
 	}
 	if platformPublicOperationErrorCode("start_never_ran") != "start_never_ran" {
 		t.Fatal("the reason is not one the views show")
@@ -487,4 +534,39 @@ func eachPlatformDriver(t *testing.T, fn func(t *testing.T, pg bool)) {
 	t.Helper()
 	t.Run("sqlite", func(t *testing.T) { fn(t, false) })
 	t.Run("postgres", func(t *testing.T) { fn(t, true) })
+}
+
+// Closing a reserved-only start leaves no candidate activation at the target generation, so the installation can be
+// repaired again: the second start finds the activation row it needs to open itself, instead of the stale one.
+func TestReservedOnlyCloseLeavesNoCandidateAndTheInstallationCanBeRepairedAgain(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		o := orphanedEnableState(t, pg)
+		var removals []string
+		o.fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+			removals = append(removals, i.command.Stage)
+			result := "stopped"
+			if i.command.Stage == "remove_code" {
+				result = "absent"
+			}
+			return platformUpdateTargetRemovalObservationFixture(i, o.endpoint, result), nil
+		}
+		script := &settleScript{before: held("reserved"), after: held("reserved")}
+		script.install(o.s, o.fake)
+		o.s.platformReadStartReceipt = func(context.Context, platformRuntimeEndpoint, platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+			if len(removals) > 0 {
+				return nil, held("never_ran")
+			}
+			return nil, held("reserved")
+		}
+		for range 8 {
+			if _, err := o.s.settlePlatformHeldStarts(context.Background(), o.endpoint); err != nil {
+				t.Fatal(err)
+			}
+		}
+		requireSameReleaseOperationClosed(t, o.s, o.op)
+		if n := scalar[int](t, o.s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id AND o.target_generation=a.generation WHERE o.id=? AND a.state='candidate'`, o.op); n != 0 {
+			t.Fatalf("%d candidate activations were left at the target generation", n)
+		}
+		o.reRepair(t)
+	})
 }

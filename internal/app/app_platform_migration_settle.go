@@ -1200,7 +1200,15 @@ func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntime
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
 			WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind IN ('update-start','enable-start','restore-start') AND state IN ('prepared','unknown')`,
 			platformNeverRanReceipt, now, lease.id)
-		return platformLeaseCAS(changed, err)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
+		// The target was removed without ever running, so no settlement evidence stands for the candidate: it is
+		// dropped exactly as the absent, refused and never-ran paths drop it. Left behind, it would be found by the
+		// next start of the installation at this generation.
+		_, err = e.exec(`DELETE FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`,
+			lease.installationID, lease.snapshot.Generation)
+		return err
 	})
 }
 

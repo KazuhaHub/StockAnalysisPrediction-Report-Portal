@@ -96,6 +96,14 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 	if active != 0 {
 		return false, nil
 	}
+	// A candidate left at the target generation would be found by the next start of the installation.
+	var candidates int
+	if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`, lease.installationID, generation).Scan(&candidates); err != nil {
+		return false, err
+	}
+	if candidates != 0 {
+		return false, nil
+	}
 	rows, err := e.query(`SELECT stage,effect_number,effect_id,kind,state,receipt_json,observed_fence FROM app_platform_operation_effects WHERE operation_id=?`, lease.id)
 	if err != nil {
 		return false, err
@@ -162,12 +170,6 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 		WHERE id=? AND installation_id=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND fence=? AND lease_owner IS NULL AND completed_ms IS NOT NULL`,
 		string(closed.Snapshot().Stage), int64(closed.Snapshot().Revision), platformStartNeverRanErrorCode, now,
 		lease.id, lease.installationID, stateRevision, rowRevision, fence)
-	if err := platformLeaseCAS(changed, err); err != nil {
-		return false, err
-	}
-	changed, err = e.exec(`UPDATE app_platform_installations SET phase='disabled',revision=revision+1,updated_ms=?
-		WHERE id=? AND phase='recovery_required' AND desired_state='disabled' AND control_fence=? AND controller_epoch=?`,
-		now, lease.installationID, lease.fence, lease.controllerEpoch)
 	if err := platformLeaseCAS(changed, err); err != nil {
 		return false, err
 	}
