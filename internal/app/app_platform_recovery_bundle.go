@@ -93,7 +93,7 @@ var errPlatformBundle = errors.New("recovery bundle is incomplete or inconsisten
 
 // platformRetainedRecoverySets are the recovery sets whose archive a restored Portal can still import:
 // cut and verified, not deleted. A set that is being cut has no digest to carry.
-const platformRetainedRecoverySets = `state IN ('verified','restoring','review_required') AND deleted_ms IS NULL AND manifest_sha256 IS NOT NULL`
+var platformRetainedRecoverySets = platformRetainedRecoverySetsOf("app_platform_recovery_sets")
 
 type platformRetainedSet struct {
 	id, installation, checkpoint, namespace, release, manifest string

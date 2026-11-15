@@ -152,8 +152,8 @@ type platformRetentionResult struct {
 	Tombstones       int64 `json:"tombstones"`
 	OperationDays    int   `json:"operation_days"`
 	RecoverySetsKept int   `json:"recovery_sets_kept"`
-	// RecoverySetsBeyond counts the recovery sets past the latest-N policy. They are reported, never removed: the
-	// runner has no command that deletes one checkpoint, so marking a set deleted would leak its data on the host.
+	// RecoverySetsBeyond counts the recovery sets past the latest-N policy that are still waiting: prunePlatformRecoverySets
+	// deletes them through the runner, so a set drops out of this count once its deletion is decided.
 	RecoverySetsBeyond int64 `json:"recovery_sets_beyond"`
 }
 
@@ -753,39 +753,61 @@ func queryRetentionIDs(e migExec, query string, args ...any) ([]string, error) {
 	return ids, rows.Err()
 }
 
-// platformRecoverySetsBeyondRetention lists the retained recovery sets past the latest keep of their
-// installation, leaving out any that is held: by an import grant that is issued or consumed, or by a restore in
-// progress. It is a selection only. The runner has no command that deletes a single checkpoint, so nothing acts
-// on it yet (doc 172 section 6).
-func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) {
-	rows, err := e.query(`SELECT r.id,r.installation_id,r.state,
+// platformBeyondSet is a retained recovery set past the latest keep of its installation.
+type platformBeyondSet struct {
+	id, installation, state string
+	created                 int64
+}
+
+// platformBeyondRetention lists the retained recovery sets past the latest keep of their installation, leaving out
+// any that is held: by an import grant that is issued or consumed, or by a restore in progress. The count of "latest
+// keep" includes every retained state, so a review_required set takes a place; the caller decides which states it
+// may act on. A set whose deletion is decided is not retained and is not listed (platformRetainedRecoverySetsOf).
+func platformBeyondRetention(e migExec, keep int) ([]platformBeyondSet, error) {
+	rows, err := e.query(`SELECT r.id,r.installation_id,r.state,r.created_ms,
 		EXISTS (SELECT 1 FROM app_platform_import_grants g WHERE g.recovery_set_id=r.id AND g.state IN ('issued','consumed'))
 		FROM app_platform_recovery_sets r WHERE ` + platformRetainedRecoverySetsOf("r") + ` ORDER BY r.installation_id,r.created_ms DESC,r.id DESC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var out []platformBeyondSet
 	var current string
 	position := 0
 	for rows.Next() {
-		var id, installation, state string
+		var b platformBeyondSet
 		var granted bool
-		if err := rows.Scan(&id, &installation, &state, &granted); err != nil {
+		if err := rows.Scan(&b.id, &b.installation, &b.state, &b.created, &granted); err != nil {
 			return nil, err
 		}
-		if installation != current {
-			current, position = installation, 0
+		if b.installation != current {
+			current, position = b.installation, 0
 		}
 		position++
-		if position > keep && state != "restoring" && !granted {
-			out = append(out, id)
+		if position > keep && b.state != "restoring" && !granted {
+			out = append(out, b)
 		}
 	}
 	return out, rows.Err()
 }
 
-// platformRetainedRecoverySetsOf is the retained-set predicate of the recovery bundle, qualified by an alias.
+// platformRecoverySetsBeyondRetention lists the ids of platformBeyondRetention. The retention sweep reports them;
+// prunePlatformRecoverySets acts on the verified ones (doc 172 section 6).
+func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) {
+	beyond, err := platformBeyondRetention(e, keep)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, b := range beyond {
+		out = append(out, b.id)
+	}
+	return out, nil
+}
+
+// platformRetainedRecoverySetsOf is the retained-set predicate of the recovery bundle, qualified by an alias. A set
+// whose deletion is decided (a delete_checkpoint effect that is prepared, unknown or applied) is not retained: the
+// runner's claim cannot be undone, so the bundle must not require an archive that is going away.
 func platformRetainedRecoverySetsOf(alias string) string {
 	return alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
 }

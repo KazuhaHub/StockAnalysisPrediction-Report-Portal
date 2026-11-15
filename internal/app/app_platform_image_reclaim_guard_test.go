@@ -79,7 +79,7 @@ func TestEnableOperationCompletesWithARemoveImageRow(t *testing.T) {
 // Fails if an effect counter spells the neutral kinds out instead of using the shared list, or if the list drifts.
 // A further kind that is not installation work is then added in one place rather than in every counter.
 func TestInstallationWideEffectReadersUseTheSharedKindList(t *testing.T) {
-	if platformInstallationNeutralEffectKinds != "'load_image','remove_image'" {
+	if platformInstallationNeutralEffectKinds != "'load_image','remove_image','delete_checkpoint'" {
 		t.Fatalf("neutral effect kinds drifted: %s", platformInstallationNeutralEffectKinds)
 	}
 	files, err := filepath.Glob("*.go")

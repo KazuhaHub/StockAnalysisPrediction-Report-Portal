@@ -209,6 +209,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				if _, reclaimErr := w.server.reclaimPlatformImages(bulkCtx, w.endpoint); reclaimErr != nil {
 					log.Printf("app-platform image reclaim: %v", reclaimErr)
 				}
+				// Idle: the checkpoint archives of recovery sets the Portal no longer keeps are deleted, and begun deletions settle.
+				w.server.pruneRecoverySetsOnTick(bulkCtx, w.endpoint)
 			}
 			w.publish("idle", "", "")
 			return nil
@@ -406,6 +408,9 @@ func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
 	if _, err := w.server.reclaimPlatformImages(ctx, w.endpoint); err != nil && ctx.Err() == nil {
 		log.Printf("app-platform image reclaim: %v", err)
 	}
+	// An operation just ended: the installation is idle and its host operation is new, so the step runs now.
+	w.server.platformPruneLast.Store(0)
+	w.server.pruneRecoverySetsOnTick(ctx, w.endpoint)
 }
 
 // Portal startup owns the portable no-data service separately. Native execution
