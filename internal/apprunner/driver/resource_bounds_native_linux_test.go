@@ -185,8 +185,11 @@ func verifyNativeCandidateResourceBounds(
 	}
 	fixtureContainerPost(
 		t, ctx, client, "/fixture/log-flood", &logs)
-	if logs.Bytes != 8<<20 {
-		t.Fatalf("log flood did not write its bounded fixture: %+v", logs)
+	// The flood must exceed the policy bound, or the test would pass with rotation switched off.
+	const logHeadroom = 1 << 20
+	const logBound = appContainerLogBoundBytes + logHeadroom
+	if logs.Bytes != 24<<20 || logs.Bytes <= logBound {
+		t.Fatalf("log flood did not write its fixture, or not more than the bound %d: %+v", logBound, logs)
 	}
 	var inspection struct {
 		LogPath string `json:"LogPath"`
@@ -208,7 +211,7 @@ func verifyNativeCandidateResourceBounds(
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if written < 1<<20 || written > 3<<20 {
+	if written < 1<<20 || written > logBound {
 		t.Fatalf("json-file log bound not enforced: %d", written)
 	}
 	t.Log("NATIVE_LOG_VOLUME_BOUNDED")

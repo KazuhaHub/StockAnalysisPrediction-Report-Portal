@@ -223,14 +223,14 @@ func (s *Server) createPlatformRecoveryReview(ctx context.Context, session platf
 		if err != nil {
 			return err
 		}
-		if control.nowMS > math.MaxInt64-900000 {
+		if control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 			return errAppPlatformPlanChanged
 		}
 		id, err := platformNewUUID()
 		if err != nil {
 			return err
 		}
-		digest, expires := platformDigest([]byte(facts.json)), control.nowMS+900000
+		digest, expires := platformDigest([]byte(facts.json)), control.nowMS+platformReviewPlanValidityMS
 		var release any
 		if facts.release != "" {
 			release = facts.release

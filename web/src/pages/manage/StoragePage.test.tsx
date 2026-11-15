@@ -71,6 +71,12 @@ describe('StoragePage', () => {
     apiMock.post.mockResolvedValue({ batch: 3, tokens: 0, reports: 2, ok: true, at: '', trigger: 'preview', dry_run: true, error: '', duration_ms: 1 })
   })
 
+  it('offers the application platform retention as its own section, loaded with the page', async () => {
+    renderPage()
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/admin/app-platform/retention'))
+    expect(await screen.findByRole('tab', { name: 'manage.operation.platformRetention' })).toBeTruthy()
+  })
+
   it('renders the usage dashboard: category cards, eligible/nothing states, and a failed history row', async () => {
     renderPage()
     await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/api/admin/cleanup/usage'))

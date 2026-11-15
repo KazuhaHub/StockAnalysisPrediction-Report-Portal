@@ -300,14 +300,14 @@ func (s *Server) createPlatformRemovalReviewWithScopeContext(ctx context.Context
 		if err != nil {
 			return err
 		}
-		if len(raw) > 65536 || control.nowMS > math.MaxInt64-900000 {
+		if len(raw) > 65536 || control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 			return errAppPlatformPlanChanged
 		}
 		id, err := platformNewUUID()
 		if err != nil {
 			return err
 		}
-		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + 900000}
+		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + platformReviewPlanValidityMS}
 		var source any
 		if p.SourceReleaseSHA256 != "" {
 			source = p.SourceReleaseSHA256

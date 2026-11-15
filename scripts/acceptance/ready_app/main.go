@@ -156,7 +156,9 @@ func fixtureExhaustTmp(w http.ResponseWriter) {
 }
 
 func fixtureFloodLog(w http.ResponseWriter) {
-	const total = int64(8 << 20)
+	// More than twice the 10 MiB json-file bound of an app container (max-size 5m, max-file 2), so the flood
+	// cannot fit without rotation.
+	const total = int64(24 << 20)
 	chunk := bytes.Repeat([]byte{'l'}, (64<<10)-1)
 	chunk = append(chunk, '\n')
 	written := int64(0)

@@ -319,8 +319,9 @@ breaks idempotency or references; two values are administrator-adjustable.**
 Never collected regardless of age: unresolved effects, `unknown` or
 `review_required` work, operations referenced by a retained recovery set or
 import grant. Adjustable values live in the database `meta` table, edited in
-the existing management UI, not `config.yaml`. The sweeper does not exist yet;
-implement it test-first.
+the existing management UI, not `config.yaml`. The sweeper is implemented in
+[doc 172](172-retention-plan.md), with its resolutions against the code and its limits (recovery-set pruning is
+blocked on a runner command; the 7-day log age is not enforceable by Docker).
 
 Acceptance: a time-travel test advances the clock past each limit and proves
 deletion of eligible rows only, retention of every pinned or unresolved row,

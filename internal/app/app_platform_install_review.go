@@ -177,7 +177,7 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 		if err != nil {
 			return err
 		}
-		if control.nowMS > math.MaxInt64-900000 {
+		if control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 			return errAppPlatformPlanChanged
 		}
 		if err := validatePlatformInstallAudience(e, projection.Audience, control.nowMS); err != nil {
@@ -198,7 +198,7 @@ func (s *Server) createPlatformInstallReviewWithRuntime(ctx context.Context, ses
 		if err := requirePlatformInstallationSlot(e); err != nil {
 			return err
 		}
-		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + 900000}
+		result = platformRemovalReview{ID: id, SHA256: platformDigest(raw), JSON: string(raw), ExpiresMS: control.nowMS + platformReviewPlanValidityMS}
 		_, err = e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms) VALUES(?,NULL,?,?,'install',NULL,?,0,0,?,?,?,?,?,?,?,?,?,?,NULL,?,?)`, id, projection.AppID, projection.PublisherID, release, trustRevision, control.epoch, actor.scope, actor.username, actor.created, actor.generation, actor.authorityFingerprint, result.SHA256, result.JSON, result.ExpiresMS, control.nowMS, control.nowMS)
 		if err == nil && facts != nil && !validPlatformInstallRuntimeFacts(*facts, endpoint) {
 			return errAppPlatformRuntimeConflict

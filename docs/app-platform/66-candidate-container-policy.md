@@ -43,7 +43,7 @@ permits adoption, overwrite or deletion.
 | Open files | Hard/soft nofile limit 1024 |
 | Lifetime | Init enabled, SIGTERM, stop timeout 10 seconds, no automatic restart/removal |
 | Health | Image health checks disabled; platform readiness probing remains separate |
-| Logs | json-file, max-size 1m and max-file 2 |
+| Logs | json-file, max-size 5m and max-file 2 (10 MiB per container, removed with it; Docker cannot limit them by age, doc 172 section 5) |
 | Data | Only the owned namespace, read-only for the candidate |
 | HTTP socket | Only this installation/generation's HTTP directory, writable |
 | Broker socket | Separate installation/generation directory, read-only |

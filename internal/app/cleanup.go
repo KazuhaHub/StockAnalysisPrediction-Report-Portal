@@ -189,6 +189,8 @@ func (s *Server) cleanupLoop() {
 // so a slow pass or a crash mid-run can't cause the 60s ticker to re-fire the same day (a missed
 // pass simply waits for the next period — cleanup is stateless).
 func (s *Server) cleanupTick() {
+	// The application platform's retention sweep rides this ticker but keeps its own cadence (DATA-08).
+	s.platformRetentionTick(time.Now())
 	c := s.cleanupConfigLoad()
 	due, stamp := cleanupDue(c, s.st.GetSetting("cleanup_last_run_period", ""), time.Now(), s.panelLocation())
 	if !due {

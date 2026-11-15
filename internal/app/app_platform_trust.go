@@ -288,7 +288,7 @@ func admitPlatformTrustQuarantine(
 ) error {
 	raw, err := json.Marshal(p)
 	if err != nil || len(raw) > 65536 ||
-		control.nowMS > math.MaxInt64-900000 {
+		control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 		return errAppPlatformPlanChanged
 	}
 	planID, err := platformNewUUID()
@@ -300,7 +300,7 @@ func admitPlatformTrustQuarantine(
 		return err
 	}
 	planSHA := platformDigest(raw)
-	expires := control.nowMS + 900000
+	expires := control.nowMS + platformReviewPlanValidityMS
 	idempotency := platformDigest(
 		[]byte("portal-app-trust-quarantine/v1:" + planID))
 	requestFrame, _ := json.Marshal(
