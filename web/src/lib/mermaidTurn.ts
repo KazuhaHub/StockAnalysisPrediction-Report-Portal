@@ -5,11 +5,34 @@
 //
 // A per-diagram directive in the source was considered and rejected: it rewrites the text that is parsed,
 // cached and exported, and the layout would then depend on the author's own directives.
+//
+// One turn that never settles would hold up every diagram after it, so a turn is given a time limit. When it
+// runs out the turn is rejected (its block falls back to the source as a code block) and the next turn
+// starts; the abandoned step is not cancelled, only no longer waited for.
+export const MERMAID_TURN_TIMEOUT_MS = 15_000
+
 let last: Promise<unknown> = Promise.resolve()
 
+function withTimeout<T>(step: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    // The limit runs from the start of the turn, not from when it was asked for.
+    const timer = setTimeout(() => reject(new Error('mermaid turn timed out')), MERMAID_TURN_TIMEOUT_MS)
+    step().then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      (error: unknown) => {
+        clearTimeout(timer)
+        reject(error)
+      },
+    )
+  })
+}
+
 export function inMermaidTurn<T>(step: () => Promise<T>): Promise<T> {
-  const turn = last.then(step)
-  // A failed turn must not break the chain for the ones after it.
+  const turn = last.then(() => withTimeout(step))
+  // A failed or timed-out turn must not break the chain for the ones after it.
   last = turn.catch(() => undefined)
   return turn
 }

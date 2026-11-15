@@ -161,6 +161,24 @@ describe('Markdown', () => {
     })
   })
 
+  it('keeps the source as a code block when its render never settles, and lets the next diagram render', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderMermaid.mockImplementation(async (id: string, source = '') =>
+        source.startsWith('mindmap') ? new Promise<never>(() => undefined) : { svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` },
+      )
+      const { container } = render(<Markdown md={'```mermaid\nmindmap\n  root\n    a\n```\n\n```mermaid\nflowchart LR\nA --> B\n```'} />)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_001)
+      })
+      await waitFor(() => expect(container.querySelectorAll('.md-mermaid svg')).toHaveLength(1))
+      expect(container.querySelector('code.language-mermaid')?.textContent).toContain('mindmap')
+    } finally {
+      vi.useRealTimers()
+      renderMermaid.mockImplementation(async (id: string) => ({ svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` }))
+    }
+  })
+
   it('uses parser-normalized source as the cache key for an indented mermaid fence', async () => {
     render(<Markdown md={'  ```mermaid\n  flowchart LR\n  A --> B\n  ```'} />)
 

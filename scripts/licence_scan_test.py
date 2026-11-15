@@ -876,6 +876,130 @@ class OwnWorkspaceTests(unittest.TestCase):
             self.assertEqual(subprocess.run(base + [sp], capture_output=True, text=True).returncode, 1)
             self.assertEqual(subprocess.run(base + ["--workspace-root", d, sp], capture_output=True, text=True).returncode, 0)
 
+class LockCrossCheckTests(unittest.TestCase):
+    """The npm SBOM is built from package-lock.json, whose license fields integrity does not cover: a pull request
+    could rewrite a GPL package's lock entry to MIT. Every npm component that is installed is therefore checked
+    against the license in its installed package.json."""
+
+    def npm(self, name, lic="MIT", **kw):
+        return comp(name, lic, purl=f"pkg:npm/{name}@1.0.0", **kw)
+
+    def judge(self, component, manifest, policy=POLICY, files=None):
+        def installed(c):
+            if isinstance(manifest, Exception):
+                raise manifest
+            return manifest
+        reader = (lambda c, name: files.get((c["name"], name))) if files is not None else None
+        r = evaluate({"components": [component]}, policy, set(), reader, None, installed)
+        return r["components"][0], r
+
+    def test_a_matching_installed_licence_passes(self):
+        c, _ = self.judge(self.npm("a"), {"license": "MIT"})
+        self.assertEqual((c["status"], c["via"]), ("pass", "allow"))
+
+    def test_a_lock_that_says_mit_over_an_installed_gpl_fails(self):
+        c, r = self.judge(self.npm("a", "MIT"), {"license": "GPL-2.0-only"})
+        self.assertEqual((c["status"], c["reason"]), ("fail", "lock-mismatch"))
+        self.assertIn("GPL-2.0-only", c["detail"])
+        self.assertFalse(r["ok"])
+
+    def test_an_installed_licence_with_no_lock_declaration_fails(self):
+        c, _ = self.judge(self.npm("a", None), {"license": "GPL-2.0-only"})
+        self.assertEqual((c["status"], c["reason"]), ("fail", "lock-mismatch"))
+
+    def test_a_lock_declaration_over_an_installed_package_with_none_fails(self):
+        c, _ = self.judge(self.npm("a", "MIT"), {"name": "a"})
+        self.assertEqual((c["status"], c["reason"]), ("fail", "lock-mismatch"))
+
+    def test_no_declaration_on_either_side_agrees(self):
+        c, _ = self.judge(self.npm("a", None), {"name": "a"})
+        self.assertEqual(c["reason"], "no-licence")  # judged as before, not as a mismatch
+
+    def test_an_expression_must_agree_exactly(self):
+        c, _ = self.judge(self.npm("a", expr="(MIT OR ISC)"), {"license": "(MIT OR ISC)"})
+        self.assertEqual(c["status"], "pass")
+        c, _ = self.judge(self.npm("a", expr="(MIT OR ISC)"), {"license": "MIT"})
+        self.assertEqual(c["reason"], "lock-mismatch")
+
+    def test_the_legacy_licence_forms_of_a_manifest_are_read(self):
+        for manifest in ({"license": {"type": "MIT"}}, {"licenses": [{"type": "MIT"}]}, {"licenses": ["MIT"]}):
+            with self.subTest(manifest=manifest):
+                c, _ = self.judge(self.npm("a", "MIT"), manifest)
+                self.assertEqual(c["status"], "pass")
+        c, _ = self.judge(self.npm("a", "MIT"), {"licenses": [{"type": "GPL-2.0-only"}]})
+        self.assertEqual(c["reason"], "lock-mismatch")
+
+    def test_several_licences_are_compared_as_a_set(self):
+        c, _ = self.judge(self.npm("a", ["MIT", "ISC"]), {"licenses": [{"type": "ISC"}, {"type": "MIT"}]})
+        self.assertEqual(c["status"], "pass")
+        c, _ = self.judge(self.npm("a", ["MIT", "ISC"]), {"licenses": [{"type": "MIT"}]})
+        self.assertEqual(c["reason"], "lock-mismatch")
+
+    def test_a_mismatch_cannot_be_covered_by_a_reviewed_record_or_an_election(self):
+        c, _ = self.judge(comp("khroma", "MIT", purl="pkg:npm/khroma@1.0.0"), {"license": "GPL-2.0-only"},
+                          policy=REVIEWED_POLICY, files={("khroma", "license"): b"The MIT License (MIT)\n"})
+        self.assertEqual(c["reason"], "lock-mismatch")
+
+    def test_a_package_that_is_not_installed_is_judged_on_the_lock_and_reported(self):
+        def installed(c):
+            return None
+        r = evaluate({"components": [self.npm("a"), self.npm("b")]}, POLICY, set(), None, None, installed)
+        self.assertTrue(r["ok"])
+        self.assertTrue(any("not installed" in w and "2" in w for w in r["warnings"]))
+
+    def test_an_installed_package_that_cannot_be_trusted_fails(self):
+        c, _ = self.judge(self.npm("a"), licence_scan.LicenceFileError("installed version '9' is not '1.0.0'"))
+        self.assertEqual((c["status"], c["reason"]), ("fail", "lock-unverifiable"))
+        self.assertIn("installed version", c["detail"])
+
+    def test_go_modules_and_own_components_are_not_cross_checked(self):
+        seen = []
+        def installed(c):
+            seen.append(c["name"])
+            return {"license": "GPL-2.0-only"}
+        go = golang("github.com/KazuhaHub/x")
+        own_policy = dict(POLICY, own={"licences": ["AGPL-3.0-only"], "components": ["portal-status-ui", "github.com/KazuhaHub/"]})
+        local = comp("portal-status-ui", "AGPL-3.0-only", purl="pkg:npm/portal-status-ui")
+        local["properties"] = [{"name": "cdx:npm:package:path", "value": "node_modules/portal-status-ui"}]
+        r = evaluate({"components": [go, local]}, own_policy, set(), None, {"portal-status-ui"}, installed)
+        self.assertTrue(r["ok"], r["failures"])
+        self.assertEqual(seen, [])
+
+    def test_the_cli_reads_the_installed_tree(self):
+        with tempfile.TemporaryDirectory() as d:
+            for lic in ("MIT", "GPL-2.0-only"):
+                nm = os.path.join(d, "node_modules", "evil")
+                os.makedirs(nm, exist_ok=True)
+                with open(os.path.join(nm, "package.json"), "w") as f:
+                    json.dump({"name": "evil", "version": "1.0.0", "license": lic}, f)
+                sbom = {"components": [self.npm("evil", "MIT")]}
+                sp, pp = os.path.join(d, "s.json"), os.path.join(d, "p.json")
+                with open(sp, "w") as f:
+                    json.dump(sbom, f)
+                with open(pp, "w") as f:
+                    json.dump(POLICY, f)
+                p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "licence_scan.py"), "--policy", pp,
+                                    "--node-modules", os.path.join(d, "node_modules"), sp], capture_output=True, text=True)
+                self.assertEqual(p.returncode, 0 if lic == "MIT" else 1, p.stdout)
+                if lic != "MIT":
+                    self.assertIn("lock-mismatch", p.stdout)
+
+    def test_the_installed_reader_follows_the_install_path_and_refuses_a_wrong_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            nested = os.path.join(d, "node_modules", "a", "node_modules", "tslib")
+            os.makedirs(nested)
+            with open(os.path.join(nested, "package.json"), "w") as f:
+                json.dump({"version": "2.3.0", "license": "0BSD"}, f)
+            reader = licence_scan.make_installed_reader(os.path.join(d, "node_modules"))
+            c = {"name": "tslib", "version": "2.3.0", "purl": "pkg:npm/tslib@2.3.0",
+                 "properties": [{"name": "cdx:npm:package:path", "value": "node_modules/a/node_modules/tslib"}]}
+            self.assertEqual(reader(c)["license"], "0BSD")
+            with self.assertRaisesRegex(licence_scan.LicenceFileError, "version"):
+                reader(dict(c, version="9.9.9"))
+            self.assertIsNone(reader({"name": "gone", "version": "1", "purl": "pkg:npm/gone@1"}))
+            self.assertIsNone(reader({"name": "m", "version": "1", "purl": "pkg:golang/m@1"}))
+
+
 class CliTests(unittest.TestCase):
     def scan(self, sbom, *extra):
         with tempfile.TemporaryDirectory() as d:

@@ -30,6 +30,11 @@ Rules, in the order they apply to one component:
    a namespace prefix, any other entry names one package exactly. An npm component must also be a local
    workspace package (--workspace-root) with no registry distribution, so a registry package cannot take the name.
 
+7. An npm component that is installed (--node-modules) must declare what its installed package.json declares:
+   the SBOM is built from package-lock.json, whose license fields integrity does not cover. A mismatch fails and
+   cannot be covered by a record. A component that is not installed (an optional package of another platform) is
+   judged on the lock's declaration alone and counted in a warning.
+
 Every component is judged, nested ones included (cyclonedx-npm nests packages that are not hoisted).
 
 This evaluator is duplicated in the Apps repository (scripts/licence_scan.py in
@@ -168,6 +173,47 @@ def _inside(base, path):
     return path != base and os.path.commonpath([base, path]) == base
 
 
+def _locate(comp, go_mod_cache, node_modules):
+    """(root, is_npm) of a component's shipped package, or None when it is not a kind this knows or the cache or
+    node_modules was not given. A root that is not strictly inside the module cache or node_modules is refused."""
+    go = _purl_path(comp, "golang")
+    npm = _purl_path(comp, "npm")
+    if go is not None and go_mod_cache and comp.get("version"):
+        base = os.path.realpath(go_mod_cache)
+        root = os.path.realpath(os.path.join(base, _go_escape(go) + "@" + comp["version"]))
+        if not _inside(base, root):
+            raise LicenceFileError(f"module path {go!r} escapes the module cache")
+        return root, False
+    if npm is not None and node_modules:
+        base = os.path.realpath(node_modules)
+        where = _property(comp, "cdx:npm:package:path")
+        if where is not None:
+            if os.path.isabs(where):
+                raise LicenceFileError(f"install path {where!r} is absolute and escapes node_modules")
+            root = os.path.realpath(os.path.join(os.path.dirname(base), where))
+        else:
+            root = os.path.realpath(os.path.join(base, npm))
+        if not _inside(base, root):
+            raise LicenceFileError(f"install path {where or npm!r} escapes node_modules")
+        return root, True
+    return None
+
+
+def _manifest(root, comp):
+    """The installed package.json, whose version must be the component's."""
+    try:
+        with open(os.path.join(root, "package.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+    except (OSError, ValueError):
+        raise LicenceFileError("the installed package has no readable package.json")
+    if not isinstance(manifest, dict):
+        raise LicenceFileError("the installed package.json is not an object")
+    if comp.get("version") and manifest.get("version") != comp["version"]:
+        raise LicenceFileError(f"installed version {manifest.get('version')!r} is not the component version "
+                               f"{comp['version']!r}")
+    return manifest
+
+
 def make_reader(go_mod_cache=None, node_modules=None):
     """A reader of one file inside a component's shipped package.
 
@@ -179,45 +225,63 @@ def make_reader(go_mod_cache=None, node_modules=None):
     there cannot be trusted.
     """
     def read(comp, name):
-        go = _purl_path(comp, "golang")
-        npm = _purl_path(comp, "npm")
-        if go is not None and go_mod_cache and comp.get("version"):
-            base = os.path.realpath(go_mod_cache)
-            root = os.path.realpath(os.path.join(base, _go_escape(go) + "@" + comp["version"]))
-            if not _inside(base, root):
-                raise LicenceFileError(f"module path {go!r} escapes the module cache")
-            manifest = False
-        elif npm is not None and node_modules:
-            base = os.path.realpath(node_modules)
-            where = _property(comp, "cdx:npm:package:path")
-            if where is not None:
-                if os.path.isabs(where):
-                    raise LicenceFileError(f"install path {where!r} is absolute and escapes node_modules")
-                root = os.path.realpath(os.path.join(os.path.dirname(base), where))
-            else:
-                root = os.path.realpath(os.path.join(base, npm))
-            if not _inside(base, root):
-                raise LicenceFileError(f"install path {where or npm!r} escapes node_modules")
-            manifest = True
-        else:
+        located = _locate(comp, go_mod_cache, node_modules)
+        if located is None:
             return None
+        root, is_npm = located
         if not os.path.isdir(root):
             return None
-        if manifest:
-            try:
-                with open(os.path.join(root, "package.json"), encoding="utf-8") as f:
-                    installed = json.load(f).get("version")
-            except (OSError, ValueError):
-                raise LicenceFileError("the installed package has no readable package.json")
-            if comp.get("version") and installed != comp["version"]:
-                raise LicenceFileError(f"installed version {installed!r} is not the component version "
-                                       f"{comp['version']!r}")
+        if is_npm:
+            _manifest(root, comp)
         path = os.path.realpath(os.path.join(root, name))
         if not _inside(root, path) or not os.path.isfile(path) or os.path.getsize(path) > MAX_LICENCE_FILE:
             return None
         with open(path, "rb") as f:
             return f.read()
     return read
+
+
+def make_installed_reader(node_modules):
+    """A reader of the installed package.json of an npm component (None when it is not installed or is not an
+    npm component), for the cross-check against the lock file's declaration. Same root rules as make_reader."""
+    def read(comp):
+        located = _locate(comp, None, node_modules) if _purl_path(comp, "npm") is not None else None
+        if located is None or not os.path.isdir(located[0]):
+            return None
+        return _manifest(located[0], comp)
+    return read
+
+
+def _installed_declaration(manifest):
+    """The licences an installed package.json declares, as a sorted list of strings (license as a string or an
+    object with a type, or the legacy licenses list); an empty list when it declares none."""
+    found = []
+
+    def one(value):
+        if isinstance(value, str) and value.strip():
+            found.append(value.strip())
+        elif isinstance(value, dict) and isinstance(value.get("type"), str) and value["type"].strip():
+            found.append(value["type"].strip())
+    one(manifest.get("license"))
+    licences = manifest.get("licenses")
+    if isinstance(licences, list):
+        for item in licences:
+            one(item)
+    return sorted(found)
+
+
+def _lock_declaration(comp):
+    entries = comp.get("licenses") or []
+    out = []
+    for entry in entries:
+        if "expression" in entry:
+            out.append(entry["expression"].strip())
+        else:
+            lic = entry.get("license") or {}
+            text = (lic.get("id") or lic.get("name") or "").strip()
+            if text:
+                out.append(text)
+    return sorted(out)
 
 
 def read_workspaces(root):
@@ -451,14 +515,17 @@ def _fail(base, reason, detail):
     return dict(base, status="fail", reason=reason, detail=detail)
 
 
-def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
+def evaluate(sbom, policy, verified, read_licence=None, workspaces=None, installed=None):
     """Judge every component of `sbom` (a dict with "components") against `policy`.
 
     Returns {"ok", "components", "failures", "warnings", "problems"}. `verified` is the set of check
     names the caller has confirmed passed; exclusions that require a name outside it do not apply.
     `read_licence(component, filename)` returns the bytes of a file in the shipped package, or None; without
     one no reviewed-as record can be verified. `workspaces` is the set of local npm workspace package names an
-    own npm component must belong to. Nested components are judged like top-level ones.
+    own npm component must belong to. Nested components are judged like top-level ones. `installed(component)` returns
+    the installed package.json of an npm component (None when it is not installed): the SBOM of an npm project is
+    built from package-lock.json, whose license fields its integrity hashes do not cover, so every installed
+    component's declaration must agree with its installed manifest.
     """
     top = sbom.get("components") or []
     comps = flatten(top)
@@ -472,6 +539,7 @@ def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
     own_prefixes = policy["own"]["components"]
     seen = set()
     results, warnings = [], []
+    not_installed = []
     for comp in comps:
         key = component_key(comp)
         seen.add(key)
@@ -491,6 +559,20 @@ def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
             results.append(_fail(dict(base, declared=_declared_nodes_text(comp)), "unparseable", str(e)))
             continue
         base["declared"] = declared
+        own = _is_own(comp, key, own_prefixes, workspaces)
+        if installed is not None and not own and (comp.get("purl") or "").startswith("pkg:npm/"):
+            try:
+                manifest = installed(comp)
+            except LicenceFileError as err:
+                results.append(_fail(base, "lock-unverifiable", f"the installed package cannot be trusted: {err}"))
+                continue
+            if manifest is None:
+                not_installed.append(key)
+            elif _installed_declaration(manifest) != _lock_declaration(comp):
+                results.append(_fail(base, "lock-mismatch",
+                                     f"the lock file declares {_lock_declaration(comp) or 'nothing'} but the installed "
+                                     f"package.json declares {_installed_declaration(manifest) or 'nothing'}"))
+                continue
         if not nodes:
             rec = reviewed.get(key)
             if rec is not None and _apply_review(key, comp, rec, UNKNOWN, declared, allow_lower, read_licence, warnings):
@@ -499,7 +581,6 @@ def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
             else:
                 results.append(_fail(base, "no-licence", "the SBOM records no licence for this component"))
             continue
-        own = _is_own(comp, key, own_prefixes, workspaces)
         judge = _Judge(policy, own)
         election = elections.get(key)
         if election is not None:
@@ -526,6 +607,10 @@ def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
             detail = {DENIED: "a denied licence", UNKNOWN: "a licence that is on neither list",
                       ELECTION_REQUIRED: "only allowed through an election record, and none applies"}[verdict]
             results.append(_fail(base, verdict, detail))
+    if not_installed:
+        warnings.append(f"{len(not_installed)} npm components are not installed and were judged on the lock file's "
+                        f"declaration alone (optional packages of other platforms): "
+                        f"{', '.join(sorted(not_installed)[:5])}{', ...' if len(not_installed) > 5 else ''}")
     for name, e in {**elections, **exclusions, **reviewed}.items():
         if name not in seen:
             warnings.append(f"policy entry for {name} is not present in this SBOM set")
@@ -631,7 +716,8 @@ def main(argv=None):
         print(f"licence scan: cannot read input: {e}", file=sys.stderr)
         return 2
     result = evaluate({"components": comps}, policy, set(args.verified),
-                      make_reader(args.go_mod_cache, args.node_modules), workspaces)
+                      make_reader(args.go_mod_cache, args.node_modules), workspaces,
+                      make_installed_reader(args.node_modules) if args.node_modules else None)
     for path in empty:
         result["problems"].append(f"{path} has no components")
     result["problems"] = sorted(set(result["problems"]))

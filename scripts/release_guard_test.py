@@ -313,6 +313,14 @@ class LicenceGateTests(unittest.TestCase):
         listed = set(re.findall(r'\b(linux|darwin|windows)/(amd64|arm64)\b', licence))
         self.assertEqual(listed, targets)
 
+    def test_licence_workflow_cross_checks_the_lock_against_the_installed_tree(self):
+        # The npm SBOM comes from package-lock.json, whose licence fields its integrity hashes do not cover; the
+        # scan is given the installed node_modules so every installed package is checked against its own manifest.
+        workflow = read_workflow('licence.yml')
+        scan = workflow[workflow.index('licence_scan.py'):]
+        self.assertIn('--node-modules web/node_modules', scan)
+        self.assertLess(workflow.index('npm ci'), workflow.index('licence_scan.py'))
+
     def runs(self, workflow, conclusion='success', jobs=None):
         run = {'id': 1, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'u/' + workflow}
         default = {'test.yml': [{'name': n, 'conclusion': 'success'} for n in sorted(
