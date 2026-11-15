@@ -164,7 +164,47 @@ func ownerContainerLabels(o containerOwner) map[string]string {
 	}
 }
 
+// planMemo remembers plans that passed validation, with their parsed policy. See decisionMemo.
+var planMemo = newDecisionMemo[containerCreate](256)
+
+// planKey digests every field of a plan, so a plan that differs in anything validation reads is another
+// question. TestPlanMemoKeyCoversEveryPlanField fails when containerPlan grows a field this does not cover.
+// The binding structs hold strings only, so %+v prints all of them.
+func planKey(p containerPlan) memoKey {
+	return memoKeyOf([]byte(p.name), p.body, []byte(p.bodySHA), []byte(fmt.Sprintf("%+v", p.owner)), bindingPart(p.writable), bindingPart(p.updateStart), bindingPart(p.migration), []byte(p.profile), []byte(p.cpuset))
+}
+
+func bindingPart[T any](binding *T) []byte {
+	if binding == nil {
+		return []byte("-")
+	}
+	return []byte(fmt.Sprintf("+%+v", *binding))
+}
+
+// validatedContainerBody is validContainerPlan that also returns the plan's parsed create policy. The result
+// is shared between callers and must be treated as read-only.
+func validatedContainerBody(plan containerPlan) (containerCreate, bool) {
+	key := planKey(plan)
+	if body, ok := planMemo.get(key); ok {
+		return body, true
+	}
+	if !validContainerPlanUncached(plan) {
+		return containerCreate{}, false
+	}
+	var body containerCreate
+	if json.Unmarshal(plan.body, &body) != nil {
+		return containerCreate{}, false
+	}
+	planMemo.put(key, body)
+	return body, true
+}
+
 func validContainerPlan(plan containerPlan) bool {
+	_, ok := validatedContainerBody(plan)
+	return ok
+}
+
+func validContainerPlanUncached(plan containerPlan) bool {
 	if !validContainerOwner(plan.owner) || plan.name != "portal-app-"+plan.owner.ResourceID || len(plan.body) == 0 || len(plan.body) > 32768 || plan.bodySHA != containerHash(plan.body) {
 		return false
 	}

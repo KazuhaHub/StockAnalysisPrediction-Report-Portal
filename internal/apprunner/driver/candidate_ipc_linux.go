@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -267,6 +268,14 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	}()
 	result := make([]candidateIPCContainer, 0, len(entries))
 	for _, entry := range entries {
+		// An entry that passed the checks below passes them again byte for byte; the daemon's volatile
+		// fields (a status like "Up 3 minutes") make it a different entry, which is checked from scratch.
+		key := memoKeyOf(entry)
+		if remembered, ok := inventoryEntryMemo.get(key); ok {
+			remembered.Mounts = bytes.Clone(remembered.Mounts)
+			result = append(result, remembered)
+			continue
+		}
 		var container candidateIPCContainer
 		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: projection rejected", ErrInvalidResponse, inventoryEntryLabel(entry))
@@ -277,9 +286,19 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		if _, _, err := candidateIPCMountPlan(container.Mounts); err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
+		inventoryEntryMemo.put(key, candidateIPCContainer{ID: container.ID, Mounts: bytes.Clone(container.Mounts)})
 		result = append(result, container)
 	}
 	return result, nil
+}
+
+// inventoryEntryMemo and mountPlanMemo remember accepted decodings of daemon bytes only. See decisionMemo.
+var inventoryEntryMemo = newDecisionMemo[candidateIPCContainer](1024)
+var mountPlanMemo = newDecisionMemo[candidateIPCMountPlanResult](1024)
+
+type candidateIPCMountPlanResult struct {
+	sources []string
+	pending []candidateIPCPendingVolume
 }
 
 // shortContainerID names a container in an error without the full identifier.
@@ -324,6 +343,23 @@ func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 }
 
 func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
+	if len(raw) == 0 {
+		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
+	}
+	// The plan is a function of the mount bytes alone. Callers append to the result, so they get copies.
+	key := memoKeyOf(raw)
+	if plan, ok := mountPlanMemo.get(key); ok {
+		return slices.Clone(plan.sources), slices.Clone(plan.pending), nil
+	}
+	sources, pending, err := parseCandidateIPCMountPlan(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	mountPlanMemo.put(key, candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)})
+	return sources, pending, nil
+}
+
+func parseCandidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
 	if len(raw) == 0 {
 		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
@@ -438,20 +474,46 @@ func boundedString(s string) string {
 	return s
 }
 
+// candidateIPCResolver canonicalises a mount source. A variable so a test can count and fail resolutions.
+var candidateIPCResolver = filepath.EvalSymlinks
+
 func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
+	return candidateIPCReferencedInPass(ctx, path, source, map[string]candidateIPCResolution{})
+}
+
+// candidateIPCResolution is one source's canonical path as one inventory pass saw it.
+type candidateIPCResolution struct {
+	canonical string
+	missing   bool
+}
+
+// candidateIPCReferencedInPass is candidateIPCReferenced for a pass that tests one source against several
+// policy paths: the filesystem is asked about a source once per pass. The answer is never kept past the
+// pass, so a symlink retargeted between two passes is seen by the second.
+func candidateIPCReferencedInPass(ctx context.Context, path, source string, pass map[string]candidateIPCResolution) (bool, error) {
 	if source == "" {
 		return false, nil
 	}
 	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
 		return false, ErrInvalidResponse
 	}
-	canonical, err := resolveCandidateIPCSource(ctx, source, filepath.EvalSymlinks)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+	resolved, ok := pass[source]
+	if !ok {
+		canonical, err := resolveCandidateIPCSource(ctx, source, candidateIPCResolver)
+		switch {
+		case err == nil:
+			resolved = candidateIPCResolution{canonical: canonical}
+		case errors.Is(err, os.ErrNotExist):
+			resolved = candidateIPCResolution{missing: true}
+		default:
+			return false, ErrUnavailable
 		}
-		return false, ErrUnavailable
+		pass[source] = resolved
 	}
+	if resolved.missing {
+		return false, nil
+	}
+	canonical := resolved.canonical
 	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil
 }
 

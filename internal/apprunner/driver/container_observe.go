@@ -68,12 +68,43 @@ func inspectContainerState(ctx context.Context, client *http.Client, nativeID st
 	if !containerSHA.MatchString(nativeID) || !validContainerPlan(plan) {
 		return none, ErrInvalidResponse
 	}
+	raw, err := fetchJSONBody(ctx, client, "/v"+APIVersion+"/containers/"+nativeID+"/json", ErrUnavailable)
+	if err != nil {
+		return none, errors.Join(ErrContainerUncertain, err)
+	}
+	// The verdict below is a pure function of the plan and these exact bytes, so a document that was
+	// already accepted under this plan is accepted again without being walked a second time.
+	key := inspectionKey(plan, nativeID, raw)
+	if state, ok := inspectionMemo.get(key); ok {
+		if err := ctx.Err(); err != nil {
+			return none, errors.Join(ErrContainerUncertain, err)
+		}
+		return state, nil
+	}
+	state, err := judgeContainerInspection(ctx, raw, nativeID, plan)
+	if err == nil {
+		inspectionMemo.put(key, state)
+	}
+	return state, err
+}
+
+// inspectionMemo remembers accepted inspections only. See decisionMemo.
+var inspectionMemo = newDecisionMemo[containerStateInspection](256)
+
+// inspectionKey covers everything the verdict depends on: the plan's policy bytes and name, the native id
+// asked for and the whole inspect document.
+func inspectionKey(plan containerPlan, nativeID string, raw []byte) memoKey {
+	return memoKeyOf([]byte(plan.bodySHA), []byte(plan.name), []byte(nativeID), raw)
+}
+
+func judgeContainerInspection(ctx context.Context, raw []byte, nativeID string, plan containerPlan) (containerStateInspection, error) {
+	none := containerStateInspection{}
 	var expected containerCreate
 	if json.Unmarshal(plan.body, &expected) != nil {
 		return none, ErrInvalidResponse
 	}
 	var actual containerInspection
-	if err := readJSON(ctx, client, "/v"+APIVersion+"/containers/"+nativeID+"/json", &actual); err != nil {
+	if err := decodeProjectedJSON(raw, &actual); err != nil {
 		return none, errors.Join(ErrContainerUncertain, err)
 	}
 	if actual.ID != nativeID || actual.Name != "/"+plan.name || actual.Image != expected.Image || !validProjection(actual.Config, &containerConfigInspection{}) || !validProjection(actual.HostConfig, &containerHostConfig{}) || !validProjection(actual.HostConfig, &containerForbiddenOptions{}) {
