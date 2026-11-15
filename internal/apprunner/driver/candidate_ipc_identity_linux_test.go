@@ -170,7 +170,7 @@ func TestStackedMountUsesTheTopmostEntry(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "mountinfo")
 	body := "1 0 8:1 / / rw - ext4 a rw\n" +
 		"2 1 8:2 / " + f.data + " rw - ext4 b rw\n" +
-		"3 1 8:3 / " + f.data + " rw - ext4 c rw\n" // covers the previous one
+		"3 2 8:3 / " + f.data + " rw - ext4 c rw\n" // mounted on top of the previous one
 	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -429,6 +429,25 @@ func TestBindMountAliasIsAnOverlap(t *testing.T) {
 		t.Cleanup(func() { unix.Unmount(to, unix.MNT_DETACH) })
 		return to
 	}
+	// A recursive bind: /srv/y is a bind of the data root and the source is /srv. The container sees the
+	// namespace through <source>/y/ns-a, though neither path names it.
+	t.Run("submount of the source", func(t *testing.T) {
+		srv := filepath.Join(mountRoot, "srv")
+		to := filepath.Join(srv, "y")
+		if err := os.MkdirAll(to, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("mount", "--bind", f.data, to).CombinedOutput(); err != nil {
+			t.Skipf("cannot bind mount here: %v: %s", err, out)
+		}
+		t.Cleanup(func() { unix.Unmount(to, unix.MNT_DETACH) })
+		if got, err := referencedFresh(t, f.namespace, srv); err != nil || !got {
+			t.Fatal("a source with a bind of the data root below it passed", got, err)
+		}
+		if got, err := referencedFresh(t, f.sibling, to); err != nil || !got {
+			t.Fatal("the bind itself must overlap its own subtree", got, err)
+		}
+	})
 	for name, c := range map[string]struct {
 		from string
 		want bool
@@ -447,5 +466,89 @@ func TestBindMountAliasIsAnOverlap(t *testing.T) {
 				t.Fatalf("bind of %s: overlap=%v err=%v, want %v", name, got, err, c.want)
 			}
 		})
+	}
+}
+
+// Docker binds are recursive: a container that mounts /srv also sees what is mounted below it.
+func TestRecursiveBindSeesSubmounts(t *testing.T) {
+	f := newIdentityFixture(t)
+	srv := aliasPath(t, "srv")
+	y := filepath.Join(srv, "y")
+	for name, tc := range map[string]struct {
+		bindRoot string
+		source   string
+		want     bool
+	}{
+		"submount binds the data root":         {f.data, srv, true},
+		"submount binds the namespace":         {f.namespace, srv, true},
+		"submount binds a descendant":          {f.nested, srv, true},
+		"submount binds the filesystem root":   {"/", srv, true},
+		"submount binds a sibling":             {f.sibling, srv, false},
+		"submount binds elsewhere":             {"/srv/elsewhere", srv, false},
+		"a source that is the submount itself": {f.data, y, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fakeMountInfo(t, map[string]string{y: tc.bindRoot})
+			if got, err := referencedFresh(t, f.namespace, tc.source); err != nil || got != tc.want {
+				t.Fatalf("overlap=%v err=%v, want %v", got, err, tc.want)
+			}
+		})
+	}
+	// A submount further down a mount below the source is found too.
+	fakeMountInfo(t, map[string]string{filepath.Join(srv, "a", "b", "c"): f.data})
+	if got, err := referencedFresh(t, f.namespace, srv); err != nil || !got {
+		t.Fatal("a deep submount was missed", got, err)
+	}
+	// A mount beside the source, not under it, is not seen through it.
+	fakeMountInfo(t, map[string]string{aliasPath(t, "srv-other/y"): f.data})
+	if got, err := referencedFresh(t, f.namespace, srv); err != nil || got {
+		t.Fatal("a mount beside the source was treated as below it", got, err)
+	}
+}
+
+// The covering mount is chosen by the mount tree (parent ids), not by the order of the file.
+func TestStackedMountUsesParentIdsNotFileOrder(t *testing.T) {
+	f := newIdentityFixture(t)
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	// The covering mount (id 7, parent 3) is listed before the mount it covers (id 3).
+	body := "1 0 8:1 / / rw - ext4 a rw\n" +
+		"7 3 8:3 / " + f.data + " rw - ext4 c rw\n" +
+		"3 1 8:2 / " + f.data + " rw - ext4 b rw\n"
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := candidateIPCMountInfoPath
+	candidateIPCMountInfoPath = file
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
+	mounts, err := loadCandidateIPCMounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if place, err := mounts.place(f.namespace); err != nil || place.dev != "8:3" {
+		t.Fatal("the mount on top of the stack was not chosen", place, err)
+	}
+}
+
+// After a missing component a ".." can return to a directory that exists, and what follows is real again.
+func TestComponentsAfterAMissingOneAreResolvedAgain(t *testing.T) {
+	f := newIdentityFixture(t)
+	real := filepath.Join(f.data, "alias-of-ns")
+	if err := os.Symlink(f.namespace, real); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.root, "twisty")
+	if err := os.Symlink(filepath.Join(f.sibling, "missing", "..", "..", "ns-a-link-dir"), link); err != nil {
+		t.Fatal(err)
+	}
+	// data/ns-b/missing/../.. is data; the next component is a real symlink to the namespace.
+	if err := os.Symlink(f.namespace, filepath.Join(f.data, "ns-a-link-dir")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := referencedFresh(t, f.namespace, filepath.Join(link, "x")); err != nil || !got {
+		t.Fatal("a symlink after a missing component that was undone was not followed", got, err)
+	}
+	canonical, err := candidateIPCCanonicalize(filepath.Join(f.sibling, "missing", "..", "..", "ns-a-link-dir", "tail"))
+	if err != nil || canonical != filepath.Join(f.namespace, "tail") {
+		t.Fatalf("canonical %q (%v)", canonical, err)
 	}
 }

@@ -462,6 +462,40 @@ func parseCandidateIPCMountPlan(raw json.RawMessage) (candidateIPCMountPlanResul
 // candidateIPCVolumeName is the name syntax the allow-list admits for a volume read.
 var candidateIPCVolumeName = regexp.MustCompile(`^` + dockerVolumeName + `$`)
 
+// candidateIPCVolumeOptionsRefusal refuses a local volume that is not a bind but whose options name a host
+// path or a block device: an overlay's lowerdir, upperdir or workdir, a device other than the literal tmpfs
+// one, or any value that looks like a path. The daemon mounts it on the host when a container uses it, so it
+// can reach the namespace in ways the list never shows. A volume with no options, or with options that name
+// no path (a size, a uid), is judged by the path the list shows, as before. nil means none of that.
+func candidateIPCVolumeOptionsRefusal(name string, options map[string]string) error {
+	refuse := func(key string) error {
+		return fmt.Errorf("%w: local volume %q names a host path or device in its option %q", ErrContainerConflict, boundedString(name), boundedString(key))
+	}
+	for key, value := range options {
+		switch {
+		case key == "lowerdir" || key == "upperdir" || key == "workdir":
+			return refuse(key)
+		case key == "device" && value != "" && value != "tmpfs":
+			return refuse(key)
+		case strings.Contains(value, "/"):
+			return refuse(key)
+		}
+	}
+	return nil
+}
+
+// volumeDevice is candidateIPCBindVolumeDevice answered once per pass for a volume name.
+func (p *candidateIPCPass) volumeDevice(ctx context.Context, client *http.Client, name string) (string, error) {
+	if answer, ok := p.volumes[name]; ok {
+		return answer.device, answer.err
+	}
+	device, err := candidateIPCBindVolumeDevice(ctx, client, name)
+	if ctx.Err() == nil { // an answer cut short by the deadline is not remembered
+		p.volumes[name] = candidateIPCVolumeAnswer{device, err}
+	}
+	return device, err
+}
+
 // candidateIPCBindVolumeDevice inspects one local volume and returns the host path it binds, or "" when it is
 // not a bind-backed volume. A volume whose options are not a flat object of strings, that names another
 // driver, or that binds without an absolute device or with a filesystem type other than none, is refused.
@@ -491,7 +525,7 @@ func candidateIPCBindVolumeDevice(ctx context.Context, client *http.Client, name
 		}
 	}
 	if !bind {
-		return "", nil
+		return "", candidateIPCVolumeOptionsRefusal(name, options)
 	}
 	if fsType, ok := options["type"]; ok && fsType != "none" {
 		return "", fmt.Errorf("%w: volume %q: a bind option with the filesystem type %q", ErrInvalidResponse, boundedString(name), boundedString(fsType))
@@ -507,6 +541,12 @@ func candidateIPCBindVolumeDevice(ctx context.Context, client *http.Client, name
 // volume the list reports without a path (a non-local driver) is resolved with
 // one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
 func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
+	return newCandidateIPCPass().containerSources(ctx, client, container)
+}
+
+// containerSources is candidateIPCContainerSources for a pass: a volume is inspected once per pass, however many
+// containers mount it.
+func (p *candidateIPCPass) containerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
 	var plan candidateIPCMountPlanResult
 	if container.plan != nil {
 		plan = container.plan.clone()
@@ -519,7 +559,7 @@ func candidateIPCContainerSources(ctx context.Context, client *http.Client, cont
 	}
 	sources, pending := plan.sources, plan.pending
 	for _, name := range plan.volumes {
-		device, err := candidateIPCBindVolumeDevice(ctx, client, name)
+		device, err := p.volumeDevice(ctx, client, name)
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}

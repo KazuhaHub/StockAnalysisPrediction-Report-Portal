@@ -578,10 +578,22 @@ because they share it. No schema, journal or wire change.
   which created a mount, so a missing source of any mount type is treated alike, which fails closed and is accepted.
 - **Fail closed.** A mount table that cannot be read or parsed, a path no mount entry covers, a runner that is chrooted
   (`/proc/self/root` is not `/`), a lookup error other than absence, and a cancelled context are all refusals.
-- **Mount namespace.** The mount table is the runner's own, so the check assumes the runner and dockerd share the host mount namespace.
-  The daemon dialer compares the daemon peer's `/proc/<pid>/ns/mnt` (from `SO_PEERCRED`) with the runner's on every connection and
-  records the verdict on the client; the inventory read refuses a client that has not seen a daemon in the runner's namespace. A client
-  that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
+- **Recursive binds.** A Docker bind is recursive unless it says otherwise, and nothing the container list shows says otherwise, so every source is
+  treated as recursive: a source also overlaps when any mount whose mount point lies strictly under the source's canonical path exposes a tree
+  that overlaps the namespace (its device and its root within it, with the same prefix test). `-v /srv:/x` with `/srv/y` a bind of `/data` is
+  therefore a reference to `/data/ns-a`. A non-recursive bind is never trusted as such: that needs a container inspect per container and
+  only ever removes refusals, so an `o=bind` volume device is also taken as recursive.
+- **Mount namespace and the daemon.** The mount table is the runner's own, so the check assumes the runner and dockerd share the host mount
+  namespace. `SO_PEERCRED` names the process that listened, which is systemd under socket activation and the proxy behind a forwarder, so it
+  does not identify dockerd. Instead, once per client (on its first dial), the socket's inode is found by path in `/proc/net/unix` and every
+  process with a descriptor on it is found through `/proc/*/fd`. The socket is trusted only when at least one holder's executable is a
+  `dockerd` and every holder is in the runner's mount namespace; socket activation (systemd and dockerd both hold it) passes and a forwarder
+  to a remote daemon (no local dockerd holds the socket) is refused. Every dial is then checked: the answering process must be one of the
+  vetted holders and in the runner's mount namespace, and one failure taints the client. The inventory read refuses a client that has not seen
+  a vetted daemon. A client that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
+- **Mount choice.** Of several mounts at the longest mount point the one mounted on top by the mount tree (parent ids) is used, not the last
+  in the file.
+- **Absent paths.** A `..` after a missing component can return to a directory that exists, and what follows it is resolved for real again.
 - **Bind-backed local volumes.** A bind-backed local volume is mounted on the host only while a container runs, so a created or stopped container
   lists only the daemon's own `_data` directory, which the mount table cannot see through. For that reason a mount of `Type: "volume"` with
   the `local` driver is also inspected by name (`GET /volumes/{name}`, the only volume route on the runner's allow-list, GET only; creating,
@@ -589,7 +601,12 @@ because they share it. No schema, journal or wire change.
   `Options.device` is taken as one more source of the container and judged exactly like a bind source: placed by the mount table, symlinks
   followed, an absent device under the namespace a reference. Any other local volume is judged as before. A failed inspect, a driver that
   differs from the list, options that are not a flat object of strings, a bind option with another filesystem type, a missing or relative
-  device, and a local volume mount without a valid name are refusals. Each local volume of each container costs one inspect per pass.
+  device, and a local volume mount without a valid name are refusals. A local volume that is not a bind but whose options name a host path or
+  a block device is refused (`ErrContainerConflict`): an overlay's `lowerdir`, `upperdir` or `workdir`, any `device` other than the literal
+  `tmpfs`, or any option value that contains a `/`, since an unknown option that looks like a path is treated conservatively. A volume with no
+  options, or only options that name no path (a size, a uid), keeps the path-based judgement. A volume is inspected once per pass whatever the
+  number of containers that mount it; a pass over 300 containers on 300 volumes against a daemon on a unix socket took about 35 ms with one
+  connection per request, so no connection reuse was added (the 5 s pass deadline is not approached).
 - **Lookups.** Every filesystem lookup, the source canonicalisation, the namespace canonicalisation and the mount table read, runs under
   the one-in-flight slot and is abandoned when the context ends, so a stuck mount cannot hold the caller past its deadline. A lookup that
   does not return keeps the slot until it does; further lookups wait for it or give up at their own deadline.
@@ -618,7 +635,13 @@ touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged
 **Limits.**
 
 - The check is a point-in-time observation. A link retargeted, a directory renamed or a mount made between the check and the start is
-  not seen, and it is not exclusion against host root. This is the rename-during-check race.
+  not seen, and it is not exclusion against host root. This is the rename-during-check race. Within one pass the mount table is read
+  once but the lookups are several calls: a source is resolved (symlinks followed) and later placed by the table as two separate steps,
+  and the table, the namespace and each source are read at different instants, so a change between them can pair a path with a stale place.
+- A holder of the daemon socket that exits, with its pid reused before a later dial, would be taken for itself. A pidfd would close it
+  and is not used.
+- A mount hidden because a later mount covers its parent is not detected as hidden; the covering is judged only at the same mount
+  point. A submount that is covered is treated as visible, which can only add a refusal.
 - A filesystem the mount table gives one device number for different trees (a btrfs subvolume layout with identical numbers), or one
   that mints a different number per mount of the same tree, can hide or invent an overlap. A mount hidden beneath a later mount of its
   parent is mapped by longest mount point.

@@ -32,7 +32,7 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 		if !containerSHA.MatchString(container.ID) {
 			return ErrInvalidResponse
 		}
-		sources, err := candidateIPCContainerSources(ctx, client, container)
+		sources, err := pass.containerSources(ctx, client, container)
 		if err != nil {
 			return err
 		}

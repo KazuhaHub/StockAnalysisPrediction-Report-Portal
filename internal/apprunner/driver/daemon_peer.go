@@ -3,13 +3,23 @@ package driver
 import (
 	"fmt"
 	"net/http"
+	"sync"
 	"sync/atomic"
 )
 
-// daemonPeer records, for one client built by newDockerClient, whether the process on the other end of the
-// daemon socket is in the runner's mount namespace. The mount-table overlap check reads the runner's own
+// daemonPeer records, for one client built by newDockerClient, whether the daemon behind the socket is a local
+// dockerd in the runner's mount namespace. SO_PEERCRED names the process that listened, which under socket
+// activation is systemd and behind a forwarder is the proxy, so the socket's holders are vetted instead. The mount-table overlap check reads the runner's own
 // /proc/self/mountinfo, which describes the daemon's paths only when both share a mount namespace.
-type daemonPeer struct{ state atomic.Int32 }
+type daemonPeer struct {
+	state atomic.Int32
+
+	// The holders of the daemon socket are vetted once per client, on its first dial (see observe).
+	mu      sync.Mutex
+	scanned bool
+	holders map[int]struct{}
+	vetErr  error
+}
 
 const (
 	daemonPeerUnknown int32 = iota

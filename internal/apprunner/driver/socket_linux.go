@@ -67,7 +67,7 @@ func dockerDialer(path string, peer ...*daemonPeer) func(context.Context, string
 			return refuse()
 		}
 		if len(peer) > 0 && peer[0] != nil {
-			peer[0].record(sharesMountNamespace(int(credential.Pid)))
+			peer[0].observe(path, int(credential.Pid))
 		}
 		after, err := socketInfo(path, 0)
 		if err != nil || !os.SameFile(before, after) {

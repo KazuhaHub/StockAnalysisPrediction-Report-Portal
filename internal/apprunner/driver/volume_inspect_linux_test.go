@@ -94,25 +94,33 @@ func TestBindBackedLocalVolumeIsJudgedByItsDevice(t *testing.T) {
 		options string
 		want    error // nil means no conflict
 	}{
-		"bind device is the namespace":         {`{"type":"none","o":"bind","device":"` + f.data + `"}`, ErrContainerConflict},
-		"bind device is an ancestor":           {`{"type":"none","o":"bind","device":"` + filepath.Dir(f.data) + `"}`, ErrContainerConflict},
-		"bind device is below the namespace":   {`{"type":"none","o":"bind","device":"` + filepath.Join(f.data, "sub") + `"}`, ErrContainerConflict},
-		"rbind with other options":             {`{"type":"none","o":"ro,rbind","device":"` + f.data + `"}`, ErrContainerConflict},
-		"no type":                              {`{"o":"bind","device":"` + f.data + `"}`, ErrContainerConflict},
-		"bind device elsewhere":                {`{"type":"none","o":"bind","device":"` + filepath.Join(f.root, "data", "ns-b") + `"}`, nil},
-		"bind device absent elsewhere":         {`{"type":"none","o":"bind","device":"` + filepath.Join(f.root, "nowhere") + `"}`, nil},
-		"not a bind (tmpfs options)":           {`{"type":"tmpfs","device":"tmpfs","o":"size=64m"}`, nil},
-		"not a bind (size only)":               {`{"size":"10g"}`, nil},
-		"no options (null)":                    {`null`, nil},
-		"no options (empty object)":            {`{}`, nil},
-		"not a bind but names the namespace":   {`{"type":"none","o":"uid=1","device":"` + f.data + `"}`, nil},
-		"bind without a device":                {`{"type":"none","o":"bind"}`, ErrInvalidResponse},
-		"bind with an empty device":            {`{"type":"none","o":"bind","device":""}`, ErrInvalidResponse},
-		"bind with a relative device":          {`{"type":"none","o":"bind","device":"relative/dir"}`, ErrInvalidResponse},
-		"bind with another filesystem type":    {`{"type":"nfs","o":"bind","device":"` + f.data + `"}`, ErrInvalidResponse},
-		"options is an array":                  {`["bind"]`, ErrInvalidResponse},
-		"an option value that is not a string": {`{"o":"bind","device":5}`, ErrInvalidResponse},
-		"duplicate option keys":                {`{"o":"bind","o":"x","device":"` + f.data + `"}`, ErrInvalidResponse},
+		"bind device is the namespace":              {`{"type":"none","o":"bind","device":"` + f.data + `"}`, ErrContainerConflict},
+		"bind device is an ancestor":                {`{"type":"none","o":"bind","device":"` + filepath.Dir(f.data) + `"}`, ErrContainerConflict},
+		"bind device is below the namespace":        {`{"type":"none","o":"bind","device":"` + filepath.Join(f.data, "sub") + `"}`, ErrContainerConflict},
+		"rbind with other options":                  {`{"type":"none","o":"ro,rbind","device":"` + f.data + `"}`, ErrContainerConflict},
+		"no type":                                   {`{"o":"bind","device":"` + f.data + `"}`, ErrContainerConflict},
+		"bind device elsewhere":                     {`{"type":"none","o":"bind","device":"` + filepath.Join(f.root, "data", "ns-b") + `"}`, nil},
+		"bind device absent elsewhere":              {`{"type":"none","o":"bind","device":"` + filepath.Join(f.root, "nowhere") + `"}`, nil},
+		"not a bind (tmpfs options)":                {`{"type":"tmpfs","device":"tmpfs","o":"size=64m"}`, nil},
+		"not a bind (size only)":                    {`{"size":"10g"}`, nil},
+		"no options (null)":                         {`null`, nil},
+		"no options (empty object)":                 {`{}`, nil},
+		"not a bind but names the namespace":        {`{"type":"none","o":"uid=1","device":"` + f.data + `"}`, ErrContainerConflict},
+		"overlay with an upperdir in the namespace": {`{"type":"overlay","device":"overlay","o":"lowerdir=/a,upperdir=` + f.data + `/up,workdir=` + f.data + `/w"}`, ErrContainerConflict},
+		"overlay with directories elsewhere":        {`{"type":"overlay","device":"overlay","o":"lowerdir=/a,upperdir=/b,workdir=/c"}`, ErrContainerConflict},
+		"an upperdir key":                           {`{"type":"overlay","upperdir":"` + f.data + `"}`, ErrContainerConflict},
+		"ext4 on a block device":                    {`{"type":"ext4","device":"/dev/vdb1"}`, ErrContainerConflict},
+		"a device by label":                         {`{"type":"ext4","device":"LABEL=data"}`, ErrContainerConflict},
+		"an unknown option whose value is a path":   {`{"somekey":"/srv/x"}`, ErrContainerConflict},
+		"an unknown option with a relative path":    {`{"somekey":"a/b"}`, ErrContainerConflict},
+		"a plain volume with an unrelated option":   {`{"somekey":"on"}`, nil},
+		"bind without a device":                     {`{"type":"none","o":"bind"}`, ErrInvalidResponse},
+		"bind with an empty device":                 {`{"type":"none","o":"bind","device":""}`, ErrInvalidResponse},
+		"bind with a relative device":               {`{"type":"none","o":"bind","device":"relative/dir"}`, ErrInvalidResponse},
+		"bind with another filesystem type":         {`{"type":"nfs","o":"bind","device":"` + f.data + `"}`, ErrInvalidResponse},
+		"options is an array":                       {`["bind"]`, ErrInvalidResponse},
+		"an option value that is not a string":      {`{"o":"bind","device":5}`, ErrInvalidResponse},
+		"duplicate option keys":                     {`{"o":"bind","o":"x","device":"` + f.data + `"}`, ErrInvalidResponse},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f.volumes["v"] = volumeBody(tc.options)
@@ -206,5 +214,28 @@ func TestLocalVolumeWithAPlainDirectoryKeepsToday(t *testing.T) {
 	}
 	if err := f.check(f.listing("v", "local")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Each volume is inspected once per pass however many containers mount it.
+func TestVolumeInspectsAreDedupedWithinAPass(t *testing.T) {
+	f := newInspectFixture(t)
+	f.volumes["v"] = volumeBody(`null`)
+	mount := `{"Type":"volume","Name":"v","Driver":"local","Source":"` + filepath.Join(f.root, "docker", "v", "_data") + `","Destination":"/v"}`
+	var entries []string
+	for i := 0; i < 5; i++ {
+		entries = append(entries, `{"Id":"`+strings.Repeat(string(rune('a'+i)), 64)+`","Mounts":[`+mount+`,`+mount+`]}`)
+	}
+	if err := f.check("[" + strings.Join(entries, ",") + "]"); err != nil {
+		t.Fatal(err)
+	}
+	reads := 0
+	for _, asked := range f.asked {
+		if strings.Contains(asked, "/volumes/") {
+			reads++
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("%d volume inspects for one volume", reads)
 	}
 }

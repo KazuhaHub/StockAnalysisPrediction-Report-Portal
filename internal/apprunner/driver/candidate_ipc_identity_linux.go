@@ -48,7 +48,7 @@ var candidateIPCNamespaceResolver = candidateIPCCanonicalize
 // candidateIPCPlace is a path's device and its path within that device's filesystem.
 type candidateIPCPlace struct{ dev, path string }
 
-type candidateIPCMount struct{ dev, root, point string }
+type candidateIPCMount struct{ id, parent, dev, root, point string }
 
 type candidateIPCMounts []candidateIPCMount
 
@@ -59,6 +59,13 @@ type candidateIPCPass struct {
 	mounts     candidateIPCMounts
 	sources    map[string]candidateIPCResolution
 	namespaces map[string]candidateIPCNamespace
+	volumes    map[string]candidateIPCVolumeAnswer
+}
+
+// candidateIPCVolumeAnswer is what one volume inspect said in this pass.
+type candidateIPCVolumeAnswer struct {
+	device string
+	err    error
 }
 
 // candidateIPCResolution is one source's canonical path (where it lands, for an absent one) and its place.
@@ -73,7 +80,7 @@ type candidateIPCNamespace struct {
 }
 
 func newCandidateIPCPass() *candidateIPCPass {
-	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]candidateIPCNamespace{}}
+	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]candidateIPCNamespace{}, volumes: map[string]candidateIPCVolumeAnswer{}}
 }
 
 // candidateIPCReferenced reports whether a mount source overlaps the namespace directory path. See
@@ -155,8 +162,22 @@ func (p *candidateIPCPass) referenced(ctx context.Context, path, source string) 
 		namespace.place = place
 		p.namespaces[path] = namespace
 	}
-	return resolved.place.dev == namespace.place.dev &&
-		(candidateIPCPathWithin(resolved.place.path, namespace.place.path) || candidateIPCPathWithin(namespace.place.path, resolved.place.path)), nil
+	if candidateIPCPlacesOverlap(resolved.place, namespace.place) {
+		return true, nil
+	}
+	// A bind is recursive unless it says otherwise, and nothing the list shows says otherwise, so the container
+	// also sees every mount below the source. Each is a tree of its own: its device and its root within it.
+	for _, mount := range p.mounts {
+		if mount.point != resolved.canonical && candidateIPCPathWithin(resolved.canonical, mount.point) &&
+			candidateIPCPlacesOverlap(candidateIPCPlace{dev: mount.dev, path: mount.root}, namespace.place) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func candidateIPCPlacesOverlap(a, b candidateIPCPlace) bool {
+	return a.dev == b.dev && (candidateIPCPathWithin(a.path, b.path) || candidateIPCPathWithin(b.path, a.path))
 }
 
 func candidateIPCNameOverlap(canonical, path string) bool {
@@ -185,7 +206,7 @@ func candidateIPCCanonicalize(path string) (string, error) {
 	pending := candidateIPCComponents(path)
 	var resolved []string
 	hops := 0
-	missing := false
+	missing := 0 // components appended after the first that does not exist, not yet undone by a ".."
 	for len(pending) > 0 {
 		name := pending[0]
 		pending = pending[1:]
@@ -196,10 +217,14 @@ func candidateIPCCanonicalize(path string) (string, error) {
 			if len(resolved) > 0 {
 				resolved = resolved[:len(resolved)-1]
 			}
+			if missing > 0 {
+				missing-- // back at a directory that exists: what follows is real again
+			}
 			continue
 		}
-		if missing {
+		if missing > 0 {
 			resolved = append(resolved, name)
+			missing++
 			continue
 		}
 		target, err := os.Readlink("/" + strings.Join(append(append([]string{}, resolved...), name), "/"))
@@ -215,7 +240,7 @@ func candidateIPCCanonicalize(path string) (string, error) {
 		case errors.Is(err, syscall.EINVAL): // exists, not a link
 			resolved = append(resolved, name)
 		case errors.Is(err, os.ErrNotExist):
-			missing = true
+			missing = 1
 			resolved = append(resolved, name)
 		default:
 			return "", err
@@ -264,7 +289,7 @@ func parseCandidateIPCMountInfo(raw []byte) (candidateIPCMounts, error) {
 			// It holds no directory tree, so no path can be placed on it.
 			continue
 		}
-		mounts = append(mounts, candidateIPCMount{dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
+		mounts = append(mounts, candidateIPCMount{id: fields[0], parent: fields[1], dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
 	}
 	if len(mounts) == 0 {
 		return nil, ErrInvalidResponse
@@ -299,7 +324,10 @@ func (m candidateIPCMounts) place(path string) (candidateIPCPlace, error) {
 		if !candidateIPCPathWithin(mount.point, path) {
 			continue
 		}
-		if best < 0 || len(mount.point) >= len(m[best].point) {
+		switch {
+		case best < 0 || len(mount.point) > len(m[best].point):
+			best = i
+		case len(mount.point) == len(m[best].point) && m.stackedOver(mount, m[best]):
 			best = i
 		}
 	}
@@ -309,4 +337,34 @@ func (m candidateIPCMounts) place(path string) (candidateIPCPlace, error) {
 	mount := m[best]
 	rel := strings.TrimPrefix(path, mount.point)
 	return candidateIPCPlace{dev: mount.dev, path: filepath.Join(mount.root, rel)}, nil
+}
+
+// stackedOver reports whether a is mounted on top of b at the same mount point, by the mount tree: a's parent
+// chain reaches b. Mounts that are unrelated by the tree keep the order of the file, the latest winning.
+func (m candidateIPCMounts) stackedOver(a, b candidateIPCMount) bool {
+	byID := make(map[string]candidateIPCMount, len(m))
+	for _, mount := range m {
+		byID[mount.id] = mount
+	}
+	for cur, hops := a, 0; hops < len(m); hops++ {
+		if cur.parent == b.id {
+			return true
+		}
+		next, ok := byID[cur.parent]
+		if !ok || next.point != a.point {
+			break
+		}
+		cur = next
+	}
+	for cur, hops := b, 0; hops < len(m); hops++ {
+		if cur.parent == a.id {
+			return false
+		}
+		next, ok := byID[cur.parent]
+		if !ok || next.point != b.point {
+			break
+		}
+		cur = next
+	}
+	return true // unrelated: the later entry wins
 }

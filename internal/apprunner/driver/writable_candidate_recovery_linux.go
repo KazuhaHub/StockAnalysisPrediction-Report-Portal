@@ -33,7 +33,7 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 			return "", ErrInvalidResponse
 		}
 		seen[entry.ID] = true
-		sources, err := candidateIPCContainerSources(ctx, client, entry)
+		sources, err := pass.containerSources(ctx, client, entry)
 		if err != nil {
 			return "", err
 		}
