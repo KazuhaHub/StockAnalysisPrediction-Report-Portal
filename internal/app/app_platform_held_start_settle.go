@@ -3,15 +3,18 @@ package app
 import (
 	"context"
 	"log"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// Settling the start an enable or repair left open.
+// Settling the start an enable, repair or roll back left open.
 //
-// An enable or repair that ended for review with its start effect still open (prepared or unknown) may have left
-// the runner holding that start claimed with nothing executing it. The runner keeps its target reservation, and an
-// enable start's replaced source, until the start is settled. The settlement of a failed update already reads such a
-// start back, asks the runner to settle an orphan, and closes the effect on what it answers; this drives the same
-// steps (settleSettlementStart) for the operations that hold an enable start, from the same idle tick.
+// An enable, repair or roll back (a managed restore that is not a recovery resume) that ended for review with its
+// start effect still open (prepared or unknown) may have left the runner holding that start claimed with nothing
+// executing it. The runner keeps its target reservation, and an enable start's replaced source, until the start is
+// settled. The settlement of a failed update already reads such a start back, asks the runner to settle an orphan,
+// and closes the effect on what it answers; this drives the same steps (settleSettlementStart) for these
+// operations, from the same idle tick.
 //
 // A start the runner holds as reserved (never claimed) holds no capacity but keeps the pending target resource the
 // reserve wrote; its target is removed bound to the reservation, which needs only the start effect, and the start is
@@ -21,13 +24,19 @@ import (
 // platformHeldStartWindow is how many open starts one tick takes a step for.
 const platformHeldStartWindow = 8
 
-// platformHeldStartCandidates lists the finished enables and repairs whose start effect is still open.
+// platformHeldStartCandidates lists the finished enables, repairs and roll backs whose start effect is still open.
 func (s *Server) platformHeldStartCandidates(ctx context.Context) ([]string, error) {
+	// An enable or repair holds an enable-start. A managed restore that is not a recovery resume (a roll back of a
+	// failed update) holds a restore-start; a resume is reconciled by the recovery path, which runs while the Portal is
+	// paused and has its own evidence, so it is left out here.
 	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
-		WHERE o.action IN ('enable','repair') AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
-		AND f.kind='enable-start' AND f.state IN ('prepared','unknown')
-		ORDER BY o.completed_ms,o.id LIMIT 256`)
+		LEFT JOIN app_platform_review_plans p ON p.id=o.review_plan_id
+		WHERE o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+		AND f.state IN ('prepared','unknown')
+		AND ((o.action IN ('enable','repair') AND f.kind='enable-start')
+		  OR (o.action='restore' AND f.kind='restore-start' AND (p.plan_json IS NULL OR p.plan_json NOT LIKE ?)))
+		ORDER BY o.completed_ms,o.id LIMIT 256`, platformResumePlanPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +99,7 @@ func (s *Server) settlePlatformHeldStarts(ctx context.Context, endpoint platform
 
 func (s *Server) settlePlatformHeldStart(ctx context.Context, endpoint platformRuntimeEndpoint, operation string) (bool, error) {
 	lease, err := platformSettlementLease(s.st.poolExec(), operation)
-	if err != nil || !platformSameReleaseLifecycle(lease.snapshot.Action) {
+	if err != nil || (!platformSameReleaseLifecycle(lease.snapshot.Action) && lease.snapshot.Action != appplatform.ActionRestore) {
 		return false, err
 	}
 	start, err := loadPlatformSettleEffect(s.st.poolExec(), operation, "start", 1)

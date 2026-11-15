@@ -850,7 +850,8 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		wantKind = platformSameReleaseStartKind(lease.snapshot.Action)
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
-		return fail("restore start")
+		return loadPlatformRestoreSettlementStart(e, lease, runtime, now, completed, platformRestoreStartRow{
+			effectID: effectID, kind: kind, digest: digest, epoch: epoch, state: state, receipt: receipt, admitted: admitted, observed: observed})
 	}
 	if kind != wantKind || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown" && state != "applied") {
 		return fail("effect row")
