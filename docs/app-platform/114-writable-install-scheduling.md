@@ -70,7 +70,11 @@ just because a new worker exists.
 endpoint, worker UUID and interval bounds. Empty frontend bootstrap is refused.
 Construction starts no goroutine. `serve` retains its supported-Linux and exact
 non-root controller UID gate, single-start guard, cancellation/join behavior and
-serial gate. Production frontend startup does not call the new constructor.
+serial gate. Production startup calls the constructor when a trusted runner endpoint is bound
+(`RP_APP_RUNNER_*`, validated at startup): the installer service starts this scheduler beside the
+frontend scheduler, with its own worker identity, and stops both at shutdown. With no endpoint bound it
+starts the frontend scheduler only. The runner-side generation-1 service-task registration kind that
+the scheduler's installs need ships with it (doc 170).
 
 A writable tick selects its own queue, renews only at a serial boundary, invokes
 the writable driver and retains the last confirmed result token. No concurrent
