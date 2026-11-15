@@ -999,8 +999,8 @@ func (s *Server) platformPruneRefusals(ctx context.Context) ([]platformPruneRefu
 const platformPruneInterval = time.Minute
 
 // pruneRecoverySetsOnTick runs prunePlatformRecoverySets from the scheduler. It never fails the tick. The step is
-// throttled to platformPruneInterval, except that a pass that left work (a deletion begun or waiting on the runner)
-// lets the next tick continue it.
+// throttled to platformPruneInterval, except that a pass that left a deletion running on the runner lets the next
+// tick read it back. A deletion the runner refused to claim (an installation busy there) waits for the interval.
 func (s *Server) pruneRecoverySetsOnTick(ctx context.Context, endpoint platformRuntimeEndpoint) {
 	now := time.Now().UnixMilli()
 	if last := s.platformPruneLast.Load(); last != 0 && now-last < platformPruneInterval.Milliseconds() {
@@ -1011,7 +1011,7 @@ func (s *Server) pruneRecoverySetsOnTick(ctx context.Context, endpoint platformR
 	if err != nil && ctx.Err() == nil {
 		log.Printf("app-platform recovery set prune: %v", err)
 	}
-	if result.Busy > 0 || result.Unclaimed > 0 {
+	if result.Busy > 0 {
 		s.platformPruneLast.Store(0)
 	}
 }
