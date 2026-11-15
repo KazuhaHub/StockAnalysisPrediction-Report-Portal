@@ -2,18 +2,41 @@
   "version": 1,
   "source": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8 (DEV-04)",
   "allow": [
-    "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "0BSD", "Zlib",
-    "Unlicense", "CC0-1.0", "BlueOak-1.0.0", "Python-2.0", "MPL-2.0"
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Apache-2.0",
+    "0BSD",
+    "Zlib",
+    "Unlicense",
+    "CC0-1.0",
+    "BlueOak-1.0.0",
+    "Python-2.0",
+    "MPL-2.0"
   ],
   "deny": [
-    "GPL-2.0-only", "GPL-2.0", "SSPL-1.0", "BUSL-1.1", "Commons-Clause",
-    "EPL-1.0", "EPL-2.0", "NOASSERTION", "UNLICENSED"
+    "GPL-2.0-only",
+    "GPL-2.0",
+    "SSPL-1.0",
+    "BUSL-1.1",
+    "Commons-Clause",
+    "EPL-1.0",
+    "EPL-2.0",
+    "NOASSERTION",
+    "UNLICENSED"
   ],
   "own": {
-    "licences": ["AGPL-3.0-only"],
-    "components": ["github.com/KazuhaHub/"]
+    "licences": [
+      "AGPL-3.0-only"
+    ],
+    "components": [
+      "github.com/KazuhaHub/"
+    ]
   },
-  "election_only": ["FTL"],
+  "election_only": [
+    "FTL"
+  ],
   "elections": [
     {
       "component": "dompurify",
@@ -33,6 +56,32 @@
       "component": "elkjs",
       "requires": "elk-build-test",
       "reason": "EPL-2.0 dependency of mermaid 12, aliased to an empty module in the Vite build; not shipped. Valid only while the ELK build test passes (web/scripts/check-no-elk.mjs)."
+    }
+  ],
+  "reviewed": [
+    {
+      "components": [
+        "golang.org/x/crypto",
+        "golang.org/x/image",
+        "golang.org/x/net",
+        "golang.org/x/oauth2",
+        "golang.org/x/sync",
+        "golang.org/x/sys",
+        "golang.org/x/text"
+      ],
+      "reviewed_as": "BSD-3-Clause",
+      "file": "LICENSE",
+      "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
+      "reason": "Owner review: the LICENSE shipped in each golang.org/x module is the standard Go BSD 3-clause text (byte-identical across all of them); the licence detector reports it as BSD-Source-Code. Pinned to the file's SHA-256, so a change to the text makes the record stale."
+    },
+    {
+      "components": [
+        "khroma"
+      ],
+      "reviewed_as": "MIT",
+      "file": "license",
+      "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
+      "reason": "Owner review: the package ships the MIT licence text in its license file and declares no license field in package.json. Pinned to the file's SHA-256."
     }
   ]
 }

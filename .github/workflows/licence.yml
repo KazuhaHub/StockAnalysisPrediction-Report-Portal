@@ -81,7 +81,10 @@ jobs:
           else
             status=1
           fi
+          # Reviewed-as records are checked against the licence files that ship: the Go module cache and
+          # the node_modules this job installed.
           python3 -I scripts/licence_scan.py --policy scripts/licence-policy.json "${verified[@]}" \
+            --go-mod-cache "$(go env GOMODCACHE)" --node-modules web/node_modules \
             --report "$RUNNER_TEMP/licence-report.json" \
             "$RUNNER_TEMP/go.cdx.json" "$RUNNER_TEMP/web.cdx.json" || status=1
           exit "$status"

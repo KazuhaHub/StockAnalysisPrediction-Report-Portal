@@ -20,15 +20,23 @@ Rules, in the order they apply to one component:
    every term allowed, and several licence entries on one component are ANDed.
 4. A licence in "election_only" (the FreeType License) is never a free choice: it counts only through an
    election record naming the component.
-5. The project's own licence (AGPL-3.0-only) is allowed only on the own components: an entry ending in "/" is
+5. A reviewed-as record is the owner's reading of one licence text: it names components, the licence they are
+   reviewed as (which must be on the allow list), the file inside the package and the SHA-256 of that file. It
+   applies only to a component that fails on its merits for a reason other than a denied licence, and only while
+   the file that ships in the Go module cache or node_modules still hashes to the pinned value. A changed or
+   missing file makes the record stale: it is ignored, with a warning, and the gate fails again.
+6. The project's own licence (AGPL-3.0-only) is allowed only on the own components: an entry ending in "/" is
    a namespace prefix, any other entry names one package exactly.
 
 This evaluator is duplicated in the Apps repository (scripts/licence_scan.py in KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps); keep the two in sync.
 """
 import argparse
+import hashlib
 import json
+import os
 import re
 import sys
+import urllib.parse
 
 OK, ELECTION_REQUIRED, UNKNOWN, DENIED = "ok", "election-required", "unknown", "denied"
 _BAD_ORDER = {ELECTION_REQUIRED: 1, UNKNOWN: 2, DENIED: 3}
@@ -112,9 +120,50 @@ def load_policy(path):
     with open(path, encoding="utf-8") as f:
         policy = json.load(f)
     for key, default in (("allow", []), ("deny", []), ("own", {"licences": [], "components": []}),
-                         ("election_only", []), ("elections", []), ("exclusions", [])):
+                         ("election_only", []), ("elections", []), ("exclusions", []), ("reviewed", [])):
         policy.setdefault(key, default)
     return policy
+
+
+MAX_LICENCE_FILE = 1 << 20
+
+
+def _purl_path(comp, kind):
+    purl = comp.get("purl") or ""
+    prefix = f"pkg:{kind}/"
+    if not purl.startswith(prefix):
+        return None
+    body = purl[len(prefix):].split("?", 1)[0].split("#", 1)[0]
+    body = body.rsplit("@", 1)[0]
+    return urllib.parse.unquote(body)
+
+
+def _go_escape(path):
+    return re.sub(r"[A-Z]", lambda m: "!" + m.group(0).lower(), path)
+
+
+def make_reader(go_mod_cache=None, node_modules=None):
+    """A reader of one file inside a component's shipped package: the Go module cache directory of the
+    module version, or the package directory under node_modules. It never leaves that directory."""
+    def read(comp, name):
+        root = None
+        go = _purl_path(comp, "golang")
+        npm = _purl_path(comp, "npm")
+        if go and go_mod_cache and comp.get("version"):
+            root = os.path.join(go_mod_cache, _go_escape(go) + "@" + comp["version"])
+        elif npm and node_modules:
+            root = os.path.join(node_modules, npm)
+        if root is None or not os.path.isdir(root):
+            return None
+        real_root = os.path.realpath(root)
+        path = os.path.realpath(os.path.join(real_root, name))
+        if os.path.commonpath([real_root, path]) != real_root or not os.path.isfile(path):
+            return None
+        if os.path.getsize(path) > MAX_LICENCE_FILE:
+            return None
+        with open(path, "rb") as f:
+            return f.read()
+    return read
 
 
 def component_key(comp):
@@ -196,11 +245,13 @@ def _fail(base, reason, detail):
     return dict(base, status="fail", reason=reason, detail=detail)
 
 
-def evaluate(sbom, policy, verified):
+def evaluate(sbom, policy, verified, read_licence=None):
     """Judge every component of `sbom` (a dict with "components") against `policy`.
 
     Returns {"ok", "components", "failures", "warnings", "problems"}. `verified` is the set of check
     names the caller has confirmed passed; exclusions that require a name outside it do not apply.
+    `read_licence(component, filename)` returns the bytes of a file in the shipped package, or None; without
+    one no reviewed-as record can be verified.
     """
     comps = sbom.get("components") or []
     problems = []
@@ -208,6 +259,8 @@ def evaluate(sbom, policy, verified):
         problems.append("SBOM has no components: the generator produced nothing to scan")
     exclusions = {e["component"]: e for e in policy["exclusions"]}
     elections = {e["component"]: e for e in policy["elections"]}
+    reviewed = {name: rec for rec in policy.get("reviewed", []) for name in rec["components"]}
+    allow_lower = {a.lower() for a in policy["allow"]}
     own_prefixes = policy["own"]["components"]
     seen = set()
     results, warnings = [], []
@@ -231,7 +284,12 @@ def evaluate(sbom, policy, verified):
             continue
         base["declared"] = declared
         if not nodes:
-            results.append(_fail(base, "no-licence", "the SBOM records no licence for this component"))
+            rec = reviewed.get(key)
+            if rec is not None and _apply_review(key, comp, rec, UNKNOWN, allow_lower, read_licence, warnings):
+                results.append(dict(base, status="pass", via="reviewed", reason="reviewed",
+                                    reviewed_as=rec["reviewed_as"], detail=rec["reason"]))
+            else:
+                results.append(_fail(base, "no-licence", "the SBOM records no licence for this component"))
             continue
         own = any(key == p or (p.endswith("/") and key.startswith(p)) for p in own_prefixes)
         judge = _Judge(policy, own)
@@ -252,15 +310,43 @@ def evaluate(sbom, policy, verified):
         if verdict == OK:
             results.append(dict(base, status="pass", via="own" if judge.used_own else "allow", reason="allowed"))
         else:
+            rec = reviewed.get(key)
+            if rec is not None:
+                outcome = _apply_review(key, comp, rec, verdict, allow_lower, read_licence, warnings)
+                if outcome is not None:
+                    results.append(dict(base, status="pass", via="reviewed", reason="reviewed",
+                                        reviewed_as=rec["reviewed_as"], detail=rec["reason"]))
+                    continue
             detail = {DENIED: "a denied licence", UNKNOWN: "a licence that is on neither list",
                       ELECTION_REQUIRED: "only allowed through an election record, and none applies"}[verdict]
             results.append(_fail(base, verdict, detail))
-    for name, e in {**elections, **exclusions}.items():
+    for name, e in {**elections, **exclusions, **reviewed}.items():
         if name not in seen:
             warnings.append(f"policy entry for {name} is not present in this SBOM set")
     failures = [r for r in results if r["status"] == "fail"]
     return {"ok": not failures and not problems, "components": results, "failures": failures,
             "warnings": warnings, "problems": problems}
+
+
+def _apply_review(key, comp, rec, verdict, allow_lower, read_licence, warnings):
+    """True when the reviewed-as record holds for this component; otherwise None, with the reason as a warning."""
+    if rec["reviewed_as"].lower() not in allow_lower:
+        warnings.append(f"reviewed-as record for {key} reviews it as {rec['reviewed_as']!r}, which is not allowed "
+                        f"by the policy; ignored")
+        return None
+    if verdict == DENIED:
+        warnings.append(f"reviewed-as record for {key} cannot override a denied licence; ignored")
+        return None
+    data = read_licence(comp, rec["file"]) if read_licence else None
+    if data is None:
+        warnings.append(f"reviewed-as record for {key}: licence file {rec['file']!r} not found in the shipped "
+                        f"package; ignored")
+        return None
+    if hashlib.sha256(data).hexdigest() != rec["sha256"].lower():
+        warnings.append(f"stale reviewed-as record for {key}: {rec['file']!r} no longer hashes to the pinned "
+                        f"SHA-256; ignored")
+        return None
+    return True
 
 
 def _declared_nodes_text(comp):
@@ -282,8 +368,8 @@ def _render(result, sources):
     lines.append(f"licence scan: {len(comps)} components from {', '.join(sources)}")
     lines.append("  passed: " + (", ".join(f"{n} {v}" for v, n in sorted(by_via.items())) or "none"))
     for c in comps:
-        if c["status"] == "pass" and c["via"] in ("election", "exclusion"):
-            extra = f" -> {c['elected']}" if c["via"] == "election" else ""
+        if c["status"] == "pass" and c["via"] in ("election", "exclusion", "reviewed"):
+            extra = {"election": f" -> {c.get('elected')}", "reviewed": f" reviewed as {c.get('reviewed_as')}"}.get(c["via"], "")
             lines.append(f"  {c['via']}: {c['name']} {c['version']} [{c['declared']}]{extra}: {c['detail']}")
     for w in result["warnings"]:
         lines.append(f"  warning: {w}")
@@ -303,6 +389,9 @@ def main(argv=None):
     ap.add_argument("--policy", required=True)
     ap.add_argument("--verified", action="append", default=[], metavar="NAME",
                     help="a check that passed in this run; exclusions requiring it become valid")
+    ap.add_argument("--go-mod-cache", metavar="DIR", help="Go module cache (go env GOMODCACHE), where reviewed-as "
+                    "records find a module's licence file")
+    ap.add_argument("--node-modules", metavar="DIR", help="node_modules directory holding the packages of the SBOM")
     ap.add_argument("--report", help="write the full result as JSON")
     ap.add_argument("sbom", nargs="+")
     args = ap.parse_args(argv)
@@ -319,7 +408,8 @@ def main(argv=None):
     except (OSError, ValueError, KeyError) as e:
         print(f"licence scan: cannot read input: {e}", file=sys.stderr)
         return 2
-    result = evaluate({"components": comps}, policy, set(args.verified))
+    result = evaluate({"components": comps}, policy, set(args.verified),
+                      make_reader(args.go_mod_cache, args.node_modules))
     for path in empty:
         result["problems"].append(f"{path} has no components")
     result["problems"] = sorted(set(result["problems"]))

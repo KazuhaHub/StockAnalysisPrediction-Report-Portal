@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -276,6 +276,63 @@ class GuardTests(unittest.TestCase):
         self.assertIn(f'LATEST_TARGET={tag}\n', out)
         skipped = set(re.search(r'^SKIPPED_INCOMPLETE=(.*)$', out, re.M)[1].split(','))
         self.assertEqual(skipped, set(short), {t: short[t] for t in set(short) - skipped})
+
+class LicenceGateTests(unittest.TestCase):
+    """A release needs a green licence scan on the exact commit, as well as the full test run."""
+
+    def test_licence_ready_needs_the_scan_job_green(self):
+        self.assertTrue(licence_ready([{'name': 'licence scan', 'conclusion': 'success'}]))
+        self.assertFalse(licence_ready([]))
+        for bad in ('failure', 'cancelled', 'skipped', None):
+            self.assertFalse(licence_ready([{'name': 'licence scan', 'conclusion': bad}]), bad)
+        self.assertFalse(licence_ready([{'name': 'go-test', 'conclusion': 'success'}]))
+
+    def test_licence_ready_matches_the_licence_workflow(self):
+        # The guard names the job by display name, so a rename must fail here and not at release time.
+        names = push_run_jobs(read_workflow('licence.yml'))
+        self.assertEqual(names, {'licence scan'})
+        self.assertTrue(licence_ready([{'name': n, 'conclusion': 'success'} for n in names]))
+
+    def test_licence_workflow_runs_on_main_pushes_and_can_be_dispatched(self):
+        # The guard verifies a run for the exact main commit; with no push trigger there would never be one.
+        head = read_workflow('licence.yml').split('\njobs:\n', 1)[0]
+        self.assertRegex(head, r'(?m)^  push:\n    branches: \[main\]$')
+        self.assertRegex(head, r'(?m)^  workflow_dispatch:')
+
+    def runs(self, workflow, conclusion='success', jobs=None):
+        run = {'id': 1, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'u/' + workflow}
+        default = {'test.yml': [{'name': n, 'conclusion': 'success'} for n in sorted(
+            push_run_jobs(read_workflow('test.yml')))], 'licence.yml': [{'name': 'licence scan', 'conclusion': 'success'}]}
+        return run, default[workflow] if jobs is None else jobs
+
+    def wait(self, licence_conclusion='success', licence_jobs=None, licence_runs=True):
+        def fake(endpoint):
+            if '/runs/1/jobs' in endpoint:
+                return {'jobs': self.current_jobs}
+            wf = 'licence.yml' if 'licence.yml' in endpoint else 'test.yml'
+            self.current_jobs = self.runs(wf, licence_conclusion if wf == 'licence.yml' else 'success',
+                                          licence_jobs if wf == 'licence.yml' else None)[1]
+            if wf == 'licence.yml' and not licence_runs:
+                return {'workflow_runs': []}
+            return {'workflow_runs': [self.runs(wf, licence_conclusion if wf == 'licence.yml' else 'success')[0]]}
+        with patch('release_guard.gh_json', side_effect=fake):
+            wait_ci('o/r', 'a' * 40)
+
+    def test_green_tests_and_green_licence_pass(self):
+        self.wait()
+
+    def test_a_failed_licence_run_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'Licence scan did not pass'):
+            self.wait(licence_conclusion='failure')
+
+    def test_a_licence_run_without_the_scan_job_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'Licence scan did not pass'):
+            self.wait(licence_jobs=[])
+
+    def test_no_licence_run_for_the_commit_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'licence.yml'):
+            self.wait(licence_runs=False)
+
 
 if __name__ == '__main__':
     unittest.main()
