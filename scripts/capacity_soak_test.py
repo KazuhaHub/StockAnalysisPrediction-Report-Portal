@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -252,8 +253,15 @@ def per_backend(index, at_ms, usage_usec, mem_fraction=0.9, pids=58, quota=CPU_Q
             "memory_max": LIMIT_MIB * 1024 ** 2, "cpu_quota_millis": quota, "pids_current": pids, "pids_max": PIDS_MAX}
 
 
+def journal_reading(at_ms, rate=100):
+    """The runner's journal files as the sampler records them: a database that grows by `rate` bytes a second from the start of the load."""
+    seconds = max((at_ms - LOAD_START_MS) // 1000, 0)
+    database, wal = 4 * 1024 ** 2 + seconds * rate, 1024 ** 2
+    return {"files": {"journal.sqlite3": database, "journal.sqlite3-wal": wal}, "total": database + wal}
+
+
 def backend_sample(at_ms, mem_mib=3900, cpu=1900.0, running=8, total=8, oom=0, restarts=0, usage_fraction=0.95, mem_fraction=0.9, pids=58,
-                   available_kib=12_000_000, detail=True):
+                   available_kib=12_000_000, detail=True, journal_rate=100):
     """One host sample. usage_usec counts from LOAD_START_MS so a backend at usage_fraction burns that share of its quota."""
     seconds = (at_ms - LOAD_START_MS) / 1000.0
     usage = int(max(seconds, 0) * CPU_QUOTA_MILLIS * usage_fraction * 1000.0)
@@ -262,6 +270,8 @@ def backend_sample(at_ms, mem_mib=3900, cpu=1900.0, running=8, total=8, oom=0, r
                            "restart_count": restarts, "memory_bytes": mem_mib * 1024 ** 2, "cpu_millis": cpu, "pids": 400}}
     if detail:
         sample["backends"]["per_backend"] = [per_backend(i, at_ms, usage, mem_fraction=mem_fraction, pids=pids) for i in range(8)]
+    if journal_rate is not None:
+        sample["journal_bytes"] = journal_reading(at_ms, journal_rate)
     return sample
 
 
@@ -276,6 +286,7 @@ class EvaluateTests(unittest.TestCase):
         evidence = evidence or child_evidence(minutes)
         samples = samples if samples is not None else load_samples(minutes)
         kwargs.setdefault("unit_tests", {"TestTaskQuotasRefuseAtTheirOwnBoundary": True})
+        kwargs.setdefault("event", "workflow_dispatch")
         return soak.evaluate(evidence, samples, parent_passed=exit_ok, **kwargs)
 
     def failing(self, verdict):
@@ -587,7 +598,7 @@ class EvaluateTests(unittest.TestCase):
         # 60 percent of the quota is idle by this rule; the same backend at 75 percent passes.
         slow = [backend_sample(at, usage_fraction=0.60) for at in range(LOAD_START_MS - 30_000, LOAD_START_MS + 3 * PERIOD_MS + 1, 30_000)]
         verdict = self.verdict(samples=slow)
-        self.assertEqual(self.failing(verdict), {"backends_held_their_limits_in_every_window"})
+        self.assertEqual(self.failing(verdict), {"backends_used_their_cpu_quota_in_every_window"})
         ok = [backend_sample(at, usage_fraction=0.75) for at in range(LOAD_START_MS - 30_000, LOAD_START_MS + 3 * PERIOD_MS + 1, 30_000)]
         self.assertTrue(self.verdict(samples=ok)["passed"])
 
@@ -599,40 +610,75 @@ class EvaluateTests(unittest.TestCase):
                 row = sample["backends"]["per_backend"][5]
                 row["usage_usec"] = int((PERIOD_MS / 1000.0) * CPU_QUOTA_MILLIS * 0.95 * 1000.0) * 1
         verdict = self.verdict(samples=samples)
-        self.assertIn("backends_held_their_limits_in_every_window", self.failing(verdict))
-        problems = self.check(verdict, "backends_held_their_limits_in_every_window")["detail"]["problems"]
+        self.assertIn("backends_used_their_cpu_quota_in_every_window", self.failing(verdict))
+        problems = self.check(verdict, "backends_used_their_cpu_quota_in_every_window")["detail"]["problems"]
         self.assertTrue(any(p["window"] == 2 and p["backend"] == "container-5" for p in problems), problems)
 
-    def test_memory_current_must_stay_at_or_above_the_held_fraction_in_every_window(self):
+    def test_memory_current_includes_the_page_cache_so_it_is_a_diagnostic_and_the_backends_own_held_bytes_decide(self):
+        # A backend whose cgroup memory.current reads 50% of its limit (page cache dropped) but which holds its 85% itself still passes.
         samples = load_samples(3)
         samples[3]["backends"]["per_backend"][0]["memory_current"] = int(0.50 * LIMIT_MIB * 1024 ** 2)
         verdict = self.verdict(samples=samples)
-        self.assertIn("backends_held_their_limits_in_every_window", self.failing(verdict))
-        problems = self.check(verdict, "backends_held_their_limits_in_every_window")["detail"]["problems"]
-        self.assertTrue(any("memory" in p["reason"] for p in problems), problems)
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        self.assertAlmostEqual(verdict["achieved_fractions"]["memory_current_min"]["per_backend"]["container-0"], 0.50, places=3)
+
+    def test_held_bytes_below_the_held_fraction_in_one_window_fail_even_when_the_last_window_is_fine(self):
+        evidence = child_evidence(windows=4)
+        evidence["windows"][1]["backends"][4] = backend_status(4, window=2, held_bytes=int(0.60 * LIMIT_MIB) * 1024 ** 2)
+        verdict = self.verdict(evidence, minutes=4)
+        self.assertEqual(self.failing(verdict), {"backends_ran_every_declared_load"})
+        problems = self.check(verdict, "backends_ran_every_declared_load")["detail"]["problems"]
+        self.assertTrue(any("window 2" in reason and "held" in reason for p in problems for reason in p["reasons"]), problems)
 
     def test_cgroup_counters_missing_from_the_samples_fail_instead_of_passing_vacuously(self):
         samples = load_samples(3, detail=False)
-        self.assertIn("backends_held_their_limits_in_every_window", self.failing(self.verdict(samples=samples)))
-        self.assertIn("backends_reached_their_pid_limit", self.failing(self.verdict(samples=samples)))
+        self.assertIn("backends_used_their_cpu_quota_in_every_window", self.failing(self.verdict(samples=samples)))
+        self.assertIn("backends_held_their_pid_limit_in_every_window", self.failing(self.verdict(samples=samples)))
 
-    def test_pids_must_reach_the_limit_minus_a_small_margin_and_the_fractions_are_recorded(self):
+    def test_pids_must_stay_at_the_limit_minus_a_small_margin_in_every_window_and_the_fractions_are_recorded(self):
         self.assertEqual(soak.PIDS_REACHED_FRACTION, 0.85)
         low = load_samples(3, pids=40)  # 40 of 64: the first smoke
         verdict = self.verdict(samples=low)
-        self.assertEqual(self.failing(verdict), {"backends_reached_their_pid_limit"})
+        self.assertEqual(self.failing(verdict), {"backends_held_their_pid_limit_in_every_window"})
         achieved = self.verdict()["achieved_fractions"]
         self.assertAlmostEqual(achieved["pids_peak"]["min"], 58 / 64, places=3)
+        self.assertAlmostEqual(achieved["pids_window_min"]["min"], 58 / 64, places=3)
         self.assertAlmostEqual(achieved["memory_current_min"]["min"], 0.9, places=3)
         self.assertGreaterEqual(achieved["cpu_window_min"]["min"], 0.94)
         self.assertEqual(len(achieved["pids_peak"]["per_backend"]), 8)
+
+    def test_a_pid_count_that_dropped_in_one_window_fails_although_the_run_peak_reached_the_limit(self):
+        samples = load_samples(3)
+        for sample in samples:  # window 2 only: backend 6 held 40 of 64 PIDs, having peaked at 60 before
+            if LOAD_START_MS + PERIOD_MS < sample["at_ms"] <= LOAD_START_MS + 2 * PERIOD_MS:
+                row = sample["backends"]["per_backend"][6]
+                row["pids_current"], row["pids_peak"] = 40, 60
+        verdict = self.verdict(samples=samples)
+        self.assertEqual(self.failing(verdict), {"backends_held_their_pid_limit_in_every_window"})
+        detail = self.check(verdict, "backends_held_their_pid_limit_in_every_window")["detail"]
+        self.assertTrue(any(p["window"] == 2 and p["backend"] == "container-6" for p in detail["problems"]), detail)
+
+    def test_the_runner_journal_may_grow_by_at_most_the_bound_over_the_load(self):
+        self.assertEqual(soak.JOURNAL_GROWTH_LIMIT_BYTES, 256 * 1024 ** 2)
+        ok = self.verdict()
+        self.assertTrue(ok["passed"], self.failing(ok))
+        detail = self.check(ok, "runner_journal_growth_within_bound")["detail"]
+        self.assertEqual(detail["limit_bytes"], 256 * 1024 ** 2)
+        self.assertGreater(detail["growth_bytes"], 0)
+        # 3 minutes at 2 MiB a second is 360 MiB: over the bound.
+        fast = self.verdict(samples=load_samples(3, journal_rate=2 * 1024 ** 2))
+        self.assertEqual(self.failing(fast), {"runner_journal_growth_within_bound"})
+        # No reading at all is a failed check, not a pass.
+        blind = self.verdict(samples=load_samples(3, journal_rate=None))
+        self.assertEqual(self.failing(blind), {"runner_journal_growth_within_bound"})
 
     def test_ops08_evidence_requires_the_full_duration_and_a_pass(self):
         smoke = self.verdict(minutes=5)
         self.assertTrue(smoke["passed"])
         self.assertFalse(smoke["counts_as_ops08_evidence"])
         evidence = child_evidence(windows=120)
-        full = soak.evaluate(evidence, load_samples(120), parent_passed=True, unit_tests={"TestTaskQuotasRefuseAtTheirOwnBoundary": True})
+        full = soak.evaluate(evidence, load_samples(120), parent_passed=True, unit_tests={"TestTaskQuotasRefuseAtTheirOwnBoundary": True},
+                             event="workflow_dispatch")
         self.assertTrue(full["passed"], self.failing(full))
         self.assertTrue(full["counts_as_ops08_evidence"])
 
@@ -641,7 +687,7 @@ class VariantTests(unittest.TestCase):
     def test_a_diagnostic_variant_never_counts_as_ops08_evidence_even_when_it_passes_for_two_hours(self):
         evidence = child_evidence(windows=120)
         samples = load_samples(120)
-        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
         self.assertTrue(soak.evaluate(evidence, samples, **kwargs)["counts_as_ops08_evidence"])
         verdict = soak.evaluate(evidence, samples, variant="memory-db", **kwargs)
         self.assertTrue(verdict["passed"])
@@ -659,7 +705,7 @@ class VariantTests(unittest.TestCase):
 
 class DatabaseTests(unittest.TestCase):
     def kwargs(self):
-        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
 
     def test_only_a_postgres_run_counts_as_ops08_evidence(self):
         # Owner decision 2026-11-14: the evidence is a run on PostgreSQL; a SQLite run is a known-limit measurement.
@@ -750,7 +796,7 @@ class CPUBreakdownTests(unittest.TestCase):
 
 
 def self_kwargs():
-    return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+    return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
 
 
 class StallTests(unittest.TestCase):
@@ -944,7 +990,7 @@ class PlatformWeightTests(unittest.TestCase):
                 soak.soak_platform_cpu_weight(bad)
 
     def test_a_weighted_run_is_not_evidence(self):
-        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
         verdict = soak.evaluate(child_evidence(windows=120), load_samples(120), platform_weight="1000", **kwargs)
         self.assertTrue(verdict["passed"])
         self.assertFalse(verdict["counts_as_ops08_evidence"])
@@ -968,7 +1014,7 @@ class PinPlatformTests(unittest.TestCase):
             soak.soak_pin_platform("yes")
 
     def test_a_pinned_run_is_not_evidence(self):
-        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
         evidence, samples = child_evidence(windows=120), load_samples(120)
         verdict = soak.evaluate(evidence, samples, pin_platform=True, **kwargs)
         self.assertTrue(verdict["passed"])
@@ -1003,7 +1049,7 @@ class ReservedCPUTests(unittest.TestCase):
 
     def test_an_override_of_the_reserved_cpus_is_evidence_only_when_it_equals_the_default(self):
         self.assertEqual(soak.RUNNER_DEFAULT_RESERVED_CPUS, 1)
-        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
         evidence, samples = child_evidence(windows=120), load_samples(120)
         self.assertTrue(soak.evaluate(evidence, samples, reserved_cpus="1", **kwargs)["counts_as_ops08_evidence"])
         verdict = soak.evaluate(evidence, samples, reserved_cpus="2", **kwargs)
@@ -1115,7 +1161,7 @@ class CgroupLayoutTests(unittest.TestCase):
 
 class CPUBudgetTests(unittest.TestCase):
     def kwargs(self):
-        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        return {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}, "event": "workflow_dispatch"}
 
     def test_the_cpu_percent_is_empty_or_one_to_one_hundred(self):
         self.assertEqual(soak.soak_cpu_percent(""), "")
@@ -1220,6 +1266,299 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             soak.require_disposable_environment({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}, euid=0, platform="linux", which=lambda tool, path=None: None)
         soak.require_disposable_environment({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}, euid=0, platform="linux", which=lambda tool, path=None: "/bin/" + tool)
+
+
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/app-project-quota-probe.yml"
+GOOD = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+
+
+def workflow_dispatch_inputs():
+    """The input names of the workflow_dispatch trigger, read from the workflow file itself."""
+    names, inside = [], False
+    for line in WORKFLOW.read_text().splitlines():
+        if line.startswith("  workflow_dispatch:"):
+            inside = True
+        elif inside and line.startswith("  ") and not line.startswith("   "):
+            break
+        elif inside and re.fullmatch(r"      [a-z_]+:", line):
+            names.append(line.strip().rstrip(":"))
+    return names
+
+
+def job_env_line(name):
+    job = WORKFLOW.read_text()
+    job = job[job.index("\n  capacity-soak:"):]
+    return next(line for line in job.splitlines() if line.strip().startswith(name + ":") and line.startswith("      APP_"))
+
+
+# What the dispatcher sets for each diagnostic input, in the form the job passes it on: always a value that is not the default.
+NON_DEFAULT = {"soak_db": "sqlite-file", "soak_cpu_percent": "37", "soak_reserved_cpus": "2", "soak_pin_platform": "true",
+               "soak_platform_cpu_weight": "1000", "soak_runner_profile": "1", "soak_variant": "memory-db"}
+
+
+def evidence_environment(**changes):
+    env = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": "a" * 40, "GITHUB_REF_NAME": "feat/app-platform-capacity-soak"}
+    env.update(changes)
+    return env
+
+
+def evidence_verdict(env, windows=120):
+    return soak.evaluate(child_evidence(windows=windows), load_samples(windows), **GOOD, **soak.verdict_arguments(env))
+
+
+class EvidenceInputTests(unittest.TestCase):
+    def test_every_workflow_input_is_classified_as_neutral_or_diagnostic(self):
+        inputs = workflow_dispatch_inputs()
+        self.assertIn("duration_minutes", inputs)
+        self.assertIn("soak_variant", inputs)
+        classified = set(soak.EVIDENCE_NEUTRAL_INPUTS) | set(soak.DIAGNOSTIC_INPUTS)
+        self.assertEqual(set(inputs) - classified, set(), "a new workflow input must be classified as neutral or diagnostic in capacity_soak.py")
+        self.assertEqual(classified - set(inputs), set(), "a classified input no longer exists in the workflow")
+        self.assertEqual(set(soak.EVIDENCE_NEUTRAL_INPUTS) & set(soak.DIAGNOSTIC_INPUTS), set())
+
+    def test_every_diagnostic_input_has_a_non_default_value_in_this_test(self):
+        self.assertEqual(set(NON_DEFAULT), set(soak.DIAGNOSTIC_INPUTS))
+        for name, value in NON_DEFAULT.items():
+            self.assertNotIn(value, soak.DIAGNOSTIC_INPUTS[name][1], name)
+
+    def test_only_the_all_default_postgres_dispatch_run_counts_as_evidence(self):
+        verdict = evidence_verdict(evidence_environment())
+        self.assertTrue(verdict["passed"], verdict)
+        self.assertTrue(verdict["counts_as_ops08_evidence"], verdict["evidence_blockers"])
+        self.assertEqual(verdict["evidence_blockers"], [])
+        for name, (variable, _defaults) in soak.DIAGNOSTIC_INPUTS.items():
+            verdict = evidence_verdict(evidence_environment(**{variable: NON_DEFAULT[name]}))
+            self.assertTrue(verdict["passed"], name)
+            self.assertFalse(verdict["counts_as_ops08_evidence"], name)
+            self.assertTrue(any(name in blocker for blocker in verdict["evidence_blockers"]), (name, verdict["evidence_blockers"]))
+        # The diagnosis switch the pull request smoke sets, and every explicit default, are judged too.
+        diagnose = evidence_verdict(evidence_environment(APP_CAPACITY_SOAK_DIAGNOSE="1"))
+        self.assertFalse(diagnose["counts_as_ops08_evidence"])
+        for name, (variable, defaults) in soak.DIAGNOSTIC_INPUTS.items():
+            for default in defaults:
+                self.assertTrue(evidence_verdict(evidence_environment(**{variable: default}))["counts_as_ops08_evidence"], (name, default))
+
+    def test_a_runner_profile_run_is_not_evidence(self):
+        verdict = evidence_verdict(evidence_environment(APP_CAPACITY_SOAK_RUNNER_PROFILE="1", APP_CAPACITY_SOAK_DIAGNOSE="1"))
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+
+    def test_the_workflow_hands_each_diagnostic_input_to_its_variable_and_keeps_it_through_sudo(self):
+        text = WORKFLOW.read_text()
+        job = text[text.index("\n  capacity-soak:"):]
+        preserved = re.search(r"--preserve-env=(\S+)", job).group(1).split(",")
+        for name, (variable, _defaults) in soak.DIAGNOSTIC_INPUTS.items():
+            self.assertIn(f"inputs.{name}", job_env_line(variable), name)
+            self.assertIn(variable, preserved, variable)
+        self.assertIn("inputs.expected_commit", job_env_line("APP_CAPACITY_SOAK_EXPECTED_COMMIT"))
+        for variable in ("APP_CAPACITY_SOAK_EXPECTED_COMMIT", "APP_CAPACITY_SOAK_DIAGNOSE", "GITHUB_SHA", "GITHUB_EVENT_NAME"):
+            self.assertIn(variable, preserved, variable)
+
+    def test_only_a_workflow_dispatch_counts(self):
+        for event in ("pull_request", "push", "schedule", ""):
+            verdict = evidence_verdict(evidence_environment(GITHUB_EVENT_NAME=event))
+            self.assertTrue(verdict["passed"], event)
+            self.assertFalse(verdict["counts_as_ops08_evidence"], event)
+            self.assertTrue(any("event" in blocker for blocker in verdict["evidence_blockers"]), event)
+
+    def test_the_expected_commit_must_match_when_the_reviewer_names_one(self):
+        sha = "a" * 40
+        matching = evidence_verdict(evidence_environment(APP_CAPACITY_SOAK_EXPECTED_COMMIT=sha))
+        self.assertTrue(matching["counts_as_ops08_evidence"])
+        self.assertEqual((matching["commit"], matching["expected_commit"], matching["commit_matches_expected"]), (sha, sha, True))
+        other = evidence_verdict(evidence_environment(APP_CAPACITY_SOAK_EXPECTED_COMMIT="b" * 40))
+        self.assertFalse(other["counts_as_ops08_evidence"])
+        self.assertIs(other["commit_matches_expected"], False)
+        self.assertTrue(any("commit" in blocker for blocker in other["evidence_blockers"]))
+        unnamed = evidence_verdict(evidence_environment())
+        self.assertTrue(unnamed["counts_as_ops08_evidence"])
+        self.assertIsNone(unnamed["commit_matches_expected"])
+        self.assertEqual(unnamed["commit"], sha)
+
+    def test_the_expected_commit_is_a_full_hexadecimal_sha_or_empty(self):
+        self.assertEqual(soak.expected_commit(""), "")
+        self.assertEqual(soak.expected_commit("a" * 40), "a" * 40)
+        for bad in ("a" * 7, "A" * 40, "g" * 40, " " + "a" * 40, "a" * 41):
+            with self.assertRaises(RuntimeError):
+                soak.expected_commit(bad)
+
+
+class FsyncProbeTests(unittest.TestCase):
+    def test_the_probe_times_each_synced_write_and_reports_p50_p95_and_the_maximum(self):
+        ticks = iter(x for i in range(200) for x in (i * 10.0, i * 10.0 + (0.0010 if i < 190 else 0.0100)))
+        syncs = []
+        with tempfile.TemporaryDirectory() as root:
+            result = soak.fsync_probe(root, writes=200, size=4096, clock=lambda: next(ticks), sync=syncs.append)
+            self.assertEqual(list(Path(root).iterdir()), [], "the probe file is removed")
+        self.assertEqual(len(syncs), 200)
+        self.assertEqual(result["writes"], 200)
+        self.assertEqual(result["bytes_per_write"], 4096)
+        self.assertAlmostEqual(result["p50_ms"], 1.0, places=3)
+        self.assertAlmostEqual(result["p95_ms"], 1.0, places=3)
+        self.assertAlmostEqual(result["max_ms"], 10.0, places=3)
+
+    def test_the_probe_removes_its_file_when_a_sync_fails(self):
+        def broken(fd):
+            raise OSError("I/O error")
+
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaises(OSError):
+                soak.fsync_probe(root, writes=3, sync=broken)
+            self.assertEqual(list(Path(root).iterdir()), [])
+
+    def test_the_probe_really_writes_and_syncs_when_nothing_is_injected(self):
+        with tempfile.TemporaryDirectory() as root:
+            result = soak.fsync_probe(root, writes=5)
+        self.assertEqual(result["writes"], 5)
+        self.assertGreaterEqual(result["p50_ms"], 0.0)
+
+
+def wal_sample(at_ms, mean_ms, syncs_per_second=5.0):
+    return {"at_ms": at_ms, "pg": {"commits_per_second": 90.0, "mean_wal_sync_ms": mean_ms, "wal_syncs_per_second": syncs_per_second}}
+
+
+def idle_evidence(idle_start=0, idle_end=180_000):
+    evidence = child_evidence(windows=3)
+    evidence["idle_windows"] = [{"minute": 0, "started_ms": idle_start, "ended_ms": idle_end}]
+    evidence["load_started_ms"] = LOAD_START_MS
+    return evidence
+
+
+FAST_PROBE = {"writes": 200, "bytes_per_write": 4096, "p50_ms": 0.1, "p95_ms": 0.3, "max_ms": 0.9}
+
+
+class DiskPrecheckTests(unittest.TestCase):
+    def test_the_thresholds_are_named_constants(self):
+        self.assertEqual(soak.DISK_PRECHECK_WAL_SYNC_MS, 2.0)
+        self.assertEqual(soak.DISK_PRECHECK_PROBE_P50_MS, 1.0)
+        self.assertEqual(soak.RESULT_INCONCLUSIVE_SLOW_DISK, "inconclusive_slow_disk")
+
+    def test_the_idle_wal_sync_is_the_mean_weighted_by_the_syncs_of_each_interval_inside_the_baseline_only(self):
+        evidence = idle_evidence()
+        samples = [wal_sample(30_000, 1.0, 10.0), wal_sample(60_000, 4.0, 30.0),
+                   wal_sample(200_000, 50.0, 10.0),          # after the baseline: the load, never part of the precheck
+                   {"at_ms": 90_000}]                        # no reading: skipped
+        self.assertAlmostEqual(soak.idle_wal_sync_ms(evidence, samples), (1.0 * 10 + 4.0 * 30) / 40, places=6)
+        self.assertIsNone(soak.idle_wal_sync_ms(evidence, [{"at_ms": 90_000}]))
+        self.assertIsNone(soak.idle_wal_sync_ms({}, samples))
+        self.assertIsNone(soak.idle_wal_sync_ms(evidence, [wal_sample(30_000, 3.0, 0.0)]))
+
+    def test_the_precheck_trips_on_a_slow_idle_wal_sync_or_a_slow_probe_and_names_the_signal(self):
+        ok = soak.disk_precheck(0.06, FAST_PROBE)
+        self.assertFalse(ok["tripped"])
+        self.assertEqual(ok["reasons"], [])
+        wal = soak.disk_precheck(2.5, FAST_PROBE)
+        self.assertTrue(wal["tripped"])
+        self.assertTrue(any("WAL sync" in r for r in wal["reasons"]))
+        probe = soak.disk_precheck(0.06, dict(FAST_PROBE, p50_ms=1.5))
+        self.assertTrue(probe["tripped"])
+        self.assertTrue(any("fsync probe" in r for r in probe["reasons"]))
+        # At the bound is not over it.
+        self.assertFalse(soak.disk_precheck(2.0, dict(FAST_PROBE, p50_ms=1.0))["tripped"])
+        # A signal that was not measured cannot trip: the other one still can.
+        self.assertFalse(soak.disk_precheck(None, None)["tripped"])
+        self.assertTrue(soak.disk_precheck(None, dict(FAST_PROBE, p50_ms=3.0))["tripped"])
+        self.assertEqual(ok["signals"], {"idle_wal_sync_ms": 0.06, "probe": FAST_PROBE})
+
+    def test_a_tripped_precheck_ends_the_run_as_inconclusive_never_evidence_neither_passed_nor_failed(self):
+        samples = load_samples(120) + [wal_sample(30_000, 3.0)]
+        evidence = child_evidence(windows=120)
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": 0, "ended_ms": 180_000}]
+        verdict = soak.evaluate(evidence, samples, **GOOD, event="workflow_dispatch")
+        self.assertEqual(verdict["result"], "inconclusive_slow_disk")
+        self.assertIsNone(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertTrue(verdict["precheck"]["tripped"])
+        self.assertTrue(any("disk" in blocker for blocker in verdict["evidence_blockers"]))
+
+    def test_a_slow_probe_alone_makes_the_run_inconclusive_even_when_every_check_failed(self):
+        evidence = child_evidence(windows=120)
+        evidence["loaded"]["home"]["p95_us"] = 90_000
+        verdict = soak.evaluate(evidence, load_samples(120), disk_probe=dict(FAST_PROBE, p50_ms=2.0), event="workflow_dispatch", **GOOD)
+        self.assertIn("home_p95_within_absolute_bound", {c["name"] for c in verdict["checks"] if not c["passed"]})
+        self.assertEqual(verdict["result"], "inconclusive_slow_disk")
+        self.assertIsNone(verdict["passed"])
+
+    def test_a_disk_that_degrades_during_the_load_stays_a_failure(self):
+        # The idle baseline is healthy; the load windows have a slow WAL sync and the Portal missed its bound: that is the Portal's FAIL.
+        evidence = child_evidence(windows=120)
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": 0, "ended_ms": 180_000}]
+        evidence["loaded"]["report"]["p95_us"] = 90_000
+        loaded = load_samples(120)
+        for sample in loaded:
+            if sample["at_ms"] > LOAD_START_MS:
+                sample["pg"] = {"commits_per_second": 90.0, "mean_wal_sync_ms": 9.0, "wal_syncs_per_second": 40.0}
+        samples = [wal_sample(30_000, 0.06)] + loaded
+        verdict = soak.evaluate(evidence, samples, disk_probe=FAST_PROBE, event="workflow_dispatch", **GOOD)
+        self.assertFalse(verdict["precheck"]["tripped"])
+        self.assertEqual(verdict["result"], "failed")
+        self.assertFalse(verdict["passed"])
+
+    def test_a_healthy_run_is_passed_and_a_failing_one_failed(self):
+        self.assertEqual(soak.evaluate(child_evidence(windows=3), load_samples(3), disk_probe=FAST_PROBE, **GOOD)["result"], "passed")
+        broken = child_evidence(windows=3)
+        broken["loaded"]["home"]["p95_us"] = 99_000
+        self.assertEqual(soak.evaluate(broken, load_samples(3), **GOOD)["result"], "failed")
+
+    def test_the_failed_hosts_idle_readings_are_below_the_wal_threshold_so_the_probe_is_the_signal_that_decides(self):
+        # The idle baseline of run 43678283415 attempt 1 (the slow disk that failed home and batch start): six WAL sync means at
+        # about five syncs a second. Its weighted mean, 1.31 ms, is under the 2 ms bound: the WAL signal alone would not have flagged it.
+        readings = [(0.705, 15.77), (0.642, 5.83), (1.536, 5.1), (1.145, 5.23), (2.247, 5.07), (2.987, 5.1)]
+        evidence = idle_evidence()
+        samples = [wal_sample(30_000 * (i + 1), mean, rate) for i, (mean, rate) in enumerate(readings)]
+        measured = soak.idle_wal_sync_ms(evidence, samples)
+        self.assertAlmostEqual(measured, 1.314, places=2)
+        self.assertFalse(soak.disk_precheck(measured, None)["tripped"])
+        # The green runs of the same configuration measured 0.06, 0.16 and 0.70 ms idle: a probe above 1 ms on that class of disk trips.
+        self.assertTrue(soak.disk_precheck(measured, dict(FAST_PROBE, p50_ms=1.3))["tripped"])
+
+    def test_the_step_summary_names_an_inconclusive_run_and_its_reasons_instead_of_calling_it_failed(self):
+        evidence = child_evidence(windows=3)
+        verdict = soak.evaluate(evidence, load_samples(3), disk_probe=dict(FAST_PROBE, p50_ms=2.0), event="workflow_dispatch", **GOOD)
+        text = soak.render_summary(evidence, verdict)
+        self.assertIn("INCONCLUSIVE", text.splitlines()[0])
+        self.assertNotIn("FAILED", text.splitlines()[0])
+        self.assertIn("fsync probe", text)
+        self.assertIn("Rerun the job", text)
+        passed = soak.render_summary(evidence, soak.evaluate(evidence, load_samples(3), **GOOD))
+        self.assertIn(": passed", passed.splitlines()[0])
+
+    def test_the_precheck_alone_ends_a_run_before_the_load_when_the_probe_is_slow(self):
+        self.assertTrue(soak.probe_trips(dict(FAST_PROBE, p50_ms=1.01)))
+        self.assertFalse(soak.probe_trips(FAST_PROBE))
+        self.assertFalse(soak.probe_trips(None))
+
+
+class JournalSizeTests(unittest.TestCase):
+    def test_the_journal_files_are_sized_and_summed_and_other_files_are_ignored(self):
+        with tempfile.TemporaryDirectory() as root:
+            for name, size in (("journal.sqlite3", 100), ("journal.sqlite3-wal", 40), ("journal.sqlite3-shm", 8), ("state.db", 10), ("x.db-wal", 2),
+                               ("notes.txt", 999), ("lock", 5)):
+                (Path(root) / name).write_bytes(b"x" * size)
+            (Path(root) / "sub.db").mkdir()
+            reading = soak.journal_sizes(root)
+        self.assertEqual(reading["files"], {"journal.sqlite3": 100, "journal.sqlite3-wal": 40, "journal.sqlite3-shm": 8, "state.db": 10, "x.db-wal": 2})
+        self.assertEqual(reading["total"], 160)
+
+    def test_a_missing_directory_is_no_reading(self):
+        self.assertIsNone(soak.journal_sizes("/nonexistent-journal-directory"))
+        self.assertIsNone(soak.journal_sizes(None))
+
+    def test_the_sample_carries_the_journal_sizes_when_the_sampler_is_given_the_directory(self):
+        with tempfile.TemporaryDirectory() as root:
+            journal = Path(root) / "control"
+            journal.mkdir()
+            (journal / "journal.sqlite3").write_bytes(b"x" * 64)
+            proc = Path(root) / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "stat").write_text("cpu  100 0 100 700 100 0 0 0 0 0\n")
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            mount = Path(root) / "mount"
+            mount.mkdir()
+            sampler = soak.Sampler(run=lambda *a: "", proc=proc, mountpoint=mount, image_id="sha256:" + "b" * 64, clock=lambda: 1000.0, journal_dir=journal)
+            row = sampler.sample()
+        self.assertEqual(row["journal_bytes"], {"files": {"journal.sqlite3": 64}, "total": 64})
 
 
 if __name__ == "__main__":

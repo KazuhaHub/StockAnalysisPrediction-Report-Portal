@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Declared-capacity soak on a disposable GitHub-hosted worker (doc 171, PR 4b; OPS-08, closing SEC-09).
+"""Declared-capacity soak on a disposable GitHub-hosted worker (doc 171, PR 4b; OPS-08; SEC-09 stays partial after it passes).
 
 It builds a newly owned 16 GiB XFS project-quota loop volume, prepares the runner's journal on it, and runs the
 Go acceptance TestPlatformCapacitySoak (a real root runner, a Portal child, fifty installations, the excess probes
@@ -53,6 +53,32 @@ MEBIBYTE = 1024 ** 2
 RUNNER_DEFAULT_CPU_PERCENT = 50
 # The runner's default of capacity.reserved_cpus on a host of four or more CPUs (internal/apprunner/service/capacity.go).
 RUNNER_DEFAULT_RESERVED_CPUS = 1
+# The runner's journal (its database and write-ahead log) is sampled every thirty seconds; over the load it may grow by at most this much.
+JOURNAL_GROWTH_LIMIT_BYTES = 256 * MEBIBYTE
+JOURNAL_FILE_PATTERN = re.compile(r".*(\.db|\.sqlite3?|-wal|-shm)")
+# The disk-health precheck (doc 171): judged only from measurements taken before the load, so a Portal change that loads the disk can never
+# reclassify its own run. Healthy hosts measured 0.06 to 0.7 ms of mean WAL sync while idle; the 2 ms bound is the owner-reviewed ceiling.
+# The fsync probe is a dedicated measurement (writes of 4 KiB, each followed by fdatasync, on the PostgreSQL data device); the host that failed run
+# 43678283415 attempt 1 read 1.3 ms of idle WAL sync, under the 2 ms bound, so the probe's median has its own, lower bound.
+DISK_PRECHECK_WAL_SYNC_MS = 2.0
+DISK_PRECHECK_PROBE_P50_MS = 1.0
+FSYNC_PROBE_WRITES = 200
+FSYNC_PROBE_BYTES = 4096
+RESULT_PASSED, RESULT_FAILED, RESULT_INCONCLUSIVE_SLOW_DISK = "passed", "failed", "inconclusive_slow_disk"
+EXIT_INCONCLUSIVE = 3
+# Every input of the workflow is either neutral (it cannot change what is measured) or diagnostic (it does, so the run is never evidence).
+# A diagnostic input maps to the environment variable the job passes it as and the values that mean "not set"; a test reads the workflow's
+# inputs and fails for one that is in neither list.
+EVIDENCE_NEUTRAL_INPUTS = ("skip_browser", "event_only", "duration_minutes", "soak_only", "expected_commit")
+DIAGNOSTIC_INPUTS = {
+    "soak_db": ("APP_CAPACITY_SOAK_DB", ("", "postgres")),
+    "soak_cpu_percent": ("APP_CAPACITY_SOAK_CPU_PERCENT", ("", "50")),
+    "soak_reserved_cpus": ("APP_CAPACITY_SOAK_RESERVED_CPUS", ("", "1")),
+    "soak_pin_platform": ("APP_CAPACITY_SOAK_PIN_PLATFORM", ("", "false")),
+    "soak_platform_cpu_weight": ("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ("",)),
+    "soak_runner_profile": ("APP_CAPACITY_SOAK_RUNNER_PROFILE", ("", "0")),
+    "soak_variant": ("APP_CAPACITY_SOAK_VARIANT", ("",)),
+}
 RETIRED_PROBES = ("ninth_backend", "memory_over_budget", "cpu_over_budget")
 REQUIRED_PROBES = (
     "fifty_first_installation",
@@ -403,8 +429,8 @@ class Sampler:
     `run` runs a command and returns its text (injected so the parsing is tested without a Docker daemon)."""
 
     def __init__(self, run, proc, mountpoint, image_id, clock=time.time, cgroup_root="/sys/fs/cgroup/system.slice", cpus=None, ticks_per_second=None,
-                 disk_devices=None, postgres=False):
-        self.disk_devices, self.postgres = disk_devices or {}, postgres
+                 disk_devices=None, postgres=False, journal_dir=None):
+        self.disk_devices, self.postgres, self.journal_dir = disk_devices or {}, postgres, journal_dir
         self._disks, self._pg, self._iowait, self._cores = None, None, None, None
         self._pid_comm = {}
         self._modes = None
@@ -588,6 +614,9 @@ class Sampler:
             row["cpu_groups"] = shares
             row["cpu_detail"] = {k: round(v, 3) for k, v in self.last_detail.items() if v > 0}
         row.update(extra)
+        journal = journal_sizes(self.journal_dir)
+        if journal is not None:
+            row["journal_bytes"] = journal
         return row
 
     def _stalls(self, now, memory_text, stat_text):
@@ -636,6 +665,93 @@ class Sampler:
                 if previous and now > previous[0]:
                     extra["pg"] = pg_delta(previous[1], reading, now - previous[0])
         return extra
+
+
+# ---- disk health and journal size ----
+
+def fsync_probe(directory, writes=FSYNC_PROBE_WRITES, size=FSYNC_PROBE_BYTES, clock=time.perf_counter, sync=getattr(os, "fdatasync", os.fsync)):
+    """Time `writes` appended blocks of `size` bytes, each followed by a data sync, in a scratch file of `directory`, and report the
+    median, the 95th percentile (nearest rank) and the maximum in milliseconds. The file never outlives the call."""
+    path = Path(directory) / f".soak-fsync-probe-{os.getpid()}"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    durations = []
+    try:
+        block = os.urandom(size)
+        for index in range(writes):
+            began = clock()
+            os.pwrite(fd, block, index * size)
+            sync(fd)
+            durations.append((clock() - began) * 1000.0)
+    finally:
+        os.close(fd)
+        os.unlink(path)
+    ordered = sorted(durations)
+
+    def rank(fraction):
+        return ordered[max(0, -(-int(fraction * 1000) * len(ordered) // 1000) - 1)]
+
+    return {"writes": len(ordered), "bytes_per_write": size, "p50_ms": round(rank(0.50), 3), "p95_ms": round(rank(0.95), 3),
+            "max_ms": round(ordered[-1], 3)}
+
+
+def idle_wal_sync_ms(evidence, samples):
+    """PostgreSQL's mean WAL sync time over the idle baseline, weighted by the syncs of each sampled interval; None when it was not measured."""
+    windows = evidence.get("idle_windows") or []
+    if not windows:
+        return None
+    start, end = min(w.get("started_ms", 0) for w in windows), max(w.get("ended_ms", 0) for w in windows)
+    weighted, total = 0.0, 0.0
+    for sample in samples:
+        reading = sample.get("pg")
+        if reading and start < sample["at_ms"] <= end and reading.get("wal_syncs_per_second", 0) > 0:
+            weighted += reading["mean_wal_sync_ms"] * reading["wal_syncs_per_second"]
+            total += reading["wal_syncs_per_second"]
+    return round(weighted / total, 3) if total else None
+
+
+def probe_trips(probe):
+    """Whether the fsync probe alone is slow enough to end the run before the load: it is measured before anything else runs."""
+    return bool(probe) and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS
+
+
+def disk_precheck(idle_wal_ms, probe):
+    """Whether the disk was too slow before the load began to say anything about the Portal. Only readings taken before the load are given
+    to it, and a signal that was not measured cannot trip it."""
+    reasons = []
+    if idle_wal_ms is not None and idle_wal_ms > DISK_PRECHECK_WAL_SYNC_MS:
+        reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {DISK_PRECHECK_WAL_SYNC_MS} ms")
+    if probe and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS:
+        reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {DISK_PRECHECK_PROBE_P50_MS} ms")
+    return {"tripped": bool(reasons), "reasons": reasons, "thresholds": {"idle_wal_sync_ms": DISK_PRECHECK_WAL_SYNC_MS,
+                                                                           "probe_p50_ms": DISK_PRECHECK_PROBE_P50_MS},
+            "signals": {"idle_wal_sync_ms": idle_wal_ms, "probe": probe}}
+
+
+def journal_sizes(directory):
+    """The sizes of the runner's journal database and its write-ahead log and shared-memory files; None when the directory cannot be read."""
+    if not directory:
+        return None
+    files = {}
+    try:
+        for entry in Path(directory).iterdir():
+            if JOURNAL_FILE_PATTERN.fullmatch(entry.name) and entry.is_file():
+                files[entry.name] = entry.stat().st_size
+    except OSError:
+        return None
+    return {"files": files, "total": sum(files.values())}
+
+
+def _journal_check(evidence, samples):
+    start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
+    readings = sorted(((s["at_ms"], s["journal_bytes"]["total"]) for s in samples if s.get("journal_bytes")), key=lambda r: r[0])
+    before = [total for at, total in readings if at <= start]
+    during = [total for at, total in readings if start < at <= end]
+    base = before[-1] if before else (during[0] if during else None)
+    peak = max(during) if during else None
+    growth = None if base is None or peak is None else peak - base
+    return _check("runner_journal_growth_within_bound", growth is not None and growth <= JOURNAL_GROWTH_LIMIT_BYTES,
+                  {"limit_bytes": JOURNAL_GROWTH_LIMIT_BYTES, "growth_bytes": growth, "bytes_before_the_load": base, "peak_bytes_during_the_load": peak,
+                   "readings": len(readings)})
 
 
 # ---- judging ----
@@ -694,8 +810,12 @@ def _latency_check(name, series, evidence):
 
 def render_summary(evidence, verdict):
     """Markdown for the job's step summary: the verdict per series and every window of every series."""
-    lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {'passed' if verdict['passed'] else 'FAILED'}",
-             "", "Latency verdict (owner decision 2026-11-15): pooled loaded p95 at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start. "
+    outcome = {RESULT_PASSED: "passed", RESULT_FAILED: "FAILED", RESULT_INCONCLUSIVE_SLOW_DISK: "INCONCLUSIVE (slow disk)"}.get(verdict.get("result"), "FAILED")
+    lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {outcome}"]
+    if verdict.get("result") == RESULT_INCONCLUSIVE_SLOW_DISK:
+        lines += ["", "The disk-health precheck, judged only from readings taken before the load, tripped: this run says nothing about the Portal, is neither "
+                  "passed nor failed and is never evidence. Rerun the job. Reasons: " + "; ".join(verdict["precheck"]["reasons"]) + "."]
+    lines += ["", "Latency verdict (owner decision 2026-11-15): pooled loaded p95 at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start. "
              "The pooling is an engineering decision; windows, the relative threshold max(1.5 x idle p95, idle p95 + 5 ms) and the ratio to idle are diagnostics."]
     for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
@@ -740,7 +860,7 @@ def _window_bounds(evidence):
 
 
 def _loads_check(evidence):
-    """Each backend's own status shows its loads ran, and keeps showing it: memory held at the held fraction of its limit,
+    """Each backend's own status shows its loads ran, and keeps showing it: memory held (its own held_bytes) at the held fraction of its limit in every window,
     CPU burners, threads, log written and the data namespace filled to its quota, with the log and request counters
     advancing in every window. Without this a backend that did nothing, or stopped, would pass."""
     windows = evidence.get("windows", [])
@@ -759,8 +879,10 @@ def _loads_check(evidence):
             reasons.append(f"did not answer in {len(rows) - len(answered)} of {len(rows)} windows")
         if answered:
             last = answered[-1][1]
-            if held_minimum <= 0 or last["held_bytes"] < held_minimum:
-                reasons.append(f"held too little memory ({last['held_bytes']} of at least {held_minimum} bytes)")
+            # The backend's own count of what it holds, in every window: the cgroup's memory.current includes page cache and is a diagnostic.
+            for minute, b in answered:
+                if held_minimum <= 0 or b["held_bytes"] < held_minimum:
+                    reasons.append(f"window {minute}: held too little memory ({b['held_bytes']} of at least {held_minimum} bytes)")
             if last["threads"] < 8:
                 reasons.append("started too few threads")
             if last["burners"] < 1:
@@ -786,17 +908,19 @@ def _fractions(values):
 
 
 def _backend_limits(evidence, samples):
-    """Judge each backend against its own cgroup counters, window by window: CPU used at least CPU_QUOTA_USED_FRACTION of
-    its quota, memory current at least MEMORY_HELD_FRACTION of its limit, and PIDs up to the limit less a small margin.
-    The status counters the backend reports about itself are checked separately; these cannot be reported by the backend."""
+    """Judge each backend against its own cgroup counters, window by window: CPU used at least CPU_QUOTA_USED_FRACTION of its quota, and
+    PIDs, in every window, at least PIDS_REACHED_FRACTION of the limit. memory.current counts page cache, so it is recorded as a diagnostic
+    and the memory the backend holds is judged from its own status (held_bytes) in _loads_check. The counters read here cannot be reported
+    by the backend."""
     rows = sorted((s for s in samples if (s.get("backends") or {}).get("per_backend")), key=lambda s: s["at_ms"])
     expected = evidence.get("budgets", {}).get("running_backends", 0)
-    problems, cpu_min, memory_min, memory_peak, pids_peak = [], {}, {}, {}, {}
+    problems, pid_problems, cpu_min, memory_min, memory_peak, pids_peak, pids_window_min = [], [], {}, {}, {}, {}, {}
     bounds = _window_bounds(evidence)
     for minute, start, end in bounds:
         in_window = [(i, r) for i, r in enumerate(rows) if start < r["at_ms"] <= end]
         if not in_window:
             problems.append({"window": minute, "backend": None, "reason": "no cgroup sample in the window"})
+            pid_problems.append({"window": minute, "backend": None, "reason": "no cgroup sample in the window"})
             continue
         used, available = {}, {}
         for i, current in in_window:
@@ -820,12 +944,15 @@ def _backend_limits(evidence, samples):
                 cpu_min[backend] = min(cpu_min.get(backend, fraction), fraction)
                 if fraction < CPU_QUOTA_USED_FRACTION:
                     problems.append({"window": minute, "backend": backend, "reason": f"CPU used {fraction:.3f} of its quota, below {CPU_QUOTA_USED_FRACTION}"})
-            held = [r_b["memory_current"] / r_b["memory_max"] for _, r in in_window for r_b in r["backends"]["per_backend"]
-                    if r_b["id"] == backend and r_b.get("memory_max") and r_b.get("memory_current") is not None]
-            if not held:
-                problems.append({"window": minute, "backend": backend, "reason": "memory current or its limit unknown"})
-            elif min(held) < MEMORY_HELD_FRACTION:
-                problems.append({"window": minute, "backend": backend, "reason": f"memory current {min(held):.3f} of its limit, below {MEMORY_HELD_FRACTION}"})
+            pids = [r_b["pids_current"] / r_b["pids_max"] for _, r in in_window for r_b in r["backends"]["per_backend"]
+                    if r_b["id"] == backend and r_b.get("pids_max") and r_b.get("pids_current") is not None]
+            if not pids:
+                pid_problems.append({"window": minute, "backend": backend, "reason": "PID count or its limit unknown"})
+                continue
+            pids_window_min[backend] = min(pids_window_min.get(backend, min(pids)), min(pids))
+            if min(pids) < PIDS_REACHED_FRACTION:
+                pid_problems.append({"window": minute, "backend": backend,
+                                     "reason": f"PIDs {min(pids):.3f} of the limit, below {PIDS_REACHED_FRACTION}"})
     start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
     for sample in rows:
         if start < sample["at_ms"] <= end:
@@ -838,13 +965,14 @@ def _backend_limits(evidence, samples):
                     reached = max(b.get("pids_current") or 0, b.get("pids_peak") or 0)
                     pids_peak[b["id"]] = max(pids_peak.get(b["id"], 0.0), reached / b["pids_max"])
     achieved = {"cpu_window_min": _fractions(cpu_min), "memory_current_min": _fractions(memory_min),
-                "memory_current_peak": _fractions(memory_peak), "pids_peak": _fractions(pids_peak)}
-    held_check = _check("backends_held_their_limits_in_every_window", bool(bounds) and bool(rows) and not problems,
-                        {"windows": len(bounds), "cpu_minimum_fraction_of_quota": CPU_QUOTA_USED_FRACTION,
-                         "memory_minimum_fraction_of_limit": MEMORY_HELD_FRACTION, "problems": problems[:50], "problem_count": len(problems)})
-    short = {b: f for b, f in pids_peak.items() if f < PIDS_REACHED_FRACTION}
-    pid_check = _check("backends_reached_their_pid_limit", bool(pids_peak) and (not expected or len(pids_peak) == expected) and not short,
-                       {"minimum_fraction_of_limit": PIDS_REACHED_FRACTION, "peak_fractions": pids_peak, "below_the_minimum": short})
+                "memory_current_peak": _fractions(memory_peak), "pids_peak": _fractions(pids_peak), "pids_window_min": _fractions(pids_window_min)}
+    held_check = _check("backends_used_their_cpu_quota_in_every_window", bool(bounds) and bool(rows) and not problems,
+                        {"windows": len(bounds), "cpu_minimum_fraction_of_quota": CPU_QUOTA_USED_FRACTION, "problems": problems[:50],
+                         "problem_count": len(problems)})
+    pid_check = _check("backends_held_their_pid_limit_in_every_window",
+                       bool(bounds) and bool(pids_window_min) and (not expected or len(pids_window_min) == expected) and not pid_problems,
+                       {"minimum_fraction_of_limit": PIDS_REACHED_FRACTION, "window_minimum_fractions": pids_window_min, "problems": pid_problems[:50],
+                        "problem_count": len(pid_problems), "run_peak_fractions": pids_peak})
     return held_check, pid_check, achieved
 
 
@@ -1006,8 +1134,53 @@ def cpu_breakdown(evidence, samples):
     return {"idle": _mean_shares(idle), "windows": windows, "flood_rates": rates}
 
 
-def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False, platform_weight=""):
-    """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
+def expected_commit(value):
+    """The reviewed commit the dispatcher expects the run to measure: empty (not stated) or a full lower-case hexadecimal SHA."""
+    if value and not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise RuntimeError("expected_commit is empty or a full 40 character lower-case hexadecimal commit SHA")
+    return value or ""
+
+
+def verdict_arguments(env):
+    """The keyword arguments of evaluate that describe how the run was started, read from the job's environment in one place."""
+    return {"variant": env.get("APP_CAPACITY_SOAK_VARIANT", ""), "cpu_percent": env.get("APP_CAPACITY_SOAK_CPU_PERCENT", ""),
+            "reserved_cpus": env.get("APP_CAPACITY_SOAK_RESERVED_CPUS", ""), "pin_platform": env.get("APP_CAPACITY_SOAK_PIN_PLATFORM", "") == "true",
+            "platform_weight": env.get("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ""), "database": env.get("APP_CAPACITY_SOAK_DB", ""),
+            "runner_profile": env.get("APP_CAPACITY_SOAK_RUNNER_PROFILE", "") == "1", "diagnose": env.get("APP_CAPACITY_SOAK_DIAGNOSE", "") == "1",
+            "event": env.get("GITHUB_EVENT_NAME", ""), "commit": env.get("GITHUB_SHA", ""),
+            "expected_commit": env.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", "")}
+
+
+def evidence_blockers(passed, tripped, minutes, db_driver, event, commit, expected, diagnose, diagnostic_values):
+    """Why a run does not count as OPS-08 evidence; empty only for a passing, full-length PostgreSQL workflow_dispatch run at the commit the
+    reviewer named, with every diagnostic input at its default."""
+    blockers = []
+    if tripped:
+        blockers.append("the disk-health precheck tripped: the run is inconclusive, not evidence")
+    elif not passed:
+        blockers.append("the run did not pass")
+    if minutes < OPS08_MINUTES:
+        blockers.append(f"the run measured {minutes} minutes, fewer than {OPS08_MINUTES}")
+    if db_driver != "postgres":
+        blockers.append(f"the measured Portal's database was {db_driver or 'unknown'}, not postgres")
+    if event != "workflow_dispatch":
+        blockers.append(f"the event was {event or 'unknown'}, not workflow_dispatch")
+    if expected and expected != commit:
+        blockers.append(f"the run measured commit {commit or 'unknown'}, not the expected commit {expected}")
+    if diagnose:
+        blockers.append("the diagnosis switch was on")
+    for name, (_variable, defaults) in DIAGNOSTIC_INPUTS.items():
+        if diagnostic_values[name] not in defaults:
+            blockers.append(f"diagnostic input {name} is set to {diagnostic_values[name]!r}")
+    return blockers
+
+
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False, platform_weight="",
+             database="", runner_profile=False, diagnose=False, event="", commit="", expected_commit="", disk_probe=None):
+    """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4.
+
+    The result is passed, failed, or inconclusive_slow_disk: the last when the disk-health precheck, judged only from readings taken before the
+    load, tripped. Such a run is neither passed nor failed and never evidence."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
     checks = []
@@ -1034,7 +1207,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     budgets = evidence.get("budgets", {})
     checks.append(_loads_check(evidence))
     held_check, pid_check, achieved = _backend_limits(evidence, samples)
-    checks.extend([held_check, pid_check])
+    checks.extend([held_check, pid_check, _journal_check(evidence, samples)])
     start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
     load = [s for s in samples if start < s["at_ms"] <= end]
     expected_samples = int((end - start) / 1000.0 // SAMPLE_INTERVAL_SECONDS) if end > start else 0
@@ -1069,11 +1242,20 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     busy = {"mean": round(sum(busy_values) / len(busy_values), 1), "max": max(busy_values)} if busy_values else {}
     backend_cpu_mean = round(sum(s["backends"]["cpu_millis"] for s in cpu_samples) / len(cpu_samples), 1) if cpu_samples else 0.0
     breakdown = cpu_breakdown(evidence, samples)
-    passed = all(c["passed"] for c in checks)
+    checks_passed = all(c["passed"] for c in checks)
+    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe)
+    result = RESULT_INCONCLUSIVE_SLOW_DISK if precheck["tripped"] else (RESULT_PASSED if checks_passed else RESULT_FAILED)
+    passed = {RESULT_PASSED: True, RESULT_FAILED: False}.get(result)
+    diagnostic_values = {"soak_db": database, "soak_cpu_percent": cpu_percent, "soak_reserved_cpus": reserved_cpus,
+                         "soak_pin_platform": "true" if pin_platform else "", "soak_platform_cpu_weight": platform_weight,
+                         "soak_runner_profile": "1" if runner_profile else "", "soak_variant": variant}
+    blockers = evidence_blockers(checks_passed, precheck["tripped"], minutes, evidence.get("db_driver"), event, commit, expected_commit, diagnose,
+                                 diagnostic_values)
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
-        "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
-        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)) and reserved_cpus in ("", str(RUNNER_DEFAULT_RESERVED_CPUS)) and not pin_platform and not platform_weight,
+        "result": result, "passed": passed, "counts_as_ops08_evidence": not blockers, "evidence_blockers": blockers, "precheck": precheck,
+        "event": event, "commit": commit, "expected_commit": expected_commit,
+        "commit_matches_expected": (expected_commit == commit) if expected_commit else None,
         "platform_cpu_weight": platform_weight,
         "pin_platform": pin_platform,
         "reserved_cpus_override": reserved_cpus,
@@ -1251,6 +1433,30 @@ def read_json_lines(path):
         return []
 
 
+def exit_code(verdict):
+    """0 for a pass, 1 for a failure and 3 for an inconclusive run, which says so on the job's log."""
+    if verdict["result"] == RESULT_INCONCLUSIVE_SLOW_DISK:
+        print(f"::error title={RESULT_INCONCLUSIVE_SLOW_DISK}::The disk was too slow before the load to judge the Portal ({'; '.join(verdict['precheck']['reasons'])}). "
+              "This run is neither passed nor failed and is not evidence: rerun the job.")
+        return EXIT_INCONCLUSIVE
+    return 0 if verdict["passed"] else 1
+
+
+def end_before_the_load(out, minutes, probe):
+    """The fsync probe tripped before the load began: nothing was started, so say so and end without spending the soak's duration."""
+    precheck = disk_precheck(None, probe)
+    verdict = {"result": RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "counts_as_ops08_evidence": False, "precheck": precheck,
+               "evidence_blockers": ["the disk-health precheck tripped before the load: the run is inconclusive, not evidence"], "checks": []}
+    run = {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")}
+    (out / "capacity-soak-evidence.json").write_text(json.dumps({"format": EVIDENCE_FORMAT, "requested_minutes": minutes, "run": run, "disk_probe": probe,
+                                                                 "verdict": verdict, "ended": "before the load"}, indent=2, sort_keys=True) + "\n")
+    step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if step_summary:
+        with open(step_summary, "a", encoding="utf-8") as sink:
+            sink.write(render_summary({"duration_minutes": minutes}, verdict))
+    return exit_code(verdict)
+
+
 def main(argv):
     import argparse
     sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -1271,6 +1477,7 @@ def main(argv):
     platform_weight = soak_platform_cpu_weight(os.environ.get("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ""))
     pin_platform = soak_pin_platform(os.environ.get("APP_CAPACITY_SOAK_PIN_PLATFORM", ""))
     database = soak_database(os.environ.get("APP_CAPACITY_SOAK_DB", ""))
+    expected_commit(os.environ.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
     for path in (args.portal_binary, args.journal_binary, args.out) + ((app_binary,) if app_binary else ()):
         if not Path(path).is_absolute():
@@ -1286,6 +1493,18 @@ def main(argv):
         run_command("systemctl", "set-property", "--runtime", postgres_unit(run_command), "AllowedCPUs=" + pin_cpus)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    # The disk-health precheck's first reading, taken before anything else runs: a short fsync probe on the PostgreSQL data device.
+    postgres_data_dir, disk_probe = "", None
+    try:
+        postgres_data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
+    except (RuntimeError, OSError, subprocess.SubprocessError):
+        pass  # not a PostgreSQL run
+    if postgres_data_dir:
+        probe_dir = Path(postgres_data_dir).parent
+        disk_probe = dict(fsync_probe(probe_dir), directory=str(probe_dir), data_directory=postgres_data_dir)
+        print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
+        if probe_trips(disk_probe):
+            return end_before_the_load(out, minutes, disk_probe)
     socket = os.path.realpath("/var/run/docker.sock")
     image_id = run_command("docker", "image", "inspect", image, "--format", "{{.Id}}").strip()
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
@@ -1351,17 +1570,17 @@ def main(argv):
         if os.environ.get("APP_CAPACITY_SOAK_RUNNER_PROFILE") == "1":
             soak_env["APP_CAPACITY_SOAK_RUNNER_PROFILE"] = "1"
         devices, extra = {}, {}
-        try:
-            data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
-            extra["postgres_data_dir"] = data_dir
-            devices["postgres_data"] = device_number(data_dir)
-        except (RuntimeError, OSError, subprocess.SubprocessError):
-            pass  # not a PostgreSQL run
+        if postgres_data_dir:
+            try:
+                extra["postgres_data_dir"] = postgres_data_dir
+                devices["postgres_data"] = device_number(postgres_data_dir)
+            except OSError:
+                pass
         devices["xfs_mount"], devices["xfs_backing_file"], devices["docker_root"] = device_number(mountpoint), device_number(volume), device_number(docker_root)
         storage = storage_layout(devices, parse_diskstats(Path("/proc/diskstats").read_text()), extra)
         print("storage layout:", json.dumps(storage, sort_keys=True), file=sys.stderr)
         tracked = {name: dev for name, dev in devices.items() if name != "docker_root"}
-        sampler = Sampler(run_command, "/proc", mountpoint, image_id, disk_devices=tracked, postgres="postgres_data" in devices)
+        sampler = Sampler(run_command, "/proc", mountpoint, image_id, disk_devices=tracked, postgres="postgres_data" in devices, journal_dir=control)
         stop = threading.Event()
         collected, failed_counter = [], [0]
 
@@ -1402,7 +1621,8 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent, reserved_cpus=reserved_cpus, pin_platform=pin_platform, platform_weight=platform_weight)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, disk_probe=disk_probe,
+                       **verdict_arguments(os.environ))
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -1419,11 +1639,12 @@ def main(argv):
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
         "unit_tests": unit_tests, "runner_cpus": parse_ready_cpus((out / "runner.log").read_text(errors="replace")) if (out / "runner.log").exists() else {},
         "backend_cpusets": {r["id"]: r.get("cpuset_effective") for sample in samples[-1:] for r in (sample.get("backends") or {}).get("per_backend", [])},
-        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent, "runner_reserved_cpus_override": reserved_cpus, "pin_platform_cpus": pin_cpus, "topology": collect_topology(run_command),
+        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "disk_probe": disk_probe, "runner_cpu_percent_override": cpu_percent, "runner_reserved_cpus_override": reserved_cpus, "pin_platform_cpus": pin_cpus, "topology": collect_topology(run_command),
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    summary = {"passed": verdict["passed"], "counts_as_ops08_evidence": verdict["counts_as_ops08_evidence"],
+    summary = {"result": verdict["result"], "passed": verdict["passed"], "precheck": verdict["precheck"], "evidence_blockers": verdict["evidence_blockers"],
+               "commit": verdict["commit"], "expected_commit": verdict["expected_commit"], "counts_as_ops08_evidence": verdict["counts_as_ops08_evidence"],
                "failed_checks": [c["name"] for c in verdict["checks"] if not c["passed"]], "worst_ratios": verdict["worst_ratios"],
                "achieved_fractions": {name: {"min": value.get("min"), "max": value.get("max")} for name, value in verdict["achieved_fractions"].items()}, "shallow_dispatch_worst_ratio": verdict["informational_shallow_dispatch_worst_ratio"],
                "peak_backend_memory_bytes": verdict["peak_backend_memory_bytes"], "peak_backend_cpu_millis": verdict["peak_backend_cpu_millis"]}
@@ -1433,7 +1654,7 @@ def main(argv):
     if step_summary:
         with open(step_summary, "a", encoding="utf-8") as sink:
             sink.write(render_summary(evidence, verdict))
-    return 0 if verdict["passed"] else 1
+    return exit_code(verdict)
 
 
 if __name__ == "__main__":

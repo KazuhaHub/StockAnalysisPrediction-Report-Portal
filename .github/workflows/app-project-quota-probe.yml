@@ -47,6 +47,10 @@ on:
         description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
         type: string
         default: ''
+      expected_commit:
+        description: The full SHA of the reviewed commit the run must measure. When it is given and differs from the commit that ran, the run is never OPS-08 evidence
+        type: string
+        default: ''
   pull_request:
     paths:
       - 'internal/appplatform/contract/**'
@@ -544,7 +548,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # The declared-capacity soak (doc 171, PR 4b; OPS-08, closing SEC-09). The dispatch run is the acceptance run
+  # The declared-capacity soak (doc 171, PR 4b; OPS-08; SEC-09 stays partial after OPS-08 passes, because the task worker and event delivery coordinator are not exercised). The dispatch run is the acceptance run
   # (120 minutes by default, 140 at most), started on the branch that carries this job at the reviewed commit; a pull request
   # touching the capacity code, the code behind its latency fixes or the soak runs the same configuration for five minutes
   # (and adds the diagnosis) so it cannot rot, and that smoke is never evidence. Both use the reference host class: a
@@ -565,6 +569,7 @@ jobs:
       APP_CAPACITY_SOAK_RESERVED_CPUS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_reserved_cpus || '' }}
       APP_CAPACITY_SOAK_PIN_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_pin_platform && 'true' || '' }}
       APP_CAPACITY_SOAK_VARIANT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_variant || '' }}
+      APP_CAPACITY_SOAK_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -624,7 +629,7 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY,APP_CAPACITY_SOAK_EXPECTED_COMMIT \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \

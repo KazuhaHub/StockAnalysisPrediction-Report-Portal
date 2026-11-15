@@ -9,6 +9,15 @@
     "run_id": null,
     "branch": "feat/app-platform-capacity-soak",
     "commit": null,
+    "expected_commit": null,
+    "commit_matches_expected": null,
+    "result": null,
+    "disk_precheck": {
+      "idle_wal_sync_ms": null,
+      "fsync_probe_p50_ms": null,
+      "fsync_probe_p95_ms": null,
+      "tripped": null
+    },
     "event": "workflow_dispatch",
     "soak_only": true,
     "requested_minutes": 120,
@@ -54,7 +63,7 @@
     "backend_workload": "each backend holds 85% of its memory limit (a Go soft limit at 95% keeps the collector ahead of the kernel), burns its CPU quota, parks threads up to its PID limit minus 8, writes 1 MiB/s to its log and fills its data namespace to ENOSPC; the achieved fractions are measured from each backend's own cgroup counters and recorded, not assumed",
     "platform_workload": "the relay is driven at the Portal's admission cap of 2 concurrent requests: a flood process outside the measured one keeps one attempt in flight per backend through the Portal HTTP route, at most two are admitted Portal-wide and excess attempts are refused 429 app_platform_busy (about 92% of attempts in the smokes); both counts and every other outcome class are recorded per window. Before the load, a task backlog to the global quota and an event subscription flooded past its in-flight bound",
     "batch_workload": "the Portal's real batch scheduler (scheduleTick and scheduleLoop) runs against a local stub Dify that answers at once; a standing backlog of 200 queued jobs is held behind long runs that occupy the budget, and a batch job is enqueued every three seconds and given one extra slot; enqueue-to-start latency is measured against the idle baseline with the same bound",
-    "portal": "PostgreSQL (fresh postgres:16 service per run, OpenStore); running: the batch scheduler, the relay, installs and uninstalls through the ordinary workers; not exercised: the task worker and event delivery coordinator, a backend-originated message or task request",
+    "portal": "PostgreSQL (the runner image's own postgresql.service, version 16, recreated empty for every run, opened with OpenStore); running: the batch scheduler, the relay, installs and uninstalls through the ordinary workers; not exercised: the task worker and event delivery coordinator, a backend-originated message or task request",
     "measurement_windows": null
   },
   "probes": {
@@ -177,6 +186,7 @@
       "memory_current_min": null,
       "memory_current_peak": null,
       "pids_peak": null,
+      "pids_window_min": null,
       "cpu_window_min": null
     },
     "docker_root_free_bytes": null,
@@ -199,8 +209,9 @@
     "message_flood_refusals_are_typed": null,
     "message_flood_alive_throughout": null,
     "backends_ran_every_declared_load": null,
-    "backends_held_their_limits_in_every_window": null,
-    "backends_reached_their_pid_limit": null,
+    "backends_used_their_cpu_quota_in_every_window": null,
+    "backends_held_their_pid_limit_in_every_window": null,
+    "runner_journal_growth_within_bound": null,
     "host_memory_headroom": null,
     "host_samples_cover_the_load": null,
     "unit_level_probe_tests_passed": null,
@@ -216,7 +227,7 @@
     },
     "SEC-09": {
       "status": "partial",
-      "closes_with": "OPS-08: the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load"
+      "after_ops08": "SEC-09 stays partial after OPS-08 passes: the task worker and event delivery coordinator are not exercised by the soak. OPS-08 supplies the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load"
     }
   },
   "unproven_until_the_dispatch_run": [
