@@ -905,6 +905,103 @@ held, and a request that passes the pre-check and loses the acquire gets the sam
 against a full budget, 2000 small reads): small-read p95 263 to 776 microseconds with authentication first, 76 to 98
 microseconds with admission first (p50 37 to 83, against 33 to 42).
 
+## Resolution (SQLite read pool)
+
+This is the follow-up that resolution 73 recorded and the follow-up list below blocked the integration merge on: a read pool for the
+file-backed SQLite Portal. It changes no schema.
+
+**Cause (from resolution 73).** SQLite ran on one connection. The backend relay's two admitted requests held it about a third of the
+time, and every page read queued behind them.
+
+**Decision.**
+
+- **WAL and a second pool.** A file-backed SQLite store switches its file to WAL once, after initialization (`openReadPool`, called by
+  `OpenStore` and not by `connectStore`, so the schema inspection that only looks at a database does not change it), and opens a pool of
+  four read-only connections (`sqliteReadPoolSize`, a constant: `config.yaml` carries infrastructure only) on the same file beside the
+  single writer connection. Each reader is opened `mode=ro` with `query_only(1)` and the same busy timeout as the writer (the cherry-pick of
+  #431 in this branch; the connection hook that enforces foreign keys applies to every connection of the driver). In WAL a reader never
+  blocks the writer and the writer never blocks a reader.
+- **Read-your-writes.** A write that has returned (autocommit, or `Commit`) is visible to every read that begins afterwards, on any
+  connection, so a client that saves and then reloads sees what it saved. A reader does not see a write that is still uncommitted, which is
+  the isolation a snapshot read already had on PostgreSQL. This is stated at the top of `store_readpool.go`.
+- **Explicit routing, not a heuristic.** The call sites that are standalone read-only queries use `Store.readQuery`, `readQueryRow` (and
+  their context forms), `readExec` (the pool as a `migExec`, for the readers written once over a snapshot and a standalone call) and
+  `beginRead` (a read transaction). Everything else (every write, every transaction that writes, every read-modify-write, the schema work,
+  and every read inside a transaction that must see that transaction's writes) is unchanged on the writer. The alternative, inspecting the
+  SQL text and sending `SELECT` to the pool, was rejected: `SELECT` is not the same as "may run on a snapshot" (a read that follows a write
+  of its own transaction, a read whose caller holds a lock for it, `RETURNING`, a `SELECT` of a function with a side effect), and a
+  heuristic fails silently on exactly those. A read that is not named here simply stays where it was; the cost of forgetting one is latency,
+  never a wrong answer.
+- **No-op elsewhere.** On PostgreSQL there is no second pool, no WAL and no second statement cache: `readDB` is `db`, the read accessors are
+  the one pool, and `openReadPool` returns at its first line. The same holds for an in-memory database (each connection would be its own
+  database), a source that already names a `mode`, and a file that does not end up in WAL (a network filesystem without shared memory answers
+  the pragma with the mode it kept; the store logs one line and keeps every read on the writer rather than opening readers that would block
+  it). A source that names its own `journal_mode` is honoured: the pool opens only if that mode is WAL.
+- **Statement caches.** A prepared statement belongs to the pool it was prepared on, so the read pool carries its own cache
+  (`rstmts`, same bound) and a `migExec` carries a flag (`ro`) that picks the cache for a transaction it wraps.
+
+**Routed call sites** (the paths the soak measures and the gate every request passes):
+
+| Path | Reads now on the read pool |
+| --- | --- |
+| Every session route | the cookie's session row (`verify`), `GetUser`, the settings read (`GetSetting`: panel timezone, policy), the enrolment gate's and the viewer scope's read transactions (`loadOUPolicySubject`, `viewerScopeSnapshot`) |
+| Relay and app routes | the session and account-generation reads of `platformHTTPReader` |
+| Home | `SearchNewLatest`, `NewTypes`, `ReportKinds`, `ReportVersionsPresent`, `Versions`, `LinkGroups`, `Links`, `KindColors` |
+| Report and stock page | the read snapshot (`beginReadSnapshot`: symbol timeline, type and version registries, report body, reader's OU), `NewBySymbol`, `GetNew`, `TypeConfigs`, the forecast access read transaction and `forecastTimelineDates` |
+| Dispatch | `QueuedJobs`, `RecentJobActivity` and the settings the priority weights read |
+
+One write was removed from the request path rather than moved: `currentActiveUser` issued `UPDATE user_sessions SET last_seen ...` on every
+authenticated request, a statement that matched nothing until the stamp was due (once per five minutes) and still queued for the writer
+connection. A read now says whether the stamp is due, and the `UPDATE` keeps its own `last_seen<?` condition, so two racing requests still
+stamp once.
+
+**Tests** (`store_readpool_test.go`, written first). Reads proceed, with the committed state and not the uncommitted write, while a write
+transaction holds the writer (with a control that shows the writer pool is in fact blocked); a write is visible to the next read-pool query
+across 300 alternating values and across `Commit`; the read pool rejects writes four ways (raw pool, cached executor, snapshot, and a
+`PRAGMA query_only=0` followed by a write, which `mode=ro` still refuses); the read snapshot runs on the pool while the writer is held;
+the derivation of the read source (in-memory refused, path characters escaped, one busy timeout); a source pinned to another journal mode
+gets no pool; `Close` closes the readers first and leaves no WAL; the session check, the home reads, the stock page's reads, the report body
+and the dispatch decision complete while the writer is held; the two pages answer end to end on a file-backed store; on PostgreSQL the pool
+is absent, the accessor is the one pool and a write is read back (gated on `TEST_POSTGRES_DSN`).
+`TestReadsAreNotSerializedBehindTheWriter` holds the writer connection 10 ms of every 30 ms and compares the single connection with the pool;
+`BenchmarkSQLiteReadBehindWriter` and the new `grouped/cache/single-connection` case of `BenchmarkStockPage` report the same comparison.
+
+**What was measured** (an Apple M5 laptop, ten cores, local disk, `go test -bench`, file-backed SQLite; not the soak host, not CI, none of it
+evidence). The single-connection shape is the same code with the pool switched off (`closeReadPool`).
+
+| Benchmark | single connection | read pool |
+| --- | --- | --- |
+| `BenchmarkSQLiteReadBehindWriter`, read p95 behind a writer held a third of the time (three runs) | 12.2, 11.8, 11.8 ms | 0.15, 0.67, 0.44 ms |
+| the same, read p50 | 85 to 146 us | 51 to 109 us |
+| `BenchmarkStockPage/grouped/cache` (`GET /api/stock/{symbol}`, ten parallel readers, two paced writers, 3000 requests, three runs), p50 | 21.5, 24.3, 24.2 ms | 7.2, 6.0, 4.8 ms |
+| the same, p95 | 49.9, 51.6, 49.5 ms | 20.8, 19.0, 16.6 ms |
+
+A read that does not touch the writer no longer waits for it. The stock page still ends in the report-read audit row, which is a write on
+the writer connection, so its tail is lowered by the removed reads and not independent of the writer (see the limits).
+
+**Not measured.** The soak: no `soak_db=sqlite-file` dispatch run has been made on this change, so none of the four series is known to pass
+on SQLite, and **no claim is made that the SQLite envelope is proven.** The relay flood against the pool, and PostgreSQL under load (the
+change is a no-op there; its test run is described in the pull request).
+
+**Limits.**
+
+- **Not soaked.** The gate is judged on the soak host; this change removes the queueing that resolution 73 measured, and whether the
+  remaining latency meets the bounds is for the run to say.
+- **Writes and every transaction stay on one connection.** The relay's admitted work (launch, backend, network and document routes read and
+  write inside write-capable transactions) and the report-read audit row, the activity stamp and the batch scheduler's writes still queue
+  for it, so a page that writes still waits for a held writer. Moving the relay's read-only transactions, or taking the audit row off the
+  response path, is a separate decision (the second changes when an audit row becomes durable) and was not made here.
+- **A file-level copy of a live database.** The file stays in WAL after this change. The Portal's own backup and the recovery bundle dump
+  the database logically and are unaffected; a copy of `portal.db` taken with `cp` while the Portal runs misses what is still in `portal.db-wal`
+  and must include that file and `portal.db-shm`, or use SQLite's backup API.
+- **A filesystem without shared memory** (some network mounts) keeps its rollback journal, and the Portal then runs as before, on one
+  connection, with one log line.
+- **Long read snapshots hold back the WAL checkpoint.** The snapshots here span a handler's reads, a few milliseconds. A caller that held one
+  for long would let the WAL grow.
+- **Two statement caches** of 256 entries each, and four more connections' page caches, are the memory cost.
+- **The soak's pool diagnostics** (`db.Stats()` in the diagnostic minute) describe the writer pool only; the read pool's occupancy is not
+  reported there.
+
 ## PR 4b implementation notes
 
 PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending until a real 120-minute dispatch run has passed, and SEC-09 stays partial even then; the records are written so that only the run URL and the
@@ -1459,13 +1556,13 @@ is evidence for OPS-08.
     averaged 6.9%, while the CPU figures were those of the other runs (Portal CPU pressure 12.4%, host 79% to 80% busy). A noisy shared disk can therefore fail the gate on the report page and the batch start, which write or wait on commits; the
     absolute bounds leave a factor of 1.3 to 5 over the green runs, not over a disk this slow.
 
-    Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
+    Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73, before the read pool); PostgreSQL on the
     first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'
     CPU weight (#442) 17.7 ms and 27.0 ms; with CPU 0 reserved (#443) 8.5 ms and 10.6 ms (dispatch passing for the first time); two reserved CPUs, platform pinning, platform weights 1000: no better (12 to 13 ms); with the cheaper
     relay (#445) 13.7 ms and 27.9 ms in a run with the diagnosis on. The host is two physical cores (four SMT threads): the apps burn their 2 CPUs of quota continuously and the platform shares what is left, so a relative floor of
     a few milliseconds over an idle host's 1 to 3 ms cannot hold under full declared load.
 
-    **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
+    **Known limit of the SQLite Portal (as measured before the read pool; see the section "Resolution (SQLite read pool)").** On a SQLite Portal, sustained app-backend relay traffic raised page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
     13.8% idle, 6111 to 31948 pool waits a minute). Measured this round, five-minute pull request smokes and dispatch runs, none evidence
@@ -1480,8 +1577,8 @@ is evidence for OPS-08.
     | 43590645282 (`85376438`, with #440) | 3147 / 14924 / 8147 fail | 9598 / 48249 / 14598 fail |
 
     The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
-    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. A SQLite read pool is a tracked follow-up, and
-    until it lands no claim is made that the SQLite envelope is proven.
+    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. The SQLite read pool has since been implemented (the
+    section "Resolution (SQLite read pool)"); it has not been soaked, so no claim is made that the SQLite envelope is proven.
 
 75. **Round 2 of the review of PR #433 (before the 120-minute run).**
 
@@ -1727,7 +1824,7 @@ Other results:
 
 **Follow-ups that still block the integration to main merge.**
 
-- **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
+- **SQLite read pool: implemented, not soaked.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); what remains is a `soak_db=sqlite-file` dispatch run on it, and until that run no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
 - **Inventory overlap by device and inode** (the follow-up above), together with an absent bind source under the data root, which is to be treated as a reference to the namespace rather than as no overlap.
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
