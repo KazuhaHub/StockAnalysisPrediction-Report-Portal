@@ -78,4 +78,30 @@ describe('inMermaidTurn timeout', () => {
     await expect(first).resolves.toBe('first')
     await expect(second).resolves.toBe('second')
   })
+
+  it('tells a timed-out step that it no longer owns the turn, so it can stop before rendering', async () => {
+    vi.useFakeTimers()
+    let release: () => void = () => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ownership: boolean[] = []
+    const slow = inMermaidTurn(async (owned) => {
+      ownership.push(owned())
+      await gate
+      ownership.push(owned())
+    })
+    const slowResult = slow.catch((error: Error) => error.message)
+    let nextOwned: boolean | undefined
+    const next = inMermaidTurn(async (owned) => {
+      nextOwned = owned()
+    })
+    await vi.advanceTimersByTimeAsync(MERMAID_TURN_TIMEOUT_MS)
+    await expect(slowResult).resolves.toMatch(/timed out/i)
+    await next
+    expect(nextOwned).toBe(true)
+    release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ownership).toEqual([true, false])
+  })
 })

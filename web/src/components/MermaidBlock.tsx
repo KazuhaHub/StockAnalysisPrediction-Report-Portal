@@ -115,8 +115,11 @@ export default function MermaidBlock({ source }: { source: string }) {
       .then(({ default: mermaid }) =>
         // The configuration is global: initialize and render are one turn, so this block's layout and theme
         // are in force for its own render (see mermaidTurn.ts).
-        inMermaidTurn(async () => {
-          if (!active) return
+        inMermaidTurn(async (owned) => {
+          // `owned()` turns false if this turn timed out: the chain has moved on and another diagram's
+          // configuration may now be in force, so a late step must not render or write.
+          const current = () => active && owned()
+          if (!current()) return
           let type: string | undefined
           try {
             type = mermaid.detectType(source)
@@ -146,9 +149,9 @@ export default function MermaidBlock({ source }: { source: string }) {
             suppressErrorRendering: true,
           })
           const valid = await mermaid.parse(source, { suppressErrors: true })
-          if (!valid || !active) return
+          if (!valid || !current()) return
           const rendered = await mermaid.render(id.current, source)
-          if (!active) return
+          if (!current()) return
           setSVG(
             DOMPurify.sanitize(rendered.svg, {
               USE_PROFILES: { svg: true, svgFilters: true },

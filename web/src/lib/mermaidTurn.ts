@@ -8,16 +8,24 @@
 //
 // One turn that never settles would hold up every diagram after it, so a turn is given a time limit. When it
 // runs out the turn is rejected (its block falls back to the source as a code block) and the next turn
-// starts; the abandoned step is not cancelled, only no longer waited for.
+// starts. The abandoned step cannot be cancelled, so it is told instead: `owned()` turns false when its turn
+// times out, and the step must check it before touching the global configuration or the DOM again, or a late
+// render would run beside the next turn's initialize and write a diagram drawn under another's layout.
 export const MERMAID_TURN_TIMEOUT_MS = 15_000
 
 let last: Promise<unknown> = Promise.resolve()
 
-function withTimeout<T>(step: () => Promise<T>): Promise<T> {
+export type MermaidTurnStep<T> = (owned: () => boolean) => Promise<T>
+
+function withTimeout<T>(step: MermaidTurnStep<T>): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    let timedOut = false
     // The limit runs from the start of the turn, not from when it was asked for.
-    const timer = setTimeout(() => reject(new Error('mermaid turn timed out')), MERMAID_TURN_TIMEOUT_MS)
-    step().then(
+    const timer = setTimeout(() => {
+      timedOut = true
+      reject(new Error('mermaid turn timed out'))
+    }, MERMAID_TURN_TIMEOUT_MS)
+    step(() => !timedOut).then(
       (value) => {
         clearTimeout(timer)
         resolve(value)
@@ -30,7 +38,7 @@ function withTimeout<T>(step: () => Promise<T>): Promise<T> {
   })
 }
 
-export function inMermaidTurn<T>(step: () => Promise<T>): Promise<T> {
+export function inMermaidTurn<T>(step: MermaidTurnStep<T>): Promise<T> {
   const turn = last.then(() => withTimeout(step))
   // A failed or timed-out turn must not break the chain for the ones after it.
   last = turn.catch(() => undefined)
