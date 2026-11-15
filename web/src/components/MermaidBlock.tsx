@@ -8,6 +8,8 @@ import {
 import DOMPurify from 'dompurify'
 import { useTranslation } from 'react-i18next'
 import { loadMermaid } from '../lib/mermaid'
+import { layoutForDiagram } from '../lib/mermaidLayout'
+import { inMermaidTurn } from '../lib/mermaidTurn'
 import { flattenMermaidSVG } from '../lib/flattenSvg'
 import { cacheMermaidSVG } from '../lib/mermaidCache'
 
@@ -110,36 +112,55 @@ export default function MermaidBlock({ source }: { source: string }) {
     if (source.length > MAX_MERMAID_SOURCE_SIZE) return () => undefined
 
     void loadMermaid()
-      .then(async ({ default: mermaid }) => {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'strict',
-          htmlLabels: false,
-          secure: [
-            'securityLevel',
-            'startOnLoad',
-            'htmlLabels',
-            'maxTextSize',
-            'maxEdges',
-            'suppressErrorRendering',
-          ],
-          maxTextSize: MAX_MERMAID_SOURCE_SIZE,
-          maxEdges: 500,
-          theme: theme === 'dark' ? 'dark' : 'default',
-          suppressErrorRendering: true,
-        })
-        const valid = await mermaid.parse(source, { suppressErrors: true })
-        if (!valid || !active) return
-        const rendered = await mermaid.render(id.current, source)
-        if (!active) return
-        setSVG(
-          DOMPurify.sanitize(rendered.svg, {
-            USE_PROFILES: { svg: true, svgFilters: true },
-            FORBID_TAGS: ['foreignObject', 'script'],
-            FORBID_ATTR: ['onerror', 'onload', 'onclick'],
-          }),
-        )
-      })
+      .then(({ default: mermaid }) =>
+        // The configuration is global: initialize and render are one turn, so this block's layout and theme
+        // are in force for its own render (see mermaidTurn.ts).
+        inMermaidTurn(async (owned) => {
+          // `owned()` turns false if this turn timed out: the chain has moved on and another diagram's
+          // configuration may now be in force, so a late step must not render or write.
+          const current = () => active && owned()
+          if (!current()) return
+          let type: string | undefined
+          try {
+            type = mermaid.detectType(source)
+          } catch {
+            type = undefined // not a diagram mermaid knows; parse() below reports it
+          }
+          const layout = layoutForDiagram(type)
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'strict',
+            htmlLabels: false,
+            // See mermaidLayout.ts: dagre for the diagrams that would default to the ELK layout, which is
+            // not in the build; a diagram that explicitly asks for ELK fails closed. Left unset for a
+            // mind map, which brings its own layout.
+            ...(layout ? { layout } : {}),
+            secure: [
+              'securityLevel',
+              'startOnLoad',
+              'htmlLabels',
+              'maxTextSize',
+              'maxEdges',
+              'suppressErrorRendering',
+            ],
+            maxTextSize: MAX_MERMAID_SOURCE_SIZE,
+            maxEdges: 500,
+            theme: theme === 'dark' ? 'dark' : 'default',
+            suppressErrorRendering: true,
+          })
+          const valid = await mermaid.parse(source, { suppressErrors: true })
+          if (!valid || !current()) return
+          const rendered = await mermaid.render(id.current, source)
+          if (!current()) return
+          setSVG(
+            DOMPurify.sanitize(rendered.svg, {
+              USE_PROFILES: { svg: true, svgFilters: true },
+              FORBID_TAGS: ['foreignObject', 'script'],
+              FORBID_ATTR: ['onerror', 'onload', 'onclick'],
+            }),
+          )
+        }),
+      )
       .catch(() => {
         if (active) setSVG('')
       })

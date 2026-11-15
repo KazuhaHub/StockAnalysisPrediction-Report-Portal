@@ -1,0 +1,179 @@
+{
+  "format": "portal.licence-policy-acceptance/1-dev.1",
+  "status": "partial",
+  "plan": "docs/app-platform/173-licence-policy-plan.md",
+  "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8",
+  "note": "Filled from local runs and CI runs on 2026-11-15. Portal branch feat/app-platform-licence-gate (PR 447, cut from integration/app-platform at 16e38a98); Apps branch feat/licence-gate (PR 41, main merged in after PR 40). The gate is green on both branches. The first scan flagged ten components; the owner decided them on 2026-11-15 (reviewed-as records, below). An independent review then returned fix-first; its findings are fixed and listed in docs/app-platform/173-licence-policy-plan.md.",
+  "environment": {
+    "go": "1.27.1 locally (go 1.26.11 in go.mod; CI uses the go.mod version)",
+    "node": "26.9.0 locally (CI uses 24)",
+    "cyclonedx_gomod": "v1.9.0, app -licenses -assert-licenses, CGO_ENABLED=0 GOOS=linux GOARCH=amd64",
+    "cyclonedx_npm": "6.0.1, --omit dev --package-lock-only --spec-version 1.6",
+    "mermaid": "12.1.0",
+    "schema_change": "none"
+  },
+  "implemented": {
+    "policy": "scripts/licence-policy.json: allow (12 SPDX ids), deny (GPL-2.0-only, SSPL-1.0, BUSL-1.1, Commons-Clause, EPL-1.0, EPL-2.0 and others), own licence AGPL-3.0-only for named own components, election-only FTL, elections (dompurify to Apache-2.0, github.com/golang/freetype to FTL), exclusion (elkjs, requires elk-build-test)",
+    "evaluator": "scripts/licence_scan.py: SPDX OR/AND/parentheses, WITH kept opaque, several licence entries ANDed, fails closed on unknown, missing and unparseable licences and on an empty SBOM, exit 0/1/2, JSON report",
+    "elk": "web/vite.config.ts aliases ^elkjs(/.*)?$ to web/src/lib/elkDisabled.ts (throws on construction); forbidElkjs Rollup plugin (web/scripts/forbid-elkjs.mjs) fails the build if any module id lies under node_modules/elkjs/ (verified: the build fails with the alias removed); web/scripts/check-no-elk.mjs scans the output for org.eclipse.elk.alg. and org.eclipse.elk.core. as a second layer (the generic wrapper names were dropped: they can appear in unrelated code, and forbidElkjs covers the wrappers by module id); dagre is requested through layoutForDiagram for flowchart, state, class, ER and requirement diagrams and left unset for mind maps (Mermaid 12.1 would otherwise default them to ELK)",
+    "ci": "Portal .github/workflows/licence.yml (dedicated workflow; push to main and integration/app-platform, pull requests, dispatch; Go SBOM for all six release platforms; npm production SBOM; ELK build test; scan); Apps .github/workflows/check.yml job licence (Go SBOM for the six status release targets; npm production SBOM; check_licence_copy.py; scan with --workspace-root)",
+    "apps_declarations": "root, @portal-app/sdk, portal-status-ui, portal-symbols-demo and the status acceptance harness package.json declare AGPL-3.0-only; scripts/tests/test_licence_scan.py fails if one stops",
+    "reviewed_as": "Per-component reviewed-as records pinned to the SHA-256 of the licence file read from the Go module cache or node_modules in CI, and to the exact declared expression; a changed hash, changed declaration, missing file or version mismatch makes the record stale and the gate fails again; a record cannot override a denied licence",
+    "nested_components": "Components are walked recursively; one component is judged once only when bom-ref, version and declared licences are identical, conflicting copies are each judged",
+    "own_workspace": "An own component needs a purl; Go a pkg:golang purl; npm an install path of exactly node_modules/<name>, no registry distribution and membership of the repository's npm workspaces (--workspace-root)",
+    "elections": "Elections are evidence: declaration pinned exactly and by kind; offered expression a pure top-level OR with the elected licence an operand and allowed (allow list or election_only); no denied or unallowed extra operand; pinned to the SHA-256 of the licence files that ship (dompurify LICENSE and LICENSE-MPL, golang/freetype LICENSE); a changed or missing file makes the election stale",
+    "licence_files": "npm licence file read from the SBOM's install path (cdx:npm:package:path); installed package.json version must equal the component version; roots escaping node_modules or the module cache are refused; licence entries with only a url or text fail as unknown",
+    "copy_check": "Apps scripts/check_licence_copy.py (public repositories, anonymous or with the workflow's read-only GITHUB_TOKEN sent only to api.github.com): the copy equals the Portal commit in scripts/licence-scan.pin; the pin is reachable from a live Portal branch (integration/app-platform or main, live = carries the file); the pinned files equal at least one live branch; a branch that contains the pin but lost the file fails; before any branch has the file only the pin is compared. The pin is 9fac73ef7b8c4f614b3595595b92f71936a5afd1, a feature-branch commit, to be moved to the merge commit after the Portal PR merges",
+    "mermaid_turn": "Each diagram's mermaid.initialize, parse and render run as one turn on a module-level promise chain (web/src/lib/mermaidTurn.ts), so its layout and theme are in force for its own render; tests render a flowchart and a mind map concurrently in both orders; a turn is rejected after 15 seconds so a render that never settles cannot stall later diagrams (its block keeps the source as a code block)",
+    "lock_cross_check": "With --node-modules, every installed npm component's declaration must equal its installed package.json (license string or object, legacy licenses list, several as a set), read from the SBOM's install path with the version checked; mismatch fails as lock-mismatch and no record covers it; untrustworthy installs fail as lock-unverifiable; own and Go components are skipped; components not installed (optional packages of other platforms) are judged on the lock and counted in a warning. An installed-tree SBOM (no --package-lock-only) was tried and gives a different component set (328 against 347), so the SBOM stays lock-based"
+  },
+  "elk_build_test": {
+    "markers": [
+      "org.eclipse.elk.alg.",
+      "org.eclipse.elk.core."
+    ],
+    "with_alias": {
+      "elk_chunk_bytes": 34456,
+      "result": "pass, exit 0"
+    },
+    "alias_removed": {
+      "elk_chunk_bytes": 1462510,
+      "result": "fail, exit 1: assets/elk-IJKZMXRS-*.js (org.eclipse.elk.alg.)"
+    },
+    "alias_restored": "pass, exit 0"
+  },
+  "mermaid_browser_probe": {
+    "how": "mermaid 12.1.0 served by vite with the production alias, initialised as MermaidBlock does, 21 diagram types rendered with the layout option unset and with dagre in the Browser pane",
+    "need_dagre_because_they_default_to_elk": [
+      "flowchart-v2",
+      "stateDiagram",
+      "classDiagram",
+      "er",
+      "requirement"
+    ],
+    "own_layout_kept_unset": [
+      "mindmap"
+    ],
+    "unaffected": [
+      "block",
+      "sequence",
+      "gantt",
+      "pie",
+      "journey",
+      "timeline",
+      "gitGraph",
+      "quadrantChart",
+      "sankey",
+      "xychart",
+      "kanban",
+      "architecture",
+      "packet",
+      "radar",
+      "treemap"
+    ],
+    "elk_requested_in_frontmatter": "fails with: The ELK layout is not supported in this build; use the default layout instead."
+  },
+  "tests": {
+    "python_portal": "scripts/licence_scan_test.py 159 tests; scripts/release_guard_test.py 27 tests; all Portal script tests 381",
+    "python_apps": "scripts/tests/test_licence_scan.py 153; test_licence_copy.py 34; test_status_publish.py 20; all Apps script tests 235",
+    "web": "npx vitest run: 279 files, 2922 tests, all passing",
+    "workflow": "actionlint 0 findings on the Portal workflows and on Apps check.yml"
+  },
+  "scans": {
+    "portal": {
+      "sboms": {
+        "go_per_platform": {
+          "linux/amd64": 48,
+          "linux/arm64": 48,
+          "darwin/amd64": 50,
+          "darwin/arm64": 50,
+          "windows/amd64": 50,
+          "windows/arm64": 50
+        },
+        "go_union": 50,
+        "web_top_level": 329,
+        "web_with_nested": 347
+      },
+      "components": 397,
+      "passed": {
+        "allow": 385,
+        "election": 2,
+        "exclusion": 1,
+        "own": 1,
+        "reviewed": 8
+      },
+      "failed": 0
+    },
+    "apps": {
+      "sboms": {
+        "npm_top_level": 71,
+        "npm_with_nested": 73,
+        "go_per_target": {
+          "linux/amd64": 13,
+          "linux/arm64": 13,
+          "linux/arm/7": 13,
+          "darwin/amd64": 15,
+          "darwin/arm64": 15,
+          "windows/amd64": 14
+        },
+        "go_union": 15
+      },
+      "components": 88,
+      "passed": {
+        "allow": 82,
+        "own": 4,
+        "reviewed": 2
+      },
+      "failed": 0
+    },
+    "replayed_from": "clean clones of both branches, locally and in CI"
+  },
+  "owner_decisions_needed": [
+    "Add 'licence scan' (Portal) and 'licence' (Apps) to branch protection as required checks (approval pending)"
+  ],
+  "limits": [
+    "Source and lock inputs only: no released binary or OCI digest has been scanned; the release-key and environment approval remain open.",
+    "The licence detector assigns BSD-Source-Code to the Go BSD 3-clause text; the reviewed-as record, pinned to the file hash, covers the seven Portal modules and two in Apps. A new golang.org/x module is not covered until the owner adds it.",
+    "apps/status/tests (not shipped) and templates/react-app (no lockfile) are not scanned.",
+    "golang/freetype's dual licence is evidenced by the LICENSE in the module cache at the pinned hash; a new freetype version with a different LICENSE needs the election re-pinned by the owner.",
+    "The Apps copy check compares with a Portal commit and the live Portal branches; until the Portal PR merges the pin is a feature-branch commit, and after a squash merge it must be moved to the merge commit or the check fails (intended).",
+    "The lock cross-check covers installed packages only; the optional packages of other platforms are judged on the lock's declaration (19 in the Portal SBOM on a macOS machine) and are not part of what ships."
+  ],
+  "owner_decisions": {
+    "date": "2026-11-15",
+    "reviewed_as": [
+      {
+        "components": [
+          "golang.org/x/crypto",
+          "golang.org/x/image",
+          "golang.org/x/net",
+          "golang.org/x/oauth2",
+          "golang.org/x/sync",
+          "golang.org/x/sys",
+          "golang.org/x/text"
+        ],
+        "reviewed_as": "BSD-3-Clause",
+        "declared": "BSD-Source-Code",
+        "file": "LICENSE",
+        "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"
+      },
+      {
+        "components": [
+          "khroma"
+        ],
+        "reviewed_as": "MIT",
+        "declared": "",
+        "file": "license",
+        "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49"
+      }
+    ],
+    "release_prerequisite": "The licence job is a release prerequisite: Portal scripts/release_guard.py wait-ci waits for a green licence.yml run (job 'licence scan') of the exact commit; Apps scripts/status-publish.py lists the 'licence' job in REQUIRED_JOBS.",
+    "branch_protection": "Pending owner approval: add 'licence scan' (Portal) and 'licence' (Apps) as required checks. No repository setting was changed."
+  },
+  "ci_runs": {
+    "portal_licence": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43729130675 (success, commit 9fac73ef, 397 components)",
+    "portal_test": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43729130655 (success, commit 9fac73ef)",
+    "apps_check": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/actions/runs/43729242764 (success, commit e20c0228, 88 components)"
+  },
+  "first_scan_flagged_components": "Ten components: golang.org/x/{crypto,image,net,oauth2,sync,sys,text} (BSD-Source-Code) and khroma (no licence field) in the Portal, golang.org/x/sys and x/text in Apps; all decided by the owner on 2026-11-15, see owner_decisions"
+}
