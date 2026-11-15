@@ -490,6 +490,10 @@ func TestPruneRetriesAPassingRefusalUnderTheNextAttemptAndStopsOnAFinalOne(t *te
 		if scalar[int](t, p.s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.recovery_set_prune_refused'`) != 1 {
 			t.Fatal("the final refusal is not recorded for an operator")
 		}
+		status, statusErr := p.s.platformImageStorageStatus(context.Background())
+		if statusErr != nil || len(status.PruneRefused) != 1 || status.PruneRefused[0].RecoverySetID != mismatch {
+			t.Fatalf("the storage status does not carry the refusal: %+v %v", status.PruneRefused, statusErr)
+		}
 		refused, err := p.s.platformPruneRefusals(context.Background())
 		if err != nil || len(refused) != 1 || refused[0].RecoverySetID != mismatch || refused[0].Reason != journal.DeleteOutcomeIdentityMismatch {
 			t.Fatalf("the status does not report the mismatch for an operator: %+v %v", refused, err)

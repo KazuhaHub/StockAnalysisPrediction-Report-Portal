@@ -414,6 +414,9 @@ type platformImageStorageStatus struct {
 	Unreadable []platformImageUnreadable `json:"unreadable"`
 	// ReclaimRefused lists images whose removal was refused on every attempt, with the last typed reason.
 	ReclaimRefused []platformReclaimRefused `json:"reclaim_refused"`
+	// PruneRefused lists recovery sets whose checkpoint deletion the runner refused in a way that does not pass, or on
+	// every attempt: an operator has to look at the archive.
+	PruneRefused []platformPruneRefused `json:"recovery_prune_refused"`
 }
 
 type platformImageUnreadable struct {
@@ -425,9 +428,12 @@ type platformImageUnreadable struct {
 }
 
 func (s *Server) platformImageStorageStatus(ctx context.Context) (platformImageStorageStatus, error) {
-	result := platformImageStorageStatus{Unreadable: []platformImageUnreadable{}, ReclaimRefused: []platformReclaimRefused{}}
+	result := platformImageStorageStatus{Unreadable: []platformImageUnreadable{}, ReclaimRefused: []platformReclaimRefused{}, PruneRefused: []platformPruneRefused{}}
 	if refused, err := s.platformReclaimRefusals(ctx); err == nil {
 		result.ReclaimRefused = refused
+	}
+	if refused, err := s.platformPruneRefusals(ctx); err == nil {
+		result.PruneRefused = refused
 	}
 	store, err := s.platformImages()
 	if err != nil {
