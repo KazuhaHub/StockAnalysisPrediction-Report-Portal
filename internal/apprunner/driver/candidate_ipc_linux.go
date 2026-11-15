@@ -274,7 +274,15 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		// fields (a status like "Up 3 minutes") make it a different entry, which is checked from scratch.
 		key := memoKeyOf(entry)
 		if remembered, ok := inventoryEntryMemo.get(key); ok {
-			result = append(result, candidateIPCContainer{ID: remembered.id, plan: &candidateIPCMountPlanResult{sources: slices.Clone(remembered.plan.sources), pending: slices.Clone(remembered.plan.pending)}})
+			// The same bytes were accepted before, so Mounts is present. Callers read it, so it is taken
+			// from this pass's own bytes (a copy the result owns), not kept in the memory.
+			var narrow struct {
+				Mounts json.RawMessage `json:"Mounts"`
+			}
+			if json.Unmarshal(entry, &narrow) != nil || len(narrow.Mounts) == 0 {
+				return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: Mounts key missing", ErrInvalidResponse, inventoryEntryLabel(entry))
+			}
+			result = append(result, candidateIPCContainer{ID: remembered.id, Mounts: narrow.Mounts, plan: &candidateIPCMountPlanResult{sources: slices.Clone(remembered.plan.sources), pending: slices.Clone(remembered.plan.pending)}})
 			continue
 		}
 		var container candidateIPCContainer

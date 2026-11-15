@@ -254,3 +254,36 @@ func TestInventoryMemosKeepNoDaemonBytes(t *testing.T) {
 		}
 	}
 }
+
+// Callers read each returned entry's Mounts (the acceptance suites hand it to candidateIPCMountSources), so a
+// remembered entry must still carry them, including an empty list, and an absent key stays refused.
+func TestInventoryReturnsMountsOnEveryPassAndRefusesAnAbsentKey(t *testing.T) {
+	freshInventoryMemos(t)
+	f := newInventoryMemoFixture(t)
+	empty := strings.Repeat("e", 64)
+	f.listing = []map[string]any{f.entry(f.id, f.target), {"Id": empty, "Mounts": []any{}, "State": "exited"}}
+	for pass := 0; pass < 3; pass++ { // the first is cold, the rest warm
+		entries, err := readCandidateIPCInventory(context.Background(), f.client())
+		if err != nil || len(entries) != 2 {
+			t.Fatal("inventory", pass, err)
+		}
+		for _, e := range entries {
+			sources, err := candidateIPCMountSources(e.Mounts)
+			if err != nil {
+				t.Fatal("a returned entry lost its Mounts", pass, e.ID, err)
+			}
+			if (e.ID == f.id) != (len(sources) == 1) {
+				t.Fatal("sources", pass, e.ID, sources)
+			}
+		}
+		if string(entries[1].Mounts) != "[]" {
+			t.Fatalf("empty Mounts changed: %q", entries[1].Mounts)
+		}
+	}
+	f.listing = []map[string]any{{"Id": empty, "State": "exited"}}
+	for pass := 0; pass < 2; pass++ {
+		if _, err := readCandidateIPCInventory(context.Background(), f.client()); err == nil {
+			t.Fatal("an entry without Mounts was accepted", pass)
+		}
+	}
+}
