@@ -1,7 +1,7 @@
 # Declared capacity envelope: implementation plan
 
 Status: accepted 2026-11-13. This plan turns section 4 of
-[doc 167](167-owner-decisions-remaining-acceptance.md) (OPS-08, closing SEC-09) into ordered,
+[doc 167](167-owner-decisions-remaining-acceptance.md) (OPS-08, and the part of SEC-09 the soak measures) into ordered,
 test-first steps, following the review practice of docs 168–170.
 
 ## Owner decision taken with this plan
@@ -907,8 +907,7 @@ microseconds with admission first (p50 37 to 83, against 33 to 42).
 
 ## PR 4b implementation notes
 
-PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending and SEC-09
-partial until a real 120-minute dispatch run has passed; the records are written so that only the run URL and the
+PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending until a real 120-minute dispatch run has passed, and SEC-09 stays partial even then; the records are written so that only the run URL and the
 numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.json`).
 
 ### What was added
@@ -1483,6 +1482,34 @@ is evidence for OPS-08.
     The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
     the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. A SQLite read pool is a tracked follow-up, and
     until it lands no claim is made that the SQLite envelope is proven.
+
+75. **Round 2 of the review of PR #433 (before the 120-minute run).**
+
+    - **Evidence is only the all-default PostgreSQL dispatch run.** `counts_as_ops08_evidence` is empty-blockers: the run passed, measured at least 120 minutes on
+      `postgres`, was a `workflow_dispatch`, and had every diagnostic input at its default (`soak_db`, `soak_cpu_percent`, `soak_reserved_cpus`, `soak_pin_platform`,
+      `soak_platform_cpu_weight`, `soak_runner_profile`, `soak_variant`, and the diagnosis switch). Each blocker is listed in the verdict (`evidence_blockers`). A unit test reads the
+      workflow's own inputs and fails for any that is not classified in `EVIDENCE_NEUTRAL_INPUTS` or `DIAGNOSTIC_INPUTS`, so a new input cannot silently count.
+    - **The reviewed commit is stated and compared.** A new `expected_commit` input (a full SHA) is compared with `GITHUB_SHA`; when given and different, the run is not evidence. The verdict records `commit`,
+      `expected_commit` and `commit_matches_expected` (null when none was named: the dispatcher is expected to name it, and the run records that it did not).
+    - **The Portal description is built from the real driver and version** (`soakPortalOf`), so a PostgreSQL run no longer says SQLite and no longer lists PostgreSQL as not exercised.
+    - **SEC-09 stays partial after OPS-08 passes**: the task worker and event delivery coordinator are not exercised by the soak. The checklist, the evidence template, doc 06 and the workflow say so; doc 167's
+      original sentence is unchanged and carries a dated engineering note.
+    - **Memory and PIDs are judged per window.** The memory a backend holds is its own `held_bytes` (page cache is not held memory), at least 85% of its limit in every window, not only the last; the cgroup's
+      `memory.current` stays recorded as a diagnostic (`memory_current_min`, `memory_current_peak`). PIDs are judged per window at least 0.85 of the limit (`backends_held_their_pid_limit_in_every_window`; the run peak is a diagnostic).
+      The CPU check is named `backends_used_their_cpu_quota_in_every_window`.
+    - **The runner's journal is sampled** every 30 seconds (database, write-ahead log and shared-memory files of its journal directory) and may grow by at most 256 MiB over the load
+      (`runner_journal_growth_within_bound`; no reading is a failure).
+    - **Disk-health precheck; the result `inconclusive_slow_disk`.** Two readings taken before the load decide it: the idle baseline's mean WAL sync time (`pg_stat_wal`, weighted by syncs; bound `DISK_PRECHECK_WAL_SYNC_MS` = 2 ms) and a
+      new fsync probe run before anything else (200 writes of 4 KiB, each with `fdatasync`, on the PostgreSQL data device; median bound `DISK_PRECHECK_PROBE_P50_MS` = 1 ms, p95 and maximum recorded). If the probe trips, the run ends before the
+      load; if the idle WAL mean trips, the verdict is replaced after the run. The result is then neither passed nor failed, never evidence, the job exits 3 with an error message, and it is simply rerun. A disk that degrades **during** the load is not
+      looked at: that stays a failure of the run.
+
+      **Verification against run 43678283415 attempt 1 (the slow-disk host).** The idle baseline of that attempt measured a sync-weighted mean WAL sync of **1.31 ms** (simple mean of the intervals 1.54 ms, maximum 2.99 ms), under the
+      2 ms bound, so **the WAL signal alone would not have flagged it**; the 4.3 ms quoted for that host is the loaded mean (4.17 ms weighted). The other idle readings do not separate it either: the idle disk await averaged 10.4 ms there and 9.9 ms in the
+      green run 43679294042. Idle WAL sync means of the green runs: 0.06 (43678283415 attempt 2), 0.16 (43678298699) and 0.70 ms (43679294042). The signal that decides is therefore the fsync probe, whose 1 ms median bound sits between those greens and the 1.3 ms
+      of that host; it was not measured in any earlier run, so its bound is a reading of those idle values and is to be checked against the probe readings the smokes now record (`disk_probe` in the evidence).
+    - **Known risk for the 120-minute run: variance between hosts.** Two runs of the evidence configuration on one commit (`885750fd`) measured home at 20.1 ms (43679294042) and 37.3 ms (43678298699) against the 50 ms bound, and batch start at 51.9 and 55.7 ms against 100 ms. A
+      2-hour pooled p95 averages over more of that variance than a 5-minute one but is not immune to a slow host; a failure is judged as it stands, and the evidence records the precheck readings beside it for the reviewer (`precheck`, `disk_probe`).
 
 ### Findings of the revised harness: the latency bound on a production-shaped Portal (not evidence)
 

@@ -178,8 +178,9 @@ what.
 ### Declared capacity envelope status (OPS-08, SEC-09)
 
 Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
-[doc 171](171-capacity-envelope-plan.md). **OPS-08 is pending and SEC-09 stays partial until one 120-minute
-`workflow_dispatch` run of the `capacity-soak` job has passed; no result is cited before then.** Only that run counts. The
+[doc 171](171-capacity-envelope-plan.md). **OPS-08 is pending until one 120-minute
+`workflow_dispatch` run of the `capacity-soak` job has passed, and no result is cited before then. SEC-09 stays partial even after that run
+passes: the task worker and event delivery coordinator are not exercised by the soak.** Only that run counts. The
 job exists on the branch `feat/app-platform-capacity-soak`, which targets `integration/app-platform`, not on `main`, so the
 evidence run is a `workflow_dispatch` of that branch at the reviewed commit with `soak_only=true`; the evidence records the
 branch (`GITHUB_REF_NAME`), the commit and the event. The same configuration runs for five minutes, with a diagnosis added, on
@@ -189,7 +190,7 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
 - **What the job does:** on a GitHub-hosted `ubuntu-24.04` runner (4 vCPU, 16 GiB) with a 16 GiB XFS project-quota
   loop volume it owns, a real root runner runs fifty installations (forty-two static, eight managed backends of a
   soak fixture image, each sized from the memory and CPU budgets the runner reports in its readiness facts). The measured
-  Portal runs on PostgreSQL (a fresh `postgres:16` service for every run, opened with `OpenStore`; owner decision 2026-11-14: the evidence shape is
+  Portal runs on PostgreSQL (the runner image's own PostgreSQL 16, started as `postgresql.service` and recreated empty for every run, opened with `OpenStore`; owner decision 2026-11-14: the evidence shape is
   the production one), running its real batch scheduler against a local stub Dify that answers at once. It does not run the platform task worker or the event delivery
   coordinator, no request originates from a backend (the fixture has no outbound channel to the platform), and these are stated gaps, recorded in the evidence. The evidence records `db_driver` and the server version, and only a PostgreSQL run counts.
 - **SQLite is a recorded known limit, not evidence.** The `soak_db=sqlite-file` input measures the file-backed SQLite Portal. On it, sustained
