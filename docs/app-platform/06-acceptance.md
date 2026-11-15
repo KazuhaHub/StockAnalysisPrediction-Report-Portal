@@ -175,6 +175,19 @@ what.
 | OPS-07 | Present unsupported legacy app/container for managed adoption | No automatic takeover; old installation continues under legacy rules |
 | OPS-08 | Repeat test at declared maximum apps/tasks/resource envelope | Measured capacity/latency recorded, quotas reject excess and reserve host headroom |
 
+### Retention status (DATA-08)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 5 and [doc 172](172-retention-plan.md). **DATA-08 stays partial.**
+Implemented and tested on SQLite and PostgreSQL 18.6 with a synthetic clock: the retention sweeper (review plans, completed operations
+with their effects, terminal task and event tombstones with the per-installation cap), the two adjustable values and their page, the
+named 15-minute plan validity, and the 10 MiB runner log bound. The tests prove deletion of eligible rows only, retention of every
+pinned row (unresolved effects, recovery chains, recovery sets and their checkpoint sources, import grants, plan references, retained
+data, the live chain, the image ledger), idempotency replay inside the period and a new request after it, a swept task occurrence
+still deduplicated, one audit row per sweep, and no work during the restore pause. **Not met:** pruning recovery sets beyond the latest N
+is selected and reported but not performed, because the runner has no command that deletes one checkpoint; the 7-day runner log age is not
+enforceable by Docker's `json-file` driver (the size bound applies); nothing was run for the real retention periods or against a
+production-size database. The RUN-08 flood evidence was measured at the previous 1 MiB log policy.
+
 ### Declared capacity envelope status (OPS-08, SEC-09)
 
 Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
