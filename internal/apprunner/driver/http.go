@@ -39,43 +39,58 @@ func readJSON(ctx context.Context, client *http.Client, path string, out any) er
 // readJSONOrMissing is readJSON with a chosen error for a 404, so a caller can tell an absent object from an
 // unavailable daemon.
 func readJSONOrMissing(ctx context.Context, client *http.Client, path string, out any, missing error) error {
+	raw, err := fetchJSONBody(ctx, client, path, missing)
+	if err != nil {
+		return err
+	}
+	return decodeProjectedJSON(raw, out)
+}
+
+// fetchJSONBody is the bounded GET half of readJSONOrMissing: it returns the raw body of a 200 answer and
+// the same errors the combined call gives, leaving the strict decode to the caller.
+func fetchJSONBody(ctx context.Context, client *http.Client, path string, missing error) ([]byte, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://app-runner-docker.invalid"+path, nil)
 	if err != nil {
-		return ErrUnavailable
+		return nil, ErrUnavailable
 	}
 	request.Header.Set("Accept", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
 		if errors.Is(err, ErrUnsafeSocket) {
-			return ErrUnsafeSocket
+			return nil, ErrUnsafeSocket
 		}
 		if errors.Is(err, ErrAccessDenied) {
-			return ErrAccessDenied
+			return nil, ErrAccessDenied
 		}
-		return ErrUnavailable
+		return nil, ErrUnavailable
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
-		return missing
+		return nil, missing
 	}
 	if response.StatusCode != http.StatusOK {
-		return ErrUnavailable
+		return nil, ErrUnavailable
 	}
 	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return nil, ctx.Err()
 		}
-		return ErrUnavailable
+		return nil, ErrUnavailable
 	}
+	return raw, nil
+}
+
+// decodeProjectedJSON is the strict decode half: size bound, projection rules, then the typed decode.
+// Unknown daemon fields are deliberately ignored, never copied into reports.
+// No response value selects a URL, operation, path or implementation.
+func decodeProjectedJSON(raw []byte, out any) error {
 	if len(raw) > maxResponseBytes || !validProjection(raw, out) {
 		return ErrInvalidResponse
 	}
-	// Unknown daemon fields are deliberately ignored, never copied into reports.
-	// No response value selects a URL, operation, path or implementation.
 	if err := json.Unmarshal(raw, out); err != nil {
 		return ErrInvalidResponse
 	}

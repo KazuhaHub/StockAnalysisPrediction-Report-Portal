@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -164,7 +165,117 @@ func ownerContainerLabels(o containerOwner) map[string]string {
 	}
 }
 
+// planMemo remembers plans that passed validation, with their parsed policy. See decisionMemo.
+var planMemo = newDecisionMemo[containerCreate](256)
+
+// planKey digests every leaf of a plan, so a plan that differs in anything validation reads is another
+// question. Each leaf is a length-prefixed part (see memoKeyOf) tagged with its kind, in field order, so no two
+// plans encode alike unless every leaf is equal. A pointer to a binding contributes a presence marker and then
+// its leaves. TestPlanMemoKeyCoversEveryLeafField fails when containerPlan grows a leaf, or any field shape
+// this encoding cannot cover (a map, an interface, a pointer below the top level).
+func planKey(p containerPlan) memoKey {
+	var parts [][]byte
+	planParts(reflect.ValueOf(p), &parts)
+	return memoKeyOf(parts...)
+}
+
+func planParts(v reflect.Value, parts *[][]byte) {
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			*parts = append(*parts, []byte("s"+f.String()))
+		case reflect.Bool:
+			*parts = append(*parts, []byte("b"+strconv.FormatBool(f.Bool())))
+		case reflect.Int, reflect.Int64:
+			*parts = append(*parts, []byte("i"+strconv.FormatInt(f.Int(), 10)))
+		case reflect.Uint, reflect.Uint64:
+			*parts = append(*parts, []byte("u"+strconv.FormatUint(f.Uint(), 10)))
+		case reflect.Slice:
+			*parts = append(*parts, append([]byte("y"), f.Bytes()...))
+		case reflect.Struct:
+			planParts(f, parts)
+		case reflect.Pointer:
+			if f.IsNil() {
+				*parts = append(*parts, []byte("-"))
+			} else {
+				*parts = append(*parts, []byte("+"))
+				planParts(f.Elem(), parts)
+			}
+		default:
+			// An unencodable shape is never keyed loosely: a part that names only its kind never
+			// equals the key of a plan that was validated, so such a plan is simply never found again.
+			*parts = append(*parts, []byte("?"+f.Kind().String()))
+		}
+	}
+}
+
+// deepClone copies a value with no shared slices, maps or pointers. The memoized policy is cloned in and out.
+func deepClone[T any](v T) T {
+	out := reflect.New(reflect.TypeOf(v)).Elem()
+	cloneInto(out, reflect.ValueOf(v))
+	return out.Interface().(T)
+}
+
+func cloneInto(dst, src reflect.Value) {
+	switch src.Kind() {
+	case reflect.Slice:
+		if src.IsNil() {
+			return
+		}
+		dst.Set(reflect.MakeSlice(src.Type(), src.Len(), src.Len()))
+		for i := 0; i < src.Len(); i++ {
+			cloneInto(dst.Index(i), src.Index(i))
+		}
+	case reflect.Map:
+		if src.IsNil() {
+			return
+		}
+		dst.Set(reflect.MakeMapWithSize(src.Type(), src.Len()))
+		for it := src.MapRange(); it.Next(); {
+			value := reflect.New(src.Type().Elem()).Elem()
+			cloneInto(value, it.Value())
+			dst.SetMapIndex(it.Key(), value)
+		}
+	case reflect.Pointer:
+		if src.IsNil() {
+			return
+		}
+		dst.Set(reflect.New(src.Type().Elem()))
+		cloneInto(dst.Elem(), src.Elem())
+	case reflect.Struct:
+		for i := 0; i < src.NumField(); i++ {
+			cloneInto(dst.Field(i), src.Field(i))
+		}
+	default:
+		dst.Set(src)
+	}
+}
+
+// validatedContainerBody is validContainerPlan that also returns the plan's parsed create policy. The memory
+// keeps its own copy and every caller gets a private deep clone, so a caller may edit what it receives.
+func validatedContainerBody(plan containerPlan) (containerCreate, bool) {
+	key := planKey(plan)
+	if body, ok := planMemo.get(key); ok {
+		return deepClone(body), true
+	}
+	if !validContainerPlanUncached(plan) {
+		return containerCreate{}, false
+	}
+	var body containerCreate
+	if json.Unmarshal(plan.body, &body) != nil {
+		return containerCreate{}, false
+	}
+	planMemo.put(key, deepClone(body))
+	return body, true
+}
+
 func validContainerPlan(plan containerPlan) bool {
+	_, ok := validatedContainerBody(plan)
+	return ok
+}
+
+func validContainerPlanUncached(plan containerPlan) bool {
 	if !validContainerOwner(plan.owner) || plan.name != "portal-app-"+plan.owner.ResourceID || len(plan.body) == 0 || len(plan.body) > 32768 || plan.bodySHA != containerHash(plan.body) {
 		return false
 	}

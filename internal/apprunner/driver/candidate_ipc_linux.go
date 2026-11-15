@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -225,6 +226,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 type candidateIPCContainer struct {
 	ID     string          `json:"Id"`
 	Mounts json.RawMessage `json:"Mounts"`
+	// plan is the parsed mount plan of a remembered entry, whose Mounts bytes are not kept.
+	plan *candidateIPCMountPlanResult
 }
 
 // The general daemon decoder deliberately accepts object projections only.
@@ -267,6 +270,21 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 	}()
 	result := make([]candidateIPCContainer, 0, len(entries))
 	for _, entry := range entries {
+		// An entry that passed the checks below passes them again byte for byte; the daemon's volatile
+		// fields (a status like "Up 3 minutes") make it a different entry, which is checked from scratch.
+		key := memoKeyOf(entry)
+		if remembered, ok := inventoryEntryMemo.get(key); ok {
+			// The same bytes were accepted before, so Mounts is present. Callers read it, so it is taken
+			// from this pass's own bytes (a copy the result owns), not kept in the memory.
+			var narrow struct {
+				Mounts json.RawMessage `json:"Mounts"`
+			}
+			if json.Unmarshal(entry, &narrow) != nil || len(narrow.Mounts) == 0 {
+				return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: Mounts key missing", ErrInvalidResponse, inventoryEntryLabel(entry))
+			}
+			result = append(result, candidateIPCContainer{ID: remembered.id, Mounts: narrow.Mounts, plan: &candidateIPCMountPlanResult{sources: slices.Clone(remembered.plan.sources), pending: slices.Clone(remembered.plan.pending)}})
+			continue
+		}
 		var container candidateIPCContainer
 		if !validProjection(entry, &container) || json.Unmarshal(entry, &container) != nil {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: projection rejected", ErrInvalidResponse, inventoryEntryLabel(entry))
@@ -274,12 +292,31 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		if !containerSHA.MatchString(container.ID) {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
-		if _, _, err := candidateIPCMountPlan(container.Mounts); err != nil {
+		sources, pending, err := candidateIPCMountPlan(container.Mounts)
+		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
+		inventoryEntryMemo.put(key, candidateIPCInventoryEntry{id: container.ID, plan: candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)}})
 		result = append(result, container)
 	}
 	return result, nil
+}
+
+// inventoryEntryMemo and mountPlanMemo remember accepted decodings of daemon bytes only. See decisionMemo.
+var inventoryEntryMemo = newDecisionMemo[candidateIPCInventoryEntry](1024)
+
+// candidateIPCInventoryEntry is what is kept of an accepted entry: its id and its parsed mount plan, never
+// the daemon's bytes, which each pass clears.
+type candidateIPCInventoryEntry struct {
+	id   string
+	plan candidateIPCMountPlanResult
+}
+
+var mountPlanMemo = newDecisionMemo[candidateIPCMountPlanResult](1024)
+
+type candidateIPCMountPlanResult struct {
+	sources []string
+	pending []candidateIPCPendingVolume
 }
 
 // shortContainerID names a container in an error without the full identifier.
@@ -324,6 +361,23 @@ func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
 }
 
 func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
+	if len(raw) == 0 {
+		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
+	}
+	// The plan is a function of the mount bytes alone. Callers append to the result, so they get copies.
+	key := memoKeyOf(raw)
+	if plan, ok := mountPlanMemo.get(key); ok {
+		return slices.Clone(plan.sources), slices.Clone(plan.pending), nil
+	}
+	sources, pending, err := parseCandidateIPCMountPlan(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	mountPlanMemo.put(key, candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)})
+	return sources, pending, nil
+}
+
+func parseCandidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
 	if len(raw) == 0 {
 		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
@@ -380,9 +434,16 @@ func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPending
 // volume the list reports without a path (a non-local driver) is resolved with
 // one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
 func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
-	sources, pending, err := candidateIPCMountPlan(container.Mounts)
-	if err != nil {
-		return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+	var sources []string
+	var pending []candidateIPCPendingVolume
+	if container.plan != nil {
+		sources, pending = slices.Clone(container.plan.sources), slices.Clone(container.plan.pending)
+	} else {
+		var err error
+		sources, pending, err = candidateIPCMountPlan(container.Mounts)
+		if err != nil {
+			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+		}
 	}
 	if len(pending) == 0 {
 		return sources, nil
@@ -438,20 +499,46 @@ func boundedString(s string) string {
 	return s
 }
 
+// candidateIPCResolver canonicalises a mount source. A variable so a test can count and fail resolutions.
+var candidateIPCResolver = filepath.EvalSymlinks
+
 func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
+	return candidateIPCReferencedInPass(ctx, path, source, map[string]candidateIPCResolution{})
+}
+
+// candidateIPCResolution is one source's canonical path as one inventory pass saw it.
+type candidateIPCResolution struct {
+	canonical string
+	missing   bool
+}
+
+// candidateIPCReferencedInPass is candidateIPCReferenced for a pass that tests one source against several
+// policy paths: the filesystem is asked about a source once per pass. The answer is never kept past the
+// pass, so a symlink retargeted between two passes is seen by the second.
+func candidateIPCReferencedInPass(ctx context.Context, path, source string, pass map[string]candidateIPCResolution) (bool, error) {
 	if source == "" {
 		return false, nil
 	}
 	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
 		return false, ErrInvalidResponse
 	}
-	canonical, err := resolveCandidateIPCSource(ctx, source, filepath.EvalSymlinks)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+	resolved, ok := pass[source]
+	if !ok {
+		canonical, err := resolveCandidateIPCSource(ctx, source, candidateIPCResolver)
+		switch {
+		case err == nil:
+			resolved = candidateIPCResolution{canonical: canonical}
+		case errors.Is(err, os.ErrNotExist):
+			resolved = candidateIPCResolution{missing: true}
+		default:
+			return false, ErrUnavailable
 		}
-		return false, ErrUnavailable
+		pass[source] = resolved
 	}
+	if resolved.missing {
+		return false, nil
+	}
+	canonical := resolved.canonical
 	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil
 }
 

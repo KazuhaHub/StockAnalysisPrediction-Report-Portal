@@ -42,6 +42,17 @@ func (v VerifiedWritableBackendRequest) Registration() VerifiedWritableBackendRe
 	return v.registration
 }
 func VerifyWritableBackendRequest(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableBackendRequest, error) {
+	return cachedVerify("writable-backend-request", raw, signature, a, nowMS, func() (VerifiedWritableBackendRequest, int64, error) {
+		v, err := verifyWritableBackendRequestUncached(raw, signature, a, nowMS)
+		if err != nil {
+			return v, 0, err
+		}
+		// A request has no window of its own: it is good exactly as long as the registration it names.
+		return v, expiryMS(v.registration.candidate.writer.data.ExpiresMS), nil
+	})
+}
+
+func verifyWritableBackendRequestUncached(raw, signature []byte, a Authority, nowMS int64) (VerifiedWritableBackendRequest, error) {
 	var zero VerifiedWritableBackendRequest
 	var c WritableBackendRequestCommand
 	if len(raw) == 0 || len(raw) > MaxCommandBytes || len(signature) != ed25519.SignatureSize || !utf8.Valid(raw) {

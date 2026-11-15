@@ -5,7 +5,6 @@ package driver
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"os"
@@ -17,11 +16,8 @@ import (
 // to any private mount; the caller must independently inspect its full policy.
 // This is lifecycle-scoped observation, not exclusion against host root.
 func managedCandidateReference(ctx context.Context, client *http.Client, plan containerPlan) (string, error) {
-	if !validContainerPlan(plan) || (plan.writable == nil && plan.updateStart == nil) {
-		return "", ErrInvalidResponse
-	}
-	var policy containerCreate
-	if json.Unmarshal(plan.body, &policy) != nil {
+	policy, ok := validatedContainerBody(plan)
+	if !ok || (plan.writable == nil && plan.updateStart == nil) {
 		return "", ErrInvalidResponse
 	}
 	entries, err := readCandidateIPCInventory(ctx, client)
@@ -30,6 +26,8 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 	}
 	found := ""
 	seen := map[string]bool{}
+	// One filesystem answer per distinct source for this pass, not one per source and policy mount.
+	pass := map[string]candidateIPCResolution{}
 	for _, entry := range entries {
 		if seen[entry.ID] {
 			return "", ErrInvalidResponse
@@ -42,7 +40,7 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 		referenced := false
 		for _, source := range sources {
 			for _, mount := range policy.HostConfig.Mounts {
-				matches, err := candidateIPCReferenced(ctx, mount.Source, source)
+				matches, err := candidateIPCReferencedInPass(ctx, mount.Source, source, pass)
 				if err != nil {
 					return "", err
 				}
