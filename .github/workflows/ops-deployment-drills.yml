@@ -7,6 +7,8 @@ name: ops deployment drills
 # See scripts/acceptance/ops_deploy_drills.py and the engineering note in
 # docs/app-platform/167-owner-decisions-remaining-acceptance.md section 6.
 on:
+  push:
+    branches: [test/app-platform-ops-drills]
   workflow_dispatch:
     inputs:
       expected_commit:
