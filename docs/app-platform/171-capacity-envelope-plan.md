@@ -1320,6 +1320,37 @@ is evidence for OPS-08.
     treat the Portal better than the two saturated ones, and the Portal's wake-ups appear to be disturbed by the neighbours it shares the host with rather than by their share. No stability
     rerun was made: nothing passed. Nothing was tuned.
 
+    **Pinning the platform to the reserved CPUs (`soak_pin_platform`; hypothesis: the Portal's threads wake on the saturated app CPUs and queue behind the backends; PostgreSQL, 5
+    minutes, default 50% budget; not evidence).** The input starts the Portal's scope with `systemd-run -p AllowedCPUs=<reserved set>` and sets PostgreSQL's unit to the same set
+    with `systemctl set-property --runtime` before the soak starts; each process's affinity is recorded from `/proc/<pid>/status` (`Cpus_allowed_list`) in the evidence. The runner
+    could not be pinned: pinned to CPU 0 it refuses to start, `app-runner not ready: capacity: online_cpus_disagree_with_reported` (it compares the CPUs it can use with those Docker
+    reports), so it stays on 0-3 in both runs, as does the flood's parent test process. The flood shares the Portal's scope and is pinned with it.
+
+    | | (a) `reserved_cpus=1` pinned to CPU 0, run 43656621825 | (b) `reserved_cpus=2` pinned to 0-1, run 43657628078 |
+    | --- | --- | --- |
+    | recorded affinity: Portal, flood, PostgreSQL / runner | 0, 0, 0 / 0-3 | 0-1, 0-1, 0-1 / 0-3 |
+    | backend cpuset | 1-3 | 2-3 |
+    | per-CPU busy loaded, CPU 0 / 1 / 2 / 3 (idle about 0.2 to 1.7) | 65.6 / 78.3 / 79.7 / 79.3 | 59.1 / 60.2 / 97.7 / 97.9 |
+    | host busy; Portal, flood, PostgreSQL, runner, docker, backends, other (percent of host, windows 2 to 5) | 77.9; 6.3, 0.3, 0.1, 11.0, 4.1, 48.0, 8.1 | 79.8; 6.7, 0.4, 0.2, 11.9, 4.3, 47.8, 8.3 |
+    | admitted / refused per second | 10.3 / 115.7 | 9.5 / 115.8 |
+    | Portal scope CPU pressure some / full avg10 (idle 0) | 28.6 / 11.8 | 13.6 / 7.6 |
+    | Portal scope I/O pressure | 0.001 | 0 |
+    | PostgreSQL unit CPU some | 12.2 | 8.8 |
+    | PostgreSQL mean WAL sync (ms, idle 0.06 / 0.07) | 0.84 (max 2.95) | 0.12 |
+    | home idle / pooled / bound (us) | 1212 / 13309 / 6212 fail | 2342 / 9782 / 7342 fail |
+    | home windows 1 to 5 | 11341, 12649, 13473, 15873, 11761 | 9471, 8513, 10012, 12323, 9782 |
+    | report | 2085 / 20877 / 7085 fail | 2835 / 12631 / 7835 fail |
+    | report windows | 18945, 26322, 14815, 24735, 14700 | 12538, 9430, 14487, 15019, 11395 |
+    | dispatch@200 | 757 / 5206 / 5757 pass | 955 / 4639 / 5955 pass |
+    | dispatch windows | 5206, 4903, 4309, 5246, 5023 | 3544, 4158, 5046, 3999, 4908 |
+    | batch start | 13168 / 35169 / 19752 fail | 9781 / 28252 / 14781 fail |
+    | batch start windows | 31807, 45392, 31577, 38777, 23830 | 21077, 24690, 23666, 35636, 25604 |
+
+    The hypothesis is not supported. Pinned to CPU 0 (a) the Portal waits 28.6% of the time, more than unpinned (9.9% with one reserved CPU, 43654065624), and PostgreSQL's WAL sync mean rises
+    to 0.84 ms: the Portal, PostgreSQL, the runner, Docker and the rest of the host's own work all compete for one CPU (65.6% busy on average). Pinned to CPUs 0-1 (b) the Portal waits 13.6%
+    on CPUs that are 59% to 60% busy and cannot wake on the saturated CPUs 2-3 at all, yet waits as much as unpinned with two reserved CPUs (12.1%). So the wait is not caused by wake-ups landing
+    behind the backends. Home and report stay at 1.3 to 3 times their bounds in both runs, dispatch passes in both and batch start fails. No stability rerun: nothing passed. Nothing was tuned.
+
     **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
