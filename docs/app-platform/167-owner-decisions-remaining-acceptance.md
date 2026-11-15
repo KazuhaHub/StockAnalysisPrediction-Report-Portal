@@ -282,6 +282,26 @@ with a typed error; Portal p95 latency for the home page and report detail
 within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
+Engineering note 2026-11-15 (not the owner's decision): "closes `SEC-09`" above is read as the soak's contribution to `SEC-09`.
+`SEC-09` stays partial after `OPS-08` passes: the task worker and event delivery coordinator are not exercised by the soak
+(`handoff/acceptance-checklist.csv`, `SEC-09`).
+
+Owner decision 2026-11-13: the latency bound is max(1.5x idle p95, idle p95 + 5 ms), for the home page, the report page and
+the queue's dispatch decision, measured with load generated outside the measured process. The owner decided only that floor.
+
+Verdict computation (engineering decision, not the owner's): the p95 over the loaded period, pooled over every loaded sample of
+the run, is compared with the bound; per-window values are diagnostics. The pooling is the engineering lead's reading of the
+sentence "Portal p95 latency ... within 1.5x of the idle baseline" above, adopted before the evidence run.
+
+Owner decision 2026-11-15: under full declared load on the reference host, home and report pooled p95 ≤ 50 ms and batch start pooled p95 ≤ 100 ms; dispatch stays within max(1.5× idle, idle + 5 ms). The relative floor was measured and could not be met on a 2-physical-core host at full app CPU load; see doc 171.
+
+Owner decision 2026-11-15 (dispatch): dispatch@200 pooled p95 ≤ 25 ms (measured 6.5–11.4 ms under full load, relative floor not reliably met). This supersedes the dispatch clause of the decision above: all four series are judged on absolute pooled bounds, the relative threshold and the ratio to idle being diagnostics.
+
+Added by the same harness, as engineering decisions, not the owner's: the real batch scheduler's enqueue-to-start latency is judged
+by its own bound, 100 ms pooled p95 (it is what "Portal business executor capacity remains available" of SEC-09 is measured with), and every
+one-minute window must show the backends and the message flood alive (answered requests, typed refusals, CPU and memory
+held), so that a bound met by a flood that stopped does not pass.
+
 ## 5. DATA-08: retention defaults
 
 **Decision: adopt the doc 05 proposal values, corrected so retention never
