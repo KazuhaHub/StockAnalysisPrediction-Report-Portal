@@ -534,3 +534,119 @@ func TestServiceBackendTaskManagedInitialAcceptsPolicyRevisionAfterGrantChange(t
 		t.Fatal("managed task signed with a policy revision its grant does not carry")
 	}
 }
+
+// An updated, restored or resumed app is at generation 2 or later. An access-grant
+// change bumps its policy revision without a new generation, so the task of such an
+// app must be accepted at the grant's current revision, never below the revision the
+// update was started with.
+func TestServiceBackendTaskUpdateGenerationAcceptsPolicyRevisionAfterGrantChange(t *testing.T) {
+	registrationCommand, key, authority, now, descriptor, document :=
+		updateStartRegistrationFixture(t)
+	defer clear(document)
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registrationRaw, registrationSignature, err :=
+		SignUpdateStartRegistration(registrationCommand, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registration, err := VerifyUpdateStartRegistration(
+		registrationRaw, registrationSignature, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := registration.Start().Command()
+	floor := start.Payload.TargetPolicyRevision
+	taskID := "10000000-0000-4000-8000-000000000051"
+	body, err := appplatform.EncodeTaskBackendRequest(
+		taskID, "generation-2:grant-change", []byte(`{"fixture":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseID := "10000000-0000-4000-8000-000000000052"
+	build := func(policy string) (ServiceBackendTaskCommand, bool) {
+		identity, err := appplatform.SignServiceIdentity(
+			[]byte(strings.Repeat("u", 32)), appplatform.ServiceIdentityGrant{
+				Format: appplatform.ServiceIdentityFormat, LeaseID: leaseID,
+				AppID: parsed.Manifest.ID, InstallationID: start.InstallationID,
+				ControllerEpoch: start.ControllerEpoch,
+				Generation:      start.TargetGeneration, PolicyRevision: policy,
+				ReleaseSHA256: start.Payload.TargetReleaseSHA256,
+				Resources:     []string{"tasks.schedule"},
+				IssuedMS:      strconv.FormatInt(now, 10),
+				ExpiresMS:     strconv.FormatInt(now+60000, 10),
+			}, now)
+		if err != nil {
+			// The grant itself refuses a non-canonical revision.
+			return ServiceBackendTaskCommand{}, false
+		}
+		return ServiceBackendTaskCommand{
+			Format:    ServiceBackendTaskFormat,
+			RequestID: "10000000-0000-4000-8000-000000000053", TaskID: taskID,
+			LeaseID: leaseID, Handler: appplatform.TaskHandlerBackend,
+			InstallationID: start.InstallationID, Generation: start.TargetGeneration,
+			PolicyRevision: policy, ControllerEpoch: start.ControllerEpoch,
+			ReleaseSHA256: start.Payload.TargetReleaseSHA256, BootID: "generation-2-boot",
+			RegistrationRaw: registrationRaw, RegistrationSignature: registrationSignature,
+			ServiceIdentity: identity, BodySHA256: serviceTaskBodyDigest(body),
+		}, true
+	}
+	n, err := strconv.ParseUint(floor, 10, 63)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, policy := range []string{floor, strconv.FormatUint(n+1, 10), strconv.FormatUint(n+7, 10)} {
+		command, ok := build(policy)
+		if !ok {
+			t.Fatal("grant refused revision", policy)
+		}
+		raw, signature, err := SignServiceBackendTask(command, key, authority, now)
+		if err != nil {
+			t.Fatal("generation-2 task at policy revision", policy, err)
+		}
+		verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+		if err != nil || verified.RegistrationIdentity().PolicyRevision != policy ||
+			verified.RegistrationIdentity().Generation != "2" ||
+			ValidateServiceBackendTaskData(verified, body) != nil {
+			t.Fatal("generation-2 task verification", policy, err)
+		}
+	}
+	// Below the revision the update started with, or not canonical: refused.
+	for name, policy := range map[string]string{"below the floor": strconv.FormatUint(n-1, 10), "leading zero": "0" + floor, "empty": ""} {
+		command, ok := build(policy)
+		if !ok {
+			continue
+		}
+		if _, _, err := SignServiceBackendTask(command, key, authority, now); err == nil {
+			t.Fatal("generation-2 task signed with a policy revision", name)
+		}
+	}
+}
+
+// The registration's own generation is checked, not only the command's. The signed
+// chain already refuses another generation, so the guard is tested directly on the
+// projection a verified registration yields.
+func TestServiceBackendTaskWritableIdentityRequiresGenerationOne(t *testing.T) {
+	c, key, a, now := writableRegistrationFixture(t)
+	raw, signature, err := SignWritableBackendRegistration(c, key, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := VerifyWritableBackendRegistration(raw, signature, a, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := verified.Candidate().Index()
+	if identity, err := writableServiceTaskIdentity(index, "1"); err != nil || identity.Generation != "1" {
+		t.Fatal("generation-1 registration refused", err)
+	}
+	for _, generation := range []string{"0", "2", "", "01"} {
+		changed := index
+		changed.TargetGeneration = generation
+		if _, err := writableServiceTaskIdentity(changed, "1"); err == nil {
+			t.Fatal("registration at generation", generation, "yielded a task identity")
+		}
+	}
+}

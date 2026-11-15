@@ -511,7 +511,7 @@ wait:
 	if inspectErr != nil {
 		t.Fatal(inspectErr)
 	}
-	for _, marker := range []string{"IMAGE_DELIVERY_CHILD_STAGED_OFFLINE", "IMAGE_DELIVERY_CHILD_LOAD_RECEIPT", "IMAGE_DELIVERY_CHILD_APP_ANSWERED", "IMAGE_DELIVERY_CHILD_UNINSTALLED"} {
+	for _, marker := range []string{"IMAGE_DELIVERY_CHILD_STAGED_OFFLINE", "IMAGE_DELIVERY_CHILD_LOAD_RECEIPT", "IMAGE_DELIVERY_CHILD_APP_ANSWERED", "SCHEDULED_DIGEST_WRITABLE_GENERATION_ONE_TASK_VERIFIED", "IMAGE_DELIVERY_CHILD_UNINSTALLED"} {
 		if !bytes.Contains(output.Bytes(), []byte(marker)) {
 			t.Fatal("child assertion missing: "+marker, output.String())
 		}
