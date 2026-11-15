@@ -14,7 +14,7 @@ name: licence
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/app-platform-licence-gate]
   pull_request:
   workflow_dispatch:
 
