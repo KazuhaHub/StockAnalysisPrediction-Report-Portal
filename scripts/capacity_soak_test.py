@@ -816,6 +816,89 @@ class StallTests(unittest.TestCase):
         self.assertEqual(summary["loaded"]["vm.dirty_kib"]["max"], 90_000)
 
 
+class TopologyTests(unittest.TestCase):
+    def test_eevdf_is_the_scheduler_from_kernel_6_6(self):
+        for kernel, want in (("7.0.0-1017-azure", True), ("6.8.0-1030-azure", True), ("6.6.12", True), ("6.5.0", False), ("5.15.0-1", False)):
+            self.assertEqual(soak.uses_eevdf(kernel), want, kernel)
+        self.assertFalse(soak.uses_eevdf("garbage"))
+
+    def test_the_topology_says_whether_cpu_threads_share_a_core_and_who_shares_with_cpu_0(self):
+        shared = soak.smt_layout({"cpu0": "0-1", "cpu1": "0-1", "cpu2": "2-3", "cpu3": "2-3"})
+        self.assertTrue(shared["smt"])
+        self.assertEqual(shared["cpu0_siblings"], "0-1")
+        alone = soak.smt_layout({"cpu0": "0", "cpu1": "1", "cpu2": "2", "cpu3": "3"})
+        self.assertFalse(alone["smt"])
+        self.assertEqual(alone["cpu0_siblings"], "0")
+
+    def test_the_topology_reads_the_sibling_lists_from_sysfs(self):
+        with tempfile.TemporaryDirectory() as root:
+            for cpu, siblings in (("cpu0", "0,2"), ("cpu1", "1,3"), ("cpu2", "0,2"), ("cpu3", "1,3")):
+                folder = Path(root) / cpu / "topology"
+                folder.mkdir(parents=True)
+                (folder / "thread_siblings_list").write_text(siblings + "\n")
+            (Path(root) / "cpufreq").mkdir()
+            self.assertEqual(soak.read_thread_siblings(root), {"cpu0": "0,2", "cpu1": "1,3", "cpu2": "0,2", "cpu3": "1,3"})
+
+
+class DetailTests(unittest.TestCase):
+    def test_comm_names_lose_their_numbers_so_kernel_threads_group(self):
+        self.assertEqual(soak.normalise_comm("kworker/u8:3"), "kworker/uN:N")
+        self.assertEqual(soak.normalise_comm("ksoftirqd/2"), "ksoftirqd/N")
+        self.assertEqual(soak.normalise_comm("loop0"), "loopN")
+        self.assertEqual(soak.normalise_comm("jbd2/sda1-8"), "jbdN/sdaN-N")
+        self.assertEqual(soak.normalise_comm("dockerd"), "dockerd")
+
+    def test_a_sample_splits_docker_and_the_rest_by_command_name(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc = Path(root) / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            (Path(root) / "mount").mkdir()
+            moments = iter([1.0, 11.0])
+            sampler = soak.Sampler(run=lambda *a: "", proc=proc, mountpoint=Path(root) / "mount", image_id="sha256:" + "b" * 64, clock=lambda: next(moments), cpus=4, ticks_per_second=100)
+
+            def lay(n):
+                (proc / "stat").write_text(f"cpu  {2000 * n} 0 0 {8000 + 2000 * n} 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n")
+                write_process(proc, 20, "dockerd", ["dockerd"], (n * 100, 0))              # 100 ticks of 4000 (10 s, 4 cpus): 2.5%
+                write_process(proc, 21, "containerd-shim", ["containerd-shim"], (n * 40, 0))  # 1%
+                write_process(proc, 22, "kworker/u8:3", [], (n * 80, 0))                     # 2%
+                write_process(proc, 23, "kworker/u8:5", [], (n * 40, 0))                     # 1%, the same group
+                write_process(proc, 24, "bash", ["bash"], (n * 20, 0))
+
+            lay(0)
+            sampler.sample()
+            lay(1)
+            detail = sampler.sample()["cpu_detail"]
+        self.assertEqual({k: round(v, 2) for k, v in detail.items()},
+                         {"docker.dockerd": 2.5, "docker.containerd-shim": 1.0, "other.kworker/uN:N": 3.0, "other.bash": 0.5})
+
+    def test_the_verdict_lists_the_top_consumers_inside_docker_and_other(self):
+        evidence = child_evidence(windows=3)
+        samples = load_samples(3)
+        for sample in samples:
+            sample["cpu_detail"] = {"docker.dockerd": 2.0, "docker.containerd": 1.0, "other.kworker/uN:N": 5.0, "other.loopN": 0.5}
+        top = soak.evaluate(evidence, samples, **self_kwargs())["cpu_detail_top"]
+        self.assertEqual(top["other"][0], {"name": "kworker/uN:N", "percent_of_host": 5.0})
+        self.assertEqual([x["name"] for x in top["docker"]], ["dockerd", "containerd"])
+
+
+class PlatformWeightTests(unittest.TestCase):
+    def test_the_weight_is_empty_or_one_to_ten_thousand(self):
+        self.assertEqual(soak.soak_platform_cpu_weight(""), "")
+        self.assertEqual(soak.soak_platform_cpu_weight("1000"), "1000")
+        for bad in ("0", "10001", "x", "-1", " 1000", "1e3"):
+            with self.assertRaises(RuntimeError):
+                soak.soak_platform_cpu_weight(bad)
+
+    def test_a_weighted_run_is_not_evidence(self):
+        kwargs = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
+        verdict = soak.evaluate(child_evidence(windows=120), load_samples(120), platform_weight="1000", **kwargs)
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertEqual(verdict["platform_cpu_weight"], "1000")
+
+
 class PinPlatformTests(unittest.TestCase):
     def test_the_pin_set_is_the_reserved_cpus_the_runner_keeps_free_of_apps(self):
         self.assertEqual(soak.pin_cpu_set(""), "0")        # the runner default reserves one CPU

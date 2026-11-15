@@ -331,8 +331,11 @@ func soakBatchProbeDue(iteration int) bool { return iteration%soakBatchProbeEver
 // soakScopeCommand is the argv that starts command in its own transient scope under system.slice at the default CPU weight, as a
 // compose container or a systemd unit of production sits among its siblings. uid >= 0 drops root inside the scope. systemd-run
 // itself is root; the scope exists before the process runs, so the process is born in it.
-func soakScopeCommand(unit, allowedCPUs string, uid int, command ...string) []string {
-	argv := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=" + unit, "-p", "CPUWeight=100"}
+func soakScopeCommand(unit, allowedCPUs string, weight, uid int, command ...string) []string {
+	if weight < 1 {
+		weight = 100 // the default weight of a systemd unit
+	}
+	argv := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=" + unit, "-p", "CPUWeight=" + strconv.Itoa(weight)}
 	if allowedCPUs != "" {
 		argv = append(argv, "-p", "AllowedCPUs="+allowedCPUs)
 	}
@@ -341,6 +344,34 @@ func soakScopeCommand(unit, allowedCPUs string, uid int, command ...string) []st
 		argv = append(argv, "setpriv", "--reuid="+strconv.Itoa(uid), "--regid="+strconv.Itoa(uid), "--groups="+strconv.Itoa(uid))
 	}
 	return append(argv, command...)
+}
+
+// soakParsePlatformWeight reads APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT: empty leaves the default weight (0), else the CPUWeight of the Portal's
+// scope and of PostgreSQL's unit (systemd accepts 1 to 10000). The runner's scope stays at the default.
+func soakParsePlatformWeight(env string) (int, error) {
+	if env == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(env)
+	if err != nil || n < 1 || n > 10000 || strconv.Itoa(n) != env {
+		return 0, fmt.Errorf("the platform CPU weight is empty or an integer from 1 to 10000, got %q", env)
+	}
+	return n, nil
+}
+
+// soakRunnerProfileSummary is what the flood did between the two readings that bracket the runner's CPU profile: the relayed (answered)
+// and the refused requests, and their rates, so the runner's CPU can be divided by the requests it carried.
+type soakRunnerProfileSummaryT struct {
+	Admitted, Refused                            int64
+	Seconds, AdmittedPerSecond, RefusedPerSecond float64
+}
+
+func soakRunnerProfileSummary(before, after soakFloodCounters, window time.Duration) soakRunnerProfileSummaryT {
+	out := soakRunnerProfileSummaryT{Admitted: after.Classes[soakFloodOK] - before.Classes[soakFloodOK], Refused: after.Classes[soakFloodBusy] - before.Classes[soakFloodBusy], Seconds: window.Seconds()}
+	if out.Seconds > 0 {
+		out.AdmittedPerSecond, out.RefusedPerSecond = float64(out.Admitted)/out.Seconds, float64(out.Refused)/out.Seconds
+	}
+	return out
 }
 
 // soakReservedCPUSet is the CPU list of the reserved CPUs: the runner reserves the lowest ones.
@@ -807,18 +838,22 @@ func TestSoakCPUPercentIsEmptyOrAnIntegerFromOneToOneHundred(t *testing.T) {
 }
 
 func TestSoakScopeCommandRunsTheProcessInItsOwnSystemSliceScopeAtTheDefaultWeight(t *testing.T) {
-	got := soakScopeCommand("soak-runner", "", -1, "/t/portal.test", "-test.run=^X$")
+	got := soakScopeCommand("soak-runner", "", 0, -1, "/t/portal.test", "-test.run=^X$")
 	want := []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-runner", "-p", "CPUWeight=100", "--",
 		"/t/portal.test", "-test.run=^X$"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %q", got)
 	}
 	// An unprivileged process drops root inside the scope, after systemd has placed it: systemd-run itself runs as root.
-	pinned := soakScopeCommand("soak-runner", "0-1", -1, "/t/portal.test")
+	pinned := soakScopeCommand("soak-runner", "0-1", 0, -1, "/t/portal.test")
 	if strings.Join(pinned[6:10], " ") != "-p CPUWeight=100 -p AllowedCPUs=0-1" && strings.Join(pinned[6:11], " ") != "-p CPUWeight=100 -p AllowedCPUs=0-1" {
 		t.Fatalf("pinned argv = %q", pinned)
 	}
-	got = soakScopeCommand("soak-portal", "", 41001, "/t/portal.test", "-test.v")
+	weighted := soakScopeCommand("soak-portal", "", 1000, -1, "/t/portal.test")
+	if strings.Join(weighted[6:8], " ") != "-p CPUWeight=1000" {
+		t.Fatalf("weighted argv = %q", weighted)
+	}
+	got = soakScopeCommand("soak-portal", "", 0, 41001, "/t/portal.test", "-test.v")
 	want = []string{"systemd-run", "--scope", "--quiet", "--collect", "--slice=system.slice", "--unit=soak-portal", "-p", "CPUWeight=100", "--",
 		"setpriv", "--reuid=41001", "--regid=41001", "--groups=41001", "/t/portal.test", "-test.v"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
@@ -854,6 +889,34 @@ func TestSoakPinnedCPUSetIsTheReservedRange(t *testing.T) {
 	}
 	if soakReservedCPUSet(0) != "" {
 		t.Error("no reserved CPU, nothing to pin to")
+	}
+}
+
+func TestSoakPlatformCPUWeightIsEmptyOrOneToTenThousand(t *testing.T) {
+	if got, err := soakParsePlatformWeight(""); err != nil || got != 0 {
+		t.Fatalf("empty = %d, %v", got, err)
+	}
+	for _, want := range []int{1, 100, 1000, 10000} {
+		if got, err := soakParsePlatformWeight(strconv.Itoa(want)); err != nil || got != want {
+			t.Errorf("%d = %d, %v", want, got, err)
+		}
+	}
+	for _, bad := range []string{"0", "10001", "x", "-5", "1e3", " 1000"} {
+		if _, err := soakParsePlatformWeight(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}
+
+func TestSoakRunnerProfileSummaryCountsTheRelayedRequestsOfTheProfiledMinute(t *testing.T) {
+	before := soakFloodCounters{Requests: 1000, Classes: map[string]int64{"200": 100, "429:app_platform_busy": 900}}
+	after := soakFloodCounters{Requests: 8900, Classes: map[string]int64{"200": 700, "429:app_platform_busy": 8200}}
+	got := soakRunnerProfileSummary(before, after, 60*time.Second)
+	if got.Admitted != 600 || got.Refused != 7300 || got.Seconds != 60 || got.AdmittedPerSecond != 10 || got.RefusedPerSecond < 121 || got.RefusedPerSecond > 122 {
+		t.Fatalf("summary = %+v", got)
+	}
+	if empty := soakRunnerProfileSummary(before, before, 0); empty.AdmittedPerSecond != 0 {
+		t.Fatalf("an empty window = %+v", empty)
 	}
 }
 

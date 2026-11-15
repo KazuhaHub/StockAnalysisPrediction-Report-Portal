@@ -154,6 +154,45 @@ def cpu_millis_between(previous_usec, current_usec, seconds):
     return (current_usec - previous_usec) / (seconds * 1000.0)
 
 
+# ---- topology ----
+
+def uses_eevdf(kernel):
+    """The kernel's own scheduler is EEVDF from 6.6 (CFS before it)."""
+    match = re.match(r"^([0-9]+)\.([0-9]+)", kernel or "")
+    return bool(match) and (int(match.group(1)), int(match.group(2))) >= (6, 6)
+
+
+def read_thread_siblings(cpu_root="/sys/devices/system/cpu"):
+    siblings = {}
+    for folder in sorted(Path(cpu_root).glob("cpu[0-9]*")):
+        try:
+            siblings[folder.name] = (folder / "topology" / "thread_siblings_list").read_text().strip()
+        except OSError:
+            pass
+    return siblings
+
+
+def smt_layout(siblings):
+    """Whether any CPU shares a physical core with another, and which CPUs share cpu0's core."""
+    return {"thread_siblings": siblings, "smt": any(re.search(r"[,-]", v) for v in siblings.values()), "cpu0_siblings": siblings.get("cpu0")}
+
+
+def collect_topology(run):
+    """uname, lscpu and every CPU's thread siblings, for the evidence."""
+    kernel = os.uname().release
+    topology = {"kernel": kernel, "eevdf": uses_eevdf(kernel), **smt_layout(read_thread_siblings())}
+    try:
+        topology["lscpu"] = run("lscpu")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        topology["lscpu"] = "unavailable: " + str(error)
+    return topology
+
+
+def normalise_comm(comm):
+    """A command name with its numbers replaced, so kworker/u8:3 and kworker/u8:5 are one consumer."""
+    return re.sub(r"[0-9]+", "N", comm)
+
+
 # ---- which CPUs ----
 
 def parse_per_cpu(text):
@@ -352,6 +391,7 @@ class Sampler:
                  disk_devices=None, postgres=False):
         self.disk_devices, self.postgres = disk_devices or {}, postgres
         self._disks, self._pg, self._iowait, self._cores = None, None, None, None
+        self._pid_comm = {}
         self.cpus = cpus or os.cpu_count() or 1
         self.ticks_per_second = ticks_per_second or os.sysconf("SC_CLK_TCK")
         self._backend_full_ids = set()
@@ -466,6 +506,7 @@ class Sampler:
                 continue
             group = classify_process(comm, cmdline)
             groups.setdefault(group, {})[int(folder.name)] = ticks
+            self._pid_comm[int(folder.name)] = normalise_comm(comm)
         return groups
 
     def _cpu_groups(self, now, host_percent, backend_millis):
@@ -482,6 +523,13 @@ class Sampler:
                   for name, members in groups.items() if name != "other"}
         for name in ("portal", "flood", "postgres", "runner", "docker"):
             shares.setdefault(name, 0.0)
+        detail = {}
+        for name in ("docker", "other"):
+            for pid, ticks in groups.get(name, {}).items():
+                share = 100.0 * max(ticks - previous.get(pid, 0), 0) / capacity
+                key = f"{name}.{self._pid_comm.get(pid, '?')}"
+                detail[key] = detail.get(key, 0.0) + share
+        self.last_detail = detail
         shares["backends"] = backend_millis / (self.cpus * 10.0)
         shares["host_busy"] = host_percent
         shares["other"] = max(0.0, host_percent - sum(v for k, v in shares.items() if k != "host_busy"))
@@ -518,6 +566,7 @@ class Sampler:
         }
         if shares is not None:
             row["cpu_groups"] = shares
+            row["cpu_detail"] = {k: round(v, 3) for k, v in self.last_detail.items() if v > 0}
         row.update(extra)
         return row
 
@@ -874,6 +923,20 @@ def stall_summary(evidence, samples):
     return {"idle": _summarise(idle), "loaded": _summarise(loaded)}
 
 
+def cpu_detail_top(evidence, samples, limit=15):
+    """Mean share of the host over the load of each command inside docker and inside "other", largest first."""
+    start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
+    rows = [s["cpu_detail"] for s in samples if s.get("cpu_detail") and start < s["at_ms"] <= end]
+    top = {"docker": [], "other": []}
+    if not rows:
+        return top
+    names = {k for r in rows for k in r}
+    means = {k: sum(r.get(k, 0.0) for r in rows) / len(rows) for k in names}
+    for group in top:
+        top[group] = [{"name": k.split(".", 1)[1], "percent_of_host": round(v, 3)} for k, v in sorted(means.items(), key=lambda kv: -kv[1]) if k.startswith(group + ".")][:limit]
+    return top
+
+
 def per_cpu_summary(evidence, samples):
     """Each CPU's busy percent, mean and max, for the idle period and the load."""
     rows = [(s["at_ms"], dict(s["cpu_per_core"])) for s in sorted(samples, key=lambda s: s["at_ms"]) if s.get("cpu_per_core")]
@@ -908,7 +971,7 @@ def cpu_breakdown(evidence, samples):
     return {"idle": _mean_shares(idle), "windows": windows, "flood_rates": rates}
 
 
-def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False):
+def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False, platform_weight=""):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4."""
     # The Go side encodes an empty list as null, and a run that died early has no evidence at all.
     evidence = {k: v for k, v in (evidence or {}).items() if v is not None}
@@ -975,10 +1038,11 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     return {
         # A diagnostic variant measures the scenario with one part removed: it explains a result and is never evidence.
         "passed": passed, "counts_as_ops08_evidence": passed and minutes >= OPS08_MINUTES and not variant and evidence.get("db_driver") == "postgres"
-        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)) and reserved_cpus in ("", str(RUNNER_DEFAULT_RESERVED_CPUS)) and not pin_platform,
+        and cpu_percent in ("", str(RUNNER_DEFAULT_CPU_PERCENT)) and reserved_cpus in ("", str(RUNNER_DEFAULT_RESERVED_CPUS)) and not pin_platform and not platform_weight,
+        "platform_cpu_weight": platform_weight,
         "pin_platform": pin_platform,
         "reserved_cpus_override": reserved_cpus,
-        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
+        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "cpu_detail_top": cpu_detail_top(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
@@ -1040,6 +1104,13 @@ def soak_reserved_cpus(value):
     """An override of the runner's capacity.reserved_cpus for a diagnostic run: empty or a non-negative integer."""
     if value and not (re.fullmatch(r"[0-9]{1,2}", value) and int(value) <= 64 and str(int(value)) == value):
         raise RuntimeError("soak_reserved_cpus is empty or an integer from 0 to 64")
+    return value or ""
+
+
+def soak_platform_cpu_weight(value):
+    """CPUWeight for the Portal scope and the PostgreSQL unit: empty or an integer 1 to 10000 (a diagnostic, never evidence)."""
+    if value and not (re.fullmatch(r"[0-9]{1,5}", value) and 1 <= int(value) <= 10000 and str(int(value)) == value):
+        raise RuntimeError("soak_platform_cpu_weight is empty or an integer from 1 to 10000")
     return value or ""
 
 
@@ -1162,6 +1233,7 @@ def main(argv):
     variant = soak_variant(os.environ.get("APP_CAPACITY_SOAK_VARIANT", ""))
     cpu_percent = soak_cpu_percent(os.environ.get("APP_CAPACITY_SOAK_CPU_PERCENT", ""))
     reserved_cpus = soak_reserved_cpus(os.environ.get("APP_CAPACITY_SOAK_RESERVED_CPUS", ""))
+    platform_weight = soak_platform_cpu_weight(os.environ.get("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ""))
     pin_platform = soak_pin_platform(os.environ.get("APP_CAPACITY_SOAK_PIN_PLATFORM", ""))
     database = soak_database(os.environ.get("APP_CAPACITY_SOAK_DB", ""))
     app_binary = os.environ.get("APP_CAPACITY_SOAK_APP_BINARY", "")
@@ -1171,6 +1243,8 @@ def main(argv):
     require_disposable_environment(os.environ, os.geteuid(), sys.platform, shutil.which)
     require_systemd_scopes(run_command)
     pin_cpus = ""
+    if platform_weight:  # PostgreSQL's unit gets the same weight as the Portal's scope; the runner's scope keeps the default
+        run_command("systemctl", "set-property", "--runtime", postgres_unit(run_command), "CPUWeight=" + platform_weight)
     if pin_platform:
         pin_cpus = pin_cpu_set(reserved_cpus)
         # PostgreSQL is a unit of the runner image: its cpuset is set at run time, before the soak starts, and only for this run.
@@ -1234,7 +1308,7 @@ def main(argv):
                         APP_CAPACITY_SOAK_MINUTES=str(minutes), APP_CAPACITY_SOAK_BASELINE_SECONDS=str(baseline_seconds(minutes)),
                         APP_CAPACITY_SOAK_IMAGE_STORE=store_mode, APP_CAPACITY_SOAK_IMAGE_STORE_REASON=store_reason,
                         APP_CAPACITY_SOAK_DOCKER_FREE_BYTES=str(docker_free if docker_free is not None else ""),
-                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent, APP_CAPACITY_SOAK_RESERVED_CPUS=reserved_cpus, APP_CAPACITY_SOAK_PIN_CPUS=pin_cpus, APP_CAPACITY_SOAK_SCOPES="systemd",
+                        APP_CAPACITY_SOAK_APP_BINARY=app_binary, APP_CAPACITY_SOAK_VARIANT=variant, APP_CAPACITY_SOAK_DB=database, APP_CAPACITY_SOAK_CPU_PERCENT=cpu_percent, APP_CAPACITY_SOAK_RESERVED_CPUS=reserved_cpus, APP_CAPACITY_SOAK_PIN_CPUS=pin_cpus, APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT=platform_weight, APP_CAPACITY_SOAK_SCOPES="systemd",
                         APP_CAPACITY_SOAK_POSTGRES_DSN=os.environ.get("APP_CAPACITY_SOAK_POSTGRES_DSN", ""))
         soak_env.pop("APP_DATA_NATIVE_PHASE")
         if os.environ.get("APP_CAPACITY_SOAK_DIAGNOSE") == "1":
@@ -1291,7 +1365,7 @@ def main(argv):
         if not deferred:
             shutil.rmtree(root, ignore_errors=True)
 
-    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent, reserved_cpus=reserved_cpus, pin_platform=pin_platform)
+    verdict = evaluate(evidence, samples, parent_passed, failed_samples=failed_counter[0], unit_tests=unit_tests, variant=variant, cpu_percent=cpu_percent, reserved_cpus=reserved_cpus, pin_platform=pin_platform, platform_weight=platform_weight)
     for name in ("portal-parent.log", "containers.txt"):
         try:
             print(f"--- tail of {name} ---\n" + (out / name).read_text(errors="replace")[-6000:], file=sys.stderr)
@@ -1308,7 +1382,7 @@ def main(argv):
                  "docker_root_free_bytes": docker_free, "image_store_probe": store_mode, "image_store_probe_reason": store_reason},
         "unit_tests": unit_tests, "runner_cpus": parse_ready_cpus((out / "runner.log").read_text(errors="replace")) if (out / "runner.log").exists() else {},
         "backend_cpusets": {r["id"]: r.get("cpuset_effective") for sample in samples[-1:] for r in (sample.get("backends") or {}).get("per_backend", [])},
-        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent, "runner_reserved_cpus_override": reserved_cpus, "pin_platform_cpus": pin_cpus,
+        "storage_layout": storage if "storage" in locals() else {}, "cgroup_layout": sampler.layout if "sampler" in locals() else {}, "variant": variant, "database": database, "runner_cpu_percent_override": cpu_percent, "runner_reserved_cpus_override": reserved_cpus, "pin_platform_cpus": pin_cpus, "topology": collect_topology(run_command),
         "child": evidence, "samples": samples, "runner_log": read_json_lines(out / "runner-log.jsonl"), "verdict": verdict,
     }
     (out / "capacity-soak-evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

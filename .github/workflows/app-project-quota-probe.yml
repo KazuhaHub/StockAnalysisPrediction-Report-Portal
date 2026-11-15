@@ -35,6 +35,14 @@ on:
         description: Confine the measured Portal's scope, PostgreSQL and the runner to the reserved CPUs (AllowedCPUs). Diagnostic, never OPS-08 evidence
         type: boolean
         default: false
+      soak_platform_cpu_weight:
+        description: CPUWeight (1 to 10000) of the measured Portal's scope and PostgreSQL's unit; the runner's scope keeps 100. Diagnostic, never OPS-08 evidence
+        type: string
+        default: ''
+      soak_runner_profile:
+        description: Profile the runner's CPU for the loaded diagnostic minute and count the requests it relayed (turns the diagnosis on). Diagnostic, never OPS-08 evidence
+        type: boolean
+        default: false
       soak_variant:
         description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
         type: string
@@ -550,7 +558,9 @@ jobs:
       APP_CAPACITY_SOAK_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_soak?sslmode=disable"
       SOAK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.duration_minutes || '5' }}
       # The pull request smoke also profiles the measured process (see the diagnosis in doc 171); the dispatch run does not.
-      APP_CAPACITY_SOAK_DIAGNOSE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+      APP_CAPACITY_SOAK_DIAGNOSE: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.soak_runner_profile)) && '1' || '' }}
+      APP_CAPACITY_SOAK_RUNNER_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_runner_profile && '1' || '' }}
+      APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_platform_cpu_weight || '' }}
       APP_CAPACITY_SOAK_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_cpu_percent || '' }}
       APP_CAPACITY_SOAK_RESERVED_CPUS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_reserved_cpus || '' }}
       APP_CAPACITY_SOAK_PIN_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_pin_platform && 'true' || '' }}
@@ -614,12 +624,21 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \
             --unit-tests "$RUNNER_TEMP/capacity-soak/unit-tests.json" \
             --out "$RUNNER_TEMP/capacity-soak"
+      - name: Summarise the runner's CPU profile
+        if: always()
+        run: |
+          profile="$RUNNER_TEMP/capacity-soak/diag/runner-cpu.pprof"
+          if [ -s "$profile" ]; then
+            go tool pprof -top -cum -lines -nodecount=70 "$profile" > "$RUNNER_TEMP/capacity-soak/diag/runner-profile-cum.txt" 2>&1 || true
+            go tool pprof -top -lines -nodecount=40 "$profile" > "$RUNNER_TEMP/capacity-soak/diag/runner-profile-flat.txt" 2>&1 || true
+            head -60 "$RUNNER_TEMP/capacity-soak/diag/runner-profile-cum.txt"
+          fi
       - name: Preserve the soak evidence
         if: always()
         uses: actions/upload-artifact@v7

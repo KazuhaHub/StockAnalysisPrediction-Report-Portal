@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	goruntime "runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -870,7 +871,7 @@ func startPlatformServiceFixture(t *testing.T, binaryPath, fixtureDir string, de
 	fixture := &platformServiceFixture{cmd: exec.Command(binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout), done: make(chan error, 1), root: root, ipcRoot: ipcRoot, socket: socket}
 	// The runner is never pinned: it refuses to start on an affinity narrower than the host ("online_cpus_disagree_with_reported").
 	if scope := os.Getenv("APP_RUNNER_SERVICE_SCOPE"); scope != "" { // a long acceptance places the service in its own systemd scope
-		argv := soakScopeCommand(scope, "", -1, binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout)
+		argv := soakScopeCommand(scope, "", 0, -1, binaryPath, "-test.run=^TestPlatformRunnerServiceChild$", "-test.v", "-test.timeout="+timeout)
 		fixture.cmd = exec.Command(argv[0], argv[1:]...)
 	}
 	fixture.cmd.Env = append(os.Environ(), "PORTAL_RUNNER_SERVICE_CHILD=1", "PORTAL_RUNNER_SERVICE_CONFIG="+configPath)
@@ -932,6 +933,26 @@ func TestPlatformRunnerServiceChild(t *testing.T) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if path := os.Getenv("APP_RUNNER_SERVICE_CPUPROFILE"); path != "" {
+		// A long acceptance profiles the runner between two signals: SIGUSR1 starts a CPU profile, SIGUSR2 stops and writes it.
+		profiles := make(chan os.Signal, 2)
+		signal.Notify(profiles, syscall.SIGUSR1, syscall.SIGUSR2)
+		go func() {
+			var file *os.File
+			for sig := range profiles {
+				switch {
+				case sig == syscall.SIGUSR1 && file == nil:
+					if f, err := os.Create(path); err == nil && pprof.StartCPUProfile(f) == nil {
+						file = f
+					}
+				case sig == syscall.SIGUSR2 && file != nil:
+					pprof.StopCPUProfile()
+					file.Close()
+					file = nil
+				}
+			}
+		}()
+	}
 	logger := log.New(os.Stderr, "", log.LstdFlags)
 	if err := service.Serve(ctx, os.Getenv("PORTAL_RUNNER_SERVICE_CONFIG"), logger); err != nil {
 		t.Fatal(err)

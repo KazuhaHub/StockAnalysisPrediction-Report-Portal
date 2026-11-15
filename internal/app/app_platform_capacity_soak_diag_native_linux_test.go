@@ -132,6 +132,12 @@ func (c *soakChild) diagnose(label string, duration time.Duration) {
 		t.Fatal(err)
 	}
 
+	// The runner is profiled for the same minute (APP_CAPACITY_SOAK_RUNNER_PROFILE): the parent watches for these markers.
+	marker := func(name string) {
+		_ = os.WriteFile(filepath.Join(os.Getenv("TMPDIR"), "diag-"+label+"-"+name), []byte("1\n"), 0o644)
+	}
+	marker("start")
+	defer marker("end")
 	var stopSampler atomic.Bool
 	samplerDone := make(chan []int, 1)
 	go func() {

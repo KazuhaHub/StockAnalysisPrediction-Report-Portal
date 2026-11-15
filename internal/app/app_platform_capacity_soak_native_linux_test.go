@@ -178,6 +178,12 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("APP_CAPACITY_SOAK_RUNNER_PROFILE") == "1" {
+		if err := os.MkdirAll(filepath.Join(out, "diag"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("APP_RUNNER_SERVICE_CPUPROFILE", filepath.Join(out, "diag", "runner-cpu.pprof"))
+	}
 	runner := startPlatformServiceFixture(t, binaryPath, dir, deployment, func(c *service.Config) {
 		c.AllowLocalReferenceImages = true
 		if cpuPercent != nil || reservedCPUs != nil { // diagnostic overrides of the runner's CPU budget and reservation; the backends are sized from what it reports
@@ -188,6 +194,12 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		runner.stop(t)
 		removePlatformServiceFixtureRoot(t, runner.root)
 	}()
+
+	if os.Getenv("APP_CAPACITY_SOAK_RUNNER_PROFILE") == "1" {
+		profileDone := make(chan struct{})
+		defer close(profileDone)
+		go soakProfileRunner(runner.cmd.Process, childData, out, profileDone)
+	}
 
 	// The runner's own log is sampled by size every thirty seconds, as the operator would watch its journal.
 	logCtx, stopLog := context.WithCancel(context.Background())
@@ -222,6 +234,7 @@ func TestPlatformCapacitySoak(t *testing.T) {
 		"APP_CAPACITY_SOAK_DIAGNOSE=" + os.Getenv("APP_CAPACITY_SOAK_DIAGNOSE"),
 		"APP_CAPACITY_SOAK_VARIANT=" + os.Getenv("APP_CAPACITY_SOAK_VARIANT"),
 		"APP_CAPACITY_SOAK_DB=" + os.Getenv("APP_CAPACITY_SOAK_DB"),
+		"APP_CAPACITY_SOAK_RUNNER_PROFILE=" + os.Getenv("APP_CAPACITY_SOAK_RUNNER_PROFILE"),
 		"APP_CAPACITY_SOAK_POSTGRES_DSN=" + os.Getenv("APP_CAPACITY_SOAK_POSTGRES_DSN"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE"),
 		"APP_CAPACITY_SOAK_IMAGE_STORE_REASON=" + os.Getenv("APP_CAPACITY_SOAK_IMAGE_STORE_REASON"),
@@ -234,7 +247,11 @@ func TestPlatformCapacitySoak(t *testing.T) {
 	if os.Getenv("APP_CAPACITY_SOAK_SCOPES") == "systemd" {
 		// The Portal runs in its own transient scope under system.slice at the default weight, as the compose container of
 		// production sits among its siblings; its flood generator, started by it, shares that scope (about 0.5% of the host).
-		argv := soakScopeCommand("soak-portal", os.Getenv("APP_CAPACITY_SOAK_PIN_CPUS"), 41001, binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
+		weight, err := soakParsePlatformWeight(os.Getenv("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		argv := soakScopeCommand("soak-portal", os.Getenv("APP_CAPACITY_SOAK_PIN_CPUS"), weight, 41001, binaryPath, "-test.run=^TestPlatformCapacitySoakChild$", "-test.v", timeout)
 		dir, env := child.Dir, child.Env
 		child = exec.Command(argv[0], argv[1:]...)
 		child.Dir, child.Env = dir, append(env, "PATH=/usr/sbin:/usr/bin:/sbin:/bin")
@@ -1305,4 +1322,43 @@ func (c *soakChild) load(minutes int) {
 	}
 	c.rec.SetLoad(started.UnixMilli(), time.Now().UnixMilli(), minutes)
 	c.rec.Mark("load_finished")
+}
+
+// soakProfileRunner brackets the runner's CPU profile around the loaded diagnostic minute of the Portal child: the child leaves a marker file when
+// the minute starts and another when it ends; the runner starts its profile on SIGUSR1 and writes it on SIGUSR2. The flood's counters are read at both
+// markers, so the runner's CPU can be divided by the requests it carried in that minute. The summary goes to runner-profile.json beside the profile.
+func soakProfileRunner(process *os.Process, childData, out string, done <-chan struct{}) {
+	wait := func(marker string) bool {
+		for {
+			if _, err := os.Stat(filepath.Join(childData, marker)); err == nil {
+				return true
+			}
+			select {
+			case <-done:
+				return false
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	read := func() soakFloodCounters {
+		var counters soakFloodCounters
+		if raw, err := os.ReadFile(filepath.Join(childData, "flood-counters.json")); err == nil {
+			_ = json.Unmarshal(raw, &counters)
+		}
+		return counters
+	}
+	if !wait("diag-loaded-start") {
+		return
+	}
+	before, began := read(), time.Now()
+	_ = process.Signal(syscall.SIGUSR1)
+	if !wait("diag-loaded-end") {
+		return
+	}
+	after, window := read(), time.Since(began)
+	_ = process.Signal(syscall.SIGUSR2)
+	summary := soakRunnerProfileSummary(before, after, window)
+	raw, _ := json.MarshalIndent(map[string]any{"admitted": summary.Admitted, "refused": summary.Refused, "seconds": summary.Seconds,
+		"admitted_per_second": summary.AdmittedPerSecond, "refused_per_second": summary.RefusedPerSecond, "started_ms": began.UnixMilli()}, "", "  ")
+	_ = os.WriteFile(filepath.Join(out, "diag", "runner-profile.json"), raw, 0o644)
 }
