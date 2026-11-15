@@ -4,6 +4,12 @@ package app
 
 import "syscall"
 
+// darwinNetworkFilesystems are the f_fstypename values of the macOS network and FUSE filesystems.
+var darwinNetworkFilesystems = map[string]bool{
+	"nfs": true, "smbfs": true, "afpfs": true, "webdav": true, "osxfs": true, "macfuse": true,
+	"osxfuse": true, "fuse": true, "fusefs": true, "9p": true, "virtiofs": true,
+}
+
 func detectSQLiteFilesystem(path string) (string, bool, error) {
 	var st syscall.Statfs_t
 	if err := syscall.Statfs(path, &st); err != nil {

@@ -71,20 +71,6 @@ func (s *Store) readerPool() poolRef {
 	return s.writerPool()
 }
 
-// poolOf is the pool (and statement cache) a *sql.DB belongs to.
-func (s *Store) poolOf(db *sql.DB) poolRef {
-	if rp := s.rp.Load(); rp != nil && db == rp.db {
-		return poolRef{db: rp.db, stmts: rp.stmts}
-	}
-	return s.writerPool()
-}
-
-// isReadDB reports whether db is the current read pool's database.
-func (s *Store) isReadDB(db *sql.DB) bool {
-	rp := s.rp.Load()
-	return rp != nil && db == rp.db
-}
-
 // readDB is the pool a standalone read-only query runs on.
 func (s *Store) readDB() *sql.DB { return s.readerPool().db }
 

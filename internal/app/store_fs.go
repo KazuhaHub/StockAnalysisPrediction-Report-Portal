@@ -46,12 +46,6 @@ func classifyLinuxFilesystem(magic uint32) (name string, unsafeForWAL bool) {
 	return "unlisted", false
 }
 
-// darwinNetworkFilesystems are the f_fstypename values of the macOS network and FUSE filesystems.
-var darwinNetworkFilesystems = map[string]bool{
-	"nfs": true, "smbfs": true, "afpfs": true, "webdav": true, "osxfs": true, "macfuse": true,
-	"osxfuse": true, "fuse": true, "fusefs": true, "9p": true, "virtiofs": true,
-}
-
 // sqliteFilesystemCheck identifies the filesystem a database file is on: its name, whether WAL is unsafe
 // there, and an error when it cannot be identified (the caller then runs without WAL). It is a variable
 // so a test can stand in for a mount it does not have.
