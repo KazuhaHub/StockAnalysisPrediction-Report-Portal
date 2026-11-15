@@ -354,6 +354,13 @@ Executing the drill touches the production server (to take the copy) and is
 started by the owner explicitly at that time. Production adoption of the
 platform is a separate deployment after section 9's gates.
 
+**Amendment, 2026-11-15 (owner).** No real server is touched by either drill. Both run in CI on a
+disposable GitHub-hosted runner, so the production database copy, the production `secret_key`
+and the staging host above are not used: the stack is the beta compose shape with generated
+throwaway credentials, and the drill is `.github/workflows/ops-deployment-drills.yml` driven by
+`scripts/acceptance/ops_deploy_drills.py`. What this does and does not stand in for is recorded in
+`docs/app-platform/handoff/evidence/platform-ops-deployment-drills/acceptance.json`.
+
 ## 7. Human-only acceptance
 
 No automated run by an implementer may be relabelled as satisfying these.

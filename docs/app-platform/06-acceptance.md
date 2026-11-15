@@ -175,6 +175,10 @@ what.
 | OPS-07 | Present unsupported legacy app/container for managed adoption | No automatic takeover; old installation continues under legacy rules |
 | OPS-08 | Repeat test at declared maximum apps/tasks/resource envelope | Measured capacity/latency recorded, quotas reject excess and reserve host headroom |
 
+### Deployment drills status (OPS-05, OPS-06)
+
+Both rows run in CI on a disposable GitHub-hosted runner (owner decision 2026-11-15: no real server is touched), by `.github/workflows/ops-deployment-drills.yml` and `scripts/acceptance/ops_deploy_drills.py` (unit tests: `python3 -B -m unittest scripts/ops_deploy_drills_test.py`). OPS-05 deploys the newest published release image through the beta compose shape, with the image reference pinned by tag, and checks that the compose file and its reference are byte-identical after the deploy and that the digest, version, commit and binary actually loaded equal the release's own record. OPS-06 takes a protected recovery set with that build (a logical dump, the config directory holding `secret_key`, and the compose file), forces a failed rollout, shows the prior build refusing the migrated database, then restores the set, checking integrity, dry-run compatibility and a scratch-database rehearsal that signs in a two-factor fixture account before the prior version is activated. Three negative controls (a dump written by the newer build, a truncated set, a set with the wrong `secret_key`) each fail the check meant to catch them. The evidence, its limits and the run that produced it are in [the evidence file](handoff/evidence/platform-ops-deployment-drills/acceptance.json). The runs so far are push-triggered runs of the branch; a `workflow_dispatch` repeat is pending the workflow reaching the default branch.
+
 ### Retention status (DATA-08)
 
 Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 5 and [doc 172](172-retention-plan.md). **DATA-08 stays partial.**
