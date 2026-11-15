@@ -591,7 +591,7 @@ because they share it. No schema, journal or wire change.
   runner asks the kernel through NETLINK `sock_diag` (`UNIX_DIAG`, `UDIAG_SHOW_PEER`) for the peer of its own socket, finds the processes with a
   descriptor on that inode through `/proc/*/fd`, and requires every holder to be a `dockerd` (by the executable's base name) in the runner's
   mount namespace. A pid already found to be one is re-checked on each new connection by what it holds and runs, so the scan of `/proc` is done
-  once per client. If `sock_diag` is unavailable, the connection is refused. The `/proc/net/unix` entry with inode 0 that an earlier version
+  once per client. If `sock_diag` is unavailable, or the runner cannot read the daemon's descriptors (it is not root), the connection is refused for the overlap check. The refusal is remembered on the client and returned by every inventory read, not by the request itself: an image load or a daemon inspection needs no mount table and still runs, as the unprivileged native image tests do. The `/proc/net/unix` entry with inode 0 that an earlier version
   treated as an orphan is the server end of the runner's own pending connection, created in the connecting process's network namespace with the
   listener's path copied onto it; it gets an inode only once the daemon accepts. A listener that does not appear in the runner's
   `/proc/net/unix` lives in another network namespace, which is why no path is looked up. The runner's client keeps connections alive: a daemon

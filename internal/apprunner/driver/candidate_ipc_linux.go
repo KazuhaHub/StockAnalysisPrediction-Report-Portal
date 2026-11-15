@@ -245,6 +245,9 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 			ErrUnavailable, err)
 	}
 	defer response.Body.Close()
+	if err := requireDaemonIdentified(client); err != nil {
+		return nil, err
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(
 			"%w: candidate IPC inventory status %d",

@@ -187,15 +187,17 @@ func realPeerClient(socket string) *http.Client {
 	return &http.Client{Transport: allowListTransport{next: transport, peer: &daemonPeer{}}, Timeout: 5 * time.Second}
 }
 
+// inventoryRequest is a request and the check the overlap check makes after it.
 func inventoryRequest(t *testing.T, client *http.Client) error {
 	t.Helper()
 	request, _ := http.NewRequest(http.MethodGet, "http://"+dockerRequestHost+"/v"+APIVersion+"/containers/json", nil)
 	response, err := client.Do(request)
-	if err == nil {
-		io.Copy(io.Discard, response.Body)
-		response.Body.Close()
+	if err != nil {
+		return err
 	}
-	return err
+	io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	return requireDaemonIdentified(client)
 }
 
 // The real sock_diag and /proc readers: the peer of the runner's connection is the accepted socket this process
@@ -255,4 +257,21 @@ func acceptExecutable(t *testing.T, accept func(string) bool) {
 	old := daemonExecutableAccepted
 	daemonExecutableAccepted = accept
 	t.Cleanup(func() { daemonExecutableAccepted = old })
+}
+
+// A refusal does not stop requests that need no mount table (an image load by a runner that cannot read
+// /proc/<pid>/fd), only the overlap check.
+func TestRefusedDaemonStillAnswersButTheOverlapCheckRefuses(t *testing.T) {
+	socket := unixDaemon(t)
+	acceptExecutable(t, func(string) bool { return false })
+	client := realPeerClient(socket)
+	request, _ := http.NewRequest(http.MethodGet, "http://"+dockerRequestHost+"/v"+APIVersion+"/containers/json", nil)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatalf("a plain request was refused: %v", err)
+	}
+	response.Body.Close()
+	if err := requireDaemonIdentified(client); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("the overlap check would have passed: %v", err)
+	}
 }

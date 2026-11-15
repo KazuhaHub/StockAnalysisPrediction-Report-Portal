@@ -3,6 +3,7 @@ package driver
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"sync"
 )
 
@@ -16,9 +17,13 @@ type daemonPeer struct {
 	vetted map[int]struct{}
 	// seen are the connections already identified: a connection's peer cannot change while it lives.
 	seen map[net.Conn]struct{}
+	// refused is the first refusal of a connection. Requests still run (an image load needs no mount table, and
+	// a runner without the privilege to read /proc/<pid>/fd can still load one); the overlap check, which does,
+	// asks for it through requireDaemonIdentified.
+	refused error
 }
 
-// verifyOnce identifies the daemon behind a connection the first time it answers.
+// verifyOnce identifies the daemon behind a connection the first time it answers and remembers a refusal.
 func (p *daemonPeer) verifyOnce(conn net.Conn) error {
 	p.mu.Lock()
 	_, done := p.seen[conn]
@@ -27,7 +32,12 @@ func (p *daemonPeer) verifyOnce(conn net.Conn) error {
 		return nil
 	}
 	if err := p.verify(conn); err != nil {
-		return err
+		p.mu.Lock()
+		if p.refused == nil {
+			p.refused = err
+		}
+		p.mu.Unlock()
+		return nil
 	}
 	p.mu.Lock()
 	if p.seen == nil || len(p.seen) >= 256 {
@@ -40,4 +50,18 @@ func (p *daemonPeer) verifyOnce(conn net.Conn) error {
 
 func (p *daemonPeer) refuse(format string, args ...any) error {
 	return fmt.Errorf("%w: the container daemon is not a local dockerd in the runner's mount namespace, so mount sources cannot be compared (%s)", ErrUnavailable, fmt.Sprintf(format, args...))
+}
+
+// requireDaemonIdentified refuses when any connection of the client was not found to be a local dockerd in the
+// runner's mount namespace. Every overlap check calls it after its request, because it compares the runner's own
+// mount table with the daemon's paths. A client that was not built by newDockerClient has no peer to ask (only a
+// test builds one) and passes.
+func requireDaemonIdentified(client *http.Client) error {
+	transport, ok := client.Transport.(allowListTransport)
+	if !ok || transport.peer == nil {
+		return nil
+	}
+	transport.peer.mu.Lock()
+	defer transport.peer.mu.Unlock()
+	return transport.peer.refused
 }

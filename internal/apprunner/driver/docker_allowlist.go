@@ -87,12 +87,13 @@ func (t allowListTransport) RoundTrip(request *http.Request) (*http.Response, er
 		return nil, err
 	}
 	if conn == nil {
-		response.Body.Close()
-		return nil, t.peer.refuse("the connection of the answer is unknown")
+		t.peer.mu.Lock()
+		if t.peer.refused == nil {
+			t.peer.refused = t.peer.refuse("the connection of the answer is unknown")
+		}
+		t.peer.mu.Unlock()
+		return response, nil
 	}
-	if err := t.peer.verifyOnce(conn); err != nil {
-		response.Body.Close()
-		return nil, err
-	}
+	t.peer.verifyOnce(conn) // a refusal is remembered, and the overlap check asks for it
 	return response, nil
 }
