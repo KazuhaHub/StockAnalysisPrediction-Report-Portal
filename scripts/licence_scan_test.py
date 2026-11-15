@@ -12,23 +12,42 @@ from licence_scan import evaluate, load_policy, parse_expression, ExpressionErro
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+APACHE_TEXT = b"Apache License\nVersion 2.0, January 2004\n"
+MPL_TEXT = b"Mozilla Public License Version 2.0\n"
+FREETYPE_TEXT = b"Use of the Freetype-Go software is subject to your choice of exactly one of\nthe following two licenses:\n"
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
 POLICY = {
     "allow": ["MIT", "BSD-3-Clause", "ISC", "Apache-2.0", "MPL-2.0", "0BSD"],
-    "deny": ["GPL-2.0-only", "SSPL-1.0", "BUSL-1.1", "Commons-Clause", "EPL-2.0"],
+    "deny": ["GPL-2.0-only", "SSPL-1.0", "BUSL-1.1", "Commons-Clause", "EPL-2.0", "GPL-3.0-only"],
     "own": {"licences": ["AGPL-3.0-only"], "components": ["github.com/KazuhaHub/"]},
     "election_only": ["FTL"],
     "elections": [
-        {"component": "dompurify", "declared": "MPL-2.0 OR Apache-2.0", "elected": "Apache-2.0", "reason": "dual"},
-        {"component": "github.com/golang/freetype", "declared": "GPL-2.0-or-later", "offered": "GPL-2.0-or-later OR FTL", "elected": "FTL", "reason": "dual"},
+        {"component": "dompurify", "declared": "expression:(MPL-2.0 OR Apache-2.0)", "offered": "MPL-2.0 OR Apache-2.0",
+         "elected": "Apache-2.0", "reason": "dual",
+         "evidence": [{"file": "LICENSE", "sha256": sha(APACHE_TEXT)}, {"file": "LICENSE-MPL", "sha256": sha(MPL_TEXT)}]},
+        {"component": "github.com/golang/freetype", "declared": "id:GPL-2.0-or-later",
+         "offered": "GPL-2.0-or-later OR FTL", "elected": "FTL", "reason": "dual",
+         "evidence": [{"file": "LICENSE", "sha256": sha(FREETYPE_TEXT)}]},
     ],
     "exclusions": [
         {"component": "elkjs", "requires": "elk-build-test", "reason": "ELK layout aliased to an empty module"},
     ],
 }
 
+# The licence files the two elections were pinned to, as a reader would find them.
+ELECTION_FILES = {("dompurify", "LICENSE"): APACHE_TEXT, ("dompurify", "LICENSE-MPL"): MPL_TEXT,
+                  ("github.com/golang/freetype", "LICENSE"): FREETYPE_TEXT}
 
-def comp(name, lic=None, expr=None, group=None, version="1.0.0", lname=None):
+
+def comp(name, lic=None, expr=None, group=None, version="1.0.0", lname=None, purl=None):
     c = {"type": "library", "name": name, "version": version}
+    if purl:
+        c["purl"] = purl
     if group:
         c["group"] = group
     if expr is not None:
@@ -42,7 +61,8 @@ def comp(name, lic=None, expr=None, group=None, version="1.0.0", lname=None):
 
 
 def run(components, verified=(), policy=POLICY, files=None):
-    reader = None if files is None else (lambda c, name: files.get((c["name"], name)))
+    files = ELECTION_FILES if files is None else files
+    reader = lambda c, name: files.get((c["name"], name))  # noqa: E731
     return evaluate({"components": components}, policy, set(verified), reader)
 
 
@@ -175,34 +195,34 @@ class ExpressionVerdictTests(unittest.TestCase):
         self.assertEqual((c["status"], c["reason"]), ("fail", "unknown"))
 
 
+def golang(name, lic="AGPL-3.0-only"):
+    return comp(name, lic, purl=f"pkg:golang/{name}@v1.0.0")
+
+
 class OwnComponentTests(unittest.TestCase):
     def test_own_agpl_passes(self):
-        c, _ = one([comp("github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol", "AGPL-3.0-only")])
+        c, _ = one([golang("github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol")])
         self.assertEqual((c["status"], c["via"]), ("pass", "own"))
 
     def test_third_party_agpl_fails(self):
-        c, _ = one([comp("github.com/someone/else", "AGPL-3.0-only")])
+        c, _ = one([golang("github.com/someone/else")])
         self.assertEqual(c["status"], "fail")
 
     def test_own_prefix_must_match_whole_namespace(self):
-        c, _ = one([comp("github.com/KazuhaHubEvil/x", "AGPL-3.0-only")])
-        self.assertEqual(c["status"], "fail")
-
-    def test_own_entry_without_a_trailing_slash_names_one_package_exactly(self):
-        policy = dict(POLICY, own={"licences": ["AGPL-3.0-only"], "components": ["portal-status-ui"]})
-        c, _ = one([comp("portal-status-ui", "AGPL-3.0-only")], policy=policy)
-        self.assertEqual((c["status"], c["via"]), ("pass", "own"))
-        c, _ = one([comp("portal-status-ui-evil", "AGPL-3.0-only")], policy=policy)
+        c, _ = one([golang("github.com/KazuhaHubEvil/x")])
         self.assertEqual(c["status"], "fail")
 
     def test_own_component_still_cannot_carry_a_denied_licence(self):
-        c, _ = one([comp("github.com/KazuhaHub/x", "GPL-2.0-only")])
+        c, _ = one([golang("github.com/KazuhaHub/x", "GPL-2.0-only")])
         self.assertEqual(c["status"], "fail")
 
-    def test_scoped_npm_name_uses_group(self):
-        policy = dict(POLICY, own={"licences": ["AGPL-3.0-only"], "components": ["@report-portal/"]})
-        c, _ = one([comp("sdk", "AGPL-3.0-only", group="@report-portal")], policy=policy)
-        self.assertEqual((c["status"], c["via"]), ("pass", "own"))
+    def test_a_component_with_no_purl_is_not_own(self):
+        c, _ = one([comp("github.com/KazuhaHub/x", "AGPL-3.0-only")])
+        self.assertEqual(c["status"], "fail")
+
+    def test_a_purl_of_another_ecosystem_is_not_own_for_a_go_module_name(self):
+        c, _ = one([comp("github.com/KazuhaHub/x", "AGPL-3.0-only", purl="pkg:pypi/x@1")])
+        self.assertEqual(c["status"], "fail")
 
 
 class ElectionTests(unittest.TestCase):
@@ -212,11 +232,12 @@ class ElectionTests(unittest.TestCase):
         self.assertEqual(c["via"], "election")
         self.assertEqual(c["elected"], "Apache-2.0")
 
-    def test_election_matches_regardless_of_parentheses_and_case(self):
-        c, _ = one([comp("dompurify", expr="Apache-2.0 or MPL-2.0")])
-        # Operand order differs from the recorded declaration: the election is stale, but both
-        # choices are allowed on their merits so the component still passes.
-        self.assertEqual(c["status"], "pass")
+    def test_a_declaration_written_differently_is_stale_but_still_passes_on_its_merits(self):
+        # Exact match: no parentheses and a different order is another declaration. Both choices are
+        # allowed on their merits, so the component still passes, but not through the election.
+        c, r = one([comp("dompurify", expr="Apache-2.0 OR MPL-2.0")])
+        self.assertEqual((c["status"], c["via"]), ("pass", "allow"))
+        self.assertTrue(any("stale election" in w for w in r["warnings"]))
 
     def test_freetype_needs_its_election(self):
         c, _ = one([comp("github.com/golang/freetype", "GPL-2.0-or-later")])
@@ -246,15 +267,6 @@ class ElectionTests(unittest.TestCase):
         c, r = one([comp("github.com/golang/freetype", "GPL-3.0-only")])
         self.assertEqual(c["status"], "fail")
         self.assertTrue(any("freetype" in w and "stale" in w for w in r["warnings"]))
-
-    def test_election_may_not_elect_a_denied_licence(self):
-        policy = dict(POLICY, elections=[{"component": "p", "declared": "SSPL-1.0 OR MIT", "elected": "SSPL-1.0", "reason": "x"}])
-        c, _ = one([comp("p", expr="SSPL-1.0 OR MIT")], policy=policy)
-        # Passes on the merits (MIT) but not via the election.
-        self.assertEqual(c["status"], "pass")
-        self.assertNotEqual(c.get("via"), "election")
-        c, _ = one([comp("p", "SSPL-1.0")], policy=dict(policy, elections=[{"component": "p", "declared": "SSPL-1.0", "elected": "SSPL-1.0", "reason": "x"}]))
-        self.assertEqual(c["status"], "fail")
 
     def test_unused_election_is_a_warning_not_a_failure(self):
         r = run([comp("left-pad", "MIT")])
@@ -295,7 +307,7 @@ GO_TEXT = b"Copyright 2009 The Go Authors.\n\nRedistribution and use in source a
 OTHER_TEXT = GO_TEXT + b"An extra clause.\n"
 REVIEWED_POLICY = dict(POLICY, reviewed=[
     {"components": ["golang.org/x/sys", "golang.org/x/text"], "reviewed_as": "BSD-3-Clause", "file": "LICENSE",
-     "declared": "BSD-Source-Code",
+     "declared": "id:BSD-Source-Code",
      "sha256": hashlib.sha256(GO_TEXT).hexdigest(), "reason": "Standard Go BSD 3-clause text."},
     {"components": ["khroma"], "reviewed_as": "MIT", "file": "license", "declared": "",
      "sha256": hashlib.sha256(b"The MIT License (MIT)\n").hexdigest(), "reason": "MIT text, no manifest field."},
@@ -348,7 +360,8 @@ class ReviewedTests(unittest.TestCase):
         self.assertEqual((c["status"], c["via"], c["reviewed_as"]), ("pass", "reviewed", "MIT"))
 
     def test_record_cannot_override_a_denied_declaration(self):
-        c, r = self.check(comp("golang.org/x/sys", "GPL-2.0-only"), {("golang.org/x/sys", "LICENSE"): GO_TEXT})
+        pol = dict(REVIEWED_POLICY, reviewed=[dict(REVIEWED_POLICY["reviewed"][0], declared="id:GPL-2.0-only")])
+        c, r = self.check(comp("golang.org/x/sys", "GPL-2.0-only"), {("golang.org/x/sys", "LICENSE"): GO_TEXT}, pol)
         self.assertEqual((c["status"], c["reason"]), ("fail", "denied"))
         self.assertTrue(any("denied" in w for w in r["warnings"]))
 
@@ -453,6 +466,17 @@ class NestedComponentTests(unittest.TestCase):
         r = run([ref(with_children(comp("a", "MIT"), child), "r|a"), ref(with_children(comp("b", "MIT"), child), "r|b")])
         self.assertEqual(len(r["components"]), 3)
 
+    def test_copies_with_one_bom_ref_but_different_licences_are_each_judged(self):
+        ok, bad = ref(comp("tslib", "MIT"), "r|tslib@2"), ref(comp("tslib", "GPL-2.0-only"), "r|tslib@2")
+        r = run([with_children(comp("a", "MIT"), ok), with_children(comp("b", "MIT"), bad)])
+        self.assertFalse(r["ok"])
+        self.assertEqual([c["name"] for c in r["failures"]], ["tslib"])
+        self.assertEqual(len(r["components"]), 4)
+
+    def test_copies_with_one_bom_ref_and_the_same_licence_data_are_judged_once(self):
+        a, b = ref(comp("tslib", "MIT"), "r|tslib@2"), ref(comp("tslib", "MIT"), "r|tslib@2")
+        self.assertEqual(len(run([a, b])["components"]), 1)
+
     def test_distinct_bom_refs_of_one_package_are_each_judged(self):
         r = run([ref(with_children(comp("a", "MIT"), ref(comp("katex", "MIT"), "r|a|katex")), "r|a"),
                  ref(comp("katex", "MIT"), "r|katex")])
@@ -530,9 +554,23 @@ class ReviewedDeclarationTests(unittest.TestCase):
         c, _ = one([comp("golang.org/x/sys", "BSD-Source-Code")], policy=REVIEWED_POLICY, files=self.FILES)
         self.assertEqual(c["via"], "reviewed")
 
-    def test_spacing_and_case_of_the_declaration_do_not_matter(self):
-        c, _ = one([comp("golang.org/x/sys", expr="  bsd-source-code ")], policy=REVIEWED_POLICY, files=self.FILES)
+    def test_surrounding_whitespace_is_not_part_of_the_declaration(self):
+        c, _ = one([comp("golang.org/x/sys", "  BSD-Source-Code ")], policy=REVIEWED_POLICY, files=self.FILES)
         self.assertEqual(c["via"], "reviewed")
+
+    def test_the_declaration_is_matched_case_sensitively(self):
+        c, _ = one([comp("golang.org/x/sys", "bsd-source-code")], policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["status"], "fail")
+
+    def test_an_id_a_name_and_an_expression_are_different_declarations(self):
+        for c in (comp("golang.org/x/sys", lname="BSD-Source-Code"), comp("golang.org/x/sys", expr="BSD-Source-Code")):
+            r, _ = one([c], policy=REVIEWED_POLICY, files=self.FILES)
+            self.assertEqual(r["status"], "fail")
+
+    def test_parentheses_are_part_of_an_expression_declaration(self):
+        pol = dict(REVIEWED_POLICY, reviewed=[dict(REVIEWED_POLICY["reviewed"][0], declared="expression:(BSD-Source-Code)")])
+        self.assertEqual(one([comp("golang.org/x/sys", expr="(BSD-Source-Code)")], policy=pol, files=self.FILES)[0]["via"], "reviewed")
+        self.assertEqual(one([comp("golang.org/x/sys", expr="BSD-Source-Code")], policy=pol, files=self.FILES)[0]["status"], "fail")
 
     def test_a_licence_appearing_where_none_was_declared_makes_the_record_stale(self):
         files = {("khroma", "license"): b"The MIT License (MIT)\n"}
@@ -547,40 +585,136 @@ class ReviewedDeclarationTests(unittest.TestCase):
         self.assertTrue(any("declared" in w for w in r["warnings"]))
 
 
-class ElectionOperandTests(unittest.TestCase):
+class ElectionHardeningTests(unittest.TestCase):
+    """An election is the owner's choice from a dual licence, so its inputs must be evidence, not free text."""
+
+    TEXT = b"dual licence statement\n"
+    FILES = {("p", "COPYING"): TEXT}
+
     def policy(self, **election):
-        e = {"component": "p", "declared": "Weird-1.0 OR MIT", "elected": "MIT", "reason": "x"}
+        e = {"component": "p", "declared": "id:Weird-1.0", "offered": "Weird-1.0 OR MIT", "elected": "MIT",
+             "evidence": [{"file": "COPYING", "sha256": sha(self.TEXT)}], "reason": "x"}
         e.update(election)
         return dict(POLICY, elections=[e])
 
-    def test_elected_licence_that_is_an_or_operand_applies(self):
-        c, _ = one([comp("p", expr="Weird-1.0 OR MIT")], policy=self.policy())
-        self.assertEqual((c["status"], c["via"]), ("pass", "election"))
+    def check(self, comp_, **election):
+        return one([comp_], policy=self.policy(**election), files=self.FILES)
 
-    def test_elected_licence_missing_from_the_declaration_is_refused(self):
-        pol = self.policy(declared="Weird-1.0", elected="MIT")
-        c, r = one([comp("p", "Weird-1.0")], policy=pol)
+    def test_a_well_formed_election_applies(self):
+        c, _ = self.check(comp("p", "Weird-1.0"))
+        self.assertEqual((c["status"], c["via"], c["elected"]), ("pass", "election", "MIT"))
+
+    # (a) a denied operand cannot be laundered through an election
+    def test_a_denied_operand_in_the_offered_expression_refuses_the_election(self):
+        for denied in ("SSPL-1.0", "GPL-3.0-only"):
+            with self.subTest(denied=denied):
+                c, r = self.check(comp("p", "Weird-1.0"), offered=f"Weird-1.0 OR {denied} OR MIT")
+                self.assertEqual(c["status"], "fail")
+                self.assertTrue(any("denied" in w for w in r["warnings"]))
+
+    def test_an_extra_operand_that_is_neither_allowed_nor_declared_refuses_the_election(self):
+        # GPL-3.0-or-later is on no list here: not denied, but not a licence this election may carry either.
+        c, r = self.check(comp("p", "Weird-1.0"), offered="Weird-1.0 OR GPL-3.0-or-later OR MIT")
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("GPL-3.0-or-later" in w and "neither allowed" in w for w in r["warnings"]))
+
+    def test_a_denied_declared_side_refuses_the_election(self):
+        c, r = self.check(comp("p", "SSPL-1.0"), declared="id:SSPL-1.0", offered="SSPL-1.0 OR MIT")
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("denied" in w for w in r["warnings"]))
+
+    def test_a_denied_licence_cannot_be_the_elected_one(self):
+        c, _ = self.check(comp("p", "Weird-1.0"), offered="Weird-1.0 OR SSPL-1.0", elected="SSPL-1.0")
+        self.assertEqual(c["status"], "fail")
+
+    # (b) the elected licence must be one the policy allows
+    def test_the_elected_licence_must_be_allowed(self):
+        c, r = self.check(comp("p", "Weird-1.0"), offered="Weird-1.0 OR Other-1.0", elected="Other-1.0")
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("not allowed" in w for w in r["warnings"]))
+
+    def test_an_election_only_licence_may_be_elected(self):
+        c, _ = self.check(comp("p", "Weird-1.0"), offered="Weird-1.0 OR FTL", elected="FTL")
+        self.assertEqual(c["via"], "election")
+
+    # (c) the offered expression is pinned to licence files that ship
+    def test_a_changed_licence_file_makes_the_election_stale(self):
+        c, r = one([comp("p", "Weird-1.0")], policy=self.policy(), files={("p", "COPYING"): self.TEXT + b"edit"})
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("stale" in w and "COPYING" in w for w in r["warnings"]))
+
+    def test_a_missing_licence_file_fails_closed(self):
+        c, r = one([comp("p", "Weird-1.0")], policy=self.policy(), files={})
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("not found" in w and "COPYING" in w for w in r["warnings"]))
+
+    def test_every_pinned_file_must_match(self):
+        pol = self.policy(evidence=[{"file": "COPYING", "sha256": sha(self.TEXT)}, {"file": "OTHER", "sha256": sha(b"x")}])
+        c, _ = one([comp("p", "Weird-1.0")], policy=pol, files={("p", "COPYING"): self.TEXT})
+        self.assertEqual(c["status"], "fail")
+
+    def test_an_election_without_evidence_is_refused(self):
+        for evidence in (None, [], [{"file": "COPYING"}], [{"file": "COPYING", "sha256": "abc"}]):
+            with self.subTest(evidence=evidence):
+                e = {"component": "p", "declared": "id:Weird-1.0", "offered": "Weird-1.0 OR MIT", "elected": "MIT", "reason": "x"}
+                if evidence is not None:
+                    e["evidence"] = evidence
+                c, r = one([comp("p", "Weird-1.0")], policy=dict(POLICY, elections=[e]), files=self.FILES)
+                self.assertEqual(c["status"], "fail")
+                self.assertTrue(any("evidence" in w for w in r["warnings"]))
+
+    def test_a_reader_that_refuses_the_package_makes_the_election_stale(self):
+        def reader(component, name):
+            raise licence_scan.LicenceFileError("installed version 9 is not 1")
+        r = evaluate({"components": [comp("p", "Weird-1.0")]}, self.policy(), set(), reader)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("p" in w and "installed version" in w for w in r["warnings"]))
+
+    # (d) offered is a pure top-level OR
+    def test_an_and_in_the_offered_expression_refuses_the_election(self):
+        for offered in ("Weird-1.0 AND MIT", "ISC AND (Weird-1.0 OR MIT)", "(Weird-1.0 OR MIT) AND ISC"):
+            with self.subTest(offered=offered):
+                c, r = self.check(comp("p", "Weird-1.0"), offered=offered)
+                self.assertEqual(c["status"], "fail")
+                self.assertTrue(any("top-level OR" in w for w in r["warnings"]))
+
+    def test_a_nested_or_in_the_offered_expression_refuses_the_election(self):
+        c, _ = self.check(comp("p", "Weird-1.0"), offered="Weird-1.0 OR (Other-1.0 OR MIT)")
+        self.assertEqual(c["status"], "fail")
+
+    def test_a_single_licence_is_not_a_choice(self):
+        c, _ = self.check(comp("p", "MIT"), declared="id:MIT", offered="MIT", elected="MIT")
+        self.assertNotEqual(c.get("via"), "election")
+
+    def test_the_elected_licence_must_be_a_top_level_operand(self):
+        c, r = self.check(comp("p", "Weird-1.0"), elected="ISC")
         self.assertEqual(c["status"], "fail")
         self.assertTrue(any("operand" in w for w in r["warnings"]))
 
-    def test_an_and_operand_is_not_a_choice(self):
-        pol = self.policy(declared="Weird-1.0 AND MIT", elected="MIT")
-        c, _ = one([comp("p", expr="Weird-1.0 AND MIT")], policy=pol)
+    def test_an_id_declaration_must_be_another_operand(self):
+        c, r = self.check(comp("p", "Else-1.0"), declared="id:Else-1.0")
         self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("operand" in w for w in r["warnings"]))
 
-    def test_an_or_nested_inside_an_and_still_offers_a_choice(self):
-        pol = self.policy(declared="ISC AND (Weird-1.0 OR MIT)", elected="MIT")
-        c, _ = one([comp("p", expr="ISC AND (Weird-1.0 OR MIT)")], policy=pol)
-        self.assertEqual(c["via"], "election")
+    def test_the_declaration_may_not_be_the_elected_licence_itself(self):
+        c, _ = self.check(comp("p", "MIT"), declared="id:MIT")
+        self.assertNotEqual(c.get("via"), "election")
 
-    def test_offered_expression_must_contain_the_declared_side(self):
-        pol = self.policy(declared="GPL-2.0-or-later", offered="LGPL-3.0-only OR MIT", elected="MIT")
-        c, _ = one([comp("p", "GPL-2.0-or-later")], policy=pol)
+    def test_an_expression_declaration_must_equal_the_whole_offered_expression(self):
+        good = self.check(comp("p", expr="(Weird-1.0 OR MIT)"), declared="expression:(Weird-1.0 OR MIT)")[0]
+        self.assertEqual(good["via"], "election")
+        reordered = self.check(comp("p", expr="MIT OR Weird-1.0"), declared="expression:MIT OR Weird-1.0")[0]
+        self.assertEqual(reordered["via"], "election")
+        narrower = self.check(comp("p", expr="Weird-1.0 OR Else-1.0"),
+                              declared="expression:Weird-1.0 OR Else-1.0")[0]
+        self.assertEqual(narrower["status"], "fail")
+
+    def test_the_declaration_is_matched_exactly_and_by_kind(self):
+        c, r = self.check(comp("p", lname="Weird-1.0"))
         self.assertEqual(c["status"], "fail")
-
-    def test_offered_defaults_to_the_declaration(self):
-        c, _ = one([comp("dompurify", expr="(MPL-2.0 OR Apache-2.0)")])
-        self.assertEqual(c["via"], "election")
+        self.assertTrue(any("stale election" in w for w in r["warnings"]))
+        c, _ = self.check(comp("p", "weird-1.0"))
+        self.assertEqual(c["status"], "fail")
 
 
 class PackageRootTests(unittest.TestCase):
@@ -673,9 +807,11 @@ class OwnWorkspaceTests(unittest.TestCase):
     def own(self, c, workspaces):
         return evaluate({"components": [c]}, self.POLICY, set(), None, workspaces)["components"][0]
 
-    def local(self, name, group=None):
+    def local(self, name, group=None, path=None):
         c = comp(name, "AGPL-3.0-only", group=group)
         c["purl"] = "pkg:npm/" + (f"%40{group[1:]}/" if group else "") + name
+        key = f"{group}/{name}" if group else name
+        c["properties"] = [{"name": "cdx:npm:package:path", "value": path or f"node_modules/{key}"}]
         return c
 
     def test_a_workspace_package_is_own(self):
@@ -700,10 +836,28 @@ class OwnWorkspaceTests(unittest.TestCase):
         r = self.own(self.local("portal-status-ui"), None)
         self.assertEqual(r["status"], "fail")
 
+    def test_a_nested_package_of_the_same_name_is_not_own(self):
+        c = self.local("portal-status-ui", path="node_modules/other/node_modules/portal-status-ui")
+        self.assertEqual(self.own(c, {"portal-status-ui"})["status"], "fail")
+
+    def test_the_install_path_must_be_exactly_node_modules_then_the_name(self):
+        for path in ("packages/ui", "node_modules/portal-status-ui/", "./node_modules/portal-status-ui",
+                     "node_modules/../node_modules/portal-status-ui", "/abs/node_modules/portal-status-ui"):
+            with self.subTest(path=path):
+                self.assertEqual(self.own(self.local("portal-status-ui", path=path), {"portal-status-ui"})["status"], "fail")
+
+    def test_a_component_with_no_install_path_is_not_own(self):
+        c = self.local("portal-status-ui")
+        del c["properties"]
+        self.assertEqual(self.own(c, {"portal-status-ui"})["status"], "fail")
+
+    def test_a_component_with_no_purl_is_not_own(self):
+        c = self.local("portal-status-ui")
+        del c["purl"]
+        self.assertEqual(self.own(c, {"portal-status-ui"})["status"], "fail")
+
     def test_go_modules_need_no_workspace(self):
-        c = comp("github.com/KazuhaHub/x", "AGPL-3.0-only")
-        c["purl"] = "pkg:golang/github.com/KazuhaHub/x@v1.0.0"
-        r = evaluate({"components": [c]}, POLICY, set())["components"][0]
+        r = evaluate({"components": [golang("github.com/KazuhaHub/x")]}, POLICY, set())["components"][0]
         self.assertEqual(r["via"], "own")
 
     def test_cli_reads_workspaces_from_the_root_manifest(self):
@@ -779,6 +933,23 @@ class CliTests(unittest.TestCase):
             self.assertTrue(rep["ok"])
 
 
+class AppsCopyNoticeTests(unittest.TestCase):
+    """A change here must prompt the matching change in the Apps repository's copy."""
+
+    def test_the_evaluator_names_the_apps_copy_and_how_to_update_it(self):
+        doc = licence_scan.__doc__
+        for needle in ("KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps", "scripts/licence_scan.py",
+                       "check_licence_copy.py", "licence-scan.pin"):
+            self.assertIn(needle, doc)
+
+    def test_the_policy_names_the_sections_the_apps_copy_shares(self):
+        with open(os.path.join(HERE, "licence-policy.json")) as f:
+            source = json.load(f)["source"]
+        self.assertIn("StockAnalysisPrediction-Report-Portal-Apps", source)
+        for section in ("allow", "deny", "election_only", "own.licences", "reviewed"):
+            self.assertIn(section, source)
+
+
 class CheckedInPolicyTests(unittest.TestCase):
     """The policy file in the repository is the decision of doc 167 section 8."""
 
@@ -829,16 +1000,24 @@ class CheckedInPolicyTests(unittest.TestCase):
 
     def test_reviewed_records_pin_the_declaration_they_were_reviewed_against(self):
         got = {r["reviewed_as"]: r["declared"] for r in self.policy["reviewed"]}
-        self.assertEqual(got, {"BSD-3-Clause": "BSD-Source-Code", "MIT": ""})
+        self.assertEqual(got, {"BSD-3-Clause": "id:BSD-Source-Code", "MIT": ""})
 
     def test_freetype_election_names_the_dual_licence_it_chooses_from(self):
         e = next(e for e in self.policy["elections"] if e["component"] == "github.com/golang/freetype")
-        self.assertEqual((e["declared"], e["offered"], e["elected"]), ("GPL-2.0-or-later", "GPL-2.0-or-later OR FTL", "FTL"))
-        self.assertIsNone(licence_scan._election_problem(e))
+        self.assertEqual((e["declared"], e["offered"], e["elected"]), ("id:GPL-2.0-or-later", "GPL-2.0-or-later OR FTL", "FTL"))
+        self.assertIsNone(licence_scan._election_problem(e, self.policy))
+        self.assertEqual([f["file"] for f in e["evidence"]], ["LICENSE"])
+
+    def test_the_election_evidence_is_pinned_to_the_shipped_licence_files(self):
+        got = {e["component"]: [(f["file"], f["sha256"]) for f in e["evidence"]] for e in self.policy["elections"]}
+        self.assertEqual(got, {
+            "dompurify": [("LICENSE", "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"),
+                          ("LICENSE-MPL", "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85")],
+            "github.com/golang/freetype": [("LICENSE", "d3ba056adc2b7909e95681deaae397fb37c97ed491a920f491214f07b62c41d0")]})
 
     def test_every_election_stands(self):
         for e in self.policy["elections"]:
-            self.assertIsNone(licence_scan._election_problem(e), e["component"])
+            self.assertIsNone(licence_scan._election_problem(e, self.policy), e["component"])
 
     def test_reviewed_records_are_well_formed(self):
         for r in self.policy["reviewed"]:

@@ -32,7 +32,12 @@ Rules, in the order they apply to one component:
 
 Every component is judged, nested ones included (cyclonedx-npm nests packages that are not hoisted).
 
-This evaluator is duplicated in the Apps repository (scripts/licence_scan.py in KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps); keep the two in sync.
+This evaluator is duplicated in the Apps repository (scripts/licence_scan.py in
+KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps), together with the allow, deny, election_only, own.licences and
+reviewed sections of scripts/licence-policy.json. A change to either must be copied there: merge it here first, then
+copy the files into the Apps repository, write the merge commit's SHA into its scripts/licence-scan.pin and run its
+scripts/check_licence_copy.py, which fails on any difference from the live files on this repository's
+integration/app-platform and main.
 """
 import argparse
 import glob
@@ -233,19 +238,23 @@ def read_workspaces(root):
 
 
 def flatten(components):
-    """Every component, nested ones included, once per bom-ref.
+    """Every component, nested ones included.
 
     cyclonedx-npm nests a package that is not hoisted inside the components of its parent, so judging only
-    the top level would pass anything a parent happens to hide. Components without a bom-ref are all kept.
+    the top level would pass anything a parent happens to hide. A repeated component is judged once only
+    when it is really the same: the same bom-ref and the same version and declared licences. Copies that
+    share a bom-ref but differ in what they declare are all kept and judged separately, so one cannot shadow
+    another. Components without a bom-ref are all kept.
     """
     seen, out = set(), []
 
     def walk(items):
         for comp in items or []:
             ref = comp.get("bom-ref")
-            if ref is None or ref not in seen:
-                if ref is not None:
-                    seen.add(ref)
+            identity = None if ref is None else (ref, comp.get("version"), declaration_key(comp))
+            if identity is None or identity not in seen:
+                if identity is not None:
+                    seen.add(identity)
                 out.append(comp)
             walk(comp.get("components"))
     walk(components)
@@ -255,6 +264,27 @@ def flatten(components):
 def component_key(comp):
     group = comp.get("group")
     return f"{group}/{comp['name']}" if group else comp["name"]
+
+
+def declaration_key(comp):
+    """The licence declaration of a component, exactly and by kind: 'id:MIT', 'name:Some terms',
+    'expression:(MIT OR ISC)', joined with ' | ' when there are several entries, '' when there is none.
+    Policy records pin this string, so an id, a name and an expression never stand for one another, and
+    case, order and parentheses all count."""
+    entries = comp.get("licenses") or (comp.get("evidence") or {}).get("licenses") or []
+    parts = []
+    for entry in entries:
+        if "expression" in entry:
+            parts.append("expression:" + entry["expression"].strip())
+            continue
+        lic = entry.get("license") or {}
+        if (lic.get("id") or "").strip():
+            parts.append("id:" + lic["id"].strip())
+        elif (lic.get("name") or "").strip():
+            parts.append("name:" + lic["name"].strip())
+        else:
+            parts.append("unidentified:")
+    return " | ".join(parts)
 
 
 def _declared_nodes(comp):
@@ -277,64 +307,109 @@ def _declared_nodes(comp):
     return nodes, " AND ".join(texts)
 
 
-def _norm_decl(text):
-    text = re.sub(r"\s+", " ", text.strip()).lower()
-    while text.startswith("(") and text.endswith(")") and _wraps(text):
-        text = text[1:-1].strip()
-    return text
+def _declared_atoms(declared):
+    """The licence identifiers inside a pinned 'kind:text' declaration."""
+    kind, _, text = declared.partition(":")
+    if kind == "expression":
+        found = []
+
+        def walk(node):
+            if node[0] == "id":
+                found.append(node[1])
+            else:
+                for child in node[1]:
+                    walk(child)
+        walk(parse_expression(text))
+        return found
+    return [text]
 
 
-def _wraps(text):
-    depth = 0
-    for i, ch in enumerate(text):
-        depth += (ch == "(") - (ch == ")")
-        if depth == 0 and i < len(text) - 1:
-            return False
-    return True
+def _election_problem(e, policy):
+    """Why an election cannot stand, or None. The record is the owner's choice from a dual licence, so it
+    must be a real choice and its inputs must be evidence, not free text:
 
-
-def _or_operands(node):
-    """The identifiers that are a direct operand of an OR anywhere in the expression: the real choices."""
-    found = set()
-
-    def walk(n):
-        if n[0] == "id":
-            return
-        if n[0] == "or":
-            found.update(c[1].lower() for c in n[1] if c[0] == "id")
-        for child in n[1]:
-            walk(child)
-    walk(node)
-    return found
-
-
-def _election_problem(e):
-    """Why an election cannot stand, or None. The elected licence must be one side of a dual licence."""
-    offered = e.get("offered", e["declared"])
+    - the offered expression is a pure top-level OR of identifiers, and the elected licence is one of them;
+    - no identifier of the declaration or of the offer is denied, and the elected one is allowed (on the
+      allow list, or elected-only);
+    - the declaration is another top-level operand, or the whole offer;
+    - the offer is pinned to the SHA-256 of the licence files it was read from (checked against the shipped
+      package by the caller).
+    """
+    deny = {d.lower() for d in policy["deny"]}
+    allowed = {a.lower() for a in policy["allow"]} | {a.lower() for a in policy["election_only"]}
     try:
-        operands = _or_operands(parse_expression(offered))
-    except ExpressionError as err:
-        return f"its offered expression does not parse: {err}"
-    if e["elected"].lower() not in operands:
-        return f"{e['elected']!r} is not an OR operand of {offered!r}"
-    if _norm_decl(offered) != _norm_decl(e["declared"]) and _norm_decl(e["declared"]) not in operands:
-        return f"the declared {e['declared']!r} is not an OR operand of {offered!r}"
+        offer = parse_expression(e["offered"])
+        declared_atoms = _declared_atoms(e["declared"])
+        declared_tree = parse_expression(e["declared"].partition(":")[2]) if e["declared"].startswith("expression:") else None
+    except (ExpressionError, KeyError) as err:
+        return f"its declaration or offer does not parse: {err}"
+    if offer[0] != "or" or any(child[0] != "id" for child in offer[1]):
+        return f"the offer {e['offered']!r} is not a pure top-level OR expression"
+    operands = [child[1] for child in offer[1]]
+    for atom in operands + declared_atoms:
+        if atom.lower() in deny:
+            return f"{atom!r} is a denied licence"
+    if e["elected"] not in operands:
+        return f"{e['elected']!r} is not a top-level operand of {e['offered']!r}"
+    if e["elected"].lower() not in allowed:
+        return f"{e['elected']!r} is not allowed by the policy"
+    kind = e["declared"].partition(":")[0]
+    if kind == "id":
+        if declared_atoms[0] == e["elected"] or declared_atoms[0] not in operands:
+            return f"the declared {declared_atoms[0]!r} is not another top-level operand of {e['offered']!r}"
+        for atom in operands:
+            if atom != declared_atoms[0] and atom.lower() not in allowed:
+                return f"{atom!r} in the offer is neither allowed by the policy nor the declared side"
+    elif kind == "expression":
+        if declared_tree[0] != "or" or any(c[0] != "id" for c in declared_tree[1]) \
+                or {c[1] for c in declared_tree[1]} != set(operands):
+            return f"the declared expression is not the whole offer {e['offered']!r}"
+    else:
+        return f"the declaration {e['declared']!r} must be 'id:...' or 'expression:...'"
+    evidence = e.get("evidence")
+    if not evidence or any(not isinstance(f, dict) or not f.get("file")
+                           or not re.fullmatch(r"[0-9a-fA-F]{64}", f.get("sha256", "")) for f in evidence):
+        return "it has no licence-file evidence (a list of {file, sha256}) for the offered expression"
     return None
 
 
-def _is_own(comp, key, prefixes, workspaces):
-    """The project's own component: a matching name, and for npm a local workspace package too.
+def _election_evidence(key, comp, e, read_licence, warnings):
+    """True when every pinned licence file still ships with the hash the election was written against."""
+    for item in e["evidence"]:
+        try:
+            data = read_licence(comp, item["file"]) if read_licence else None
+        except LicenceFileError as err:
+            warnings.append(f"election for {key}: {err}; ignored")
+            return False
+        if data is None:
+            warnings.append(f"election for {key}: licence file {item['file']!r} not found in the shipped package; ignored")
+            return False
+        if hashlib.sha256(data).hexdigest() != item["sha256"].lower():
+            warnings.append(f"stale election for {key}: {item['file']!r} no longer hashes to the pinned SHA-256; ignored")
+            return False
+    return True
 
-    A name alone can be squatted by a registry package, so an npm component must also carry no registry
-    distribution and be one of the workspace packages of this repository.
+
+def _is_own(comp, key, prefixes, workspaces):
+    """The project's own component: a matching name, and proof it is the local package.
+
+    A name alone can be squatted by a registry package, and a Go module path is not proof either, so a
+    component with no purl is never own. A Go module needs a golang purl. An npm component must have an
+    install path of exactly node_modules/<its name> (a nested copy of the same name is not it), carry no
+    registry distribution, and be a package of this repository's workspaces.
     """
     if not any(key == p or (p.endswith("/") and key.startswith(p)) for p in prefixes):
         return False
-    if (comp.get("purl") or "").startswith("pkg:npm/"):
-        if any(r.get("type") == "distribution" for r in comp.get("externalReferences") or []):
-            return False
-        return workspaces is not None and key in workspaces
-    return True
+    purl = comp.get("purl") or ""
+    if purl.startswith("pkg:golang/"):
+        return True
+    if not purl.startswith("pkg:npm/"):
+        return False
+    if any(r.get("type") == "distribution" for r in comp.get("externalReferences") or []):
+        return False
+    if _property(comp, "cdx:npm:package:path") != f"node_modules/{key}":
+        return False
+    return workspaces is not None and key in workspaces
 
 
 class _Judge:
@@ -428,19 +503,15 @@ def evaluate(sbom, policy, verified, read_licence=None, workspaces=None):
         judge = _Judge(policy, own)
         election = elections.get(key)
         if election is not None:
-            if _norm_decl(election["declared"]) != _norm_decl(declared):
-                warnings.append(f"stale election for {key}: it was written for {election['declared']!r} "
-                                f"but the SBOM declares {declared!r}; ignored")
-            elif _election_problem(election):
-                warnings.append(f"election for {key} refused: {_election_problem(election)}")
-            else:
-                verdict = judge.atom(election["elected"])
-                if verdict == OK or election["elected"].lower() in judge.election_only:
-                    results.append(dict(base, status="pass", via="election", reason="elected",
-                                        elected=election["elected"], detail=election["reason"]))
-                    continue
-                warnings.append(f"election for {key} names {election['elected']!r}, which the policy does not "
-                                f"permit; ignored")
+            if election["declared"] != declaration_key(comp):
+                warnings.append(f"stale election for {key}: it was written for the declaration "
+                                f"{election['declared']!r} but the SBOM declares {declaration_key(comp)!r}; ignored")
+            elif _election_problem(election, policy):
+                warnings.append(f"election for {key} refused: {_election_problem(election, policy)}")
+            elif _election_evidence(key, comp, election, read_licence, warnings):
+                results.append(dict(base, status="pass", via="election", reason="elected",
+                                    elected=election["elected"], detail=election["reason"]))
+                continue
         verdict = judge.node(("and", nodes) if len(nodes) > 1 else nodes[0])
         if verdict == OK:
             results.append(dict(base, status="pass", via="own" if judge.used_own else "allow", reason="allowed"))
@@ -469,16 +540,16 @@ def _apply_review(key, comp, rec, verdict, declared, allow_lower, read_licence, 
         warnings.append(f"reviewed-as record for {key} reviews it as {rec['reviewed_as']!r}, which is not allowed "
                         f"by the policy; ignored")
         return None
-    if verdict == DENIED:
-        warnings.append(f"reviewed-as record for {key} cannot override a denied licence; ignored")
-        return None
     if "declared" not in rec:
         warnings.append(f"reviewed-as record for {key} does not pin the declaration it was reviewed against "
                         f"(no 'declared'); ignored")
         return None
-    if _norm_decl(rec["declared"]) != _norm_decl(declared):
+    if rec["declared"] != declaration_key(comp):
         warnings.append(f"stale reviewed-as record for {key}: it was reviewed against the declaration "
-                        f"{rec['declared']!r} but the SBOM declares {declared!r}; ignored")
+                        f"{rec['declared']!r} but the SBOM declares {declaration_key(comp)!r}; ignored")
+        return None
+    if verdict == DENIED:
+        warnings.append(f"reviewed-as record for {key} cannot override a denied licence; ignored")
         return None
     try:
         data = read_licence(comp, rec["file"]) if read_licence else None

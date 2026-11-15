@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8 (DEV-04)",
+  "source": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8 (DEV-04). The allow, deny, election_only, own.licences and reviewed sections are copied into the Apps repository (KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps, scripts/licence-policy.json), with scripts/licence_scan.py: change them there too and bump its scripts/licence-scan.pin.",
   "allow": [
     "MIT",
     "BSD-2-Clause",
@@ -16,14 +16,14 @@
     "MPL-2.0"
   ],
   "deny": [
-    "GPL-2.0-only",
-    "GPL-2.0",
-    "SSPL-1.0",
     "BUSL-1.1",
     "Commons-Clause",
     "EPL-1.0",
     "EPL-2.0",
+    "GPL-2.0",
+    "GPL-2.0-only",
     "NOASSERTION",
+    "SSPL-1.0",
     "UNLICENSED"
   ],
   "own": {
@@ -40,16 +40,33 @@
   "elections": [
     {
       "component": "dompurify",
-      "declared": "MPL-2.0 OR Apache-2.0",
+      "declared": "expression:(MPL-2.0 OR Apache-2.0)",
       "elected": "Apache-2.0",
-      "reason": "Dual licence MPL-2.0 OR Apache-2.0; the project takes Apache-2.0 (doc 167 section 8)."
+      "reason": "Dual licence MPL-2.0 OR Apache-2.0; the project takes Apache-2.0 (doc 167 section 8). The offered expression is pinned to the SHA-256 of the licence files that ship in the package.",
+      "offered": "MPL-2.0 OR Apache-2.0",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        {
+          "file": "LICENSE-MPL",
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+        }
+      ]
     },
     {
       "component": "github.com/golang/freetype",
-      "declared": "GPL-2.0-or-later",
+      "declared": "id:GPL-2.0-or-later",
       "elected": "FTL",
-      "reason": "Dual licence FTL or GPL-2.0-or-later, pulled in by the captcha dependency; the project uses it under the FreeType License (doc 167 section 8). The licence detector reports only the GPL side.",
-      "offered": "GPL-2.0-or-later OR FTL"
+      "reason": "Dual licence FTL or GPL-2.0-or-later, pulled in by the captcha dependency; the project uses it under the FreeType License (doc 167 section 8). The licence detector reports only the GPL side. The offered expression is pinned to the SHA-256 of the licence files that ship in the package.",
+      "offered": "GPL-2.0-or-later OR FTL",
+      "evidence": [
+        {
+          "file": "LICENSE",
+          "sha256": "d3ba056adc2b7909e95681deaae397fb37c97ed491a920f491214f07b62c41d0"
+        }
+      ]
     }
   ],
   "exclusions": [
@@ -74,7 +91,7 @@
       "file": "LICENSE",
       "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
       "reason": "Owner review: the LICENSE shipped in each golang.org/x module is the standard Go BSD 3-clause text (byte-identical across all of them); the licence detector reports it as BSD-Source-Code. Pinned to the file's SHA-256, so a change to the text makes the record stale.",
-      "declared": "BSD-Source-Code"
+      "declared": "id:BSD-Source-Code"
     },
     {
       "components": [
