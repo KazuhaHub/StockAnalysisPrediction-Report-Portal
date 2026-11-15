@@ -734,6 +734,8 @@ settlement. Resolution 5 (the image store is never reclaimed) no longer holds.
 Recorded from the round-3 review of PR 4c (#429). Each one is on a failure path, and each fails closed or
 leaves work for an administrator. None of them may remain when the integration branch merges into `main`.
 
+**Status: all six are closed** (see "Resolutions: PR 4c residuals" below). The entries stay as the record of what each was.
+
 - **Orphaned restore start outside a recovery resume.** The runner admits capacity when it claims the start
   (`ClaimUpdateStart`), but nothing on the Portal sends the settlement for a managed restore that is not a
   recovery resume. Its target reservation is therefore held until an operator steps in. Fix: settle it from
