@@ -202,7 +202,7 @@ func writableLifecycleFrame(parent context.Context, path string, profile endpoin
 			return zero, &journal.UpdateStartHeldError{State: absence.State}
 		}
 	}
-	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) || removeImageAbsenceReply(action, body) {
+	if importAbsenceReply(action, body) || startAbsenceReply(action, body) || migrateAbsenceReply(action, body) || loadImageAbsenceReply(action, body) || removeImageAbsenceReply(action, body) || deleteCheckpointAbsenceReply(action, body) {
 		// The runner proved it never claimed this effect. This is the only definite negative
 		// the transport reports; every other failure above stays uncertain.
 		return zero, journal.ErrNoSuchEffect
@@ -348,6 +348,13 @@ func (s *Server) handleWritableLifecycle(ctx context.Context, conn *net.UnixConn
 		result, err = provider.store.DispatchRemoveImage(ctx, raw, sig, descriptor, provider.native)
 	case RemoveImageRead:
 		result, err = provider.store.ReadRemoveImageOrStatus(ctx, raw, sig)
+	case DeleteCheckpointExecute:
+		if provider.checkpointRoot == nil {
+			return
+		}
+		result, err = provider.store.DispatchDeleteCheckpoint(ctx, raw, sig, journal.NewDeleteCheckpointNative(provider.checkpointRoot, provider.checkpointPin))
+	case DeleteCheckpointRead:
+		result, err = provider.store.ReadDeleteCheckpointOrStatus(ctx, raw, sig)
 	case SettleUpdateStartExecute:
 		result, err = provider.store.SettleUpdateStart(ctx, raw, sig, provider.native)
 	case SettleUpdateStartRead:

@@ -56,13 +56,15 @@ const (
 	LoadImageRead
 	RemoveImageExecute
 	RemoveImageRead
+	DeleteCheckpointExecute
+	DeleteCheckpointRead
 )
 
 func (a WritableLifecycleAction) valid() bool {
-	return a >= WritableWriterExecute && a <= RemoveImageRead
+	return a >= WritableWriterExecute && a <= DeleteCheckpointRead
 }
 func (a WritableLifecycleAction) mutating() bool {
-	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute
+	return a == WritableWriterExecute || a == WritableWriterReconcile || a == WritableCandidateStart || a == WritableCandidateReconcile || a == WritableRegistrationDeliver || a == ManagedRemovalStop || a == ManagedRemovalRemoveCode || a == CheckpointCreate || a == RestoreExecute || a == UpdateStartReserve || a == UpdateStartExecute || a == UpdateStartRegistrationDeliver || a == UpdateStartRemovalStop || a == UpdateStartRemovalRemoveCode || a == ManagedDataDelete || a == ImportCheckpointExecute || a == MigrateDataExecute || a == DiscardMigrationExecute || a == SettleUpdateStartExecute || a == LoadImageExecute || a == RemoveImageExecute || a == DeleteCheckpointExecute
 }
 func (a WritableLifecycleAction) registrationDelivery() bool {
 	return a == WritableRegistrationDeliver || a == UpdateStartRegistrationDeliver
@@ -187,6 +189,24 @@ func (o WritableLifecycleObservation) RemoveImageStatus() (journal.RemoveImageSt
 	return journal.ParseRemoveImageStatus([]byte(o.body))
 }
 
+// DeleteCheckpointReceipt returns the receipt of a delete-checkpoint execute or read-back. A typed status is not a
+// receipt: see DeleteCheckpointStatus.
+func (o WritableLifecycleObservation) DeleteCheckpointReceipt() (journal.DeleteCheckpointReceipt, error) {
+	if o.action != DeleteCheckpointExecute && o.action != DeleteCheckpointRead {
+		return journal.DeleteCheckpointReceipt{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseDeleteCheckpointReceipt([]byte(o.body))
+}
+
+// DeleteCheckpointStatus returns the typed "pending" or "orphaned" answer to a delete-checkpoint execute or read-back.
+// A definite absence is not an observation: it is reported as journal.ErrNoSuchEffect.
+func (o WritableLifecycleObservation) DeleteCheckpointStatus() (journal.DeleteCheckpointStatus, error) {
+	if o.action != DeleteCheckpointExecute && o.action != DeleteCheckpointRead {
+		return journal.DeleteCheckpointStatus{}, driver.ErrContainerUncertain
+	}
+	return journal.ParseDeleteCheckpointStatus([]byte(o.body))
+}
+
 func (o WritableLifecycleObservation) SettleUpdateStartReceipt() (journal.SettleUpdateStartReceipt, error) {
 	if o.action != SettleUpdateStartExecute && o.action != SettleUpdateStartRead {
 		return journal.SettleUpdateStartReceipt{}, driver.ErrContainerUncertain
@@ -259,6 +279,7 @@ type writableLifecycleReference struct {
 	settleStart             control.SettleUpdateStartCommand
 	loadImage               control.LoadImageCommand
 	removeImage             control.RemoveImageCommand
+	deleteCheckpoint        control.DeleteCheckpointCommand
 	updateStart             control.UpdateStartCommand
 	updateStartRegistration control.UpdateStartRegistrationCommand
 	updateStartRemoval      control.UpdateStartRemovalCommand
@@ -434,6 +455,21 @@ func verifyWritableLifecycleMode(action WritableLifecycleAction, raw, sig, descr
 		}
 		r.removeImage = v.Command()
 		r.release = r.removeImage.Payload.ReleaseSHA256
+	case action == DeleteCheckpointExecute || action == DeleteCheckpointRead:
+		var v control.VerifiedDeleteCheckpointCommand
+		var err error
+		if action == DeleteCheckpointRead {
+			v, err = control.VerifyDeleteCheckpointRead(raw, sig, a, now)
+		} else if settling {
+			v, err = control.VerifyDeleteCheckpointSettlement(raw, sig, a, now)
+		} else {
+			v, err = control.VerifyDeleteCheckpoint(raw, sig, a, now)
+		}
+		if err != nil {
+			return r, err
+		}
+		r.deleteCheckpoint = v.Command()
+		r.release = r.deleteCheckpoint.Payload.ReleaseSHA256
 	case action == SettleUpdateStartExecute || action == SettleUpdateStartRead:
 		var v control.VerifiedSettleUpdateStartCommand
 		var err error
@@ -532,6 +568,9 @@ func validWritableLifecycleReply(action WritableLifecycleAction, body []byte, r 
 	}
 	if action == RemoveImageExecute || action == RemoveImageRead {
 		return validRemoveImageReply(body, r.removeImage, received)
+	}
+	if action == DeleteCheckpointExecute || action == DeleteCheckpointRead {
+		return validDeleteCheckpointReply(body, r.deleteCheckpoint, received)
 	}
 	var settled string
 	switch {
@@ -942,5 +981,32 @@ func removeImageAbsenceReply(action WritableLifecycleAction, body []byte) bool {
 		return false
 	}
 	status, err := journal.ParseRemoveImageStatus(body)
+	return err == nil && status.State == "absent"
+}
+
+// validDeleteCheckpointReply accepts a typed status or a receipt, each bound to the exact signed command. A receipt is
+// terminal and immutable, so a read-back is not held to the command's signing time.
+func validDeleteCheckpointReply(body []byte, c control.DeleteCheckpointCommand, received time.Time) bool {
+	if status, err := journal.ParseDeleteCheckpointStatus(body); err == nil {
+		observed, observedErr := strconv.ParseInt(status.ObservedMS, 10, 64)
+		issued, issuedErr := strconv.ParseInt(c.IssuedMS, 10, 64)
+		return journal.DeleteCheckpointStatusMatchesCommand(status, c) && observedErr == nil && issuedErr == nil && observed >= issued && observed <= received.UnixMilli()
+	}
+	receipt, err := journal.ParseDeleteCheckpointReceipt(body)
+	if err != nil || !journal.DeleteCheckpointReceiptMatchesCommand(receipt, c) {
+		return false
+	}
+	settled, settledErr := strconv.ParseInt(receipt.SettledMS, 10, 64)
+	return settledErr == nil && settled <= received.UnixMilli()
+}
+
+// deleteCheckpointAbsenceReply reports whether body is the runner's definite "never claimed" answer. Only a read-back
+// can be answered so; an execute that found no row claims one instead. Pending and orphaned are not definite and stay
+// observations.
+func deleteCheckpointAbsenceReply(action WritableLifecycleAction, body []byte) bool {
+	if action != DeleteCheckpointRead {
+		return false
+	}
+	status, err := journal.ParseDeleteCheckpointStatus(body)
 	return err == nil && status.State == "absent"
 }

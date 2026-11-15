@@ -23,7 +23,20 @@ var (
 	ErrDeleteIncomplete     = errors.New("data deletion requires reconciliation")
 	ErrImportUnsafe         = errors.New("data checkpoint import binding is unsafe")
 	ErrImportIncomplete     = errors.New("data checkpoint import requires reconciliation")
+	// ErrArchiveMismatch is a retained checkpoint archive that is not the file a deletion claimed: not a regular file,
+	// linked more than once, or of another size. Nothing is removed.
+	ErrArchiveMismatch = errors.New("checkpoint archive does not match the claimed file")
+	// ErrArchiveRemovalIncomplete is a removal whose unlink returned but whose absence could not be confirmed.
+	ErrArchiveRemovalIncomplete = errors.New("checkpoint archive removal requires reconciliation")
 )
+
+// CheckpointArchive is an observation of one retained checkpoint archive file. Found is false when no such file
+// exists; Bytes is its size when it does.
+type CheckpointArchive struct {
+	Found bool
+	Bytes int64
+}
+
 var namespaceID = regexp.MustCompile(`^[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}$`)
 
 type Request struct {

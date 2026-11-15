@@ -200,7 +200,7 @@ func commandFenceFloor(ctx context.Context, tx *sql.Tx, c control.Command) (int6
 // installation-wide reader of runner_commands excludes these kinds with kind NOT IN (...), so a fourth such kind is
 // added here and nowhere else. TestInstallationWideCommandReadersIgnoreLoadImageRows requires the constant at every
 // such statement.
-const installationNeutralCommandKinds = `'load-image','remove-image'`
+const installationNeutralCommandKinds = `'load-image','remove-image','delete-checkpoint'`
 
 // Rows of kind load-image are ignored, in any state, by every reader that counts, pending-checks or takes a
 // floor over an installation's command rows (writer, candidate, registration, update-start, checkpoint, removal,

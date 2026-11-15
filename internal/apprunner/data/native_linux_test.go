@@ -367,6 +367,54 @@ func TestNativeDataPrimitive(t *testing.T) {
 		t.Fatal("deterministic restore replay", replayedSnapshot, errors.Join(err, replaySnapshotErr))
 	}
 	t.Log("NATIVE_DATA_RESTORE_VERIFIED")
+
+	// Deleting one retained archive removes that file only, refuses a file of another size, and confirms absence.
+	keep := request
+	keep.CheckpointID = nativeNamespace(503)
+	keepCheckpoint, keepErr := checkpointRoot.Checkpoint(context.Background(), checkpointIdentity, root, expected, keep)
+	keepSnapshot, keepSnapshotErr := keepCheckpoint.Snapshot()
+	if keepErr != nil || keepSnapshotErr != nil {
+		t.Fatal("second checkpoint", errors.Join(keepErr, keepSnapshotErr))
+	}
+	keepBefore, err := os.ReadFile(checkpointPath + "/.portal-checkpoints/" + keep.CheckpointID + ".tar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archive, err := checkpointRoot.InspectCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID)
+	if err != nil || !archive.Found || archive.Bytes != checkpointSnapshot.ArchiveBytes {
+		t.Fatalf("inspect archive: %+v %v", archive, err)
+	}
+	if _, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes+1); !errors.Is(err, ErrArchiveMismatch) {
+		t.Fatal("archive of another size was removed", err)
+	}
+	if again, err := checkpointRoot.InspectCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID); err != nil || !again.Found {
+		t.Fatal("a refused removal changed the archive", again, err)
+	}
+	removed, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes)
+	if err != nil || !removed.Found || removed.Bytes != checkpointSnapshot.ArchiveBytes {
+		t.Fatalf("remove archive: %+v %v", removed, err)
+	}
+	listed, err := os.ReadDir(checkpointPath + "/.portal-checkpoints")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range listed {
+		if entry.Name() == request.CheckpointID+".tar" {
+			t.Fatal("the deleted archive is still listed")
+		}
+	}
+	keepAfter, err := os.ReadFile(checkpointPath + "/.portal-checkpoints/" + keep.CheckpointID + ".tar")
+	if err != nil || string(keepAfter) != string(keepBefore) || int64(len(keepAfter)) != keepSnapshot.ArchiveBytes {
+		t.Fatal("another archive changed", err)
+	}
+	gone, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes)
+	if err != nil || gone.Found {
+		t.Fatalf("removing an absent archive: %+v %v", gone, err)
+	}
+	if _, err := checkpointRoot.InspectCheckpointArchive(context.Background(), RootIdentity{}, request.CheckpointID); !errors.Is(err, ErrUnsafe) {
+		t.Fatal("archive inspected through a different root identity", err)
+	}
+	t.Log("NATIVE_DATA_CHECKPOINT_DELETE_VERIFIED")
 	if err := os.Symlink("hello.txt", namespace+"/link"); err != nil {
 		t.Fatal(err)
 	}
