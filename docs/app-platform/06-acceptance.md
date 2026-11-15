@@ -178,9 +178,11 @@ what.
 ### Declared capacity envelope status (OPS-08, SEC-09)
 
 Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
-[doc 171](171-capacity-envelope-plan.md). **OPS-08 is pending until one 120-minute
-`workflow_dispatch` run of the `capacity-soak` job has passed, and no result is cited before then. SEC-09 stays partial even after that run
-passes: the task worker and event delivery coordinator are not exercised by the soak.** Only that run counts. The
+[doc 171](171-capacity-envelope-plan.md). **OPS-08 passed on 2026-11-15:** the 120-minute `workflow_dispatch` run
+[43683877826](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43683877826) of the `capacity-soak` job, at commit
+`8121574b90c9aa8110ada71dcfe8a19604608e50` (the `expected_commit` matched), PostgreSQL 16.15, passed all 25 checks with no evidence blocker.
+Pooled loaded p95: home 10.8 ms (bound 50), report 17.5 ms (50), dispatch@200 9.9 ms (25), batch start 43.7 ms (100). **SEC-09 stays partial:** the
+task worker and event delivery coordinator are not exercised by the soak; its OPS-08 dependency is met. Only that run counts. The
 job exists on the branch `feat/app-platform-capacity-soak`, which targets `integration/app-platform`, not on `main`, so the
 evidence run is a `workflow_dispatch` of that branch at the reviewed commit with `soak_only=true`; the evidence records the
 branch (`GITHUB_REF_NAME`), the commit and the event. The same configuration runs for five minutes, with a diagnosis added, on
@@ -238,7 +240,7 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
   when it holds 8 GiB plus 6 GiB of headroom.
 - **Proven at unit level only, by design:** the per-application task quota and the exact 2 GiB staging cap without writing a byte. The runner's
   own refusal of an over-declared layer is covered by the blob channel unit tests; the soak drives the Portal's import route.
-- **Records:** `handoff/evidence/platform-capacity-envelope/acceptance.json` (to be filled from the dispatch run) and the
+- **Records:** `handoff/evidence/platform-capacity-envelope/acceptance.json` (filled from run 43683877826) and the
   OPS-08 and SEC-09 rows of `handoff/acceptance-checklist.csv`.
 
 ## 7. Developer and delivery verification

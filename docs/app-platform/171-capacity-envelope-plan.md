@@ -1695,11 +1695,39 @@ backend's cgroup counters, the unit test results, the runner log series and the 
 `samples.jsonl`, `child-evidence.json`, `unit-tests.json`, `disk-before.txt`, `runner-log.jsonl`, `portal-parent.log`, `portal-child.log` and
 `runner.log`, uploaded as the `capacity-soak-evidence` artifact (90 days for a dispatch run).
 
-### Not proven until the 120-minute run
+### PR 4b evidence
 
-- That the latency bound holds for two hours: on the production-shaped Portal it does not hold in the smokes (see the findings above).
-- That the eight backends stay inside the budgets and none is OOM-killed or restarted for two hours; the five-minute smokes held every
-  backend at the fractions of resolution 67 with no restart.
-- The task worker and the event delivery coordinator under the load, a backend-originated message or task flood, the per-application
-  task quota natively, the runner's own refusal of an over-declared layer over the control socket, and PostgreSQL (the soak drives a
-  SQLite Portal).
+**The 120-minute dispatch run passed (OPS-08).** Run [43683877826](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43683877826), a `workflow_dispatch`
+of `feat/app-platform-capacity-soak` at `8121574b90c9aa8110ada71dcfe8a19604608e50` with `expected_commit` matching, `soak_only=true`, `duration_minutes=120`, PostgreSQL 16.15 (`db_driver=postgres`).
+The `capacity-soak` job ran on 2026-11-15 from 06:05:44Z to 08:11:10Z (7455 s of harness time). Verdict `passed=true`, `counts_as_ops08_evidence=true`, `evidence_blockers=[]`, 25 of 25 checks. Artifact `capacity-soak-evidence`
+(90 days); the numbers are recorded in `handoff/evidence/platform-capacity-envelope/acceptance.json`.
+
+Pooled loaded p95 (the verdict, resolution 74), with the idle baseline and the worst one-minute window as diagnostics (microseconds):
+
+| Series | Idle p95 | Pooled p95 | Bound | Samples | Worst window | Windows over the bound |
+| --- | --- | --- | --- | --- | --- | --- |
+| home | 2108 | 10817 | 50000 | 12000 | 17265 (minute 73) | 0 |
+| report | 2346 | 17498 | 50000 | 12000 | 25963 (minute 83) | 0 |
+| dispatch@200 | 948 | 9902 | 25000 | 12000 | 14856 (minute 119) | 0 |
+| batch start | 9113 | 43686 | 100000 | 2400 | 59403 (minute 87) | 0 |
+
+Other results:
+
+- **Disk-health precheck (resolution 75) did not trip:** idle WAL sync mean 0.064 ms; fsync probe median 0.187 ms, p95 0.213 ms, maximum 0.435 ms (200 writes of 4 KiB). The probe's 1 ms bound sits well above this host.
+- **Probes:** all ten native probes were refused with their typed errors; the four that install something were retired by the managed uninstall. The image store probe ran natively. The per-application task quota is proven at unit level, and its tests passed in the job.
+- **Backends:** eight backends of 488 MiB and 240 mCPU each (runner budgets 3925 MiB and 2000 mCPU); none crashed, was OOM-killed or restarted. CPU used at least 0.996 of the quota in every window, PIDs at least 0.891 of the limit in every window, memory held at the held fraction in every window. Summed backend memory peaked at 3.66 GB and CPU at 1980 mCPU, inside the budgets.
+- **Message flood:** 80045 requests answered and 830028 refused 429 `app_platform_busy`, no other class, and answered, typed and alive in every window.
+- **Runner journal:** grew 1.24 MB over the load against a 256 MiB bound. **Host:** 240 of 240 samples, none failed; lowest available memory 68% against the 10% floor. The session outlived the run.
+
+**Remaining limits.**
+
+- SEC-09 stays partial: the task worker and event delivery coordinator are not exercised by the soak, and no request originates from a backend. Its OPS-08 dependency is met.
+- The per-application task quota is proven at unit level only, and the runner's own refusal of an over-declared layer is covered by the blob channel unit tests.
+- One host class, one run: the earlier two runs of the same configuration measured home at 20.1 and 37.3 ms (5 minutes), so a rerun on another host can differ; the bounds leave a factor of 1.7 to 4.6 over the worst windows and pooled values of this run.
+
+**Follow-ups that still block the integration to main merge.**
+
+- **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
+- **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
+- **Inventory overlap by device and inode** (the follow-up above), together with an absent bind source under the data root, which is to be treated as a reference to the namespace rather than as no overlap.
+- **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
