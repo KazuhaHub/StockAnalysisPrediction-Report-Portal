@@ -153,11 +153,11 @@ class TotpTests(unittest.TestCase):
 
         def sleep(seconds):
             slept.append(seconds)
-            clock[0] += 30
+            clock[0] += seconds
 
         step = drills.pick_totp_step({100, 101}, sleep=sleep, clock=lambda: clock[0])
         self.assertEqual(step, 102)
-        self.assertTrue(slept)
+        self.assertEqual(slept, [2.0])  # to just past the next 30-second boundary, not a fixed pause
 
 
 class FakePortal(BaseHTTPRequestHandler):
@@ -239,6 +239,11 @@ class PortalClientTests(unittest.TestCase):
         self.assertEqual(drills.failed_checks(checks), [])
         self.assertEqual([c["id"] for c in checks], ["healthz", "admin_login", "version", "users", "report", "totp_login"])
         self.assertIn(self.step, self.fx.used_steps)
+
+    def test_a_refused_code_is_not_marked_spent(self):
+        FakePortal.behaviour["wrong_key"] = True
+        self.run_gate()
+        self.assertEqual(self.fx.used_steps, set())
 
     def test_a_lost_key_fails_only_the_two_factor_login(self):
         FakePortal.behaviour["wrong_key"] = True

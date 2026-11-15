@@ -217,16 +217,17 @@ def totp_code(secret, step):
 
 
 def pick_totp_step(used, now=None, sleep=time.sleep, clock=time.time):
-    """A current or next 30-second step the portal has not seen from this account, waiting for the next
-    one when both are spent (a replayed step is refused)."""
+    """A current or next 30-second step the portal has not accepted from this account, waiting for the next
+    window when both are spent (a replayed step is refused)."""
     for _ in range(3):
-        current = int(clock() if now is None else now) // 30
+        moment = clock() if now is None else now
+        current = int(moment) // 30
         for step in (current, current + 1):
             if step not in used:
                 return step
         if now is not None:
             break
-        sleep(5)
+        sleep(30 - (moment % 30) + 1)
     raise RuntimeError("no unused TOTP step available")
 
 
@@ -345,8 +346,8 @@ def run_gate(base, fx, expect_version=None, expect_commit_prefix=None):
 
     totp = Portal(base)
     status, body, step = totp.login_totp(fx.totp_user, fx.totp_password, fx.totp_secret, fx.used_steps)
-    if step is not None:
-        fx.used_steps.add(step)
+    if step is not None and status == 200:
+        fx.used_steps.add(step)  # only an accepted code is spent; a refused one was never consumed
     if status == 200:
         status, me = totp.req("GET", "/api/me")
         signed_in = status == 200 and me.get("user") == fx.totp_user
