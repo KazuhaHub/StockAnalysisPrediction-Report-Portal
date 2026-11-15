@@ -924,9 +924,9 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	if !evidence.ReadinessSeen {
 		t.Fatal("the activation carries no readiness evidence")
 	}
-	// A worker-installed generation-1 app has no service-task history (that is tied to the managed-install review
-	// format), so the answer is a signed session request through the platform to the running backend, the path the
-	// enable and repair acceptances use: the Scheduled Digest service serves its current digest.
+	// A worker-installed generation-1 app answers a signed session request through the platform to the running
+	// backend: the Scheduled Digest service serves its current digest. Its scheduled task then runs through the
+	// runner's writable generation-1 service-task registration kind (below, after the session request).
 	configureNativeScheduledDigestSetup(t, s, session, committed.InstallationID)
 	answer, err := s.requestPlatformWritableBackend(ctx, session, committed.InstallationID, "GET", "/v1/digest", nil, endpoint)
 	var snapshot map[string]any
@@ -935,6 +935,8 @@ func TestPlatformManagedImageDeliveryChild(t *testing.T) {
 	}
 	evidence.AppAnswered = true
 	t.Log("IMAGE_DELIVERY_CHILD_APP_ANSWERED")
+	s.platformTaskBackend = s.runPlatformBackendTask
+	testNativeWritableGenerationOneDigestTask(t, s, committed.InstallationID)
 
 	// Hand over to the parent while the container is running.
 	writeEvidence := func() {

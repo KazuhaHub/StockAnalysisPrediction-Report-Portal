@@ -237,3 +237,58 @@ func testNativeExactScheduledDigest(
 	t.Log("SCHEDULED_DIGEST_EXACT_MANAGED_IMAGE_VERIFIED")
 	t.Log("SCHEDULED_DIGEST_SETUP_REQUIRED_AND_CONFIGURED")
 }
+
+// testNativeWritableGenerationOneDigestTask runs a Scheduled Digest task against an app the writable install
+// worker installed at generation 1, through the runner's writable service-task registration kind. The setup
+// must already be configured.
+func testNativeWritableGenerationOneDigestTask(
+	t *testing.T, s *Server, installation string,
+) {
+	t.Helper()
+	ctx := context.Background()
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	occurrence := "digest:writable-generation-1:2026-11-03"
+	id, created, err := s.admitPlatformTask(ctx, installation, platformTaskAdmission{
+		OccurrenceID: occurrence,
+		Handler:      appplatform.TaskHandlerDigest,
+		Payload:      []byte(`{"scheduleId":"daily","reportIds":[41,42]}`),
+		ExpiresMS:    now + int64(time.Hour/time.Millisecond),
+	})
+	if err != nil || !created || !platformValidUUID(id) {
+		t.Fatal("writable generation-1 digest admission", id, created, err)
+	}
+	worker, err := newPlatformTaskScheduler(s, platformFixtureID(896), 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var state, raw, errorCode string
+	for attempt := 0; attempt < 32; attempt++ {
+		worked, err := worker.tick(ctx)
+		if err != nil {
+			t.Fatal("writable generation-1 digest worker", err)
+		}
+		if err := s.st.queryRow(`SELECT state,COALESCE(result_json,''),COALESCE(error_code,'')
+			FROM app_platform_tasks WHERE id=?`, id).Scan(&state, &raw, &errorCode); err != nil {
+			t.Fatal(err)
+		}
+		if state == "succeeded" || state == "failed" || state == "uncertain" || state == "review_required" {
+			break
+		}
+		if !worked {
+			break
+		}
+	}
+	var result struct {
+		OccurrenceID string `json:"occurrenceId"`
+		ItemCount    int    `json:"itemCount"`
+		Digest       string `json:"digest"`
+	}
+	if state != "succeeded" || json.Unmarshal([]byte(raw), &result) != nil ||
+		result.OccurrenceID != occurrence || result.ItemCount != 2 || !platformValidSHA(result.Digest) {
+		t.Fatalf("writable generation-1 digest task = %s %s %s", state, errorCode, raw)
+	}
+	t.Log("SCHEDULED_DIGEST_WRITABLE_GENERATION_ONE_TASK_VERIFIED")
+}

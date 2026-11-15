@@ -1,8 +1,12 @@
 package app
 
 import (
+	"bytes"
+	"crypto/ed25519"
 	"errors"
+	"strconv"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -11,6 +15,14 @@ import (
 // platformServiceHistoryFor reads one installation's active tuple exactly as the
 // service task preflight does and asks for the history a task would run against.
 func platformServiceHistoryFor(t *testing.T, s *Server, installation string) (platformServiceBackendHistory, error) {
+	t.Helper()
+	h, _, err := platformServiceHistoryWithSeed(t, s, installation)
+	return h, err
+}
+
+// platformServiceHistoryWithSeed also returns the controller signing seed the
+// task path signs its command with; the caller clears it.
+func platformServiceHistoryWithSeed(t *testing.T, s *Server, installation string) (platformServiceBackendHistory, []byte, error) {
 	t.Helper()
 	tx, err := s.st.db.Begin()
 	if err != nil {
@@ -40,18 +52,18 @@ func platformServiceHistoryFor(t *testing.T, s *Server, installation string) (pl
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer clear(seed)
 	now, err := platformDatabaseNow(e)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s.loadPlatformServiceBackendHistory(e, b, runtime, seed, dek, now)
+	h, err := s.loadPlatformServiceBackendHistory(e, b, runtime, seed, dek, now)
+	return h, seed, err
 }
 
-func requireServiceHistory(t *testing.T, h platformServiceBackendHistory, format string, initial, update bool) {
+func requireServiceHistory(t *testing.T, h platformServiceBackendHistory, format string, initial, update bool, writable ...bool) {
 	t.Helper()
 	defer h.Close()
-	if h.format != format || (h.initial != nil) != initial || (h.update != nil) != update ||
+	if h.format != format || (h.initial != nil) != initial || (h.update != nil) != update || (h.writable != nil) != (len(writable) > 0 && writable[0]) ||
 		len(h.raw) == 0 || len(h.signature) == 0 || len(h.descriptor) == 0 ||
 		h.runtime.id == "" || h.authority.DeploymentID == "" {
 		t.Fatalf("service history: format=%q initial=%v update=%v", h.format, h.initial != nil, h.update != nil)
@@ -71,19 +83,16 @@ func testPlatformServiceHistoryManagedGenerationOne(t *testing.T, pg bool) {
 	requireServiceHistory(t, h, control.BackendRegistrationFormat, true, false)
 }
 
-// A writable generation-1 install is not mis-read as a managed one: its history is
-// refused by the format check and not by the managed reader's effect count.
-func testPlatformServiceHistoryWritableGenerationOneIsRefusedByFormat(t *testing.T, pg bool) {
+// A writable generation-1 install resolves the writable registration the runner
+// verifies as a third kind. It is neither mis-read as managed (the managed reader's
+// effect count) nor refused.
+func testPlatformServiceHistoryWritableGenerationOneUsesWritableKind(t *testing.T, pg bool) {
 	s, _, lease := platformWritableAccessFixture(t, pg)
 	h, err := platformServiceHistoryFor(t, s, lease.installationID)
-	if err == nil {
-		h.Close()
-		t.Fatal("a writable generation-1 install resolved a service-task history")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(err, errAppPlatformTaskUnavailable) ||
-		!errors.Is(err, errPlatformWritableInitialServiceTask) {
-		t.Fatalf("unexpected refusal: %v", err)
-	}
+	requireServiceHistory(t, h, control.WritableBackendRegistrationFormat, false, false, true)
 }
 
 // Generation 2 after an update selects the update reader.
@@ -146,11 +155,11 @@ func TestPlatformServiceHistoryManagedGenerationOnePostgres(t *testing.T) {
 	testPlatformServiceHistoryManagedGenerationOne(t, true)
 }
 
-func TestPlatformServiceHistoryWritableGenerationOneIsRefusedByFormatSQLite(t *testing.T) {
-	testPlatformServiceHistoryWritableGenerationOneIsRefusedByFormat(t, false)
+func TestPlatformServiceHistoryWritableGenerationOneUsesWritableKindSQLite(t *testing.T) {
+	testPlatformServiceHistoryWritableGenerationOneUsesWritableKind(t, false)
 }
-func TestPlatformServiceHistoryWritableGenerationOneIsRefusedByFormatPostgres(t *testing.T) {
-	testPlatformServiceHistoryWritableGenerationOneIsRefusedByFormat(t, true)
+func TestPlatformServiceHistoryWritableGenerationOneUsesWritableKindPostgres(t *testing.T) {
+	testPlatformServiceHistoryWritableGenerationOneUsesWritableKind(t, true)
 }
 
 func TestPlatformServiceHistoryGenerationTwoAfterUpdateSQLite(t *testing.T) {
@@ -179,4 +188,114 @@ func TestPlatformServiceHistoryUnknownPlanFormatIsRefusedSQLite(t *testing.T) {
 }
 func TestPlatformServiceHistoryUnknownPlanFormatIsRefusedPostgres(t *testing.T) {
 	testPlatformServiceHistoryUnknownPlanFormatIsRefused(t, true)
+}
+
+// signPlatformServiceTaskAfterGrantChange bumps the installation's policy revision the
+// way an access-grant change does (no new generation), then signs a service task the
+// way the task path does, against the history the Portal now resolves, and returns the
+// runner-side verification of it.
+func signPlatformServiceTaskAfterGrantChange(t *testing.T, s *Server, installation string, bumps int) (control.VerifiedServiceBackendTask, string, error) {
+	t.Helper()
+	tx, err := s.st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := migExec{s: s.st, ex: tx}
+	for range bumps {
+		if err := invalidateAppPlatformPrincipal(e, &platformPrincipalImpact{installations: []string{installation}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	// The history reader refuses rows stamped in the database clock's future; a task never
+	// follows a grant change within the same millisecond, so keep the fixture off that edge.
+	time.Sleep(30 * time.Millisecond)
+	h, seed, err := platformServiceHistoryWithSeed(t, s, installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	defer clear(seed)
+	parsed, err := appplatform.ParseDescriptor(h.descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var epoch, policy string
+	if err := s.st.db.QueryRow(`SELECT controller_epoch,policy_revision FROM app_platform_installations WHERE id=?`, installation).Scan(&epoch, &policy); err != nil {
+		t.Fatal(err)
+	}
+	if policy != strconv.Itoa(1+bumps) {
+		t.Fatal("grant change did not bump the policy revision", policy)
+	}
+	now := time.Now().UnixMilli()
+	lease := platformFixtureID(7301)
+	identity, err := appplatform.SignServiceIdentity(bytes.Repeat([]byte{7}, 32), appplatform.ServiceIdentityGrant{
+		Format: appplatform.ServiceIdentityFormat, LeaseID: lease, AppID: parsed.Manifest.ID,
+		InstallationID: installation, ControllerEpoch: epoch, Generation: "1",
+		PolicyRevision: policy, ReleaseSHA256: parsed.SHA256, Resources: []string{"tasks.schedule"},
+		IssuedMS: strconv.FormatInt(now, 10), ExpiresMS: strconv.FormatInt(now+60000, 10),
+	}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := platformFixtureID(7302)
+	body, err := appplatform.EncodeTaskBackendRequest(taskID, "grant-change:1", []byte(`{"fixture":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := control.ServiceBackendTaskCommand{
+		Format: control.ServiceBackendTaskFormat, RequestID: platformFixtureID(7303), TaskID: taskID,
+		LeaseID: lease, Handler: appplatform.TaskHandlerBackend, InstallationID: installation,
+		Generation: "1", PolicyRevision: policy, ControllerEpoch: epoch, ReleaseSHA256: parsed.SHA256,
+		BootID: "boot", RegistrationRaw: bytes.Clone(h.raw), RegistrationSignature: bytes.Clone(h.signature),
+		ServiceIdentity: identity, BodySHA256: platformDigest(body),
+	}
+	key := ed25519.NewKeyFromSeed(seed)
+	defer clear(key)
+	raw, signature, err := control.SignServiceBackendTask(command, key, h.authority, now)
+	if err != nil {
+		return control.VerifiedServiceBackendTask{}, h.format, err
+	}
+	verified, err := control.VerifyServiceBackendTask(raw, signature, h.authority, now)
+	return verified, h.format, err
+}
+
+// A grant change at generation 1 followed by a task: the runner must still accept
+// the task of a managed install at the new policy revision.
+func testPlatformServiceTaskAfterGrantChangeManaged(t *testing.T, pg bool) {
+	s, _, lease := platformManagedAccessFixture(t, pg)
+	verified, format, err := signPlatformServiceTaskAfterGrantChange(t, s, lease.installationID, 1)
+	if err != nil {
+		t.Fatal("managed generation-1 task refused after a grant change:", err)
+	}
+	if format != control.BackendRegistrationFormat || verified.RegistrationIdentity().PolicyRevision != "2" {
+		t.Fatal("unexpected registration identity", format, verified.RegistrationIdentity())
+	}
+}
+
+// The same for a writable generation-1 install, through the writable kind.
+func testPlatformServiceTaskAfterGrantChangeWritable(t *testing.T, pg bool) {
+	s, _, lease := platformWritableAccessFixture(t, pg)
+	verified, format, err := signPlatformServiceTaskAfterGrantChange(t, s, lease.installationID, 2)
+	if err != nil {
+		t.Fatal("writable generation-1 task refused after a grant change:", err)
+	}
+	if _, ok := verified.WritableRegistration(); !ok || format != control.WritableBackendRegistrationFormat || verified.RegistrationIdentity().PolicyRevision != "3" {
+		t.Fatal("unexpected registration identity", format, verified.RegistrationIdentity())
+	}
+}
+
+func TestPlatformServiceTaskAfterGrantChangeManagedSQLite(t *testing.T) {
+	testPlatformServiceTaskAfterGrantChangeManaged(t, false)
+}
+func TestPlatformServiceTaskAfterGrantChangeManagedPostgres(t *testing.T) {
+	testPlatformServiceTaskAfterGrantChangeManaged(t, true)
+}
+func TestPlatformServiceTaskAfterGrantChangeWritableSQLite(t *testing.T) {
+	testPlatformServiceTaskAfterGrantChangeWritable(t, false)
+}
+func TestPlatformServiceTaskAfterGrantChangeWritablePostgres(t *testing.T) {
+	testPlatformServiceTaskAfterGrantChangeWritable(t, true)
 }

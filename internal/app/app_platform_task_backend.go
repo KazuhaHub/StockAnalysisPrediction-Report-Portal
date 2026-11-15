@@ -19,8 +19,6 @@ import (
 // Distinct causes behind errAppPlatformTaskUnavailable, so a refusal is
 // observable and cannot be confused with the managed reader rejecting a plan.
 var (
-	errPlatformWritableInitialServiceTask = errors.New(
-		"writable generation-1 install has no service-task registration")
 	errPlatformUnknownServiceTaskPlan = errors.New(
 		"unknown install plan format for service task")
 )
@@ -40,6 +38,9 @@ type platformServiceBackendHistory struct {
 	authority      control.Authority
 	initial        *platformBackendDeliveryIntent
 	update         *platformWritableRegistrationIntent
+	// writable is the generation-1 writable install's applied registration,
+	// the same history the writable launch path reads.
+	writable *platformWritableRegistrationIntent
 }
 
 func (h *platformServiceBackendHistory) Close() {
@@ -52,7 +53,9 @@ func (h *platformServiceBackendHistory) Close() {
 
 // loadPlatformServiceBackendHistory selects the completed execution history a
 // service task is delivered against, the same way the launch path selects it.
-// Generation 1 follows the install plan's format; later generations go through
+// Generation 1 follows the install plan's format (a managed install reads the
+// managed initial registration, a writable install the writable registration);
+// later generations go through
 // the shared writable selector, which picks the resume, restore or update
 // reader. Anything the runner cannot verify as a service-task registration is
 // refused here rather than at delivery.
@@ -87,12 +90,23 @@ func (s *Server) loadPlatformServiceBackendHistory(
 		switch plan.Format {
 		case platformManagedInstallFormat:
 		case platformWritableInstallFormat:
-			// A writable install has no service-task registration the
-			// runner can verify at generation 1 (it is only verified for
-			// the managed initial registration and the update-start
-			// family), so it is refused instead of mis-read as managed.
-			return zero, fmt.Errorf("%w: %w", errAppPlatformTaskUnavailable,
-				errPlatformWritableInitialServiceTask)
+			writable, err := s.loadPlatformWritableBackendHistory(
+				e, b, runtime, seed, dek, now)
+			if err != nil {
+				return zero, errAppPlatformTaskUnavailable
+			}
+			if writable.update != nil || writable.generation > 1 {
+				writable.registration.Close()
+				return zero, errAppPlatformTaskUnavailable
+			}
+			history.format = control.WritableBackendRegistrationFormat
+			history.registration = writable.registration
+			history.raw, history.signature = writable.raw, writable.signature
+			history.descriptor = bytes.Clone(writable.start.writer.descriptor)
+			history.runtime = writable.start.writer.runtime
+			history.authority = writable.start.writer.authority
+			history.writable = &writable
+			return history, nil
 		default:
 			return zero, fmt.Errorf("%w: %w", errAppPlatformTaskUnavailable,
 				errPlatformUnknownServiceTaskPlan)
