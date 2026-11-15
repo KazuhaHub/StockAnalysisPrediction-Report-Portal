@@ -149,6 +149,11 @@ func TestInspectionMemoNeverStoresRefusalsAndIsKeyedByPlan(t *testing.T) {
 	raw := []byte(`{"Id":"x"}`)
 	other := plan
 	other.bodySHA = strings.Repeat("0", 64)
+	renamed := plan
+	renamed.name += "x"
+	if inspectionKey(plan, strings.Repeat("c", 64), raw) == inspectionKey(renamed, strings.Repeat("c", 64), raw) {
+		t.Fatal("two plans that differ only in name share an inspection verdict")
+	}
 	if inspectionKey(plan, strings.Repeat("c", 64), raw) == inspectionKey(other, strings.Repeat("c", 64), raw) ||
 		inspectionKey(plan, strings.Repeat("c", 64), raw) == inspectionKey(plan, strings.Repeat("d", 64), raw) ||
 		inspectionKey(plan, strings.Repeat("c", 64), raw) == inspectionKey(plan, strings.Repeat("c", 64), append(raw, ' ')) {

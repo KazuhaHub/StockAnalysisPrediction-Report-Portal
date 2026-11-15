@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -74,7 +75,7 @@ func (f *inventoryMemoFixture) client() *http.Client {
 func freshInventoryMemos(t *testing.T) {
 	t.Helper()
 	oldEntries, oldMounts := inventoryEntryMemo, mountPlanMemo
-	inventoryEntryMemo = newDecisionMemo[candidateIPCContainer](64)
+	inventoryEntryMemo = newDecisionMemo[candidateIPCInventoryEntry](64)
 	mountPlanMemo = newDecisionMemo[candidateIPCMountPlanResult](64)
 	t.Cleanup(func() { inventoryEntryMemo, mountPlanMemo = oldEntries, oldMounts })
 }
@@ -215,4 +216,41 @@ func TestWarmInventoryStillCatchesNamespaceExposure(t *testing.T) {
 			t.Fatal("an unreadable source passed", err)
 		}
 	})
+}
+
+// The memories hold parsed results only. Daemon bytes are cleared by the pass that read them, so nothing
+// the memos keep may be a byte buffer or a raw message.
+func TestInventoryMemosKeepNoDaemonBytes(t *testing.T) {
+	var walk func(reflect.Type, string)
+	walk = func(typ reflect.Type, path string) {
+		switch typ.Kind() {
+		case reflect.Slice, reflect.Array:
+			if typ.Elem().Kind() == reflect.Uint8 {
+				t.Fatalf("%s keeps bytes (%s)", path, typ)
+			}
+			walk(typ.Elem(), path+"[]")
+		case reflect.Pointer, reflect.Map:
+			walk(typ.Elem(), path+"*")
+		case reflect.Struct:
+			for i := 0; i < typ.NumField(); i++ {
+				walk(typ.Field(i).Type, path+"."+typ.Field(i).Name)
+			}
+		}
+	}
+	walk(reflect.TypeOf(candidateIPCInventoryEntry{}), "inventory entry")
+	walk(reflect.TypeOf(candidateIPCMountPlanResult{}), "mount plan")
+	// A remembered entry still answers the pass with the same sources as a cold one.
+	freshInventoryMemos(t)
+	f := newInventoryMemoFixture(t)
+	f.listing = []map[string]any{f.entry(f.id, f.target), f.entry(strings.Repeat("c", 64), filepath.Join(f.root, "x"))}
+	for i := 0; i < 2; i++ {
+		got, err := readCandidateIPCInventory(context.Background(), f.client())
+		if err != nil || len(got) != 2 {
+			t.Fatal("inventory", i, err)
+		}
+		sources, err := candidateIPCContainerSources(context.Background(), f.client(), got[0])
+		if err != nil || len(sources) != 1 || sources[0] != f.target {
+			t.Fatal("sources of a remembered entry", i, sources, err)
+		}
+	}
 }

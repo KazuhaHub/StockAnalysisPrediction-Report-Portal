@@ -226,6 +226,8 @@ func (r *CandidateRuntime) ReleaseCandidateHTTPStorage(ctx context.Context, iden
 type candidateIPCContainer struct {
 	ID     string          `json:"Id"`
 	Mounts json.RawMessage `json:"Mounts"`
+	// plan is the parsed mount plan of a remembered entry, whose Mounts bytes are not kept.
+	plan *candidateIPCMountPlanResult
 }
 
 // The general daemon decoder deliberately accepts object projections only.
@@ -272,8 +274,7 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		// fields (a status like "Up 3 minutes") make it a different entry, which is checked from scratch.
 		key := memoKeyOf(entry)
 		if remembered, ok := inventoryEntryMemo.get(key); ok {
-			remembered.Mounts = bytes.Clone(remembered.Mounts)
-			result = append(result, remembered)
+			result = append(result, candidateIPCContainer{ID: remembered.id, plan: &candidateIPCMountPlanResult{sources: slices.Clone(remembered.plan.sources), pending: slices.Clone(remembered.plan.pending)}})
 			continue
 		}
 		var container candidateIPCContainer
@@ -283,17 +284,26 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		if !containerSHA.MatchString(container.ID) {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
-		if _, _, err := candidateIPCMountPlan(container.Mounts); err != nil {
+		sources, pending, err := candidateIPCMountPlan(container.Mounts)
+		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
-		inventoryEntryMemo.put(key, candidateIPCContainer{ID: container.ID, Mounts: bytes.Clone(container.Mounts)})
+		inventoryEntryMemo.put(key, candidateIPCInventoryEntry{id: container.ID, plan: candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)}})
 		result = append(result, container)
 	}
 	return result, nil
 }
 
 // inventoryEntryMemo and mountPlanMemo remember accepted decodings of daemon bytes only. See decisionMemo.
-var inventoryEntryMemo = newDecisionMemo[candidateIPCContainer](1024)
+var inventoryEntryMemo = newDecisionMemo[candidateIPCInventoryEntry](1024)
+
+// candidateIPCInventoryEntry is what is kept of an accepted entry: its id and its parsed mount plan, never
+// the daemon's bytes, which each pass clears.
+type candidateIPCInventoryEntry struct {
+	id   string
+	plan candidateIPCMountPlanResult
+}
+
 var mountPlanMemo = newDecisionMemo[candidateIPCMountPlanResult](1024)
 
 type candidateIPCMountPlanResult struct {
@@ -416,9 +426,16 @@ func parseCandidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPe
 // volume the list reports without a path (a non-local driver) is resolved with
 // one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
 func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
-	sources, pending, err := candidateIPCMountPlan(container.Mounts)
-	if err != nil {
-		return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+	var sources []string
+	var pending []candidateIPCPendingVolume
+	if container.plan != nil {
+		sources, pending = slices.Clone(container.plan.sources), slices.Clone(container.plan.pending)
+	} else {
+		var err error
+		sources, pending, err = candidateIPCMountPlan(container.Mounts)
+		if err != nil {
+			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+		}
 	}
 	if len(pending) == 0 {
 		return sources, nil
