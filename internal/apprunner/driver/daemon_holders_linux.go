@@ -57,13 +57,16 @@ func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 		return nil, fmt.Errorf("%w: process table: %v", ErrUnavailable, err)
 	}
 	holders := map[int]struct{}{}
+	scanned, unreadable := 0, 0
 	for _, entry := range processes {
 		pid, err := strconv.Atoi(entry.Name())
 		if err != nil {
 			continue
 		}
+		scanned++
 		fds, err := os.ReadDir("/proc/" + entry.Name() + "/fd")
 		if err != nil {
+			unreadable++
 			continue // exited, or not readable: a process the runner cannot see cannot be vetted either way
 		}
 		for _, fd := range fds {
@@ -83,7 +86,7 @@ func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 		}
 	}
 	if !daemon {
-		return nil, fmt.Errorf("%w: no dockerd holds %s (%d holders), so the daemon may be remote", ErrUnavailable, path, len(holders))
+		return nil, fmt.Errorf("%w: no dockerd holds %s (%d holders among %d processes, %d unreadable, euid %d, socket inodes %v), so the daemon may be remote", ErrUnavailable, path, len(holders), scanned, unreadable, os.Geteuid(), parseProcNetUnixInodes(table, path))
 	}
 	return holders, nil
 }
