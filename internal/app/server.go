@@ -79,6 +79,8 @@ type Server struct {
 	platformImageRunner platformImageRunner
 	// platformLoadCursor rotates the window of the load-image settlement driver.
 	platformLoadCursor int
+	// platformHeldStartCursor rotates the window of the held-start settlement.
+	platformHeldStartCursor int
 	// platformReclaimCursor rotates the window of the image removal step.
 	platformReclaimCursor int
 

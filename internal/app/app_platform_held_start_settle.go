@@ -18,13 +18,16 @@ import (
 // not have. A start the runner reports running is closed as applied and nothing more is done; the installation stays
 // in recovery for an administrator.
 
+// platformHeldStartWindow is how many open starts one tick takes a step for.
+const platformHeldStartWindow = 8
+
 // platformHeldStartCandidates lists the finished enables and repairs whose start effect is still open.
 func (s *Server) platformHeldStartCandidates(ctx context.Context) ([]string, error) {
 	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
 		JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
 		WHERE o.action IN ('enable','repair') AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND f.kind='enable-start' AND f.state IN ('prepared','unknown')
-		ORDER BY o.completed_ms,o.id LIMIT 8`)
+		ORDER BY o.completed_ms,o.id LIMIT 256`)
 	if err != nil {
 		return nil, err
 	}
@@ -40,13 +43,31 @@ func (s *Server) platformHeldStartCandidates(ctx context.Context) ([]string, err
 	return ids, rows.Err()
 }
 
+// platformHeldStartsToSettle is the window of open starts this tick takes a step for. The candidates are read in a
+// fixed order, so a window that always began at the oldest would be taken up for good by starts that keep failing
+// (a runner that stays unreachable, a start whose evidence no longer verifies): the ones after them would never be
+// reached. The window therefore rotates through the candidates with a cursor, as the load settlement does, and every
+// open start is reached within a bounded number of ticks.
+func (s *Server) platformHeldStartsToSettle(ctx context.Context) ([]string, error) {
+	ids, err := s.platformHeldStartCandidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(ids) > platformHeldStartWindow {
+		start := s.platformHeldStartCursor % len(ids)
+		ids = append(append([]string{}, ids[start:]...), ids[:start]...)[:platformHeldStartWindow]
+		s.platformHeldStartCursor += platformHeldStartWindow
+	}
+	return ids, nil
+}
+
 // settlePlatformHeldStarts takes one settlement step for each finished enable or repair whose start is open, and
 // returns how many made progress.
 func (s *Server) settlePlatformHeldStarts(ctx context.Context, endpoint platformRuntimeEndpoint) (int, error) {
 	if endpoint.path == "" {
 		return 0, nil
 	}
-	ids, err := s.platformHeldStartCandidates(ctx)
+	ids, err := s.platformHeldStartsToSettle(ctx)
 	if err != nil {
 		return 0, err
 	}
