@@ -840,6 +840,29 @@ class TopologyTests(unittest.TestCase):
             self.assertEqual(soak.read_thread_siblings(root), {"cpu0": "0,2", "cpu1": "1,3", "cpu2": "0,2", "cpu3": "1,3"})
 
 
+class CPUModeTests(unittest.TestCase):
+    def test_the_modes_of_the_host_cpu_time_split_user_system_interrupts_and_steal(self):
+        before = "cpu  100 0 100 700 0 0 0 0 0 0\n"
+        after = "cpu  300 0 200 1100 50 20 60 70 0 0\n"
+        modes = soak.cpu_modes(soak.parse_cpu_modes(before), soak.parse_cpu_modes(after))
+        # 900 ticks passed: 200 user, 100 system, 400 idle, 50 iowait, 20 irq, 60 softirq, 70 steal
+        self.assertEqual(modes, {"user": 22.22, "nice": 0.0, "system": 11.11, "idle": 44.44, "iowait": 5.56, "irq": 2.22, "softirq": 6.67, "steal": 7.78})
+
+    def test_a_sample_carries_the_modes(self):
+        with tempfile.TemporaryDirectory() as root:
+            proc = Path(root) / "proc"
+            proc.mkdir()
+            (proc / "meminfo").write_text(MEMINFO)
+            (proc / "loadavg").write_text("0.5 0.4 0.3 4/600 99\n")
+            (Path(root) / "mount").mkdir()
+            moments = iter([1.0, 11.0])
+            sampler = soak.Sampler(run=lambda *a: "", proc=proc, mountpoint=Path(root) / "mount", image_id="x", clock=lambda: next(moments), cpus=4, ticks_per_second=100)
+            (proc / "stat").write_text("cpu  100 0 100 700 0 0 0 0 0 0\n")
+            sampler.sample()
+            (proc / "stat").write_text("cpu  300 0 200 1100 50 20 60 70 0 0\n")
+            self.assertEqual(sampler.sample()["cpu_modes"]["steal"], 7.78)
+
+
 class DetailTests(unittest.TestCase):
     def test_comm_names_lose_their_numbers_so_kernel_threads_group(self):
         self.assertEqual(soak.normalise_comm("kworker/u8:3"), "kworker/uN:N")
@@ -878,7 +901,11 @@ class DetailTests(unittest.TestCase):
         samples = load_samples(3)
         for sample in samples:
             sample["cpu_detail"] = {"docker.dockerd": 2.0, "docker.containerd": 1.0, "other.kworker/uN:N": 5.0, "other.loopN": 0.5}
-        top = soak.evaluate(evidence, samples, **self_kwargs())["cpu_detail_top"]
+        for sample in samples:
+            sample["cpu_modes"] = {"user": 40.0, "system": 20.0, "softirq": 5.0, "steal": 6.0, "idle": 29.0}
+        verdict = soak.evaluate(evidence, samples, **self_kwargs())
+        self.assertEqual(verdict["cpu_modes_loaded"]["steal"], 6.0)
+        top = verdict["cpu_detail_top"]
         self.assertEqual(top["other"][0], {"name": "kworker/uN:N", "percent_of_host": 5.0})
         self.assertEqual([x["name"] for x in top["docker"]], ["dockerd", "containerd"])
 

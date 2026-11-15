@@ -193,6 +193,21 @@ def normalise_comm(comm):
     return re.sub(r"[0-9]+", "N", comm)
 
 
+MODE_NAMES = ("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal")
+
+
+def parse_cpu_modes(text):
+    f = text.splitlines()[0].split()
+    return [int(v) for v in f[1:9]]
+
+
+def cpu_modes(before, after):
+    """The host's CPU time by mode between two readings, in percent: user, system, interrupts, softirq, hypervisor steal, idle."""
+    delta = [a - b for a, b in zip(after, before)]
+    total = sum(delta)
+    return {name: round(100.0 * d / total, 2) for name, d in zip(MODE_NAMES, delta)} if total > 0 else {}
+
+
 # ---- which CPUs ----
 
 def parse_per_cpu(text):
@@ -392,6 +407,7 @@ class Sampler:
         self.disk_devices, self.postgres = disk_devices or {}, postgres
         self._disks, self._pg, self._iowait, self._cores = None, None, None, None
         self._pid_comm = {}
+        self._modes = None
         self.cpus = cpus or os.cpu_count() or 1
         self.ticks_per_second = ticks_per_second or os.sysconf("SC_CLK_TCK")
         self._backend_full_ids = set()
@@ -552,6 +568,10 @@ class Sampler:
         except OSError:
             pass
         extra = self._stalls(now, memory_text, stat_text)
+        modes = parse_cpu_modes(stat_text)
+        if self._modes is not None:
+            extra["cpu_modes"] = cpu_modes(self._modes, modes)
+        self._modes = modes
         cores = parse_per_cpu(stat_text)
         previous_cores, self._cores = self._cores, cores
         if previous_cores:
@@ -937,6 +957,12 @@ def cpu_detail_top(evidence, samples, limit=15):
     return top
 
 
+def cpu_modes_loaded(evidence, samples):
+    start, end = evidence.get("load_started_ms", 0), evidence.get("load_finished_ms", 0)
+    rows = [s["cpu_modes"] for s in samples if s.get("cpu_modes") and start < s["at_ms"] <= end]
+    return {name: round(sum(r.get(name, 0.0) for r in rows) / len(rows), 2) for name in MODE_NAMES} if rows else {}
+
+
 def per_cpu_summary(evidence, samples):
     """Each CPU's busy percent, mean and max, for the idle period and the load."""
     rows = [(s["at_ms"], dict(s["cpu_per_core"])) for s in sorted(samples, key=lambda s: s["at_ms"]) if s.get("cpu_per_core")]
@@ -1042,7 +1068,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
         "platform_cpu_weight": platform_weight,
         "pin_platform": pin_platform,
         "reserved_cpus_override": reserved_cpus,
-        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "cpu_detail_top": cpu_detail_top(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
+        "cpu_percent_override": cpu_percent, "cpu_breakdown": breakdown, "stall_summary": stall_summary(evidence, samples), "per_cpu_busy": per_cpu_summary(evidence, samples), "cpu_detail_top": cpu_detail_top(evidence, samples), "cpu_modes_loaded": cpu_modes_loaded(evidence, samples), "host_busy_percent": busy, "backend_cpu_millis_mean": backend_cpu_mean,
         "variant": variant, "db_driver": evidence.get("db_driver") or "", "checks": checks,
         "unit_level_probes": unit_reported, "achieved_fractions": achieved,
         "worst_ratios": ratios, "informational_shallow_dispatch_worst_ratio": shallow_ratio, "peak_backend_memory_bytes": peak_memory, "peak_backend_cpu_millis": round(peak_cpu, 1),
