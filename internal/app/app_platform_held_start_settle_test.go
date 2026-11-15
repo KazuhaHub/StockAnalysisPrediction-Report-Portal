@@ -313,3 +313,45 @@ func TestHeldStartSettlementTickAsksAboutEveryStartNotOnlyTheFirstEight(t *testi
 		t.Fatal("a start behind a window of failing starts was never tried")
 	}
 }
+
+// An enable or repair start the runner holds only as reserved (admitted, never claimed) leaves a pending target
+// resource. It is removed bound to the reservation, exactly as an update's is, and the start is then closed as
+// never run: the resource row is not left behind for an administrator.
+func TestSettlementTickRemovesTheTargetOfAReservedEnableStart(t *testing.T) {
+	s, operation, endpoint, fake := orphanedEnableFixture(t)
+	var removals []string
+	fake.removeTarget = func(i platformUpdateTargetRemovalIntent) (platformUpdateTargetRemovalObservation, error) {
+		if i.command.RunningReceiptSHA256 != control.ReservedStartReceiptSHA256 || i.start.running != nil || i.start.command.Kind != "enable-start" {
+			t.Errorf("the removal is not bound to the reserved enable start: %+v", i.command)
+		}
+		removals = append(removals, i.command.Stage)
+		result := "stopped"
+		if i.command.Stage == "remove_code" {
+			result = "absent"
+		}
+		return platformUpdateTargetRemovalObservationFixture(i, endpoint, result), nil
+	}
+	script := &settleScript{before: held("reserved"), after: held("reserved")}
+	script.install(s, fake)
+	s.platformReadStartReceipt = func(_ context.Context, _ platformRuntimeEndpoint, _ platformUpdateStartIntent) (platformUpdateStartRunningObservation, error) {
+		if len(removals) > 0 {
+			return nil, held("never_ran")
+		}
+		return nil, held("reserved")
+	}
+	for range 8 {
+		if _, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(removals) != 2 || removals[0] != "stop" || removals[1] != "remove_code" || script.settled != 0 {
+		t.Fatalf("the reserved target was not removed by the reserved-only removal alone: %v settlements=%d", removals, script.settled)
+	}
+	if effectState(t, s, operation, "start", 1) != "reverted" || effectState(t, s, operation, "settle", 4) != "applied" || effectState(t, s, operation, "settle", 5) != "applied" ||
+		effectState(t, s, operation, "settle", 6) != "applied" {
+		t.Fatal("the start was not closed as never run after its target was removed and its namespace swept")
+	}
+	if fake.count("execute-start") != 0 || fake.count("execute-restore") != 0 {
+		t.Fatalf("the settlement sent the start: %v", fake.calls)
+	}
+}

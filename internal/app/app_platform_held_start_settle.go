@@ -13,10 +13,10 @@ import (
 // start back, asks the runner to settle an orphan, and closes the effect on what it answers; this drives the same
 // steps (settleSettlementStart) for the operations that hold an enable start, from the same idle tick.
 //
-// Only the read-back and the orphan settlement are taken here. A start the runner holds as reserved (never claimed)
-// holds no capacity and is left alone: its removal is built from an update's checkpoint, which these operations do
-// not have. A start the runner reports running is closed as applied and nothing more is done; the installation stays
-// in recovery for an administrator.
+// A start the runner holds as reserved (never claimed) holds no capacity but keeps the pending target resource the
+// reserve wrote; its target is removed bound to the reservation, which needs only the start effect, and the start is
+// then closed as never run. A start the runner reports running is closed as applied and nothing more is done; the
+// installation stays in recovery for an administrator.
 
 // platformHeldStartWindow is how many open starts one tick takes a step for.
 const platformHeldStartWindow = 8

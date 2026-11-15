@@ -1073,11 +1073,9 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 		}
 		return s.settleOrphanedStart(ctx, endpoint, lease)
 	case "reserved":
-		if platformSameReleaseLifecycle(lease.snapshot.Action) {
-			// Nothing was claimed, so no capacity is held; the removal of its target is built from an update's own
-			// checkpoint and is not taken for an enable.
-			return false, nil
-		}
+		// An enable or repair start held only as reserved holds no capacity (admission happens at the claim), but
+		// the runner keeps the pending target resource the reserve wrote. It is removed like an update's, bound to the
+		// reservation, and the start is then closed as never run.
 		if !marker.exists {
 			return true, s.recordHeldStart(ctx, lease, read, platformHeldReservedReceipt, marker)
 		}
@@ -1473,10 +1471,6 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	if err != nil {
 		return zero, err
 	}
-	_, _, checkpoint, _, err := loadPlatformRestoreCheckpoint(e, lease)
-	if err != nil {
-		return zero, err
-	}
 	var start platformUpdateStartIntent
 	// The reserved-only removal has slots of its own and is for a start that is still open. One that got its running
 	// receipt is removed like any running target, by an effect of the ordinary slots.
@@ -1502,6 +1496,13 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 		}
 		start = read.intent
 	} else {
+		// A running target is removed from the update's own checkpoint. The reserved-only removal above needs none:
+		// it is rebuilt from the start effect alone, which is what lets an enable or repair, whose checkpoint is not
+		// an update's, take the same step.
+		_, _, checkpoint, _, err := loadPlatformRestoreCheckpoint(e, lease)
+		if err != nil {
+			return zero, err
+		}
 		start, _, _, _, err = loadPlatformUpdateTargetRemovalPlan(e, lease, runtime, checkpoint, now)
 		if err != nil || start.running == nil {
 			return zero, fmt.Errorf("settlement target removal source: %w", errors.Join(errAppPlatformStageEvidence, err))
