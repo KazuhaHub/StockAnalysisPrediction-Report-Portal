@@ -195,14 +195,20 @@ func (s *Server) apiQuoteMode(w http.ResponseWriter, r *http.Request, historyOnl
 	// Bars is never written after the parser returns it.
 	out := *resp
 	out.Cached = cached
+	labelPending := false
 	if !out.HistoryOnly {
-		out.Phase = s.quotes.phaseFor(target.Market, s.quotes.marketLine(cfg))
+		line, pending := s.quotes.marketLine(cfg)
+		out.Phase = s.quotes.phaseFor(target.Market, line)
+		// A stale answer is never cached, so asking back for its label would not be served from the
+		// cache but would call the failing vendor for the price again; it keeps its own advice.
+		labelPending = pending && out.Phase == quotePhaseUnknown && !out.Stale
 	}
 	out.Bars = quoteVisibleBars(iv, resp.Bars)
 	advice := quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, ttl, resp)
 	if out.Stale || out.HistoryOnly {
 		advice = quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, 0, nil)
 	}
+	advice = withLabelRetry(s.quotes.clockNow(), s.quoteAutoRefresh(), labelPending, advice)
 	out.RefreshAfterSecs = advice.RefreshAfterSecs
 	out.RefreshAt = advice.RefreshAt
 	if iv == quoteIntervalSnapshot {
@@ -409,7 +415,8 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 	autoRefresh := s.quoteAutoRefresh()
 	// The label never waits on a vendor: marketLine answers from its cache at once and refreshes in
 	// the background, so a cold or slow anchor costs this response its label and nothing else.
-	marketLine := s.quotes.marketLine(cfg)
+	marketLine, linePending := s.quotes.marketLine(cfg)
+	labelPending := false
 	answered := s.quotes.fetchBatchUnder(r.Context(), cfg, targets)
 	advices := make([]quoteRefreshAdvice, 0, len(targets))
 	for _, target := range targets {
@@ -429,12 +436,13 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 		// code, which is what the feed looks a card up by.
 		card := quoteCardOf(entry)
 		card.Phase = s.quotes.phaseFor(target.Market, marketLine)
+		labelPending = labelPending || linePending && card.Phase == quotePhaseUnknown
 		quotes[target.Symbol] = card
 		advices = append(advices, quoteRefreshAdviceFor(now, autoRefresh, cfg, target, quoteIntervalSnapshot, entry.ttl, entry.resp))
 	}
 	out["quotes"] = quotes
 	out["missing"] = missing
-	quoteAdviceMap(out, quoteAggregateAdvice(now, advices))
+	quoteAdviceMap(out, withLabelRetry(now, autoRefresh, labelPending, quoteAggregateAdvice(now, advices)))
 	// no-store rather than a max-age: this body is fifty answers with fifty different remaining
 	// lifetimes, and any single number here would be wrong for most of them. The server's own cache
 	// is what keeps the vendor call count down; the browser re-asks and is served from it.

@@ -385,3 +385,139 @@ func TestQuoteMarketLineRefreshNeverReadsTheClock(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// waitMarketLineIdle waits for a background market-line refresh to land, successfully or not.
+func waitMarketLineIdle(t *testing.T, s *Server) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.quotes.phaseMu.Lock()
+		busy := s.quotes.phaseBusy
+		s.quotes.phaseMu.Unlock()
+		if !busy {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("market line refresh never landed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// The first page view after a quiet spell had no label: the cache held no line (or one too old to
+// believe), the response went out at once, and the refresh it started landed seconds later behind
+// the vendor's request spacing, with nothing asking again until the next session opened. That
+// answer now asks the browser to come back shortly; the prices are cached by then, so the second
+// request costs no vendor call and carries the label.
+func TestQuoteBatchAsksAgainSoonWhileTheLabelIsPending(t *testing.T) {
+	s := quoteServer(t)
+	tencent := batchStub(t)
+	tencent.marketLine = phaseLineEvening
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineEvening).Add(5 * time.Second) }
+
+	cold := quoteBatchBody(t, quoteBatchGET(t, s, "/api/quotes?symbols=601899"))
+	quoteEqStr(t, "cold phase", cold.Quotes["sh601899"].Phase, quotePhaseUnknown)
+	if cold.RefreshAfterSecs != quoteLabelRetrySecs {
+		t.Errorf("cold refreshAfterSecs = %d, want %d (ask again for the label)", cold.RefreshAfterSecs, quoteLabelRetrySecs)
+	}
+
+	waitMarketLineIdle(t, s)
+	again := quoteBatchBody(t, quoteBatchGET(t, s, "/api/quotes?symbols=601899"))
+	quoteEqStr(t, "phase", again.Quotes["sh601899"].Phase, quotePhaseClosed)
+	if again.RefreshAfterSecs != 0 || again.RefreshAt == "" {
+		t.Errorf("labelled answer advises refreshAfterSecs=%d refreshAt=%q, want only the next open", again.RefreshAfterSecs, again.RefreshAt)
+	}
+}
+
+// The reading page's strip: a line cached hours ago is not believed, so the same short re-ask.
+func TestQuoteSingleAsksAgainSoonWhenTheCachedLineIsTooOld(t *testing.T) {
+	s := quoteServer(t)
+	tencent := tencentStub(readQuoteFixture(t, fixTencentSH))
+	tencent.marketLine = phaseLineEvening
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineEvening).Add(5 * time.Second) }
+	s.quotes.phaseMu.Lock()
+	s.quotes.phaseLine, s.quotes.phaseAt = phaseLineAuction, phaseAtStamp(t, phaseLineAuction).Add(quoteMarketLineTTL)
+	s.quotes.phaseMu.Unlock()
+
+	first := quoteBody(t, quoteGET(t, s, "/api/quote/601899"))
+	quoteEqStr(t, "stale phase", first.Phase, quotePhaseUnknown)
+	if first.RefreshAfterSecs != quoteLabelRetrySecs {
+		t.Errorf("refreshAfterSecs = %d, want %d", first.RefreshAfterSecs, quoteLabelRetrySecs)
+	}
+	waitMarketLineIdle(t, s)
+	quoteEqStr(t, "phase", quoteBody(t, quoteGET(t, s, "/api/quote/601899")).Phase, quotePhaseClosed)
+}
+
+// A vendor that fails the refresh is not asked about in a loop: once the failed refresh has landed
+// there is nothing in flight to wait for, and the answer goes back to the ordinary advice.
+func TestQuoteLabelRetryStopsAfterAFailedRefresh(t *testing.T) {
+	s := quoteServer(t)
+	tencent := batchStub(t) // no market line: the stub's fetcher fails
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineEvening).Add(5 * time.Second) }
+
+	cold := quoteBatchBody(t, quoteBatchGET(t, s, "/api/quotes?symbols=601899"))
+	if cold.RefreshAfterSecs != quoteLabelRetrySecs {
+		t.Errorf("cold refreshAfterSecs = %d, want %d", cold.RefreshAfterSecs, quoteLabelRetrySecs)
+	}
+	waitMarketLineIdle(t, s)
+	after := quoteBatchBody(t, quoteBatchGET(t, s, "/api/quotes?symbols=601899"))
+	quoteEqStr(t, "phase", after.Quotes["sh601899"].Phase, quotePhaseUnknown)
+	if after.RefreshAfterSecs == quoteLabelRetrySecs {
+		t.Error("a failed refresh left the browser re-asking for the label")
+	}
+}
+
+// With automatic refresh switched off the operator asked for no re-asks, and a label is no reason
+// to make one.
+func TestQuoteLabelRetryHonoursAutoRefreshOff(t *testing.T) {
+	s := quoteServer(t)
+	tencent := batchStub(t)
+	tencent.marketLine = phaseLineEvening
+	wireQuoteSources(s, tencent, failingStub("sina must not be asked"))
+	s.quotes.init()
+	s.quotes.now = func() time.Time { return phaseAtStamp(t, phaseLineEvening).Add(5 * time.Second) }
+	if err := s.st.SetSetting(setQuoteAutoRefresh, "0"); err != nil {
+		t.Fatal(err)
+	}
+	cold := quoteBatchBody(t, quoteBatchGET(t, s, "/api/quotes?symbols=601899"))
+	if cold.RefreshAfterSecs != 0 || cold.RefreshAt != "" {
+		t.Errorf("auto refresh off still advised refreshAfterSecs=%d refreshAt=%q", cold.RefreshAfterSecs, cold.RefreshAt)
+	}
+	waitMarketLineIdle(t, s)
+}
+
+// A stale answer is never cached, so re-asking for its label would not be served from the cache: it
+// would call the failing vendor for the price again. A stale answer keeps its own, slower advice.
+func TestQuoteStaleAnswerDoesNotAskBackForTheLabel(t *testing.T) {
+	s := quoteServer(t)
+	clock := time.Date(2026, 10, 26, 2, 0, 0, 0, time.UTC)
+	s.quotes.now = func() time.Time { return clock }
+	s.quotes.init()
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	s.quotes.sources = []quoteSource{{
+		name:  "tencent",
+		fetch: func(context.Context, string, string, int) (*QuoteResp, error) { return nil, errors.New("offline") },
+		fetchMarketLine: func(ctx context.Context) (string, error) {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return "", errors.New("hung")
+		},
+	}}
+	s.quotes.put(quoteCacheKey("sh", "600081", 22, quoteIntervalDaily, quoteWindow{}), &QuoteResp{Symbol: "600081", Source: "tencent", Snapshot: QuoteSnapshot{Last: 1013, AsOf: "2026-10-23T16:14:56+08:00", Session: quoteSessionClose}}, -time.Minute)
+	out := quoteBody(t, quoteGET(t, s, "/api/quote/600081?range=1m"))
+	if !out.Stale {
+		t.Fatalf("want a stale answer, got %+v", out)
+	}
+	if out.RefreshAfterSecs != 120 {
+		t.Errorf("stale refreshAfterSecs = %d, want 120 (no label re-ask)", out.RefreshAfterSecs)
+	}
+}

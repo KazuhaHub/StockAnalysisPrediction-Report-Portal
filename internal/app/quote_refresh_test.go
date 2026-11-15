@@ -168,6 +168,10 @@ func TestQuoteEndpointsExposeRefreshAdviceAndRetryAdvice(t *testing.T) {
 	openServer.quotes.now = func() time.Time { return now }
 	body := strings.Replace(string(readQuoteFixture(t, fixTencentSH)), "SH_close_", "SH_open_", 1)
 	wireQuoteSources(openServer, tencentStub([]byte(body)), sinaStub(t))
+	// Let the label's own refresh land first: while it is in flight the answer asks back sooner for
+	// the label (TestQuoteBatchAsksAgainSoonWhileTheLabelIsPending), which is not what this checks.
+	openServer.quotes.marketLine(openServer.quoteConfigLoad())
+	waitMarketLineIdle(t, openServer)
 	rec := quoteGET(t, openServer, "/api/quote/601899?range=3m")
 	if rec.Code != 200 {
 		t.Fatalf("open quote status=%d body=%s", rec.Code, rec.Body.String())

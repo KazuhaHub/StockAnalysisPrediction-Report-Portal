@@ -48,6 +48,12 @@ const (
 	quoteMarketLineTTL     = 20 * time.Second
 	quoteMarketLineFailTTL = 30 * time.Second
 
+	// quoteLabelRetrySecs is how soon a response whose label is still on its way asks the browser to
+	// come back. The anchor request queues behind the price request for the same vendor (the vendor
+	// scheduler spaces Tencent requests two seconds apart at its default 30 per minute), then takes
+	// well under a second; five seconds covers both with room to spare.
+	quoteLabelRetrySecs = 5
+
 	// quoteMarketLineStamp is the layout of the line's leading timestamp, and quoteMarketLineZone its
 	// zone. Measured 2026-11-03: the same line, requested through a Hong Kong, a US and a Shanghai
 	// symbol, carried the same China-clock stamp (09:15:19 at 01:15 UTC).
@@ -88,6 +94,25 @@ func quotePhaseWord(word string) string {
 	return quotePhaseUnknown
 }
 
+// quoteMarketLineBelievable reads the line's own timestamp and reports whether it is close enough to
+// now to be taken as evidence of the market's state: a frozen feed keeps saying "trading" in its
+// last words, so a line whose stamp is more than quotePhaseMaxAge away is not believed.
+func quoteMarketLineBelievable(raw string, now time.Time) (time.Time, bool) {
+	stamp, _, _ := strings.Cut(raw, "|")
+	lineLoc, err := quoteZone(quoteMarketLineZone)
+	if err != nil {
+		return time.Time{}, false
+	}
+	at, err := time.ParseInLocation(quoteMarketLineStamp, strings.TrimSpace(stamp), lineLoc)
+	if err != nil {
+		return time.Time{}, false
+	}
+	if d := now.Sub(at); d > quotePhaseMaxAge || d < -quotePhaseMaxAge {
+		return time.Time{}, false
+	}
+	return at, true
+}
+
 // quoteMarketPhase derives one market's phase from the vendor's session line.
 //
 // The vendor's own word is the source; the rules below only REFUSE a reading the rest of the line
@@ -109,16 +134,8 @@ func quoteMarketPhase(m *quoteMarket, raw string, now time.Time) string {
 	if !ok {
 		return quotePhaseUnknown
 	}
-	stamp, _, _ := strings.Cut(raw, "|")
-	lineLoc, err := quoteZone(quoteMarketLineZone)
-	if err != nil {
-		return quotePhaseUnknown
-	}
-	at, err := time.ParseInLocation(quoteMarketLineStamp, strings.TrimSpace(stamp), lineLoc)
-	if err != nil {
-		return quotePhaseUnknown
-	}
-	if d := now.Sub(at); d > quotePhaseMaxAge || d < -quotePhaseMaxAge {
+	at, ok := quoteMarketLineBelievable(raw, now)
+	if !ok {
 		return quotePhaseUnknown
 	}
 	marketLoc, err := quoteZone(m.zone)
@@ -206,10 +223,14 @@ func parseTencentMarketLine(body []byte) (string, error) {
 //
 // An old line is still returned: quoteMarketPhase refuses one whose own timestamp is too far from
 // now, so staleness is judged by the vendor's clock and not by when we last asked.
-func (c *quoteCache) marketLine(cfg quoteConfig) string {
+//
+// pending reports that this answer has no believable line while a refresh that may bring one is in
+// flight. A handler uses it to ask the browser back shortly (quoteLabelRetrySecs) rather than leave
+// the label empty until the next scheduled refresh, which outside trading hours is the next open.
+func (c *quoteCache) marketLine(cfg quoteConfig) (line string, pending bool) {
 	c.init()
 	if cfg.HistoryOnly {
-		return ""
+		return "", false
 	}
 	byName := make(map[string]quoteSource, len(c.sources))
 	for _, src := range c.sources {
@@ -223,16 +244,27 @@ func (c *quoteCache) marketLine(cfg quoteConfig) string {
 		}
 	}
 	if fetch == nil {
-		return ""
+		return "", false
 	}
 	c.phaseMu.Lock()
 	defer c.phaseMu.Unlock()
-	line := c.phaseLine
-	if now := c.now(); (c.phaseAt.IsZero() || !now.Before(c.phaseAt)) && !c.phaseBusy {
+	line = c.phaseLine
+	now := c.now()
+	if (c.phaseAt.IsZero() || !now.Before(c.phaseAt)) && !c.phaseBusy {
 		c.phaseBusy = true
 		go c.refreshMarketLine(fetch, now)
 	}
-	return line
+	_, believable := quoteMarketLineBelievable(line, now)
+	return line, c.phaseBusy && !believable
+}
+
+// withLabelRetry adds the short "ask again for the label" advice to a response's own advice, when
+// the label is pending and the operator has automatic refresh on; the earlier of the two wins.
+func withLabelRetry(now time.Time, enabled, pending bool, advice quoteRefreshAdvice) quoteRefreshAdvice {
+	if !enabled || !pending {
+		return advice
+	}
+	return quoteAggregateAdvice(now, []quoteRefreshAdvice{advice, {RefreshAfterSecs: quoteLabelRetrySecs}})
 }
 
 // refreshMarketLine is the single background refresh. It holds phaseMu only to publish the result,
