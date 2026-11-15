@@ -134,13 +134,17 @@ func TestDifferentDeviceNeverOverlaps(t *testing.T) {
 
 func TestMountInfoParsing(t *testing.T) {
 	raw := "36 35 98:0 /mnt\\040a /mnt2/with\\040space rw,noatime master:1 - ext3 /dev/root rw\n" +
-		"37 36 98:0 / /mnt2 rw - ext3 /dev/root rw\n"
+		"37 36 98:0 / /mnt2 rw - ext3 /dev/root rw\n" +
+		"290 32 0:5 net:[4026532761] /run/docker/netns/a94d17aa1840 rw shared:429 - nsfs nsfs rw\n"
 	mounts, err := parseCandidateIPCMountInfo([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(mounts) < 2 || mounts[0].point != "/mnt2/with space" || mounts[0].root != "/mnt a" || mounts[0].dev != "98:0" {
 		t.Fatalf("octal escapes or fields misread: %+v", mounts)
+	}
+	if len(mounts) != 2 {
+		t.Fatalf("a namespace file mount must be skipped, not placed or refused: %+v", mounts)
 	}
 	for _, bad := range []string{"1 2 3\n", "x y z w\n", ""} {
 		if _, err := parseCandidateIPCMountInfo([]byte(bad)); err == nil {

@@ -244,7 +244,7 @@ func loadCandidateIPCMounts(ctx context.Context) (candidateIPCMounts, error) {
 }
 
 // parseCandidateIPCMountInfo reads the fields the overlap needs: the device (3), the mount's root within its
-// filesystem (4) and the mount point (5). Spaces, tabs, newlines and backslashes are octal escapes in a path.
+// filesystem (4) and the mount point (5). A mount whose root is not a path (an nsfs namespace file) is skipped. Spaces, tabs, newlines and backslashes are octal escapes in a path.
 func parseCandidateIPCMountInfo(raw []byte) (candidateIPCMounts, error) {
 	var mounts candidateIPCMounts
 	for _, line := range bytes.Split(raw, []byte("\n")) {
@@ -256,8 +256,13 @@ func parseCandidateIPCMountInfo(raw []byte) (candidateIPCMounts, error) {
 			return nil, ErrInvalidResponse
 		}
 		root, point := unescapeCandidateIPCMountField(fields[3]), unescapeCandidateIPCMountField(fields[4])
-		if !strings.HasPrefix(root, "/") || !strings.HasPrefix(point, "/") {
+		if !strings.HasPrefix(point, "/") {
 			return nil, ErrInvalidResponse
+		}
+		if !strings.HasPrefix(root, "/") {
+			// A namespace file bind-mounted for a container's network namespace has the root "net:[4026532761]".
+			// It holds no directory tree, so no path can be placed on it.
+			continue
 		}
 		mounts = append(mounts, candidateIPCMount{dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
 	}
