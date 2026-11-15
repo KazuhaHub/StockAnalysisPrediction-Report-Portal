@@ -355,11 +355,26 @@ started by the owner explicitly at that time. Production adoption of the
 platform is a separate deployment after section 9's gates.
 
 **Amendment, 2026-11-15 (owner).** No real server is touched by either drill. Both run in CI on a
-disposable GitHub-hosted runner, so the production database copy, the production `secret_key`
-and the staging host above are not used: the stack is the beta compose shape with generated
-throwaway credentials, and the drill is `.github/workflows/ops-deployment-drills.yml` driven by
-`scripts/acceptance/ops_deploy_drills.py`. What this does and does not stand in for is recorded in
-`docs/app-platform/handoff/evidence/platform-ops-deployment-drills/acceptance.json`.
+disposable host, so the production database copy, the production `secret_key` and the staging host
+above are not used.
+
+Engineering note, 2026-11-15 (implementation of section 6; not the owner's decision, and the decision
+text above is unchanged). The drills are `.github/workflows/ops-deployment-drills.yml`, driven by
+`scripts/acceptance/ops_deploy_drills.py`. They deploy the repository's `docker-compose.yml` with only the
+report-portal image line replaced; that is not the server's own beta configuration. Both rows stay partial;
+the gaps and the run that produced the evidence are in
+`docs/app-platform/handoff/evidence/platform-ops-deployment-drills/acceptance.json`. Three texts in the docs
+are not reconciled, and the drills do not settle them:
+
+- Section 6 above says OPS-05 deploys "the platform candidate". The drill builds and deploys the candidate
+  from the commit under test, without an app runner (the runner is a separate host service).
+- Section 9 says the beta gate requires OPS-05 and OPS-06 "passed on staging". The drills run on a CI host,
+  not staging, so they do not by themselves meet that gate.
+- Docs 04 P13.5 and 07 section 7 say not to rewrite the server's `beta` channel reference to fixed tags or
+  digests, while the current production procedure is a single compose file with a fixed version tag (in use
+  since v2026.43.5). The drill follows the current procedure (the deployed compose differs from the
+  repository's only in the image line, and the running digest equals the digest that tag resolves to);
+  which rule governs the platform deployment is for the owner to decide.
 
 ## 7. Human-only acceptance
 
