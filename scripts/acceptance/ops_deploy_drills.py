@@ -628,7 +628,9 @@ class DockerHost:
         return out.split()[0]
 
     def loaded_binary_sha(self):
-        out = self.compose("exec", "-T", "report-portal", "sha256sum", "/proc/1/exe").stdout
+        # The process runs as the image's unprivileged user (PUID, default 10001); only that user may read
+        # its own /proc/1/exe, so root in the container cannot.
+        out = self.compose("exec", "-T", "--user", "10001:10001", "report-portal", "sha256sum", "/proc/1/exe").stdout
         return out.split()[0]
 
     # -- one-off CLI containers against a chosen database
