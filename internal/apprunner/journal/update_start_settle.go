@@ -228,16 +228,39 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 	if err := requirePendingTarget(facts.resource, start, facts.start.fence); err != nil {
 		return zero, err
 	}
+	// The target's two looks and, for an enable start, the stopped source's two looks share one wait, so the whole
+	// settlement takes the delay once: at most four inspections of up to driver.DockerRequestTimeout each plus the
+	// delay, which fits the 30 second connection bound that carries it. The first look of each is taken before the wait
+	// and the second after it, so each pair is a settle delay apart.
+	sourceID, err := s.enableStartSourceLookID(ctx, start)
+	if err != nil {
+		return zero, err
+	}
+	sourceSeen := false
+	lookSource := func() error {
+		if sourceID == "" || sourceSeen {
+			return nil
+		}
+		seen, err := inspector.InspectTarget(ctx, sourceID)
+		if err != nil {
+			return fmt.Errorf("%w: inspect the enable source: %v", ErrManagedRemovalUnavailable, err)
+		}
+		sourceSeen = seen.Found
+		return nil
+	}
 	observed, err := inspector.InspectTarget(ctx, facts.resource.id)
 	if err != nil {
 		return zero, fmt.Errorf("%w: inspect the target: %v", ErrManagedRemovalUnavailable, err)
 	}
+	if err := lookSource(); err != nil {
+		return zero, err
+	}
+	if err := absenceWaiter(ctx); err != nil {
+		return zero, fmt.Errorf("%w: wait before the second look: %v", ErrManagedRemovalUnavailable, err)
+	}
 	if !observed.Found {
 		// One absence proves nothing: the daemon can finish a create after the client gave up. A second look, a
 		// settle delay later, must agree; a container that appears keeps the start unknown for a later settlement.
-		if err := waitAbsenceSettle(ctx); err != nil {
-			return zero, fmt.Errorf("%w: wait before the second look: %v", ErrManagedRemovalUnavailable, err)
-		}
 		if observed, err = inspector.InspectTarget(ctx, facts.resource.id); err != nil {
 			return zero, fmt.Errorf("%w: inspect the target again: %v", ErrManagedRemovalUnavailable, err)
 		}
@@ -245,45 +268,28 @@ func (s *Store) SettleUpdateStart(ctx context.Context, raw, signature []byte, in
 			return zero, fmt.Errorf("%w: a container appeared after the first look", ErrManagedRemovalUnavailable)
 		}
 	}
-	sourceAbsent, err := s.enableSourceAbsentNatively(ctx, start, inspector)
-	if err != nil {
+	if err := lookSource(); err != nil {
 		return zero, err
 	}
+	sourceAbsent := sourceID != "" && !sourceSeen
 	return s.settleOrphan(ctx, raw, signature, observed, sourceAbsent)
 }
 
-// enableSourceAbsentNatively looks, twice a settle delay apart, for the stopped source container an enable start
-// replaced. Its native removal precedes the target's creation, so an orphaned enable start may have removed it
-// without ever recording that. Only two agreeing absences prove it; anything else, or a start that is not an enable
-// start, reports false and the source keeps its reservation.
-func (s *Store) enableSourceAbsentNatively(ctx context.Context, start control.UpdateStartCommand, inspector TargetInspector) (bool, error) {
+// enableStartSourceLookID is the stopped source container an enable start replaced, to be looked for natively, or ""
+// for a start that is not an enable start or has no source distinct from its target. Its native removal precedes the
+// target's creation, so an orphaned enable start may have removed it without ever recording that; only two agreeing
+// absences, a settle delay apart, prove it, and anything else keeps the source's reservation.
+func (s *Store) enableStartSourceLookID(ctx context.Context, start control.UpdateStartCommand) (string, error) {
 	if start.Kind != "enable-start" {
-		return false, nil
+		return "", nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return "", err
 	}
 	id, err := enableStartSourceID(ctx, tx, start, time.Now().UTC().UnixMilli())
 	tx.Rollback()
-	if err != nil || id == "" {
-		return false, err
-	}
-	for look := 0; look < 2; look++ {
-		if look > 0 {
-			if err := waitAbsenceSettle(ctx); err != nil {
-				return false, fmt.Errorf("%w: wait before the second source look: %v", ErrManagedRemovalUnavailable, err)
-			}
-		}
-		seen, err := inspector.InspectTarget(ctx, id)
-		if err != nil {
-			return false, fmt.Errorf("%w: inspect the enable source: %v", ErrManagedRemovalUnavailable, err)
-		}
-		if seen.Found {
-			return false, nil
-		}
-	}
-	return true, nil
+	return id, err
 }
 
 // enableStartSourceID is the stopped backend an enable start replaced, or "" when it has none distinct from its target.
@@ -404,7 +410,8 @@ func (s *Store) sweepNamespace(ctx context.Context, raw, signature []byte, facts
 		}
 		claimed = true
 	}
-	for round := 0; ; round++ {
+	quiet, removals := false, 0
+	for {
 		listed, err := inspector.ListNamespaceContainers(ctx, start.Payload.NamespaceID)
 		if errors.Is(err, driver.ErrForeignContainer) {
 			blocked := base
@@ -428,11 +435,22 @@ func (s *Store) sweepNamespace(ctx context.Context, raw, signature []byte, facts
 			}
 		}
 		if len(fresh) == 0 {
-			break
+			// The sweep is the evidence that nothing was left behind, so an empty listing is confirmed by a second
+			// one a settle delay later: a late create that completes in between is found, claimed and removed.
+			if quiet {
+				break
+			}
+			if err := absenceWaiter(ctx); err != nil {
+				return zero, fmt.Errorf("%w: wait before the confirming listing: %v", ErrManagedRemovalUnavailable, err)
+			}
+			quiet = true
+			continue
 		}
-		if round == 3 {
+		quiet = false
+		if removals == 3 {
 			return zero, fmt.Errorf("%w: a stray container is still there", ErrManagedRemovalUnavailable)
 		}
+		removals++
 		// Claim what is about to be removed, durably, before removing any of it.
 		for _, id := range fresh {
 			if !slices.Contains(claim.Intended, id) {

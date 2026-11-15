@@ -129,16 +129,23 @@ func storedCandidateOrphan(raw string, id CapacityIdentity) (CandidateOrphanRece
 }
 
 // absenceSettleDelay is how long an absence settlement waits between its two looks. The Docker daemon can finish a
-// container create after the client context that asked for it was cancelled, so a container missing at one look can
-// exist a moment later; driver.DockerRequestTimeout says for how long. The first look is taken with the data execution
-// gate held, so no request of this runner can be issued after it, and every request issued before it completes (or
-// is lost) within that timeout of its issue. A second look more than the timeout later, with the gate still held,
-// therefore sees whatever any create was going to produce: two agreeing absences prove none exists and none will.
-// The delay is the timeout plus a second of margin for scheduling and the daemon's own clock. A package variable so
-// tests do not wait it out.
+// container create after the client that asked for it disconnected, so a container missing at one look can exist a
+// moment later; driver.DockerRequestTimeout is the bound the runner already uses for that. The delay is that timeout
+// plus a second.
+//
+// What this proves, and what it assumes. The first look is taken with the data execution gate held, so no request of
+// this runner can be issued after it. A request issued before it is carried out, or is not, by the daemon; the bound
+// assumes the daemon finishes a request within DockerRequestTimeout of its issue. dockerd makes no such promise: it
+// may still complete a request after the client has disconnected, however long that takes. Under the assumption, a
+// second look more than the timeout later sees every container an earlier request was going to produce. Without it,
+// the two looks are a strong heuristic and nothing more. The assumption is recorded as the stated limit in the
+// application platform plan (resolution R6). A package variable so tests do not wait it out.
 const defaultAbsenceSettleDelay = driver.DockerRequestTimeout + time.Second
 
 var absenceSettleDelay = defaultAbsenceSettleDelay
+
+// absenceWaiter is waitAbsenceSettle, a variable so a test can count the waits an operation takes.
+var absenceWaiter = waitAbsenceSettle
 
 // waitAbsenceSettle sleeps the settle delay, or returns the context's error if it ends first.
 func waitAbsenceSettle(ctx context.Context) error {
@@ -190,7 +197,7 @@ func (s *Store) settleCandidateOrphanLocked(ctx context.Context, load loadCandid
 	}
 	// One absence proves nothing: the daemon can finish a create after the client gave up. A second look, a settle
 	// delay later, must agree before anything is released; otherwise the start stays unknown.
-	if err := waitAbsenceSettle(ctx); err != nil {
+	if err := absenceWaiter(ctx); err != nil {
 		return zero, fmt.Errorf("%w: wait before the second look: %v", ErrFenceReconciliation, err)
 	}
 	observed, err = inspector.InspectTarget(ctx, before.resource.id)
