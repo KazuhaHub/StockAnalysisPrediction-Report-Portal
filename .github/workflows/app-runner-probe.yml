@@ -397,7 +397,7 @@ jobs:
           sudo curl -sSf --unix-socket "$sock" "http://localhost/v1.47/containers/$id/json" | jq '{Id, Name, Mounts}' > "$RUNNER_TEMP/foreign/container-inspect.json"
           docker version --format '{{.Server.Version}} api {{.Server.APIVersion}}' | tee "$RUNNER_TEMP/foreign/docker-version.txt"
           # The overlap check reads the runner's mount table, so keep it with the payload.
-          sudo cat /proc/self/mountinfo > "$RUNNER_TEMP/foreign/mountinfo.txt"
+          sudo cat /proc/self/mountinfo | tee "$RUNNER_TEMP/foreign/mountinfo.txt" > /dev/null
           sudo readlink /proc/self/root | tee "$RUNNER_TEMP/foreign/proc-self-root.txt"
       - name: Run the writer's container inventory beside the service container
         env:
