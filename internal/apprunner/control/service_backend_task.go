@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -45,10 +46,11 @@ type ServiceBackendTaskRegistrationIdentity struct {
 }
 
 type VerifiedServiceBackendTask struct {
-	command             ServiceBackendTaskCommand
-	registration        ServiceBackendTaskRegistrationIdentity
-	initialRegistration *VerifiedBackendRegistrationCommand
-	updateRegistration  *VerifiedUpdateStartRegistrationCommand
+	command              ServiceBackendTaskCommand
+	registration         ServiceBackendTaskRegistrationIdentity
+	initialRegistration  *VerifiedBackendRegistrationCommand
+	updateRegistration   *VerifiedUpdateStartRegistrationCommand
+	writableRegistration *VerifiedWritableBackendRegistrationCommand
 }
 
 func (v VerifiedServiceBackendTask) Command() ServiceBackendTaskCommand {
@@ -75,6 +77,15 @@ func (v VerifiedServiceBackendTask) UpdateStartRegistration() (VerifiedUpdateSta
 		return VerifiedUpdateStartRegistrationCommand{}, false
 	}
 	return *v.updateRegistration, true
+}
+
+// WritableRegistration returns the generation-1 writable install registration
+// a task was bound to. It is present only for WritableBackendRegistrationFormat.
+func (v VerifiedServiceBackendTask) WritableRegistration() (VerifiedWritableBackendRegistrationCommand, bool) {
+	if v.writableRegistration == nil {
+		return VerifiedWritableBackendRegistrationCommand{}, false
+	}
+	return *v.writableRegistration, true
 }
 
 func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (VerifiedServiceBackendTask, error) {
@@ -106,6 +117,7 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	var registration ServiceBackendTaskRegistrationIdentity
 	var initial *VerifiedBackendRegistrationCommand
 	var update *VerifiedUpdateStartRegistrationCommand
+	var writable *VerifiedWritableBackendRegistrationCommand
 	switch format.Format {
 	case BackendRegistrationFormat:
 		verified, err := VerifyBackendRegistration(
@@ -115,11 +127,19 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 				"initial registration: %w", ErrInvalidCommand)
 		}
 		candidate := verified.Candidate()
+		// The initial registration binds no policy revision. An access-grant
+		// change bumps the revision without a new generation, so it is taken
+		// from the signed command (the service grant MAC binds it again) and
+		// must be a canonical revision >= 1, never assumed to be "1".
+		if !canonicalPolicyRevision(c.PolicyRevision) {
+			return zero, fmt.Errorf(
+				"initial registration tuple: %w", ErrInvalidCommand)
+		}
 		initial = &verified
 		registration = ServiceBackendTaskRegistrationIdentity{
 			Format:         BackendRegistrationFormat,
 			InstallationID: candidate.InstallationID,
-			Generation:     candidate.TargetGeneration, PolicyRevision: "1",
+			Generation:     candidate.TargetGeneration, PolicyRevision: c.PolicyRevision,
 			ControllerEpoch: candidate.ControllerEpoch,
 			ReleaseSHA256:   candidate.Payload.ReleaseSHA256,
 			ExpiresMS:       candidate.ExpiresMS,
@@ -141,6 +161,32 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 			ControllerEpoch: start.ControllerEpoch,
 			ReleaseSHA256:   start.Payload.TargetReleaseSHA256,
 			ExpiresMS:       start.ExpiresMS,
+		}
+	case WritableBackendRegistrationFormat:
+		verified, err := VerifyWritableBackendRegistration(
+			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
+		if err != nil {
+			return zero, fmt.Errorf(
+				"writable registration: %w", ErrInvalidCommand)
+		}
+		index := verified.Candidate().Index()
+		// The writable registration binds no policy revision. The signed
+		// command carries it and the service grant MAC binds it again, so it
+		// is taken from the command and must be a canonical revision >= 1.
+		if index.TargetGeneration != "1" ||
+			!canonicalPolicyRevision(c.PolicyRevision) {
+			return zero, fmt.Errorf(
+				"writable registration tuple: %w", ErrInvalidCommand)
+		}
+		writable = &verified
+		registration = ServiceBackendTaskRegistrationIdentity{
+			Format:          WritableBackendRegistrationFormat,
+			InstallationID:  index.InstallationID,
+			Generation:      index.TargetGeneration,
+			PolicyRevision:  c.PolicyRevision,
+			ControllerEpoch: index.ControllerEpoch,
+			ReleaseSHA256:   index.Payload.ReleaseSHA256,
+			ExpiresMS:       index.ExpiresMS,
 		}
 	default:
 		return zero, fmt.Errorf(
@@ -193,7 +239,13 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	return VerifiedServiceBackendTask{
 		command: c, registration: registration,
 		initialRegistration: initial, updateRegistration: update,
+		writableRegistration: writable,
 	}, nil
+}
+
+func canonicalPolicyRevision(v string) bool {
+	n, err := strconv.ParseUint(v, 10, 63)
+	return err == nil && n >= 1 && strconv.FormatUint(n, 10) == v
 }
 
 func serviceTaskResource(resources []string, required string) bool {

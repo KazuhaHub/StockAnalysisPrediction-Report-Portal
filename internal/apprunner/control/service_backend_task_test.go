@@ -1,6 +1,7 @@
 package control
 
 import (
+	"crypto/ed25519"
 	"strconv"
 	"strings"
 	"testing"
@@ -340,5 +341,196 @@ func TestServiceDigestTaskUsesFixedTaskBodyAndReportAuthority(t *testing.T) {
 	command.ServiceIdentity = identity([]string{"tasks.schedule"})
 	if _, _, err := SignServiceBackendTask(command, key, authority, now); err == nil {
 		t.Fatal("digest task without reports.read was signed")
+	}
+}
+
+func writableServiceTaskFixture(t *testing.T, handler string, policy string, resources []string) (ServiceBackendTaskCommand, ed25519.PrivateKey, Authority, int64, []byte) {
+	t.Helper()
+	request, key, authority, now, _, _ := writableBackendRequestFixture(t)
+	registration, err := VerifyWritableBackendRegistration(
+		request.RegistrationRaw, request.RegistrationSignature, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := registration.Candidate().Index()
+	taskID := "10000000-0000-4000-8000-000000000041"
+	var body []byte
+	if handler == appplatform.TaskHandlerEvent {
+		body, _, err = appplatform.BuildEventDelivery(
+			"10000000-0000-4000-8000-000000000042", taskID,
+			appplatform.EventReportIngested, "report", "41", now,
+			[]byte(`{"id":41}`))
+	} else {
+		body, err = appplatform.EncodeTaskBackendRequest(
+			taskID, "writable:1", []byte(`{"fixture":true}`))
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaseID := "10000000-0000-4000-8000-000000000043"
+	identity, err := appplatform.SignServiceIdentity(
+		[]byte(strings.Repeat("w", 32)), appplatform.ServiceIdentityGrant{
+			Format: appplatform.ServiceIdentityFormat, LeaseID: leaseID,
+			AppID: "notes-demo", InstallationID: index.InstallationID,
+			ControllerEpoch: index.ControllerEpoch, Generation: "1",
+			PolicyRevision: policy, ReleaseSHA256: index.Payload.ReleaseSHA256,
+			Resources: resources, IssuedMS: strconv.FormatInt(now, 10),
+			ExpiresMS: strconv.FormatInt(now+60000, 10),
+		}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ServiceBackendTaskCommand{
+		Format:    ServiceBackendTaskFormat,
+		RequestID: "10000000-0000-4000-8000-000000000044", TaskID: taskID,
+		LeaseID: leaseID, Handler: handler,
+		InstallationID: index.InstallationID, Generation: "1",
+		PolicyRevision: policy, ControllerEpoch: index.ControllerEpoch,
+		ReleaseSHA256: index.Payload.ReleaseSHA256, BootID: request.BootID,
+		RegistrationRaw:       request.RegistrationRaw,
+		RegistrationSignature: request.RegistrationSignature,
+		ServiceIdentity:       identity, BodySHA256: serviceTaskBodyDigest(body),
+	}, key, authority, now, body
+}
+
+func TestServiceBackendTaskAcceptsWritableInitialRegistration(t *testing.T) {
+	for _, policy := range []string{"1", "4"} {
+		command, key, authority, now, body := writableServiceTaskFixture(
+			t, appplatform.TaskHandlerBackend, policy, []string{"tasks.schedule"})
+		raw, signature, err := SignServiceBackendTask(command, key, authority, now)
+		if err != nil {
+			t.Fatal(policy, err)
+		}
+		verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+		if err != nil || ValidateServiceBackendTaskData(verified, body) != nil {
+			t.Fatal("writable task", verified, err)
+		}
+		identity := verified.RegistrationIdentity()
+		registration, ok := verified.WritableRegistration()
+		if !ok || identity.Format != WritableBackendRegistrationFormat ||
+			identity.Generation != "1" || identity.PolicyRevision != policy ||
+			identity.InstallationID != registration.Candidate().Index().InstallationID {
+			t.Fatal("writable identity", identity, ok)
+		}
+		if _, ok := verified.InitialRegistration(); ok {
+			t.Fatal("writable task exposed the managed registration")
+		}
+		if _, ok := verified.UpdateStartRegistration(); ok {
+			t.Fatal("writable task exposed the update registration")
+		}
+	}
+}
+
+func TestServiceBackendTaskWritableRegistrationRefusesMismatches(t *testing.T) {
+	command, key, authority, now, _ := writableServiceTaskFixture(
+		t, appplatform.TaskHandlerBackend, "1", []string{"tasks.schedule"})
+	for name, mutate := range map[string]func(*ServiceBackendTaskCommand){
+		"installation": func(c *ServiceBackendTaskCommand) {
+			c.InstallationID = "90000000-0000-4000-8000-000000000005"
+		},
+		"generation": func(c *ServiceBackendTaskCommand) { c.Generation = "2" },
+		"epoch": func(c *ServiceBackendTaskCommand) {
+			c.ControllerEpoch = "90000000-0000-4000-8000-000000000006"
+		},
+		"release": func(c *ServiceBackendTaskCommand) {
+			c.ReleaseSHA256 = strings.Repeat("b", 64)
+		},
+		"policy vs grant": func(c *ServiceBackendTaskCommand) { c.PolicyRevision = "2" },
+		"policy zero":     func(c *ServiceBackendTaskCommand) { c.PolicyRevision = "0" },
+		"policy leading zero": func(c *ServiceBackendTaskCommand) {
+			c.PolicyRevision = "01"
+		},
+		"registration signature": func(c *ServiceBackendTaskCommand) {
+			c.RegistrationSignature = append([]byte(nil), c.RegistrationSignature...)
+			c.RegistrationSignature[0] ^= 1
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			changed := command
+			mutate(&changed)
+			if raw, signature, err := SignServiceBackendTask(
+				changed, key, authority, now); err == nil ||
+				len(raw) != 0 || len(signature) != 0 {
+				t.Fatal("mismatched writable task was signed")
+			}
+		})
+	}
+	// A stale registration (past its expiry) is refused.
+	raw, signature, err := SignServiceBackendTask(command, key, authority, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyServiceBackendTask(
+		raw, signature, authority, now+10*24*3600*1000); err == nil {
+		t.Fatal("expired writable registration accepted")
+	}
+}
+
+func TestServiceBackendTaskWritableHandlersRequireGrantResources(t *testing.T) {
+	for handler, resource := range map[string]string{
+		appplatform.TaskHandlerDigest: "reports.read",
+		appplatform.TaskHandlerEvent:  "events.subscribe",
+	} {
+		command, key, authority, now, _ := writableServiceTaskFixture(
+			t, handler, "1", []string{resource, "tasks.schedule"})
+		if _, _, err := SignServiceBackendTask(command, key, authority, now); err != nil {
+			t.Fatal(handler, err)
+		}
+		command, key, authority, now, _ = writableServiceTaskFixture(
+			t, handler, "1", []string{"tasks.schedule"})
+		if _, _, err := SignServiceBackendTask(command, key, authority, now); err == nil {
+			t.Fatal(handler, "signed without", resource)
+		}
+	}
+}
+
+// An access-grant change bumps the policy revision without starting a new
+// generation, so a generation-1 managed install must keep accepting tasks at
+// the grant's current revision.
+func TestServiceBackendTaskManagedInitialAcceptsPolicyRevisionAfterGrantChange(t *testing.T) {
+	command, _, _, key, authority, now, body := serviceBackendTaskFixture(t)
+	for _, policy := range []string{"1", "2", "9"} {
+		identity, err := appplatform.SignServiceIdentity(
+			[]byte(strings.Repeat("s", 32)), appplatform.ServiceIdentityGrant{
+				Format:          appplatform.ServiceIdentityFormat,
+				LeaseID:         command.LeaseID,
+				AppID:           "notes-sample",
+				InstallationID:  command.InstallationID,
+				ControllerEpoch: command.ControllerEpoch,
+				Generation:      "1",
+				PolicyRevision:  policy,
+				ReleaseSHA256:   command.ReleaseSHA256,
+				Resources:       []string{"tasks.schedule"},
+				IssuedMS:        strconv.FormatInt(now, 10),
+				ExpiresMS:       strconv.FormatInt(now+60000, 10),
+			}, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := command
+		changed.PolicyRevision = policy
+		changed.ServiceIdentity = identity
+		raw, signature, err := SignServiceBackendTask(changed, key, authority, now)
+		if err != nil {
+			t.Fatal("policy revision", policy, err)
+		}
+		verified, err := VerifyServiceBackendTask(raw, signature, authority, now)
+		if err != nil || verified.RegistrationIdentity().PolicyRevision != policy ||
+			ValidateServiceBackendTaskData(verified, body) != nil {
+			t.Fatal("managed task at policy revision", policy, err)
+		}
+	}
+	// The command and the grant still have to agree, and the revision must be canonical.
+	for name, policy := range map[string]string{"zero": "0", "leading zero": "02", "empty": "", "signed": "+2"} {
+		changed := command
+		changed.PolicyRevision = policy
+		if _, _, err := SignServiceBackendTask(changed, key, authority, now); err == nil {
+			t.Fatal("managed task signed with a", name, "policy revision")
+		}
+	}
+	changed := command
+	changed.PolicyRevision = "2"
+	if _, _, err := SignServiceBackendTask(changed, key, authority, now); err == nil {
+		t.Fatal("managed task signed with a policy revision its grant does not carry")
 	}
 }
