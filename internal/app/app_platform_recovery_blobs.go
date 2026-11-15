@@ -93,27 +93,18 @@ func bundleOnePlatformBlob(dir string, store *platformImageStore, blob appplatfo
 	return file, nil
 }
 
-// restorePlatformBundleBlobs places the blobs of a verified bundle into the blob store of the receiving host and
-// releases their reservation at once.
+// restorePlatformBundleBlobs places the blobs of a verified bundle into the blob store of the receiving host. Each
+// blob is hashed while it is written to a partial file and takes its name only when it matches, so a damaged blob is
+// never placed, whatever the manifest says. The reservation is capacity accounting inside this process: it is held
+// only while the blobs are written, and it does not protect them from a sweep by another process. What protects a
+// restore is that the Portal is stopped.
 func (s *Server) restorePlatformBundleBlobs(dir string, manifest platformRecoveryBundleManifest) error {
-	release, err := s.placePlatformBundleBlobs(dir, manifest)
-	if err != nil {
-		return err
-	}
-	release()
-	return nil
-}
-
-// placePlatformBundleBlobs places the blobs and returns the function that ends their reservation. Each blob is
-// hashed while it is written to a partial file and takes its name only when it matches, so a damaged blob is never
-// placed, whatever the manifest says. A caller that goes on to load a database keeps the reservation until it has.
-func (s *Server) placePlatformBundleBlobs(dir string, manifest platformRecoveryBundleManifest) (func(), error) {
 	if len(manifest.ImageBlobs) == 0 {
-		return func() {}, nil
+		return nil
 	}
 	store, err := s.platformImages()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var blobs []appplatform.ImageBlob
 	for _, f := range manifest.ImageBlobs {
@@ -121,20 +112,19 @@ func (s *Server) placePlatformBundleBlobs(dir string, manifest platformRecoveryB
 	}
 	unreserve, err := store.reserveBlobs(blobs)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	defer unreserve()
 	for _, f := range manifest.ImageBlobs {
 		in, err := os.Open(filepath.Join(dir, filepath.FromSlash(f.Path)))
 		if err != nil {
-			unreserve()
-			return nil, err
+			return err
 		}
 		putErr := store.putBlob(appplatform.ImageBlob{Digest: f.SHA256, Size: f.Bytes}, io.Reader(in))
 		in.Close()
 		if putErr != nil {
-			unreserve()
-			return nil, fmt.Errorf("%w: %s: %v", errPlatformBundle, f.Path, putErr)
+			return fmt.Errorf("%w: %s: %v", errPlatformBundle, f.Path, putErr)
 		}
 	}
-	return unreserve, nil
+	return nil
 }

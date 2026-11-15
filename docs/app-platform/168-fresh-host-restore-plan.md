@@ -169,7 +169,10 @@ Migration id 0021 is reserved for the platform on `main`, in the same way as 001
   recovery mode with every runtime binding retired, when the dump held app platform entities. `--force` needs an
   empty target database (one holding only what a new database starts with) unless `--replace-existing` is passed;
   the command has no way to detect a running Portal or runner, so it only warns. The dry run parses the dump in a
-  scratch in-memory database and does not open the target. The command does not load the checkpoint archives or
+  scratch in-memory database and does not open the target; it does not run the insert phase or the post-restore
+  verifications, so a dump that parses can still fail a forced restore. The keyring check also accepts
+  `secret_key_previous` (a read-only probe that never re-wraps), and placed image blobs are protected only by the
+  Portal being stopped. The command does not load the checkpoint archives or
   open the journal; it lists the archives for the runner host, whose import review is the existing flow above.
 - The runner's read-receipt answer is "receipt" or a closed connection. The Portal's import
   reconciliation therefore treats a failed read as unknown and re-sends the same effect, which the

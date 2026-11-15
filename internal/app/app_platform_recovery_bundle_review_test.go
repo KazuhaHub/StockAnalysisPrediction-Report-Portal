@@ -136,11 +136,13 @@ func TestRecoveryBundleRefusesACheckpointIDThatIsNotAUUID(t *testing.T) {
 	}
 }
 
-// 4. Placed blobs stay reserved until the dump has loaded.
-func TestRecoveryBundleRestoreKeepsBlobsReservedUntilTheDumpLoaded(t *testing.T) {
+// 4. The reservation is capacity accounting inside this process and protects nothing from a sweep, so it is not held
+// across the dump load (which would count the placed bytes twice). The real protection is a stopped Portal.
+func TestRecoveryBundleRestoreReleasesTheBlobReservationOncePlaced(t *testing.T) {
 	b, _, _ := bundleWithManagedReleases(t)
 	dir := t.TempDir()
-	if _, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{Archives: b.archives}); err != nil {
+	manifest, err := b.s.writePlatformRecoveryBundle(dir, platformRecoveryBundleInput{Archives: b.archives})
+	if err != nil {
 		t.Fatal(err)
 	}
 	target := freshTarget(t, rotOldKey)
@@ -149,19 +151,22 @@ func TestRecoveryBundleRestoreKeepsBlobsReservedUntilTheDumpLoaded(t *testing.T)
 		t.Fatal(err)
 	}
 	var during int64 = -1
+	placed := 0
 	_, err = target.restoreRecoveryBundle(dir, recoveryBundleRestoreOptions{Force: true, afterBlobs: func() {
 		store.mu.Lock()
 		during = store.reservedBlobs
 		store.mu.Unlock()
+		for _, f := range manifest.ImageBlobs {
+			if _, err := os.Stat(store.blobPath(f.SHA256)); err == nil {
+				placed++
+			}
+		}
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.mu.Lock()
-	after := store.reservedBlobs
-	store.mu.Unlock()
-	if during <= 0 || after != 0 {
-		t.Fatalf("reservation during the load %d, after %d; want >0 then 0", during, after)
+	if during != 0 || placed != len(manifest.ImageBlobs) {
+		t.Fatalf("reservation %d with %d of %d blobs placed when the dump started loading", during, placed, len(manifest.ImageBlobs))
 	}
 }
 
@@ -337,5 +342,51 @@ func TestRecoveryBundleRestoreRefusesADumpSwappedAfterVerification(t *testing.T)
 	}
 	if scalar[int](t, target.st, `SELECT COUNT(*) FROM app_platform_recovery_sets`) != 0 {
 		t.Fatal("the refused restore committed rows")
+	}
+}
+
+// 3 (round 3). A rotated secret_key whose keyring was not re-wrapped yet: the previous key opens the bundle keyring.
+func TestRecoveryBundleKeyringCheckAcceptsThePreviousKeyWithoutRewrapping(t *testing.T) {
+	_, dir, _ := writeGoodBundle(t)
+	cfg := func(key, previous string) string {
+		path, _, _ := bundleTestConfig(t, key)
+		raw, _ := os.ReadFile(path)
+		if previous != "" {
+			raw = append(raw, []byte("secret_key_previous: \""+previous+"\"\n")...)
+		}
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	keyringBefore, _ := os.ReadFile(filepath.Join(dir, platformBundleKeyringName))
+	if err := RecoveryBundleCommand(cfg(wrongSecretKey, rotOldKey), []string{"restore", dir}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("a rotated key with its previous key was refused: %v", err)
+	}
+	err := RecoveryBundleCommand(cfg(wrongSecretKey, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"), []string{"restore", dir}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "secret_key does not match the bundle") {
+		t.Fatalf("two wrong keys were accepted: %v", err)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, platformBundleKeyringName)); !bytes.Equal(keyringBefore, after) {
+		t.Fatal("the check rewrote the bundle keyring")
+	}
+}
+
+// 4 (round 3). A target with a registered plugin table is reported as holding data, not as a missing table.
+func TestRecoveryBundleRestoreReportsAPluginTableAsExistingData(t *testing.T) {
+	_, dir, _ := writeGoodBundle(t)
+	target := freshTarget(t, rotOldKey)
+	appID := platformFixtureID(7601)
+	table := platformPluginDataTableName(appID)
+	if err := createPlatformPluginDataTable(target.st.poolExec(), table); err != nil {
+		t.Fatal(err)
+	}
+	platformTestInsert(t, target.st.poolExec(), "plugin_tables", map[string]any{
+		"id": platformFixtureID(7602), "app_id": appID, "table_name": table, "data_format": 1,
+		"used_bytes": 0, "used_objects": 0, "revision": 1, "created_ms": 1, "updated_ms": 1,
+	})
+	_, err := target.restoreRecoveryBundle(dir, recoveryBundleRestoreOptions{Force: true})
+	if err == nil || !strings.Contains(err.Error(), "already holds data") || strings.Contains(err.Error(), "no such table") {
+		t.Fatalf("a registered plugin table was not reported as data: %v", err)
 	}
 }

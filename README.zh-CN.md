@@ -101,7 +101,16 @@ report-portal recovery-bundle restore /backup/bundle --force  # 加载到空数�
 - `--checkpoints` 指向 Runner 保存归档（`<checkpoint id>.tar`）的位置：检查点根目录、其下的 `.portal-checkpoints` 目录，或直接给出归档文件，可重复使用。每个保留的恢复集必须有且只有一个归档；归档缺失、与数据库记录不符、你直接指定的归档文件不属于任何保留的恢复集、或同一归档在两处同时出现时，命令会拒绝执行，且不会在恢复包目录中留下任何文件。目录中可能留有已删除恢复集的归档（Runner 无法删除检查点），因此通过目录搜索到的此类归档会被跳过并列为“已忽略”。
 - `--runner-journal` 是旧 Runner 的日志文件，仅按字节复制，作为来源证据，绝不会被打开。若主机上没有日志，必须显式传入 `--no-runner-journal`，两者必须二选一。
 - 数据库导出、密钥环、保留的恢复集和发布清单在**同一个读事务**中读取，因此写入中的数据库不会产生自相矛盾的恢复包。结束时会再读取一次保留的恢复集；若在复制归档期间发生变化，则拒绝生成。
-- `restore` 会先按清单校验恢复包中每个文件的 SHA-256，并确认 `config.yaml` 中的 `secret_key` 能打开恢复包的密钥环（密钥不符会以“secret_key does not match the bundle”拒绝），以上都在修改数据库之前完成。随后放置托管镜像 blob，并与 `restore` 相同地加载数据库导出；读取导出时会再次计算哈希，校验后被替换的文件会被拒绝。不带 `--force` 时为试运行：不会打开目标数据库，也不会创建任何内容。带 `--force` 时目标数据库必须为空（例如尚未启动过的新主机）；若数据库已有数据，需额外传入 `--replace-existing`。该命令无法检测 Portal 或 Runner 是否仍在运行，请先停止两者。当导出包含应用平台数据时，恢复后的 Portal 处于恢复模式：运行时绑定已作废，任务、订阅和恢复集等待审核。
+- `restore` 会先按清单校验恢复包中每个文件的 SHA-256，并确认 `config.yaml` 中的 `secret_key` 能打开恢复包的密钥环（密钥不符会以“secret_key does not match the bundle”拒绝），以上都在修改数据库之前完成。随后放置托管镜像 blob，并与 `restore` 相同地加载数据库导出；读取导出时会再次计算哈希，校验后被替换的文件会被拒绝。不带 `--force` 时为试运行：不会打开目标数据库，也不会创建任何内容。带 `--force` 时目标数据库必须为空（例如尚未启动过的新主机）；若数据库已有数据，需额外传入 `--replace-existing`。该命令无法检测 Portal 或 Runner 是否仍在运行，请先停止两者：除此之外没有任何机制保护已放置的镜像 blob 不被清理。当导出包含应用平台数据时，恢复后的 Portal 处于恢复模式：运行时绑定已作废，任务、订阅和恢复集等待审核。
+- **Docker**：请在不启动服务的一次性容器中、针对全新的数据卷执行恢复。`docker compose exec` 需要 Portal 正在运行，而已启动过的 Portal 已创建引导管理员，空数据库保护会因此拒绝执行。若使用 compose 文件中的 PostgreSQL 服务，请先只启动数据库。配置卷中必须已有原来的 `config.yaml`（`secret_key` 一致）。因为镜像默认入口会启动服务，所以这里覆盖了入口；容器以 root 运行，下次正常启动时入口脚本会修复 `/app/data` 的属主。
+
+  ```bash
+  docker compose up -d db        # 仅当 config.yaml 使用 PostgreSQL 时需要
+  docker compose run --rm --no-deps -v /backup/bundle:/bundle:ro --entrypoint /app/report-portal \
+    report-portal recovery-bundle restore /bundle --force
+  docker compose up -d
+  ```
+
 - 该命令不会加载检查点归档和日志。`restore` 完成后，请把命令列出的归档复制到 Runner 主机，并按 [168 号文档](docs/app-platform/168-fresh-host-restore-plan.md) 执行导入审核。
 - 恢复包**不包含** `config.yaml`。请单独保管原来的 `secret_key`，没有它就无法打开密钥环。恢复包目录会被设为仅所有者可访问（目录 0700，文件 0600），并包含密码哈希和令牌哈希，应视为机密。
 

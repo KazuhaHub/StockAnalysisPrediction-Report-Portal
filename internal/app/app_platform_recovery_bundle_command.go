@@ -3,6 +3,7 @@ package app
 import (
 	"bufio"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -346,8 +347,10 @@ func verifyRecoveryBundleForHost(cfg *config.Config, dir string, opt recoveryBun
 	return manifest, nil
 }
 
-// checkRecoveryBundleKeyring opens the bundle's keyring under the secret_key of this host. It reads and writes
-// nothing else: a previous key is deliberately not consulted, because that path would re-wrap the keyring.
+// checkRecoveryBundleKeyring opens the bundle's keyring under the secret_key of this host, or, when the key was
+// rotated and the keyring not re-wrapped yet, under secret_key_previous. Both are read-only probes (derive a key, try
+// to open); nothing is written. openStoredKeyring is not used for the previous key because it would call
+// rewrapKeyring, which is the only path that writes.
 func checkRecoveryBundleKeyring(cfg *config.Config, dir string, manifest platformRecoveryBundleManifest) error {
 	raw, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(manifest.Keyring.Path)))
 	if err != nil {
@@ -362,12 +365,21 @@ func checkRecoveryBundleKeyring(cfg *config.Config, dir string, manifest platfor
 		return fmt.Errorf("%w: unreadable keyring", errPlatformBundle)
 	}
 	probe := &Server{cfg: &config.Config{SecretKey: cfg.SecretKey}}
-	dek, err := probe.openStoredKeyring(keyring.Salt, keyring.Wrapped)
-	if err != nil {
-		return fmt.Errorf("%w: secret_key does not match the bundle: it cannot open the bundle's keyring; use the config.yaml secret_key of the host the bundle came from", errPlatformBundle)
+	if dek, err := probe.openStoredKeyring(keyring.Salt, keyring.Wrapped); err == nil {
+		clear(dek)
+		return nil
 	}
-	clear(dek)
-	return nil
+	if cfg.SecretKeyPrevious != "" {
+		if salt, err := base64.StdEncoding.DecodeString(keyring.Salt); err == nil {
+			if kek, err := kekFrom(cfg.SecretKeyPrevious, salt); err == nil {
+				if dek, err := aesOpen(kek, keyring.Wrapped, []byte("dek")); err == nil {
+					clear(dek)
+					return nil
+				}
+			}
+		}
+	}
+	return fmt.Errorf("%w: secret_key does not match the bundle: neither it nor secret_key_previous can open the bundle's keyring; use the config.yaml secret_key of the host the bundle came from", errPlatformBundle)
 }
 
 // verifiedDumpReader hashes the dump while it is read and turns the end of the stream into an error if the bytes
@@ -424,8 +436,9 @@ func (s *Server) restoreRecoveryBundle(dir string, opt recoveryBundleRestoreOpti
 }
 
 // loadRecoveryBundle loads a verified bundle. Unless ReplaceExisting is set the database must hold nothing but what a
-// new database starts with. The managed image blobs are placed first and stay reserved until the dump has loaded: they
-// are content-addressed and harmless on their own, and nothing may sweep them before the rows that name them exist.
+// new database starts with. The managed image blobs are placed first: they are content-addressed and harmless on
+// their own, and a failure there leaves the database untouched. Nothing in this process protects them from a sweep
+// before the rows that name them exist; the Portal must be stopped for the whole restore.
 func (s *Server) loadRecoveryBundle(dir string, manifest platformRecoveryBundleManifest, opt recoveryBundleRestoreOptions) (*recoveryBundleRestoreReport, error) {
 	if !opt.ReplaceExisting {
 		if filled, err := nonPristineTables(s.st); err != nil {
@@ -440,11 +453,9 @@ func (s *Server) loadRecoveryBundle(dir string, manifest platformRecoveryBundleM
 		return nil, err
 	}
 	defer dump.Close()
-	release, err := s.placePlatformBundleBlobs(dir, manifest)
-	if err != nil {
+	if err := s.restorePlatformBundleBlobs(dir, manifest); err != nil {
 		return nil, err
 	}
-	defer release()
 	if opt.afterBlobs != nil {
 		opt.afterBlobs()
 	}
@@ -472,7 +483,12 @@ func nonPristineTables(st *Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	base, err := pristine.rowCounts(names)
+	// A table a new database does not have (a registered plugin data table) is compared against zero.
+	known, err := pristine.backupTables()
+	if err != nil {
+		return nil, err
+	}
+	base, err := pristine.rowCounts(known)
 	if err != nil {
 		return nil, err
 	}
