@@ -2,6 +2,7 @@ package driver
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -42,5 +43,15 @@ func TestContainerPlanWithOtherLogOptionsIsRefused(t *testing.T) {
 		if validContainerPlan(plan) {
 			t.Errorf("%s: a plan with unbounded logs was accepted", name)
 		}
+	}
+}
+
+// The Docker option strings and the numbers the native log test bounds on are one policy.
+func TestAppContainerLogConstantsAgree(t *testing.T) {
+	if appContainerLogMaxSize != fmt.Sprintf("%dm", appContainerLogMaxSizeMiB) || appContainerLogMaxFile != fmt.Sprint(appContainerLogMaxFiles) {
+		t.Fatalf("log option strings %q/%q disagree with %d MiB x %d files", appContainerLogMaxSize, appContainerLogMaxFile, appContainerLogMaxSizeMiB, appContainerLogMaxFiles)
+	}
+	if appContainerLogBoundBytes != 10<<20 {
+		t.Fatalf("log bound = %d, want 10 MiB", appContainerLogBoundBytes)
 	}
 }

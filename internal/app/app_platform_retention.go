@@ -37,6 +37,7 @@ const (
 	platformTaskRowsPerInstallation   = 10000
 	platformRetentionBatch            = 500
 	platformRetentionInterval         = time.Hour
+	platformRetentionClassTimeout     = 30 * time.Second
 	platformRetentionSweepTimeout     = 5 * time.Minute
 	platformRetentionRunnerLogMiB     = 10
 )
@@ -68,6 +69,59 @@ func (s *Server) platformRetentionConfigLoad() platformRetentionConfig {
 	return c
 }
 
+// errPlatformRetentionPaused is returned by a class that found the Portal in the restore pause inside its own transaction.
+var errPlatformRetentionPaused = errors.New("application platform retention: restore pause")
+
+// retentionClassTx runs one class in its own transaction with a deadline. lock takes the locks the writers of the
+// records the class deletes take, in the order they take them, before the first read, so a decision to delete and
+// the delete are made under the same locks and cannot be overtaken by an admission. The pause is re-read inside
+// the transaction and fails closed, as the image reclaim does.
+func (s *Server) retentionClassTx(ctx context.Context, lock func(migExec) error, fn func(migExec) error) error {
+	for attempt := 0; ; attempt++ {
+		err := s.retentionClassTxOnce(ctx, lock, fn)
+		if err == nil || !isContentionErr(err) || attempt == 5 || ctx.Err() != nil {
+			return err
+		}
+		time.Sleep(time.Duration(10<<attempt) * time.Millisecond)
+	}
+}
+
+func (s *Server) retentionClassTxOnce(ctx context.Context, lock func(migExec) error, fn func(migExec) error) error {
+	ctx, cancel := context.WithTimeout(ctx, platformRetentionClassTimeout)
+	defer cancel()
+	tx, err := s.st.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
+	if lock != nil {
+		if err := lock(e); err != nil {
+			return err
+		}
+	}
+	paused, err := platformRecoveryPaused(e)
+	if err != nil {
+		return err
+	}
+	if paused {
+		return errPlatformRetentionPaused
+	}
+	if err := fn(e); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// lockRetentionOperations takes the locks operation admission takes, in its order: the OU mutation lock, then the
+// publisher trust lock. The operation, effect and plan classes run under them.
+func lockRetentionOperations(e migExec) error {
+	if err := lockOUMutation(e); err != nil {
+		return err
+	}
+	return lockPlatformPublisherTrust(e)
+}
+
 // platformRetentionLimits are the bounds of one sweep. A test injects small ones.
 type platformRetentionLimits struct {
 	// Batch is the most rows each class removes or reduces in one sweep.
@@ -83,7 +137,7 @@ func defaultPlatformRetentionLimits() platformRetentionLimits {
 // platformRetentionResult is what one sweep did. Its JSON form is the audit row's detail.
 type platformRetentionResult struct {
 	At     string `json:"-"`
-	Paused bool   `json:"-"`
+	Paused bool   `json:"paused,omitempty"`
 	Error  string `json:"error,omitempty"`
 	// Backlog is true when a class stopped at its batch bound, so a following sweep may find more.
 	Backlog bool `json:"backlog"`
@@ -101,6 +155,10 @@ type platformRetentionResult struct {
 	// RecoverySetsBeyond counts the recovery sets past the latest-N policy. They are reported, never removed: the
 	// runner has no command that deletes one checkpoint, so marking a set deleted would leak its data on the host.
 	RecoverySetsBeyond int64 `json:"recovery_sets_beyond"`
+}
+
+func (r platformRetentionResult) changed() int64 {
+	return r.Plans + r.Operations + r.Effects + r.OperationPlans + r.TasksReduced + r.TaskAttempts + r.TasksCapped + r.Tombstones
 }
 
 // sweepPlatformRetention applies the retention policy as of nowMS. It does nothing while the Portal is in the
@@ -125,27 +183,37 @@ func (s *Server) sweepPlatformRetention(ctx context.Context, nowMS int64, limits
 	cfg := s.platformRetentionConfigLoad()
 	result.OperationDays, result.RecoverySetsKept = cfg.OperationDays, cfg.RecoverySets
 
+	// Each class runs on its own: a failure is recorded and the others still run.
 	steps := []func() error{
 		func() (err error) { result.Plans, err = s.sweepRetentionPlans(ctx, nowMS, limits); return },
 		func() error { return s.sweepRetentionOperations(ctx, nowMS, cfg, limits, &result) },
 		func() error { return s.sweepRetentionTasks(ctx, nowMS, cfg, limits, &result) },
 		func() error {
-			return s.st.withOUMutation(func(e migExec) error {
+			return s.retentionClassTx(ctx, nil, func(e migExec) error {
 				beyond, err := platformRecoverySetsBeyondRetention(e, cfg.RecoverySets)
 				result.RecoverySetsBeyond = int64(len(beyond))
 				return err
 			})
 		},
 	}
-	var sweepErr error
+	var failures []error
 	for _, step := range steps {
 		if err := ctx.Err(); err != nil {
-			sweepErr = err
+			failures = append(failures, err)
 			break
 		}
-		if sweepErr = step(); sweepErr != nil {
+		err := step()
+		if errors.Is(err, errPlatformRetentionPaused) {
+			result.Paused = true
 			break
 		}
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	sweepErr := errors.Join(failures...)
+	if result.Paused && sweepErr == nil && result.changed() == 0 {
+		return result, nil
 	}
 	if result.Plans >= int64(limits.Batch) {
 		result.Backlog = true
@@ -168,7 +236,7 @@ func (s *Server) sweepPlatformRetention(ctx context.Context, nowMS int64, limits
 // references. A consumed plan is never removed on its own: it goes with its operation.
 func (s *Server) sweepRetentionPlans(ctx context.Context, nowMS int64, limits platformRetentionLimits) (int64, error) {
 	var removed int64
-	err := s.st.withOUMutation(func(e migExec) error {
+	err := s.retentionClassTx(ctx, lockRetentionOperations, func(e migExec) error {
 		res, err := e.exec(`DELETE FROM app_platform_review_plans WHERE id IN (
 			SELECT p.id FROM app_platform_review_plans p
 			WHERE p.consumed_ms IS NULL AND p.expires_ms<?
@@ -182,8 +250,16 @@ func (s *Server) sweepRetentionPlans(ctx context.Context, nowMS int64, limits pl
 		removed, err = res.RowsAffected()
 		return err
 	})
-	return removed, err
+	if err != nil {
+		return 0, err
+	}
+	return removed, nil
 }
+
+// platformOperationSettled is when an operation was last resolved: the later of its completion and its last update.
+// A recovery reconcile that resolves an operation later writes updated_ms and leaves completed_ms where it was, so
+// the retention period counts from the actual resolution.
+const platformOperationSettled = `(CASE WHEN o.updated_ms>o.completed_ms THEN o.updated_ms ELSE o.completed_ms END)`
 
 // platformRetentionEligibleOperations selects, in completion order, the completed operations the SQL-expressible
 // rules allow the sweep to remove. The rules are the pin rule of doc 172; the two that need parsed receipts (the
@@ -201,11 +277,11 @@ func (s *Server) sweepRetentionPlans(ctx context.Context, nowMS int64, limits pl
 //     history and status readers use: a completed install, a completed operation of the installation's current
 //     generation or later, the latest completed operation of its action, or the installation's latest
 //     operation by update time.
-const platformRetentionEligibleOperations = `SELECT o.id,o.installation_id,o.review_plan_id,o.completed_ms
+const platformRetentionEligibleOperations = `SELECT o.id,o.installation_id,o.review_plan_id,` + platformOperationSettled + `
 	FROM app_platform_operations o
 	JOIN app_platform_installations i ON i.id=o.installation_id
-	WHERE o.completed_ms IS NOT NULL AND o.completed_ms<?
-	AND (o.completed_ms>? OR (o.completed_ms=? AND o.id>?))
+	WHERE o.completed_ms IS NOT NULL AND ` + platformOperationSettled + `<?
+	AND (` + platformOperationSettled + `>? OR (` + platformOperationSettled + `=? AND o.id>?))
 	AND o.stage IN ('complete','failed') AND o.lease_owner IS NULL
 	AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.state IN ('prepared','unknown'))
 	AND NOT EXISTS (SELECT 1 FROM app_platform_operations x WHERE x.installation_id=o.installation_id AND (x.completed_ms IS NULL OR x.stage='recovery_required'))
@@ -230,25 +306,29 @@ const platformRetentionEligibleOperations = `SELECT o.id,o.installation_id,o.rev
 				AND (n3.updated_ms>o.updated_ms OR (n3.updated_ms=o.updated_ms AND n3.id>o.id)))
 		)
 	)
-	ORDER BY o.completed_ms,o.id LIMIT ?`
+	ORDER BY ` + platformOperationSettled + `,o.id LIMIT ?`
 
 type platformRetentionCandidate struct {
 	id, installation, plan string
 	completed              int64
 }
 
-// sweepRetentionOperations removes eligible completed operations together with their effects and plans.
+// sweepRetentionOperations removes eligible completed operations together with their effects and plans. The pins,
+// the candidates and the deletes are all read and written in one transaction under the admission locks.
 func (s *Server) sweepRetentionOperations(ctx context.Context, nowMS int64, cfg platformRetentionConfig, limits platformRetentionLimits, result *platformRetentionResult) error {
 	cutoff := nowMS - int64(cfg.OperationDays)*platformRetentionDayMS
-	return s.st.withOUMutation(func(e migExec) error {
+	var effects, operations, plans int64
+	backlog := false
+	err := s.retentionClassTx(ctx, lockRetentionOperations, func(e migExec) error {
+		effects, operations, plans, backlog = 0, 0, 0, false
 		pins, err := loadPlatformRetentionPins(e)
 		if err != nil {
 			return err
 		}
 		var chosen []platformRetentionCandidate
-		afterCompleted, afterID := int64(-1), ""
+		afterSettled, afterID := int64(-1), ""
 		for len(chosen) < limits.Batch {
-			page, err := loadRetentionCandidates(e, cutoff, afterCompleted, afterID, limits.Batch)
+			page, err := loadRetentionCandidates(e, cutoff, afterSettled, afterID, limits.Batch)
 			if err != nil {
 				return err
 			}
@@ -260,19 +340,20 @@ func (s *Server) sweepRetentionOperations(ctx context.Context, nowMS int64, cfg 
 			if len(page) < limits.Batch {
 				break
 			}
-			afterCompleted, afterID = page[len(page)-1].completed, page[len(page)-1].id
+			afterSettled, afterID = page[len(page)-1].completed, page[len(page)-1].id
 		}
+		chosen = withholdUnclosedImageRemovals(chosen, pins.closedImages)
 		for _, c := range chosen {
 			res, err := e.exec(`DELETE FROM app_platform_operation_effects WHERE operation_id=?`, c.id)
 			if err != nil {
 				return err
 			}
 			n, _ := res.RowsAffected()
-			result.Effects += n
+			effects += n
 			if _, err := e.exec(`DELETE FROM app_platform_operations WHERE id=?`, c.id); err != nil {
 				return err
 			}
-			result.Operations++
+			operations++
 			// Its plan goes with it unless a grant or binding still names the plan.
 			res, err = e.exec(`DELETE FROM app_platform_review_plans WHERE id=? AND consumed_ms IS NOT NULL
 				AND NOT EXISTS (SELECT 1 FROM app_platform_operations o WHERE o.review_plan_id=?)
@@ -282,13 +363,59 @@ func (s *Server) sweepRetentionOperations(ctx context.Context, nowMS int64, cfg 
 				return err
 			}
 			n, _ = res.RowsAffected()
-			result.OperationPlans += n
+			plans += n
 		}
-		if len(chosen) >= limits.Batch {
-			result.Backlog = true
-		}
+		backlog = len(chosen) >= limits.Batch
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	result.Effects, result.Operations, result.OperationPlans = effects, operations, plans
+	result.Backlog = result.Backlog || backlog
+	return nil
+}
+
+// withholdUnclosedImageRemovals keeps a closed image record whole or not at all. The load side of a record is
+// the operations holding its applied loads and the removal side those holding its applied removals. While any
+// load-side operation is not being deleted (pinned by the live chain, too young, or past the batch), the removals
+// stay, because a load without its removal reads as an image still loaded and reclaim would remove it again. A
+// removal withheld may in turn be the load side of another record, so this repeats until nothing changes.
+func withholdUnclosedImageRemovals(chosen []platformRetentionCandidate, records []platformClosedImageRecord) []platformRetentionCandidate {
+	for {
+		deleting := map[string]bool{}
+		for _, c := range chosen {
+			deleting[c.id] = true
+		}
+		withheld := map[string]bool{}
+		for _, r := range records {
+			whole := true
+			for op := range r.loads {
+				if !deleting[op] {
+					whole = false
+					break
+				}
+			}
+			if whole {
+				continue
+			}
+			for op := range r.removals {
+				if deleting[op] {
+					withheld[op] = true
+				}
+			}
+		}
+		if len(withheld) == 0 {
+			return chosen
+		}
+		kept := chosen[:0:0]
+		for _, c := range chosen {
+			if !withheld[c.id] {
+				kept = append(kept, c)
+			}
+		}
+		chosen = kept
+	}
 }
 
 func loadRetentionCandidates(e migExec, cutoff, afterCompleted int64, afterID string, limit int) ([]platformRetentionCandidate, error) {
@@ -314,11 +441,18 @@ func loadRetentionCandidates(e migExec, cutoff, afterCompleted int64, afterID st
 type platformRetentionPins struct {
 	ops           map[string]bool
 	installations map[string]bool
+	// closedImages are the image records whose latest load a removal has followed. They pin nothing themselves;
+	// they are deleted whole or not at all (withholdUnclosedImageRemovals).
+	closedImages []platformClosedImageRecord
+}
+
+type platformClosedImageRecord struct {
+	loads, removals map[string]bool
 }
 
 func loadPlatformRetentionPins(e migExec) (platformRetentionPins, error) {
 	pins := platformRetentionPins{ops: map[string]bool{}, installations: map[string]bool{}}
-	if err := pinImageLedger(e, pins); err != nil {
+	if err := pinImageLedger(e, &pins); err != nil {
 		return pins, err
 	}
 	if err := pinRetainedCheckpointSources(e, pins); err != nil {
@@ -333,7 +467,7 @@ func loadPlatformRetentionPins(e migExec) (platformRetentionPins, error) {
 // effect whose receipt cannot be read, and every image of a runtime that holds an effect with no verdict keep
 // all of their effects, because the removal sends the known loads to the runner and the runtime is left out of
 // reclaim as a whole while a verdict is missing.
-func pinImageLedger(e migExec, pins platformRetentionPins) error {
+func pinImageLedger(e migExec, pins *platformRetentionPins) error {
 	rows, err := e.query(`SELECT f.kind,f.state,COALESCE(f.runtime_id,''),f.operation_id,f.updated_ms,f.receipt_json
 		FROM app_platform_operation_effects f WHERE f.kind IN ('load_image','remove_image') ORDER BY f.updated_ms,f.effect_id`)
 	if err != nil {
@@ -342,7 +476,7 @@ func pinImageLedger(e migExec, pins platformRetentionPins) error {
 	defer rows.Close()
 	type key struct{ runtime, digest string }
 	type record struct {
-		ops                   map[string]bool
+		loads, removals       map[string]bool
 		hasLoad               bool
 		latestLoad, removedAt int64
 	}
@@ -376,9 +510,9 @@ func pinImageLedger(e migExec, pins platformRetentionPins) error {
 			}
 			k := key{runtime, parsed.Claim.ConfigDigest}
 			if records[k] == nil {
-				records[k] = &record{ops: map[string]bool{}}
+				records[k] = &record{loads: map[string]bool{}, removals: map[string]bool{}}
 			}
-			records[k].ops[op], records[k].hasLoad = true, true
+			records[k].loads[op], records[k].hasLoad = true, true
 			records[k].latestLoad = max(records[k].latestLoad, updated)
 		case kind == platformRemoveImageKind:
 			touch(runtime, op)
@@ -389,9 +523,9 @@ func pinImageLedger(e migExec, pins platformRetentionPins) error {
 			}
 			k := key{runtime, settled.Claim.ConfigDigest}
 			if records[k] == nil {
-				records[k] = &record{ops: map[string]bool{}}
+				records[k] = &record{loads: map[string]bool{}, removals: map[string]bool{}}
 			}
-			records[k].ops[op] = true
+			records[k].removals[op] = true
 			records[k].removedAt = max(records[k].removedAt, updated)
 		}
 	}
@@ -399,10 +533,18 @@ func pinImageLedger(e migExec, pins platformRetentionPins) error {
 		return err
 	}
 	for _, r := range records {
-		if r.hasLoad && r.removedAt < r.latestLoad {
-			for op := range r.ops {
+		switch {
+		case !r.hasLoad:
+			// A removal with no load is read by nothing.
+		case r.removedAt < r.latestLoad:
+			for op := range r.loads {
 				pins.ops[op] = true
 			}
+			for op := range r.removals {
+				pins.ops[op] = true
+			}
+		default:
+			pins.closedImages = append(pins.closedImages, platformClosedImageRecord{loads: r.loads, removals: r.removals})
 		}
 	}
 	for runtime := range busy {
@@ -491,7 +633,11 @@ func platformEmptyBlob(driver string) string {
 func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platformRetentionConfig, limits platformRetentionLimits, result *platformRetentionResult) error {
 	driver := s.st.driver
 	unreduced := platformTaskUnreduced(driver)
-	return s.st.withOUMutation(func(e migExec) error {
+	var reduced, attempts, capped, tombstones int64
+	backlog := false
+	// The task admission lock is the only one task admission takes, so it is the only one taken here.
+	err := s.retentionClassTx(ctx, lockPlatformTaskAdmission, func(e migExec) error {
+		reduced, attempts, capped, tombstones, backlog = 0, 0, 0, 0, false
 		reduce := func(ids []string) (int64, error) {
 			var done int64
 			for _, id := range ids {
@@ -500,7 +646,7 @@ func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platf
 					return done, err
 				}
 				n, _ := res.RowsAffected()
-				result.TaskAttempts += n
+				attempts += n
 				if _, err := e.exec(`UPDATE app_platform_tasks SET payload=`+platformEmptyBlob(driver)+`,result_json=NULL WHERE id=? AND state IN `+platformTaskTerminal, id); err != nil {
 					return done, err
 				}
@@ -513,11 +659,11 @@ func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platf
 		if err != nil {
 			return err
 		}
-		if result.TasksReduced, err = reduce(ids); err != nil {
+		if reduced, err = reduce(ids); err != nil {
 			return err
 		}
 		if len(ids) >= limits.Batch {
-			result.Backlog = true
+			backlog = true
 		}
 
 		type surplus struct {
@@ -546,7 +692,7 @@ func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platf
 		for _, c := range crowded {
 			take := min(c.count-int64(limits.TaskCap), remaining)
 			if take <= 0 {
-				result.Backlog = true
+				backlog = true
 				break
 			}
 			ids, err := queryRetentionIDs(e, `SELECT t.id FROM app_platform_tasks t WHERE t.installation_id=? AND t.state IN `+platformTaskTerminal+` AND `+unreduced+` ORDER BY t.completed_ms,t.id LIMIT ?`, c.installation, take)
@@ -557,10 +703,10 @@ func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platf
 			if err != nil {
 				return err
 			}
-			result.TasksCapped += n
+			capped += n
 			remaining -= n
 			if take < c.count-int64(limits.TaskCap) {
-				result.Backlog = true
+				backlog = true
 			}
 		}
 
@@ -570,16 +716,24 @@ func (s *Server) sweepRetentionTasks(ctx context.Context, nowMS int64, cfg platf
 			return err
 		}
 		for _, id := range ids {
-			if _, err := e.exec(`DELETE FROM app_platform_tasks WHERE id=? AND state IN `+platformTaskTerminal, id); err != nil {
+			res, err := e.exec(`DELETE FROM app_platform_tasks WHERE id=? AND state IN `+platformTaskTerminal, id)
+			if err != nil {
 				return err
 			}
-			result.Tombstones++
+			n, _ := res.RowsAffected()
+			tombstones += n
 		}
 		if len(ids) >= limits.Batch {
-			result.Backlog = true
+			backlog = true
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	result.TasksReduced, result.TaskAttempts, result.TasksCapped, result.Tombstones = reduced, attempts, capped, tombstones
+	result.Backlog = result.Backlog || backlog
+	return nil
 }
 
 func queryRetentionIDs(e migExec, query string, args ...any) ([]string, error) {

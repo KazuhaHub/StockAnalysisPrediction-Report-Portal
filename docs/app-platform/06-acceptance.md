@@ -186,7 +186,7 @@ data, the live chain, the image ledger), idempotency replay inside the period an
 still deduplicated, one audit row per sweep, and no work during the restore pause. **Not met:** pruning recovery sets beyond the latest N
 is selected and reported but not performed, because the runner has no command that deletes one checkpoint; the 7-day runner log age is not
 enforceable by Docker's `json-file` driver (the size bound applies); nothing was run for the real retention periods or against a
-production-size database. The RUN-08 flood evidence was measured at the previous 1 MiB log policy.
+production-size database, and not against live concurrent installs (the sweep takes the operation and task admission locks, and a PostgreSQL test shows it waits for them). The RUN-08 flood evidence was measured at the previous 1 MiB log policy; the native log test now bounds a 24 MiB flood at the 10 MiB policy plus 1 MiB headroom and runs only in CI.
 
 ### Declared capacity envelope status (OPS-08, SEC-09)
 

@@ -103,9 +103,16 @@ const appContainerCPUShares = 256
 // bound is. The options are part of the plan and so of its policy digest, and validContainerPlan refuses a body
 // that differs, even with its digest recomputed.
 const (
+	appContainerLogMaxSizeMiB = 5
+	appContainerLogMaxFiles   = 2
+	// The Docker option strings. A test keeps them equal to the numbers above, which the native log test
+	// derives its bound from.
 	appContainerLogMaxSize = "5m"
 	appContainerLogMaxFile = "2"
 )
+
+// appContainerLogBoundBytes is the most a container's json-file logs may occupy: every file at its size limit.
+const appContainerLogBoundBytes = appContainerLogMaxFiles * appContainerLogMaxSizeMiB << 20
 
 func validAppContainerLogConfig(config map[string]string, driver string) bool {
 	return driver == "json-file" && len(config) == 2 && config["max-size"] == appContainerLogMaxSize && config["max-file"] == appContainerLogMaxFile

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -765,4 +767,254 @@ func TestReviewPlanValidityIsOneNamedConstant(t *testing.T) {
 			t.Errorf("%s writes the review plan validity as a literal; use platformReviewPlanValidityMS", file)
 		}
 	}
+}
+
+// A closed image record is deleted whole or not at all: while a load of it is kept, its removal is kept too,
+// or platformLoadedImages would report the image as loaded again and reclaim would remove it again, forever.
+func TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned(t *testing.T) {
+	bothDrivers(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		live := f.liveInstallation(2)
+		config := platformDigest([]byte("pinned-load"))
+		install, installPlan := f.operation(live, "install", "complete", retNow-200*retDay, 1)
+		f.effect(install, "load_image", "applied", f.loadReceipt(install, live, config))
+		removal, removalPlan := f.operation(live, "update", "complete", retNow-190*retDay, 1)
+		f.effect(removal, "remove_image", "applied", f.removeReceipt(config))
+		f.operation(live, "update", "complete", retNow-150*retDay, 2)
+
+		f.sweep(retNow)
+
+		if !f.exists("operations", install) || !f.exists("review_plans", installPlan) {
+			t.Fatal("the install operation, pinned by the live chain, was removed")
+		}
+		if !f.exists("operations", removal) || !f.exists("review_plans", removalPlan) {
+			t.Fatal("the removal of an image whose load is kept was deleted: the image would read as loaded again")
+		}
+		loaded, err := f.s.platformLoadedImages(context.Background())
+		if err != nil || len(loaded) != 0 {
+			t.Fatalf("after the sweep the image reads as loaded: %v, %v", loaded, err)
+		}
+	})
+}
+
+// A runtime that holds an effect with no verdict is left out of reclaim as a whole, so every image record on it is kept.
+func TestPlatformRetentionKeepsEveryImageRecordOfABusyRuntime(t *testing.T) {
+	bothDrivers(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		removed := f.removedInstallation()
+		f.namespace(removed, "deleted")
+		runtime := f.runtimeBinding()
+		config := platformDigest([]byte("busy"))
+		old := retNow - 100*retDay
+		load, _ := f.operation(removed, "update", "complete", old, 2)
+		f.effectOn(load, runtime, "load_image", "applied", f.loadReceipt(load, removed, config))
+		remove, _ := f.operation(removed, "update", "complete", old, 3)
+		f.effectOn(remove, runtime, "remove_image", "applied", f.removeReceipt(config))
+		pending, _ := f.operation(removed, "update", "complete", old, 4)
+		f.effectOn(pending, runtime, "load_image", "unknown", "{}")
+		other := f.runtimeBinding()
+		free, _ := f.operation(removed, "update", "complete", old, 5)
+		f.effectOn(free, other, "load_image", "applied", f.loadReceipt(free, removed, platformDigest([]byte("free"))))
+		freeRemove, _ := f.operation(removed, "update", "complete", old, 6)
+		f.effectOn(freeRemove, other, "remove_image", "applied", f.removeReceipt(platformDigest([]byte("free"))))
+
+		f.sweep(retNow)
+
+		for _, op := range []string{load, remove, pending} {
+			if !f.exists("operations", op) {
+				t.Errorf("operation %s of a busy runtime was deleted", op)
+			}
+		}
+		for _, op := range []string{free, freeRemove} {
+			if f.exists("operations", op) {
+				t.Errorf("operation %s of a runtime with no open effect was kept", op)
+			}
+		}
+	})
+}
+
+// Mutation guards: each of these rules once survived its removal.
+func TestPlatformRetentionPlanReferencedBySecretBindingIsKept(t *testing.T) {
+	bothDrivers(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		removed := f.removedInstallation()
+		f.namespace(removed, "deleted")
+		// An operation whose plan only a secret binding names.
+		op, plan := f.operation(removed, "install", "complete", retNow-100*retDay, 1)
+		f.secretBinding(removed, plan)
+		// An unconsumed expired plan only a secret binding names.
+		unconsumed := f.plan(removed, "install", retNow-30*retDay, 0)
+		f.secretBinding(removed, unconsumed)
+		free := f.plan(removed, "install", retNow-30*retDay, 0)
+
+		f.sweep(retNow)
+
+		if !f.exists("operations", op) || !f.exists("review_plans", plan) {
+			t.Error("an operation whose plan a secret binding names was removed")
+		}
+		if !f.exists("review_plans", unconsumed) {
+			t.Error("an unconsumed plan a secret binding names was removed")
+		}
+		if f.exists("review_plans", free) {
+			t.Error("an unreferenced expired plan was kept")
+		}
+	})
+}
+
+func TestPlatformRetentionKeepsOperationsOfALaterGenerationOnALiveInstallation(t *testing.T) {
+	bothDrivers(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		live := f.liveInstallation(3)
+		ahead, _ := f.operation(live, "enable", "complete", retNow-141*retDay, 4)
+		f.operation(live, "enable", "complete", retNow-130*retDay, 3)
+		behind, _ := f.operation(live, "update", "complete", retNow-142*retDay, 2)
+		f.operation(live, "update", "complete", retNow-120*retDay, 3)
+		f.sweep(retNow)
+		if !f.exists("operations", ahead) {
+			t.Error("an operation of a generation past the installation's was removed")
+		}
+		if f.exists("operations", behind) {
+			t.Error("a superseded operation of an earlier generation was kept")
+		}
+	})
+}
+
+// The period counts from the moment the operation was resolved: a later recovery reconcile updates updated_ms and
+// leaves completed_ms where it was.
+func TestPlatformRetentionCountsFromTheLatestOfCompletedAndUpdated(t *testing.T) {
+	f := newRetFixture(t, false)
+	removed := f.removedInstallation()
+	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
+	mustExec(t, f.st, `UPDATE app_platform_operations SET updated_ms=? WHERE id=?`, retNow-10*retDay, op)
+	f.sweep(retNow)
+	if !f.exists("operations", op) {
+		t.Fatal("an operation resolved 10 days ago was removed because it completed 100 days ago")
+	}
+	f.sweep(retNow + 81*retDay)
+	if f.exists("operations", op) {
+		t.Fatal("the operation outlived its period counted from its resolution")
+	}
+}
+
+// One class failing does not stop the others, and the audit row names the failure.
+func TestPlatformRetentionClassesRunIndependently(t *testing.T) {
+	f := newRetFixture(t, false)
+	removed := f.removedInstallation()
+	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
+	task := f.task(removed, "t", "succeeded", retNow-40*retDay, true)
+	mustExec(t, f.st, `ALTER TABLE app_platform_data_namespaces RENAME TO app_platform_data_namespaces_hidden`)
+	result, err := f.s.sweepPlatformRetention(context.Background(), retNow, defaultPlatformRetentionLimits())
+	mustExec(t, f.st, `ALTER TABLE app_platform_data_namespaces_hidden RENAME TO app_platform_data_namespaces`)
+	if err == nil || result.Error == "" {
+		t.Fatalf("the failing class was not reported: %v %q", err, result.Error)
+	}
+	if !f.exists("operations", op) {
+		t.Fatal("the failed class removed rows")
+	}
+	if f.taskRow(task).payloadLen != 0 || result.TasksReduced != 1 {
+		t.Fatalf("the task class did not run after the operations class failed: %+v", result)
+	}
+	var detail string
+	if err := f.st.queryRow(`SELECT detail FROM audit_log WHERE action='app_platform.retention_sweep'`).Scan(&detail); err != nil || !strings.Contains(detail, `"error"`) {
+		t.Fatalf("the audit detail does not carry the error: %q %v", detail, err)
+	}
+}
+
+// Each class re-checks the pause inside its own transaction.
+func TestPlatformRetentionClassesRecheckThePauseInsideTheirTransaction(t *testing.T) {
+	f := newRetFixture(t, false)
+	removed := f.removedInstallation()
+	plan := f.plan(removed, "install", retNow-30*retDay, 0)
+	task := f.task(removed, "t", "succeeded", retNow-40*retDay, false)
+	f.st.SetSetting("app_platform_restore_paused", "1")
+	limits := defaultPlatformRetentionLimits()
+	if _, err := f.s.sweepRetentionPlans(context.Background(), retNow, limits); !errors.Is(err, errPlatformRetentionPaused) {
+		t.Fatalf("plans class = %v, want the pause", err)
+	}
+	var result platformRetentionResult
+	cfg := f.s.platformRetentionConfigLoad()
+	if err := f.s.sweepRetentionOperations(context.Background(), retNow, cfg, limits, &result); !errors.Is(err, errPlatformRetentionPaused) {
+		t.Fatalf("operations class = %v, want the pause", err)
+	}
+	if err := f.s.sweepRetentionTasks(context.Background(), retNow, cfg, limits, &result); !errors.Is(err, errPlatformRetentionPaused) {
+		t.Fatalf("tasks class = %v, want the pause", err)
+	}
+	if !f.exists("review_plans", plan) || f.taskRow(task).payloadLen == 0 {
+		t.Fatal("a class changed rows under the pause")
+	}
+}
+
+// retWaiters counts backends waiting for a lock the test did not grant.
+func retWaiters(t *testing.T, st *Store) int {
+	t.Helper()
+	return scalar[int](t, st, `SELECT COUNT(*) FROM pg_locks WHERE NOT granted AND locktype IN ('advisory','relation')`)
+}
+
+// retBlocked starts fn, waits until a backend is waiting for a lock, runs release, and expects fn to finish. It
+// polls the lock table rather than sleeping.
+func retBlocked(t *testing.T, st *Store, fn func(), release func()) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() { defer close(done); fn() }()
+	deadline := time.Now().Add(20 * time.Second)
+	for retWaiters(t, st) == 0 {
+		select {
+		case <-done:
+			t.Fatal("the sweep finished without waiting for the admission lock")
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the sweep never waited for the lock")
+		}
+		runtime.Gosched()
+	}
+	release()
+	select {
+	case <-done:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the sweep did not resume once the lock was released")
+	}
+}
+
+// The sweep takes the locks the admission paths take, so a decision to delete cannot be overtaken by an admission.
+func TestPlatformRetentionSerializesWithAdmissionOnPostgres(t *testing.T) {
+	f := newRetFixture(t, true)
+	removed := f.removedInstallation()
+	f.namespace(removed, "deleted")
+	op, _ := f.operation(removed, "disable", "complete", retNow-100*retDay, 1)
+	hold := func(statement string) (*sql.Tx, func()) {
+		tx, err := f.st.db.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
+		return tx, func() {
+			if err := tx.Commit(); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	sweep := func() {
+		if _, err := f.s.sweepPlatformRetention(context.Background(), retNow, defaultPlatformRetentionLimits()); err != nil {
+			t.Error(err)
+		}
+	}
+
+	t.Run("the trust lock operation admission takes", func(t *testing.T) {
+		_, release := hold(`LOCK TABLE app_platform_publishers,app_platform_publisher_keys IN SHARE ROW EXCLUSIVE MODE`)
+		retBlocked(t, f.st, sweep, release)
+		if f.exists("operations", op) {
+			t.Fatal("the sweep did not delete once the lock was released")
+		}
+	})
+	t.Run("the task admission lock", func(t *testing.T) {
+		task := f.task(removed, "serialized", "succeeded", retNow-40*retDay, false)
+		_, release := hold(`SELECT pg_advisory_xact_lock(780719)`)
+		retBlocked(t, f.st, sweep, release)
+		if f.taskRow(task).payloadLen != 0 {
+			t.Fatal("the sweep did not reduce the task once the lock was released")
+		}
+	})
 }

@@ -15,7 +15,7 @@ No Portal DDL is needed and none was added: no table, no column, no index, no mi
 | Review plans | valid 15 minutes; unconsumed expired plans swept; consumed plans kept with their operation | the 15 minutes was a literal in 12 places, each with an overflow guard | one constant, `platformReviewPlanValidityMS`; unconsumed plans removed 24 hours after expiry |
 | Completed operations and evidence | 90 days, adjustable 90–365 | never removed | swept by the pin rule below |
 | Terminal task and event history | 30 days and 10000 rows per installation; occurrence tombstone kept for the operations period | never removed | reduced to a tombstone, tombstone removed after the operations period |
-| Runner logs | 10 MiB per installation, 7 days | 1 MiB × 2 files per container (2 MiB) | 5 MiB × 2 files (10 MiB) per container; the age limit is a documented deviation |
+| Runner logs | 10 MiB per container, 7 days (doc 167 says per installation) | 1 MiB × 2 files per container (2 MiB) | 5 MiB × 2 files (10 MiB) per container; the age limit is a documented deviation |
 | Recovery sets | latest 2 per installation, adjustable 1–2 | unbounded | selection and setting implemented; removal blocked, see section 6 |
 | Uninstalled data | until explicit deletion | already so | already so; a test proves the sweep never touches a retained namespace |
 
@@ -52,9 +52,28 @@ sweep keeps its own cadence:
 - nothing runs, and nothing is stamped, while the Portal is in the restore pause. An unreadable pause marker stops the sweep with
   an error (fail closed), as the image reclaim does.
 
-Each class runs in its own transaction under `withOUMutation`, the lock the other platform mutations take, in batches of at most
-500 rows (`platformRetentionBatch`). The sweep takes `nowMS` as a parameter and has no clock of its own, so the tests advance
-time by passing a later instant. The same SQL runs on SQLite and PostgreSQL.
+Each class runs in its own transaction (`retentionClassTx`), in batches of at most 500 rows (`platformRetentionBatch`), with a
+30-second deadline (`platformRetentionClassTimeout`) so a stuck lock cannot hold a transaction open. The sweep takes `nowMS` as a
+parameter and has no clock of its own, so the tests advance time by passing a later instant. The same SQL runs on SQLite and
+PostgreSQL.
+
+**Locks.** `withOUMutation` is not what admission takes, so the classes take the writers' own locks, in the writers' order, before
+the first read, and make the pin decision and the delete in the same transaction:
+
+| Class | Locks, in order | Why |
+| --- | --- | --- |
+| Review plans, operations (with effects and their plans) | `lockOUMutation` (advisory 780716 on PostgreSQL), then `lockPlatformPublisherTrust` (`SHARE ROW EXCLUSIVE` on the publisher tables) | the order every operation-admitting transaction takes them (`insertPlatformOperation` callers) |
+| Tasks (reduce, cap, tombstone removal) | `lockPlatformTaskAdmission` (advisory 780719) only | the only lock task admission takes; taking 780716 first would add an order no admission path uses |
+| Recovery-set selection | none (read only) | it changes nothing |
+
+On SQLite the lock helpers reduce to a write that takes the single writer lock. `TestPlatformRetentionSerializesWithAdmissionOnPostgres`
+holds each lock in another transaction, waits until the lock table shows the sweep waiting (no sleep), releases the lock and
+checks the sweep resumes and deletes.
+
+**Independent classes.** A failure in one class is recorded and the next class still runs; the audit detail carries the joined
+`error`, and the sweep returns it. A class that finds the Portal in the restore pause stops the sweep (`paused` in the detail).
+**The pause is read again inside each class transaction** and fails closed, in addition to the check before the first class.
+Counts are published only when a class commits, so a rolled-back class reports nothing.
 
 ## 2. Review plans
 
@@ -85,8 +104,10 @@ each group states what it needs from an operation that is no longer running.
 
 ### The rule
 
-An operation is removable when it completed (stage `complete` or `failed`, never `recovery_required`, never unfinished) before
-`now - operation_days`, and **none** of these pins it:
+An operation is removable when it completed (stage `complete` or `failed`, never `recovery_required`, never unfinished) and was last
+resolved before `now - operation_days`, and **none** of these pins it. "Last resolved" is the later of `completed_ms` and `updated_ms`
+(`platformOperationSettled`): a recovery reconcile that resolves an operation later updates `updated_ms` and leaves `completed_ms`,
+and the period must count from the actual resolution.
 
 1. **Unresolved effect.** One of its effects is `prepared` or `unknown`.
 2. **Recovery chain.** Its installation has an unfinished operation or an operation in `recovery_required`. Their readers walk the
@@ -105,7 +126,11 @@ An operation is removable when it completed (stage `complete` or `failed`, never
    the installation's latest operation by `updated_ms`.
 8. **Image ledger.** Its load or removal effects are the live record of an image: an image whose latest applied load is newer than
    its latest applied removal, an applied effect whose receipt cannot be read, and every image effect of a runtime that holds an
-   effect with no verdict. A closed image record (a removal at least as recent as the latest load) pins nothing.
+   effect with no verdict. A closed image record (a removal at least as recent as the latest load) pins nothing by itself, but it is
+   **deleted whole or not at all**: while any operation holding one of its loads is not being deleted (pinned by the live chain, too
+   young, or past the batch), every operation holding one of its removals is kept too (`withholdUnclosedImageRemovals`, repeated
+   to a fixed point). A load whose removal was deleted would read as loaded again in `platformLoadedImages`, and reclaim would
+   remove it again, forever.
 
 A removed installation with all its namespaces deleted, no recovery chain and no recovery set rows is therefore swept whole. A live
 installation sweeps its superseded history: older updates, older disables, repeated repairs, failed attempts that are not its
@@ -116,6 +141,16 @@ latest operation.
 Per operation, in one transaction: its effects, then the operation, then its plan unless something still names the plan. Replaying
 an idempotency key inside the period returns the original operation. After deletion the key is unknown and behaves as a new request
 (the plan it named is gone too, so a new request needs a new review).
+
+### Known limits of the rule
+
+- **An installation that ever needed recovery is pinned for good.** Pin 2 keeps every operation of an installation that has an
+  unfinished operation or one in `recovery_required`, and an operation in `recovery_required` is never deleted, so once an installation
+  has had one, its whole history stays. This is safe, and it is deliberately blunt: the recovery readers walk the whole history and
+  the rule was not narrowed past what could be proven from reading them.
+- **Swept history is gone from two views.** The status timeline of an installation reads the audit rows of its operations; the rows of a
+  deleted operation are no longer found through it (the audit rows themselves are not deleted by this sweep, only the operation that
+  indexed them). The administrator view of a task shows a tombstone with no result and no attempt history. Both are accepted.
 
 ### Consequence of the rule that the decision did not state
 
@@ -136,6 +171,10 @@ admission dedup reads (`app_platform_task_store.go`).
 - **Remove.** A tombstone whose `completed_ms` is older than the operations period is deleted as a whole row.
 - `waiting`, `leased`, `running`, `uncertain` and `review_required` tasks are never touched.
 
+Tombstones are outside the 10000-row cap: the cap counts terminal tasks that still hold a payload, result or attempts. Tombstones
+are small and are removed by age, so an installation can hold more than 10000 rows in all while it holds at most 10000 unreduced ones.
+The tombstone count in the audit detail is rows affected by the delete, not rows selected.
+
 A replayed occurrence of a reduced task finds its row and returns it. A replay with another payload hash or handler conflicts. After
 the row is removed the occurrence is a new request.
 
@@ -149,6 +188,19 @@ non-terminal rows.
 `validContainerPlan` now refuses a body whose log options differ, even with the digest recomputed (the same guard the CPU
 settings have). This changes the policy digest of every container, which is acceptable before release; a container created
 under the old options is a plan mismatch like a CPU-set change.
+
+**Rollout, as for the CPU-set change in [doc 171](171-capacity-envelope-plan.md).** The log options are part of the create policy,
+so every app container created before the upgrade is a policy-digest conflict: the runner refuses to adopt, start or remove it.
+For each affected installation, stop the app in the Portal, remove its stopped container by hand as root on the runner host
+(`docker rm portal-app-<resource id>`, without `-f`; data is not in the container, so nothing is lost), then start or reinstall
+the app, and the runner creates a container under the new options. Where the runner's journal still records the removed container
+as live and the runner keeps refusing it, start the runner on a fresh journal as the operator procedure for a rebuilt host does.
+That last step was not exercised here and is stated as procedure, not as a tested path. Upgrade the Portal and runner together,
+and do it when no operation is running.
+
+The native log-flood test (`TestNativeDataWriterContainer`) bounds a 24 MiB flood by the named constants,
+`appContainerLogBoundBytes` (2 files times 5 MiB) plus the 1 MiB headroom the 1 MiB policy had; the flood is larger than the bound so
+the test cannot pass with rotation off. It runs in CI (`enforce-disposable-project-quota`) and not locally.
 
 **Documented deviation: the 7-day age limit is not enforced.** The `json-file` driver rotates by size only. The bound that applies
 is the size bound, and the logs go away when the container is removed. Enforcing an age needs a log shipper or a runner task
@@ -208,6 +260,10 @@ each made a named test fail.
 | Retained namespaces untouched | `TestPlatformRetentionNeverTouchesRetainedData` |
 | Recovery selection, nothing marked deleted | `TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN` |
 | Runner log bound | `TestAppContainerLogsAreBoundedToTenMiB`, `TestContainerPlanWithOtherLogOptionsIsRefused` |
+| Closed image record deleted whole or not at all; busy runtime keeps its records | `TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned`, `…KeepsEveryImageRecordOfABusyRuntime` |
+| Secret-binding plan reference, later generations, resolution time | `…PlanReferencedBySecretBindingIsKept`, `…KeepsOperationsOfALaterGenerationOnALiveInstallation`, `…CountsFromTheLatestOfCompletedAndUpdated` |
+| Independent classes, pause re-read inside each class | `…ClassesRunIndependently`, `…ClassesRecheckThePauseInsideTheirTransaction` |
+| Admission locks taken (PostgreSQL) | `TestPlatformRetentionSerializesWithAdmissionOnPostgres` |
 | One validity constant | `TestReviewPlanValidityIsOneNamedConstant` |
 | Web | `AppPlatformRetentionCard.test.tsx`, `StoragePage.test.tsx`, the locale parity test |
 
@@ -224,7 +280,9 @@ Every sweep test runs on SQLite and, when `TEST_POSTGRES_DSN` is set, on Postgre
   scenario tests are where to add its fixture.
 - **Recovery-set pruning** is not done (section 6).
 - **The 7-day log age** is not enforced (section 5), and RUN-08's flood measurement was taken at 1 MiB, not 5 MiB.
-- **Secret binding pin.** The plan-reference pin is tested through a capability grant. The secret-binding branch is the same query
-  shape and is not exercised by its own fixture.
-- **Concurrent admission.** The sweep serialises with other platform mutations through `withOUMutation`. It was not run against live
-  concurrent installs.
+- **Concurrent admission.** The sweep takes the admission locks (section 1) and a PostgreSQL test shows it waits for them. It was not
+  run against live concurrent installs, and the lock order was compared with the admission paths by reading them, not by a
+  deadlock search.
+- **Unbounded scans.** The image ledger, the retained-set receipts and the per-installation task count are read in full inside the
+  class transactions; only the deletes are batched. The 30-second class deadline bounds a bad case but does not make the scan
+  incremental.

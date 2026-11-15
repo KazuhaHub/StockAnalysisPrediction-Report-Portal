@@ -63,6 +63,31 @@ describe('Application platform retention card', () => {
     expect(screen.getByText(/storage\.platform\.pruneBlocked/).textContent).toContain('"count":5')
   })
 
+  it('shows the error the last sweep reported', async () => {
+    apiMock.get.mockResolvedValue({
+      ...structuredClone(policy),
+      last_sweep: { at: '2026-11-15T03:00:00Z', counts: { operations: 0, plans: 0, error: 'lock timeout' } },
+    })
+    render(<App><AppPlatformRetentionCard /></App>)
+    const alert = await screen.findByText(/storage\.platform\.sweepFailed/)
+    expect(alert.textContent).toContain('lock timeout')
+  })
+
+  it('shows no failure for a sweep that reported none', async () => {
+    apiMock.get.mockResolvedValue({ ...structuredClone(policy), last_sweep: { at: '2026-11-15T03:00:00Z', counts: { operations: 1 } } })
+    render(<App><AppPlatformRetentionCard /></App>)
+    await screen.findByText(/storage\.platform\.lastSweep/)
+    expect(screen.queryByText(/storage\.platform\.sweepFailed/)).toBeNull()
+  })
+
+  it('uses the same joined number input for both values', async () => {
+    render(<App><AppPlatformRetentionCard /></App>)
+    const days = await screen.findByRole('spinbutton', { name: 'storage.platform.operationDays' })
+    const sets = screen.getByRole('spinbutton', { name: 'storage.platform.recoverySets' })
+    expect(days.closest('.ant-space-compact')).toBeTruthy()
+    expect(sets.closest('.ant-space-compact')).toBeTruthy()
+  })
+
   it('saves a confirmed change and nothing else', async () => {
     render(<App><AppPlatformRetentionCard /></App>)
     const days = await screen.findByRole('spinbutton', { name: 'storage.platform.operationDays' })

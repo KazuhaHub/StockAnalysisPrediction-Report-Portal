@@ -218,6 +218,40 @@ func (f *retFixture) taskRow(id string) retTask {
 	return r
 }
 
+// runtimeBinding adds a disabled runtime binding and returns its id.
+func (f *retFixture) runtimeBinding() string {
+	f.t.Helper()
+	id := f.id()
+	f.insert("runtime_bindings", map[string]any{
+		"id": id, "deployment_id": f.id(), "controller_epoch": f.epoch, "control_revision": 1, "enabled": 0,
+		"verification_key_fingerprint": nil, "sealed_control_key": nil, "revision": 1, "created_ms": 1, "updated_ms": 1,
+	})
+	return id
+}
+
+// effectOn adds an effect of an operation that names a runtime.
+func (f *retFixture) effectOn(op, runtime, kind, state, receipt string) string {
+	f.t.Helper()
+	id := f.effect(op, kind, state, receipt)
+	mustExec(f.t, f.st, `UPDATE app_platform_operation_effects SET runtime_id=? WHERE effect_id=?`, runtime, id)
+	return id
+}
+
+// secretBinding adds a binding that names a review plan.
+func (f *retFixture) secretBinding(installation, plan string) {
+	f.t.Helper()
+	credential := f.id()
+	f.insert("credentials", map[string]any{
+		"id": credential, "label": "c", "state": "active", "sealed_value": "x", "value_revision": 1, "revision": 1,
+		"created_ms": 1, "updated_ms": 1, "revoked_ms": nil,
+	})
+	f.insert("secret_bindings", map[string]any{
+		"id": f.id(), "installation_id": installation, "name": "n" + f.id(), "credential_id": credential, "credential_value_revision": 1,
+		"operation": "http_bearer", "state": "active", "policy_json": "{}", "policy_revision": 1, "review_plan_id": plan, "revision": 1,
+		"created_ms": 1, "updated_ms": 1, "revoked_ms": nil,
+	})
+}
+
 func (f *retFixture) namespace(installation, state string) string {
 	f.t.Helper()
 	id := f.id()

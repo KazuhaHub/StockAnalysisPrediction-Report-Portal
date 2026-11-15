@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Card, InputNumber, Space, Typography } from 'antd'
+import { Alert, App, Button, Card, Space, Typography } from 'antd'
 import CompactNumberInput from './CompactNumberInput'
 import { useTranslation } from 'react-i18next'
 import Confirm from './Confirm'
@@ -24,9 +24,11 @@ interface Policy {
     task_rows_per_installation: number
     runner_log_mib: number
   }
-  last_sweep: { at: string; counts: Record<string, number> } | null
+  last_sweep: { at: string; counts: Record<string, number | string> } | null
   recovery_set_pruning: string
 }
+
+const num = (v: number | string | undefined) => (typeof v === 'number' ? v : 0)
 
 const usable = (p: Partial<Policy> | undefined): p is Policy =>
   !!p && typeof p.operation_days === 'number' && typeof p.recovery_sets === 'number' && !!p.bounds && !!p.fixed
@@ -100,8 +102,8 @@ export default function AppPlatformRetentionCard() {
           </Typography.Text>
           <Space wrap>
             <Typography.Text>{t('storage.platform.recoverySets')}</Typography.Text>
-            <InputNumber aria-label={t('storage.platform.recoverySets')} min={b.recovery_sets_min} max={b.recovery_sets_max}
-              precision={0} value={sets} onChange={setSets} disabled={saving} />
+            <CompactNumberInput aria-label={t('storage.platform.recoverySets')} min={b.recovery_sets_min} max={b.recovery_sets_max}
+              precision={0} value={sets} onChange={setSets} disabled={saving} after={t('storage.platform.setsUnit')} />
           </Space>
           <Typography.Text type="secondary">
             {t('storage.platform.recoverySetsHint', { min: b.recovery_sets_min, max: b.recovery_sets_max })}
@@ -119,16 +121,19 @@ export default function AppPlatformRetentionCard() {
             {row(t('storage.platform.fixed.uninstalled'), t('storage.platform.fixed.uninstalledValue'))}
           </div>
 
+          {typeof counts.error === 'string' && counts.error !== '' ? (
+            <Alert type="error" showIcon title={t('storage.platform.sweepFailed', { error: counts.error })} />
+          ) : null}
           <Typography.Text type="secondary" role="status">
             {sweep
               ? t('storage.platform.lastSweep', {
-                  at: formatReportDateTime(sweep.at), operations: counts.operations ?? 0, plans: counts.plans ?? 0,
-                  tombstones: counts.tombstones ?? 0, tasks: (counts.tasks_reduced ?? 0) + (counts.tasks_capped ?? 0),
+                  at: formatReportDateTime(sweep.at), operations: num(counts.operations), plans: num(counts.plans),
+                  tombstones: num(counts.tombstones), tasks: num(counts.tasks_reduced) + num(counts.tasks_capped),
                 })
               : t('storage.platform.neverSwept')}
           </Typography.Text>
           {policy.recovery_set_pruning === 'blocked' && (
-            <Alert type="info" showIcon title={t('storage.platform.pruneBlocked', { count: counts.recovery_sets_beyond ?? 0 })} />
+            <Alert type="info" showIcon title={t('storage.platform.pruneBlocked', { count: num(counts.recovery_sets_beyond) })} />
           )}
         </Space>
       )}
