@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -47,7 +48,7 @@ func socketInfo(path string, owner uint32) (os.FileInfo, error) {
 	return info, nil
 }
 
-func dockerDialer(path string) func(context.Context, string, string) (net.Conn, error) {
+func dockerDialer(path string, peer ...*daemonPeer) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, _, _ string) (net.Conn, error) {
 		before, err := socketInfo(path, 0)
 		if err != nil {
@@ -61,8 +62,12 @@ func dockerDialer(path string) func(context.Context, string, string) (net.Conn, 
 			return nil, ErrUnavailable
 		}
 		refuse := func() (net.Conn, error) { conn.Close(); return nil, ErrUnsafeSocket }
-		if !rootPeer(conn) {
+		credential := peerCredential(conn)
+		if credential == nil || credential.Uid != 0 {
 			return refuse()
+		}
+		if len(peer) > 0 && peer[0] != nil {
+			peer[0].record(sharesMountNamespace(int(credential.Pid)))
 		}
 		after, err := socketInfo(path, 0)
 		if err != nil || !os.SameFile(before, after) {
@@ -73,18 +78,37 @@ func dockerDialer(path string) func(context.Context, string, string) (net.Conn, 
 }
 
 func rootPeer(conn net.Conn) bool {
+	credential := peerCredential(conn)
+	return credential != nil && credential.Uid == 0
+}
+
+func peerCredential(conn net.Conn) *syscall.Ucred {
 	unix, ok := conn.(*net.UnixConn)
 	if !ok {
-		return false
+		return nil
 	}
 	raw, err := unix.SyscallConn()
 	if err != nil {
-		return false
+		return nil
 	}
 	var credential *syscall.Ucred
 	var credentialErr error
 	err = raw.Control(func(fd uintptr) {
 		credential, credentialErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
 	})
-	return err == nil && credentialErr == nil && credential != nil && credential.Uid == 0
+	if err != nil || credentialErr != nil {
+		return nil
+	}
+	return credential
+}
+
+// sharesMountNamespace reports whether a process is in the runner's mount namespace. A namespace file that
+// cannot be read is not shared.
+func sharesMountNamespace(pid int) bool {
+	theirs, err := os.Stat("/proc/" + strconv.Itoa(pid) + "/ns/mnt")
+	if err != nil {
+		return false
+	}
+	ours, err := os.Stat("/proc/self/ns/mnt")
+	return err == nil && os.SameFile(ours, theirs)
 }

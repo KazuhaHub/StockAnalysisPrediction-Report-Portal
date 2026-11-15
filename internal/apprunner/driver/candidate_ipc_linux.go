@@ -243,6 +243,9 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 			ErrUnavailable, err)
 	}
 	defer response.Body.Close()
+	if err := requireDaemonSharesMountNamespace(client); err != nil {
+		return nil, err
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf(
 			"%w: candidate IPC inventory status %d",
@@ -499,18 +502,13 @@ func boundedString(s string) string {
 }
 
 // candidateIPCResolver canonicalises a mount source. A variable so a test can count and fail resolutions.
-var candidateIPCResolver = filepath.EvalSymlinks
+var candidateIPCResolver = candidateIPCCanonicalize
 
-// candidateIPCReferenced reports whether a mount source overlaps the namespace directory path. See
-// candidateIPCPass.referenced for the exact semantics.
-func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
-	return newCandidateIPCPass().referenced(ctx, path, source)
-}
-
-// A filesystem lookup may block on an unrelated host volume. Keep at most one
-// lookup in flight process-wide and stop waiting at the cleanup deadline. A
-// timed-out lookup retains the slot until it actually returns; retries cannot
-// spawn an unbounded set of blocked native threads.
+// A filesystem lookup may block on an unrelated host volume. Every lookup the
+// overlap check makes, on the source side and the namespace side alike, runs
+// here: at most one in flight process-wide, and the caller stops waiting at its
+// deadline. A timed-out lookup retains the slot until it actually returns;
+// retries cannot spawn an unbounded set of blocked native threads.
 var candidateIPCResolverSlot = make(chan struct{}, 1)
 
 func resolveCandidateIPCSource(ctx context.Context, source string, resolve func(string) (string, error)) (string, error) {

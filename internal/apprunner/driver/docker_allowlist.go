@@ -52,7 +52,11 @@ func dockerRequestAllowed(method, escapedPath string) bool {
 }
 
 // allowListTransport refuses every request outside the closed set before it reaches the daemon socket.
-type allowListTransport struct{ next http.RoundTripper }
+type allowListTransport struct {
+	next http.RoundTripper
+	// peer is set for a client of a real daemon socket (newDockerClient); a test client has none.
+	peer *daemonPeer
+}
 
 func (t allowListTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	if request.URL == nil || request.URL.Scheme != "http" || request.URL.Host != dockerRequestHost ||

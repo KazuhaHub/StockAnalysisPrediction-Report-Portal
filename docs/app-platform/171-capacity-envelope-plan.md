@@ -522,8 +522,8 @@ settle and release in one transaction.
 
 ### Inventory overlap by device and inode
 
-**Status: resolved; see "Resolution (inventory overlap by device and inode)" below.** The text that follows is the
-problem as it was recorded.
+**Status: implemented, awaiting the native acceptance run; see "Resolution (inventory overlap by device and inode)" below.** The
+text that follows is the problem as it was recorded, and the comparison by `stat` it proposes was replaced by the mount table.
 
 `candidateIPCReferenced` (`internal/apprunner/driver/candidate_ipc_linux.go`) decides whether a container mounts a data
 namespace by comparing path strings after `filepath.EvalSymlinks`. `EvalSymlinks` does not follow bind mounts, so the
@@ -546,59 +546,74 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 ## Resolution (inventory overlap by device and inode)
 
-This closes the follow-up recorded above, together with the absent-bind-source gap. The inventory (`candidateIPCPass.referenced`
-in `driver/candidate_ipc_identity_linux.go`, behind `candidateIPCReferenced`) now decides an overlap by identity as well as
-by name, in the data writer, its recovery and the writable candidate recovery alike, because they share it. No schema, journal
-or wire change.
+**Status: implemented; not yet marked resolved.** The item stays in the "still block the integration to main merge" list until the
+native acceptance run below is green on GitHub.
 
-**Semantics.** A mount source overlaps the namespace directory when it is the namespace, an ancestor of it, or a descendant
-of it, by any of:
+This answers the follow-up recorded above, together with the absent-bind-source gap. The inventory
+(`candidateIPCPass.referenced` in `driver/candidate_ipc_identity_linux.go`, behind `candidateIPCReferenced`) decides an overlap
+by where a path really lives as well as by its name, in the data writer, its recovery and the writable candidate recovery alike,
+because they share it. No schema, journal or wire change.
 
-- **Name** (unchanged): the symlink-free source equals the namespace, is a prefix directory of it, is `/`, or lies under it.
-- **Identity:** the source's `st_dev`/`st_ino` equals that of the namespace, of any of its ancestors up to `/` (taken both by
-  the lexical path and by its symlink-free path), or of any directory below it. That is how a bind mount of the namespace, of
-  the data root or of a nested directory is seen, including a bind-backed local volume, which the daemon lists under
-  `/var/lib/docker/volumes/<id>/_data`. A descendant is found by walking the namespace once per pass (directories only,
-  `lstat`, symlinks not followed), not by walking up from the source, because `..` from a bind mount root leaves through the
-  mount's own parent rather than the real one.
-- **Creation:** Docker creates a missing `-v` source when the container starts, so an absent source is judged by where it would
-  be created: the deepest ancestor that resolves is resolved (symlinks included) and stat-ed, and the source is a reference
-  when that ancestor is the namespace or a directory inside it, or when the resolved landing path falls under the namespace.
-  An absent source that would land beside the namespace, including a sibling namespace that does not exist yet, is not a
-  reference to this namespace. A namespace that does not exist yet is referenced by an absent source that names it.
-- A dangling symlink source is taken at its own name; Docker cannot create the directory behind one, so the start fails and
-  nothing is mounted.
-- **Fail closed:** a source or namespace that cannot be examined for a reason other than absence is `ErrUnavailable`, as before.
-  So is a namespace with more than 4096 directories (the walk bound), and a cancelled context. Every lookup on a source runs
-  under the existing one-in-flight slot. The data writer now shares one pass across the whole inventory, so a namespace is
-  walked once, not once per source.
-- On a platform other than Linux the identity logic does not exist; the fallback reports a reference with `ErrUnsupported`.
+**Semantics.**
 
-**Behaviour change.** An absent source under the namespace used to be "not a reference" by design
-(`TestVolumeWithAbsentSourceUnderTheDataRootIsNotAReference`). That test is replaced by
-`TestSourceAbsentUnderTheNamespaceIsAReference`, which pins the reverse and also pins that a source landing beside the namespace
-still passes. The foreign-container behaviour is unchanged: a container with no mount under the namespace does not stop the
-writer, and a local volume with an empty `Source` is still skipped.
+- **Place.** A mount source and the namespace are each resolved to a place: the device (major:minor) of the filesystem they are on
+  and their path within that filesystem, read from `/proc/self/mountinfo` (field 3 is the device, field 4 the mount's root within
+  the filesystem, field 5 the mount point; octal escapes are decoded). The covering mount is the one with the longest mount
+  point, the latest of several at the same point. Two paths overlap when they are on the same device and one place's path is a
+  prefix of the other's: the same directory, an ancestor or a descendant. That sees a bind mount of the namespace, of the data
+  root or of a nested directory, including a bind-backed local volume, with no walk of the namespace: the cost depends on the
+  mount table, never on data an application controls. (An earlier version of this change enumerated directories below the
+  namespace under a bound of 4096; that let an application make its own writer refuse and was dropped.) It also reaches a
+  namespace that does not exist yet.
+- **Name.** The canonical source equals the namespace, is a prefix directory of it, is `/`, or lies under it. Kept as before.
+- **Symlinks.** A source is canonicalised by `candidateIPCCanonicalize`, which follows links one hop at a time with at most 40 hops
+  (the kernel's bound). A dangling link, a link partway along a path that does not exist, and a chain are judged by where they land,
+  because Docker creates a missing bind source on each start and follows the link once the target exists. A cycle or too many hops
+  is `ELOOP`, a refusal.
+- **Absent source.** A component that does not exist ends the walk and the rest is appended as written, so an absent source is judged
+  by where it would be created. Only Binds (`-v`) create a missing source; `HostConfig.Mounts` refuses one. The listing does not say
+  which created a mount, so a missing source of any mount type is treated alike, which fails closed and is accepted.
+- **Fail closed.** A mount table that cannot be read or parsed, a path no mount entry covers, a runner that is chrooted
+  (`/proc/self/root` is not `/`), a lookup error other than absence, and a cancelled context are all refusals.
+- **Mount namespace.** The mount table is the runner's own, so the check assumes the runner and dockerd share the host mount namespace.
+  The daemon dialer compares the daemon peer's `/proc/<pid>/ns/mnt` (from `SO_PEERCRED`) with the runner's on every connection and
+  records the verdict on the client; the inventory read refuses a client that has not seen a daemon in the runner's namespace. A client
+  that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
+- **Lookups.** Every filesystem lookup, the source canonicalisation, the namespace canonicalisation and the mount table read, runs under
+  the one-in-flight slot and is abandoned when the context ends, so a stuck mount cannot hold the caller past its deadline. A lookup that
+  does not return keeps the slot until it does; further lookups wait for it or give up at their own deadline.
 
-**Tests.** `candidate_ipc_identity_linux_test.go`: the overlap semantics for the namespace, an ancestor, a far ancestor, a
-descendant, a sibling and an unrelated directory (the alias is simulated by hooks where there is no privilege); an alias paths
-cannot see; absent sources inside, beside and under a symlinked parent; a missing namespace; a dangling symlink; stat failure,
-walk bound and cancellation failing closed; and `TestBindMountAliasIsAnOverlap`, which makes real `mount --bind` mounts of the
-namespace, the data root, a descendant and a sibling and skips without root or mount capability.
+**Behaviour change.** An absent source under the namespace used to be "not a reference" by design. That test is replaced by
+`TestSourceAbsentUnderTheNamespaceIsAReference`, which pins the reverse for a bind and a volume mount and pins that a source landing
+beside the namespace still passes. The foreign-container behaviour is unchanged: a container with no mount under the namespace does not
+stop the writer, and a local volume with an empty `Source` is still skipped.
+
+**Tests.** `candidate_ipc_identity_linux_test.go` (synthetic mount tables, so no privilege is needed): overlap for the namespace, an
+ancestor, the filesystem root, a descendant, a sibling and an unrelated directory; an alias that names cannot see; a namespace that does
+not exist yet; a different device; mount table parsing and stacking; unreadable, malformed and uncovering tables; absent sources inside
+and beside; links into the namespace, into a subdirectory that does not exist, relative, chained, partway along an absent path, a link
+elsewhere, cycles and the hop bound; cancellation and a stalled namespace lookup or mount table read. `daemon_peer_linux_test.go`: the mount
+namespace verdict. Root-only: `TestBindMountAliasIsAnOverlap` makes real `mount --bind` mounts of the namespace, the data root, a
+descendant and a sibling and reads the real mount table.
+
+**Where the native tests run.** `.github/workflows/app-runner-probe.yml`, job `foreign-container-beside-writer`, on a GitHub-hosted
+runner as root with a real daemon: `TestDockerAcceptanceBindBackedVolumeIsAConflict` creates a `type=none,o=bind` local volume of a
+namespace, starts a container on it, requires that the daemon lists a `/volumes/` source, and requires `ErrContainerConflict` for the
+namespace and none for a sibling; it also requires a conflict for a created container whose bind source is absent under the namespace.
+`TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` run there too. The job runs on every pull request that
+touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged) the root-only tests skip.
 
 **Limits.**
 
-- A single-file bind whose source is a file inside the namespace, reached through an alias, is not found by identity: only
-  directories below the namespace are enumerated, because enumerating every file would make the cost depend on the
-  namespace's data. A file source is still caught by name.
-- The walk bound of 4096 directories refuses the writer for a namespace that deep and wide; raise the bound if one is met.
-- The check is a point-in-time observation, as the data writer's comment says; a mount made after the pass is not seen, and
-  it is not exclusion against host root.
-- Identity cannot see a mount of the same filesystem object through a different device number, such as a FUSE or overlay
-  re-export that mints its own inodes.
-- The native acceptance named in the problem statement (a disposable runner creating a `type=none,o=bind` local volume and
-  expecting `ErrContainerConflict`) is not added here; the real-mount unit test covers the identity rule, not the daemon's
-  volume listing.
+- A bind-backed local volume is mounted on the host only while a container uses it. A created or stopped container that uses one lists the
+  daemon's `_data` directory, which is not yet a mount, so the table cannot see where it will lead. The volume's `Options.device` would
+  show it, but the runner's allow-list has no volume route; this is not covered.
+- The check is a point-in-time observation. A link retargeted, a directory renamed or a mount made between the check and the start is
+  not seen, and it is not exclusion against host root. This is the rename-during-check race.
+- A filesystem the mount table gives one device number for different trees (a btrfs subvolume layout with identical numbers), or one
+  that mints a different number per mount of the same tree, can hide or invent an overlap. A mount hidden beneath a later mount of its
+  parent is mapped by longest mount point.
+- A path through a regular file is `ENOTDIR`, a refusal.
 
 ## Resolutions (PR 4c)
 
@@ -1788,4 +1803,5 @@ Other results:
 
 - **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
+- **Inventory overlap by device and inode** (the follow-up above) together with an absent bind source under the data root: implemented, and resolved once the native acceptance run is green (see its resolution section).
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.

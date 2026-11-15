@@ -5,11 +5,14 @@ package driver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -42,25 +45,26 @@ func referencedFresh(t *testing.T, path, source string) (bool, error) {
 	return candidateIPCReferenced(context.Background(), path, source)
 }
 
-// aliasSource makes a path the filesystem cannot reach through names resolve to a real directory, the way a
-// bind-backed local volume reports /var/lib/docker/volumes/<id>/_data for a directory it mounts. It stands in
-// for a bind mount where the test has no privilege; TestBindMountAliasIsAnOverlap uses a real one.
-func aliasSource(t *testing.T, alias, real string) {
+// fakeMountInfo points the inventory at a synthetic /proc/self/mountinfo: every path lives on device 8:1 mounted
+// at "/", and each alias entry is a bind mount of an fs-relative directory at an unrelated mount point, the shape
+// the host shows for a bind-backed local volume. It stands in for a bind mount where the test has no privilege;
+// TestBindMountAliasIsAnOverlap uses real ones.
+func fakeMountInfo(t *testing.T, binds map[string]string) {
 	t.Helper()
-	oldResolve, oldStat := candidateIPCResolver, candidateIPCStatter
-	candidateIPCResolver = func(p string) (string, error) {
-		if p == alias {
-			return alias, nil
-		}
-		return oldResolve(p)
+	var b strings.Builder
+	b.WriteString("1 0 8:1 / / rw,relatime shared:1 - ext4 /dev/vda1 rw\n")
+	n := 2
+	for point, root := range binds {
+		fmt.Fprintf(&b, "%d 1 8:1 %s %s rw,relatime shared:1 - ext4 /dev/vda1 rw\n", n, root, point)
+		n++
 	}
-	candidateIPCStatter = func(p string) (candidateIPCNode, error) {
-		if p == alias {
-			return oldStat(real)
-		}
-		return oldStat(p)
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	if err := os.WriteFile(file, []byte(b.String()), 0600); err != nil {
+		t.Fatal(err)
 	}
-	t.Cleanup(func() { candidateIPCResolver, candidateIPCStatter = oldResolve, oldStat })
+	old := candidateIPCMountInfoPath
+	candidateIPCMountInfoPath = file
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
 }
 
 func TestIdentityOverlapSemantics(t *testing.T) {
@@ -74,13 +78,14 @@ func TestIdentityOverlapSemantics(t *testing.T) {
 		{"the namespace itself", f.namespace, true},
 		{"an ancestor of the namespace (the data root)", f.data, true},
 		{"a far ancestor", f.root, true},
+		{"the filesystem root", "/", true},
 		{"a descendant of the namespace", f.nested, true},
 		{"a sibling namespace", f.sibling, false},
-		{"a directory elsewhere", t.TempDir(), false},
+		{"a directory elsewhere", "/srv/elsewhere", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			aliasSource(t, alias, c.real)
+			fakeMountInfo(t, map[string]string{alias: c.real})
 			got, err := referencedFresh(t, f.namespace, alias)
 			if err != nil || got != c.want {
 				t.Fatalf("overlap=%v err=%v, want %v", got, err, c.want)
@@ -89,21 +94,100 @@ func TestIdentityOverlapSemantics(t *testing.T) {
 	}
 }
 
-// A hard alias a name comparison cannot see: the same directory reached under a path that is not under the
-// namespace, not a symlink, and not equal to it. The source's device and inode are the namespace's.
+// The alias is not a symlink, is not under the namespace and does not name it: only the mount table shows
+// where it leads.
 func TestIdentityOverlapSeesAnAliasThatPathsDoNot(t *testing.T) {
 	f := newIdentityFixture(t)
 	const alias = "/srv/unrelated/looks-harmless"
-	aliasSource(t, alias, f.namespace)
+	fakeMountInfo(t, map[string]string{alias: f.namespace})
 	if strings.HasPrefix(alias, f.namespace) || strings.HasPrefix(f.namespace, alias) {
 		t.Fatal("fixture: the alias must not overlap by name")
 	}
 	if got, err := referencedFresh(t, f.namespace, alias); err != nil || !got {
-		t.Fatal("alias of the namespace by device and inode missed", got, err)
+		t.Fatal("alias of the namespace by device and path within the filesystem missed", got, err)
 	}
-	// The same alias against the sibling namespace is not an overlap.
 	if got, err := referencedFresh(t, f.sibling, alias); err != nil || got {
 		t.Fatal("alias reported against the wrong namespace", got, err)
+	}
+	// An alias of a path below the data root reaches a namespace that does not exist yet.
+	future := filepath.Join(f.data, "ns-future")
+	fakeMountInfo(t, map[string]string{alias: future})
+	if got, err := referencedFresh(t, future, alias); err != nil || !got {
+		t.Fatal("alias of a namespace that does not exist yet missed", got, err)
+	}
+}
+
+func TestDifferentDeviceNeverOverlaps(t *testing.T) {
+	f := newIdentityFixture(t)
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	body := "1 0 8:1 / / rw - ext4 /dev/vda1 rw\n2 1 9:9 / /srv/other rw - ext4 /dev/vdb rw\n"
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := candidateIPCMountInfoPath
+	candidateIPCMountInfoPath = file
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
+	if got, err := referencedFresh(t, f.namespace, "/srv/other/sub"); err != nil || got {
+		t.Fatal("a path on another device was an overlap", got, err)
+	}
+}
+
+func TestMountInfoParsing(t *testing.T) {
+	raw := "36 35 98:0 /mnt\\040a /mnt2/with\\040space rw,noatime master:1 - ext3 /dev/root rw\n" +
+		"37 36 98:0 / /mnt2 rw - ext3 /dev/root rw\n"
+	mounts, err := parseCandidateIPCMountInfo([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(mounts) < 2 || mounts[0].point != "/mnt2/with space" || mounts[0].root != "/mnt a" || mounts[0].dev != "98:0" {
+		t.Fatalf("octal escapes or fields misread: %+v", mounts)
+	}
+	for _, bad := range []string{"1 2 3\n", "x y z w\n", ""} {
+		if _, err := parseCandidateIPCMountInfo([]byte(bad)); err == nil {
+			t.Fatalf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestStackedMountUsesTheTopmostEntry(t *testing.T) {
+	f := newIdentityFixture(t)
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	body := "1 0 8:1 / / rw - ext4 a rw\n" +
+		"2 1 8:2 / " + f.data + " rw - ext4 b rw\n" +
+		"3 1 8:3 / " + f.data + " rw - ext4 c rw\n" // covers the previous one
+	if err := os.WriteFile(file, []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	old := candidateIPCMountInfoPath
+	candidateIPCMountInfoPath = file
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
+	mounts, err := loadCandidateIPCMounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	place, err := mounts.place(f.namespace)
+	if err != nil || place.dev != "8:3" {
+		t.Fatal("the covering mount was not used", place, err)
+	}
+}
+
+func TestUnmappablePathsFailClosed(t *testing.T) {
+	f := newIdentityFixture(t)
+	old := candidateIPCMountInfoPath
+	t.Cleanup(func() { candidateIPCMountInfoPath = old })
+	candidateIPCMountInfoPath = filepath.Join(t.TempDir(), "missing")
+	if got, err := referencedFresh(t, f.namespace, f.sibling); !errors.Is(err, ErrUnavailable) || got {
+		t.Fatal("an unreadable mount table passed", got, err)
+	}
+	file := filepath.Join(t.TempDir(), "mountinfo")
+	os.WriteFile(file, []byte("1 0 8:1 / /somewhere rw - ext4 a rw\n"), 0600) // nothing covers the namespace
+	candidateIPCMountInfoPath = file
+	if got, err := referencedFresh(t, f.namespace, f.sibling); !errors.Is(err, ErrUnavailable) || got {
+		t.Fatal("a path with no mount entry passed", got, err)
+	}
+	os.WriteFile(file, []byte("garbage\n"), 0600)
+	if got, err := referencedFresh(t, f.namespace, f.sibling); !errors.Is(err, ErrUnavailable) || got {
+		t.Fatal("a malformed mount table passed", got, err)
 	}
 }
 
@@ -113,7 +197,7 @@ func TestAbsentSourceUnderTheNamespaceIsAReference(t *testing.T) {
 		"directly under the namespace": filepath.Join(f.namespace, "created-on-start"),
 		"deep under the namespace":     filepath.Join(f.namespace, "a", "b", "c"),
 		"under a nested directory":     filepath.Join(f.nested, "new"),
-		"dotdot back into it":          filepath.Join(f.sibling, "..", "ns-a", "x"),
+		"dotdot back into it":          f.sibling + "/../ns-a/x",
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := referencedFresh(t, f.namespace, source); err != nil || !got {
@@ -121,7 +205,6 @@ func TestAbsentSourceUnderTheNamespaceIsAReference(t *testing.T) {
 			}
 		})
 	}
-	// Reached through a symlinked parent, the source would still be created inside the namespace.
 	link := filepath.Join(f.root, "link")
 	if err := os.Symlink(f.namespace, link); err != nil {
 		t.Fatal(err)
@@ -146,7 +229,6 @@ func TestAbsentSourceElsewhereIsNotAReference(t *testing.T) {
 	}
 }
 
-// A namespace that does not exist yet is reached by an absent source with the same name.
 func TestAbsentSourceThatIsTheMissingNamespaceIsAReference(t *testing.T) {
 	f := newIdentityFixture(t)
 	future := filepath.Join(f.data, "ns-future")
@@ -157,35 +239,108 @@ func TestAbsentSourceThatIsTheMissingNamespaceIsAReference(t *testing.T) {
 	}
 }
 
-// Docker cannot create the directory behind a dangling symlink, so the start fails and nothing is mounted.
-func TestDanglingSymlinkSourceIsNotAReference(t *testing.T) {
+// A symlink is followed to where it lands, existing or not: Docker follows it when the target appears, and it
+// creates the target of a missing source on each start.
+func TestSymlinkSourcesAreJudgedWhereTheyLand(t *testing.T) {
 	f := newIdentityFixture(t)
-	dangling := filepath.Join(f.root, "dangling")
-	if err := os.Symlink(filepath.Join(f.root, "nowhere"), dangling); err != nil {
+	link := func(name, target string) string {
+		p := filepath.Join(f.root, name)
+		if err := os.Symlink(target, p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	t.Run("dangling link into the namespace", func(t *testing.T) {
+		l := link("into-ns", filepath.Join(f.namespace, "not-yet"))
+		if got, err := referencedFresh(t, f.namespace, l); err != nil || !got {
+			t.Fatal("dangling link into the namespace passed", got, err)
+		}
+	})
+	t.Run("dangling link into a subdirectory that does not exist", func(t *testing.T) {
+		l := link("into-missing", filepath.Join(f.namespace, "nope", "deeper", "still"))
+		if got, err := referencedFresh(t, f.namespace, l); err != nil || !got {
+			t.Fatal("link into a missing subdirectory passed", got, err)
+		}
+	})
+	t.Run("relative dangling link into the namespace", func(t *testing.T) {
+		l := link("rel", "data/ns-a/later")
+		if got, err := referencedFresh(t, f.namespace, l); err != nil || !got {
+			t.Fatal("relative dangling link passed", got, err)
+		}
+	})
+	t.Run("link chain", func(t *testing.T) {
+		l2 := link("chain2", filepath.Join(f.namespace, "end"))
+		l1 := link("chain1", l2)
+		if got, err := referencedFresh(t, f.namespace, l1); err != nil || !got {
+			t.Fatal("link chain into the namespace passed", got, err)
+		}
+	})
+	t.Run("symlink component partway along an absent path", func(t *testing.T) {
+		l := link("mid", filepath.Join(f.namespace, "gone"))
+		if got, err := referencedFresh(t, f.namespace, filepath.Join(l, "a", "b")); err != nil || !got {
+			t.Fatal("absent path through a dangling link passed", got, err)
+		}
+	})
+	t.Run("dangling link elsewhere", func(t *testing.T) {
+		l := link("away", filepath.Join(f.root, "nowhere"))
+		if got, err := referencedFresh(t, f.namespace, l); err != nil || got {
+			t.Fatal("dangling link outside the namespace was a reference", got, err)
+		}
+	})
+	t.Run("cycle fails closed", func(t *testing.T) {
+		a, b := filepath.Join(f.root, "cyc-a"), filepath.Join(f.root, "cyc-b")
+		os.Symlink(b, a)
+		os.Symlink(a, b)
+		if got, err := referencedFresh(t, f.namespace, a); !errors.Is(err, ErrUnavailable) || got {
+			t.Fatal("a link cycle passed", got, err)
+		}
+		self := filepath.Join(f.root, "self")
+		os.Symlink(self, self)
+		if got, err := referencedFresh(t, f.namespace, filepath.Join(self, "x")); !errors.Is(err, ErrUnavailable) || got {
+			t.Fatal("a self link passed", got, err)
+		}
+	})
+	t.Run("hop bound", func(t *testing.T) {
+		chain := func(n int) string {
+			prev := filepath.Join(f.namespace, "final")
+			for i := 0; i < n; i++ {
+				cur := filepath.Join(f.root, fmt.Sprintf("hop%d-%d", n, i))
+				if err := os.Symlink(prev, cur); err != nil {
+					t.Fatal(err)
+				}
+				prev = cur
+			}
+			return prev
+		}
+		if got, err := referencedFresh(t, f.namespace, chain(candidateIPCMaxLinkHops)); err != nil || !got {
+			t.Fatal("a chain at the bound was refused", got, err)
+		}
+		if got, err := referencedFresh(t, f.namespace, chain(candidateIPCMaxLinkHops+1)); !errors.Is(err, ErrUnavailable) || got {
+			t.Fatal("a chain past the bound passed", got, err)
+		}
+	})
+}
+
+// Docker cannot create the directory behind a dangling symlink at a path it cannot make, but a link that lands
+// elsewhere is simply elsewhere.
+func TestCanonicalizeMatchesTheKernelForExistingPaths(t *testing.T) {
+	f := newIdentityFixture(t)
+	link := filepath.Join(f.root, "to-data")
+	if err := os.Symlink("data/ns-a/../ns-b", link); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := referencedFresh(t, f.namespace, dangling); err != nil || got {
-		t.Fatal("a dangling symlink source outside the namespace was treated as a reference", got, err)
+	got, err := candidateIPCCanonicalize(link + "/")
+	want, _ := filepath.EvalSymlinks(link)
+	if err != nil || got != want {
+		t.Fatalf("canonical %q (%v), kernel %q", got, err, want)
 	}
-}
-
-func TestIdentityStatFailureFailsClosed(t *testing.T) {
-	f := newIdentityFixture(t)
-	old := candidateIPCStatter
-	candidateIPCStatter = func(string) (candidateIPCNode, error) { return candidateIPCNode{}, os.ErrPermission }
-	t.Cleanup(func() { candidateIPCStatter = old })
-	if got, err := referencedFresh(t, f.namespace, f.sibling); !errors.Is(err, ErrUnavailable) || got {
-		t.Fatal("an unreadable source identity passed", got, err)
+	if _, err := candidateIPCCanonicalize(filepath.Join(f.sibling, "file", "x")); err != nil {
+		t.Fatal("a missing tail must resolve", err)
 	}
-}
-
-func TestNamespaceWalkBoundFailsClosed(t *testing.T) {
-	f := newIdentityFixture(t)
-	old := candidateIPCNamespaceDirLimit
-	candidateIPCNamespaceDirLimit = 2
-	t.Cleanup(func() { candidateIPCNamespaceDirLimit = old })
-	if got, err := referencedFresh(t, f.namespace, f.sibling); !errors.Is(err, ErrUnavailable) || got {
-		t.Fatal("a namespace too large to enumerate passed", got, err)
+	file := filepath.Join(f.sibling, "regular")
+	os.WriteFile(file, nil, 0600)
+	if _, err := candidateIPCCanonicalize(filepath.Join(file, "x")); !errors.Is(err, syscall.ENOTDIR) {
+		t.Fatal("a path through a regular file must fail", err)
 	}
 }
 
@@ -198,8 +353,49 @@ func TestIdentityHonoursCancellation(t *testing.T) {
 	}
 }
 
-// A real bind mount of the namespace, of its parent and of a descendant. Needs root and a mount-capable
-// environment, so it skips elsewhere; the container acceptance job runs it.
+// Namespace-side lookups are abandoned at the deadline like source lookups: a stuck mount cannot hold the caller.
+func TestNamespaceLookupIsAbandonedWhenTheContextEnds(t *testing.T) {
+	f := newIdentityFixture(t)
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	old := candidateIPCNamespaceResolver
+	candidateIPCNamespaceResolver = func(string) (string, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release
+		return "", os.ErrNotExist
+	}
+	t.Cleanup(func() { close(release); candidateIPCNamespaceResolver = old })
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if got, err := candidateIPCReferenced(ctx, f.namespace, f.sibling); err == nil || got {
+		t.Fatal("a stuck namespace lookup held the caller", got, err)
+	}
+	select {
+	case <-entered:
+	default:
+		t.Fatal("the namespace lookup was not routed through the resolver")
+	}
+}
+
+func TestMountInfoReadIsAbandonedWhenTheContextEnds(t *testing.T) {
+	f := newIdentityFixture(t)
+	release := make(chan struct{})
+	old := candidateIPCMountInfoReader
+	candidateIPCMountInfoReader = func() ([]byte, error) { <-release; return nil, os.ErrNotExist }
+	t.Cleanup(func() { close(release); candidateIPCMountInfoReader = old })
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if got, err := candidateIPCReferenced(ctx, f.namespace, f.sibling); err == nil || got {
+		t.Fatal("a stuck mount table read held the caller", got, err)
+	}
+}
+
+// Real bind mounts of the namespace, of the data root, of a descendant and of a sibling, read back through the
+// real /proc/self/mountinfo. Needs root and a mount-capable environment, so it skips elsewhere; the foreign
+// container job of the app runner probe workflow runs it as root on a GitHub-hosted runner.
 func TestBindMountAliasIsAnOverlap(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("bind mounts need root")

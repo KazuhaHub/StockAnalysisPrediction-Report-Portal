@@ -84,7 +84,7 @@ func countResolutions(t *testing.T) *atomic.Int64 {
 	t.Helper()
 	var n atomic.Int64
 	old := candidateIPCResolver
-	candidateIPCResolver = func(p string) (string, error) { n.Add(1); return filepath.EvalSymlinks(p) }
+	candidateIPCResolver = func(p string) (string, error) { n.Add(1); return candidateIPCCanonicalize(p) }
 	t.Cleanup(func() { candidateIPCResolver = old })
 	return &n
 }

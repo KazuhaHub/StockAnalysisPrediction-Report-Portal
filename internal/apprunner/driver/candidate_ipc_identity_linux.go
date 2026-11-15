@@ -3,82 +3,100 @@
 package driver
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
-
-	"golang.org/x/sys/unix"
 )
 
-// Mount overlap is decided by identity as well as by name. A name comparison cannot see a bind mount: a local
-// volume created with type=none,o=bind is listed with a /var/lib/docker/volumes/<id>/_data source, and a bind
-// mount of a directory under another path is a different name for the same directory. Both are the same
-// device and inode as the directory they mount.
+// Mount overlap is decided by where a path really lives as well as by its name. A name comparison cannot see a
+// bind mount: a local volume created with type=none,o=bind is listed with a /var/lib/docker/volumes/<id>/_data
+// source, and a bind mount of a directory under another path is a different name for the same directory.
+//
+// Both a mount source and the namespace are resolved to a place: the device (major:minor) of the filesystem
+// they are on and their path within that filesystem. The place comes from /proc/self/mountinfo, where field 3 is
+// the device and field 4 is the mount's root within the filesystem, so the cost depends on the mount table and
+// never on the data under the namespace. Two paths overlap when they are on the same device and one place's
+// path is a prefix of the other's: the same directory, an ancestor, or a descendant.
+//
+// This assumes the runner and dockerd share the host mount namespace and that the runner is not chrooted; the
+// daemon's namespace is compared with the runner's when the daemon connection is made (see daemonPeer), and a
+// chrooted runner is refused here.
 
-// candidateIPCNode is the identity of a filesystem object: st_dev and st_ino.
-type candidateIPCNode struct{ dev, ino uint64 }
+// candidateIPCMaxLinkHops is how many symbolic links one path may traverse, as the kernel allows.
+const candidateIPCMaxLinkHops = 40
 
-// candidateIPCStatter returns the identity of a path, following symlinks. A variable so a test can stand in for
-// a bind mount where it has no privilege to make one.
-var candidateIPCStatter = func(path string) (candidateIPCNode, error) {
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err != nil {
-		return candidateIPCNode{}, err
+// candidateIPCMountInfoPath names the mount table. A variable so a test can supply one.
+var candidateIPCMountInfoPath = "/proc/self/mountinfo"
+
+// candidateIPCMountInfoReader reads the mount table. A variable so a test can stall it.
+var candidateIPCMountInfoReader = func() ([]byte, error) {
+	if root, err := os.Readlink("/proc/self/root"); err != nil || root != "/" {
+		return nil, ErrUnavailable
 	}
-	return candidateIPCNode{dev: uint64(st.Dev), ino: uint64(st.Ino)}, nil
+	return os.ReadFile(candidateIPCMountInfoPath)
 }
 
-// candidateIPCNamespaceDirLimit bounds how many directories below a namespace are enumerated. A namespace with
-// more is refused as unavailable rather than guessed at.
-var candidateIPCNamespaceDirLimit = 4096
+// candidateIPCNamespaceResolver canonicalises a namespace path. A variable so a test can stall it.
+var candidateIPCNamespaceResolver = candidateIPCCanonicalize
 
-// candidateIPCResolution is one source's answer as one inventory pass saw it.
-type candidateIPCResolution struct {
-	// canonical is the symlink-free path the source names. For an absent source it is the path the source
-	// would have once Docker creates it: the resolved deepest existing ancestor plus the missing remainder.
-	canonical string
-	// missing marks a source that does not exist yet.
-	missing bool
-	// node is the identity of the source, or of its deepest existing ancestor when it is missing.
-	node candidateIPCNode
-}
+// candidateIPCPlace is a path's device and its path within that device's filesystem.
+type candidateIPCPlace struct{ dev, path string }
 
-// candidateIPCNamespace is the identity picture of one namespace directory.
-type candidateIPCNamespace struct {
-	// ancestors holds the namespace's strict ancestors up to the filesystem root.
-	ancestors map[candidateIPCNode]struct{}
-	// inside holds the namespace itself and every directory below it.
-	inside map[candidateIPCNode]struct{}
-}
+type candidateIPCMount struct{ dev, root, point string }
 
-// candidateIPCPass is one inventory pass. The filesystem is asked about a source once per pass and about a
-// namespace once per pass. Nothing outlives the pass, so a symlink retargeted or a mount made between two
-// passes is seen by the second.
+type candidateIPCMounts []candidateIPCMount
+
+// candidateIPCPass is one inventory pass. The mount table, each source and each namespace are asked about once
+// per pass and nothing outlives it, so a symlink retargeted or a mount made between two passes is seen by the
+// second.
 type candidateIPCPass struct {
+	mounts     candidateIPCMounts
 	sources    map[string]candidateIPCResolution
-	namespaces map[string]*candidateIPCNamespace
+	namespaces map[string]candidateIPCNamespace
+}
+
+// candidateIPCResolution is one source's canonical path (where it lands, for an absent one) and its place.
+type candidateIPCResolution struct {
+	canonical string
+	place     candidateIPCPlace
+}
+
+type candidateIPCNamespace struct {
+	canonical string
+	place     candidateIPCPlace
 }
 
 func newCandidateIPCPass() *candidateIPCPass {
-	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]*candidateIPCNamespace{}}
+	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]candidateIPCNamespace{}}
+}
+
+// candidateIPCReferenced reports whether a mount source overlaps the namespace directory path. See
+// candidateIPCPass.referenced for the exact semantics.
+func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
+	return newCandidateIPCPass().referenced(ctx, path, source)
 }
 
 // referenced reports whether a container mount source overlaps the namespace directory path. A source
-// overlaps when it is the namespace, an ancestor of it, or a descendant of it, by any of:
+// overlaps when it is the namespace, an ancestor of it, or a descendant of it, by either of:
 //
-//   - name: the canonical (symlink-free) source equals the namespace, is a prefix directory of it, or lies
-//     under it;
-//   - identity: the source's st_dev/st_ino equals that of the namespace, of one of its ancestors up to the
-//     filesystem root, or of a directory below it, which is how a bind mount of any of them is seen;
-//   - creation: a source that does not exist is judged by the deepest existing ancestor it would be created
-//     under (Docker creates a missing -v source when the container starts), so an absent source that would
-//     land in the namespace is a reference. An absent source that lands elsewhere, including a not yet created
-//     sibling namespace, is not.
+//   - name: the canonical source equals the namespace, is a prefix directory of it, is "/", or lies under it;
+//   - place: the source and the namespace are on the same device and one's path within the filesystem is a
+//     prefix of the other's. That is how a bind mount of the namespace, of the data root or of a nested
+//     directory is seen, including a bind-backed local volume, and it also reaches a namespace that does not
+//     exist yet.
 //
-// A source or namespace that cannot be examined for a reason other than absence is a refusal.
+// A source is canonicalised by following symbolic links one hop at a time (at most 40, as the kernel does),
+// including a dangling link and a link partway along a path that does not exist. A path that does not exist is
+// taken to land where its existing ancestor resolves plus the missing remainder, because Docker creates a missing
+// bind source when the container starts (Binds, or -v; HostConfig.Mounts refuses one, but both are treated alike,
+// which fails closed). A link cycle or too many hops, a mount table that cannot be read, and a path no mount
+// entry covers are refusals. Every filesystem lookup, on the source side and on the namespace side, runs under
+// the one-in-flight slot and is abandoned when the context ends.
 func (p *candidateIPCPass) referenced(ctx context.Context, path, source string) (bool, error) {
 	if source == "" {
 		return false, nil
@@ -88,163 +106,198 @@ func (p *candidateIPCPass) referenced(ctx context.Context, path, source string) 
 	}
 	resolved, ok := p.sources[source]
 	if !ok {
-		var err error
-		if resolved, err = resolveCandidateIPCIdentity(ctx, source); err != nil {
-			return false, err
+		canonical, err := resolveCandidateIPCSource(ctx, source, candidateIPCResolver)
+		if err != nil {
+			return false, candidateIPCLookupError(ctx, err)
 		}
+		resolved = candidateIPCResolution{canonical: canonical}
 		p.sources[source] = resolved
-	}
-	canonical := resolved.canonical
-	if canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/") {
-		return true, nil
 	}
 	namespace, ok := p.namespaces[path]
 	if !ok {
-		var err error
-		if namespace, err = buildCandidateIPCNamespace(ctx, path); err != nil {
-			return false, err
-		}
-		p.namespaces[path] = namespace
-	}
-	if _, in := namespace.inside[resolved.node]; in {
-		return true, nil
-	}
-	if resolved.missing {
-		// An absent source cannot be an ancestor of an existing namespace; only landing inside counts.
-		return false, nil
-	}
-	_, above := namespace.ancestors[resolved.node]
-	return above, nil
-}
-
-// resolveCandidateIPCIdentity canonicalises a source and takes its identity. Every lookup runs under the
-// process-wide slot, so a source on a stuck volume cannot pile up blocked threads.
-func resolveCandidateIPCIdentity(ctx context.Context, source string) (candidateIPCResolution, error) {
-	canonical, err := resolveCandidateIPCSource(ctx, source, candidateIPCResolver)
-	switch {
-	case err == nil:
-		node, err := candidateIPCStatNode(ctx, canonical)
-		if err != nil {
-			return candidateIPCResolution{}, err
-		}
-		return candidateIPCResolution{canonical: canonical, node: node}, nil
-	case errors.Is(err, os.ErrNotExist):
-		return resolveAbsentCandidateIPCSource(ctx, source)
-	case ctx.Err() != nil && errors.Is(err, ctx.Err()):
-		return candidateIPCResolution{}, err
-	default:
-		return candidateIPCResolution{}, ErrUnavailable
-	}
-}
-
-func candidateIPCStatNode(ctx context.Context, path string) (candidateIPCNode, error) {
-	node, err := candidateIPCSlotted(ctx, func() (candidateIPCNode, error) { return candidateIPCStatter(path) })
-	switch {
-	case err == nil:
-		return node, nil
-	case ctx.Err() != nil && errors.Is(err, ctx.Err()):
-		return candidateIPCNode{}, err
-	default:
-		return candidateIPCNode{}, ErrUnavailable
-	}
-}
-
-// resolveAbsentCandidateIPCSource finds where a source that does not exist would be created: it climbs to the
-// deepest ancestor that resolves, and keeps the missing remainder. A dangling symlink is taken at its own
-// name: Docker cannot create the directory behind one and fails the start, so nothing is ever mounted from it.
-func resolveAbsentCandidateIPCSource(ctx context.Context, source string) (candidateIPCResolution, error) {
-	current, rest := filepath.Clean(source), ""
-	for {
-		parent := filepath.Dir(current)
-		if parent == current {
-			return candidateIPCResolution{}, ErrUnavailable
-		}
-		rest = filepath.Join(filepath.Base(current), rest)
-		current = parent
-		// Ancestors are climbed with the real resolver, so the hook above still counts one resolution per source.
-		canonical, err := resolveCandidateIPCSource(ctx, current, filepath.EvalSymlinks)
+		canonical, err := resolveCandidateIPCSource(ctx, path, candidateIPCNamespaceResolver)
 		switch {
 		case err == nil:
-			node, err := candidateIPCStatNode(ctx, canonical)
-			if err != nil {
-				return candidateIPCResolution{}, err
-			}
-			return candidateIPCResolution{canonical: filepath.Join(canonical, rest), missing: true, node: node}, nil
 		case errors.Is(err, os.ErrNotExist):
-			continue
-		case ctx.Err() != nil && errors.Is(err, ctx.Err()):
-			return candidateIPCResolution{}, err
+			canonical = filepath.Clean(path)
 		default:
-			return candidateIPCResolution{}, ErrUnavailable
+			return false, candidateIPCLookupError(ctx, err)
+		}
+		namespace = candidateIPCNamespace{canonical: canonical}
+		p.namespaces[path] = namespace
+	}
+	for _, ns := range []string{path, namespace.canonical} {
+		if candidateIPCNameOverlap(resolved.canonical, ns) {
+			return true, nil
 		}
 	}
+	if p.mounts == nil {
+		mounts, err := loadCandidateIPCMounts(ctx)
+		if err != nil {
+			return false, err
+		}
+		p.mounts = mounts
+	}
+	if resolved.place == (candidateIPCPlace{}) {
+		place, err := p.mounts.place(resolved.canonical)
+		if err != nil {
+			return false, err
+		}
+		resolved.place = place
+		p.sources[source] = resolved
+	}
+	if namespace.place == (candidateIPCPlace{}) {
+		place, err := p.mounts.place(namespace.canonical)
+		if err != nil {
+			return false, err
+		}
+		namespace.place = place
+		p.namespaces[path] = namespace
+	}
+	return resolved.place.dev == namespace.place.dev &&
+		(candidateIPCPathWithin(resolved.place.path, namespace.place.path) || candidateIPCPathWithin(namespace.place.path, resolved.place.path)), nil
 }
 
-// buildCandidateIPCNamespace collects the identities that decide an overlap: the namespace's ancestors, the
-// namespace and the directories below it. Symlinks are not followed below the namespace. A namespace that does
-// not exist contributes only its existing ancestors.
-func buildCandidateIPCNamespace(ctx context.Context, path string) (*candidateIPCNamespace, error) {
-	namespace := &candidateIPCNamespace{ancestors: map[candidateIPCNode]struct{}{}, inside: map[candidateIPCNode]struct{}{}}
-	physical := filepath.Clean(path)
-	if canonical, err := filepath.EvalSymlinks(physical); err == nil {
-		physical = canonical
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, ErrUnavailable
+func candidateIPCNameOverlap(canonical, path string) bool {
+	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/")
+}
+
+// candidateIPCPathWithin reports whether inner is dir or lies under it.
+func candidateIPCPathWithin(dir, inner string) bool {
+	return dir == "/" || dir == inner || strings.HasPrefix(inner, dir+"/")
+}
+
+// candidateIPCLookupError keeps a context ending visible and turns every other failure into a refusal.
+func candidateIPCLookupError(ctx context.Context, err error) error {
+	if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+		return err
 	}
-	for _, start := range []string{filepath.Clean(path), physical} {
-		for dir := filepath.Dir(start); ; dir = filepath.Dir(dir) {
-			node, err := candidateIPCStatter(dir)
-			switch {
-			case err == nil:
-				namespace.ancestors[node] = struct{}{}
-			case !errors.Is(err, os.ErrNotExist):
-				return nil, ErrUnavailable
-			}
-			if dir == "/" {
-				break
-			}
-		}
-	}
-	self, err := candidateIPCStatter(physical)
-	switch {
-	case errors.Is(err, os.ErrNotExist):
-		return namespace, ctx.Err()
-	case err != nil:
-		return nil, ErrUnavailable
-	}
-	namespace.inside[self] = struct{}{}
-	pending, walked := []string{physical}, 0
+	return ErrUnavailable
+}
+
+// candidateIPCCanonicalize resolves a path the way the kernel does, one component and one link at a time,
+// except that a component that does not exist ends the walk instead of failing it: the rest is appended as
+// written (a "." is dropped, a ".." removes the previous component). The result is where the path lands once
+// something creates it. A cycle or more than candidateIPCMaxLinkHops links returns ELOOP, and a component that
+// is not a directory returns ENOTDIR.
+func candidateIPCCanonicalize(path string) (string, error) {
+	pending := candidateIPCComponents(path)
+	var resolved []string
+	hops := 0
+	missing := false
 	for len(pending) > 0 {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		dir := pending[len(pending)-1]
-		pending = pending[:len(pending)-1]
-		if walked++; walked > candidateIPCNamespaceDirLimit {
-			return nil, ErrUnavailable
-		}
-		entries, err := os.ReadDir(dir)
-		if errors.Is(err, os.ErrNotExist) {
+		name := pending[0]
+		pending = pending[1:]
+		switch name {
+		case "", ".":
+			continue
+		case "..":
+			if len(resolved) > 0 {
+				resolved = resolved[:len(resolved)-1]
+			}
 			continue
 		}
-		if err != nil {
-			return nil, ErrUnavailable
+		if missing {
+			resolved = append(resolved, name)
+			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
+		target, err := os.Readlink("/" + strings.Join(append(append([]string{}, resolved...), name), "/"))
+		switch {
+		case err == nil:
+			if hops++; hops > candidateIPCMaxLinkHops {
+				return "", syscall.ELOOP
 			}
-			child := filepath.Join(dir, entry.Name())
-			var st unix.Stat_t
-			if err := unix.Lstat(child, &st); err != nil {
-				if errors.Is(err, os.ErrNotExist) {
-					continue
-				}
-				return nil, ErrUnavailable
+			if strings.HasPrefix(target, "/") {
+				resolved = nil
 			}
-			namespace.inside[candidateIPCNode{dev: uint64(st.Dev), ino: uint64(st.Ino)}] = struct{}{}
-			pending = append(pending, child)
+			pending = append(candidateIPCComponents(target), pending...)
+		case errors.Is(err, syscall.EINVAL): // exists, not a link
+			resolved = append(resolved, name)
+		case errors.Is(err, os.ErrNotExist):
+			missing = true
+			resolved = append(resolved, name)
+		default:
+			return "", err
 		}
 	}
-	return namespace, ctx.Err()
+	return "/" + strings.Join(resolved, "/"), nil
+}
+
+func candidateIPCComponents(path string) []string {
+	return strings.Split(path, "/")
+}
+
+func loadCandidateIPCMounts(ctx context.Context) (candidateIPCMounts, error) {
+	raw, err := candidateIPCSlotted(ctx, candidateIPCMountInfoReader)
+	if err != nil {
+		return nil, candidateIPCLookupError(ctx, err)
+	}
+	mounts, err := parseCandidateIPCMountInfo(raw)
+	if err != nil {
+		return nil, ErrUnavailable
+	}
+	return mounts, nil
+}
+
+// parseCandidateIPCMountInfo reads the fields the overlap needs: the device (3), the mount's root within its
+// filesystem (4) and the mount point (5). Spaces, tabs, newlines and backslashes are octal escapes in a path.
+func parseCandidateIPCMountInfo(raw []byte) (candidateIPCMounts, error) {
+	var mounts candidateIPCMounts
+	for _, line := range bytes.Split(raw, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		fields := strings.Fields(string(line))
+		if len(fields) < 7 || !strings.Contains(fields[2], ":") {
+			return nil, ErrInvalidResponse
+		}
+		root, point := unescapeCandidateIPCMountField(fields[3]), unescapeCandidateIPCMountField(fields[4])
+		if !strings.HasPrefix(root, "/") || !strings.HasPrefix(point, "/") {
+			return nil, ErrInvalidResponse
+		}
+		mounts = append(mounts, candidateIPCMount{dev: fields[2], root: filepath.Clean(root), point: filepath.Clean(point)})
+	}
+	if len(mounts) == 0 {
+		return nil, ErrInvalidResponse
+	}
+	return mounts, nil
+}
+
+func unescapeCandidateIPCMountField(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+3 < len(s) {
+			if n, err := strconv.ParseUint(s[i+1:i+4], 8, 8); err == nil {
+				b.WriteByte(byte(n))
+				i += 3
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// place maps a canonical absolute path to its device and path within the filesystem: the covering mount is the
+// one with the longest mount point, and the topmost (latest) of several at the same point. No covering mount is
+// an error: the path cannot be placed.
+func (m candidateIPCMounts) place(path string) (candidateIPCPlace, error) {
+	best := -1
+	for i, mount := range m {
+		if !candidateIPCPathWithin(mount.point, path) {
+			continue
+		}
+		if best < 0 || len(mount.point) >= len(m[best].point) {
+			best = i
+		}
+	}
+	if best < 0 {
+		return candidateIPCPlace{}, ErrUnavailable
+	}
+	mount := m[best]
+	rel := strings.TrimPrefix(path, mount.point)
+	return candidateIPCPlace{dev: mount.dev, path: filepath.Join(mount.root, rel)}, nil
 }
