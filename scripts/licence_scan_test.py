@@ -19,7 +19,7 @@ POLICY = {
     "election_only": ["FTL"],
     "elections": [
         {"component": "dompurify", "declared": "MPL-2.0 OR Apache-2.0", "elected": "Apache-2.0", "reason": "dual"},
-        {"component": "github.com/golang/freetype", "declared": "GPL-2.0-or-later", "elected": "FTL", "reason": "dual"},
+        {"component": "github.com/golang/freetype", "declared": "GPL-2.0-or-later", "offered": "GPL-2.0-or-later OR FTL", "elected": "FTL", "reason": "dual"},
     ],
     "exclusions": [
         {"component": "elkjs", "requires": "elk-build-test", "reason": "ELK layout aliased to an empty module"},
@@ -295,8 +295,9 @@ GO_TEXT = b"Copyright 2009 The Go Authors.\n\nRedistribution and use in source a
 OTHER_TEXT = GO_TEXT + b"An extra clause.\n"
 REVIEWED_POLICY = dict(POLICY, reviewed=[
     {"components": ["golang.org/x/sys", "golang.org/x/text"], "reviewed_as": "BSD-3-Clause", "file": "LICENSE",
+     "declared": "BSD-Source-Code",
      "sha256": hashlib.sha256(GO_TEXT).hexdigest(), "reason": "Standard Go BSD 3-clause text."},
-    {"components": ["khroma"], "reviewed_as": "MIT", "file": "license",
+    {"components": ["khroma"], "reviewed_as": "MIT", "file": "license", "declared": "",
      "sha256": hashlib.sha256(b"The MIT License (MIT)\n").hexdigest(), "reason": "MIT text, no manifest field."},
 ])
 
@@ -376,6 +377,8 @@ class ReviewedTests(unittest.TestCase):
             os.makedirs(nm)
             with open(os.path.join(nm, "license"), "wb") as f:
                 f.write(b"The MIT License (MIT)\n")
+            with open(os.path.join(nm, "package.json"), "w") as f:
+                f.write('{"version": "2.1.0"}')
             sbom = {"components": [
                 {"name": "golang.org/x/sys", "version": "v0.1.0", "purl": "pkg:golang/golang.org/x/sys@v0.1.0?type=module",
                  "licenses": [{"license": {"id": "BSD-Source-Code"}}]},
@@ -409,11 +412,315 @@ class ReviewedTests(unittest.TestCase):
     def test_reader_refuses_to_leave_the_package_directory(self):
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, "node_modules", "p"))
+            with open(os.path.join(d, "node_modules", "p", "package.json"), "w") as f:
+                f.write('{"version": "1"}')
             with open(os.path.join(d, "node_modules", "secret"), "wb") as f:
                 f.write(b"x")
             reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
             self.assertIsNone(reader({"name": "p", "version": "1", "purl": "pkg:npm/p@1"}, "../secret"))
 
+
+
+def with_children(parent, *children):
+    parent = dict(parent)
+    parent["components"] = [dict(c) for c in children]
+    return parent
+
+
+def ref(c, bom_ref):
+    return dict(c, **{"bom-ref": bom_ref})
+
+
+class NestedComponentTests(unittest.TestCase):
+    """cyclonedx-npm nests a package that is not hoisted inside its parent's components."""
+
+    def test_nested_denied_package_under_an_allowed_parent_fails(self):
+        parent = with_children(ref(comp("parent", "MIT"), "root|parent"), ref(comp("child", "GPL-2.0-only"), "root|parent|child"))
+        r = run([parent])
+        self.assertFalse(r["ok"])
+        self.assertEqual([c["name"] for c in r["failures"]], ["child"])
+        self.assertEqual(len(r["components"]), 2)
+
+    def test_nesting_is_followed_to_any_depth(self):
+        deep = ref(comp("c", "SSPL-1.0"), "r|a|b|c")
+        tree = with_children(ref(comp("a", "MIT"), "r|a"), with_children(ref(comp("b", "MIT"), "r|a|b"), deep))
+        r = run([tree])
+        self.assertEqual([c["name"] for c in r["failures"]], ["c"])
+        self.assertEqual(len(r["components"]), 3)
+
+    def test_the_same_bom_ref_is_judged_once(self):
+        child = ref(comp("tslib", "0BSD"), "r|tslib@2")
+        r = run([ref(with_children(comp("a", "MIT"), child), "r|a"), ref(with_children(comp("b", "MIT"), child), "r|b")])
+        self.assertEqual(len(r["components"]), 3)
+
+    def test_distinct_bom_refs_of_one_package_are_each_judged(self):
+        r = run([ref(with_children(comp("a", "MIT"), ref(comp("katex", "MIT"), "r|a|katex")), "r|a"),
+                 ref(comp("katex", "MIT"), "r|katex")])
+        self.assertEqual(len(r["components"]), 3)
+
+    def test_a_nested_component_can_use_an_exclusion_or_election(self):
+        r = run([with_children(comp("host", "MIT"), comp("elkjs", "EPL-2.0"))], verified={"elk-build-test"})
+        self.assertTrue(r["ok"])
+
+    def test_cli_counts_nested_components_across_sboms(self):
+        with tempfile.TemporaryDirectory() as d:
+            pp = os.path.join(d, "p.json")
+            with open(pp, "w") as f:
+                json.dump(POLICY, f)
+            excerpt = os.path.join(HERE, "testdata", "nested_real_excerpt.json")
+            p = subprocess.run([sys.executable, "-I", os.path.join(HERE, "licence_scan.py"), "--policy", pp, excerpt],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 0, p.stdout)
+            # echarts+tslib, katex+commander, mermaid+katex, rehype-katex+katex: 4 parents, 4 nested.
+            self.assertIn("8 components", p.stdout)
+
+    def test_the_real_sbom_excerpt_has_nested_packages(self):
+        with open(os.path.join(HERE, "testdata", "nested_real_excerpt.json")) as f:
+            doc = json.load(f)
+        self.assertEqual(sum(len(c.get("components", [])) for c in doc["components"]), 4)
+
+
+class UnidentifiedLicenceTests(unittest.TestCase):
+    def test_entry_with_only_a_url_is_unknown(self):
+        c = comp("p")
+        c["licenses"] = [{"license": {"url": "https://example.com/terms"}}]
+        r, _ = one([c])
+        self.assertEqual((r["status"], r["reason"]), ("fail", "unknown"))
+
+    def test_entry_with_only_text_is_unknown(self):
+        c = comp("p")
+        c["licenses"] = [{"license": {"text": {"content": "do what you like"}}}]
+        r, _ = one([c])
+        self.assertEqual((r["status"], r["reason"]), ("fail", "unknown"))
+
+    def test_an_unidentified_entry_next_to_an_allowed_one_still_fails(self):
+        c = comp("p", "MIT")
+        c["licenses"].append({"license": {"url": "https://example.com/terms"}})
+        r, _ = one([c])
+        self.assertEqual(r["status"], "fail")
+
+    def test_an_empty_licence_list_is_still_no_licence(self):
+        c = comp("p")
+        c["licenses"] = []
+        r, _ = one([c])
+        self.assertEqual(r["reason"], "no-licence")
+
+
+class ReviewedDeclarationTests(unittest.TestCase):
+    """A reviewed-as record is pinned to the declaration it was reviewed against, as an election is."""
+
+    FILES = {("golang.org/x/sys", "LICENSE"): GO_TEXT}
+
+    def test_extra_gpl_term_makes_the_record_stale(self):
+        c, r = one([comp("golang.org/x/sys", expr="BSD-Source-Code AND GPL-3.0-only")],
+                   policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("stale" in w and "declar" in w for w in r["warnings"]))
+
+    def test_extra_agpl_term_makes_the_record_stale(self):
+        c, _ = one([comp("golang.org/x/sys", expr="BSD-Source-Code AND AGPL-3.0-or-later")],
+                   policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["status"], "fail")
+
+    def test_a_different_single_declaration_makes_the_record_stale(self):
+        c, _ = one([comp("golang.org/x/sys", "GPL-3.0-only")], policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["status"], "fail")
+
+    def test_the_pinned_declaration_still_passes(self):
+        c, _ = one([comp("golang.org/x/sys", "BSD-Source-Code")], policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["via"], "reviewed")
+
+    def test_spacing_and_case_of_the_declaration_do_not_matter(self):
+        c, _ = one([comp("golang.org/x/sys", expr="  bsd-source-code ")], policy=REVIEWED_POLICY, files=self.FILES)
+        self.assertEqual(c["via"], "reviewed")
+
+    def test_a_licence_appearing_where_none_was_declared_makes_the_record_stale(self):
+        files = {("khroma", "license"): b"The MIT License (MIT)\n"}
+        c, _ = one([comp("khroma", "GPL-3.0-only")], policy=REVIEWED_POLICY, files=files)
+        self.assertEqual(c["status"], "fail")
+
+    def test_a_record_without_a_declaration_is_never_applied(self):
+        rec = {k: v for k, v in REVIEWED_POLICY["reviewed"][0].items() if k != "declared"}
+        c, r = one([comp("golang.org/x/sys", "BSD-Source-Code")], policy=dict(REVIEWED_POLICY, reviewed=[rec]),
+                   files=self.FILES)
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("declared" in w for w in r["warnings"]))
+
+
+class ElectionOperandTests(unittest.TestCase):
+    def policy(self, **election):
+        e = {"component": "p", "declared": "Weird-1.0 OR MIT", "elected": "MIT", "reason": "x"}
+        e.update(election)
+        return dict(POLICY, elections=[e])
+
+    def test_elected_licence_that_is_an_or_operand_applies(self):
+        c, _ = one([comp("p", expr="Weird-1.0 OR MIT")], policy=self.policy())
+        self.assertEqual((c["status"], c["via"]), ("pass", "election"))
+
+    def test_elected_licence_missing_from_the_declaration_is_refused(self):
+        pol = self.policy(declared="Weird-1.0", elected="MIT")
+        c, r = one([comp("p", "Weird-1.0")], policy=pol)
+        self.assertEqual(c["status"], "fail")
+        self.assertTrue(any("operand" in w for w in r["warnings"]))
+
+    def test_an_and_operand_is_not_a_choice(self):
+        pol = self.policy(declared="Weird-1.0 AND MIT", elected="MIT")
+        c, _ = one([comp("p", expr="Weird-1.0 AND MIT")], policy=pol)
+        self.assertEqual(c["status"], "fail")
+
+    def test_an_or_nested_inside_an_and_still_offers_a_choice(self):
+        pol = self.policy(declared="ISC AND (Weird-1.0 OR MIT)", elected="MIT")
+        c, _ = one([comp("p", expr="ISC AND (Weird-1.0 OR MIT)")], policy=pol)
+        self.assertEqual(c["via"], "election")
+
+    def test_offered_expression_must_contain_the_declared_side(self):
+        pol = self.policy(declared="GPL-2.0-or-later", offered="LGPL-3.0-only OR MIT", elected="MIT")
+        c, _ = one([comp("p", "GPL-2.0-or-later")], policy=pol)
+        self.assertEqual(c["status"], "fail")
+
+    def test_offered_defaults_to_the_declaration(self):
+        c, _ = one([comp("dompurify", expr="(MPL-2.0 OR Apache-2.0)")])
+        self.assertEqual(c["via"], "election")
+
+
+class PackageRootTests(unittest.TestCase):
+    """Where a component's licence file is read from, and what the reader refuses."""
+
+    def tree(self, d, files):
+        for rel, body in files.items():
+            path = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as f:
+                f.write(body if isinstance(body, bytes) else body.encode())
+
+    def npm(self, name, version="1.0.0", path=None):
+        c = {"name": name, "version": version, "purl": f"pkg:npm/{name}@{version}"}
+        if path is not None:
+            c["properties"] = [{"name": "cdx:npm:package:path", "value": path}]
+        return c
+
+    def test_uses_the_install_path_the_sbom_gives(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"node_modules/a/node_modules/tslib/license": "NESTED",
+                          "node_modules/a/node_modules/tslib/package.json": '{"version": "2.3.0"}',
+                          "node_modules/tslib/license": "HOISTED",
+                          "node_modules/tslib/package.json": '{"version": "2.8.1"}'})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            c = self.npm("tslib", "2.3.0", "node_modules/a/node_modules/tslib")
+            self.assertEqual(reader(c, "license"), b"NESTED")
+
+    def test_falls_back_to_the_top_level_package_without_a_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"node_modules/khroma/license": "MIT", "node_modules/khroma/package.json": '{"version": "1.0.0"}'})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            self.assertEqual(reader(self.npm("khroma"), "license"), b"MIT")
+
+    def test_installed_version_must_equal_the_component_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"node_modules/khroma/license": "MIT", "node_modules/khroma/package.json": '{"version": "9.9.9"}'})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            with self.assertRaisesRegex(licence_scan.LicenceFileError, "version"):
+                reader(self.npm("khroma", "1.0.0"), "license")
+
+    def test_a_package_without_a_manifest_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"node_modules/khroma/license": "MIT"})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            with self.assertRaisesRegex(licence_scan.LicenceFileError, "package.json"):
+                reader(self.npm("khroma"), "license")
+
+    def test_install_paths_that_escape_node_modules_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"node_modules/x/license": "x", "outside/license": "SECRET",
+                          "outside/package.json": '{"version": "1.0.0"}'})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            for bad in ("../outside", "node_modules/../outside", os.path.join(d, "outside"), "/etc"):
+                with self.subTest(path=bad):
+                    with self.assertRaisesRegex(licence_scan.LicenceFileError, "escape|outside"):
+                        reader(self.npm("x", "1.0.0", bad), "license")
+
+    def test_purl_names_that_escape_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.tree(d, {"outside/license": "SECRET", "outside/package.json": '{"version": "1.0.0"}',
+                          "node_modules/x/package.json": "{}"})
+            reader = licence_scan.make_reader(node_modules=os.path.join(d, "node_modules"))
+            c = {"name": "outside", "version": "1.0.0", "purl": "pkg:npm/%2E%2E/outside@1.0.0"}
+            with self.assertRaisesRegex(licence_scan.LicenceFileError, "escape|outside"):
+                reader(c, "license")
+
+    def test_go_purl_paths_that_escape_the_module_cache_are_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            os.makedirs(os.path.join(d, "cache"))
+            self.tree(d, {"outside@v1.0.0/LICENSE": "SECRET"})
+            reader = licence_scan.make_reader(go_mod_cache=os.path.join(d, "cache"))
+            c = {"name": "x", "version": "v1.0.0", "purl": "pkg:golang/../outside@v1.0.0"}
+            with self.assertRaisesRegex(licence_scan.LicenceFileError, "escape|outside"):
+                reader(c, "LICENSE")
+
+    def test_evaluate_turns_a_refused_read_into_a_stale_record(self):
+        def reader(component, name):
+            raise licence_scan.LicenceFileError("installed version 9.9.9 is not 2.1.0")
+        r = evaluate({"components": [comp("khroma")]}, REVIEWED_POLICY, set(), reader)
+        self.assertFalse(r["ok"])
+        self.assertTrue(any("khroma" in w and "9.9.9" in w for w in r["warnings"]))
+
+
+class OwnWorkspaceTests(unittest.TestCase):
+    """Own status needs more than a matching name: an npm component must be a local workspace package."""
+
+    POLICY = dict(POLICY, own={"licences": ["AGPL-3.0-only"], "components": ["portal-status-ui", "@portal-app/"]})
+
+    def own(self, c, workspaces):
+        return evaluate({"components": [c]}, self.POLICY, set(), None, workspaces)["components"][0]
+
+    def local(self, name, group=None):
+        c = comp(name, "AGPL-3.0-only", group=group)
+        c["purl"] = "pkg:npm/" + (f"%40{group[1:]}/" if group else "") + name
+        return c
+
+    def test_a_workspace_package_is_own(self):
+        r = self.own(self.local("portal-status-ui"), {"portal-status-ui"})
+        self.assertEqual((r["status"], r["via"]), ("pass", "own"))
+
+    def test_a_scoped_workspace_package_is_own(self):
+        r = self.own(self.local("sdk", "@portal-app"), {"@portal-app/sdk"})
+        self.assertEqual(r["via"], "own")
+
+    def test_a_registry_package_with_the_same_name_is_not_own(self):
+        c = self.local("portal-status-ui")
+        c["externalReferences"] = [{"type": "distribution", "url": "https://registry.npmjs.org/portal-status-ui/-/x.tgz"}]
+        r = self.own(c, {"portal-status-ui"})
+        self.assertEqual(r["status"], "fail")
+
+    def test_a_same_named_package_outside_the_workspaces_is_not_own(self):
+        r = self.own(self.local("portal-status-ui"), {"something-else"})
+        self.assertEqual(r["status"], "fail")
+
+    def test_without_workspace_information_no_npm_package_is_own(self):
+        r = self.own(self.local("portal-status-ui"), None)
+        self.assertEqual(r["status"], "fail")
+
+    def test_go_modules_need_no_workspace(self):
+        c = comp("github.com/KazuhaHub/x", "AGPL-3.0-only")
+        c["purl"] = "pkg:golang/github.com/KazuhaHub/x@v1.0.0"
+        r = evaluate({"components": [c]}, POLICY, set())["components"][0]
+        self.assertEqual(r["via"], "own")
+
+    def test_cli_reads_workspaces_from_the_root_manifest(self):
+        with tempfile.TemporaryDirectory() as d:
+            for rel, body in {"package.json": '{"workspaces": ["packages/*"]}',
+                              "packages/ui/package.json": '{"name": "portal-status-ui"}'}.items():
+                os.makedirs(os.path.dirname(os.path.join(d, rel)), exist_ok=True)
+                with open(os.path.join(d, rel), "w") as f:
+                    f.write(body)
+            sp, pp = os.path.join(d, "s.json"), os.path.join(d, "p.json")
+            with open(sp, "w") as f:
+                json.dump({"components": [self.local("portal-status-ui")]}, f)
+            with open(pp, "w") as f:
+                json.dump(self.POLICY, f)
+            base = [sys.executable, "-I", os.path.join(HERE, "licence_scan.py"), "--policy", pp]
+            self.assertEqual(subprocess.run(base + [sp], capture_output=True, text=True).returncode, 1)
+            self.assertEqual(subprocess.run(base + ["--workspace-root", d, sp], capture_output=True, text=True).returncode, 0)
 
 class CliTests(unittest.TestCase):
     def scan(self, sbom, *extra):
@@ -519,6 +826,19 @@ class CheckedInPolicyTests(unittest.TestCase):
                              "LICENSE", "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad"),
             "MIT": (["khroma"], "license", "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49"),
         })
+
+    def test_reviewed_records_pin_the_declaration_they_were_reviewed_against(self):
+        got = {r["reviewed_as"]: r["declared"] for r in self.policy["reviewed"]}
+        self.assertEqual(got, {"BSD-3-Clause": "BSD-Source-Code", "MIT": ""})
+
+    def test_freetype_election_names_the_dual_licence_it_chooses_from(self):
+        e = next(e for e in self.policy["elections"] if e["component"] == "github.com/golang/freetype")
+        self.assertEqual((e["declared"], e["offered"], e["elected"]), ("GPL-2.0-or-later", "GPL-2.0-or-later OR FTL", "FTL"))
+        self.assertIsNone(licence_scan._election_problem(e))
+
+    def test_every_election_stands(self):
+        for e in self.policy["elections"]:
+            self.assertIsNone(licence_scan._election_problem(e), e["component"])
 
     def test_reviewed_records_are_well_formed(self):
         for r in self.policy["reviewed"]:

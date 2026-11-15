@@ -14,7 +14,7 @@ name: licence
 
 on:
   push:
-    branches: [main]
+    branches: [main, integration/app-platform]
   pull_request:
   workflow_dispatch:
 
@@ -47,17 +47,18 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: Evaluator tests
         run: python3 -B -m unittest discover -s scripts -p 'licence_scan_test.py'
-      - name: Go SBOM (modules linked into the binary, with licences)
-        # The release build's constraints (CGO off, linux). -assert-licenses puts the detected licences in
-        # the component licences, where the scan reads them; without it they are only evidence.
-        env:
-          CGO_ENABLED: "0"
-          GOOS: linux
-          GOARCH: amd64
-        run: >
-          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
-          app -licenses -assert-licenses -json -main cmd/report-portal
-          -output "$RUNNER_TEMP/go.cdx.json" .
+      - name: Go SBOMs (modules linked into the binary, one per release platform, with licences)
+        # A module can be linked on one GOOS/GOARCH and not on another, so the SBOM is built for every target of
+        # the release build matrix (release.yml), with its constraints (CGO off). The tool is compiled for the
+        # runner first; the target only constrains which packages it counts. -assert-licenses puts the detected
+        # licences in the component licences, where the scan reads them; without it they are only evidence.
+        run: |
+          GOBIN="$RUNNER_TEMP/bin" go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            CGO_ENABLED=0 GOOS="${target%/*}" GOARCH="${target#*/}" "$RUNNER_TEMP/bin/cyclonedx-gomod" \
+              app -licenses -assert-licenses -json -main cmd/report-portal \
+              -output "$RUNNER_TEMP/go-${target%/*}-${target#*/}.cdx.json" .
+          done
       - name: Install web dependencies
         working-directory: web
         run: npm ci
@@ -86,7 +87,7 @@ jobs:
           python3 -I scripts/licence_scan.py --policy scripts/licence-policy.json "${verified[@]}" \
             --go-mod-cache "$(go env GOMODCACHE)" --node-modules web/node_modules \
             --report "$RUNNER_TEMP/licence-report.json" \
-            "$RUNNER_TEMP/go.cdx.json" "$RUNNER_TEMP/web.cdx.json" || status=1
+            "$RUNNER_TEMP"/go-*.cdx.json "$RUNNER_TEMP/web.cdx.json" || status=1
           exit "$status"
       - name: Keep the SBOMs and the report
         if: always()
@@ -94,7 +95,7 @@ jobs:
         with:
           name: licence-sboms
           path: |
-            ${{ runner.temp }}/go.cdx.json
+            ${{ runner.temp }}/go-*.cdx.json
             ${{ runner.temp }}/web.cdx.json
             ${{ runner.temp }}/licence-report.json
           retention-days: 30

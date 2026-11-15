@@ -48,7 +48,8 @@
       "component": "github.com/golang/freetype",
       "declared": "GPL-2.0-or-later",
       "elected": "FTL",
-      "reason": "Dual licence FTL or GPL-2.0-or-later, pulled in by the captcha dependency; the project uses it under the FreeType License (doc 167 section 8). The licence detector reports only the GPL side."
+      "reason": "Dual licence FTL or GPL-2.0-or-later, pulled in by the captcha dependency; the project uses it under the FreeType License (doc 167 section 8). The licence detector reports only the GPL side.",
+      "offered": "GPL-2.0-or-later OR FTL"
     }
   ],
   "exclusions": [
@@ -72,7 +73,8 @@
       "reviewed_as": "BSD-3-Clause",
       "file": "LICENSE",
       "sha256": "911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad",
-      "reason": "Owner review: the LICENSE shipped in each golang.org/x module is the standard Go BSD 3-clause text (byte-identical across all of them); the licence detector reports it as BSD-Source-Code. Pinned to the file's SHA-256, so a change to the text makes the record stale."
+      "reason": "Owner review: the LICENSE shipped in each golang.org/x module is the standard Go BSD 3-clause text (byte-identical across all of them); the licence detector reports it as BSD-Source-Code. Pinned to the file's SHA-256, so a change to the text makes the record stale.",
+      "declared": "BSD-Source-Code"
     },
     {
       "components": [
@@ -81,7 +83,8 @@
       "reviewed_as": "MIT",
       "file": "license",
       "sha256": "66b333b0f66759a0b710459e03f7029abe17f4358114a128d2c972e642961b49",
-      "reason": "Owner review: the package ships the MIT licence text in its license file and declares no license field in package.json. Pinned to the file's SHA-256."
+      "reason": "Owner review: the package ships the MIT licence text in its license file and declares no license field in package.json. Pinned to the file's SHA-256.",
+      "declared": ""
     }
   ]
 }

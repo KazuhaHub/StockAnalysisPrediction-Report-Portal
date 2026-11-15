@@ -296,8 +296,22 @@ class LicenceGateTests(unittest.TestCase):
     def test_licence_workflow_runs_on_main_pushes_and_can_be_dispatched(self):
         # The guard verifies a run for the exact main commit; with no push trigger there would never be one.
         head = read_workflow('licence.yml').split('\njobs:\n', 1)[0]
-        self.assertRegex(head, r'(?m)^  push:\n    branches: \[main\]$')
+        self.assertRegex(head, r'(?m)^  push:\n    branches: \[[^\]]*\bmain\b[^\]]*\]$')
         self.assertRegex(head, r'(?m)^  workflow_dispatch:')
+
+    def test_licence_workflow_also_runs_on_the_integration_branch(self):
+        # The platform work merges into integration/app-platform first; the scan must run on those pushes too.
+        head = read_workflow('licence.yml').split('\njobs:\n', 1)[0]
+        self.assertRegex(head, r'(?m)^  push:\n    branches: \[[^\]]*\bintegration/app-platform\b[^\]]*\]$')
+
+    def test_licence_workflow_scans_every_release_platform(self):
+        # A module can be linked on one GOOS/GOARCH and not another, so the Go SBOM is built per release target.
+        release = read_workflow('release.yml')
+        targets = set(re.findall(r'\{ goos: (\w+), goarch: (\w+),', release))
+        self.assertEqual(len(targets), 6)
+        licence = read_workflow('licence.yml')
+        listed = set(re.findall(r'\b(linux|darwin|windows)/(amd64|arm64)\b', licence))
+        self.assertEqual(listed, targets)
 
     def runs(self, workflow, conclusion='success', jobs=None):
         run = {'id': 1, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'u/' + workflow}

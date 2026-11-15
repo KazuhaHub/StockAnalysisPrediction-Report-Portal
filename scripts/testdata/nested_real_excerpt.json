@@ -1,0 +1,180 @@
+{
+ "components": [
+  {
+   "type": "library",
+   "name": "echarts",
+   "version": "6.1.0",
+   "bom-ref": "report-portal-web@0.1.3|echarts@6.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "Apache-2.0",
+      "acknowledgement": "declared"
+     }
+    }
+   ],
+   "purl": "pkg:npm/echarts@6.1.0",
+   "properties": [
+    {
+     "name": "cdx:npm:package:path",
+     "value": "node_modules/echarts"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "tslib",
+     "version": "2.3.0",
+     "bom-ref": "report-portal-web@0.1.3|echarts@6.1.0|tslib@2.3.0",
+     "licenses": [
+      {
+       "license": {
+        "id": "0BSD",
+        "acknowledgement": "declared"
+       }
+      }
+     ],
+     "purl": "pkg:npm/tslib@2.3.0",
+     "properties": [
+      {
+       "name": "cdx:npm:package:path",
+       "value": "node_modules/echarts/node_modules/tslib"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "katex",
+   "version": "0.19.0",
+   "bom-ref": "report-portal-web@0.1.3|katex@0.19.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT",
+      "acknowledgement": "declared"
+     }
+    }
+   ],
+   "purl": "pkg:npm/katex@0.19.0",
+   "properties": [
+    {
+     "name": "cdx:npm:package:path",
+     "value": "node_modules/katex"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "commander",
+     "version": "15.0.0",
+     "bom-ref": "report-portal-web@0.1.3|katex@0.19.0|commander@15.0.0",
+     "licenses": [
+      {
+       "license": {
+        "id": "MIT",
+        "acknowledgement": "declared"
+       }
+      }
+     ],
+     "purl": "pkg:npm/commander@15.0.0",
+     "properties": [
+      {
+       "name": "cdx:npm:package:path",
+       "value": "node_modules/katex/node_modules/commander"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "mermaid",
+   "version": "12.1.0",
+   "bom-ref": "report-portal-web@0.1.3|mermaid@12.1.0",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT",
+      "acknowledgement": "declared"
+     }
+    }
+   ],
+   "purl": "pkg:npm/mermaid@12.1.0",
+   "properties": [
+    {
+     "name": "cdx:npm:package:path",
+     "value": "node_modules/mermaid"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "katex",
+     "version": "0.16.47",
+     "bom-ref": "report-portal-web@0.1.3|mermaid@12.1.0|katex@0.16.47",
+     "licenses": [
+      {
+       "license": {
+        "id": "MIT",
+        "acknowledgement": "declared"
+       }
+      }
+     ],
+     "purl": "pkg:npm/katex@0.16.47",
+     "properties": [
+      {
+       "name": "cdx:npm:package:path",
+       "value": "node_modules/mermaid/node_modules/katex"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "library",
+   "name": "rehype-katex",
+   "version": "7.0.1",
+   "bom-ref": "report-portal-web@0.1.3|rehype-katex@7.0.1",
+   "licenses": [
+    {
+     "license": {
+      "id": "MIT",
+      "acknowledgement": "declared"
+     }
+    }
+   ],
+   "purl": "pkg:npm/rehype-katex@7.0.1",
+   "properties": [
+    {
+     "name": "cdx:npm:package:path",
+     "value": "node_modules/rehype-katex"
+    }
+   ],
+   "components": [
+    {
+     "type": "library",
+     "name": "katex",
+     "version": "0.16.47",
+     "bom-ref": "report-portal-web@0.1.3|rehype-katex@7.0.1|katex@0.16.47",
+     "licenses": [
+      {
+       "license": {
+        "id": "MIT",
+        "acknowledgement": "declared"
+       }
+      }
+     ],
+     "purl": "pkg:npm/katex@0.16.47",
+     "properties": [
+      {
+       "name": "cdx:npm:package:path",
+       "value": "node_modules/rehype-katex/node_modules/katex"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
