@@ -185,6 +185,13 @@ class OwnComponentTests(unittest.TestCase):
         c, _ = one([comp("github.com/KazuhaHubEvil/x", "AGPL-3.0-only")])
         self.assertEqual(c["status"], "fail")
 
+    def test_own_entry_without_a_trailing_slash_names_one_package_exactly(self):
+        policy = dict(POLICY, own={"licences": ["AGPL-3.0-only"], "components": ["portal-status-ui"]})
+        c, _ = one([comp("portal-status-ui", "AGPL-3.0-only")], policy=policy)
+        self.assertEqual((c["status"], c["via"]), ("pass", "own"))
+        c, _ = one([comp("portal-status-ui-evil", "AGPL-3.0-only")], policy=policy)
+        self.assertEqual(c["status"], "fail")
+
     def test_own_component_still_cannot_carry_a_denied_licence(self):
         c, _ = one([comp("github.com/KazuhaHub/x", "GPL-2.0-only")])
         self.assertEqual(c["status"], "fail")

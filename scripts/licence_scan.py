@@ -20,9 +20,10 @@ Rules, in the order they apply to one component:
    every term allowed, and several licence entries on one component are ANDed.
 4. A licence in "election_only" (the FreeType License) is never a free choice: it counts only through an
    election record naming the component.
-5. The project's own licence (AGPL-3.0-only) is allowed only on components under the own namespaces.
+5. The project's own licence (AGPL-3.0-only) is allowed only on the own components: an entry ending in "/" is
+   a namespace prefix, any other entry names one package exactly.
 
-This evaluator is duplicated in the Apps repository (.github/scripts/licence_scan.py); keep the two in sync.
+This evaluator is duplicated in the Apps repository (scripts/licence_scan.py in KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps); keep the two in sync.
 """
 import argparse
 import json
@@ -232,7 +233,7 @@ def evaluate(sbom, policy, verified):
         if not nodes:
             results.append(_fail(base, "no-licence", "the SBOM records no licence for this component"))
             continue
-        own = any(key.startswith(p) for p in own_prefixes)
+        own = any(key == p or (p.endswith("/") and key.startswith(p)) for p in own_prefixes)
         judge = _Judge(policy, own)
         election = elections.get(key)
         if election is not None:

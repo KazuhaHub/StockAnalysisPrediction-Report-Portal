@@ -1,0 +1,79 @@
+{
+  "format": "portal.licence-policy-acceptance/1-dev.1",
+  "status": "partial",
+  "plan": "docs/app-platform/173-licence-policy-plan.md",
+  "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8",
+  "note": "Filled from local runs on 2026-11-15. Portal branch feat/app-platform-licence-gate (cut from integration/app-platform at 16e38a98); Apps branch feat/licence-gate (cut from main at 5423987). No CI run is cited: the branches were pushed and the first workflow runs are the CI evidence. The gate is red on purpose for the components in flagged_components until the owner decides them.",
+  "environment": {
+    "go": "1.27.1 locally (go 1.26.11 in go.mod; CI uses the go.mod version)",
+    "node": "26.9.0 locally (CI uses 24)",
+    "cyclonedx_gomod": "v1.9.0, app -licenses -assert-licenses, CGO_ENABLED=0 GOOS=linux GOARCH=amd64",
+    "cyclonedx_npm": "6.0.1, --omit dev --package-lock-only --spec-version 1.6",
+    "mermaid": "12.1.0",
+    "schema_change": "none"
+  },
+  "implemented": {
+    "policy": "scripts/licence-policy.json: allow (12 SPDX ids), deny (GPL-2.0-only, SSPL-1.0, BUSL-1.1, Commons-Clause, EPL-1.0, EPL-2.0 and others), own licence AGPL-3.0-only for named own components, election-only FTL, elections (dompurify to Apache-2.0, github.com/golang/freetype to FTL), exclusion (elkjs, requires elk-build-test)",
+    "evaluator": "scripts/licence_scan.py: SPDX OR/AND/parentheses, WITH kept opaque, several licence entries ANDed, fails closed on unknown, missing and unparseable licences and on an empty SBOM, exit 0/1/2, JSON report",
+    "elk": "web/vite.config.ts aliases ^elkjs(/.*)?$ to web/src/lib/elkDisabled.ts, which throws on construction; MermaidBlock passes layout dagre because mermaid 12.1 defaults to elk; web/scripts/check-no-elk.mjs scans the build output for org.eclipse.elk.alg. and org.eclipse.elk.core.",
+    "ci": "Portal .github/workflows/licence.yml (dedicated workflow, not a test.yml job: the release guard names test.yml jobs); Apps .github/workflows/check.yml job licence",
+    "apps_declarations": "root, @portal-app/sdk, portal-status-ui, portal-symbols-demo and the status acceptance harness package.json declare AGPL-3.0-only; scripts/tests/test_licence_scan.py fails if one stops"
+  },
+  "elk_build_test": {
+    "markers": ["org.eclipse.elk.alg.", "org.eclipse.elk.core."],
+    "with_alias": {"elk_chunk_bytes": 34456, "result": "pass, exit 0"},
+    "alias_removed": {"elk_chunk_bytes": 1462510, "result": "fail, exit 1: assets/elk-IJKZMXRS-*.js (org.eclipse.elk.alg.)"},
+    "alias_restored": "pass, exit 0"
+  },
+  "mermaid_browser_probe": {
+    "how": "mermaid 12.1.0 served by vite with the production alias, initialised as MermaidBlock does (securityLevel strict, htmlLabels false, layout dagre), rendered in the Browser pane",
+    "rendered": ["flowchart", "flowchart with subgraph", "sequence", "state", "class", "er", "mindmap", "pie", "xychart"],
+    "elk_requested_in_frontmatter": "fails with: The ELK layout is not supported in this build; use the default layout instead.",
+    "without_layout_option": "a plain flowchart failed with the same message, which is why layout dagre was added"
+  },
+  "tests": {
+    "python": "scripts/licence_scan_test.py, 61 tests (Portal); scripts/tests/test_licence_scan.py, 61 tests (Apps)",
+    "web": ["web/src/lib/elkGuard.test.ts (8 tests)", "web/src/components/Markdown.test.tsx (layout dagre asserted)"],
+    "workflow": "actionlint 0 findings on licence.yml, test.yml and Apps check.yml"
+  },
+  "scans": {
+    "portal": {
+      "sboms": {"go": 48, "web": 329},
+      "components": 377,
+      "passed": {"allow": 365, "election": 2, "exclusion": 1, "own": 1},
+      "failed": 8,
+      "replayed_from": "depth-1 clone of the committed branch, run with --verified elk-build-test after check:no-elk passed"
+    },
+    "apps": {
+      "sboms": {"npm_production_workspaces": 71, "status_service_go": 13},
+      "components": 84,
+      "passed": {"allow": 78, "own": 4},
+      "failed": 2,
+      "replayed_from": "depth-1 clone of origin/main with the branch changes"
+    }
+  },
+  "flagged_components": [
+    {"repo": "portal", "component": "golang.org/x/crypto", "version": "v0.58.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/image", "version": "v0.43.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/net", "version": "v0.62.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/oauth2", "version": "v0.37.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/sync", "version": "v0.24.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/sys", "version": "v0.49.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "golang.org/x/text", "version": "v0.43.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "portal", "component": "khroma", "version": "2.1.0", "declared": null, "reason": "no licence field in package.json (the package ships an MIT licence file)"},
+    {"repo": "apps", "component": "golang.org/x/sys", "version": "v0.48.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"},
+    {"repo": "apps", "component": "golang.org/x/text", "version": "v0.42.0", "declared": "BSD-Source-Code", "reason": "not on the allow list"}
+  ],
+  "owner_decisions_needed": [
+    "golang.org/x/* detected as BSD-Source-Code: the LICENSE files are the standard Go BSD 3-clause text; decide whether to record them as reviewed BSD-3-Clause (a per-component reviewed-as record) or to change the policy",
+    "khroma 2.1.0 has no licence field: decide whether to record it as reviewed MIT (its licence file) or to replace or patch the dependency",
+    "whether licence scan becomes a required check and a release prerequisite"
+  ],
+  "limits": [
+    "Source and lock inputs only: no released binary or OCI digest has been scanned.",
+    "No CI run is cited yet.",
+    "The Go licence detector assigns BSD-Source-Code to the Go BSD 3-clause text, so the same flag recurs for every golang.org/x module until decided.",
+    "apps/status/tests (not shipped) and templates/react-app (no lockfile) are not scanned.",
+    "The evaluator and the allow and deny lists are duplicated in the Apps repository with no automatic agreement check."
+  ]
+}

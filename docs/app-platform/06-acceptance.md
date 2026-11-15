@@ -266,6 +266,23 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
 | DEV-04 | Review declared dependencies/source provenance and publication identity | Reproducible identity and verified artifact relationships; signing isolated from PR code |
 | DEV-05 | Install actual public sample release, update, disable, uninstall and recover | Released-byte evidence, no development-only installer or database mutation shortcut |
 
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 8 and [doc 173](173-licence-policy-plan.md). **DEV-04 stays partial.**
+
+- **Done:** the licence policy is a checked-in file (`scripts/licence-policy.json`) judged by `scripts/licence_scan.py` over a
+  Go and a production npm CycloneDX SBOM, in `.github/workflows/licence.yml` (Portal) and the `licence` job of `check.yml`
+  (Apps). A denied, unknown or missing licence fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are
+  election records pinned to the declaration they were written against. `elkjs` is aliased to a throwing stub in the Vite
+  build, a build test fails if ELK engine code is in the output (verified to fail with the alias removed), and the `elkjs`
+  exclusion is valid only in a run where that test passed. Mermaid 12.1 defaults to ELK, so the portal now asks it for dagre.
+  First-party Apps packages declare AGPL-3.0-only and a test keeps them so.
+- **Open, owner decision:** the real scans flag ten components. Portal: `golang.org/x/{crypto,image,net,oauth2,sync,sys,text}`
+  (detected as `BSD-Source-Code`, apparently the standard Go BSD 3-clause text) and `khroma` (no `license` field in its
+  manifest, MIT text in a `license` file). Apps: `golang.org/x/sys` and `x/text`. Nothing was added to the allow list; the gate
+  is red for them until the owner decides.
+- **Open:** no CI run of either workflow is cited yet, no released binary or OCI digest has been scanned, and the release-key
+  and environment approval remain open (see the DEV-04 row and `platform-dependency-review`).
+- **Records:** `handoff/evidence/platform-licence-policy/acceptance.json` and the DEV-04 row of `handoff/acceptance-checklist.csv`.
+
 ## 8. Final release gate
 
 Required evidence bundle:
