@@ -121,9 +121,11 @@ func TestSettlementTickLeavesARestoreStartThatMayBeExecuting(t *testing.T) {
 // A recovery resume keeps its own path, the recovery reconciliation, which runs only while the Portal is paused: the
 // held-start settlement never selects it.
 func TestHeldStartSettlementLeavesARecoveryResumeToItsOwnReconciliation(t *testing.T) {
-	f, operation, _ := unknownResumeStartFixture(t)
-	candidates, err := f.s.platformHeldStartsToSettle(context.Background())
-	if err != nil || slices.Contains(candidates, operation) {
-		t.Fatalf("a recovery resume was selected by the held-start settlement: %v %v", candidates, err)
-	}
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		f, operation, _ := unknownResumeStartFixtureFor(t, pg)
+		candidates, err := f.s.platformHeldStartsToSettle(context.Background())
+		if err != nil || slices.Contains(candidates, operation) {
+			t.Fatalf("a recovery resume was selected by the held-start settlement: %v %v", candidates, err)
+		}
+	})
 }

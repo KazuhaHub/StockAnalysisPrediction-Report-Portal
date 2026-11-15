@@ -9,7 +9,11 @@ import (
 // A database error while reading the host operation is not evidence about the operation: it must not be typed as the
 // stage-evidence verdict that closes a removal. Only a missing or unsettleable operation is.
 func TestHostOperationReadErrorsAreTypedOnlyWhenTheOperationCannotSettle(t *testing.T) {
-	f := newReclaimFixture(t)
+	eachPlatformDriver(t, testHostOperationReadErrors)
+}
+
+func testHostOperationReadErrors(t *testing.T, pg bool) {
+	f := newReclaimFixtureFor(t, pg)
 	t.Run("a missing operation", func(t *testing.T) {
 		if _, err := platformLoadSettlementLease(f.s.st.poolExec(), platformFixtureID(7777)); !errors.Is(err, errAppPlatformStageEvidence) {
 			t.Fatalf("a missing operation is typed evidence, got %v", err)
@@ -35,7 +39,11 @@ func TestHostOperationReadErrorsAreTypedOnlyWhenTheOperationCannotSettle(t *test
 // The guard that runs in the signing transaction follows the same rule: a failed read is neither the lease conflict nor
 // the evidence verdict.
 func TestSettlementGuardKeepsATransientReadErrorUntyped(t *testing.T) {
-	f := newReclaimFixture(t)
+	eachPlatformDriver(t, testSettlementGuardTransient)
+}
+
+func testSettlementGuardTransient(t *testing.T, pg bool) {
+	f := newReclaimFixtureFor(t, pg)
 	lease, err := platformLoadSettlementLease(f.s.st.poolExec(), f.hostOp)
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +63,12 @@ func TestSettlementGuardKeepsATransientReadErrorUntyped(t *testing.T) {
 // An open removal whose host operation can no longer settle it is closed abandoned; one that merely could not be
 // read this time stays open and is tried again.
 func TestResolveOpenRemovalAbandonsOnlyOnTypedErrors(t *testing.T) {
+	eachPlatformDriver(t, testResolveOpenRemovalTyped)
+}
+
+func testResolveOpenRemovalTyped(t *testing.T, pg bool) {
 	open := func(t *testing.T) (*reclaimFixture, platformReclaimTarget) {
-		f := newReclaimFixture(t)
+		f := newReclaimFixtureFor(t, pg)
 		f.release(t, "a")
 		f.load(t, "a")
 		f.fake.loseExecuteReplyOnce, f.fake.readFails = true, true

@@ -251,8 +251,12 @@ func (f *platformFakeImageRunner) SendBlob(_ context.Context, _ platformRuntimeE
 // platformImageEnsureFixture is an update operation at its migrate stage whose target release is a managed
 // release carrying backend.images, with the blobs stored in the Portal's blob store.
 func platformImageEnsureFixture(t *testing.T) (*Server, platformOperationLease, platformRuntimeEndpoint, platformManagedImageParts, *platformFakeImageRunner) {
+	return platformImageEnsureFixtureFor(t, false)
+}
+
+func platformImageEnsureFixtureFor(t *testing.T, pg bool) (*Server, platformOperationLease, platformRuntimeEndpoint, platformManagedImageParts, *platformFakeImageRunner) {
 	t.Helper()
-	s, lease, endpoint, _ := platformMigrationStageFixture(t, false, true)
+	s, lease, endpoint, _ := platformMigrationStageFixture(t, pg, true)
 	s.platformImageDir = t.TempDir()
 	parts := newPlatformManagedImageParts(t, "9.9.9", "ensure")
 	target := scalar[string](t, s.st, `SELECT p.target_release_sha256 FROM app_platform_operations o JOIN app_platform_review_plans p ON p.id=o.review_plan_id WHERE o.id=?`, lease.id)
