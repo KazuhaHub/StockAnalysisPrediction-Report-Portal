@@ -115,6 +115,10 @@ export default function MermaidBlock({ source }: { source: string }) {
           startOnLoad: false,
           securityLevel: 'strict',
           htmlLabels: false,
+          // Mermaid 12 lays diagrams out with ELK unless told otherwise, and the ELK engine is
+          // aliased out of the build (vite.config.ts, doc 167 section 8). Dagre is the layout every
+          // diagram uses here; a diagram that explicitly asks for ELK fails closed.
+          layout: 'dagre',
           secure: [
             'securityLevel',
             'startOnLoad',

@@ -1,11 +1,22 @@
 /// <reference types="vitest/config" />
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 // In dev, proxy API / downloads / health check to the Go backend (:8790). The
 // production build is written to ../internal/web/dist for //go:embed.
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      // mermaid 12 imports the ELK layout engine (elkjs, EPL-2.0) for an optional layout this
+      // portal does not offer. Every import path of it resolves to an empty module that throws,
+      // so the engine is not bundled and an ELK diagram fails closed (doc 167 section 8). The
+      // build test scripts/check-no-elk.mjs proves it, and the licence gate's exclusion for
+      // elkjs depends on that test.
+      { find: /^elkjs(\/.*)?$/, replacement: fileURLToPath(new URL('./src/lib/elkDisabled.ts', import.meta.url)) },
+    ],
+  },
   server: {
     port: 5173,
     proxy: {

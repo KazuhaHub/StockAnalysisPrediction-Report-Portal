@@ -76,6 +76,9 @@ describe('Markdown', () => {
       expect.objectContaining({
         securityLevel: 'strict',
         htmlLabels: false,
+        // Mermaid 12 defaults to the ELK layout, which the build does not ship (doc 167 section 8):
+        // the portal asks for dagre explicitly, so ordinary diagrams never reach the ELK stub.
+        layout: 'dagre',
         secure: expect.arrayContaining(['htmlLabels']),
       }),
     )
