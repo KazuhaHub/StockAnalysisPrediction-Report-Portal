@@ -13,6 +13,7 @@ import SettingsWorkspace, { SettingsPanel } from './SettingsWorkspace'
 import SettingsSaveBar from './SettingsSaveBar'
 import CompactNumberInput from '../../components/CompactNumberInput'
 import LoginHistoryRetentionCard from '../../components/LoginHistoryRetentionCard'
+import AppPlatformRetentionCard from '../../components/AppPlatformRetentionCard'
 import CardTable from '../../components/CardTable'
 import { notifyError } from '../../lib/notify'
 import StatusTag from '../../components/StatusTag'
@@ -405,7 +406,7 @@ export default function StoragePage() {
     {loaded && loadErr && <Alert type="error" showIcon title={loadErr} style={{ marginBottom: 16 }} />}
     <SettingsWorkspace active={section} onChange={setSection} sections={[
       { key: 'usage', label: t('manage.operation.usage') }, { key: 'policy', label: t('manage.operation.retention') },
-      { key: 'login', label: t('manage.operation.loginHistory') }, { key: 'history', label: t('manage.operation.cleanupHistory') },
+      { key: 'login', label: t('manage.operation.loginHistory') }, { key: 'platform', label: t('manage.operation.platformRetention') }, { key: 'history', label: t('manage.operation.cleanupHistory') },
     ]}>
       <SettingsPanel section="usage">
       <Card title={t('storage.usageTitle')}>
@@ -449,6 +450,9 @@ export default function StoragePage() {
       </SettingsPanel>
       <SettingsPanel section="login">
       <LoginHistoryRetentionCard />
+      </SettingsPanel>
+      <SettingsPanel section="platform">
+      <AppPlatformRetentionCard />
       </SettingsPanel>
       <SettingsPanel section="policy">
       <Card title={t('storage.title')}>

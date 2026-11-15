@@ -344,14 +344,14 @@ func (s *Server) createPlatformRestoreResumeReview(ctx context.Context, session 
 			return err
 		}
 		raw, err := json.Marshal(candidate.plan)
-		if err != nil || len(raw) > 65536 || control.nowMS > math.MaxInt64-900000 {
+		if err != nil || len(raw) > 65536 || control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 			return errAppPlatformPlanChanged
 		}
 		id, err := platformNewUUID()
 		if err != nil {
 			return err
 		}
-		digest, expires := platformDigest(raw), control.nowMS+900000
+		digest, expires := platformDigest(raw), control.nowMS+platformReviewPlanValidityMS
 		if _, err := e.exec(`INSERT INTO app_platform_review_plans(id,installation_id,app_id,publisher_id,action,source_release_sha256,target_release_sha256,
 			installation_revision,policy_revision,trust_revision,controller_epoch,actor_scope,username,account_created,account_generation,authority_fingerprint,
 			plan_sha256,plan_json,expires_ms,consumed_ms,created_ms,updated_ms)

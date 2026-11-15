@@ -424,6 +424,9 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.admin(mux, "GET /api/admin/login-activity/retention", s.apiLoginHistoryRetentionGet)
 	s.admin(mux, "PUT /api/admin/login-activity/retention", s.apiLoginHistoryRetention)
 	s.admin(mux, "POST /api/admin/cleanup/config", s.apiCleanupConfigSave)
+	// The application platform's retention policy (docs/app-platform/172-retention-plan.md), shown beside the cleanup config.
+	s.admin(mux, "GET /api/admin/app-platform/retention", s.apiPlatformRetentionGet)
+	s.admin(mux, "PUT /api/admin/app-platform/retention", s.apiPlatformRetentionSave)
 	s.admin(mux, "GET /api/admin/cleanup/usage", s.apiCleanupUsage)
 	s.admin(mux, "POST /api/admin/cleanup/preview", s.apiCleanupPreview)
 	s.admin(mux, "POST /api/admin/cleanup/run", s.apiCleanupRunNow)

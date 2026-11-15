@@ -224,7 +224,7 @@ func (s *Server) createPlatformFrontendEnableReviewContext(ctx context.Context, 
 		}
 		raw, err := json.Marshal(p)
 		if err != nil || len(raw) > 65536 ||
-			control.nowMS > math.MaxInt64-900000 {
+			control.nowMS > math.MaxInt64-platformReviewPlanValidityMS {
 			return errAppPlatformPlanChanged
 		}
 		id, err := platformNewUUID()
@@ -233,7 +233,7 @@ func (s *Server) createPlatformFrontendEnableReviewContext(ctx context.Context, 
 		}
 		result = platformRemovalReview{
 			ID: id, SHA256: platformDigest(raw), JSON: string(raw),
-			ExpiresMS: control.nowMS + 900000,
+			ExpiresMS: control.nowMS + platformReviewPlanValidityMS,
 		}
 		_, err = e.exec(`INSERT INTO app_platform_review_plans(
 			id,installation_id,app_id,publisher_id,action,source_release_sha256,
