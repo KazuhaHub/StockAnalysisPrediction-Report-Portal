@@ -100,9 +100,16 @@ func (s *Server) resolveOpenRemoval(ctx context.Context, endpoint platformRuntim
 	if t.unparsable {
 		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
 	}
-	lease, err := platformLoadSettlementLease(s.st.poolExec(), t.hostOperation)
+	// A removal is abandoned only on a typed verdict: the host operation can no longer settle it, or its release is
+	// gone. A read that merely failed (a dropped connection, a cancelled context) says nothing about the removal, so it
+	// returns the error and the step is taken again: the runner may have applied the removal, and abandoning it would
+	// lose that verdict from the history.
+	lease, err := platformLoadSettlementLease(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}, t.hostOperation)
 	if err != nil {
-		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+		if errors.Is(err, errAppPlatformStageEvidence) {
+			return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+		}
+		return err
 	}
 	guard := func(e migExec) (int64, error) { return platformLoadSettlementGuard(e, lease) }
 	signer, err := s.newPlatformImageSignerGuarded(ctx, lease, func(e migExec) error { _, err := guard(e); return err })
@@ -115,7 +122,10 @@ func (s *Server) resolveOpenRemoval(ctx context.Context, endpoint platformRuntim
 	defer signer.close()
 	var descriptor []byte
 	if err := s.st.queryRowContext(ctx, `SELECT descriptor FROM app_platform_releases WHERE sha256=?`, t.intent.ReleaseSHA256).Scan(&descriptor); err != nil {
-		return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+		if errors.Is(err, sql.ErrNoRows) {
+			return s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
+		}
+		return err
 	}
 	call, err := signer.removeCall(t, descriptor)
 	if err != nil {
@@ -814,9 +824,9 @@ func (s *Server) reclaimPlatformImage(ctx context.Context, endpoint platformRunt
 		// The image is referenced again: it is kept, and the row is closed with the reason. Nothing is sent.
 		return false, s.abandonPlatformRemoval(ctx, t, "referenced_again")
 	}
-	lease, err := platformLoadSettlementLease(s.st.poolExec(), t.hostOperation)
+	lease, err := platformLoadSettlementLease(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}, t.hostOperation)
 	if err != nil {
-		if t.state != "" {
+		if t.state != "" && errors.Is(err, errAppPlatformStageEvidence) {
 			log.Printf("app-platform image removal %s: the host operation cannot settle it; closing the row as abandoned_outcome_unknown", t.effectID)
 			return false, s.abandonPlatformRemoval(ctx, t, "abandoned_outcome_unknown")
 		}

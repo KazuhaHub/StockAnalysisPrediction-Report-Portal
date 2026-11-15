@@ -124,8 +124,15 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 	var owner sql.NullString
 	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,action,completed_ms,lease_owner
 		FROM app_platform_operations WHERE id=? AND managed=1`, operation).
-		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &action, &completed, &owner); err != nil ||
-		!completed.Valid || owner.Valid || generation < 1 {
+		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &action, &completed, &owner); err != nil {
+		// Only a missing operation is a statement about the operation. Any other error is a failed read and says
+		// nothing about it, so it is returned as it is and the caller tries again.
+		if errors.Is(err, sql.ErrNoRows) {
+			return platformOperationLease{}, errAppPlatformStageEvidence
+		}
+		return platformOperationLease{}, err
+	}
+	if !completed.Valid || owner.Valid || generation < 1 {
 		return platformOperationLease{}, errAppPlatformStageEvidence
 	}
 	return platformOperationLease{
@@ -140,6 +147,9 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 // was derived from, and that nothing has moved the installation's fence past it.
 func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64, error) {
 	current, err := platformLoadSettlementLease(e, lease.id)
+	if err != nil && !errors.Is(err, errAppPlatformStageEvidence) {
+		return 0, err
+	}
 	if err != nil || current.fence != lease.fence || current.controllerEpoch != lease.controllerEpoch || current.installationID != lease.installationID {
 		return 0, errors.Join(errAppPlatformLeaseConflict, err)
 	}
@@ -149,8 +159,13 @@ func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64
 	}
 	var fence int64
 	var installationEpoch string
-	if err := e.queryRow(`SELECT control_fence,controller_epoch FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&fence, &installationEpoch); err != nil ||
-		fence != lease.fence || installationEpoch != lease.controllerEpoch {
+	if err := e.queryRow(`SELECT control_fence,controller_epoch FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&fence, &installationEpoch); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, errAppPlatformLeaseConflict
+		}
+		return 0, err
+	}
+	if fence != lease.fence || installationEpoch != lease.controllerEpoch {
 		return 0, errAppPlatformLeaseConflict
 	}
 	return platformDatabaseNow(e)
