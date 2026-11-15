@@ -95,16 +95,20 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
 `scripts/licence-policy.json` are copied into the Apps repository (`scripts/licence_scan.py`, `scripts/licence-policy.json`,
 `scripts/tests/test_licence_scan.py`). Each copy says so in its header, and the Portal evaluator, its policy and a test
 (`AppsCopyNoticeTests`) name the Apps copy and how to update it. Both repositories are public, so Apps' `licence` job runs
-`scripts/check_licence_copy.py` without credentials. It compares the evaluator (line for line, the module docstring
-excluded) and those policy sections with:
+`scripts/check_licence_copy.py` without credentials (it also sends the workflow's read-only `GITHUB_TOKEN`, which is
+`permissions: contents: read`, only to `api.github.com`, so the anonymous rate limit stops causing flaky runs; locally it
+stays anonymous). The rule is deterministic:
 
-- the Portal commit named in Apps' `scripts/licence-scan.pin`; and
-- the live files on the Portal's `integration/app-platform` and `main`, each once the file exists there, failing on any
-  difference.
+1. the Apps copy equals the Portal commit named in Apps' `scripts/licence-scan.pin`;
+2. the live Portal branches are `integration/app-platform` and `main`; those that carry the file are *live*, and the pin must
+   be a commit at least one of them contains (GitHub's compare API), so a pin on a feature-branch commit that a squash merge
+   orphans fails and has to be moved to the merge commit;
+3. the pinned evaluator (docstring excluded) and shared policy sections must equal those of **at least one** live branch. While
+   only `integration/app-platform` carries the file it is the reference ("newest"); once `main` carries it too, matching either
+   passes. The two branches may differ for weeks without the check being red by construction;
+4. a branch that does not carry the file but contains the pin has lost it, and fails; a branch that never had it (the gate is
+   not merged there yet) is skipped. Before any branch carries the file only rule 1 applies, and the script says so.
 
-Once a live branch carries the file, the pin must also be a commit that branch contains (GitHub's compare API, anonymously).
-A pin on a feature-branch commit, which a squash merge orphans, therefore fails and has to be moved to the merge commit.
-Until the Portal has merged the gate there is no live branch to compare with and only the pin is checked; the script says so.
 To change the evaluator or the shared policy: merge in the Portal, copy the files from that commit into Apps, write the
 commit's full SHA into `scripts/licence-scan.pin` and run the script. Elections and exclusions are Portal-only and are empty
 in Apps.
@@ -159,6 +163,24 @@ The first implementation was reviewed and returned with fixes, all made test-fir
 - **Apps platform list.** A test (`TheWorkflow` in `scripts/tests/test_licence_copy.py`, verified to fail when a target is
   removed from `check.yml`) keeps the Go SBOM targets equal to `build-status-release.py`'s.
 
+## Resolutions after the third review (2026-11-15)
+
+- **Copy check rule** relaxed to the deterministic rule under "Duplication"; removal of the file from a branch that held it
+  now fails; the job token is passed.
+- **The npm lock's licence fields are not covered by integrity.** `cyclonedx-npm --package-lock-only` reads `license` from
+  `package-lock.json`, so a pull request could rewrite a GPL package's entry to MIT. Generating the SBOM from the installed tree
+  instead was tried and gives a different component set (328 against 347 on a linux runner: it drops the optional native
+  packages of other platforms), so the SBOM stays lock-based and the evaluator cross-checks instead. With `--node-modules`, every
+  installed npm component's declaration must equal its installed `package.json` (`license` as a string or an object, or the
+  legacy `licenses` list; several as a set), read from the SBOM's install path with its version checked. A mismatch fails as
+  `lock-mismatch`, cannot be covered by a reviewed-as record or an election, and an untrustworthy install fails as
+  `lock-unverifiable`. Own components and Go modules are not cross-checked. Components that are not installed (optional packages
+  of other platforms, 19 on the Portal on a macOS machine) are judged on the lock's declaration and counted in a warning: that is
+  the remaining gap, and those packages are not part of what ships. Apps runs `npm ci --ignore-scripts` first (no script is
+  needed), the Portal job already did.
+- **Mermaid turns** have a 15 second limit from the start of the turn; a turn that never settles is rejected, its block keeps the
+  source as a code block, and the next diagram renders.
+
 ## What the first scans flagged, and what the owner decided
 
 The first scans failed on ten components. Nothing was added to the allow list; the owner decided on 2026-11-15:
@@ -178,8 +200,8 @@ denied licence. The allow and deny lists did not change.
 
 ## Verification
 
-- `python3 -B -m unittest discover -s scripts -p '*_test.py'` in the Portal, including 145 licence tests and the release guard
-  tests (366 in all), and `python3 -B -m unittest discover -s scripts/tests` in Apps (211 tests);
+- `python3 -B -m unittest discover -s scripts -p '*_test.py'` in the Portal, including 159 licence tests and the release guard
+  tests (381 in all), and `python3 -B -m unittest discover -s scripts/tests` in Apps (235 tests);
 - `cd web && npm run typecheck && npm run build && npm run check:no-elk` and `npx vitest run` (the whole suite);
 - `actionlint` on both repositories' workflows;
 - a real-browser probe of `mermaid` 12.1 with the production alias, over twenty-one diagram types with and without a layout

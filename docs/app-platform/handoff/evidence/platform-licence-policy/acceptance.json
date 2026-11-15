@@ -23,8 +23,9 @@
     "own_workspace": "An own component needs a purl; Go a pkg:golang purl; npm an install path of exactly node_modules/<name>, no registry distribution and membership of the repository's npm workspaces (--workspace-root)",
     "elections": "Elections are evidence: declaration pinned exactly and by kind; offered expression a pure top-level OR with the elected licence an operand and allowed (allow list or election_only); no denied or unallowed extra operand; pinned to the SHA-256 of the licence files that ship (dompurify LICENSE and LICENSE-MPL, golang/freetype LICENSE); a changed or missing file makes the election stale",
     "licence_files": "npm licence file read from the SBOM's install path (cdx:npm:package:path); installed package.json version must equal the component version; roots escaping node_modules or the module cache are refused; licence entries with only a url or text fail as unknown",
-    "copy_check": "Apps scripts/check_licence_copy.py (both repositories are public, no credentials) compares the evaluator (docstring excluded) and the shared policy sections with the Portal commit in scripts/licence-scan.pin and with the live files on the Portal's integration/app-platform and main once the file exists there, and requires the pin to be reachable from a live branch that has the file; before the Portal merges the gate only the pin is compared. The pin is f358823dd64a8832b242fc760e92b2d2be398297, a feature-branch commit, and must be moved to the merge commit after the Portal PR merges (pending, tracked in the Apps PR description)",
-    "mermaid_turn": "Each diagram's mermaid.initialize, parse and render run as one turn on a module-level promise chain (web/src/lib/mermaidTurn.ts), so its layout and theme are in force for its own render; tests render a flowchart and a mind map concurrently in both orders"
+    "copy_check": "Apps scripts/check_licence_copy.py (public repositories, anonymous or with the workflow's read-only GITHUB_TOKEN sent only to api.github.com): the copy equals the Portal commit in scripts/licence-scan.pin; the pin is reachable from a live Portal branch (integration/app-platform or main, live = carries the file); the pinned files equal at least one live branch; a branch that contains the pin but lost the file fails; before any branch has the file only the pin is compared. The pin is 9fac73ef7b8c4f614b3595595b92f71936a5afd1, a feature-branch commit, to be moved to the merge commit after the Portal PR merges",
+    "mermaid_turn": "Each diagram's mermaid.initialize, parse and render run as one turn on a module-level promise chain (web/src/lib/mermaidTurn.ts), so its layout and theme are in force for its own render; tests render a flowchart and a mind map concurrently in both orders; a turn is rejected after 15 seconds so a render that never settles cannot stall later diagrams (its block keeps the source as a code block)",
+    "lock_cross_check": "With --node-modules, every installed npm component's declaration must equal its installed package.json (license string or object, legacy licenses list, several as a set), read from the SBOM's install path with the version checked; mismatch fails as lock-mismatch and no record covers it; untrustworthy installs fail as lock-unverifiable; own and Go components are skipped; components not installed (optional packages of other platforms) are judged on the lock and counted in a warning. An installed-tree SBOM (no --package-lock-only) was tried and gives a different component set (328 against 347), so the SBOM stays lock-based"
   },
   "elk_build_test": {
     "markers": [
@@ -73,9 +74,9 @@
     "elk_requested_in_frontmatter": "fails with: The ELK layout is not supported in this build; use the default layout instead."
   },
   "tests": {
-    "python_portal": "scripts/licence_scan_test.py 145 tests; scripts/release_guard_test.py 26 tests; all Portal script tests 366",
-    "python_apps": "scripts/tests/test_licence_scan.py 139; test_licence_copy.py 24; test_status_publish.py 20; all Apps script tests 211",
-    "web": "npx vitest run: 279 files, 2917 tests, all passing; Markdown.test.tsx (concurrent flowchart and mind map, both orders), mermaidTurn.test.ts, mermaidLayout.test.ts and elkGuard.test.ts",
+    "python_portal": "scripts/licence_scan_test.py 159 tests; scripts/release_guard_test.py 27 tests; all Portal script tests 381",
+    "python_apps": "scripts/tests/test_licence_scan.py 153; test_licence_copy.py 34; test_status_publish.py 20; all Apps script tests 235",
+    "web": "npx vitest run: 279 files, 2922 tests, all passing",
     "workflow": "actionlint 0 findings on the Portal workflows and on Apps check.yml"
   },
   "scans": {
@@ -136,7 +137,7 @@
     "apps/status/tests (not shipped) and templates/react-app (no lockfile) are not scanned.",
     "golang/freetype's dual licence is evidenced by the LICENSE in the module cache at the pinned hash; a new freetype version with a different LICENSE needs the election re-pinned by the owner.",
     "The Apps copy check compares with a Portal commit and the live Portal branches; until the Portal PR merges the pin is a feature-branch commit, and after a squash merge it must be moved to the merge commit or the check fails (intended).",
-    "The check reads GitHub anonymously, so it is subject to GitHub's anonymous rate limit."
+    "The lock cross-check covers installed packages only; the optional packages of other platforms are judged on the lock's declaration (19 in the Portal SBOM on a macOS machine) and are not part of what ships."
   ],
   "owner_decisions": {
     "date": "2026-11-15",
@@ -170,9 +171,9 @@
     "branch_protection": "Pending owner approval: add 'licence scan' (Portal) and 'licence' (Apps) as required checks. No repository setting was changed."
   },
   "ci_runs": {
-    "portal_licence": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43727124972 (success, commit f358823d, 397 components)",
-    "portal_test": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43727124836 (success, commit f358823d)",
-    "apps_check": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/actions/runs/43727150252 (success, commit 85fd1e61, 88 components)"
+    "portal_licence": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43729130675 (success, commit 9fac73ef, 397 components)",
+    "portal_test": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43729130655 (success, commit 9fac73ef)",
+    "apps_check": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/actions/runs/43729242764 (success, commit e20c0228, 88 components)"
   },
   "first_scan_flagged_components": "Ten components: golang.org/x/{crypto,image,net,oauth2,sync,sys,text} (BSD-Source-Code) and khroma (no licence field) in the Portal, golang.org/x/sys and x/text in Apps; all decided by the owner on 2026-11-15, see owner_decisions"
 }
