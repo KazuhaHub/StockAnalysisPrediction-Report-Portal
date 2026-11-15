@@ -23,10 +23,14 @@ var (
 	// A local reference (development profile only) is addressed by an escaped digest reference. The segment is
 	// bounded and can never be "create", "load" or "json" followed by a further segment.
 	dockerImageRef = `[A-Za-z0-9._:%@-]{1,640}`
+	// A volume is only ever read, by name, and only so the overlap check can see through a bind-backed local
+	// volume. The name is Docker's own volume name syntax, bounded.
+	dockerVolumeName = `[A-Za-z0-9][A-Za-z0-9_.-]{0,254}`
 )
 
 // dockerAllowedRoutes is the complete set of daemon requests the runner issues. There is deliberately
-// no image pull route, no registry, build, commit, push, network, volume or exec route.
+// no image pull route, no registry, build, commit, push, network or exec route, and the only volume route is the
+// read of one volume by name (GET): none creates, removes, lists or prunes one.
 var dockerAllowedRoutes = []dockerRoute{
 	{http.MethodGet, regexp.MustCompile(`^/version$`)},
 	{http.MethodGet, regexp.MustCompile(`^/v` + regexp.QuoteMeta(APIVersion) + `/info$`)},
@@ -39,6 +43,7 @@ var dockerAllowedRoutes = []dockerRoute{
 	{http.MethodPost, regexp.MustCompile(`^/v` + regexp.QuoteMeta(APIVersion) + `/containers/create$`)},
 	{http.MethodPost, regexp.MustCompile(`^/v` + regexp.QuoteMeta(APIVersion) + `/containers/` + dockerContainerID + `/(start|stop|kill)$`)},
 	{http.MethodDelete, regexp.MustCompile(`^/v` + regexp.QuoteMeta(APIVersion) + `/containers/` + dockerContainerID + `$`)},
+	{http.MethodGet, regexp.MustCompile(`^/v` + regexp.QuoteMeta(APIVersion) + `/volumes/` + dockerVolumeName + `$`)},
 }
 
 // dockerRequestAllowed reports whether a method and escaped path are in the closed set.

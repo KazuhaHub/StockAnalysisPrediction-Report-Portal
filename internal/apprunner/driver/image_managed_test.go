@@ -245,7 +245,7 @@ func TestDockerRequestAllowListIsClosed(t *testing.T) {
 		{"POST", "/v1.47/images/" + image + "/tag"},         // retag
 		{"DELETE", "/v1.47/images/ghcr.io%2Fexample%2Fapp"}, // removal by name
 		{"POST", "/v1.47/build"}, {"POST", "/v1.47/commit"},
-		{"POST", "/v1.47/networks/create"}, {"POST", "/v1.47/volumes/create"},
+		{"POST", "/v1.47/networks/create"}, {"POST", "/v1.47/volumes/create"}, {"GET", "/v1.47/volumes"}, {"DELETE", "/v1.47/volumes/v"},
 		{"POST", "/v1.47/containers/" + id + "/exec"}, {"POST", "/v1.47/containers/" + id + "/attach"},
 		{"POST", "/v1.47/containers/" + id + "/restart"}, {"POST", "/v1.47/containers/" + id + "/rename"},
 		{"POST", "/v1.47/containers/prune"}, {"POST", "/v1.47/images/prune"}, {"POST", "/v1.47/system/prune"},

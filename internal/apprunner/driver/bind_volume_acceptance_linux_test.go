@@ -48,7 +48,8 @@ func TestDockerAcceptanceBindBackedVolumeIsAConflict(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(root) })
 	namespace := filepath.Join(root, "data", "00000000-0000-4000-8000-000000700002")
 	sibling := filepath.Join(root, "data", "00000000-0000-4000-8000-000000700003")
-	for _, dir := range []string{namespace, sibling} {
+	stopped := filepath.Join(root, "data", "00000000-0000-4000-8000-000000700004")
+	for _, dir := range []string{namespace, sibling, stopped} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -143,6 +144,22 @@ func TestDockerAcceptanceBindBackedVolumeIsAConflict(t *testing.T) {
 	}
 	if err := requireNoContainerMountReferences(context.Background(), client, sibling); err != nil {
 		t.Fatalf("the same container conflicted with a namespace it does not use: %v", err)
+	}
+
+	// A created container that was never started on a bind-backed volume: the daemon has not mounted the volume,
+	// so its list shows only the volume's own directory and the mount table cannot see where it leads. The
+	// volume's options say it, so the inventory must still conflict.
+	idleVolume := "portal-bindvol-idle-" + suffix
+	call(http.MethodPost, "/volumes/create", map[string]any{
+		"Name": idleVolume, "Driver": "local",
+		"DriverOpts": map[string]string{"type": "none", "o": "bind", "device": stopped},
+	}, http.StatusCreated)
+	t.Cleanup(func() {
+		call(http.MethodDelete, "/volumes/"+idleVolume+"?force=1", nil, http.StatusNoContent, http.StatusNotFound, http.StatusConflict)
+	})
+	container("portal-bindvol-idle-"+suffix, []string{idleVolume + ":/v"}, false)
+	if err := requireNoContainerMountReferences(context.Background(), client, stopped); !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("a created, never started container on a bind-backed volume did not conflict: %v", err)
 	}
 
 	// A created container whose bind source does not exist yet under the namespace: Docker makes it on start.

@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -284,7 +286,7 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 			if json.Unmarshal(entry, &narrow) != nil || len(narrow.Mounts) == 0 {
 				return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: Mounts key missing", ErrInvalidResponse, inventoryEntryLabel(entry))
 			}
-			result = append(result, candidateIPCContainer{ID: remembered.id, Mounts: narrow.Mounts, plan: &candidateIPCMountPlanResult{sources: slices.Clone(remembered.plan.sources), pending: slices.Clone(remembered.plan.pending)}})
+			result = append(result, candidateIPCContainer{ID: remembered.id, Mounts: narrow.Mounts, plan: remembered.plan.clonePtr()})
 			continue
 		}
 		var container candidateIPCContainer
@@ -294,11 +296,11 @@ func readCandidateIPCInventory(ctx context.Context, client *http.Client) ([]cand
 		if !containerSHA.MatchString(container.ID) {
 			return nil, fmt.Errorf("%w: candidate IPC inventory entry %s: malformed Id", ErrInvalidResponse, inventoryEntryLabel(entry))
 		}
-		sources, pending, err := candidateIPCMountPlan(container.Mounts)
+		plan, err := candidateIPCMountPlan(container.Mounts)
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
-		inventoryEntryMemo.put(key, candidateIPCInventoryEntry{id: container.ID, plan: candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)}})
+		inventoryEntryMemo.put(key, candidateIPCInventoryEntry{id: container.ID, plan: plan.clone()})
 		result = append(result, container)
 	}
 	return result, nil
@@ -319,6 +321,18 @@ var mountPlanMemo = newDecisionMemo[candidateIPCMountPlanResult](1024)
 type candidateIPCMountPlanResult struct {
 	sources []string
 	pending []candidateIPCPendingVolume
+	// volumes are the names of the local-driver volumes the container mounts. Each is inspected, because a
+	// local volume created with type=none,o=bind is a bind mount of its device whatever path the list shows.
+	volumes []string
+}
+
+func (r candidateIPCMountPlanResult) clonePtr() *candidateIPCMountPlanResult {
+	c := r.clone()
+	return &c
+}
+
+func (r candidateIPCMountPlanResult) clone() candidateIPCMountPlanResult {
+	return candidateIPCMountPlanResult{sources: slices.Clone(r.sources), pending: slices.Clone(r.pending), volumes: slices.Clone(r.volumes)}
 }
 
 // shortContainerID names a container in an error without the full identifier.
@@ -352,99 +366,165 @@ type candidateIPCPendingVolume struct {
 // candidateIPCMountSources is the closed, list-only projection: any mount whose
 // host path cannot be read from the list alone is refused.
 func candidateIPCMountSources(raw json.RawMessage) ([]string, error) {
-	sources, pending, err := candidateIPCMountPlan(raw)
+	plan, err := candidateIPCMountPlan(raw)
 	if err != nil {
 		return nil, err
 	}
-	if len(pending) != 0 {
-		return nil, fmt.Errorf("%w: mount %d: volume without a source needs inspection", ErrInvalidResponse, pending[0].index)
+	if len(plan.pending) != 0 {
+		return nil, fmt.Errorf("%w: mount %d: volume without a source needs inspection", ErrInvalidResponse, plan.pending[0].index)
 	}
-	return sources, nil
+	return plan.sources, nil
 }
 
-func candidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
+func candidateIPCMountPlan(raw json.RawMessage) (candidateIPCMountPlanResult, error) {
 	if len(raw) == 0 {
-		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
+		return candidateIPCMountPlanResult{}, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
 	}
 	// The plan is a function of the mount bytes alone. Callers append to the result, so they get copies.
 	key := memoKeyOf(raw)
 	if plan, ok := mountPlanMemo.get(key); ok {
-		return slices.Clone(plan.sources), slices.Clone(plan.pending), nil
+		return plan.clone(), nil
 	}
-	sources, pending, err := parseCandidateIPCMountPlan(raw)
+	plan, err := parseCandidateIPCMountPlan(raw)
 	if err != nil {
-		return nil, nil, err
+		return candidateIPCMountPlanResult{}, err
 	}
-	mountPlanMemo.put(key, candidateIPCMountPlanResult{sources: slices.Clone(sources), pending: slices.Clone(pending)})
-	return sources, pending, nil
+	mountPlanMemo.put(key, plan.clone())
+	return plan, nil
 }
 
-func parseCandidateIPCMountPlan(raw json.RawMessage) ([]string, []candidateIPCPendingVolume, error) {
+func parseCandidateIPCMountPlan(raw json.RawMessage) (candidateIPCMountPlanResult, error) {
+	var plan candidateIPCMountPlanResult
+	fail := func(format string, args ...any) (candidateIPCMountPlanResult, error) {
+		return candidateIPCMountPlanResult{}, fmt.Errorf(format, args...)
+	}
 	if len(raw) == 0 {
-		return nil, nil, fmt.Errorf("%w: Mounts key missing", ErrInvalidResponse)
+		return fail("%w: Mounts key missing", ErrInvalidResponse)
 	}
 	var mounts []json.RawMessage
 	if json.Unmarshal(raw, &mounts) != nil {
-		return nil, nil, fmt.Errorf("%w: Mounts is not an array", ErrInvalidResponse)
+		return fail("%w: Mounts is not an array", ErrInvalidResponse)
 	}
-	sources := make([]string, 0, len(mounts))
-	var pending []candidateIPCPendingVolume
+	plan.sources = make([]string, 0, len(mounts))
 	for i, entry := range mounts {
 		var m struct {
 			Type        string  `json:"Type"`
+			Name        string  `json:"Name"`
 			Source      *string `json:"Source"`
 			Driver      *string `json:"Driver"`
 			Destination string  `json:"Destination"`
 		}
 		if !validProjection(entry, &m) || json.Unmarshal(entry, &m) != nil {
-			return nil, nil, fmt.Errorf("%w: mount %d: projection rejected", ErrInvalidResponse, i)
+			return fail("%w: mount %d: projection rejected", ErrInvalidResponse, i)
 		}
 		switch m.Type {
 		case "volume":
+			local := m.Driver != nil && *m.Driver == "local"
+			if local {
+				// A local volume created with type=none,o=bind is a bind mount of its device, whatever the list
+				// shows as its source and whether or not a container is running. It is inspected by name.
+				if !candidateIPCVolumeName.MatchString(m.Name) {
+					return fail("%w: mount %d: local volume has the name %q", ErrInvalidResponse, i, boundedString(m.Name))
+				}
+				plan.volumes = append(plan.volumes, m.Name)
+			}
 			// The list endpoint reports a daemon-managed volume with an empty
 			// Source. A local-driver volume lives under the Docker root, so the
 			// empty Source names no path that could overlap the data root. Any
 			// other driver (or none) is resolved through inspect instead.
 			if m.Source != nil && *m.Source == "" {
-				if m.Driver != nil && *m.Driver == "local" {
+				if local {
 					continue
 				}
 				if !filepath.IsAbs(m.Destination) {
-					return nil, nil, fmt.Errorf("%w: mount %d: volume without a source has destination %q, not an absolute path", ErrInvalidResponse, i, boundedString(m.Destination))
+					return fail("%w: mount %d: volume without a source has destination %q, not an absolute path", ErrInvalidResponse, i, boundedString(m.Destination))
 				}
-				pending = append(pending, candidateIPCPendingVolume{index: i, destination: m.Destination})
+				plan.pending = append(plan.pending, candidateIPCPendingVolume{index: i, destination: m.Destination})
 				continue
 			}
 			fallthrough
 		case "bind":
 			if m.Source == nil || !filepath.IsAbs(*m.Source) {
-				return nil, nil, fmt.Errorf("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
+				return fail("%w: mount %d: type %q source %q is not an absolute path", ErrInvalidResponse, i, m.Type, boundedSource(m.Source))
 			}
-			sources = append(sources, *m.Source)
+			plan.sources = append(plan.sources, *m.Source)
 		case "tmpfs":
 			if m.Source != nil && *m.Source != "" {
-				return nil, nil, fmt.Errorf("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
+				return fail("%w: mount %d: tmpfs with source %q", ErrInvalidResponse, i, boundedSource(m.Source))
 			}
 		default:
-			return nil, nil, fmt.Errorf("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
+			return fail("%w: mount %d: unsupported type %q", ErrInvalidResponse, i, boundedString(m.Type))
 		}
 	}
-	return sources, pending, nil
+	return plan, nil
+}
+
+// candidateIPCVolumeName is the name syntax the allow-list admits for a volume read.
+var candidateIPCVolumeName = regexp.MustCompile(`^` + dockerVolumeName + `$`)
+
+// candidateIPCBindVolumeDevice inspects one local volume and returns the host path it binds, or "" when it is
+// not a bind-backed volume. A volume whose options are not a flat object of strings, that names another
+// driver, or that binds without an absolute device or with a filesystem type other than none, is refused.
+func candidateIPCBindVolumeDevice(ctx context.Context, client *http.Client, name string) (string, error) {
+	var inspected struct {
+		Driver  string          `json:"Driver"`
+		Options json.RawMessage `json:"Options"`
+	}
+	if err := readJSON(ctx, client, "/v"+APIVersion+"/volumes/"+name, &inspected); err != nil {
+		return "", fmt.Errorf("inspect volume %q: %w", boundedString(name), err)
+	}
+	if inspected.Driver != "local" {
+		return "", fmt.Errorf("%w: volume %q is listed as local but inspects as driver %q", ErrInvalidResponse, boundedString(name), boundedString(inspected.Driver))
+	}
+	if len(inspected.Options) == 0 || string(inspected.Options) == "null" {
+		return "", nil
+	}
+	var options map[string]string
+	var probe struct{}
+	if !validProjection(inspected.Options, &probe) || json.Unmarshal(inspected.Options, &options) != nil {
+		return "", fmt.Errorf("%w: volume %q: options are not an object of strings", ErrInvalidResponse, boundedString(name))
+	}
+	bind := false
+	for _, option := range strings.Split(options["o"], ",") {
+		if option == "bind" || option == "rbind" {
+			bind = true
+		}
+	}
+	if !bind {
+		return "", nil
+	}
+	if fsType, ok := options["type"]; ok && fsType != "none" {
+		return "", fmt.Errorf("%w: volume %q: a bind option with the filesystem type %q", ErrInvalidResponse, boundedString(name), boundedString(fsType))
+	}
+	device := options["device"]
+	if !filepath.IsAbs(device) {
+		return "", fmt.Errorf("%w: volume %q: bind device %q is not an absolute path", ErrInvalidResponse, boundedString(name), boundedString(device))
+	}
+	return device, nil
 }
 
 // candidateIPCContainerSources returns every host path a container mounts. A
 // volume the list reports without a path (a non-local driver) is resolved with
 // one inspect of that container; one that stays empty or relative is refused as an invalid response. A failed inspect (the container removed, a daemon error, a timeout) keeps the error type readJSON gives it: ErrUnavailable or the context error.
 func candidateIPCContainerSources(ctx context.Context, client *http.Client, container candidateIPCContainer) ([]string, error) {
-	var sources []string
-	var pending []candidateIPCPendingVolume
+	var plan candidateIPCMountPlanResult
 	if container.plan != nil {
-		sources, pending = slices.Clone(container.plan.sources), slices.Clone(container.plan.pending)
+		plan = container.plan.clone()
 	} else {
 		var err error
-		sources, pending, err = candidateIPCMountPlan(container.Mounts)
+		plan, err = candidateIPCMountPlan(container.Mounts)
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+		}
+	}
+	sources, pending := plan.sources, plan.pending
+	for _, name := range plan.volumes {
+		device, err := candidateIPCBindVolumeDevice(ctx, client, name)
+		if err != nil {
+			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+		}
+		if device != "" {
+			sources = append(sources, device)
 		}
 	}
 	if len(pending) == 0 {

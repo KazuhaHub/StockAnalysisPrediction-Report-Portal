@@ -16,7 +16,10 @@ import (
 )
 
 func inventoryClient(body string) *http.Client {
-	return daemonClient(transportFunc(func(*http.Request) (*http.Response, error) {
+	return daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Path, "/volumes/") { // a plain local volume
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"Driver":"local","Options":null}`))}, nil
+		}
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	}))
 }
@@ -103,7 +106,7 @@ func TestInventoryEmptyVolumeSourceDoesNotWeakenBindOrOverlap(t *testing.T) {
 		})
 	}
 	data := t.TempDir()
-	body := `[{"Id":"` + id + `","Mounts":[{"Type":"volume","Driver":"local","Source":""},{"Type":"bind","Source":"` + data + `"}]}]`
+	body := `[{"Id":"` + id + `","Mounts":[{"Type":"volume","Name":"v","Driver":"local","Source":""},{"Type":"bind","Source":"` + data + `"}]}]`
 	if err := requireNoContainerMountReferences(context.Background(), inventoryClient(body), data); !errors.Is(err, ErrContainerConflict) {
 		t.Fatalf("an overlapping mount beside an anonymous volume was admitted: %v", err)
 	}
@@ -115,6 +118,11 @@ func routedClient(listing string, inspect map[string]string, asked *[]string) *h
 	return daemonClient(transportFunc(func(r *http.Request) (*http.Response, error) {
 		*asked = append(*asked, r.URL.Path)
 		body, status := listing, 200
+		if strings.HasPrefix(r.URL.Path, "/v"+APIVersion+"/volumes/") {
+			// A plain local volume: no options, so it is judged by the path the list shows.
+			*asked = (*asked)[:len(*asked)-1] // volume reads are not the container reads these tests count
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"Driver":"local","Options":null}`))}, nil
+		}
 		if r.URL.Path != "/v"+APIVersion+"/containers/json" {
 			var ok bool
 			if body, ok = inspect[strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v"+APIVersion+"/containers/"), "/json")]; !ok {
@@ -192,6 +200,7 @@ func TestPluginVolumeThatStaysUnresolvedIsRefused(t *testing.T) {
 	}
 }
 
+// A local volume needs no container inspect; it is read as a volume (see volume_inspect_linux_test.go).
 func TestLocalAnonymousVolumeIsSkippedWithoutInspect(t *testing.T) {
 	id := strings.Repeat("a", 64)
 	listing := `[{"Id":"` + id + `","Mounts":[{"Type":"volume","Name":"v","Source":"","Driver":"local","Destination":"/db"}]}]`
@@ -212,7 +221,7 @@ func TestVolumeWithAbsoluteSourceOverlappingTheDataRootConflicts(t *testing.T) {
 	}
 	for name, source := range map[string]string{"equal": data, "ancestor": filepath.Dir(data), "child": filepath.Join(data, "child")} {
 		t.Run(name, func(t *testing.T) {
-			listing := `[{"Id":"` + strings.Repeat("b", 64) + `","Mounts":[{"Type":"volume","Driver":"local","Source":"` + source + `","Destination":"/db"}]}]`
+			listing := `[{"Id":"` + strings.Repeat("b", 64) + `","Mounts":[{"Type":"volume","Name":"v","Driver":"local","Source":"` + source + `","Destination":"/db"}]}]`
 			var asked []string
 			if err := requireNoContainerMountReferences(context.Background(), routedClient(listing, nil, &asked), data); !errors.Is(err, ErrContainerConflict) {
 				t.Fatalf("overlap through a volume admitted: %v", err)
@@ -294,7 +303,7 @@ func TestSourceAbsentUnderTheNamespaceIsAReference(t *testing.T) {
 	for _, mountType := range []string{"bind", "volume"} {
 		t.Run(mountType, func(t *testing.T) {
 			listing := func(source string) string {
-				return `[{"Id":"` + strings.Repeat("7", 64) + `","Mounts":[{"Type":"` + mountType + `","Driver":"local","Source":"` + source + `","Destination":"/db"}]}]`
+				return `[{"Id":"` + strings.Repeat("7", 64) + `","Mounts":[{"Type":"` + mountType + `","Name":"v","Driver":"local","Source":"` + source + `","Destination":"/db"}]}]`
 			}
 			var asked []string
 			if err := requireNoContainerMountReferences(context.Background(), routedClient(listing(filepath.Join(data, "absent")), nil, &asked), data); !errors.Is(err, ErrContainerConflict) {

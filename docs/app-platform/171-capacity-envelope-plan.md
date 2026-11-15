@@ -546,7 +546,7 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 ## Resolution (inventory overlap by device and inode)
 
-**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43762572824
+**Status: resolved.** The native acceptance run (before the volume inspect below was added; see the last run recorded here) is green: the foreign container job of the app runner probe workflow, run 43762572824
 (`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43762572824/job/132960484901`), passed
 `TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` as
 root against a real daemon, with the daemon listing the bind-backed volume as `/var/lib/docker/volumes/<name>/_data`. Real hosts show
@@ -582,6 +582,14 @@ because they share it. No schema, journal or wire change.
   The daemon dialer compares the daemon peer's `/proc/<pid>/ns/mnt` (from `SO_PEERCRED`) with the runner's on every connection and
   records the verdict on the client; the inventory read refuses a client that has not seen a daemon in the runner's namespace. A client
   that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
+- **Bind-backed local volumes.** A bind-backed local volume is mounted on the host only while a container runs, so a created or stopped container
+  lists only the daemon's own `_data` directory, which the mount table cannot see through. For that reason a mount of `Type: "volume"` with
+  the `local` driver is also inspected by name (`GET /volumes/{name}`, the only volume route on the runner's allow-list, GET only; creating,
+  removing, listing and pruning stay closed, and a test pins that). When `Options.o` contains `bind` or `rbind` (with `type` none or absent),
+  `Options.device` is taken as one more source of the container and judged exactly like a bind source: placed by the mount table, symlinks
+  followed, an absent device under the namespace a reference. Any other local volume is judged as before. A failed inspect, a driver that
+  differs from the list, options that are not a flat object of strings, a bind option with another filesystem type, a missing or relative
+  device, and a local volume mount without a valid name are refusals. Each local volume of each container costs one inspect per pass.
 - **Lookups.** Every filesystem lookup, the source canonicalisation, the namespace canonicalisation and the mount table read, runs under
   the one-in-flight slot and is abandoned when the context ends, so a stuck mount cannot hold the caller past its deadline. A lookup that
   does not return keeps the slot until it does; further lookups wait for it or give up at their own deadline.
@@ -602,15 +610,13 @@ descendant and a sibling and reads the real mount table.
 **Where the native tests run.** `.github/workflows/app-runner-probe.yml`, job `foreign-container-beside-writer`, on a GitHub-hosted
 runner as root with a real daemon: `TestDockerAcceptanceBindBackedVolumeIsAConflict` creates a `type=none,o=bind` local volume of a
 namespace, starts a container on it, requires that the daemon lists a `/volumes/` source, and requires `ErrContainerConflict` for the
-namespace and none for a sibling; it also requires a conflict for a created container whose bind source is absent under the namespace.
+namespace and none for a sibling; it also requires a conflict for a created container that was never started on a bind-backed volume, and for a created container whose bind
+source is absent under the namespace.
 `TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` run there too. The job runs on every pull request that
 touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged) the root-only tests skip.
 
 **Limits.**
 
-- A bind-backed local volume is mounted on the host only while a container uses it. A created or stopped container that uses one lists the
-  daemon's `_data` directory, which is not yet a mount, so the table cannot see where it will lead. The volume's `Options.device` would
-  show it, but the runner's allow-list has no volume route; this is not covered.
 - The check is a point-in-time observation. A link retargeted, a directory renamed or a mount made between the check and the start is
   not seen, and it is not exclusion against host root. This is the rename-during-check race.
 - A filesystem the mount table gives one device number for different trees (a btrfs subvolume layout with identical numbers), or one
