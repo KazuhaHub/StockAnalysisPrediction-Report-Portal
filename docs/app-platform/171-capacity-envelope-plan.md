@@ -546,8 +546,8 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 ## Resolution (inventory overlap by device and inode)
 
-**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43769745984
-(`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43769745984/job/132982772950`), passed
+**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43773100171
+(`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43773100171/job/132993178587`), passed
 `TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` as
 root against a real daemon, with the daemon listing the bind-backed volume as `/var/lib/docker/volumes/<name>/_data`. Real hosts show
 mounts whose root is not a path (`nsfs` namespace files, root `net:[...]`); the table reader skips them.
@@ -588,7 +588,7 @@ because they share it. No schema, journal or wire change.
   does not identify dockerd. Instead, once per client (on its first dial), the socket's inode is found by path in `/proc/net/unix` and every
   process with a descriptor on it is found through `/proc/*/fd`. The socket is trusted only when at least one holder's executable is a
   `dockerd` and every holder is in the runner's mount namespace; socket activation (systemd and dockerd both hold it) passes and a forwarder
-  to a remote daemon (no local dockerd holds the socket) is refused. Every dial's listener (`SO_PEERCRED`, which under socket activation is systemd and
+  to a remote daemon (no local dockerd holds the socket) is refused. If no live socket is bound to the path in the runner's network namespace (the quota job's runner saw only an orphaned entry with inode 0), the holders cannot be found by inode and the check falls back to the weaker evidence that a `dockerd` runs in the runner's mount namespace; with none, the socket is refused. That fallback does not tie the socket to that dockerd. Every dial's listener (`SO_PEERCRED`, which under socket activation is systemd and
   is not necessarily a holder any more) is then checked for the runner's mount namespace, and one failure taints the client. The holders are
   vetted once per client, so a socket replaced between dials is not seen until the next client. The inventory read refuses a client that has not seen
   a vetted daemon. A client that was not built by `newDockerClient` has no socket peer and is not asked; only a test builds one.
