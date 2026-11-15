@@ -24,7 +24,12 @@ type platformBundleSource struct {
 
 func platformBundleFixture(t *testing.T) *platformBundleSource {
 	t.Helper()
-	s, _, installation := platformLaunchFixture(t, false)
+	return platformBundleFixtureOn(t, false)
+}
+
+func platformBundleFixtureOn(t *testing.T, pg bool) *platformBundleSource {
+	t.Helper()
+	s, _, installation := platformLaunchFixture(t, pg)
 	b := &platformBundleSource{s: s, installation: installation, archives: map[string]string{}, archiveBytes: map[string][]byte{}, hostDir: t.TempDir()}
 	b.namespace = scalar[string](t, s.st, `SELECT data_namespace_id FROM app_platform_activations WHERE installation_id=? AND state='active'`, installation)
 	b.operation = scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install'`, installation)

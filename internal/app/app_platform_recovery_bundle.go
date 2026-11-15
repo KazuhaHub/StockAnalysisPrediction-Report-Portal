@@ -87,6 +87,13 @@ type platformRecoveryBundleInput struct {
 	Archives map[string]string
 	// RunnerJournal is the old runner's journal file. Empty when the host has none to carry.
 	RunnerJournal string
+
+	// Test seams. inSnapshot runs inside the read snapshot after the retained sets are read; afterSnapshot
+	// runs once the snapshot has ended and before any host file is copied. Both are nil in production.
+	inSnapshot    func()
+	afterSnapshot func()
+	// afterJournalCopy runs after the journal was copied and before it is checked again.
+	afterJournalCopy func()
 }
 
 var errPlatformBundle = errors.New("recovery bundle is incomplete or inconsistent")
@@ -249,6 +256,12 @@ func (c *platformByteCounter) Write(p []byte) (int, error) {
 // writePlatformRecoveryBundle writes the bundle into an empty directory. It refuses, and removes what it
 // wrote, if any retained checkpoint has no archive, an archive that is not the recorded one, or the
 // database changed while it was being read.
+//
+// The database is read in ONE read transaction: the dump, the retained recovery sets, the keyring, the release
+// inventory and the descriptors of managed releases all come from the same snapshot, so a moving database cannot
+// give a dump that disagrees with the manifest. The host files (archives, journal, image blobs) are copied after
+// it, and the retained sets are read once more at the end: a set that was cut, deleted or replaced while the
+// files were being copied makes the bundle inconsistent with the host, and is refused.
 func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBundleInput) (manifest platformRecoveryBundleManifest, err error) {
 	entries, readErr := os.ReadDir(dir)
 	if readErr != nil || len(entries) != 0 {
@@ -265,39 +278,82 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 		}
 	}()
 	pool := s.st.poolExec()
-	before, err := loadPlatformRetainedSets(pool)
-	if err != nil {
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return manifest, err
 	}
-	known := map[string]bool{}
-	for _, set := range before {
-		known[set.id] = true
-	}
-	for id := range in.Archives {
-		if !known[id] {
-			return manifest, fmt.Errorf("%w: an archive was given for a recovery set that is not retained", errPlatformBundle)
-		}
-	}
+	var (
+		before      []platformRetainedSet
+		keyring     []byte
+		descriptors = map[string][]byte{}
+	)
 	manifest.Format = platformRecoveryBundleFormat
-	if manifest.Dump, err = streamPlatformBundleFile(dir, platformBundleDumpName, func(w io.Writer) error {
-		_, _, dumpErr := s.st.dumpTo(w)
-		return dumpErr
-	}); err != nil {
-		return manifest, err
-	}
-	keyring, err := platformBundleKeyring(pool)
+	err = s.st.inReadSnapshot(func(tx *sql.Tx) error {
+		snapshot := migExec{s: s.st, ex: tx}
+		// The table list, including the registered plugin data tables, is part of the snapshot.
+		tables, err := s.st.backupTablesIn(snapshot)
+		if err != nil {
+			return err
+		}
+		if before, err = loadPlatformRetainedSets(snapshot); err != nil {
+			return err
+		}
+		if err := validatePlatformRetainedSets(before); err != nil {
+			return err
+		}
+		known := map[string]bool{}
+		for _, set := range before {
+			known[set.id] = true
+		}
+		for id := range in.Archives {
+			if !known[id] {
+				return fmt.Errorf("%w: an archive was given for a recovery set that is not retained", errPlatformBundle)
+			}
+		}
+		// Fail before the dump is streamed: a missing archive is the common mistake.
+		for _, set := range before {
+			if _, ok := in.Archives[set.id]; !ok {
+				return fmt.Errorf("%w: no archive for recovery set %s", errPlatformBundle, set.id)
+			}
+		}
+		if in.inSnapshot != nil {
+			in.inSnapshot()
+		}
+		if manifest.Dump, err = streamPlatformBundleFile(dir, platformBundleDumpName, func(w io.Writer) error {
+			_, _, dumpErr := s.st.dumpTx(tx, tables, w)
+			return dumpErr
+		}); err != nil {
+			return err
+		}
+		if keyring, err = platformBundleKeyring(snapshot); err != nil {
+			return err
+		}
+		if manifest.Releases, err = platformRequiredReleaseBlobs(snapshot); err != nil {
+			return err
+		}
+		for _, release := range manifest.Releases {
+			if release.Backend != platformBlobPending {
+				continue
+			}
+			var descriptor []byte
+			if err := snapshot.queryRow(`SELECT descriptor FROM app_platform_releases WHERE sha256=?`, release.ReleaseSHA256).Scan(&descriptor); err != nil {
+				return fmt.Errorf("%w: release %s is not stored", errPlatformBundle, release.ReleaseSHA256)
+			}
+			descriptors[release.ReleaseSHA256] = descriptor
+		}
+		return nil
+	})
 	if err != nil {
 		return manifest, err
+	}
+	if in.afterSnapshot != nil {
+		in.afterSnapshot()
 	}
 	if manifest.Keyring, err = writePlatformBundleFile(dir, platformBundleKeyringName, bytes.NewReader(keyring)); err != nil {
 		return manifest, err
 	}
 	manifest.Checkpoints = []platformBundleCheckpoint{}
 	for _, set := range before {
-		source, ok := in.Archives[set.id]
-		if !ok {
-			return manifest, fmt.Errorf("%w: no archive for recovery set %s", errPlatformBundle, set.id)
-		}
+		source := in.Archives[set.id]
 		file, err := copyPlatformBundleFile(dir, "checkpoints/"+set.checkpoint+".archive", source)
 		if err != nil {
 			return manifest, err
@@ -311,21 +367,24 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 		})
 	}
 	if in.RunnerJournal != "" {
-		for _, sidecar := range []string{"-wal", "-shm"} {
-			if info, statErr := os.Lstat(in.RunnerJournal + sidecar); statErr == nil && info.Size() > 0 {
-				return manifest, fmt.Errorf("%w: the runner journal has live %s content; stop the runner first", errPlatformBundle, sidecar)
-			}
+		stable, err := platformJournalState(in.RunnerJournal)
+		if err != nil {
+			return manifest, err
 		}
 		file, err := copyPlatformBundleFile(dir, platformBundleJournalName, in.RunnerJournal)
 		if err != nil {
 			return manifest, err
 		}
+		if in.afterJournalCopy != nil {
+			in.afterJournalCopy()
+		}
+		again, err := platformJournalState(in.RunnerJournal)
+		if err != nil || again != stable {
+			return manifest, fmt.Errorf("%w: the runner journal changed while it was copied; stop the runner first", errPlatformBundle)
+		}
 		manifest.RunnerJournal = &file
 	}
-	if manifest.Releases, err = platformRequiredReleaseBlobs(pool); err != nil {
-		return manifest, err
-	}
-	if manifest.ImageBlobs, err = s.bundlePlatformImageBlobs(dir, manifest.Releases); err != nil {
+	if manifest.ImageBlobs, err = s.bundlePlatformImageBlobs(dir, manifest.Releases, descriptors); err != nil {
 		return manifest, err
 	}
 	after, err := loadPlatformRetainedSets(pool)
@@ -340,6 +399,43 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 		return manifest, err
 	}
 	return manifest, nil
+}
+
+type platformJournalFile struct {
+	exists      bool
+	size, mtime int64
+}
+
+// platformJournalSnapshot is the journal file and its three possible companions: write-ahead log, shared-memory
+// index and rollback journal. Comparing two of them shows whether anything appeared or changed in between.
+type platformJournalSnapshot [4]platformJournalFile
+
+// platformJournalState refuses a journal that has live content beside it (a runner that has not stopped) and
+// returns the state to compare after the copy.
+func platformJournalState(path string) (platformJournalSnapshot, error) {
+	var state platformJournalSnapshot
+	for i, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		info, err := os.Lstat(path + suffix)
+		if err != nil {
+			continue
+		}
+		state[i] = platformJournalFile{exists: true, size: info.Size(), mtime: info.ModTime().UnixNano()}
+		if suffix != "" && info.Size() > 0 {
+			return state, fmt.Errorf("%w: the runner journal has live %s content; stop the runner first", errPlatformBundle, suffix)
+		}
+	}
+	return state, nil
+}
+
+// validatePlatformRetainedSets checks what becomes part of a file path. A checkpoint id names the archive in the
+// bundle, so it must be a UUID, never a path.
+func validatePlatformRetainedSets(sets []platformRetainedSet) error {
+	for _, set := range sets {
+		if !platformValidUUID(set.checkpoint) {
+			return fmt.Errorf("%w: recovery set %s has a checkpoint id that is not a UUID", errPlatformBundle, set.id)
+		}
+	}
+	return nil
 }
 
 func samePlatformRetainedSets(a, b []platformRetainedSet) bool {
@@ -370,6 +466,9 @@ func verifyPlatformRecoveryBundle(dir string) (platformRecoveryBundleManifest, e
 	}
 	files := []platformBundleFile{manifest.Dump, manifest.Keyring}
 	for _, checkpoint := range manifest.Checkpoints {
+		if !platformValidUUID(checkpoint.CheckpointID) || checkpoint.Archive.Path != "checkpoints/"+checkpoint.CheckpointID+".archive" {
+			return manifest, fmt.Errorf("%w: checkpoint %q is not a UUID named by its archive path", errPlatformBundle, checkpoint.CheckpointID)
+		}
 		files = append(files, checkpoint.Archive)
 	}
 	if manifest.RunnerJournal != nil {

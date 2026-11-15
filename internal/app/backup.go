@@ -79,7 +79,12 @@ const b64Key = "$b64"
 // backupTables lists every table in the current schema, from the schema declarations and the
 // migration list themselves so a new table is included the day it is declared and nobody has to
 // remember a second list.
-func (s *Store) backupTables() ([]string, error) {
+func (s *Store) backupTables() ([]string, error) { return s.backupTablesIn(s.poolExec()) }
+
+// backupTablesIn is backupTables read through e. A snapshot reads the registered plugin data tables through its own
+// transaction: listing them through the pool first lets a table registered in between show up as rows in the dump
+// but not as a table, and such a dump cannot be restored.
+func (s *Store) backupTablesIn(e migExec) ([]string, error) {
 	seen := map[string]bool{}
 	var base []string
 	for _, stmt := range s.baseSchemaStmts() {
@@ -91,8 +96,8 @@ func (s *Store) backupTables() ([]string, error) {
 		base = append(base, t)
 	}
 	names := backupTableNames(base, s.migrations())
-	if s.tableExists(platformPrefix + "plugin_tables") {
-		rows, err := s.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
+	if e.tableExists(platformPrefix + "plugin_tables") {
+		rows, err := e.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
 		if err != nil {
 			return nil, err
 		}
@@ -164,23 +169,42 @@ func Backup(cfgPath, path string) (tables int, rows int64, err error) {
 	return tables, rows, w.Flush()
 }
 
-// dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
-// single point in time rather than a table-by-table sample of a moving database.
-func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
-	names, err := s.backupTables()
-	if err != nil {
-		return 0, 0, err
-	}
+// inReadSnapshot runs fn inside ONE read-only transaction: a single point in time rather than a
+// sample of a moving database. On PostgreSQL the transaction is REPEATABLE READ; on SQLite the pool is
+// one connection, so fn must read through tx and never through the pool, or it waits for the
+// connection the transaction is holding.
+func (s *Store) inReadSnapshot(fn func(tx *sql.Tx) error) error {
 	opts := &sql.TxOptions{ReadOnly: true}
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
 	}
 	tx, err := s.db.BeginTx(context.Background(), opts)
 	if err != nil {
-		return 0, 0, err
+		return err
 	}
 	defer tx.Rollback() //nolint:errcheck // read-only: rollback is the only ending
+	return fn(tx)
+}
 
+// dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
+// single point in time rather than a table-by-table sample of a moving database.
+func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
+	var tables int
+	var total int64
+	err := s.inReadSnapshot(func(tx *sql.Tx) error {
+		names, err := s.backupTablesIn(migExec{s: s, ex: tx})
+		if err != nil {
+			return err
+		}
+		tables, total, err = s.dumpTx(tx, names, w)
+		return err
+	})
+	return tables, total, err
+}
+
+// dumpTx writes the dump of the given tables from an open read snapshot. names comes from backupTablesIn on the
+// same transaction.
+func (s *Store) dumpTx(tx *sql.Tx, names []string, w io.Writer) (int, int64, error) {
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(backupHeader{
 		Format:        backupFormat,
