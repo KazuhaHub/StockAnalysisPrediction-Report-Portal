@@ -124,10 +124,12 @@ func TestDockerAcceptanceBindBackedVolumeIsAConflict(t *testing.T) {
 		if entry.ID != id {
 			continue
 		}
-		sources, err := candidateIPCContainerSources(context.Background(), client, entry)
+		// What the list alone shows, before the volume is inspected for its device.
+		plan, err := candidateIPCMountPlan(entry.Mounts)
 		if err != nil {
 			t.Fatal(err)
 		}
+		sources := plan.sources
 		t.Logf("the daemon lists the bind-backed volume's source as %v", sources)
 		for _, source := range sources {
 			if source == namespace || strings.HasPrefix(source, namespace+"/") {
