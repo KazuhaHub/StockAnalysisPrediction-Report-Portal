@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "source": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 8 (DEV-04)",
+  "allow": [
+    "MIT", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Apache-2.0", "0BSD", "Zlib",
+    "Unlicense", "CC0-1.0", "BlueOak-1.0.0", "Python-2.0", "MPL-2.0"
+  ],
+  "deny": [
+    "GPL-2.0-only", "GPL-2.0", "SSPL-1.0", "BUSL-1.1", "Commons-Clause",
+    "EPL-1.0", "EPL-2.0", "NOASSERTION", "UNLICENSED"
+  ],
+  "own": {
+    "licences": ["AGPL-3.0-only"],
+    "components": ["github.com/KazuhaHub/"]
+  },
+  "election_only": ["FTL"],
+  "elections": [
+    {
+      "component": "dompurify",
+      "declared": "MPL-2.0 OR Apache-2.0",
+      "elected": "Apache-2.0",
+      "reason": "Dual licence MPL-2.0 OR Apache-2.0; the project takes Apache-2.0 (doc 167 section 8)."
+    },
+    {
+      "component": "github.com/golang/freetype",
+      "declared": "GPL-2.0-or-later",
+      "elected": "FTL",
+      "reason": "Dual licence FTL or GPL-2.0-or-later, pulled in by the captcha dependency; the project uses it under the FreeType License (doc 167 section 8). The licence detector reports only the GPL side."
+    }
+  ],
+  "exclusions": [
+    {
+      "component": "elkjs",
+      "requires": "elk-build-test",
+      "reason": "EPL-2.0 dependency of mermaid 12, aliased to an empty module in the Vite build; not shipped. Valid only while the ELK build test passes (web/scripts/check-no-elk.mjs)."
+    }
+  ]
+}

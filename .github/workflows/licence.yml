@@ -1,0 +1,97 @@
+name: licence
+
+# The DEV-04 licence gate (doc 167 section 8, docs/app-platform/173-licence-policy-plan.md). It builds
+# the SBOMs of what the binary ships, the Go modules linked into cmd/report-portal and the production
+# npm graph of the SPA, and judges every component against scripts/licence-policy.json. A denied
+# licence, an unknown licence and a component with no licence all fail the run.
+#
+# elkjs (EPL-2.0, a dependency of mermaid) is a "not shipped" exclusion in the policy. It counts only
+# in a run where the ELK build test passed against the SPA this job just built, so the exclusion cannot
+# outlive its evidence.
+#
+# A dedicated workflow rather than a job of test.yml: the release guard names test.yml's jobs one by
+# one, and the policy is checked on every pull request and every push to main all the same.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+permissions:
+  contents: read
+
+env:
+  GOWORK: "off"
+  GOTOOLCHAIN: "local"
+
+jobs:
+  licence-scan:
+    name: licence scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Evaluator tests
+        run: python3 -B -m unittest discover -s scripts -p 'licence_scan_test.py'
+      - name: Go SBOM (modules linked into the binary, with licences)
+        # The release build's constraints (CGO off, linux). -assert-licenses puts the detected licences in
+        # the component licences, where the scan reads them; without it they are only evidence.
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: >
+          go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0
+          app -licenses -assert-licenses -json -main cmd/report-portal
+          -output "$RUNNER_TEMP/go.cdx.json" .
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+      - name: Build SPA
+        working-directory: web
+        run: npm run build
+      - name: Web SBOM (production dependencies)
+        working-directory: web
+        run: >
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1
+          --omit dev --package-lock-only --output-format JSON --spec-version 1.6
+          --output-file "$RUNNER_TEMP/web.cdx.json" package.json
+      - name: ELK build test and licence scan
+        # Both always run, so one report shows everything that is wrong. The exclusion for elkjs is
+        # switched on only by this run's own ELK build test passing.
+        run: |
+          status=0
+          verified=()
+          if (cd web && npm run check:no-elk); then
+            verified=(--verified elk-build-test)
+          else
+            status=1
+          fi
+          python3 -I scripts/licence_scan.py --policy scripts/licence-policy.json "${verified[@]}" \
+            --report "$RUNNER_TEMP/licence-report.json" \
+            "$RUNNER_TEMP/go.cdx.json" "$RUNNER_TEMP/web.cdx.json" || status=1
+          exit "$status"
+      - name: Keep the SBOMs and the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: licence-sboms
+          path: |
+            ${{ runner.temp }}/go.cdx.json
+            ${{ runner.temp }}/web.cdx.json
+            ${{ runner.temp }}/licence-report.json
+          retention-days: 30
