@@ -115,6 +115,9 @@ func (r platformImageRows) unknown(ctx context.Context, c control.LoadImageComma
 	})
 }
 
+// errPlatformHostOperationInFlight is the answer for an operation that holds a lease or has no end yet.
+var errPlatformHostOperationInFlight = errors.New("the host operation has not finished")
+
 // platformLoadSettlementLease reads a finished operation as the unleased identity a settlement command is bound
 // to.
 func platformLoadSettlementLease(e migExec, operation string) (platformOperationLease, error) {
@@ -132,8 +135,13 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 		}
 		return platformOperationLease{}, err
 	}
-	if !completed.Valid || owner.Valid || generation < 1 {
+	if generation < 1 {
 		return platformOperationLease{}, errAppPlatformStageEvidence
+	}
+	if !completed.Valid || owner.Valid {
+		// An operation that holds a lease or has not finished is not settled yet. That says nothing about a removal
+		// that depends on it, which stays open and is tried again once the operation ends.
+		return platformOperationLease{}, errPlatformHostOperationInFlight
 	}
 	return platformOperationLease{
 		id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,

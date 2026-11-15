@@ -15,6 +15,13 @@ func TestHostOperationReadErrorsAreTypedOnlyWhenTheOperationCannotSettle(t *test
 			t.Fatalf("a missing operation is typed evidence, got %v", err)
 		}
 	})
+	t.Run("an operation still in flight", func(t *testing.T) {
+		mustExec(t, f.s.st, `UPDATE app_platform_operations SET stage='stage',completed_ms=NULL WHERE id=?`, f.hostOp)
+		_, err := platformLoadSettlementLease(f.s.st.poolExec(), f.hostOp)
+		if err == nil || errors.Is(err, errAppPlatformStageEvidence) || !errors.Is(err, errPlatformHostOperationInFlight) {
+			t.Fatalf("an operation that has not finished is not settled yet, and says nothing about the removal: %v", err)
+		}
+	})
 	t.Run("a transient read error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
@@ -72,6 +79,16 @@ func TestResolveOpenRemovalAbandonsOnlyOnTypedErrors(t *testing.T) {
 		}
 		if state(f) != "reverted" {
 			t.Fatalf("a removal its operation cannot settle was left open: %s", state(f))
+		}
+	})
+	t.Run("a host operation that is still in flight", func(t *testing.T) {
+		f, target := open(t)
+		mustExec(t, f.s.st, `UPDATE app_platform_operations SET stage='stage',completed_ms=NULL WHERE id=?`, f.hostOp)
+		if err := f.s.resolveOpenRemoval(context.Background(), f.endpoint, target); !errors.Is(err, errPlatformHostOperationInFlight) {
+			t.Fatalf("an operation that is not finished must be waited for, got %v", err)
+		}
+		if state(f) == "reverted" {
+			t.Fatal("a removal was abandoned because its host operation had not finished")
 		}
 	})
 	t.Run("a release that is gone", func(t *testing.T) {
