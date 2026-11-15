@@ -195,8 +195,12 @@ type reclaimFixture struct {
 }
 
 func newReclaimFixture(t *testing.T) *reclaimFixture {
+	return newReclaimFixtureFor(t, false)
+}
+
+func newReclaimFixtureFor(t *testing.T, pg bool) *reclaimFixture {
 	t.Helper()
-	s, lease, endpoint, _, _ := platformImageEnsureFixture(t)
+	s, lease, endpoint, _, _ := platformImageEnsureFixtureFor(t, pg)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET stage='complete',completed_ms=9999999999999,lease_owner=NULL,lease_until_ms=NULL WHERE id=?`, lease.id)
 	f := &reclaimFixture{
 		s: s, endpoint: endpoint, hostOp: lease.id, installation: lease.installationID, epoch: lease.controllerEpoch,

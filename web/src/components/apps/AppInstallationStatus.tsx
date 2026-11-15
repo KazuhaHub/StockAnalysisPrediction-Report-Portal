@@ -19,6 +19,7 @@ type AppStatus = {
   action?: string
   stage?: string
   error_code?: string
+  next_action?: string
   control_paused: boolean
   timeline: AppStatusEvent[]
 }
@@ -37,12 +38,14 @@ const errors = new Set([
   'install_authority_review_required',
   'install_execution_review_required',
   'start_never_ran',
+  'start_never_ran_review_required',
   'capacity_exhausted_memory',
   'capacity_exhausted_cpu',
   'capacity_exhausted_disk',
   'capacity_exhausted_image_store',
   'capacity_exhausted_running_backends',
 ])
+const nextActions = new Set(['repair_or_uninstall'])
 const events = new Set([
   'admitted', 'stage', 'activated', 'restored', 'failed', 'pending',
   'review_required', 'data_deleted', 'activity',
@@ -59,6 +62,7 @@ export function parseAppStatus(value: unknown): AppStatus | null {
     typeof raw.control_paused !== 'boolean' ||
     (raw.action != null && (typeof raw.action !== 'string' || !actions.has(raw.action))) ||
     (raw.stage != null && (typeof raw.stage !== 'string' || !stages.has(raw.stage))) ||
+    (raw.next_action != null && (typeof raw.next_action !== 'string' || !nextActions.has(raw.next_action))) ||
     (raw.error_code != null && (typeof raw.error_code !== 'string' || !errors.has(raw.error_code))) ||
     !Array.isArray(raw.timeline) ||
     raw.timeline.length > 20
@@ -90,6 +94,7 @@ export function parseAppStatus(value: unknown): AppStatus | null {
     ...(typeof raw.action === 'string' ? { action: raw.action } : {}),
     ...(typeof raw.stage === 'string' ? { stage: raw.stage } : {}),
     ...(typeof raw.error_code === 'string' ? { error_code: raw.error_code } : {}),
+    ...(typeof raw.next_action === 'string' ? { next_action: raw.next_action } : {}),
   }
 }
 
@@ -198,8 +203,10 @@ export default function AppInstallationStatus({
             {status.control_paused
               ? <Alert type="warning" showIcon title={t('apps.status.paused')} />
               : status.error_code
-              ? <Alert type="error" showIcon title={t(`err.${status.error_code}`)} />
-              : <Alert type="info" showIcon title={t(`apps.v2Hint.${status.state}`)} />}
+              ? <Alert type="error" showIcon title={t(`err.${status.error_code}`)}
+                  description={status.next_action ? t(`apps.status.nextAction.${status.next_action}`) : undefined} />
+              : <Alert type={status.next_action ? 'warning' : 'info'} showIcon title={t(`apps.v2Hint.${status.state}`)}
+                  description={status.next_action ? t(`apps.status.nextAction.${status.next_action}`) : undefined} />}
             {status.timeline.length > 0 && <div>
               <Typography.Title level={5}>{t('apps.status.history')}</Typography.Title>
               <Timeline items={status.timeline.map((event, index) => ({

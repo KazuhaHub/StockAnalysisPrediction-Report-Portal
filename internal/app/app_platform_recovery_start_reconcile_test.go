@@ -48,9 +48,13 @@ func (f *platformStartReadFake) read(_ context.Context, endpoint platformRuntime
 // unknownResumeStartFixture leaves a resume whose start was reserved and then lost: the execute reply never
 // arrived, so the operation ended recovery_required with its start effect unknown.
 func unknownResumeStartFixture(t *testing.T) (*platformResumeFixtureState, string, *platformStartReadFake) {
+	return unknownResumeStartFixtureFor(t, false)
+}
+
+func unknownResumeStartFixtureFor(t *testing.T, pg bool) (*platformResumeFixtureState, string, *platformStartReadFake) {
 	t.Helper()
 	ctx := context.Background()
-	f := platformResumeFixture(t, false)
+	f := platformResumeFixture(t, pg)
 	commit := f.reviewAndConsumeResume(t)
 	lease := f.driveResume(t, commit.OperationID, appplatform.StageStart)
 	intent, err := f.s.preparePlatformRestoreStart(ctx, lease)

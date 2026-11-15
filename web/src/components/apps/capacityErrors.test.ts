@@ -39,4 +39,12 @@ describe('capacity failure messages', () => {
       expect(bundle['err.start_never_ran']).toBeTruthy()
     }
   })
+
+  it('the installation status accepts the code of a start that did not run but is not proven to have done nothing', () => {
+    const base = { state: 'attention', openable: false, control_paused: false, timeline: [] }
+    expect(parseAppStatus({ ...base, error_code: 'start_never_ran_review_required' })).toEqual({ ...base, error_code: 'start_never_ran_review_required' })
+    for (const bundle of [en, zhCN, zhTW] as Array<Record<string, string>>) {
+      expect(bundle['err.start_never_ran_review_required']).toBeTruthy()
+    }
+  })
 })

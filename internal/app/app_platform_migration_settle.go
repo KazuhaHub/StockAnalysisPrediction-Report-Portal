@@ -176,21 +176,39 @@ func platformMigrationSettlementReason(e migExec, operation string) (string, err
 	return "", nil
 }
 
-// platformMigrationSettlementCandidates lists the finished updates whose migration is not yet settled.
-func (s *Server) platformMigrationSettlementCandidates(ctx context.Context) ([]string, error) {
-	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
-		WHERE o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+// platformMigrationSettlementWindow is how many failed updates one tick takes a step for.
+const platformMigrationSettlementWindow = 8
+
+// platformMigrationSettlementWhere selects the finished updates whose migration is not yet settled.
+const platformMigrationSettlementFrom = `SELECT o.id FROM app_platform_operations o`
+const platformMigrationSettlementWhere = `o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='migrate' AND f.effect_number=2)
-		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='settled' AND f.state='applied')
-		ORDER BY o.completed_ms,o.id LIMIT 8`)
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='settled' AND f.state='applied')`
+
+func scanPlatformOperationID(rows *sql.Rows) (string, string, bool, error) {
+	var id string
+	err := rows.Scan(&id)
+	return id, id, true, err
+}
+
+// platformMigrationsToSettle is the window of failed updates this tick takes a step for, walked in key order with a
+// cursor that wraps (see platformKeysetCursor), so updates that keep failing cannot starve the ones after them.
+func (s *Server) platformMigrationsToSettle(ctx context.Context) ([]string, error) {
+	return platformKeysetWindow(ctx, s.st, &s.platformMigrationCursor, platformMigrationSettlementFrom, platformMigrationSettlementWhere,
+		"o.id", nil, platformMigrationSettlementWindow, scanPlatformOperationID)
+}
+
+// platformMigrationSettlementCandidatesAll lists every finished update whose migration is not yet settled.
+func (s *Server) platformMigrationSettlementCandidatesAll(ctx context.Context) ([]string, error) {
+	rows, err := s.st.queryContext(ctx, platformMigrationSettlementFrom+` WHERE `+platformMigrationSettlementWhere+` ORDER BY o.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		id, _, _, err := scanPlatformOperationID(rows)
+		if err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
@@ -204,7 +222,7 @@ func (s *Server) settlePlatformMigrations(ctx context.Context, endpoint platform
 	if endpoint.path == "" {
 		return 0, nil
 	}
-	ids, err := s.platformMigrationSettlementCandidates(ctx)
+	ids, err := s.platformMigrationsToSettle(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -477,6 +495,10 @@ func (s *Server) settleEffectRow(ctx context.Context, lease platformOperationLea
 		return err
 	}
 	if err := write(e, now); err != nil {
+		return err
+	}
+	// An enable or repair whose start this write proved never ran is closed here, in the same transaction.
+	if _, err := closePlatformSameReleaseStartNeverRan(e, lease, now); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -846,7 +868,8 @@ func loadPlatformSettlementStart(e migExec, lease platformOperationLease, runtim
 		wantKind = platformSameReleaseStartKind(lease.snapshot.Action)
 	}
 	if lease.snapshot.Action == appplatform.ActionRestore {
-		return fail("restore start")
+		return loadPlatformRestoreSettlementStart(e, lease, runtime, now, completed, platformRestoreStartRow{
+			effectID: effectID, kind: kind, digest: digest, epoch: epoch, state: state, receipt: receipt, admitted: admitted, observed: observed})
 	}
 	if kind != wantKind || epoch != lease.controllerEpoch || admitted < 1 || admitted > lease.fence || (state != "prepared" && state != "unknown" && state != "applied") {
 		return fail("effect row")
@@ -1073,11 +1096,9 @@ func (s *Server) settleHeldStart(ctx context.Context, endpoint platformRuntimeEn
 		}
 		return s.settleOrphanedStart(ctx, endpoint, lease)
 	case "reserved":
-		if platformSameReleaseLifecycle(lease.snapshot.Action) {
-			// Nothing was claimed, so no capacity is held; the removal of its target is built from an update's own
-			// checkpoint and is not taken for an enable.
-			return false, nil
-		}
+		// An enable or repair start held only as reserved holds no capacity (admission happens at the claim), but
+		// the runner keeps the pending target resource the reserve wrote. It is removed like an update's, bound to the
+		// reservation, and the start is then closed as never run.
 		if !marker.exists {
 			return true, s.recordHeldStart(ctx, lease, read, platformHeldReservedReceipt, marker)
 		}
@@ -1197,7 +1218,15 @@ func (s *Server) reservedStartStep(ctx context.Context, endpoint platformRuntime
 		changed, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
 			WHERE operation_id=? AND stage='start' AND effect_number=1 AND kind IN ('update-start','enable-start','restore-start') AND state IN ('prepared','unknown')`,
 			platformNeverRanReceipt, now, lease.id)
-		return platformLeaseCAS(changed, err)
+		if err := platformLeaseCAS(changed, err); err != nil {
+			return err
+		}
+		// The target was removed without ever running, so no settlement evidence stands for the candidate: it is
+		// dropped exactly as the absent, refused and never-ran paths drop it. Left behind, it would be found by the
+		// next start of the installation at this generation.
+		_, err = e.exec(`DELETE FROM app_platform_activations WHERE installation_id=? AND generation=? AND state='candidate'`,
+			lease.installationID, lease.snapshot.Generation)
+		return err
 	})
 }
 
@@ -1473,10 +1502,6 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 	if err != nil {
 		return zero, err
 	}
-	_, _, checkpoint, _, err := loadPlatformRestoreCheckpoint(e, lease)
-	if err != nil {
-		return zero, err
-	}
 	var start platformUpdateStartIntent
 	// The reserved-only removal has slots of its own and is for a start that is still open. One that got its running
 	// receipt is removed like any running target, by an effect of the ordinary slots.
@@ -1502,6 +1527,13 @@ func (s *Server) prepareSettlementTargetRemoval(ctx context.Context, lease platf
 		}
 		start = read.intent
 	} else {
+		// A running target is removed from the update's own checkpoint. The reserved-only removal above needs none:
+		// it is rebuilt from the start effect alone, which is what lets an enable or repair, whose checkpoint is not
+		// an update's, take the same step.
+		_, _, checkpoint, _, err := loadPlatformRestoreCheckpoint(e, lease)
+		if err != nil {
+			return zero, err
+		}
 		start, _, _, _, err = loadPlatformUpdateTargetRemovalPlan(e, lease, runtime, checkpoint, now)
 		if err != nil || start.running == nil {
 			return zero, fmt.Errorf("settlement target removal source: %w", errors.Join(errAppPlatformStageEvidence, err))

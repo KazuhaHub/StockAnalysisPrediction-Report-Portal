@@ -402,3 +402,70 @@ func TestSettleNeverStartedClosesOnlyAFailedInstall(t *testing.T) {
 		}
 	}
 }
+
+// An enable or repair that ended recovery_required at its start stage is closed failed by one explicit transition,
+// once the caller has proved the start never ran. It is those two actions only, at the start stage only, and the
+// result is a state the model restores from a snapshot. Settle and SettleNeverStarted keep their own limits.
+func TestSettleStartNeverRanClosesOnlyAnEnableOrRepairThatFailedAtItsStart(t *testing.T) {
+	failAt := func(t *testing.T, action Action, managed bool, stage Stage, outcome EffectOutcome) Operation {
+		t.Helper()
+		op, err := NewOperation(action, managed, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, next := range operationStages(action, managed)[1:] {
+			if op, err = op.Advance(op.Snapshot().Revision, next); err != nil {
+				t.Fatal(err)
+			}
+			if next == stage {
+				break
+			}
+		}
+		failed, err := op.Fail(op.Snapshot().Revision, outcome)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return failed
+	}
+	for _, action := range []Action{ActionEnable, ActionRepair} {
+		t.Run(string(action), func(t *testing.T) {
+			unsettled := failAt(t, action, true, StageStart, EffectsUnknown)
+			if _, err := unsettled.Settle(unsettled.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatal("Settle accepted an enable or repair")
+			}
+			if _, err := unsettled.SettleNeverStarted(unsettled.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatal("SettleNeverStarted accepted an enable or repair")
+			}
+			closed, err := unsettled.SettleStartNeverRan(unsettled.Snapshot().Revision)
+			if err != nil || closed.Snapshot().Stage != StageFailed || closed.Snapshot().Revision != unsettled.Snapshot().Revision+1 {
+				t.Fatalf("not closed: %+v %v", closed.Snapshot(), err)
+			}
+			if _, err := OperationFromSnapshot(closed.Snapshot()); err != nil {
+				t.Fatalf("the closed snapshot is not a model state: %v", err)
+			}
+			if _, err := unsettled.SettleStartNeverRan(unsettled.Snapshot().Revision + 1); !errors.Is(err, ErrRevisionConflict) {
+				t.Fatal("a stale close was accepted")
+			}
+			if _, err := closed.SettleStartNeverRan(closed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatal("a closed operation was closed twice")
+			}
+			probe := failAt(t, action, true, StageProbe, EffectsUnknown)
+			if _, err := probe.SettleStartNeverRan(probe.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+				t.Fatal("a failure past the start stage was closed as a start that never ran")
+			}
+		})
+	}
+	for _, action := range []Action{ActionInstall, ActionUpdate, ActionUninstall, ActionDisable, ActionDeleteData, ActionRestore, ActionRestoreImport} {
+		stages := operationStages(action, true)
+		stage := stages[1]
+		for _, candidate := range stages {
+			if candidate == StageStart {
+				stage = StageStart
+			}
+		}
+		failed := failAt(t, action, true, stage, EffectsUnknown)
+		if _, err := failed.SettleStartNeverRan(failed.Snapshot().Revision); !errors.Is(err, ErrInvalidTransition) {
+			t.Fatalf("%s was closed as an enable or repair start that never ran", action)
+		}
+	}
+}

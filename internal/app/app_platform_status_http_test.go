@@ -128,3 +128,32 @@ func TestPlatformInstallationStatusHTTPOmitsInternalIdentity(t *testing.T) {
 		t.Fatal("revoked status remained visible")
 	}
 }
+
+// An installation a failed enable or repair left disabled in recovery_required is not plainly disabled: enable is
+// refused at review in that phase, and the administrator's next step is to repair or uninstall it. The status says so
+// with a next action, and reports the attention state, whatever the operation's typed reason.
+func testPlatformInstallationStatusDisabledInRecovery(t *testing.T, pg bool) {
+	s, reader, installation := platformLaunchFixture(t, pg)
+	platformGrantLaunchUser(t, s, reader, installation)
+	for _, code := range []string{"start_never_ran", "start_never_ran_review_required"} {
+		mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='recovery_required' WHERE id=?`, installation)
+		mustExec(t, s.st, `UPDATE app_platform_operations SET error_code=? WHERE installation_id=?`, code, installation)
+		result, err := s.readPlatformInstallationStatus(context.Background(), reader, installation)
+		if err != nil || result.State != "attention" || result.Openable || result.NextAction != "repair_or_uninstall" || result.ErrorCode != code {
+			t.Fatalf("%s: disabled-in-recovery status: %+v %v", code, result, err)
+		}
+	}
+	// A plainly disabled installation has no next action to state, and an installed one neither.
+	mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled',phase='disabled' WHERE id=?`, installation)
+	if result, err := s.readPlatformInstallationStatus(context.Background(), reader, installation); err != nil || result.State != "disabled" || result.NextAction != "" {
+		t.Fatalf("plain disabled status: %+v %v", result, err)
+	}
+}
+
+func TestPlatformInstallationStatusDisabledInRecoverySQLite(t *testing.T) {
+	testPlatformInstallationStatusDisabledInRecovery(t, false)
+}
+
+func TestPlatformInstallationStatusDisabledInRecoveryPostgres(t *testing.T) {
+	testPlatformInstallationStatusDisabledInRecovery(t, true)
+}

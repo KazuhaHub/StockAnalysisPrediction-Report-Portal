@@ -106,37 +106,37 @@ type platformRecoveryStartCandidate struct {
 	completedMS int64
 }
 
-// platformRecoveryStartCandidates lists finished resumes whose start effect is still unknown.
-func (s *Server) platformRecoveryStartCandidates(ctx context.Context) ([]platformRecoveryStartCandidate, error) {
-	rows, err := s.st.queryContext(ctx, `SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision,o.completed_ms
+// platformRecoveryStartWindow is how many finished resumes one reconciliation takes a step for.
+const platformRecoveryStartWindow = 8
+
+// platformRecoveryStartsToReconcile is the window of finished resumes whose start effect is still unknown, walked in
+// key order with a cursor that wraps (see platformKeysetCursor), so resumes that keep failing cannot starve the ones
+// after them. An invalid row is skipped but still advances the cursor.
+func (s *Server) platformRecoveryStartsToReconcile(ctx context.Context) ([]platformRecoveryStartCandidate, error) {
+	return platformKeysetWindow(ctx, s.st, &s.platformRecoveryStartCursor,
+		`SELECT o.id,o.installation_id,o.controller_epoch,o.fence,o.target_generation,o.state_revision,o.row_revision,o.completed_ms
 		FROM app_platform_operations o JOIN app_platform_operation_effects f ON f.operation_id=o.id AND f.stage='start' AND f.effect_number=1
-		JOIN app_platform_review_plans p ON p.id=o.review_plan_id
-		WHERE o.action='restore' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
-		AND f.kind='restore-start' AND f.state='unknown' AND p.plan_json LIKE ?
-		ORDER BY o.completed_ms,o.id LIMIT 8`, platformResumePlanPrefix())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var result []platformRecoveryStartCandidate
-	for rows.Next() {
-		var id, installation, epoch string
-		var fence, generation, stateRevision, rowRevision, completed int64
-		if err := rows.Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &completed); err != nil {
-			return nil, err
-		}
-		if !platformValidUUID(id) || !platformValidUUID(installation) || generation < 1 || stateRevision < 1 || rowRevision < 1 || fence < 1 {
-			continue
-		}
-		result = append(result, platformRecoveryStartCandidate{
-			lease: platformOperationLease{
-				id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,
-				snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionRestore, Managed: true, Generation: uint64(generation), Revision: uint64(stateRevision), Stage: appplatform.StageRecoveryRequired},
-			},
-			completedMS: completed,
+		JOIN app_platform_review_plans p ON p.id=o.review_plan_id`,
+		`o.action='restore' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL
+		AND f.kind='restore-start' AND f.state='unknown' AND p.plan_json LIKE ?`,
+		"o.id", []any{platformResumePlanPrefix()}, platformRecoveryStartWindow,
+		func(rows *sql.Rows) (platformRecoveryStartCandidate, string, bool, error) {
+			var id, installation, epoch string
+			var fence, generation, stateRevision, rowRevision, completed int64
+			if err := rows.Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &completed); err != nil {
+				return platformRecoveryStartCandidate{}, "", false, err
+			}
+			if !platformValidUUID(id) || !platformValidUUID(installation) || generation < 1 || stateRevision < 1 || rowRevision < 1 || fence < 1 {
+				return platformRecoveryStartCandidate{}, id, false, nil
+			}
+			return platformRecoveryStartCandidate{
+				lease: platformOperationLease{
+					id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,
+					snapshot: appplatform.OperationSnapshot{Action: appplatform.ActionRestore, Managed: true, Generation: uint64(generation), Revision: uint64(stateRevision), Stage: appplatform.StageRecoveryRequired},
+				},
+				completedMS: completed,
+			}, id, true, nil
 		})
-	}
-	return result, rows.Err()
 }
 
 // platformRecoveryStartFacts is what a recovery read of a start effect is built from and checked against.
@@ -317,7 +317,7 @@ func (s *Server) reconcilePlatformRecoveryResumes(ctx context.Context, endpoint 
 	if endpoint.path == "" || !platformValidUUID(worker) || !s.platformRecoveryPaused(ctx) {
 		return zero, nil
 	}
-	candidates, err := s.platformRecoveryStartCandidates(ctx)
+	candidates, err := s.platformRecoveryStartsToReconcile(ctx)
 	if err != nil {
 		return zero, err
 	}

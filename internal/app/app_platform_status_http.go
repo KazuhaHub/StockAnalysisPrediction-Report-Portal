@@ -15,11 +15,14 @@ import (
 // lease, actor and endpoint identities. The installation ID is already in the
 // requesting URL and never appears in the response body.
 type platformInstallationStatus struct {
-	State         string                `json:"state"`
-	Openable      bool                  `json:"openable"`
-	Action        string                `json:"action,omitempty"`
-	Stage         string                `json:"stage,omitempty"`
-	ErrorCode     string                `json:"error_code,omitempty"`
+	State     string `json:"state"`
+	Openable  bool   `json:"openable"`
+	Action    string `json:"action,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	ErrorCode string `json:"error_code,omitempty"`
+	// NextAction names what an administrator can do next when the installation cannot simply be opened or enabled:
+	// "repair_or_uninstall" for an installation a failed enable or repair left disabled in recovery_required.
+	NextAction    string                `json:"next_action,omitempty"`
 	ControlPaused bool                  `json:"control_paused"`
 	Timeline      []platformStatusEvent `json:"timeline"`
 }
@@ -143,6 +146,10 @@ func (s *Server) readPlatformInstallationStatus(ctx context.Context, session pla
 	result.ControlPaused = paused.String != "0" || !platformValidUUID(epoch) || !currentEpoch.Valid || epoch != currentEpoch.String
 	result.State = "attention"
 	switch {
+	case desired == "disabled" && phase == "recovery_required":
+		// Not plainly disabled: enable is refused at review in this phase. A repair, or an uninstall, is the way on.
+		result.State = "attention"
+		result.NextAction = "repair_or_uninstall"
 	case desired == "disabled":
 		result.State = "disabled"
 	case phase == "setup_required":

@@ -115,6 +115,9 @@ func (r platformImageRows) unknown(ctx context.Context, c control.LoadImageComma
 	})
 }
 
+// errPlatformHostOperationInFlight is the answer for an operation that holds a lease or has no end yet.
+var errPlatformHostOperationInFlight = errors.New("the host operation has not finished")
+
 // platformLoadSettlementLease reads a finished operation as the unleased identity a settlement command is bound
 // to.
 func platformLoadSettlementLease(e migExec, operation string) (platformOperationLease, error) {
@@ -124,9 +127,21 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 	var owner sql.NullString
 	if err := e.queryRow(`SELECT id,installation_id,controller_epoch,fence,target_generation,state_revision,row_revision,stage,action,completed_ms,lease_owner
 		FROM app_platform_operations WHERE id=? AND managed=1`, operation).
-		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &action, &completed, &owner); err != nil ||
-		!completed.Valid || owner.Valid || generation < 1 {
+		Scan(&id, &installation, &epoch, &fence, &generation, &stateRevision, &rowRevision, &stage, &action, &completed, &owner); err != nil {
+		// Only a missing operation is a statement about the operation. Any other error is a failed read and says
+		// nothing about it, so it is returned as it is and the caller tries again.
+		if errors.Is(err, sql.ErrNoRows) {
+			return platformOperationLease{}, errAppPlatformStageEvidence
+		}
+		return platformOperationLease{}, err
+	}
+	if generation < 1 {
 		return platformOperationLease{}, errAppPlatformStageEvidence
+	}
+	if !completed.Valid || owner.Valid {
+		// An operation that holds a lease or has not finished is not settled yet. That says nothing about a removal
+		// that depends on it, which stays open and is tried again once the operation ends.
+		return platformOperationLease{}, errPlatformHostOperationInFlight
 	}
 	return platformOperationLease{
 		id: id, installationID: installation, controllerEpoch: epoch, fence: fence, rowRevision: rowRevision,
@@ -140,6 +155,9 @@ func platformLoadSettlementLease(e migExec, operation string) (platformOperation
 // was derived from, and that nothing has moved the installation's fence past it.
 func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64, error) {
 	current, err := platformLoadSettlementLease(e, lease.id)
+	if err != nil && !errors.Is(err, errAppPlatformStageEvidence) {
+		return 0, err
+	}
 	if err != nil || current.fence != lease.fence || current.controllerEpoch != lease.controllerEpoch || current.installationID != lease.installationID {
 		return 0, errors.Join(errAppPlatformLeaseConflict, err)
 	}
@@ -149,8 +167,13 @@ func platformLoadSettlementGuard(e migExec, lease platformOperationLease) (int64
 	}
 	var fence int64
 	var installationEpoch string
-	if err := e.queryRow(`SELECT control_fence,controller_epoch FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&fence, &installationEpoch); err != nil ||
-		fence != lease.fence || installationEpoch != lease.controllerEpoch {
+	if err := e.queryRow(`SELECT control_fence,controller_epoch FROM app_platform_installations WHERE id=?`, lease.installationID).Scan(&fence, &installationEpoch); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, errAppPlatformLeaseConflict
+		}
+		return 0, err
+	}
+	if fence != lease.fence || installationEpoch != lease.controllerEpoch {
 		return 0, errAppPlatformLeaseConflict
 	}
 	return platformDatabaseNow(e)
