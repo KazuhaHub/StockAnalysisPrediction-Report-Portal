@@ -31,7 +31,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
 
-// The declared-capacity soak (doc 171, PR 4b; OPS-08, closing SEC-09) against a real root runner.
+// The declared-capacity soak (doc 171, PR 4b; OPS-08; SEC-09 stays partial after it passes) against a real root runner.
 //
 // The parent runs as root beside the Docker daemon and owns the runner service, exactly as the managed image
 // delivery acceptance does; the child is the Portal as an unprivileged user and drives everything the soak
@@ -417,14 +417,7 @@ func TestPlatformCapacitySoakChild(t *testing.T) {
 	c.rec.SetVariant(variant.Name)
 	c.rec.SetDatabase(dbDriver, dbVersion)
 	t.Logf("SOAK_DATABASE %s %s", dbDriver, dbVersion)
-	c.rec.SetPortal(soakPortalEvidence{
-		Database: "file-backed SQLite opened with OpenStore, as the server opens it",
-		Running: []string{"the batch scheduler (scheduleTick, and scheduleLoop every 30 seconds) with the real Dify provider against a local stub",
-			"the platform relay, installs and uninstalls through the ordinary workers and the real runner"},
-		NotExercised: []string{"the platform task worker (the soak's tasks are admitted with a run time an hour out, so none is due)",
-			"event delivery (the source events are captured and the subscription fenced; no delivery coordinator runs)",
-			"Postgres", "a backend-originated message or task request (the soak backends have no outbound channel to the platform)"},
-	})
+	c.rec.SetPortal(soakPortalOf(dbDriver, dbVersion, variant.MemoryDB))
 
 	// The budgets the runner reports in its readiness facts, not the nominal host, size the backends.
 	facts, err := s.observePlatformManagedRuntime(c.ctx, session, endpoint)

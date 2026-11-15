@@ -498,6 +498,33 @@ type soakPortalEvidence struct {
 	NotExercised []string `json:"not_exercised"`
 }
 
+// soakPortalOf describes the Portal the run really measured, from the driver and server version it opened, so that the evidence never
+// claims a database the run did not use. memoryDB is the diagnostic variant that keeps the Portal on the in-memory template store.
+func soakPortalOf(driver, version string, memoryDB bool) soakPortalEvidence {
+	var database string
+	notExercised := []string{
+		"the platform task worker (the soak's tasks are admitted with a run time an hour out, so none is due)",
+		"event delivery (the source events are captured and the subscription fenced; no delivery coordinator runs)",
+		"a backend-originated message or task request (the soak backends have no outbound channel to the platform)",
+	}
+	switch {
+	case memoryDB:
+		database = "in-memory SQLite template store (a diagnostic variant, not the way the server opens its database)"
+		notExercised = append(notExercised, "PostgreSQL (the diagnostic variant keeps the Portal on the in-memory template store)")
+	case driver == "postgres":
+		database = "PostgreSQL " + version + " opened with OpenStore, as the server opens it"
+	default:
+		database = "file-backed SQLite " + version + " opened with OpenStore, as the server opens it"
+		notExercised = append(notExercised, "PostgreSQL (this run is the SQLite known-limit measurement)")
+	}
+	return soakPortalEvidence{
+		Database: database,
+		Running: []string{"the batch scheduler (scheduleTick, and scheduleLoop every 30 seconds) with the real Dify provider against a local stub",
+			"the platform relay, installs and uninstalls through the ordinary workers and the real runner"},
+		NotExercised: notExercised,
+	}
+}
+
 type soakEvidence struct {
 	Format        string            `json:"format"`
 	Budgets       soakBudgets       `json:"budgets"`
@@ -966,5 +993,40 @@ func TestSoakRecorderKeepsThePooledLoadedP95OfEveryWindowTogether(t *testing.T) 
 	}
 	if !strings.Contains(string(raw), `"loaded"`) || !strings.Contains(string(raw), `"dispatch_shallow"`) {
 		t.Fatal("the pooled loaded p95 is not under the keys the verdict reads")
+	}
+}
+
+func TestSoakPortalDescriptionNamesTheDatabaseTheRunUsed(t *testing.T) {
+	notExercised := func(p soakPortalEvidence) string { return strings.Join(p.NotExercised, "\n") }
+
+	pg := soakPortalOf("postgres", "16.15", false)
+	if !strings.Contains(pg.Database, "PostgreSQL 16.15") || strings.Contains(pg.Database, "SQLite") {
+		t.Fatalf("a PostgreSQL run is described as %q", pg.Database)
+	}
+	if strings.Contains(notExercised(pg), "Postgres") {
+		t.Fatalf("a PostgreSQL run lists PostgreSQL as not exercised: %q", notExercised(pg))
+	}
+
+	file := soakPortalOf("sqlite", "3.46.0", false)
+	if !strings.Contains(file.Database, "file-backed SQLite 3.46.0") || strings.Contains(file.Database, "PostgreSQL") {
+		t.Fatalf("a SQLite run is described as %q", file.Database)
+	}
+	if !strings.Contains(notExercised(file), "PostgreSQL") {
+		t.Fatalf("a SQLite run must list PostgreSQL as not exercised: %q", notExercised(file))
+	}
+
+	memory := soakPortalOf("sqlite", "in-memory template store", true)
+	if !strings.Contains(memory.Database, "in-memory") || strings.Contains(memory.Database, "file-backed") {
+		t.Fatalf("the memory-db variant is described as %q", memory.Database)
+	}
+	if !strings.Contains(notExercised(memory), "PostgreSQL") {
+		t.Fatalf("the memory-db variant must list PostgreSQL as not exercised: %q", notExercised(memory))
+	}
+
+	// Whatever the database, the scheduler and relay stay described as running, and the task worker and events stay unexercised.
+	for _, p := range []soakPortalEvidence{pg, file, memory} {
+		if len(p.Running) != 2 || !strings.Contains(notExercised(p), "task worker") || !strings.Contains(notExercised(p), "event delivery") {
+			t.Fatalf("the shared description changed: %+v", p)
+		}
 	}
 }
