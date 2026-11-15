@@ -789,7 +789,9 @@ R2. **Enable or repair after its orphan settles (owner decision, 2026-11-15: aut
     phase `recovery_required`: that is the phase a repair is reviewed from (an enable is not admitted from it, and a
     disabled phase at the reset generation cannot be repaired), so the administrator's next step is unchanged and now
     carries the reason. The model gained `Operation.SettleStartNeverRan`, limited to enable and repair failing at the
-    start stage.
+    start stage. A candidate left at the target generation gets the typed review code too (no current path reaches it).
+    The status view does not show such an installation as plain "disabled": desired disabled in `recovery_required`
+    reports the attention state with `next_action: repair_or_uninstall`, which the UI renders in the three locales.
 R3. **Enable start held only as reserved.** Settled, not documented away: the reserved branch no longer returns early for
     enable and repair. `prepareSettlementTargetRemoval` loaded an update checkpoint it only needs for a running target;
     that load moved into the running branch, so the reserved-only stop and remove are bound to the reservation from the

@@ -3860,6 +3860,7 @@
   "apps.status.state": "Current state",
   "apps.status.action": "Current operation",
   "apps.status.stage": "Current step",
+  "apps.status.nextAction.repair_or_uninstall": "An administrator can repair or uninstall it. Enabling it is not available in this state.",
   "apps.status.paused": "Application control is paused. No new work can start until an administrator resumes it.",
   "apps.status.history": "Recent activity",
   "apps.status.event.admitted": "Operation admitted",

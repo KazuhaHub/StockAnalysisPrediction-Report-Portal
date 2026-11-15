@@ -3860,6 +3860,7 @@
   "apps.status.state": "目前狀態",
   "apps.status.action": "目前操作",
   "apps.status.stage": "目前步驟",
+  "apps.status.nextAction.repair_or_uninstall": "管理員可以修復或解除安裝該應用，此狀態下無法直接啟用。",
   "apps.status.paused": "應用程式控制已暫停。管理員恢復前不會啟動新的工作。",
   "apps.status.history": "最近活動",
   "apps.status.event.admitted": "操作已受理",

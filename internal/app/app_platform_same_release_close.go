@@ -117,10 +117,12 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 		lease.installationID, lease.installationID, generation).Scan(&active, &candidates); err != nil {
 		return false, err
 	}
-	// A candidate left at the target generation would be found by the next start of the installation.
-	if active != 0 || candidates != 0 {
+	if active != 0 {
 		return false, nil
 	}
+	// A candidate left at the target generation would be found by the next start of the installation: not proof that
+	// the start did nothing, so it is the typed review case, not the generic recovery message.
+	leftoverCandidate := candidates != 0
 	rows, err := e.query(`SELECT stage,effect_number,effect_id,kind,state,receipt_json,COALESCE(runtime_id,''),controller_epoch,admitted_fence,observed_fence
 		FROM app_platform_operation_effects WHERE operation_id=?`, lease.id)
 	if err != nil {
@@ -180,19 +182,15 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 	}
 	// What proves the start did nothing at all, as opposed to the target never having existed.
 	switch {
+	case leftoverCandidate:
+		return markPlatformStartReview(e, lease, now, errorCode.String, stateRevision, rowRevision, fence)
 	case proof == "capacity_refused":
 	case proof == "never_ran" && held != nil && held.kind == platformHeldStartKind && held.receipt == platformHeldReservedReceipt &&
 		reservedStop != nil && reservedRemove != nil && sweep != nil:
 		proof = "reserved_removed"
 	default:
 		// Not proven: leave the operation for the administrator, and say why instead of the generic message.
-		if errorCode.String == platformStartReviewErrorCode {
-			return false, nil
-		}
-		changed, err := e.exec(`UPDATE app_platform_operations SET error_code=?,row_revision=row_revision+1,updated_ms=?
-			WHERE id=? AND installation_id=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND fence=? AND lease_owner IS NULL AND completed_ms IS NOT NULL`,
-			platformStartReviewErrorCode, now, lease.id, lease.installationID, stateRevision, rowRevision, fence)
-		return false, platformLeaseCAS(changed, err)
+		return markPlatformStartReview(e, lease, now, errorCode.String, stateRevision, rowRevision, fence)
 	}
 	model, err := appplatform.OperationFromSnapshot(appplatform.OperationSnapshot{Action: appplatform.Action(action), Managed: true,
 		Generation: uint64(generation), Revision: uint64(stateRevision), Stage: appplatform.StageRecoveryRequired})
@@ -248,4 +246,15 @@ func closePlatformSameReleaseStartNeverRan(e migExec, lease platformOperationLea
 	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_operation',?,?,'')`,
 		time.UnixMilli(now).UTC().Format(time.RFC3339), platformStartNeverRanClosedAudit, lease.id, string(detail))
 	return err == nil, err
+}
+
+// markPlatformStartReview gives a reverted start that is not proven to have done nothing the typed review code, once.
+func markPlatformStartReview(e migExec, lease platformOperationLease, now int64, current string, stateRevision, rowRevision, fence int64) (bool, error) {
+	if current == platformStartReviewErrorCode {
+		return false, nil
+	}
+	changed, err := e.exec(`UPDATE app_platform_operations SET error_code=?,row_revision=row_revision+1,updated_ms=?
+		WHERE id=? AND installation_id=? AND stage='recovery_required' AND state_revision=? AND row_revision=? AND fence=? AND lease_owner IS NULL AND completed_ms IS NOT NULL`,
+		platformStartReviewErrorCode, now, lease.id, lease.installationID, stateRevision, rowRevision, fence)
+	return false, platformLeaseCAS(changed, err)
 }

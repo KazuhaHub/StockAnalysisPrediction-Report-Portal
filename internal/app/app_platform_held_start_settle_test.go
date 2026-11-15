@@ -594,3 +594,29 @@ func TestReservedOnlyCloseLeavesNoCandidateAndTheInstallationCanBeRepairedAgain(
 		o.reRepair(t)
 	})
 }
+
+// A candidate activation left at the target generation is not proof the start did nothing, and it must not leave the
+// generic recovery message: the closer gives it the typed review code. No current path reaches it (every path that
+// reverts the start drops the candidate), so the state is built by hand.
+func TestCloserGivesALeftoverCandidateTheTypedReviewCode(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		s, operation, _, _ := orphanedEnableFixture(t, pg)
+		mustExec(t, s.st, `UPDATE app_platform_operation_effects SET state='reverted',receipt_json=? WHERE operation_id=? AND stage='start' AND effect_number=1`, platformNeverRanReceipt, operation)
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id AND o.target_generation=a.generation WHERE o.id=? AND a.state='candidate'`, operation) != 1 {
+			t.Fatal("fixture: no candidate at the target generation")
+		}
+		lease, err := platformSettlementLease(s.st.poolExec(), operation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var closed bool
+		if err := s.st.withOUMutation(func(e migExec) error {
+			var err error
+			closed, err = closePlatformSameReleaseStartNeverRan(e, lease, 1)
+			return err
+		}); err != nil || closed {
+			t.Fatalf("an operation with a leftover candidate was closed: %v %v", closed, err)
+		}
+		requireStartReviewRequired(t, s, operation)
+	})
+}

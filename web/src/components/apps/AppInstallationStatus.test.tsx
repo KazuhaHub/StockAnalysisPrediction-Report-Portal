@@ -24,6 +24,9 @@ vi.mock('react-i18next', () => ({
         'apps.status.event.stage': 'Stage changed',
         'apps.v2State.pending': 'Not ready',
         'apps.v2Hint.pending': 'The application is still being prepared.',
+        'apps.status.nextAction.repair_or_uninstall': 'An administrator can repair or uninstall it. Enabling is not available.',
+        'err.start_never_ran': 'Never started.',
+        'apps.v2State.attention': 'Needs attention',
         'appPlatform.install': 'Install',
         'appPlatform.stage.prepare_data': 'Checking data policy',
       }
@@ -87,5 +90,26 @@ describe('AppInstallationStatus', () => {
     expect(parseAppStatus({ ...valid, openable: true })).toBeNull()
     expect(parseAppStatus({ ...valid, timeline: [{ at: 'bad', event: 'stage' }] })).toBeNull()
     expect(parseAppStatus({ ...valid, timeline: [{ at: '2026-11-04T12:00:00Z', event: 'private' }] })).toBeNull()
+  })
+
+  it('says what can be done next for an installation a failed enable left disabled in recovery, not plain disabled', async () => {
+    const status = {
+      state: 'attention',
+      openable: false,
+      action: 'repair',
+      stage: 'failed',
+      error_code: 'start_never_ran',
+      next_action: 'repair_or_uninstall',
+      control_paused: false,
+      timeline: [],
+    }
+    expect(parseAppStatus(status)).toEqual(status)
+    expect(parseAppStatus({ ...status, next_action: 'delete_everything' })).toBeNull()
+    apiMock.get.mockResolvedValue(status)
+    render(<AppInstallationStatus installationId={installation} name="Notes" />)
+    fireEvent.click(screen.getByRole('button', { name: 'View status for Notes' }))
+    expect(await screen.findByText('An administrator can repair or uninstall it. Enabling is not available.')).toBeTruthy()
+    expect(screen.getByText('Needs attention')).toBeTruthy()
+    expect(screen.queryByText('Disabled')).toBeNull()
   })
 })
