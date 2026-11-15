@@ -284,14 +284,19 @@ func TestFailedInspectIsUnavailableNotInvalid(t *testing.T) {
 	}
 }
 
-// A source that is absent is not a reference, by design: nothing is mounted
-// from it. Pin that, so the existing-child tests above cannot be mistaken for
-// the whole rule.
-func TestVolumeWithAbsentSourceUnderTheDataRootIsNotAReference(t *testing.T) {
+// A source that is absent but would be created inside the namespace is a reference: Docker creates a missing
+// bind source when the container starts, so the container would write into the namespace. An absent source that
+// would be created elsewhere, including under a sibling of the namespace, is not.
+func TestSourceAbsentUnderTheNamespaceIsAReference(t *testing.T) {
 	data := t.TempDir()
-	listing := `[{"Id":"` + strings.Repeat("7", 64) + `","Mounts":[{"Type":"volume","Driver":"local","Source":"` + filepath.Join(data, "absent") + `","Destination":"/db"}]}]`
+	listing := func(source string) string {
+		return `[{"Id":"` + strings.Repeat("7", 64) + `","Mounts":[{"Type":"bind","Source":"` + source + `","Destination":"/db"}]}]`
+	}
 	var asked []string
-	if err := requireNoContainerMountReferences(context.Background(), routedClient(listing, nil, &asked), data); err != nil {
-		t.Fatal(err)
+	if err := requireNoContainerMountReferences(context.Background(), routedClient(listing(filepath.Join(data, "absent")), nil, &asked), data); !errors.Is(err, ErrContainerConflict) {
+		t.Fatal("an absent source that would land in the namespace passed", err)
+	}
+	if err := requireNoContainerMountReferences(context.Background(), routedClient(listing(filepath.Join(filepath.Dir(data), "absent-sibling")), nil, &asked), data); err != nil {
+		t.Fatal("an absent source that lands beside the namespace was refused", err)
 	}
 }

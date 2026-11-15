@@ -27,6 +27,7 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 	if containers == nil {
 		return ErrInvalidResponse
 	}
+	pass := newCandidateIPCPass()
 	for _, container := range containers {
 		if !containerSHA.MatchString(container.ID) {
 			return ErrInvalidResponse
@@ -36,7 +37,7 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 			return err
 		}
 		for _, source := range sources {
-			referenced, err := candidateIPCReferenced(ctx, path, source)
+			referenced, err := pass.referenced(ctx, path, source)
 			if err != nil {
 				return err
 			}

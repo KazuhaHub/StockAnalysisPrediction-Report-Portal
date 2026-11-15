@@ -27,7 +27,7 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 	found := ""
 	seen := map[string]bool{}
 	// One filesystem answer per distinct source for this pass, not one per source and policy mount.
-	pass := map[string]candidateIPCResolution{}
+	pass := newCandidateIPCPass()
 	for _, entry := range entries {
 		if seen[entry.ID] {
 			return "", ErrInvalidResponse
@@ -40,7 +40,7 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 		referenced := false
 		for _, source := range sources {
 			for _, mount := range policy.HostConfig.Mounts {
-				matches, err := candidateIPCReferencedInPass(ctx, mount.Source, source, pass)
+				matches, err := pass.referenced(ctx, mount.Source, source)
 				if err != nil {
 					return "", err
 				}

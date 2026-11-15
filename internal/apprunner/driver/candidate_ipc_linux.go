@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -502,44 +501,10 @@ func boundedString(s string) string {
 // candidateIPCResolver canonicalises a mount source. A variable so a test can count and fail resolutions.
 var candidateIPCResolver = filepath.EvalSymlinks
 
+// candidateIPCReferenced reports whether a mount source overlaps the namespace directory path. See
+// candidateIPCPass.referenced for the exact semantics.
 func candidateIPCReferenced(ctx context.Context, path, source string) (bool, error) {
-	return candidateIPCReferencedInPass(ctx, path, source, map[string]candidateIPCResolution{})
-}
-
-// candidateIPCResolution is one source's canonical path as one inventory pass saw it.
-type candidateIPCResolution struct {
-	canonical string
-	missing   bool
-}
-
-// candidateIPCReferencedInPass is candidateIPCReferenced for a pass that tests one source against several
-// policy paths: the filesystem is asked about a source once per pass. The answer is never kept past the
-// pass, so a symlink retargeted between two passes is seen by the second.
-func candidateIPCReferencedInPass(ctx context.Context, path, source string, pass map[string]candidateIPCResolution) (bool, error) {
-	if source == "" {
-		return false, nil
-	}
-	if !filepath.IsAbs(path) || !filepath.IsAbs(source) {
-		return false, ErrInvalidResponse
-	}
-	resolved, ok := pass[source]
-	if !ok {
-		canonical, err := resolveCandidateIPCSource(ctx, source, candidateIPCResolver)
-		switch {
-		case err == nil:
-			resolved = candidateIPCResolution{canonical: canonical}
-		case errors.Is(err, os.ErrNotExist):
-			resolved = candidateIPCResolution{missing: true}
-		default:
-			return false, ErrUnavailable
-		}
-		pass[source] = resolved
-	}
-	if resolved.missing {
-		return false, nil
-	}
-	canonical := resolved.canonical
-	return canonical == path || canonical == "/" || strings.HasPrefix(path, canonical+"/") || strings.HasPrefix(canonical, path+"/"), nil
+	return newCandidateIPCPass().referenced(ctx, path, source)
 }
 
 // A filesystem lookup may block on an unrelated host volume. Keep at most one
@@ -549,32 +514,38 @@ func candidateIPCReferencedInPass(ctx context.Context, path, source string, pass
 var candidateIPCResolverSlot = make(chan struct{}, 1)
 
 func resolveCandidateIPCSource(ctx context.Context, source string, resolve func(string) (string, error)) (string, error) {
+	return candidateIPCSlotted(ctx, func() (string, error) { return resolve(source) })
+}
+
+// candidateIPCSlotted runs one lookup under the process-wide slot, as described above.
+func candidateIPCSlotted[T any](ctx context.Context, lookup func() (T, error)) (T, error) {
+	var zero T
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return zero, err
 	}
 	select {
 	case candidateIPCResolverSlot <- struct{}{}:
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return zero, ctx.Err()
 	}
 	if err := ctx.Err(); err != nil {
 		<-candidateIPCResolverSlot
-		return "", err
+		return zero, err
 	}
 	type result struct {
-		path string
-		err  error
+		value T
+		err   error
 	}
 	ready := make(chan result, 1)
 	go func() {
-		path, err := resolve(source)
+		value, err := lookup()
 		<-candidateIPCResolverSlot
-		ready <- result{path, err}
+		ready <- result{value, err}
 	}()
 	select {
 	case r := <-ready:
-		return r.path, r.err
+		return r.value, r.err
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return zero, ctx.Err()
 	}
 }

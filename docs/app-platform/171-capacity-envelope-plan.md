@@ -520,7 +520,10 @@ settlement modelled on `update_start_settle.go`: prove the native resource absen
 settle and release in one transaction.
 
 
-### Follow-up that blocks the integration to main merge: inventory overlap by device and inode
+### Inventory overlap by device and inode
+
+**Status: resolved; see "Resolution (inventory overlap by device and inode)" below.** The text that follows is the
+problem as it was recorded.
 
 `candidateIPCReferenced` (`internal/apprunner/driver/candidate_ipc_linux.go`) decides whether a container mounts a data
 namespace by comparing path strings after `filepath.EvalSymlinks`. `EvalSymlinks` does not follow bind mounts, so the
@@ -540,6 +543,62 @@ mounts. A source that cannot be stat-ed for a reason other than absence stays a 
 
 Native test required: a disposable runner creates a local volume with `type=none,o=bind,device=<namespace>` and a
 container using it, and the writer must return `ErrContainerConflict`.
+
+## Resolution (inventory overlap by device and inode)
+
+This closes the follow-up recorded above, together with the absent-bind-source gap. The inventory (`candidateIPCPass.referenced`
+in `driver/candidate_ipc_identity_linux.go`, behind `candidateIPCReferenced`) now decides an overlap by identity as well as
+by name, in the data writer, its recovery and the writable candidate recovery alike, because they share it. No schema, journal
+or wire change.
+
+**Semantics.** A mount source overlaps the namespace directory when it is the namespace, an ancestor of it, or a descendant
+of it, by any of:
+
+- **Name** (unchanged): the symlink-free source equals the namespace, is a prefix directory of it, is `/`, or lies under it.
+- **Identity:** the source's `st_dev`/`st_ino` equals that of the namespace, of any of its ancestors up to `/` (taken both by
+  the lexical path and by its symlink-free path), or of any directory below it. That is how a bind mount of the namespace, of
+  the data root or of a nested directory is seen, including a bind-backed local volume, which the daemon lists under
+  `/var/lib/docker/volumes/<id>/_data`. A descendant is found by walking the namespace once per pass (directories only,
+  `lstat`, symlinks not followed), not by walking up from the source, because `..` from a bind mount root leaves through the
+  mount's own parent rather than the real one.
+- **Creation:** Docker creates a missing `-v` source when the container starts, so an absent source is judged by where it would
+  be created: the deepest ancestor that resolves is resolved (symlinks included) and stat-ed, and the source is a reference
+  when that ancestor is the namespace or a directory inside it, or when the resolved landing path falls under the namespace.
+  An absent source that would land beside the namespace, including a sibling namespace that does not exist yet, is not a
+  reference to this namespace. A namespace that does not exist yet is referenced by an absent source that names it.
+- A dangling symlink source is taken at its own name; Docker cannot create the directory behind one, so the start fails and
+  nothing is mounted.
+- **Fail closed:** a source or namespace that cannot be examined for a reason other than absence is `ErrUnavailable`, as before.
+  So is a namespace with more than 4096 directories (the walk bound), and a cancelled context. Every lookup on a source runs
+  under the existing one-in-flight slot. The data writer now shares one pass across the whole inventory, so a namespace is
+  walked once, not once per source.
+- On a platform other than Linux the identity logic does not exist; the fallback reports a reference with `ErrUnsupported`.
+
+**Behaviour change.** An absent source under the namespace used to be "not a reference" by design
+(`TestVolumeWithAbsentSourceUnderTheDataRootIsNotAReference`). That test is replaced by
+`TestSourceAbsentUnderTheNamespaceIsAReference`, which pins the reverse and also pins that a source landing beside the namespace
+still passes. The foreign-container behaviour is unchanged: a container with no mount under the namespace does not stop the
+writer, and a local volume with an empty `Source` is still skipped.
+
+**Tests.** `candidate_ipc_identity_linux_test.go`: the overlap semantics for the namespace, an ancestor, a far ancestor, a
+descendant, a sibling and an unrelated directory (the alias is simulated by hooks where there is no privilege); an alias paths
+cannot see; absent sources inside, beside and under a symlinked parent; a missing namespace; a dangling symlink; stat failure,
+walk bound and cancellation failing closed; and `TestBindMountAliasIsAnOverlap`, which makes real `mount --bind` mounts of the
+namespace, the data root, a descendant and a sibling and skips without root or mount capability.
+
+**Limits.**
+
+- A single-file bind whose source is a file inside the namespace, reached through an alias, is not found by identity: only
+  directories below the namespace are enumerated, because enumerating every file would make the cost depend on the
+  namespace's data. A file source is still caught by name.
+- The walk bound of 4096 directories refuses the writer for a namespace that deep and wide; raise the bound if one is met.
+- The check is a point-in-time observation, as the data writer's comment says; a mount made after the pass is not seen, and
+  it is not exclusion against host root.
+- Identity cannot see a mount of the same filesystem object through a different device number, such as a FUSE or overlay
+  re-export that mints its own inodes.
+- The native acceptance named in the problem statement (a disposable runner creating a `type=none,o=bind` local volume and
+  expecting `ErrContainerConflict`) is not added here; the real-mount unit test covers the identity rule, not the daemon's
+  volume listing.
 
 ## Resolutions (PR 4c)
 
@@ -1729,5 +1788,4 @@ Other results:
 
 - **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
-- **Inventory overlap by device and inode** (the follow-up above), together with an absent bind source under the data root, which is to be treated as a reference to the namespace rather than as no overlap.
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
