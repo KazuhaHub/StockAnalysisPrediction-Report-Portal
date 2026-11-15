@@ -9,11 +9,19 @@ import (
 
 // One owner per Portal process. Durable authority, pause and pending work remain
 // in SQL; this owner never initializes control or enrolls a native runtime.
+//
+// It always runs the frontend scheduler. When a trusted runner endpoint is bound
+// (a valid RP_APP_RUNNER_* set, checked at startup), it also runs the writable
+// install scheduler against that endpoint. The two claim disjoint queues, hold
+// separate worker identities and are stopped together.
 type platformFrontendInstallRuntime struct {
 	once   sync.Once
 	cancel context.CancelFunc
 	done   chan struct{}
 	worker *platformInstallScheduler
+	// writer is nil when no runner endpoint is bound.
+	writer     *platformInstallScheduler
+	writerDone chan struct{}
 }
 
 func (s *Server) startPlatformFrontendInstallService() func(context.Context) {
@@ -32,13 +40,31 @@ func (s *Server) startPlatformFrontendInstallService() func(context.Context) {
 			return
 		}
 		go r.run(ctx)
+		if endpoint := s.platformBackendEndpoint.Load(); endpoint != nil {
+			r.writerDone = make(chan struct{})
+			writerID, err := platformNewUUID()
+			if err == nil {
+				r.writer, err = newPlatformWritableInstallScheduler(s, *endpoint, writerID, 500*time.Millisecond)
+			}
+			if err != nil {
+				close(r.writerDone)
+				log.Print("application installation: writable service unavailable")
+				return
+			}
+			go r.runWritable(ctx)
+		}
 	})
 	return func(deadline context.Context) {
 		r.cancel()
-		select {
-		case <-r.done:
-		case <-deadline.Done():
-			log.Print("application installation: worker shutdown deadline exceeded")
+		for _, done := range []chan struct{}{r.done, r.writerDone} {
+			if done == nil {
+				continue
+			}
+			select {
+			case <-done:
+			case <-deadline.Done():
+				log.Print("application installation: worker shutdown deadline exceeded")
+			}
 		}
 	}
 }
@@ -55,5 +81,18 @@ func (r *platformFrontendInstallRuntime) run(ctx context.Context) {
 	}()
 	if err := r.worker.serve(ctx); err != nil {
 		log.Print("application installation: service unavailable")
+	}
+}
+
+func (r *platformFrontendInstallRuntime) runWritable(ctx context.Context) {
+	defer close(r.writerDone)
+	defer func() {
+		if recover() != nil {
+			r.writer.status.Store(&platformInstallWorkerStatus{code: "stopped"})
+			log.Print("application installation: writable worker stopped unexpectedly")
+		}
+	}()
+	if err := r.writer.serve(ctx); err != nil {
+		log.Print("application installation: writable service unavailable")
 	}
 }
