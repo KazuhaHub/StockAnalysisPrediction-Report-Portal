@@ -130,8 +130,13 @@ func storedCandidateOrphan(raw string, id CapacityIdentity) (CandidateOrphanRece
 
 // absenceSettleDelay is how long an absence settlement waits between its two looks. The Docker daemon can finish a
 // container create after the client context that asked for it was cancelled, so a container missing at one look can
-// exist a moment later. A package variable so tests do not wait it out.
-const defaultAbsenceSettleDelay = 2 * time.Second
+// exist a moment later; driver.DockerRequestTimeout says for how long. The first look is taken with the data execution
+// gate held, so no request of this runner can be issued after it, and every request issued before it completes (or
+// is lost) within that timeout of its issue. A second look more than the timeout later, with the gate still held,
+// therefore sees whatever any create was going to produce: two agreeing absences prove none exists and none will.
+// The delay is the timeout plus a second of margin for scheduling and the daemon's own clock. A package variable so
+// tests do not wait it out.
+const defaultAbsenceSettleDelay = driver.DockerRequestTimeout + time.Second
 
 var absenceSettleDelay = defaultAbsenceSettleDelay
 

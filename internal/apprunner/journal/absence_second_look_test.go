@@ -116,9 +116,19 @@ func TestSettleOrphanNeverRanNeedsTwoAbsentObservations(t *testing.T) {
 	})
 }
 
-// The tests run with no delay between the two looks; this pins the production value the doc states.
-func TestTheProductionSecondLookWaitsTwoSeconds(t *testing.T) {
-	if defaultAbsenceSettleDelay != 2*time.Second {
-		t.Fatalf("the production settle delay is %s, documented as 2s", defaultAbsenceSettleDelay)
+// The tests run with no delay between the two looks; this pins the property the production value exists for. A
+// create the runner gave up on may still be carried out by the daemon for DockerRequestTimeout after the request was
+// issued. The first look happens with the data execution gate held, so no request of the runner's can be issued after
+// it; a second look more than that timeout later therefore sees every create that was ever going to complete. A delay
+// that is not longer than the timeout proves nothing: the first version of this value was two seconds against a
+// five-second timeout.
+func TestTheProductionSecondLookWaitsLongerThanADaemonCreateCanTake(t *testing.T) {
+	if defaultAbsenceSettleDelay <= driver.DockerRequestTimeout {
+		t.Fatalf("the production settle delay is %s, which does not exceed the daemon request timeout %s", defaultAbsenceSettleDelay, driver.DockerRequestTimeout)
+	}
+	// The two waits of an update-start settlement (the target, then an enable's source) and the rest of the command
+	// must fit in the connection bound of a candidate execution (30s), or the sender would give up mid-settlement.
+	if 2*defaultAbsenceSettleDelay > 20*time.Second {
+		t.Fatalf("two settle delays (%s) crowd the 30s connection bound", 2*defaultAbsenceSettleDelay)
 	}
 }
