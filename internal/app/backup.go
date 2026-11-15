@@ -79,7 +79,12 @@ const b64Key = "$b64"
 // backupTables lists every table in the current schema, from the schema declarations and the
 // migration list themselves so a new table is included the day it is declared and nobody has to
 // remember a second list.
-func (s *Store) backupTables() ([]string, error) {
+func (s *Store) backupTables() ([]string, error) { return s.backupTablesIn(s.poolExec()) }
+
+// backupTablesIn is backupTables read through e. A snapshot reads the registered plugin data tables through its own
+// transaction: listing them through the pool first lets a table registered in between show up as rows in the dump
+// but not as a table, and such a dump cannot be restored.
+func (s *Store) backupTablesIn(e migExec) ([]string, error) {
 	seen := map[string]bool{}
 	var base []string
 	for _, stmt := range s.baseSchemaStmts() {
@@ -91,8 +96,8 @@ func (s *Store) backupTables() ([]string, error) {
 		base = append(base, t)
 	}
 	names := backupTableNames(base, s.migrations())
-	if s.tableExists(platformPrefix + "plugin_tables") {
-		rows, err := s.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
+	if e.tableExists(platformPrefix + "plugin_tables") {
+		rows, err := e.query(`SELECT table_name FROM app_platform_plugin_tables ORDER BY table_name`)
 		if err != nil {
 			return nil, err
 		}
@@ -184,22 +189,21 @@ func (s *Store) inReadSnapshot(fn func(tx *sql.Tx) error) error {
 // dumpTo writes the whole database as JSON Lines inside ONE read transaction, so the dump is a
 // single point in time rather than a table-by-table sample of a moving database.
 func (s *Store) dumpTo(w io.Writer) (int, int64, error) {
-	names, err := s.backupTables()
-	if err != nil {
-		return 0, 0, err
-	}
 	var tables int
 	var total int64
-	err = s.inReadSnapshot(func(tx *sql.Tx) error {
-		var dumpErr error
-		tables, total, dumpErr = s.dumpTx(tx, names, w)
-		return dumpErr
+	err := s.inReadSnapshot(func(tx *sql.Tx) error {
+		names, err := s.backupTablesIn(migExec{s: s, ex: tx})
+		if err != nil {
+			return err
+		}
+		tables, total, err = s.dumpTx(tx, names, w)
+		return err
 	})
 	return tables, total, err
 }
 
-// dumpTx writes the dump of the given tables from an open read snapshot. names comes from backupTables,
-// which reads through the pool, so it is taken before the snapshot begins.
+// dumpTx writes the dump of the given tables from an open read snapshot. names comes from backupTablesIn on the
+// same transaction.
 func (s *Store) dumpTx(tx *sql.Tx, names []string, w io.Writer) (int, int64, error) {
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(backupHeader{

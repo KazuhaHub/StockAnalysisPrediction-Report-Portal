@@ -365,6 +365,7 @@ func TestRecoveryBundleCommandArguments(t *testing.T) {
 			recoveryBundleArgs{Action: "write", Dir: "/out", Host: recoveryBundleHost{Checkpoints: []string{"/c1", "/c2"}, NoRunnerJournal: true}},
 		},
 		"restore dry run": {[]string{"restore", "/in"}, recoveryBundleArgs{Action: "restore", Dir: "/in"}},
+		"restore replace": {[]string{"restore", "/in", "--force", "--replace-existing"}, recoveryBundleArgs{Action: "restore", Dir: "/in", Force: true, ReplaceExisting: true}},
 		"restore force":   {[]string{"restore", "/in", "--force"}, recoveryBundleArgs{Action: "restore", Dir: "/in", Force: true}},
 	}
 	for name, c := range ok {
@@ -385,6 +386,7 @@ func TestRecoveryBundleCommandArguments(t *testing.T) {
 		"two directories":                {"write", "/a", "/b", "--checkpoints", "/c", "--no-runner-journal"},
 		"restore with write flag":        {"restore", "/in", "--checkpoints", "/c"},
 		"write with force":               {"write", "/out", "--checkpoints", "/c", "--no-runner-journal", "--force"},
+		"replace without force":          {"restore", "/in", "--replace-existing"},
 		"unknown flag":                   {"write", "/out", "--bogus"},
 	} {
 		t.Run("refuses "+name, func(t *testing.T) {

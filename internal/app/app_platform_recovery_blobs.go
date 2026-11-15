@@ -93,16 +93,27 @@ func bundleOnePlatformBlob(dir string, store *platformImageStore, blob appplatfo
 	return file, nil
 }
 
-// restorePlatformBundleBlobs places the blobs of a verified bundle into the blob store of the receiving host.
-// Each blob is hashed while it is written to a partial file and takes its name only when it matches, so a
-// damaged blob is never placed, whatever the manifest says.
+// restorePlatformBundleBlobs places the blobs of a verified bundle into the blob store of the receiving host and
+// releases their reservation at once.
 func (s *Server) restorePlatformBundleBlobs(dir string, manifest platformRecoveryBundleManifest) error {
+	release, err := s.placePlatformBundleBlobs(dir, manifest)
+	if err != nil {
+		return err
+	}
+	release()
+	return nil
+}
+
+// placePlatformBundleBlobs places the blobs and returns the function that ends their reservation. Each blob is
+// hashed while it is written to a partial file and takes its name only when it matches, so a damaged blob is never
+// placed, whatever the manifest says. A caller that goes on to load a database keeps the reservation until it has.
+func (s *Server) placePlatformBundleBlobs(dir string, manifest platformRecoveryBundleManifest) (func(), error) {
 	if len(manifest.ImageBlobs) == 0 {
-		return nil
+		return func() {}, nil
 	}
 	store, err := s.platformImages()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var blobs []appplatform.ImageBlob
 	for _, f := range manifest.ImageBlobs {
@@ -110,19 +121,20 @@ func (s *Server) restorePlatformBundleBlobs(dir string, manifest platformRecover
 	}
 	unreserve, err := store.reserveBlobs(blobs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer unreserve()
 	for _, f := range manifest.ImageBlobs {
 		in, err := os.Open(filepath.Join(dir, filepath.FromSlash(f.Path)))
 		if err != nil {
-			return err
+			unreserve()
+			return nil, err
 		}
 		putErr := store.putBlob(appplatform.ImageBlob{Digest: f.SHA256, Size: f.Bytes}, io.Reader(in))
 		in.Close()
 		if putErr != nil {
-			return fmt.Errorf("%w: %s: %v", errPlatformBundle, f.Path, putErr)
+			unreserve()
+			return nil, fmt.Errorf("%w: %s: %v", errPlatformBundle, f.Path, putErr)
 		}
 	}
-	return nil
+	return unreserve, nil
 }
