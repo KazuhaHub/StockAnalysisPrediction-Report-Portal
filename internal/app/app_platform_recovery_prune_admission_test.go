@@ -294,3 +294,53 @@ func TestPlatformPruneTransactionTakesTheAdmissionLocksOnPostgres(t *testing.T) 
 		})
 	}
 }
+
+// The SQL of the pruning step and its predicates, on both drivers and with no runtime: the decided-deletion condition
+// (a LIKE over the receipt with a concatenated pattern), the retained-set predicate built from it, the leak selection,
+// the effect history and the effect-number allocation. The driver tests above need a full runtime fixture.
+func TestPlatformPruneQueriesOnBothDrivers(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		removed := f.removedInstallation()
+		namespace := f.namespace(removed, "deleted")
+		cut, _ := f.operation(removed, "update", "complete", retNow-1*retDay, 2)
+		decided := f.recoverySet(removed, namespace, cut, "verified", 1)
+		plain := f.recoverySet(removed, namespace, cut, "verified", 2)
+		leaked := f.recoverySet(removed, namespace, cut, "deleted", 3)
+		host, _ := f.operation(removed, "disable", "complete", retNow-1*retDay, 3)
+		named := func(set string) string {
+			return `{"recovery_set_id":"` + set + `","checkpoint_id":"` + platformFixtureID(42) + `","source":"retention","attempt":0}`
+		}
+		deletion := f.effectAt(host, "remove_data", 2, "delete_checkpoint", "prepared", named(decided))
+		e := f.st.poolExec()
+		if yes, err := platformRecoverySetDeletionDecided(e, decided); err != nil || !yes {
+			t.Fatalf("a set with a prepared deletion is not decided: %v %v", yes, err)
+		}
+		if yes, err := platformRecoverySetDeletionDecided(e, plain); err != nil || yes {
+			t.Fatalf("a set with no deletion is decided: %v %v", yes, err)
+		}
+		retained, err := loadPlatformRetainedSets(e)
+		if err != nil || len(retained) != 1 || retained[0].id != plain {
+			t.Fatalf("retained = %+v, %v", retained, err)
+		}
+		mustExec(t, f.st, `UPDATE app_platform_operation_effects SET state='reverted' WHERE effect_id=?`, deletion)
+		if retained, err = loadPlatformRetainedSets(e); err != nil || len(retained) != 2 {
+			t.Fatalf("a refused deletion changed the retained sets: %+v, %v", retained, err)
+		}
+		leak, err := platformDeletedNamespaceSets(e)
+		if err != nil || len(leak) != 1 || leak[0].id != leaked {
+			t.Fatalf("the leak selection = %+v, %v", leak, err)
+		}
+		history, open, err := platformPruneHistory(e)
+		if err != nil || len(open) != 0 || len(history[decided]) != 1 || history[decided][0].effectID != deletion || history[decided][0].intent.Source != "retention" {
+			t.Fatalf("history = %+v open = %+v, %v", history, open, err)
+		}
+		number, free, err := platformPruneNumber(e, host)
+		if err != nil || !free || number != 3 {
+			t.Fatalf("the next effect number = %d %v %v, want 3", number, free, err)
+		}
+		if beyond, err := platformBeyondRetention(e, 1); err != nil || len(beyond) != 1 || beyond[0].id != decided {
+			t.Fatalf("beyond = %+v, %v", beyond, err)
+		}
+	})
+}
