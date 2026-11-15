@@ -327,6 +327,9 @@ func (s *Server) reconcilePlatformRecoveryResumes(ctx context.Context, endpoint 
 			if ctx.Err() != nil {
 				return zero, ctx.Err()
 			}
+			if platformRunnerUnreachable(err) {
+				return zero, err
+			}
 			log.Printf("app-platform recovery resume reconcile %s: %v", c.lease.id, err)
 			continue
 		}

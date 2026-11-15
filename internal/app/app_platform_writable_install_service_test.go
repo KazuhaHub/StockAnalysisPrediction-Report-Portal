@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log"
 	"os"
 	"strings"
 	"testing"
@@ -66,4 +69,70 @@ func TestRunServerBindsTheRunnerEndpointBeforeStartingAndStoppingTheInstaller(t 
 	if bind < 0 || start < 0 || stopped < 0 || !(bind < start && start < stopped) {
 		t.Fatal("RunServer must bind the runner endpoint, then start the installer, then hand its stop to serve", bind, start, stopped)
 	}
+}
+
+// An unavailable frontend scheduler must not strand the managed operations: the operation
+// engine still starts when an endpoint is bound (the reverse holds too), and each failure is
+// logged. Startup does not abort, because the frontend scheduler is optional for managed work
+// and aborting would take the whole Portal down for a worker-identity failure.
+func TestPlatformInstallServiceStartsTheOperationEngineWhenTheFrontendSchedulerFails(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	calls := 0
+	old := platformInstallerUUID
+	platformInstallerUUID = func() (string, error) {
+		calls++
+		if calls == 1 {
+			return "", errors.New("entropy unavailable")
+		}
+		return old()
+	}
+	t.Cleanup(func() { platformInstallerUUID = old })
+	s := &Server{st: newTestStore(t)}
+	endpoint := writableServiceTestEndpoint()
+	s.platformBackendEndpoint.Store(&endpoint)
+	stop := s.startPlatformFrontendInstallService()
+	r := &s.platformInstaller
+	if r.worker != nil || r.writer == nil || !r.writer.writable {
+		t.Fatal("the operation engine was not started after the frontend scheduler failed")
+	}
+	if !strings.Contains(buf.String(), "frontend service unavailable") {
+		t.Fatal("the frontend failure was not logged:", buf.String())
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	stop(ctx)
+	for name, done := range map[string]chan struct{}{"frontend": r.done, "engine": r.writerDone} {
+		select {
+		case <-done:
+		default:
+			t.Fatalf("shutdown returned before the %s exited", name)
+		}
+	}
+}
+
+// ...and the engine's own failure leaves the frontend scheduler running.
+func TestPlatformInstallServiceKeepsTheFrontendSchedulerWhenTheOperationEngineFails(t *testing.T) {
+	calls := 0
+	old := platformInstallerUUID
+	platformInstallerUUID = func() (string, error) {
+		calls++
+		if calls == 2 {
+			return "", errors.New("entropy unavailable")
+		}
+		return old()
+	}
+	t.Cleanup(func() { platformInstallerUUID = old })
+	s := &Server{st: newTestStore(t)}
+	endpoint := writableServiceTestEndpoint()
+	s.platformBackendEndpoint.Store(&endpoint)
+	stop := s.startPlatformFrontendInstallService()
+	r := &s.platformInstaller
+	if r.worker == nil || r.writer != nil {
+		t.Fatal("frontend scheduler or engine state is wrong")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	stop(ctx)
 }

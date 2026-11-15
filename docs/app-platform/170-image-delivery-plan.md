@@ -879,15 +879,35 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   taken because the target is a writer's container. The scenario still answers a signed session request
   (`GET /v1/digest`), and then runs its Scheduled Digest task through the new kind
   (`SCHEDULED_DIGEST_WRITABLE_GENERATION_ONE_TASK_VERIFIED`; the child test is CI-only).
-  The writable install scheduler now ships in production startup. When a valid `RP_APP_RUNNER_*` set binds a
-  trusted runner endpoint at startup, the installer service starts the writable scheduler beside the frontend
-  scheduler (separate worker identities, disjoint queues) and stops both at shutdown; with no endpoint it starts
-  only the frontend scheduler, as before.
-- **Finding while building it: the managed initial kind assumed policy revision 1.** The runner derived the
-  identity's policy revision for a generation-1 managed task as the constant `"1"`, but an access-grant change
-  bumps the installation's policy revision without a new generation, so every task of a managed app after such a
-  change was refused as `task tuple`. The revision is now taken from the signed command (the service grant MAC
-  binds it too) and must be a canonical number of at least 1, for the managed initial and the writable kind alike.
+  The platform's operation engine now ships in production startup (doc 114). It is the writable
+  install scheduler, but it runs every runner-backed operation, not only writable installs: managed
+  updates, repairs and enables, delete-data, managed uninstall and disable, managed restore, recovery
+  imports and resumes, and, when idle, the settlements and image reclaim. When a valid `RP_APP_RUNNER_*`
+  set binds a trusted runner endpoint at startup, the installer service starts it beside the frontend
+  scheduler (separate worker identities, disjoint queues) and stops both at shutdown; with no endpoint it
+  starts only the frontend scheduler. A runner that cannot be reached never spends an operation's
+  attempts (bounded backoff, state-change logging); see doc 114.
+- **Finding while building it: the runner assumed a fixed policy revision.** The runner derived the
+  identity's policy revision from the registration (the constant `"1"` for the managed initial kind, the
+  update's target revision for the update-start family), but an access-grant change bumps the
+  installation's policy revision without a new generation, so every task after such a change was refused as
+  `task tuple`. The runner now takes the revision from the signed command for all three kinds and requires a
+  canonical number at or above the registration's floor (1, the update's target revision, 1); the grant's own
+  revision must equal it. This closes the runner side only. **Not closed at generation 2 and later:** the
+  Portal's update, restore and resume history readers pin the installation's and the active activation's
+  policy revision to the update's target revision, so after a grant change the Portal fails to resolve the
+  history before any runner is involved, and launch is affected the same way. Relaxing those readers changes
+  what launch and registration bind and needs an owner decision; the generation-2 regression test therefore
+  covers the runner (`TestServiceBackendTaskUpdateGenerationAcceptsPolicyRevisionAfterGrantChange`) and the
+  no-change Portal path, not a Portal task after a grant change. At generation 1 (managed and writable) the
+  Portal path is covered through a fake runner for the backend, digest and event handlers.
+- **Limit: what the runner verifies of the service identity.** The runner checks the command signature, the
+  registration (signature, expiry, tuple) and that the grant's installation, lease, generation, epoch, release
+  and policy revision equal the command's, that its resources carry what the handler needs, and that its MAC
+  field has the right length. It does not hold the identity key, so it does not verify the MAC; giving it the
+  key would move a Portal secret across the trust boundary. An access change between prepare and delivery can
+  therefore still run the handler once within the 30 s registration lifetime; the app's callbacks are refused
+  by `verifyPlatformServiceIdentity`. Kept as a documented limit.
 - **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
   API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
   "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker

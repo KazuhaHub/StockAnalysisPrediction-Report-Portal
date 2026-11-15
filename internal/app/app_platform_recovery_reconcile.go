@@ -79,6 +79,9 @@ func (s *Server) reconcilePlatformRecoveryImports(ctx context.Context, endpoint 
 			if ctx.Err() != nil {
 				return settled, ctx.Err()
 			}
+			if platformRunnerUnreachable(err) {
+				return settled, err
+			}
 			log.Printf("app-platform recovery reconcile %s: %v", lease.id, err)
 			continue
 		}
