@@ -83,6 +83,28 @@ Schema steps are applied at startup, so a deploy is a new image and a restart. T
 
 See [ADR 0027](docs/adr/0027-backup-and-restore.md) for the design and operational details.
 
+#### Platform recovery bundle (moving to a fresh host)
+
+When the app platform is in use, a plain `backup` is not enough to rebuild a lost host: the retained app-data checkpoint archives live on the runner host, outside the database. `recovery-bundle` packs everything a fresh host needs into one directory, and loads it there.
+
+~~~bash
+# Old host. Stop the app runner first so its journal has no live write-ahead content.
+report-portal recovery-bundle write /backup/bundle \
+  --checkpoints /srv/runner/checkpoints \
+  --runner-journal /srv/runner/state/journal.sqlite3
+
+# Fresh host, with the ORIGINAL config.yaml (same secret_key) in place and the portal stopped.
+report-portal recovery-bundle restore /backup/bundle          # dry run: verify the bundle, parse the dump
+report-portal recovery-bundle restore /backup/bundle --force  # replace the database
+~~~
+
+- `--checkpoints` names where the runner keeps its archives (`<checkpoint id>.tar`): the checkpoint root, its `.portal-checkpoints` directory, or the archive files themselves. It may be repeated. Every retained recovery set needs exactly one archive; a missing archive, an archive that is not the checkpoint the database recorded, a stray archive, or an archive found in two places is refused, and nothing is left in the bundle directory.
+- `--runner-journal` is the old runner's journal file. It is copied as bytes, as provenance, and never opened. Pass `--no-runner-journal` to state that the host has none; one of the two is required.
+- The database dump, the keyring, the retained recovery sets and the release inventory are read in a single read transaction, so a database that is being written to cannot produce a bundle that disagrees with itself. The retained sets are read again at the end; if they changed while the archives were being copied, the bundle is refused.
+- `restore` verifies the SHA-256 of every file in the bundle against its manifest before it touches the database, places the managed image blobs, then loads the dump exactly as `restore` does. Without `--force` it writes nothing. A restored Portal is in recovery mode: runtime bindings are retired, and tasks, subscriptions and recovery sets wait for review.
+- The command does not load the checkpoint archives or the journal. After `restore`, copy the archives it lists to the runner host and follow the import review in [doc 168](docs/app-platform/168-fresh-host-restore-plan.md).
+- The bundle does not contain `config.yaml`. Carry the original `secret_key` separately: the keyring cannot be opened without it. The directory is owner-only and holds password and token hashes, so treat it as a secret.
+
 ### Rotating `secret_key`
 
 The `secret_key` signs sessions and protects the SSO keyring. To rotate it, configure both keys for one restart:
@@ -157,6 +179,8 @@ go run ./cmd/report-portal adduser <name> <password> admin
 go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
+go run ./cmd/report-portal recovery-bundle write <dir> --checkpoints <dir-or-archive> (--runner-journal <file> | --no-runner-journal)
+go run ./cmd/report-portal recovery-bundle restore <dir> [--force]
 go run ./cmd/report-portal schema-upgrade [--apply]   # optional, offline: list pending schema steps, or apply them
 go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
 go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out

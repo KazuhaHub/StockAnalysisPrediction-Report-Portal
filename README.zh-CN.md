@@ -83,6 +83,28 @@ zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-porta
 
 详见 [ADR 0027](docs/adr/0027-backup-and-restore.md)。
 
+#### 平台恢复包（迁移到全新主机）
+
+启用应用平台后，仅靠 `backup` 无法在丢失主机后重建环境：保留的应用数据检查点归档位于 Runner 主机上，不在数据库中。`recovery-bundle` 将新主机所需的全部内容打包到一个目录，并在新主机上加载。
+
+```bash
+# 旧主机：先停止应用 Runner，确保其日志（journal）没有未落盘的 WAL 内容。
+report-portal recovery-bundle write /backup/bundle \
+  --checkpoints /srv/runner/checkpoints \
+  --runner-journal /srv/runner/state/journal.sqlite3
+
+# 新主机：放好原来的 config.yaml（secret_key 必须一致），并停止服务。
+report-portal recovery-bundle restore /backup/bundle          # 试运行：校验恢复包并解析数据库导出
+report-portal recovery-bundle restore /backup/bundle --force  # 执行恢复：替换数据库
+```
+
+- `--checkpoints` 指向 Runner 保存归档（`<checkpoint id>.tar`）的位置：检查点根目录、其下的 `.portal-checkpoints` 目录，或直接给出归档文件，可重复使用。每个保留的恢复集必须有且只有一个归档；归档缺失、与数据库记录不符、不属于任何恢复集或在两处同时出现时，命令会拒绝执行，且不会在恢复包目录中留下任何文件。
+- `--runner-journal` 是旧 Runner 的日志文件，仅按字节复制，作为来源证据，绝不会被打开。若主机上没有日志，必须显式传入 `--no-runner-journal`，两者必须二选一。
+- 数据库导出、密钥环、保留的恢复集和发布清单在**同一个读事务**中读取，因此写入中的数据库不会产生自相矛盾的恢复包。结束时会再读取一次保留的恢复集；若在复制归档期间发生变化，则拒绝生成。
+- `restore` 会先按清单校验恢复包中每个文件的 SHA-256，再修改数据库：放置托管镜像 blob，然后与 `restore` 相同地加载数据库导出。不带 `--force` 时不写入任何内容。恢复后的 Portal 处于恢复模式：运行时绑定已作废，任务、订阅和恢复集等待审核。
+- 该命令不会加载检查点归档和日志。`restore` 完成后，请把命令列出的归档复制到 Runner 主机，并按 [168 号文档](docs/app-platform/168-fresh-host-restore-plan.md) 执行导入审核。
+- 恢复包**不包含** `config.yaml`。请单独保管原来的 `secret_key`，没有它就无法打开密钥环。恢复包目录仅限所有者访问，并包含密码哈希和令牌哈希，应视为机密。
+
 ### 轮换 secret_key
 
 `secret_key` 用于会话签名和保护 SSO 密钥环。OIDC/SAML 密钥由数据加密密钥加密，该数据密钥再由 `secret_key` 派生的密钥封装。直接替换 `secret_key` 会导致密钥环无法解密；系统会返回明确错误并保持原有数据不变。
@@ -153,7 +175,7 @@ cd web && npm run build              # 产出 internal/web/dist/
 go run ./cmd/report-portal           # 访问 :8790，SPA 由二进制内嵌服务
 ```
 
-辅助命令：`go run ./cmd/report-portal hashpw '密码'`（生成 bcrypt 哈希）、`... adduser <名> <密码> admin`（恢复管理员访问）、`... fetchnames`（更新 A 股名称）、`... backup <文件|->` / `... restore <文件|-> [--force]`（导出或恢复完整数据库）、`... recompute-kinds`（分类调整后重新计算 `kind`）、`... freeze-names`（将当前名称固化到历史报告）以及 `... version`（显示版本、提交和构建时间）。
+辅助命令：`go run ./cmd/report-portal hashpw '密码'`（生成 bcrypt 哈希）、`... adduser <名> <密码> admin`（恢复管理员访问）、`... fetchnames`（更新 A 股名称）、`... backup <文件|->` / `... restore <文件|-> [--force]`（导出或恢复完整数据库）、`... recovery-bundle write|restore <目录> ...`（打包或加载平台恢复包）、`... recompute-kinds`（分类调整后重新计算 `kind`）、`... freeze-names`（将当前名称固化到历史报告）以及 `... version`（显示版本、提交和构建时间）。
 
 ## 发布
 
