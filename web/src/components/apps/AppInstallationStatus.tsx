@@ -37,6 +37,7 @@ const errors = new Set([
   'install_authority_review_required',
   'install_execution_review_required',
   'start_never_ran',
+  'start_never_ran_review_required',
   'capacity_exhausted_memory',
   'capacity_exhausted_cpu',
   'capacity_exhausted_disk',

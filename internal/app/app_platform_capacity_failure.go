@@ -47,7 +47,7 @@ func platformCapacityRefusalOf(err error) (journal.CapacityRefusal, bool) {
 // show. Anything else is reported as a generic failure and never leaks.
 func platformPublicOperationErrorCode(code string) string {
 	switch code {
-	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required", platformStartNeverRanErrorCode:
+	case "install_lease_recovery_required", "install_authority_review_required", "install_execution_review_required", platformStartNeverRanErrorCode, platformStartReviewErrorCode:
 		return code
 	}
 	if isPlatformCapacityErrorCode(code) {

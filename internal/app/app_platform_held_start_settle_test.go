@@ -165,7 +165,7 @@ func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
 		if effectState(t, s, operation, "settle", 3) != "applied" || effectState(t, s, operation, "settle", 6) != "applied" || fake.count("settle-start") != 1 {
 			t.Fatal("the orphan was not recorded and the namespace was not swept before the start was closed")
 		}
-		requireSameReleaseOperationClosed(t, s, operation)
+		requireStartReviewRequired(t, s, operation)
 		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_activations a JOIN app_platform_operations o ON o.installation_id=a.installation_id WHERE o.id=? AND a.state='candidate'`, operation) != 0 {
 			t.Fatal("the candidate of a start that never ran was left behind")
 		}
@@ -174,7 +174,7 @@ func TestSettlementTickSettlesAnOrphanedEnableStart(t *testing.T) {
 		if progressed, err := s.settlePlatformHeldStarts(context.Background(), endpoint); err != nil || progressed != 0 || script.settled != before {
 			t.Fatalf("a closed start was settled again: %d %v", progressed, err)
 		}
-		requireSameReleaseOperationClosed(t, s, operation)
+		requireStartReviewRequired(t, s, operation)
 	})
 }
 
@@ -197,8 +197,25 @@ func requireSameReleaseOperationClosed(t *testing.T, s *Server, operation string
 		t.Fatal("the closing left no single audit entry")
 	}
 	if err := s.st.queryRow(`SELECT detail FROM audit_log WHERE action='app_platform.start_never_ran_closed' AND target_id=?`, operation).Scan(&detail); err != nil ||
-		!strings.Contains(detail, `"start_effect_id"`) || !strings.Contains(detail, `"proof"`) {
+		!strings.Contains(detail, `"start_effect_id"`) || !strings.Contains(detail, `"proof"`) || !strings.Contains(detail, `"start_runtime_id"`) ||
+		!strings.Contains(detail, `"start_controller_epoch"`) || !strings.Contains(detail, `"start_admitted_fence"`) || !strings.Contains(detail, `"lease_until_ms"`) ||
+		!strings.Contains(detail, `"candidate_activations_at_target":0`) || !strings.Contains(detail, `"active_activations":0`) {
 		t.Fatalf("the evidence was not recorded: %s %v", detail, err)
+	}
+}
+
+// requireStartReviewRequired is what a start that is reverted but not proven to have done nothing leaves: the operation
+// stays in recovery_required, with the typed code that says the start did not run but nothing more is proven.
+func requireStartReviewRequired(t *testing.T, s *Server, operation string) {
+	t.Helper()
+	if got := scalar[string](t, s.st, `SELECT stage||':'||COALESCE(error_code,'') FROM app_platform_operations WHERE id=?`, operation); got != "recovery_required:start_never_ran_review_required" {
+		t.Fatalf("the operation was not left for review with the typed reason: %s", got)
+	}
+	if platformPublicOperationErrorCode("start_never_ran_review_required") != "start_never_ran_review_required" {
+		t.Fatal("the reason is not one the views show")
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action='app_platform.start_never_ran_closed' AND target_id=?`, operation) != 0 {
+		t.Fatal("a closing was audited")
 	}
 }
 
@@ -500,7 +517,7 @@ func TestSettlementTickFailsAnEnableWhoseStartWasNeverAdmitted(t *testing.T) {
 		if effectState(t, s, operation, "start", 1) != "reverted" {
 			t.Fatalf("the absent start was not reverted: %s", effectState(t, s, operation, "start", 1))
 		}
-		requireSameReleaseOperationClosed(t, s, operation)
+		requireStartReviewRequired(t, s, operation)
 	})
 }
 
