@@ -135,7 +135,7 @@ func (s *Server) forecastTimelineDates(user, symbol string, readable []Rep) map[
 	if s.forecastReaderStage(s.forecastAccess(user)) != "full" {
 		return nil
 	}
-	rows, err := s.st.query(`SELECT DISTINCT report_id, rtype FROM prediction_sets
+	rows, err := s.st.readQuery(`SELECT DISTINCT report_id, rtype FROM prediction_sets
 		WHERE symbol=? AND state=? AND report_id IS NOT NULL`, symbol, predStateAccepted)
 	if err != nil {
 		return nil

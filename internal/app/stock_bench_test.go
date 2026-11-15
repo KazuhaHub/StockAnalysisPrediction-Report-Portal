@@ -17,7 +17,8 @@ import (
 // BenchmarkStockPage measures GET /api/stock/{symbol} on a file-backed SQLite store, whose pool is a
 // single connection, while writer goroutines keep the connection busy. It runs the handler as it was
 // (reference) and as it is, each with and without the statement cache, and reports p50 and p95
-// latency of the readers.
+// latency of the readers. The "single-connection" case switches the read pool off, which is the shape
+// before it; the others run with the pool a file-backed store now carries.
 //
 //	go test ./internal/app -run xxx -bench BenchmarkStockPage -benchtime 3000x
 func BenchmarkStockPage(b *testing.B) {
@@ -25,11 +26,13 @@ func BenchmarkStockPage(b *testing.B) {
 		name    string
 		grouped bool
 		cache   bool
+		single  bool // reads on the one writer connection, as before the read pool
 	}{
-		{"reference/no-cache", false, false},
-		{"reference/cache", false, true},
-		{"grouped/no-cache", true, false},
-		{"grouped/cache", true, true},
+		{"reference/no-cache", false, false, false},
+		{"reference/cache", false, true, false},
+		{"grouped/no-cache", true, false, false},
+		{"grouped/cache", true, true, false},
+		{"grouped/cache/single-connection", true, true, true},
 	}
 	for _, c := range cases {
 		b.Run(c.name, func(b *testing.B) {
@@ -38,9 +41,16 @@ func BenchmarkStockPage(b *testing.B) {
 				b.Fatal(err)
 			}
 			defer st.Close()
+			if c.single {
+				st.closeReadPool()
+			}
 			if !c.cache {
 				st.stmts.close()
 				st.stmts = nil
+				if st.rstmts != nil {
+					st.rstmts.close()
+					st.rstmts = nil
+				}
 			}
 			s := &Server{st: st, cfg: &config.Config{SecretKey: "0123456789abcdef0123456789abcdef"}}
 			s.names = LoadNames(b.TempDir(), st)

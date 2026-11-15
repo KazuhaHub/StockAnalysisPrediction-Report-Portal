@@ -436,7 +436,7 @@ func (s *Store) CreateBatchJob(targetID int64, concurrency, maxRetries int, crea
 // submitter, and enqueue time (created_at), for the scheduler and the queue view. The
 // submitter feeds the fair-share factor (docs/adr/0008-multifactor-priority.md).
 func (s *Store) QueuedJobs() []BatchJob {
-	rows, err := s.query(`SELECT b.id, b.priority, COALESCE(b.created_by,''), b.created_at, b.run_at, b.run_preset
+	rows, err := s.readQuery(`SELECT b.id, b.priority, COALESCE(b.created_by,''), b.created_at, b.run_at, b.run_preset
 		FROM batch_jobs b
 		WHERE b.status='queued' ORDER BY b.id`)
 	if err != nil {
@@ -465,7 +465,7 @@ type JobActivity struct {
 // "2006-01-02 15:04:05" timestamp), for the fair-share usage tally. The string bound
 // sorts correctly because the timestamp format is zero-padded and lexicographic.
 func (s *Store) RecentJobActivity(since string) []JobActivity {
-	rows, err := s.query(`SELECT COALESCE(created_by,''), COALESCE(created_at,'')
+	rows, err := s.readQuery(`SELECT COALESCE(created_by,''), COALESCE(created_at,'')
 		FROM batch_jobs WHERE created_at>=? ORDER BY created_at`, since)
 	if err != nil {
 		return nil

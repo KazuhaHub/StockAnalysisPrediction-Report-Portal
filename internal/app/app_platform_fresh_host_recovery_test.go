@@ -369,8 +369,14 @@ func TestFreshHostPortalRecoveryBundleChild(t *testing.T) {
 	if err != nil || platformDigest(copied) != metadata.JournalSHA256 {
 		t.Fatalf("bundled journal is not the original: %v", err)
 	}
+	// The restored Portal database is open here and, being file-backed SQLite, carries a read pool and
+	// so write-ahead files of its own; the check is about the runner's journal, not about that file.
+	portalDB := filepath.Join(bundle, "restored.db")
 	for _, dir := range []string{bundle, metadata.JournalSourceDir} {
 		_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+			if path == portalDB+"-wal" || path == portalDB+"-shm" {
+				return nil
+			}
 			if err == nil && !d.IsDir() && (strings.HasSuffix(path, "-wal") || strings.HasSuffix(path, "-shm")) {
 				t.Fatalf("a journal sidecar appeared: %s", path)
 			}

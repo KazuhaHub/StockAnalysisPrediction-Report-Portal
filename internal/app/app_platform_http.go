@@ -181,10 +181,10 @@ func (s *Server) platformHTTPReader(r *http.Request, user string) (platformActor
 	var expires int64
 	// Persisted managed sessions, including already migrated legacy identities.
 	// This read never creates or upgrades a browser credential.
-	if err := s.st.queryRow(`SELECT expires_at FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, revision, signedExpiry).Scan(&expires); err != nil {
+	if err := s.st.readQueryRow(`SELECT expires_at FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, revision, signedExpiry).Scan(&expires); err != nil {
 		return zero, errAppPlatformLaunchUnavailable
 	}
-	generation, err := notificationAccountGeneration(s.st.poolExec(), user)
+	generation, err := notificationAccountGeneration(s.st.readExec(), user)
 	if err != nil {
 		return zero, err
 	}

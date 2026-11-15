@@ -672,7 +672,7 @@ func (s *Server) verify(cookie string) (string, int64) {
 			return "", 0
 		}
 		var n int
-		if err := s.st.queryRow(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, rev, exp).Scan(&n); err != nil || n != 1 {
+		if err := s.st.readQueryRow(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, rev, exp).Scan(&n); err != nil || n != 1 {
 			return "", 0
 		}
 		return user, rev
@@ -812,7 +812,15 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 	}
 	if id := sessionID(r); id != "" {
 		now := time.Now().Unix()
-		s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, now-int64(lastSeenInterval.Seconds()))
+		stale := now - int64(lastSeenInterval.Seconds())
+		// The stamp is due once per interval, but the UPDATE used to be issued on every request, a write
+		// statement that matched nothing and still queued for the writer connection. The read says
+		// whether it is due; the UPDATE keeps its own condition, so two requests racing past the read
+		// still stamp once.
+		var seen int64
+		if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil && seen < stale {
+			s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
+		}
 	}
 	return user
 }

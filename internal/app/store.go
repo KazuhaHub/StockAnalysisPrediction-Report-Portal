@@ -81,9 +81,15 @@ type LinkGroup struct {
 }
 
 type Store struct {
-	db       *sql.DB
-	driver   string     // "sqlite" | "postgres"
-	stmts    *stmtCache // prepared-statement cache; nil on PostgreSQL (see stmtCache)
+	db     *sql.DB
+	driver string     // "sqlite" | "postgres"
+	stmts  *stmtCache // prepared-statement cache; nil on PostgreSQL (see stmtCache)
+	// rdb is the SQLite read pool and rstmts its statement cache: a second, read-only pool on the same
+	// file, alongside the single writer connection in db (see openReadPool). Both are nil on PostgreSQL,
+	// on an in-memory database and wherever WAL is unavailable, and readDB then answers with db, so a
+	// read accessor is always safe to call.
+	rdb      *sql.DB
+	rstmts   *stmtCache
 	ticketMu sync.Mutex // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
 	// onSettingRead is a test-only observer of GetSetting. It is nil in production; a test sets it to
 	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
@@ -115,6 +121,9 @@ func OpenStore(driver, source string) (*Store, error) {
 		s.Close()
 		return nil, err
 	}
+	// After initialization, not in connectStore: the read pool switches the file to WAL, which the
+	// schema inspection that only looks at a database through connectStore must not do.
+	s.openReadPool(source)
 	return s, nil
 }
 
@@ -180,26 +189,31 @@ func connectStoreWith(driver, source, sqlDriver string) (*Store, error) {
 
 // beginReadSnapshot opens one read transaction and returns an executor over it with the func that
 // ends it: a handler that makes several related reads takes the connection once, and sees one
-// consistent state, instead of queueing for the pool once per read. The transaction holds the only
-// SQLite connection, so nothing between the call and end() may touch the pool (a helper that opens
-// its own transaction or runs a plain query would wait for the connection its caller holds).
-// end is idempotent. If the transaction cannot begin, the executor is the pool itself and every read
-// acquires separately, as before.
+// consistent state, instead of queueing for the pool once per read. On SQLite it runs on the read pool
+// (WAL: one snapshot, no lock against the writer) and holds one reader connection; where there is no
+// read pool it holds the only connection, and nothing between the call and end() may touch the pool
+// (a helper that opens its own transaction or runs a plain query would wait for the connection its
+// caller holds). Keep the span short and free of other pool work either way.
+// end is idempotent. If the transaction cannot begin, the executor is the read pool itself and every
+// read acquires separately, as before.
 func (s *Store) beginReadSnapshot(ctx context.Context) (migExec, func()) {
 	opts := &sql.TxOptions{ReadOnly: true}
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
 	}
-	tx, err := s.db.BeginTx(ctx, opts)
+	tx, err := s.beginRead(ctx, opts)
 	if err != nil {
-		return s.poolExec(), func() {}
+		return s.readExec(), func() {}
 	}
 	var once sync.Once
-	return migExec{s: s, ex: tx}, func() { once.Do(func() { _ = tx.Rollback() }) }
+	return s.readTxExec(tx), func() { once.Do(func() { _ = tx.Rollback() }) }
 }
 
-// Close closes every cached statement and then the underlying database connection.
+// Close closes the read pool, every cached statement and then the underlying database connection.
 func (s *Store) Close() error {
+	// The readers go first: the last connection to close checkpoints the WAL and removes it, and only
+	// the writer connection can.
+	s.closeReadPool()
 	s.stmts.close()
 	return s.db.Close()
 }
@@ -267,63 +281,30 @@ func (s *Store) queryRowContext(ctx context.Context, q string, args ...any) *sql
 }
 
 func (s *Store) execBound(ctx context.Context, q string, args ...any) (sql.Result, error) {
-	if st, release := s.stmts.acquire(ctx, q); st != nil {
-		defer release()
-		return st.ExecContext(ctx, args...)
-	}
-	return s.db.ExecContext(ctx, q, args...)
+	return s.writerPool().execBound(ctx, q, args...)
 }
 
 func (s *Store) queryBound(ctx context.Context, q string, args ...any) (*sql.Rows, error) {
-	if st, release := s.stmts.acquire(ctx, q); st != nil {
-		defer release()
-		return st.QueryContext(ctx, args...)
-	}
-	return s.db.QueryContext(ctx, q, args...)
+	return s.writerPool().queryBound(ctx, q, args...)
 }
 
 func (s *Store) queryRowBound(ctx context.Context, q string, args ...any) *sql.Row {
-	if st, release := s.stmts.acquire(ctx, q); st != nil {
-		defer release()
-		return st.QueryRowContext(ctx, args...)
-	}
-	return s.db.QueryRowContext(ctx, q, args...)
+	return s.writerPool().queryRowBound(ctx, q, args...)
 }
 
 // The tx variants run already-bound SQL inside tx, reusing the cached statement through
 // Tx.StmtContext. tx must have been begun on s.db. A text not yet cached runs plainly inside tx: a
 // transaction holds the only SQLite connection, so it cannot prepare on the pool.
 func (s *Store) txExecContext(ctx context.Context, tx *sql.Tx, q string, args ...any) (sql.Result, error) {
-	if st, release := s.stmts.acquireExisting(q); st != nil {
-		defer release()
-		ts := tx.StmtContext(ctx, st)
-		defer ts.Close()
-		return ts.ExecContext(ctx, args...)
-	}
-	s.stmts.want(q)
-	return tx.ExecContext(ctx, q, args...)
+	return s.writerPool().txExecContext(ctx, tx, q, args...)
 }
 
 func (s *Store) txQueryContext(ctx context.Context, tx *sql.Tx, q string, args ...any) (*sql.Rows, error) {
-	if st, release := s.stmts.acquireExisting(q); st != nil {
-		defer release()
-		ts := tx.StmtContext(ctx, st)
-		defer ts.Close()
-		return ts.QueryContext(ctx, args...)
-	}
-	s.stmts.want(q)
-	return tx.QueryContext(ctx, q, args...)
+	return s.writerPool().txQueryContext(ctx, tx, q, args...)
 }
 
 func (s *Store) txQueryRowContext(ctx context.Context, tx *sql.Tx, q string, args ...any) *sql.Row {
-	if st, release := s.stmts.acquireExisting(q); st != nil {
-		defer release()
-		ts := tx.StmtContext(ctx, st)
-		defer ts.Close()
-		return ts.QueryRowContext(ctx, args...)
-	}
-	s.stmts.want(q)
-	return tx.QueryRowContext(ctx, q, args...)
+	return s.writerPool().txQueryRowContext(ctx, tx, q, args...)
 }
 
 // pkAuto returns the auto-increment primary key definition (differs between the two SQL dialects).
@@ -1033,7 +1014,7 @@ func (s *Store) Users() []User {
 }
 
 func (s *Store) GetUser(name string) *User {
-	u, err := scanUser(s.queryRow("SELECT "+userCols+" FROM users u WHERE u.username=?", name).Scan)
+	u, err := scanUser(s.readQueryRow("SELECT "+userCols+" FROM users u WHERE u.username=?", name).Scan)
 	if err != nil {
 		return nil
 	}
@@ -1307,7 +1288,7 @@ func (s *Store) GetSetting(k, def string) string {
 		s.onSettingRead(k)
 	}
 	var v sql.NullString
-	if err := s.queryRow("SELECT v FROM meta WHERE k=?", k).Scan(&v); err == nil && v.Valid {
+	if err := s.readQueryRow("SELECT v FROM meta WHERE k=?", k).Scan(&v); err == nil && v.Valid {
 		return v.String
 	}
 	return def
@@ -1333,7 +1314,7 @@ type TypeConfig struct {
 	Label     string
 }
 
-func (s *Store) TypeConfigs() map[string]TypeConfig { return s.typeConfigsFrom(s.poolExec()) }
+func (s *Store) TypeConfigs() map[string]TypeConfig { return s.typeConfigsFrom(s.readExec()) }
 
 // typeConfigsFrom is TypeConfigs on a given executor, so a caller can run it inside a read transaction.
 func (s *Store) typeConfigsFrom(e migExec) map[string]TypeConfig {
@@ -1412,7 +1393,7 @@ func (s *Store) ClearTypeConfigs() error {
 // color; callers fall back to "default".
 func (s *Store) KindColors() map[string]string {
 	m := map[string]string{}
-	rows, err := s.query("SELECT kind,color FROM kind_config")
+	rows, err := s.readQuery("SELECT kind,color FROM kind_config")
 	if err != nil {
 		return m
 	}
@@ -1573,7 +1554,7 @@ func (s *Store) SearchNewLatest(f Filters, sc *ownerScope) ([]Rep, int, error) {
 	)
 	SELECT id,title,symbol,name,rtype,rdate,kind,run_id,source,sent_at,filtered_total
 	FROM ranked WHERE date_rank=1 ORDER BY rdate DESC,sent_at DESC`
-	rows, err := s.query(q, args...)
+	rows, err := s.readQuery(q, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -2059,7 +2040,7 @@ func (s *Store) ListRuns(symbol, date string, sc *ownerScope) []RunInfo {
 
 // NewBySymbol fetches all new reports for a symbol (without body, date descending), for the per-stock timeline detail view.
 func (s *Store) NewBySymbol(symbol string, sc *ownerScope) ([]Rep, error) {
-	return s.newBySymbolFrom(s.poolExec(), symbol, sc)
+	return s.newBySymbolFrom(s.readExec(), symbol, sc)
 }
 
 // newBySymbolFrom is NewBySymbol on a given executor, so a caller can run it inside a read transaction.
@@ -2087,7 +2068,7 @@ func (s *Store) newBySymbolFrom(e migExec, symbol string, sc *ownerScope) ([]Rep
 // out-of-scope id returns (nil, nil), so every by-id read path fails closed at the SQL layer and its
 // existing "nil → 404" handling keeps another OU's report unreachable by id enumeration (ADR 0022 R1).
 func (s *Store) GetNew(rowid int64, sc *ownerScope) (*Rep, error) {
-	return s.getNewFrom(s.poolExec(), rowid, sc)
+	return s.getNewFrom(s.readExec(), rowid, sc)
 }
 
 // getNewFrom is GetNew on a given executor, so a caller can run it inside a read transaction.
@@ -2324,7 +2305,7 @@ func (s *Store) FreezeReportNames() (int64, error) {
 // ---------- Entry buttons ----------
 
 func (s *Store) Links() []Link {
-	rows, err := s.query("SELECT id,label,url,icon,new_tab,ord,COALESCE(group_id,0),COALESCE(visible,1) FROM links ORDER BY ord,id")
+	rows, err := s.readQuery("SELECT id,label,url,icon,new_tab,ord,COALESCE(group_id,0),COALESCE(visible,1) FROM links ORDER BY ord,id")
 	if err != nil {
 		return nil
 	}
@@ -2368,7 +2349,7 @@ func (s *Store) DeleteLink(id int64) error {
 // ---------- Entry-button groups ----------
 
 func (s *Store) LinkGroups() []LinkGroup {
-	rows, err := s.query("SELECT id,COALESCE(name,''),COALESCE(mode,'row'),COALESCE(show_label,1),COALESCE(icon,''),ord,COALESCE(visible,1) FROM link_groups ORDER BY ord,id")
+	rows, err := s.readQuery("SELECT id,COALESCE(name,''),COALESCE(mode,'row'),COALESCE(show_label,1),COALESCE(icon,''),ord,COALESCE(visible,1) FROM link_groups ORDER BY ord,id")
 	if err != nil {
 		return nil
 	}
@@ -2408,7 +2389,7 @@ func (s *Store) DeleteLinkGroup(id int64) error {
 }
 
 func (s *Store) distinct(q string, args ...any) []string {
-	rows, err := s.query(q, args...)
+	rows, err := s.readQuery(q, args...)
 	if err != nil {
 		return nil
 	}

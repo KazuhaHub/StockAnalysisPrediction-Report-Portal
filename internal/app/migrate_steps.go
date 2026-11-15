@@ -54,6 +54,18 @@ type execer interface {
 type migExec struct {
 	s  *Store
 	ex execer
+	// ro marks an executor that belongs to the SQLite read pool (the pool itself or a transaction begun
+	// on it), so its statements use the read pool's statement cache: a statement is bound to the pool
+	// it was prepared on and cannot be used on another.
+	ro bool
+}
+
+// pool is the pool whose statement cache this executor uses.
+func (e migExec) pool() poolRef {
+	if e.ro {
+		return e.s.readerPool()
+	}
+	return e.s.writerPool()
 }
 
 func (s *Store) poolExec() migExec { return migExec{s: s, ex: s.db} }
@@ -64,15 +76,15 @@ func (e migExec) exec(q string, args ...any) (sql.Result, error) {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.execBound(context.Background(), q, args...)
+		if x == e.s.db || (x == e.s.rdb && x != nil) {
+			return e.s.poolOf(x).execBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.execBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txExecContext(context.Background(), x, q, args...)
+		return e.pool().txExecContext(context.Background(), x, q, args...)
 	}
 	return e.ex.Exec(q, args...)
 }
@@ -81,15 +93,15 @@ func (e migExec) queryRow(q string, args ...any) *sql.Row {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.queryRowBound(context.Background(), q, args...)
+		if x == e.s.db || (x == e.s.rdb && x != nil) {
+			return e.s.poolOf(x).queryRowBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.queryRowBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txQueryRowContext(context.Background(), x, q, args...)
+		return e.pool().txQueryRowContext(context.Background(), x, q, args...)
 	}
 	return e.ex.QueryRow(q, args...)
 }
@@ -98,15 +110,15 @@ func (e migExec) query(q string, args ...any) (*sql.Rows, error) {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.queryBound(context.Background(), q, args...)
+		if x == e.s.db || (x == e.s.rdb && x != nil) {
+			return e.s.poolOf(x).queryBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.queryBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txQueryContext(context.Background(), x, q, args...)
+		return e.pool().txQueryContext(context.Background(), x, q, args...)
 	}
 	return e.ex.Query(q, args...)
 }
