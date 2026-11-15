@@ -522,7 +522,7 @@ settle and release in one transaction.
 
 ### Inventory overlap by device and inode
 
-**Status: implemented, awaiting the native acceptance run; see "Resolution (inventory overlap by device and inode)" below.** The
+**Status: resolved; see "Resolution (inventory overlap by device and inode)" below.** The
 text that follows is the problem as it was recorded, and the comparison by `stat` it proposes was replaced by the mount table.
 
 `candidateIPCReferenced` (`internal/apprunner/driver/candidate_ipc_linux.go`) decides whether a container mounts a data
@@ -546,8 +546,11 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 ## Resolution (inventory overlap by device and inode)
 
-**Status: implemented; not yet marked resolved.** The item stays in the "still block the integration to main merge" list until the
-native acceptance run below is green on GitHub.
+**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43762572824
+(`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43762572824/job/132960484901`), passed
+`TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerDialerRecordsThePeerMountNamespace` as
+root against a real daemon, with the daemon listing the bind-backed volume as `/var/lib/docker/volumes/<name>/_data`. Real hosts show
+mounts whose root is not a path (`nsfs` namespace files, root `net:[...]`); the table reader skips them.
 
 This answers the follow-up recorded above, together with the absent-bind-source gap. The inventory
 (`candidateIPCPass.referenced` in `driver/candidate_ipc_identity_linux.go`, behind `candidateIPCReferenced`) decides an overlap
@@ -1803,5 +1806,4 @@ Other results:
 
 - **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
-- **Inventory overlap by device and inode** (the follow-up above) together with an absent bind source under the data root: implemented, and resolved once the native acceptance run is green (see its resolution section).
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
