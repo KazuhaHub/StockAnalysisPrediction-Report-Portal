@@ -191,8 +191,11 @@ with their effects, terminal task and event tombstones with the per-installation
 named 15-minute plan validity, and the 10 MiB runner log bound. The tests prove deletion of eligible rows only, retention of every
 pinned row (unresolved effects, recovery chains, recovery sets and their checkpoint sources, import grants, plan references, retained
 data, the live chain, the image ledger), idempotency replay inside the period and a new request after it, a swept task occurrence
-still deduplicated, one audit row per sweep, and no work during the restore pause. **Not met:** pruning recovery sets beyond the latest N
-is selected and reported but not performed, because the runner has no command that deletes one checkpoint; the 7-day runner log age is not
+still deduplicated, one audit row per sweep, and no work during the restore pause. **Recovery-set pruning** is implemented and unit tested (doc 172 section 6): a runner `delete-checkpoint` command, folded into journal v3, claims by marking
+the checkpoint deleted before it removes the archive, and a Portal driver prunes the verified sets beyond the latest N and the leaked checkpoint
+archives of namespaces the delete-data stage already removed (the earlier statement that delete-data removed the whole namespace on the runner held for the
+namespace only). The runner journal and command tests run against a fake native seam; the native archive removal and the lifecycle socket run only in CI on a
+root runner and have not been run; the full-fixture PostgreSQL variants of the pruning tests could not be run on the development machine. **Not met:** the 7-day runner log age is not
 enforceable by Docker's `json-file` driver (the size bound applies); nothing was run for the real retention periods or against a
 production-size database, and not against live concurrent installs (the sweep takes the operation and task admission locks, and a PostgreSQL test shows it waits for them). The RUN-08 flood evidence was measured at the previous 1 MiB log policy; the native log test now bounds a 24 MiB flood at the 10 MiB policy plus 1 MiB headroom and runs only in CI.
 

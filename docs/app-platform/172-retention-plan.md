@@ -211,18 +211,92 @@ The RUN-08 evidence measured a flood against the old `max-size 1m` policy. It is
 
 ## 6. Recovery sets
 
-`app_platform_retention_recovery_sets` (default 2, 1–2) is stored and clamped like the other value, and
+`app_platform_retention_recovery_sets` (default 2, 1-2) is stored and clamped like the other value, and
 `platformRecoverySetsBeyondRetention` selects the retained sets past the latest N of each installation, leaving out a set held by an
-import grant in `issued` or `consumed`, and a set in `restoring`.
+import grant in `issued` or `consumed`, and a set in `restoring`. The selection feeds `prunePlatformRecoverySets`, which asks the
+runner to delete the checkpoint of each `verified` set, and `recovery_sets_beyond` in the audit row reports the sets still pending.
+A `review_required` set is reported and never pruned.
 
-**Pruning is blocked on runner work and is not implemented.** A set is marked `deleted` in two places only: uninstall, and the
-delete-data stage. Both delete the whole namespace on the runner (`delete-data` carries a namespace id, a project id and an inode,
-no checkpoint id), and no runner command deletes one checkpoint archive: there is no `delete_checkpoint`, no prune, and the
-checkpoint lifecycle (`checkpoint`, `import_checkpoint`, `restore`) never removes an archive. Marking a set `deleted` without its
-archive would leak runner disk and hide the archive from the bundle that carries it. So the sweep selects and reports the sets
-beyond the retention (`recovery_sets_beyond` in the audit row and on the page) and changes no set. Doc 167's disk arithmetic, which
-assumes at most two sets, is therefore not yet enforced by this sweep; the unblocking work is a runner command that deletes one
-checkpoint by id under the same fence rules as `delete-data`.
+### The correction to what this section said before
+
+An earlier version of this section said uninstall and delete-data "delete the whole namespace on the runner". That holds for the
+namespace only. `delete-data` carries a namespace id, a project id and an inode and the data root, never the checkpoint root, and no
+runner path ever set `runner_checkpoints.state='deleted'`. The delete-data stage marks the recovery sets `deleted` on the Portal, but
+their archives (`<checkpoint_root>/.portal-checkpoints/<checkpoint_id>.tar`, at most 512 MiB each, two retained per namespace) and
+their `verified` journal rows stayed on the runner. Deleting a namespace therefore leaked up to 1 GiB of runner disk and left a
+`verified` checkpoint that the recovery bundle could still carry. The pruning below closes this leak as well: a set whose namespace is
+deleted is a second source of work for the same sweeper (a "leak backlog"), and the same command clears it.
+
+### The runner command
+
+`delete-checkpoint` (format `portal.runner.delete-checkpoint-command/1-dev.1`, execute, read and effect purposes of its own) deletes
+one retained checkpoint. It shares the journal stage `remove_data` with `delete-data` and takes effect number 2 to 32; number 1 stays
+the delete-data effect and the stage list stays closed (doc 171 resolution 26). Its payload binds the recovery set id (carried into the
+receipt only), the checkpoint id, the namespace, the operation that cut the checkpoint, the release, the manifest digest, the archive
+size, the data format and the writer fence. The command runs under the data execution gate that checkpoint, restore, import and migrate
+take, so the claim serializes with every reader of an archive.
+
+1. **Pre-claim refusals** write no row: a fence or generation below the installation's floor, and an installation with a `prepared` or
+   `unknown` command that is installation work (`ErrDeleteCheckpointInstallationBusy`). The busy refusal is deliberately blunt: the
+   journal stores only the payload digest of a restore, migration, import or update start, so it cannot tell which one names this
+   checkpoint, and it refuses for all of them. The sender's read-back then finds no claim and tries again later.
+2. **The claim**, in one transaction, writes the command row `unknown` with a claim marker and sets the checkpoint row to `deleted`
+   (`revision+1`). From that commit on restore, migrate, update start and checkpoint read-back refuse the checkpoint without being
+   changed, because each requires `verified` or `restoring`. The decision is irreversible once claimed.
+3. **Refusals after identity is read** write the row and settle it `reverted` with a typed outcome and leave the checkpoint and archive
+   untouched: `checkpoint_identity_mismatch` (a payload field differs from the runner's row, the installation included),
+   `checkpoint_in_use` (`restoring`), `checkpoint_not_verified` (`preparing`, `review_required`, or a `verified` row whose revision is
+   neither 2 nor 4, which is the state after a completed restore), `checkpoint_latest` (the newest non-deleted checkpoint of a
+   namespace whose volume resource is not `absent`: defence in depth, because the Portal never selects it) and
+   `checkpoint_unrecorded` (an archive file exists but the runner has no row: the runner never deletes a file it has no record of).
+4. **Absent** settles `applied` with outcome `absent` in the claim transaction: no row and no file (the fresh-host case, where the old
+   host's checkpoint was never recorded), or a row already `deleted` by another effect.
+5. **The native step**, after the commit: the archive is opened relative to the verified checkpoint directory without following links,
+   must be a regular file with one link and exactly the claimed size (otherwise `ErrFenceReconciliation` and the effect stays `unknown`,
+   never settled blind), is unlinked, the directory is synced and the absence is confirmed. The archive is not hashed again.
+6. **Settle** `applied`, outcome `removed`, with `archive_found`. An interrupted deletion is finished by repeating step 5: an archive
+   already gone settles as `removed` with `archive_found` false, and an unanswerable stat settles nothing.
+
+The namespace reservation is the flat 768 MiB constant and already assumes two retained checkpoints, so a deletion releases nothing.
+The command row is ignored by every installation-wide reader, through the one shared kind list in the journal.
+
+**Journal shape.** The kind list of `runner_commands` gained `delete-checkpoint` in journal v3 itself, with no v4 (owner decision
+2026-11-16, the precedent being the `remove-image` kind, doc 171 resolution 24). Version 3 has not shipped in any release, and
+`integration/app-platform` is not an ancestor of `main`. The v1 and v2 upgrades rebuild `runner_commands` to the new declaration, and a
+journal at either earlier v3 shape (before `remove-image`, and before `delete-checkpoint`) is refused with `ErrEarlierV3Journal`, which
+says to start from a fresh journal. `runner_checkpoints` needs no change (`deleted` is already in its state check). There is no Portal
+schema change.
+
+### The Portal driver
+
+`prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled to once a
+minute unless a deletion is pending on the runner. It does not run inside the retention transaction classes, which are database-only.
+
+- **Candidates.** (a) the `verified` sets beyond the retained count; (b) the leak backlog: `deleted` sets of a `deleted` namespace with
+  no applied deletion. Excluded: a set whose installation has an unfinished operation, a set held by an import grant in `issued` or
+  `consumed`, a set in `restoring`, a `review_required` set, and everything during the restore pause (read again, failing closed).
+- **The effect.** Kind `delete_checkpoint`, hosted by the latest finished operation of the installation, at the next free `remove_data`
+  number of 2 or above. The id is derived from the set, its checkpoint and the attempt only, not from the host, so every tick and
+  restart signs the same id and a lost receipt is read back under it. The row is written, under the admission locks, before the command
+  leaves the Portal. With no free number the set waits for a later operation.
+- **Settle.** `applied` marks a retention candidate's set `deleted` and writes an `app_platform.recovery_set_pruned` audit row.
+  `checkpoint_latest`, `checkpoint_in_use` and an abandoned effect are retried under the next attempt with a backoff, at most eight
+  times. `checkpoint_identity_mismatch`, `checkpoint_unrecorded` and `checkpoint_not_verified` are final: they write an
+  `app_platform.recovery_set_prune_refused` audit row and the storage status lists them as needing an operator.
+- **A decided deletion is not retained.** `platformRetainedRecoverySets` and `platformRetainedRecoverySetsOf` exclude a set that a
+  `delete_checkpoint` effect names in state `prepared`, `unknown` or `applied`. Once the decision commits, the bundle writer stops
+  requiring the archive, the retention pins stop holding its operations, a restored Portal (whose dump carries the effect row) agrees,
+  and restore admission, import-grant issuance and restore-from-import refuse the set with the existing "recovery set unavailable"
+  error. A bundle written while a deletion commits between its two reads refuses (database changed).
+- **Retention pin 9.** An operation holding a completed deletion's effect is kept while its set row exists, and the operation holding
+  the latest refused attempt of a set that is not yet deleted is kept too, because that row is the attempt count. Without the pin the
+  sweep would delete the effect after 90 days, the leak backlog would select the set again, and the runner would answer `absent` for
+  ever.
+- **Effect counters.** Every Portal effect counter that ignores `load_image` and `remove_image` rows ignores `delete_checkpoint` rows
+  through the one shared kind list.
+
+Doc 167's disk arithmetic, which assumes at most two sets, is now enforced eventually and not at once: a set beyond N waits for an
+idle installation and a free slot. The storage page reports `recovery_set_pruning` as enabled.
 
 ## 7. Uninstalled data
 
@@ -233,7 +307,7 @@ namespace, its recovery set, the installation and the operation that holds them 
 
 The storage page (`StoragePage.tsx`) has a new section, "Application platform", with `AppPlatformRetentionCard`. It shows the two
 adjustable values with their bounds, the fixed policy read-only (the numbers come from the server), the last sweep from its audit row,
-and a notice that recovery-set pruning is not available yet.
+and, while pruning is blocked, a notice that recovery-set pruning is not available. Pruning is now enabled (section 6), so the notice no longer shows.
 
 - `GET /api/admin/app-platform/retention` and `PUT /api/admin/app-platform/retention`, behind `s.admin` (`PermManage`), the same
   permission as the cleanup routes.
@@ -258,7 +332,12 @@ each made a named test fail.
 | Settings clamp on read, validate on save | `…ConfigClampsOnRead`, `…ConfigAPIValidatesOnSave`, `…ConfigAPIReportsTheLastSweep` |
 | The scheduler tick reaches the sweep | `TestPlatformRetentionTickReachesTheSweep`, `…TickWaitsAnIntervalUnlessThereIsBacklog` |
 | Retained namespaces untouched | `TestPlatformRetentionNeverTouchesRetainedData` |
-| Recovery selection, nothing marked deleted | `TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN` |
+| Recovery selection | `TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN` |
+| Runner: claim marks the checkpoint deleted before the file is touched; every refusal, the busy installation, the floors, identity binding, replay, the three crash windows, the shared gate with restore | `delete_checkpoint_test.go` in `internal/apprunner/journal` (fake native seam) |
+| Runner: every kind list and reader ignores a delete-checkpoint row; both earlier v3 shapes refused with bytes unchanged; fresh journal accepts the kind | `TestEveryCommandFamilyAdmitsAfterAnAppliedOrUnknownDeleteCheckpointRow`, `TestInstallationWideCommandReadersIgnoreLoadImageRows`, `remove_image_schema_test.go` |
+| Runner: signed command purposes and payload binding; transport actions and reply binding | `delete_checkpoint_test.go` in `internal/apprunner/control`, `delete_checkpoint_transport_test.go` |
+| Runner: the archive is unlinked, other archives are byte-identical (CI only, root fixture) | `TestNativeDataPrimitive` (`NATIVE_DATA_CHECKPOINT_DELETE_VERIFIED`) |
+| Portal: the oldest sets beyond the retention are pruned and the newest never; held sets are never selected; a decided deletion is not retained and not restorable; lost receipts are read back under one effect id; refusals retried or final; the leak backlog through the real delete-data stage; pin 9; every effect counter ignores the kind | `app_platform_recovery_prune_test.go`, `app_platform_recovery_prune_admission_test.go`, `app_platform_recovery_prune_leak_test.go`, `app_platform_image_reclaim_guard_test.go` |
 | Runner log bound | `TestAppContainerLogsAreBoundedToTenMiB`, `TestContainerPlanWithOtherLogOptionsIsRefused` |
 | Closed image record deleted whole or not at all; busy runtime keeps its records | `TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned`, `…KeepsEveryImageRecordOfABusyRuntime` |
 | Secret-binding plan reference, later generations, resolution time | `…PlanReferencedBySecretBindingIsKept`, `…KeepsOperationsOfALaterGenerationOnALiveInstallation`, `…CountsFromTheLatestOfCompletedAndUpdated` |
@@ -278,7 +357,9 @@ Every sweep test runs on SQLite and, when `TEST_POSTGRES_DSN` is set, on Postgre
 - **The reader survey is a reading, not a proof.** The pin rule keeps what the readers named in the table need. A reader added later
   that walks old operations in a way the rule does not cover would break silently; the rule is the place to extend, and the
   scenario tests are where to add its fixture.
-- **Recovery-set pruning** is not done (section 6).
+- **Recovery-set pruning** (section 6) is proven by unit tests against a fake runner and by the runner journal tests against a fake native seam. The native archive removal (`TestNativeDataPrimitive`) and the lifecycle socket need a root runner and run only in CI; they have not been run. The transport between the Portal and the runner is checked by signature and reply binding tests, not end to end. PostgreSQL ran the SQL-level pruning tests and the lock-order test; the full-fixture PostgreSQL variants could not be run on the development machine.
+- **Fresh-host archives.** An archive a bundle carried and an operator placed on a new runner has no row there, so the runner answers `absent` or `checkpoint_unrecorded`. Pruning such files stays operator work.
+- **Checkpoint root on its own filesystem.** If the checkpoint root is a separate filesystem (`HostFacts.CheckpointSeparate`), a deletion frees that filesystem, which no budget tracks. This gap already existed and is not widened.
 - **The 7-day log age** is not enforced (section 5), and RUN-08's flood measurement was taken at 1 MiB, not 5 MiB.
 - **Concurrent admission.** The sweep takes the admission locks (section 1) and a PostgreSQL test shows it waits for them. It was not
   run against live concurrent installs, and the lock order was compared with the admission paths by reading them, not by a
