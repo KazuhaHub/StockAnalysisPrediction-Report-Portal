@@ -35,10 +35,48 @@ func TestRemoveImageKindIsDeclaredByV3Only(t *testing.T) {
 	if !strings.Contains(commandsSQL(2), "'load-image')") {
 		t.Fatal("the frozen v2 kind list changed")
 	}
-	// Only the kind list differs between the earlier and the current v3 declaration.
+	// Only the kind list differs between each earlier and the current v3 declaration.
 	earlier := earlierV3CommandsSQL()
-	if earlier == commandsSQL(3) || strings.Replace(commandsSQL(3), ",'remove-image'", "", 1) != earlier {
-		t.Fatal("the earlier v3 declaration differs from v3 by more than the remove-image kind")
+	if len(earlier) != 2 || earlier[0] == commandsSQL(3) || earlier[1] == commandsSQL(3) || earlier[0] == earlier[1] {
+		t.Fatal("the earlier v3 declarations are not two distinct shapes older than v3")
+	}
+	if strings.Replace(commandsSQL(3), ",'remove-image','delete-checkpoint'", "", 1) != earlier[0] {
+		t.Fatal("the first earlier v3 declaration differs from v3 by more than the remove-image and delete-checkpoint kinds")
+	}
+	if strings.Replace(commandsSQL(3), ",'delete-checkpoint'", "", 1) != earlier[1] {
+		t.Fatal("the second earlier v3 declaration differs from v3 by more than the delete-checkpoint kind")
+	}
+}
+
+// The delete-checkpoint kind was folded into the v3 declaration after remove-image (owner decision 2026-11-16).
+func TestDeleteCheckpointKindIsDeclaredByV3Only(t *testing.T) {
+	if !strings.Contains(commandsSQL(3), "'load-image','remove-image','delete-checkpoint'") {
+		t.Fatalf("v3 runner_commands does not declare delete-checkpoint after remove-image: %s", commandsSQL(3))
+	}
+	for _, version := range []int{1, 2} {
+		if strings.Contains(commandsSQL(version), "delete-checkpoint") {
+			t.Fatalf("v%d runner_commands declares delete-checkpoint", version)
+		}
+	}
+}
+
+func TestFreshJournalAcceptsDeleteCheckpointKind(t *testing.T) {
+	store, err := Open(privateDirectory(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := insertDeployment(store.db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(importKindCommand, fixtureID(210), fixtureID(310), fixtureID(5), "delete-checkpoint", strings.Repeat("c", 64), fixtureID(2)); err != nil {
+		t.Fatalf("delete-checkpoint refused by a fresh journal: %v", err)
+	}
+	if _, err := store.db.Exec(importKindCommand, fixtureID(211), fixtureID(311), fixtureID(5), "delete-checkpoints", strings.Repeat("c", 64), fixtureID(2)); err == nil {
+		t.Fatal("a fresh journal admitted an arbitrary kind")
+	}
+	if _, err := inspect(context.Background(), store.db); err != nil {
+		t.Fatalf("delete-checkpoint row fails inspection: %v", err)
 	}
 }
 
@@ -62,7 +100,7 @@ func TestFreshJournalAcceptsRemoveImageKind(t *testing.T) {
 	}
 }
 
-func TestV1AndV2UpgradesProduceTheRemoveImageShape(t *testing.T) {
+func TestV1AndV2UpgradesProduceTheCurrentV3Shape(t *testing.T) {
 	for name, build := range map[string]func(*testing.T) string{
 		"v1": v1Journal,
 		"v2": func(t *testing.T) string {
@@ -84,6 +122,9 @@ func TestV1AndV2UpgradesProduceTheRemoveImageShape(t *testing.T) {
 			if _, err := raw.Exec(importKindCommand, fixtureID(250), fixtureID(350), fixtureID(5), "remove-image", strings.Repeat("c", 64), fixtureID(2)); err == nil {
 				t.Fatalf("%s journal admitted remove-image before the upgrade", name)
 			}
+			if _, err := raw.Exec(importKindCommand, fixtureID(253), fixtureID(353), fixtureID(5), "delete-checkpoint", strings.Repeat("c", 64), fixtureID(2)); err == nil {
+				t.Fatalf("%s journal admitted delete-checkpoint before the upgrade", name)
+			}
 			raw.Close()
 			store, err := Open(directory)
 			if err != nil {
@@ -97,6 +138,9 @@ func TestV1AndV2UpgradesProduceTheRemoveImageShape(t *testing.T) {
 			if _, err := store.db.Exec(importKindCommand, fixtureID(251), fixtureID(351), fixtureID(5), "remove-image", strings.Repeat("c", 64), fixtureID(2)); err != nil {
 				t.Fatalf("remove-image refused after the upgrade: %v", err)
 			}
+			if _, err := store.db.Exec(importKindCommand, fixtureID(252), fixtureID(352), fixtureID(5), "delete-checkpoint", strings.Repeat("c", 64), fixtureID(2)); err != nil {
+				t.Fatalf("delete-checkpoint refused after the upgrade: %v", err)
+			}
 			if _, err := inspect(context.Background(), store.db); err != nil {
 				t.Fatalf("upgraded journal fails inspection: %v", err)
 			}
@@ -104,9 +148,18 @@ func TestV1AndV2UpgradesProduceTheRemoveImageShape(t *testing.T) {
 	}
 }
 
-// A journal at the earlier v3 shape was never shipped to a persistent runner, so it is not converted: it is
-// refused with a typed incompatibility that names the remedy, and the file is not touched.
-func TestEarlierV3ShapeIsRefusedWithATypedError(t *testing.T) {
+// A journal at either earlier v3 shape (before remove-image, and before delete-checkpoint) was never shipped to a
+// persistent runner, so it is not converted: it is refused with a typed incompatibility that names the remedy, and
+// the file is not touched.
+func TestEarlierV3ShapesAreRefusedWithATypedError(t *testing.T) {
+	for index, shape := range earlierV3Shapes() {
+		t.Run([]string{"before-remove-image", "before-delete-checkpoint"}[index], func(t *testing.T) {
+			refuseEarlierV3Shape(t, shape)
+		})
+	}
+}
+
+func refuseEarlierV3Shape(t *testing.T, shape []schemaProduct) {
 	directory := privateDirectory(t)
 	path := filepath.Join(directory, journalName)
 	if err := os.WriteFile(path, nil, 0600); err != nil {
@@ -125,7 +178,7 @@ func TestEarlierV3ShapeIsRefusedWithATypedError(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, product := range earlierV3Products() {
+	for _, product := range shape {
 		if _, err := tx.Exec(product.sql); err != nil {
 			t.Fatal(err)
 		}
