@@ -391,6 +391,13 @@ No automated run by an implementer may be relabelled as satisfying these.
 This is an engineering policy set by the copyright holder; seek counsel before
 distributing the platform commercially to third parties.
 
+Engineering note, 2026-11-15 (implementation of section 8; the decision text above is unchanged). See
+[doc 173](173-licence-policy-plan.md). The owner decided two questions the first scan raised: the seven
+`golang.org/x/*` modules (detected as `BSD-Source-Code`) are reviewed as BSD-3-Clause and `khroma` as MIT, each as a
+reviewed-as record pinned to the SHA-256 of the licence file that ships and to the exact declaration it was reviewed
+against; and the licence job is a prerequisite of a release (`scripts/release_guard.py` in the Portal, `status-publish.py`
+in Apps). Adding the job to branch protection as a required check is pending owner approval.
+
 ## 9. Integration and release order
 
 PR 364 (about 900 commits, 1176 files) is not reviewable as one change, and

@@ -3,7 +3,8 @@
 Status: implemented 2026-11-15 on `feat/app-platform-licence-gate` (Portal) and `feat/licence-gate` (Apps). This plan turns
 section 8 of [doc 167](167-owner-decisions-remaining-acceptance.md) (`DEV-04`) into ordered, test-first steps and records
 every resolution between the decision text and what the code and the real dependency graphs turned out to hold. **DEV-04
-stays partial: the gate is in place and fails on ten components that need an owner decision ("What the real scans flagged").**
+stays partial: the gate is in place and green on both branches, the owner decisions of 2026-11-15 are recorded, and the
+final-artifact scan, the release-key approval and the branch-protection change are open.**
 
 No Portal DDL was needed and none was added. Production behaviour changes in one respect only: the ELK diagram layout is
 gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dagre (resolution 1).
@@ -60,8 +61,12 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
    prefix ending in `/` (`github.com/KazuhaHub/`, `@portal-app/`) or one package named exactly. A third party carrying AGPL
    fails.
 10. **A dedicated workflow, not a job of `test.yml`.** The release guard names `test.yml`'s jobs one by one and requires each;
-    a new job there would change what a release waits on. `licence.yml` runs on every pull request and every push to `main`.
-    Making it a required check, and a release prerequisite, is a repository setting for the owner.
+    a new job there would change what a release waits on. `licence.yml` runs on every pull request and every push to `main` and
+    `integration/app-platform`. The licence scan **is** a release prerequisite in code: `release_guard.py wait-ci` waits for a
+    green `licence.yml` run of the exact commit (job `licence scan`) as well as the full `test.yml` run, and Apps'
+    `status-publish.py` lists the `licence` job among the `check.yml` jobs a status release requires. What stays a
+    repository setting, pending owner approval, is adding the two checks (`licence scan` in the Portal, `licence` in Apps)
+    to branch protection.
 
 ## Order of work
 
@@ -75,44 +80,80 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
 
 ## Duplication
 
-`scripts/licence_scan.py` and the allow, deny and `own.licences` sections of `scripts/licence-policy.json` are copied into the
-Apps repository (`scripts/licence_scan.py`, `scripts/licence-policy.json`, `scripts/tests/test_licence_scan.py`). Each copy
-says so in its header. There is no automatic check that they agree; change both in one sitting. Elections and exclusions are
-Portal-only and are empty in Apps.
+`scripts/licence_scan.py` and the allow, deny, election-only, `own.licences` and reviewed sections of
+`scripts/licence-policy.json` are copied into the Apps repository (`scripts/licence_scan.py`, `scripts/licence-policy.json`,
+`scripts/tests/test_licence_scan.py`). Each copy says so in its header. Apps' `scripts/check_licence_copy.py`, run by its
+`licence` job, compares the evaluator (line for line, the module docstring excluded) and those policy sections with the
+Portal commit named in Apps' `scripts/licence-scan.pin`, and fails on any difference. To change either: merge the change in
+the Portal, copy the files from that commit into Apps, write the commit's full SHA into the pin and run the script. The pin
+is a commit of the Portal repository, so it must stay reachable (a merge commit keeps the branch's commits). The check does
+not compare the other direction: a Portal change that is not copied leaves Apps on the old pinned evaluator, which is
+intended, and is visible as a pin that is behind. Elections and exclusions are Portal-only and are empty in Apps.
 
-## What the real scans flagged
+## Resolutions after the independent review (2026-11-15)
 
-The gate was run against the real repositories (acceptance record:
-`handoff/evidence/platform-licence-policy/acceptance.json`). Nothing was added to the allow list to make it pass.
+The first implementation was reviewed and returned with fixes, all made test-first:
 
-| Component | Where | Declared | Why it fails |
-| --- | --- | --- | --- |
-| `golang.org/x/crypto` v0.58.0, `x/image` v0.43.0, `x/net` v0.62.0, `x/oauth2` v0.37.0, `x/sync` v0.24.0, `x/sys` v0.49.0, `x/text` v0.43.0 | Portal Go | `BSD-Source-Code` | not on the allow list |
-| `golang.org/x/sys` v0.48.0, `x/text` v0.42.0 | Apps status service | `BSD-Source-Code` | not on the allow list |
-| `khroma` 2.1.0 | Portal web (via mermaid) | none | its `package.json` has no `license` field |
+- **Nested components were never judged.** `cyclonedx-npm` nests a package that is not hoisted inside its parent's
+  `components`; the Portal SBOM has 18 such packages (katex, tslib, parse5, `@babel/runtime`...) and Apps has 2. A nested
+  denied package under an MIT parent passed. Components are now walked recursively and de-duplicated by `bom-ref`. The
+  Portal scan is 397 components (50 Go across the six platforms, 347 npm, 329 of them top level), Apps 88 (73 npm, 15 Go).
+- **A reviewed-as record replaced any declaration.** `BSD-Source-Code AND GPL-3.0-only` with an unchanged `LICENSE` passed.
+  Each record now also pins the exact `declared` expression it was reviewed against (`BSD-Source-Code` for the Go modules,
+  empty for `khroma`); anything else makes the record stale.
+- **Elections.** The elected licence must be an operand of an `OR` in the pinned declaration. `golang/freetype` is declared
+  as `GPL-2.0-or-later` only, so its election carries `offered: "GPL-2.0-or-later OR FTL"`, the upstream dual licence, and
+  both the declared side and the elected side must be operands of it.
+- **Licence files.** An npm licence file is read from the install path the SBOM records (`cdx:npm:package:path`, which tells a
+  nested copy from the hoisted one); the installed `package.json` version must equal the component version; a root derived
+  from a purl or path that escapes `node_modules` or the module cache is refused. A refused or missing file makes the record
+  stale. A licence entry with only a `url` or `text` is unknown and fails; it used to be dropped.
+- **Own components.** An npm component is own only if its name matches, it carries no registry distribution and it is a
+  package of this repository's workspaces (the scan is given `--workspace-root`). A registry package cannot take the name.
+- **Mind maps.** A global `layout: 'dagre'` made Mermaid treat the layout as the user's choice and drop the mind map's own
+  layout. Probing every diagram type in a browser showed that only flowchart, state, class, ER and requirement diagrams reach
+  ELK by default, so dagre is requested through `layoutForDiagram`, by detected type, and left unset for a mind map.
+- **ELK guard.** `forbidElkjs`, a Rollup plugin, fails the build if any resolved module id lies under `node_modules/elkjs/`,
+  which catches `lib/main.js` and `lib/elk-api.js` that the text markers miss (verified: the build fails with the alias
+  removed). The marker scan stays as a second layer and gained markers for those wrappers.
+- **Platforms.** The Go SBOM is built for all six release targets (the platforms differ: 48 components on linux, 50 on darwin
+  and windows) and a test keeps the list equal to `release.yml`'s matrix. Apps builds it for the six status release targets.
+- **Triggers.** `licence.yml` also runs on pushes to `integration/app-platform`.
 
-`BSD-Source-Code` is the identifier the licence detector in `cyclonedx-gomod` gives these modules. Their `LICENSE` files in the
-module cache are byte-identical and are the standard Go BSD 3-clause text, so this looks like a detector misclassification of
-BSD-3-Clause, but that is a reading, and the gate does not make it. `khroma` ships a `license` file with the MIT text and no
-`license` field in its manifest, so no SBOM tool can see it. Both need an owner decision (a reviewed-as record per component, or
-a change to the policy); see the report that accompanied this branch.
+## What the first scans flagged, and what the owner decided
+
+The first scans failed on ten components. Nothing was added to the allow list; the owner decided on 2026-11-15:
+
+| Component | Declared | Decision |
+| --- | --- | --- |
+| `golang.org/x/{crypto,image,net,oauth2,sync,sys,text}` | `BSD-Source-Code` (the licence detector's name for the standard Go BSD 3-clause text) | reviewed as BSD-3-Clause |
+| `khroma` 2.1.0 (via mermaid) | none (no `license` field; an MIT `license` file) | reviewed as MIT |
+
+Each decision is a reviewed-as record in `scripts/licence-policy.json`: the component names, the licence it is reviewed as
+(which must be on the allow list), the declaration it was reviewed against, the file and the SHA-256 of that file
+(`911f8f57...dad` for the seven Go modules, whose `LICENSE` is byte-identical, and `66b333b0...b49` for `khroma`'s `license`).
+The scan re-reads the file in CI, from the Go module cache and `node_modules`; a changed hash, a changed declaration, a missing
+file or a version mismatch makes the record stale, it is ignored, and the gate fails again. A record cannot override a
+denied licence. The allow and deny lists did not change.
 
 ## Verification
 
-- `python3 -B -m unittest discover -s scripts -p '*_test.py'` (61 licence tests, all repository script tests green);
-- `cd web && npm run typecheck && npm run lint && npm run build && npm run check:no-elk`, and `npx vitest run` for the Markdown,
-  Mermaid cache and ELK guard tests;
-- `actionlint` on both workflows;
-- a real-browser probe of `mermaid` 12.1 built with the production alias and the portal's initialisation: flowchart, flowchart
-  with a subgraph, sequence, state, class, ER, mind map, pie and xychart diagrams all render; a diagram with `layout: elk` in its
-  frontmatter fails with the stub's message;
-- the whole workflow replayed locally from a depth-1 clone of the branch: SBOMs, SPA build, ELK check, scan.
+- `python3 -B -m unittest discover -s scripts -p '*_test.py'` in the Portal, including 120 licence tests and the release guard
+  tests, and `python3 -B -m unittest discover -s scripts/tests` in Apps (179 tests);
+- `cd web && npm run typecheck && npm run build && npm run check:no-elk` and `npx vitest run` (the whole suite);
+- `actionlint` on both repositories' workflows;
+- a real-browser probe of `mermaid` 12.1 with the production alias, over twenty-one diagram types with and without a layout
+  option: only flowchart, state, class, ER and requirement diagrams need dagre; a diagram with `layout: elk` in its frontmatter
+  fails with the stub's message;
+- both jobs replayed locally from clean clones: all SBOMs, the SPA build, the ELK check, the copy check and the scan;
+- green CI runs: see `handoff/evidence/platform-licence-policy/acceptance.json`.
 
 ## Not done
 
 - The scan covers source and lock inputs. It has not been run against a released binary or an OCI image digest; DEV-04's
-  final-artifact scan stays open.
-- No CI run of either workflow is cited yet; the branches are pushed and the first runs are the evidence.
+  final-artifact scan stays open, and so does the release-key and environment approval.
+- Adding `licence scan` (Portal) and `licence` (Apps) to branch protection is pending owner approval; no repository setting was
+  changed.
 - `apps/status/tests` (the browser acceptance harness) and `templates/react-app` are not scanned: the first is not shipped, the
   second has no lockfile and an app generated from it is a separate work.
 - App `app.json` descriptors carry no licence field; the declaration is the package manifests and the repository `LICENSE`.

@@ -268,19 +268,20 @@ evidence. The run is at most 140 minutes (the step timeout is 160).
 
 Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 8 and [doc 173](173-licence-policy-plan.md). **DEV-04 stays partial.**
 
-- **Done:** the licence policy is a checked-in file (`scripts/licence-policy.json`) judged by `scripts/licence_scan.py` over a
-  Go and a production npm CycloneDX SBOM, in `.github/workflows/licence.yml` (Portal) and the `licence` job of `check.yml`
-  (Apps). A denied, unknown or missing licence fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are
-  election records pinned to the declaration they were written against. `elkjs` is aliased to a throwing stub in the Vite
-  build, a build test fails if ELK engine code is in the output (verified to fail with the alias removed), and the `elkjs`
-  exclusion is valid only in a run where that test passed. Mermaid 12.1 defaults to ELK, so the portal now asks it for dagre.
-  First-party Apps packages declare AGPL-3.0-only and a test keeps them so.
-- **Open, owner decision:** the real scans flag ten components. Portal: `golang.org/x/{crypto,image,net,oauth2,sync,sys,text}`
-  (detected as `BSD-Source-Code`, apparently the standard Go BSD 3-clause text) and `khroma` (no `license` field in its
-  manifest, MIT text in a `license` file). Apps: `golang.org/x/sys` and `x/text`. Nothing was added to the allow list; the gate
-  is red for them until the owner decides.
-- **Open:** no CI run of either workflow is cited yet, no released binary or OCI digest has been scanned, and the release-key
-  and environment approval remain open (see the DEV-04 row and `platform-dependency-review`).
+- **Done:** the licence policy is a checked-in file (`scripts/licence-policy.json`) judged by `scripts/licence_scan.py` over the
+  Go SBOMs of every release platform and a production npm CycloneDX SBOM, nested components included, in
+  `.github/workflows/licence.yml` (Portal) and the `licence` job of `check.yml` (Apps). A denied, unknown or missing licence
+  fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are election records pinned to the declaration they were
+  written against. `elkjs` is aliased to a throwing stub in the Vite build; a Rollup plugin fails the build if any elkjs module
+  is bundled and a build test scans the output, both verified to fail with the alias removed; the `elkjs` exclusion is valid
+  only in a run where that test passed. Mermaid 12.1 defaults to ELK, so dagre is requested for the diagram types that would
+  reach it and mind maps keep their own layout. First-party Apps packages declare AGPL-3.0-only and a test keeps them so.
+- **Owner decisions of 2026-11-15, recorded:** `golang.org/x/*` is reviewed as BSD-3-Clause and `khroma` as MIT, as reviewed-as
+  records pinned to the SHA-256 of the licence text that ships and to the declaration reviewed; the licence job is a release
+  prerequisite (`release_guard.py` in the Portal, `status-publish.py` in Apps). The gate is green on both branches.
+- **Open:** adding `licence scan` (Portal) and `licence` (Apps) to branch protection is pending owner approval. No released
+  binary or OCI digest has been scanned, and the release-key and environment approval remain open (see the DEV-04 row and
+  `platform-dependency-review`).
 - **Records:** `handoff/evidence/platform-licence-policy/acceptance.json` and the DEV-04 row of `handoff/acceptance-checklist.csv`.
 
 ## 8. Final release gate
