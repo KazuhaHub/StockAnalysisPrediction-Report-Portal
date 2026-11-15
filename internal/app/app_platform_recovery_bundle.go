@@ -91,6 +91,9 @@ type platformRecoveryBundleInput struct {
 
 var errPlatformBundle = errors.New("recovery bundle is incomplete or inconsistent")
 
+// platformTestBundleBeforeRecheck lets a test commit a change between the bundle's before-read and after-read.
+var platformTestBundleBeforeRecheck func()
+
 // platformRetainedRecoverySets are the recovery sets whose archive a restored Portal can still import:
 // cut and verified, not deleted. A set that is being cut has no digest to carry.
 var platformRetainedRecoverySets = platformRetainedRecoverySetsOf("app_platform_recovery_sets")
@@ -327,6 +330,9 @@ func (s *Server) writePlatformRecoveryBundle(dir string, in platformRecoveryBund
 	}
 	if manifest.ImageBlobs, err = s.bundlePlatformImageBlobs(dir, manifest.Releases); err != nil {
 		return manifest, err
+	}
+	if platformTestBundleBeforeRecheck != nil {
+		platformTestBundleBeforeRecheck()
 	}
 	after, err := loadPlatformRetainedSets(pool)
 	if err != nil || !samePlatformRetainedSets(before, after) {

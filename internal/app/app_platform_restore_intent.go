@@ -261,6 +261,13 @@ func loadPlatformRestoreIntent(e migExec, expected platformOperationLease, runti
 		if !create || recoveryState != "verified" {
 			return zero, false, errAppPlatformStageEvidence
 		}
+		// A set whose checkpoint deletion is decided is not restorable: the runner's claim cannot be undone.
+		if decided, err := platformRecoverySetDeletionDecided(e, recoverySetID); err != nil || decided {
+			if err != nil {
+				return zero, false, err
+			}
+			return zero, false, errAppPlatformStageEvidence
+		}
 		effectID, err = platformNewUUID()
 		if err != nil {
 			return zero, false, err

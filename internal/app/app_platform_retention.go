@@ -458,7 +458,65 @@ func loadPlatformRetentionPins(e migExec) (platformRetentionPins, error) {
 	if err := pinRetainedCheckpointSources(e, pins); err != nil {
 		return pins, err
 	}
+	if err := pinCheckpointDeletions(e, pins); err != nil {
+		return pins, err
+	}
 	return pins, nil
+}
+
+// pinCheckpointDeletions keeps the operation that hosts a recorded checkpoint deletion (pin 9). The effect row is the
+// Portal's only record that the runner retired a checkpoint. Recovery set rows are never deleted (foreign keys name
+// them), so a set that was deleted stays in the table for ever, and the sweeper that finds sets of a deleted namespace
+// (platformDeletedNamespaceSets) would select it again the day the effect row went, and send a deletion the runner can
+// only answer "absent" to, every retention period. So an operation holding an applied deletion stays while its set row
+// exists. A refused deletion is kept while its set is not deleted: its row is the attempt count, and an attempt number
+// that was forgotten would sign again an effect id the runner already settled as a refusal. A row whose receipt names
+// no set is kept, because nothing can say what it was for.
+func pinCheckpointDeletions(e migExec, pins platformRetentionPins) error {
+	rows, err := e.query(`SELECT id,state FROM app_platform_recovery_sets`)
+	if err != nil {
+		return err
+	}
+	sets := map[string]string{}
+	for rows.Next() {
+		var id, state string
+		if err := rows.Scan(&id, &state); err != nil {
+			rows.Close()
+			return err
+		}
+		sets[id] = state
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	effects, err := e.query(`SELECT f.operation_id,f.state,f.receipt_json FROM app_platform_operation_effects f WHERE f.kind=? AND f.state IN ('applied','reverted')`, platformDeleteCheckpointKind)
+	if err != nil {
+		return err
+	}
+	defer effects.Close()
+	for effects.Next() {
+		var op, state, raw string
+		if err := effects.Scan(&op, &state, &raw); err != nil {
+			return err
+		}
+		var named struct {
+			RecoverySetID string `json:"recovery_set_id"`
+		}
+		if json.Unmarshal([]byte(raw), &named) != nil {
+			pins.ops[op] = true
+			continue
+		}
+		setState, exists := sets[named.RecoverySetID]
+		switch {
+		case !exists && named.RecoverySetID != "":
+			// Its set row is gone: nothing can select the set again.
+		case state == "applied", setState != "deleted":
+			pins.ops[op] = true
+		}
+	}
+	return effects.Err()
 }
 
 // pinImageLedger keeps the operations whose load and removal effects are the Portal's record of what is on a
@@ -809,7 +867,7 @@ func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) 
 // whose deletion is decided (a delete_checkpoint effect that is prepared, unknown or applied) is not retained: the
 // runner's claim cannot be undone, so the bundle must not require an archive that is going away.
 func platformRetainedRecoverySetsOf(alias string) string {
-	return alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
+	return alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL AND NOT ` + platformDeletionDecidedSQL(alias)
 }
 
 // platformRetentionTick runs the sweep from the cleanup ticker. It waits platformRetentionInterval between sweeps
