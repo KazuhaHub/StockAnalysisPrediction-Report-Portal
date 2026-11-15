@@ -99,6 +99,12 @@ def parse_release_metadata(text, tag):
     return meta
 
 
+def parse_cli_version(text):
+    """(version, commit) from `report-portal version`, which prints `YYYY.W[.R] (commit, build date)`."""
+    match = re.match(r"^\s*(\S+) \(([0-9a-f]+|none),", text or "")
+    return (match.group(1), match.group(2)) if match else ("", "")
+
+
 def manifest_digest(imagetools_json):
     """The digest of the manifest (or index) a tag resolves to, from `buildx imagetools inspect
     --format '{{json .Manifest}}'`."""
@@ -489,7 +495,9 @@ def ops05_checks(f):
     c.append(check_result("api_version_equals_release_tag", f["api_version"] == f["tag"], f["api_version"]))
     c.append(check_result("api_commit_is_the_release_commit", f["recorded_commit"].startswith(f["api_commit"]) and len(f["api_commit"]) >= 7,
                           f["api_commit"]))
-    c.append(check_result("cli_version_equals_api_version", f["tag"] in f["cli_version"], f["cli_version"]))
+    cli_version, cli_commit = parse_cli_version(f["cli_version"])
+    c.append(check_result("cli_version_matches_release", cli_version == f["tag"].lstrip("v") and cli_commit == f["api_commit"],
+                          f["cli_version"]))
     c.append(check_result("healthy", f["healthy"], ""))
     return c
 
@@ -1031,7 +1039,7 @@ def drill_ops06(host, rec, ops05_facts):
         "baseline_failed": failed_checks(baseline_gate), "precheck_set_ok": precheck_set_ok,
         "ledger_delta": delta, "candidate_digest_ok": candidate_digest_ok, "candidate_digest": cand_digest,
         "rollout_failed": rollout_failed, "rollout_healthz": healthy, "rollout_version": rollout_version,
-        "rollout_reference": cand_ref,
+        "rollout_reference": cand_ref, "rollout_gate_checks": rollout_gate,
         "rollback_refused": rb_refused, "rollback_healthy": rb_healthy, "rollback_state": json.dumps(state),
         "negative_compat_refused": neg_compat, "negative_compat_detail": json.dumps(neg_compat_detail),
         "negative_integrity_refused": neg_integrity, "negative_integrity_detail": json.dumps(neg_integrity_detail),

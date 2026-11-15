@@ -375,7 +375,7 @@ def ops05_facts():
             "container_image_id": "sha256:" + "1" * 64, "image_id": "sha256:" + "1" * 64,
             "container_config_image": f"{drills.IMAGE}:{tag}", "repo_digests": [DIGEST_A],
             "loaded_binary_sha256": "e" * 64, "image_binary_sha256": "e" * 64,
-            "api_version": tag, "api_commit": COMMIT[:7], "cli_version": f"{tag} ({COMMIT[:7]}, 2026-11-13)"}
+            "api_version": tag, "api_commit": COMMIT[:7], "cli_version": f"{tag.lstrip('v')} ({COMMIT[:7]}, 2026-11-13T02:41:15Z)"}
 
 
 class Ops05Tests(unittest.TestCase):
@@ -395,7 +395,7 @@ class Ops05Tests(unittest.TestCase):
             "loaded_binary_is_the_image_binary": {"loaded_binary_sha256": "f" * 64},
             "api_version_equals_release_tag": {"api_version": "v2026.45"},
             "api_commit_is_the_release_commit": {"api_commit": "1234567"},
-            "cli_version_equals_api_version": {"cli_version": "dev (none)"},
+            "cli_version_matches_release": {"cli_version": "dev (none, unknown)"},
             "healthy": {"healthy": False},
         }
         for check, change in cases.items():
@@ -404,6 +404,16 @@ class Ops05Tests(unittest.TestCase):
             failed = drills.failed_checks(drills.ops05_checks(facts))
             self.assertIn(check, failed, check)
         self.assertEqual(len(cases), len(drills.ops05_checks(ops05_facts())))
+
+    def test_cli_version_parsing(self):
+        self.assertEqual(drills.parse_cli_version("2026.46.1 (d0089c8, 2026-11-13T02:41:15Z)\n"), ("2026.46.1", "d0089c8"))
+        self.assertEqual(drills.parse_cli_version("dev (none, unknown)"), ("dev", "none"))
+        self.assertEqual(drills.parse_cli_version("garbage"), ("", ""))
+        facts = ops05_facts()
+        facts["cli_version"] = f"2026.46 ({COMMIT[:7]}, x)"
+        self.assertIn("cli_version_matches_release", drills.failed_checks(drills.ops05_checks(facts)))
+        facts["cli_version"] = "2026.46.1 (1234567, x)"
+        self.assertIn("cli_version_matches_release", drills.failed_checks(drills.ops05_checks(facts)))
 
     def test_a_changed_reference_with_the_same_digest_still_fails_the_unchanged_check(self):
         facts = ops05_facts()
