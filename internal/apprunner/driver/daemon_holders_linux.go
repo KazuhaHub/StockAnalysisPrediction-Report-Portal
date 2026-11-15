@@ -99,5 +99,25 @@ func (p *daemonPeer) observe(path string, pid int) {
 	holders, err := p.holders, p.vetErr
 	p.mu.Unlock()
 	_, held := holders[pid]
-	p.record(err == nil && held && sharesMountNamespace(pid))
+	reason := ""
+	switch {
+	case err != nil:
+		reason = err.Error()
+	case !held:
+		ids := make([]int, 0, len(holders))
+		for holder := range holders {
+			ids = append(ids, holder)
+		}
+		reason = fmt.Sprintf("the dial was answered by pid %d, not one of the socket holders %v", pid, ids)
+	case !sharesMountNamespace(pid):
+		reason = fmt.Sprintf("pid %d is not in the runner's mount namespace", pid)
+	}
+	if reason != "" {
+		p.mu.Lock()
+		if p.reason == "" {
+			p.reason = reason
+		}
+		p.mu.Unlock()
+	}
+	p.record(reason == "")
 }

@@ -19,6 +19,7 @@ type daemonPeer struct {
 	scanned bool
 	holders map[int]struct{}
 	vetErr  error
+	reason  string // why the first refused dial was refused
 }
 
 const (
@@ -45,7 +46,10 @@ func requireDaemonSharesMountNamespace(client *http.Client) error {
 		return nil
 	}
 	if transport.peer.state.Load() != daemonPeerSharesMountNamespace {
-		return fmt.Errorf("%w: the container daemon is not in the runner's mount namespace, so mount sources cannot be compared", ErrUnavailable)
+		transport.peer.mu.Lock()
+		reason := transport.peer.reason
+		transport.peer.mu.Unlock()
+		return fmt.Errorf("%w: the container daemon is not a local dockerd in the runner's mount namespace, so mount sources cannot be compared (%s)", ErrUnavailable, reason)
 	}
 	return nil
 }
