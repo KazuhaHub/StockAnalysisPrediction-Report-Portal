@@ -47,14 +47,19 @@ func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 	}
 	wanted := map[string]bool{}
 	for _, inode := range parseProcNetUnixInodes(table, path) {
-		wanted["socket:["+inode+"]"] = true
-	}
-	if len(wanted) == 0 {
-		return nil, fmt.Errorf("%w: no socket is bound to %s in this namespace", ErrUnavailable, path)
+		if inode != "0" { // an orphaned socket: no descriptor can hold it
+			wanted["socket:["+inode+"]"] = true
+		}
 	}
 	processes, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, fmt.Errorf("%w: process table: %v", ErrUnavailable, err)
+	}
+	if len(wanted) == 0 {
+		// No live socket is bound to the path in this network namespace's table (only an orphaned one, or none),
+		// so its holders cannot be found by inode. Fall back to the weaker evidence that a dockerd runs in the
+		// runner's mount namespace; with none, the daemon may be remote and the socket is refused.
+		return localDaemonProcesses(processes, path)
 	}
 	holders := map[int]struct{}{}
 	scanned, unreadable := 0, 0
@@ -89,6 +94,25 @@ func vetDaemonSocketHolders(path string) (map[int]struct{}, error) {
 		return nil, fmt.Errorf("%w: no dockerd holds %s (%d holders among %d processes, %d unreadable, euid %d, socket inodes %v), so the daemon may be remote", ErrUnavailable, path, len(holders), scanned, unreadable, os.Geteuid(), parseProcNetUnixInodes(table, path))
 	}
 	return holders, nil
+}
+
+// localDaemonProcesses is the fallback vetting: the dockerd processes in the runner's mount namespace. It does
+// not tie the socket to them, so a forwarder on the socket beside an unrelated local dockerd is not told apart.
+func localDaemonProcesses(processes []os.DirEntry, path string) (map[int]struct{}, error) {
+	found := map[int]struct{}{}
+	for _, entry := range processes {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || !sharesMountNamespace(pid) {
+			continue
+		}
+		if exe, err := os.Readlink("/proc/" + entry.Name() + "/exe"); err == nil && daemonExecutableAccepted(exe) {
+			found[pid] = struct{}{}
+		}
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("%w: no live socket is bound to %s in this network namespace and no dockerd runs in this mount namespace, so the daemon may be remote", ErrUnavailable, path)
+	}
+	return found, nil
 }
 
 // observe records one dial's verdict: the daemon socket was vetted (once per client) and the listener the dial

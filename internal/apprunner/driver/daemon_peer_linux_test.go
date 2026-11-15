@@ -151,10 +151,16 @@ func TestSocketHoldersMustIncludeADaemonInTheRunnersMountNamespace(t *testing.T)
 	if _, err := vetDaemonSocketHolders(path); !errors.Is(err, ErrUnavailable) {
 		t.Fatal("a socket no dockerd holds was vetted", err)
 	}
-	// A socket nobody holds under that path.
+	// A socket path with no live socket in this namespace falls back to a local dockerd process, and with none
+	// at all is refused.
+	absent := filepath.Join(filepath.Dir(path), "absent.sock")
+	acceptExecutable(t, func(exe string) bool { return false })
+	if _, err := vetDaemonSocketHolders(absent); !errors.Is(err, ErrUnavailable) {
+		t.Fatal("an unbound socket path with no local dockerd was vetted", err)
+	}
 	acceptExecutable(t, func(string) bool { return true })
-	if _, err := vetDaemonSocketHolders(filepath.Join(filepath.Dir(path), "absent.sock")); !errors.Is(err, ErrUnavailable) {
-		t.Fatal("an unbound socket path was vetted", err)
+	if holders, err := vetDaemonSocketHolders(absent); err != nil || len(holders) == 0 {
+		t.Fatal("the fallback must accept a local dockerd in this mount namespace", holders, err)
 	}
 }
 
