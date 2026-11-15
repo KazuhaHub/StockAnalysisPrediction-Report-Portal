@@ -369,6 +369,50 @@ func TestDeleteCheckpointRefusesTheNewestCheckpointOfALiveNamespace(t *testing.T
 	}
 }
 
+// Unusable newer rows are not a fallback: with a live volume the newest VERIFIED checkpoint stays protected whatever
+// preparing, restoring or review_required rows sit beside it. Fails if any non-deleted row counts as newer.
+func TestDeleteCheckpointLatestGuardCountsOnlyVerifiedSiblings(t *testing.T) {
+	for _, state := range []string{"preparing", "restoring", "review_required"} {
+		t.Run(state, func(t *testing.T) {
+			d := newDeleteCheckpointFixture(t)
+			d.setVolume(t, "present")
+			insertSiblingCheckpoint(t, d, fixtureID(7101), state, 1000, "created_ms+1000")
+			if receipt := mustDeleteReceipt(t)(d.dispatch()); receipt.Outcome != DeleteOutcomeLatest {
+				t.Fatalf("a %s sibling made the newest verified checkpoint deletable: %+v", state, receipt)
+			}
+			if !d.native.has(d.checkpoint.CheckpointID) {
+				t.Fatal("the archive was removed")
+			}
+		})
+	}
+}
+
+// The tie-break matches the order the runner reads the newest checkpoint in: equal created_ms, smaller id is newer.
+func TestDeleteCheckpointLatestGuardTieBreaksOnTheSmallerID(t *testing.T) {
+	d := newDeleteCheckpointFixture(t)
+	d.setVolume(t, "present")
+	// A verified sibling with the same created_ms and a LARGER id is older: this checkpoint is the newest, refused.
+	insertSiblingCheckpoint(t, d, "ffffffff-ffff-4fff-8fff-ffffffffffff", "verified", 0, "created_ms")
+	if receipt := mustDeleteReceipt(t)(d.dispatch()); receipt.Outcome != DeleteOutcomeLatest {
+		t.Fatalf("a tie with a larger id must leave this checkpoint the newest: %+v", receipt)
+	}
+	// A verified sibling with the same created_ms and a SMALLER id is newer: this one is deletable.
+	d2 := newDeleteCheckpointFixture(t)
+	d2.setVolume(t, "present")
+	insertSiblingCheckpoint(t, d2, "00000000-0000-4000-8000-000000000001", "verified", 0, "created_ms")
+	if receipt := mustDeleteReceipt(t)(d2.dispatch()); receipt.Outcome != DeleteOutcomeRemoved {
+		t.Fatalf("a tie with a smaller id must make this checkpoint older: %+v", receipt)
+	}
+}
+
+func insertSiblingCheckpoint(t *testing.T, d *deleteCheckpointFixtureT, id, state string, _ int, created string) {
+	t.Helper()
+	mustJournalExec(t, d.store.db, `INSERT INTO runner_checkpoints(id,data_namespace_id,installation_id,operation_id,release_sha256,data_format,writer_fence,manifest_sha256,bytes,state,revision,verified_ms,created_ms,updated_ms)
+		SELECT ?,data_namespace_id,installation_id,?,release_sha256,data_format,writer_fence,CASE WHEN ?='preparing' THEN NULL ELSE manifest_sha256 END,CASE WHEN ?='preparing' THEN 0 ELSE bytes END,?,
+		CASE WHEN ?='preparing' THEN 1 ELSE 2 END,CASE WHEN ?='preparing' THEN NULL ELSE verified_ms END,`+created+`,updated_ms FROM runner_checkpoints WHERE id=?`,
+		id, fixtureID(7999), state, state, state, state, state, d.checkpoint.CheckpointID)
+}
+
 func TestDeleteCheckpointAdmitsAnOlderCheckpointOfALiveNamespace(t *testing.T) {
 	d := newDeleteCheckpointFixture(t)
 	d.setVolume(t, "present")

@@ -545,10 +545,13 @@ func (s *Store) deleteCheckpointDecision(ctx context.Context, tx *sql.Tx, c cont
 	if row.revision != 2 && row.revision != 4 {
 		return DeleteOutcomeNotVerified, nil
 	}
-	// Defence in depth: the Portal never selects the newest checkpoint of a namespace that still exists. A retained
+	// Defence in depth: the Portal never selects the newest verified checkpoint of a namespace that still exists. The
+	// order is created_ms, newer first, then checkpoint id, smaller first (the order validateCheckpointRecord reads
+	// the newest in). Only verified siblings count: a preparing, restoring or review_required newer row is not a
+	// fallback anyone can restore, so it never makes the newest verified checkpoint deletable. A retained
 	// (uninstalled, data kept) namespace keeps its last checkpoint until the namespace itself is deleted.
 	var newer, live int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_checkpoints WHERE data_namespace_id=? AND state<>'deleted' AND id<>? AND (created_ms>? OR (created_ms=? AND id<?))`,
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_checkpoints WHERE data_namespace_id=? AND state='verified' AND id<>? AND (created_ms>? OR (created_ms=? AND id<?))`,
 		row.namespace, p.CheckpointID, row.created, row.created, p.CheckpointID).Scan(&newer); err != nil {
 		return "", err
 	}

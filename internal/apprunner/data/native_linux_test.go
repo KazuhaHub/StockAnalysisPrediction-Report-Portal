@@ -407,6 +407,16 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if err != nil || string(keepAfter) != string(keepBefore) || int64(len(keepAfter)) != keepSnapshot.ArchiveBytes {
 		t.Fatal("another archive changed", err)
 	}
+	// An interrupted removal leaves the archive under its trash name: the next removal finishes it.
+	if err := os.WriteFile(checkpointPath+"/.portal-checkpoints/"+nativeNamespace(504)+".tar.deleting", []byte("x"), 0400); err != nil {
+		t.Fatal(err)
+	}
+	if left, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, nativeNamespace(504), 1); err != nil || left.Found {
+		t.Fatal("a leftover trash entry was not finished", left, err)
+	}
+	if _, err := os.Lstat(checkpointPath + "/.portal-checkpoints/" + nativeNamespace(504) + ".tar.deleting"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the leftover trash entry remains", err)
+	}
 	gone, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes)
 	if err != nil || gone.Found {
 		t.Fatalf("removing an absent archive: %+v %v", gone, err)

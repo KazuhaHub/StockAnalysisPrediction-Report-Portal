@@ -54,6 +54,18 @@ func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, che
 	name := checkpointID + ".tar"
 	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
+		if remove >= 0 {
+			// An interrupted removal may have moved the archive to its trash name and not unlinked it yet.
+			var leftover unix.Stat_t
+			if unix.Fstatat(int(directory.Fd()), name+".deleting", &leftover, unix.AT_SYMLINK_NOFOLLOW) == nil {
+				if leftover.Mode&unix.S_IFMT != unix.S_IFREG || leftover.Nlink != 1 || leftover.Size != remove {
+					return zero, ErrArchiveMismatch
+				}
+				if err := r.finishTrash(directory, name+".deleting", leftover, name); err != nil {
+					return zero, err
+				}
+			}
+		}
 		return zero, nil
 	}
 	if err != nil {
@@ -75,15 +87,48 @@ func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, che
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	if err := unix.Unlinkat(int(directory.Fd()), name, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+	// Unlink only the file that was verified. A name can be swapped between the checks above and an unlink by name,
+	// so the file is first moved to a fixed trash name (without replacing anything), identified again by device and
+	// inode against the verified descriptor, and only then unlinked. A different file is moved back, never deleted.
+	trash := name + ".deleting"
+	if err := unix.Renameat2(int(directory.Fd()), name, int(directory.Fd()), trash, unix.RENAME_NOREPLACE); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return found, r.finishTrash(directory, trash, stat, name)
+		}
 		return zero, err
 	}
-	if err := directory.Sync(); err != nil {
+	if err := r.finishTrash(directory, trash, stat, name); err != nil {
 		return zero, err
-	}
-	var after unix.Stat_t
-	if err := unix.Fstatat(int(directory.Fd()), name, &after, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
-		return zero, ErrArchiveRemovalIncomplete
 	}
 	return found, nil
+}
+
+// finishTrash unlinks the trash name when it is the verified file (same device and inode, a regular file with one
+// link), syncs the directory and confirms that neither name remains. A trash entry that is another file is moved back
+// to the archive name when that is free and reported as a mismatch. A missing trash name is an interrupted earlier
+// attempt that already finished the unlink.
+func (r *Root) finishTrash(directory *os.File, trash string, verified unix.Stat_t, name string) error {
+	var current unix.Stat_t
+	err := unix.Fstatat(int(directory.Fd()), trash, &current, unix.AT_SYMLINK_NOFOLLOW)
+	if err == nil {
+		if current.Mode&unix.S_IFMT != unix.S_IFREG || current.Nlink != 1 || current.Dev != verified.Dev || current.Ino != verified.Ino {
+			_ = unix.Renameat2(int(directory.Fd()), trash, int(directory.Fd()), name, unix.RENAME_NOREPLACE)
+			return ErrArchiveMismatch
+		}
+		if err := unix.Unlinkat(int(directory.Fd()), trash, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+			return err
+		}
+	} else if !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	if err := directory.Sync(); err != nil {
+		return err
+	}
+	for _, n := range []string{name, trash} {
+		var after unix.Stat_t
+		if err := unix.Fstatat(int(directory.Fd()), n, &after, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
+			return ErrArchiveRemovalIncomplete
+		}
+	}
+	return nil
 }
