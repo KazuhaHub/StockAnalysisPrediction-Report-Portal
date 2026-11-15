@@ -79,25 +79,37 @@ func TestEveryCommandFamilyAdmitsAfterAnAppliedOrUnknownRemoveImageRow(t *testin
 // the installation's rows must carry the exclusion, so a new reader cannot silently reintroduce the blocker.
 func TestInstallationWideCommandReadersIgnoreLoadImageRows(t *testing.T) {
 	files, _ := filepath.Glob("*.go")
-	sql := regexp.MustCompile("`[^`]*runner_commands[^`]*`")
+	// A statement is a raw literal, possibly continued by "+ identifier +" and further raw literals.
+	sql := regexp.MustCompile("(?s)`[^`]*`(?:\\s*\\+\\s*[A-Za-z]+\\s*\\+\\s*`[^`]*`)*")
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") || f == "load_image.go" || f == "remove_image.go" || f == "enrollment.go" || f == "store.go" {
 			continue
 		}
 		raw, _ := os.ReadFile(f)
 		for _, q := range sql.FindAllString(string(raw), -1) {
+			if !strings.Contains(q, "runner_commands") {
+				continue
+			}
 			if strings.Contains(q, "INSERT INTO") || strings.Contains(q, "UPDATE runner_commands") || !strings.Contains(q, "installation_id=?") {
 				continue
 			}
 			wide := strings.Contains(q, "COUNT(*)") || strings.Contains(q, "MAX(")
-			if !wide || (strings.Contains(q, "load-image") && strings.Contains(q, "remove-image")) {
+			if !wide || strings.Contains(q, "NOT IN (`+installationNeutralCommandKinds+`)") {
 				continue
 			}
 			// Statements already narrowed to one kind or one operation stage are not installation-wide.
 			if regexp.MustCompile(`kind\s*(=|IN)`).MatchString(q) || strings.Contains(q, "operation_id=?") || strings.Contains(q, "effect_id=?") {
 				continue
 			}
-			t.Errorf("%s: an installation-wide runner_commands reader does not ignore load-image rows:\n%s", f, q)
+			t.Errorf("%s: an installation-wide runner_commands reader does not use installationNeutralCommandKinds:\n%s", f, q)
 		}
+	}
+}
+
+// Fails if the shared list of neutral command kinds drifts: it names exactly the kinds whose rows never block a
+// start-bearing command family.
+func TestInstallationNeutralCommandKindsAreTheLoadAndRemoveImageKinds(t *testing.T) {
+	if installationNeutralCommandKinds != "'load-image','remove-image'" {
+		t.Fatalf("neutral command kinds drifted: %s", installationNeutralCommandKinds)
 	}
 }

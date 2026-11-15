@@ -2,6 +2,10 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -70,4 +74,36 @@ func TestEnableOperationCompletesWithARemoveImageRow(t *testing.T) {
 	}
 	defer func() { platformTestAfterEnableClaim = nil }()
 	testPlatformManagedEnableSecondCycle(t, false)
+}
+
+// Fails if an effect counter spells the neutral kinds out instead of using the shared list, or if the list drifts.
+// A further kind that is not installation work is then added in one place rather than in every counter.
+func TestInstallationWideEffectReadersUseTheSharedKindList(t *testing.T) {
+	if platformInstallationNeutralEffectKinds != "'load_image','remove_image'" {
+		t.Fatalf("neutral effect kinds drifted: %s", platformInstallationNeutralEffectKinds)
+	}
+	files, err := filepath.Glob("*.go")
+	if err != nil || len(files) == 0 {
+		t.Fatal("no source files", err)
+	}
+	spelled := regexp.MustCompile(`(?i)kind\s*(NOT IN\s*\(\s*'load_image'|<>\s*'load_image')`)
+	shared := 0
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loc := spelled.FindIndex(raw); loc != nil {
+			t.Errorf("%s spells out the neutral effect kinds: %s", f, raw[loc[0]:loc[1]])
+		}
+		text := string(raw)
+		shared += strings.Count(text, "NOT IN (`+platformInstallationNeutralEffectKinds+`)") +
+			strings.Count(text, "NOT IN (` + platformInstallationNeutralEffectKinds + `)")
+	}
+	if shared < 19 {
+		t.Errorf("only %d statements use the shared neutral kind list", shared)
+	}
 }
