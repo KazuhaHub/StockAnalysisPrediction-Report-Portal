@@ -176,21 +176,39 @@ func platformMigrationSettlementReason(e migExec, operation string) (string, err
 	return "", nil
 }
 
-// platformMigrationSettlementCandidates lists the finished updates whose migration is not yet settled.
-func (s *Server) platformMigrationSettlementCandidates(ctx context.Context) ([]string, error) {
-	rows, err := s.st.queryContext(ctx, `SELECT o.id FROM app_platform_operations o
-		WHERE o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
+// platformMigrationSettlementWindow is how many failed updates one tick takes a step for.
+const platformMigrationSettlementWindow = 8
+
+// platformMigrationSettlementWhere selects the finished updates whose migration is not yet settled.
+const platformMigrationSettlementFrom = `SELECT o.id FROM app_platform_operations o`
+const platformMigrationSettlementWhere = `o.action='update' AND o.managed=1 AND o.stage='recovery_required' AND o.completed_ms IS NOT NULL AND o.lease_owner IS NULL
 		AND EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='migrate' AND f.effect_number=2)
-		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='settled' AND f.state='applied')
-		ORDER BY o.completed_ms,o.id LIMIT 8`)
+		AND NOT EXISTS (SELECT 1 FROM app_platform_operation_effects f WHERE f.operation_id=o.id AND f.stage='settled' AND f.state='applied')`
+
+func scanPlatformOperationID(rows *sql.Rows) (string, string, bool, error) {
+	var id string
+	err := rows.Scan(&id)
+	return id, id, true, err
+}
+
+// platformMigrationsToSettle is the window of failed updates this tick takes a step for, walked in key order with a
+// cursor that wraps (see platformKeysetCursor), so updates that keep failing cannot starve the ones after them.
+func (s *Server) platformMigrationsToSettle(ctx context.Context) ([]string, error) {
+	return platformKeysetWindow(ctx, s.st, &s.platformMigrationCursor, platformMigrationSettlementFrom, platformMigrationSettlementWhere,
+		"o.id", nil, platformMigrationSettlementWindow, scanPlatformOperationID)
+}
+
+// platformMigrationSettlementCandidatesAll lists every finished update whose migration is not yet settled.
+func (s *Server) platformMigrationSettlementCandidatesAll(ctx context.Context) ([]string, error) {
+	rows, err := s.st.queryContext(ctx, platformMigrationSettlementFrom+` WHERE `+platformMigrationSettlementWhere+` ORDER BY o.id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var ids []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		id, _, _, err := scanPlatformOperationID(rows)
+		if err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
@@ -204,7 +222,7 @@ func (s *Server) settlePlatformMigrations(ctx context.Context, endpoint platform
 	if endpoint.path == "" {
 		return 0, nil
 	}
-	ids, err := s.platformMigrationSettlementCandidates(ctx)
+	ids, err := s.platformMigrationsToSettle(ctx)
 	if err != nil {
 		return 0, err
 	}

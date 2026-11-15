@@ -63,7 +63,7 @@ func TestSettlementTickSettlesAnOrphanedRestoreStartOutsideARecoveryResume(t *te
 		f, operation := orphanedRestoreStartFixture(t, pg)
 		script := &settleScript{before: held("orphaned"), after: held("never_ran")}
 		script.install(f.s, f.fake)
-		candidates, err := f.s.platformHeldStartCandidates(context.Background())
+		candidates, err := f.s.platformHeldStartsToSettle(context.Background())
 		if err != nil || !slices.Contains(candidates, operation) {
 			t.Fatalf("a finished roll back with an open start is not a candidate: %v %v", candidates, err)
 		}
@@ -122,7 +122,7 @@ func TestSettlementTickLeavesARestoreStartThatMayBeExecuting(t *testing.T) {
 // held-start settlement never selects it.
 func TestHeldStartSettlementLeavesARecoveryResumeToItsOwnReconciliation(t *testing.T) {
 	f, operation, _ := unknownResumeStartFixture(t)
-	candidates, err := f.s.platformHeldStartCandidates(context.Background())
+	candidates, err := f.s.platformHeldStartsToSettle(context.Background())
 	if err != nil || slices.Contains(candidates, operation) {
 		t.Fatalf("a recovery resume was selected by the held-start settlement: %v %v", candidates, err)
 	}

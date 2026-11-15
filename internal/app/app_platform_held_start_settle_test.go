@@ -355,6 +355,13 @@ func ageRecoveryStart(t *testing.T, s *Server, operation string) {
 // as the fixture's. They exist only to be listed: nothing about them can be settled.
 func cloneHeldStarts(t *testing.T, s *Server, operation string, n int) []string {
 	t.Helper()
+	return cloneOperations(t, s, operation, n, `stage='start' AND effect_number=1`)
+}
+
+// cloneOperations is cloneHeldStarts for any one effect of the operation: the clones carry the rows matching
+// effectWhere and nothing else. Each clone ends before the one it was cloned from, so the clones sort first by end.
+func cloneOperations(t *testing.T, s *Server, operation string, n int, effectWhere string) []string {
+	t.Helper()
 	ids := []string{operation}
 	for i := range n {
 		installation, plan, op := platformFixtureID(9600+i), platformFixtureID(9700+i), platformFixtureID(9800+i)
@@ -369,7 +376,7 @@ func cloneHeldStarts(t *testing.T, s *Server, operation string, n int) []string 
 			FROM app_platform_operations WHERE id=?`, op, installation, plan, platformDigest([]byte(op)), platformDigest([]byte(plan+op)), i+1, operation)
 		mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
 			SELECT ?,stage,effect_number,?,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms
-			FROM app_platform_operation_effects WHERE operation_id=? AND stage='start' AND effect_number=1`, op, platformFixtureID(9900+i), operation)
+			FROM app_platform_operation_effects WHERE operation_id=? AND `+effectWhere, op, platformFixtureID(9900+i), operation)
 		ids = append(ids, op)
 	}
 	return ids
