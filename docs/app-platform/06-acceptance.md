@@ -271,8 +271,7 @@ Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 
 - **Done:** the licence policy is a checked-in file (`scripts/licence-policy.json`) judged by `scripts/licence_scan.py` over the
   Go SBOMs of every release platform and a production npm CycloneDX SBOM, nested components included, in
   `.github/workflows/licence.yml` (Portal) and the `licence` job of `check.yml` (Apps). A denied, unknown or missing licence
-  fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are election records pinned to the declaration they were
-  written against. `elkjs` is aliased to a throwing stub in the Vite build; a Rollup plugin fails the build if any elkjs module
+  fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are election records pinned to the declaration and to the SHA-256 of the licence files that state the choice. `elkjs` is aliased to a throwing stub in the Vite build; a Rollup plugin fails the build if any elkjs module
   is bundled and a build test scans the output, both verified to fail with the alias removed; the `elkjs` exclusion is valid
   only in a run where that test passed. Mermaid 12.1 defaults to ELK, so dagre is requested for the diagram types that would
   reach it and mind maps keep their own layout. First-party Apps packages declare AGPL-3.0-only and a test keeps them so.

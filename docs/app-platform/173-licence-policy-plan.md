@@ -53,13 +53,24 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
    is days old. `cyclonedx-gomod` is v1.9.0, the version the DEV-04 evidence used.
 7. **Several licence entries on one component are ANDed**, and an SPDX `X WITH Y` is one opaque identifier, so an exception can
    never be satisfied by its base licence. A free-text licence name is taken literally and never guessed.
-8. **Elections are pinned to what upstream declares.** An election records the declaration it was written against
-   (`dompurify`: `MPL-2.0 OR Apache-2.0`; `freetype`: `GPL-2.0-or-later`, the only side the detector reports). If upstream
-   changes the declaration the election is reported as stale and ignored, and the component is judged on its merits, so a
-   licence change cannot slip through an old election. `FTL` is election-only: it is never a free choice in an `OR`.
+8. **Elections are pinned evidence, not free text.** An election records the exact declaration it was written against
+   (`id:GPL-2.0-or-later`, `expression:(MPL-2.0 OR Apache-2.0)`: matched case-sensitively, by kind, with order and
+   parentheses), the dual licence it chooses from (`offered`), the elected licence, and the SHA-256 of the licence files
+   that state the choice. If upstream changes the declaration or any of those files the election is reported as stale and
+   ignored, and the component is judged on its merits. The offer must be a pure top-level OR of identifiers, the elected
+   licence one of them and allowed by the policy (on the allow list, or `election_only` for the FreeType License), the
+   declaration another operand or the whole offer, and no operand of the declaration or the offer may be denied or be
+   an unallowed licence other than the declared side. So an offer cannot launder `SSPL-1.0` or `GPL-3.0` through an
+   `OR`, and an `AND` anywhere in it refuses the election. `FTL` is election-only: never a free choice in an `OR`.
+   Evidence: for `github.com/golang/freetype` the `LICENSE` in the module cache (it states the choice of the FreeType
+   License or the GPL, version 2 or later); for `dompurify` the `LICENSE` (Apache-2.0) and `LICENSE-MPL` it ships, with
+   the `(MPL-2.0 OR Apache-2.0)` declaration pinned exactly. Both were found; if one had not been, the election would fail
+   closed.
 9. **The own-licence rule.** AGPL-3.0-only passes only on components the policy names as the project's own: a namespace
-   prefix ending in `/` (`github.com/KazuhaHub/`, `@portal-app/`) or one package named exactly. A third party carrying AGPL
-   fails.
+   prefix ending in `/` (`github.com/KazuhaHub/`, `@portal-app/`) or one package named exactly, and that carry proof of
+   being the local package: a purl (a component with none is never own), for Go a `pkg:golang` purl, for npm an install
+   path of exactly `node_modules/<name>` (a nested copy of the same name is not it), no registry distribution and
+   membership of the repository's npm workspaces. A third party carrying AGPL fails.
 10. **A dedicated workflow, not a job of `test.yml`.** The release guard names `test.yml`'s jobs one by one and requires each;
     a new job there would change what a release waits on. `licence.yml` runs on every pull request and every push to `main` and
     `integration/app-platform`. The licence scan **is** a release prerequisite in code: `release_guard.py wait-ci` waits for a
@@ -82,13 +93,21 @@ gone, and because Mermaid 12 uses ELK by default, diagrams are laid out with dag
 
 `scripts/licence_scan.py` and the allow, deny, election-only, `own.licences` and reviewed sections of
 `scripts/licence-policy.json` are copied into the Apps repository (`scripts/licence_scan.py`, `scripts/licence-policy.json`,
-`scripts/tests/test_licence_scan.py`). Each copy says so in its header. Apps' `scripts/check_licence_copy.py`, run by its
-`licence` job, compares the evaluator (line for line, the module docstring excluded) and those policy sections with the
-Portal commit named in Apps' `scripts/licence-scan.pin`, and fails on any difference. To change either: merge the change in
-the Portal, copy the files from that commit into Apps, write the commit's full SHA into the pin and run the script. The pin
-is a commit of the Portal repository, so it must stay reachable (a merge commit keeps the branch's commits). The check does
-not compare the other direction: a Portal change that is not copied leaves Apps on the old pinned evaluator, which is
-intended, and is visible as a pin that is behind. Elections and exclusions are Portal-only and are empty in Apps.
+`scripts/tests/test_licence_scan.py`). Each copy says so in its header, and the Portal evaluator, its policy and a test
+(`AppsCopyNoticeTests`) name the Apps copy and how to update it. Both repositories are public, so Apps' `licence` job runs
+`scripts/check_licence_copy.py` without credentials. It compares the evaluator (line for line, the module docstring
+excluded) and those policy sections with:
+
+- the Portal commit named in Apps' `scripts/licence-scan.pin`; and
+- the live files on the Portal's `integration/app-platform` and `main`, each once the file exists there, failing on any
+  difference.
+
+Once a live branch carries the file, the pin must also be a commit that branch contains (GitHub's compare API, anonymously).
+A pin on a feature-branch commit, which a squash merge orphans, therefore fails and has to be moved to the merge commit.
+Until the Portal has merged the gate there is no live branch to compare with and only the pin is checked; the script says so.
+To change the evaluator or the shared policy: merge in the Portal, copy the files from that commit into Apps, write the
+commit's full SHA into `scripts/licence-scan.pin` and run the script. Elections and exclusions are Portal-only and are empty
+in Apps.
 
 ## Resolutions after the independent review (2026-11-15)
 
@@ -120,6 +139,26 @@ The first implementation was reviewed and returned with fixes, all made test-fir
   and windows) and a test keeps the list equal to `release.yml`'s matrix. Apps builds it for the six status release targets.
 - **Triggers.** `licence.yml` also runs on pushes to `integration/app-platform`.
 
+## Resolutions after the second review (2026-11-15)
+
+- **Mermaid configuration race.** `mermaid.initialize` is global and synchronous while parse and render are queued, so with a
+  flowchart and a mind map on one page the last initialize won for both. Each diagram's initialize, parse and render now run as
+  one turn on a module-level promise chain (`mermaidTurn.ts`), so its layout and theme are in force for its own render. A
+  per-diagram `%%{init}%%` directive was rejected: it rewrites the source that is parsed, cached and exported, and the layout
+  would depend on the author's own directives. A test renders both orders concurrently and asserts each diagram's layout at the
+  start and the end of its render.
+- **Elections** are evidence (resolution 8): hardened against laundering a denied or unallowed licence, pinned to licence files,
+  a pure top-level OR.
+- **Copy check** compares with the live Portal branches and requires a reachable pin (see Duplication).
+- **Copies of one component.** Components sharing a `bom-ref` are judged once only when version and declared licences are
+  identical; conflicting copies are each judged.
+- **Own components** need a purl, and an npm one the exact install path (resolution 9).
+- **Declarations** in reviewed-as records and elections are matched exactly and by kind (`id:`, `name:`, `expression:`).
+- **Marker scan.** The generic markers (`ELKNode`, `elk-api.js`, `elk-worker.min.js`) are gone; the engine package names stay,
+  and `forbidElkjs` covers elkjs's wrapper files by module id.
+- **Apps platform list.** A test (`TheWorkflow` in `scripts/tests/test_licence_copy.py`, verified to fail when a target is
+  removed from `check.yml`) keeps the Go SBOM targets equal to `build-status-release.py`'s.
+
 ## What the first scans flagged, and what the owner decided
 
 The first scans failed on ten components. Nothing was added to the allow list; the owner decided on 2026-11-15:
@@ -131,22 +170,23 @@ The first scans failed on ten components. Nothing was added to the allow list; t
 
 Each decision is a reviewed-as record in `scripts/licence-policy.json`: the component names, the licence it is reviewed as
 (which must be on the allow list), the declaration it was reviewed against, the file and the SHA-256 of that file
-(`911f8f57...dad` for the seven Go modules, whose `LICENSE` is byte-identical, and `66b333b0...b49` for `khroma`'s `license`).
+(`911f8f57...dad` for the seven Go modules, whose `LICENSE` is byte-identical, and `66b333b0...b49` for `khroma`'s `license`),
+and it pins the declaration as `id:BSD-Source-Code` (`khroma`: none).
 The scan re-reads the file in CI, from the Go module cache and `node_modules`; a changed hash, a changed declaration, a missing
 file or a version mismatch makes the record stale, it is ignored, and the gate fails again. A record cannot override a
 denied licence. The allow and deny lists did not change.
 
 ## Verification
 
-- `python3 -B -m unittest discover -s scripts -p '*_test.py'` in the Portal, including 120 licence tests and the release guard
-  tests, and `python3 -B -m unittest discover -s scripts/tests` in Apps (179 tests);
+- `python3 -B -m unittest discover -s scripts -p '*_test.py'` in the Portal, including 145 licence tests and the release guard
+  tests (366 in all), and `python3 -B -m unittest discover -s scripts/tests` in Apps (211 tests);
 - `cd web && npm run typecheck && npm run build && npm run check:no-elk` and `npx vitest run` (the whole suite);
 - `actionlint` on both repositories' workflows;
 - a real-browser probe of `mermaid` 12.1 with the production alias, over twenty-one diagram types with and without a layout
   option: only flowchart, state, class, ER and requirement diagrams need dagre; a diagram with `layout: elk` in its frontmatter
   fails with the stub's message;
 - both jobs replayed locally from clean clones: all SBOMs, the SPA build, the ELK check, the copy check and the scan;
-- green CI runs: see `handoff/evidence/platform-licence-policy/acceptance.json`.
+- green CI runs (Portal `licence` and `test`, Apps `check`): see `handoff/evidence/platform-licence-policy/acceptance.json`.
 
 ## Not done
 
