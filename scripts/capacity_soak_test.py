@@ -215,6 +215,51 @@ def flood(answered=600, busy=7000, errors=0, alive=True, heartbeat_age_ms=1500, 
             "classes": classes if classes is not None else {"200": answered, "429:app_platform_busy": busy}}
 
 
+TASK_WINDOW_CREATED = 66
+
+
+def task_stats(count=66, p95=800, maximum=2500):
+    return {"count": count, "p50_ms": 200, "p95_ms": p95, "max_ms": maximum}
+
+
+def window_tasks(**changes):
+    value = {"created": TASK_WINDOW_CREATED, "created_backend": 36, "created_event": 30, "succeeded": TASK_WINDOW_CREATED, "failed": 0,
+             "uncertain": 0, "review_required": 0, "cancelled": 0, "open": 3, "oldest_open_age_ms": 1500, "latency_ms": task_stats(),
+             "worker_alive": True}
+    value.update(changes)
+    return value
+
+
+def window_events(**changes):
+    value = {"captured": 5, "capture_errors": 0, "delivered": 30, "max_inflight_per_subscription": 3, "subscriptions_active": 6, "subscriptions_fenced": 0}
+    value.update(changes)
+    return value
+
+
+def window_quota(**changes):
+    value = {"max_installation_active": soak.TASK_INSTALLATION_QUOTA, "saturated_active": {"sat-0": soak.TASK_INSTALLATION_QUOTA, "sat-1": soak.TASK_INSTALLATION_QUOTA}}
+    value.update(changes)
+    return value
+
+
+def window_backend_flood(requests=2400, answered=120, **changes):
+    value = {"requests": requests, "answered": answered, "refused": requests - answered, "alive": True, "heartbeat_age_ms": 900,
+             "classes": {"200": answered, "429:task_capacity": requests - answered}}
+    value.update(changes)
+    return value
+
+
+def platform_work(windows):
+    subscriptions = [{"installation": f"w-{i}", "role": "workload", "state": "active", "reason": ""} for i in range(6)]
+    subscriptions += [{"installation": "sat-1", "role": "saturated", "state": "review_required", "reason": "task_capacity"},
+                      {"installation": "sat-0", "role": "probe", "state": "review_required", "reason": "inflight_limit"}]
+    total = TASK_WINDOW_CREATED * windows
+    return {"workload_tenants": 6, "saturated_tenants": 2, "worker_interval_ms": 1000, "loaded_latency_ms": task_stats(count=total),
+            "tasks_total": {"created": total, "by_state": {"succeeded": total}},
+            "events_total": {"captured": 5 * windows, "expected_deliveries": 30 * windows, "delivered": 30 * windows, "capture_errors": 0},
+            "drain": {"seconds": 4, "open_after": 0, "timed_out": False}, "subscriptions": subscriptions}
+
+
 def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, flood_ok=100):
     def window(m, scale):
         return {
@@ -224,6 +269,7 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
             "batch_start": stats(int(batch * scale), 20),
             "flood": flood(answered=flood_ok),
             "backends": [backend_status(i, window=m) for i in range(8)],
+            "tasks": window_tasks(), "events": window_events(), "quota": window_quota(), "backend_flood": window_backend_flood(),
         }
     return {
         "format": "portal.capacity-soak.child/1-dev.1",
@@ -241,6 +287,7 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
         "session_expires_ms": LOAD_START_MS + PERIOD_MS * windows + 3_600_000,
         "db_driver": "postgres", "db_version": "16.4",
         "markers": ["load_finished"],
+        "platform_work": platform_work(windows),
     }
 
 
@@ -681,6 +728,187 @@ class EvaluateTests(unittest.TestCase):
                              event="workflow_dispatch")
         self.assertTrue(full["passed"], self.failing(full))
         self.assertTrue(full["counts_as_ops08_evidence"])
+
+    # ---- SEC-09: the task worker, the event delivery coordinator and a backend-originated flood, judged beside OPS-08 ----
+
+    def test_the_step_summary_names_every_platform_work_check(self):
+        evidence = child_evidence()
+        text = soak.render_summary(evidence, self.verdict(evidence))
+        for name in soak.PLATFORM_WORK_CHECKS:
+            self.assertIn(name + ": pass", text)
+
+    def test_the_platform_work_checks_are_in_the_verdict_and_so_in_the_evidence_decision(self):
+        verdict = self.verdict(minutes=120, samples=load_samples(120), evidence=child_evidence(120))
+        names = {c["name"] for c in verdict["checks"]}
+        self.assertTrue(set(soak.PLATFORM_WORK_CHECKS) <= names, set(soak.PLATFORM_WORK_CHECKS) - names)
+        self.assertTrue(verdict["counts_as_ops08_evidence"], self.failing(verdict))
+        for name in soak.PLATFORM_WORK_CHECKS:
+            evidence = child_evidence(120)
+            del evidence["platform_work"]
+            for window in evidence["windows"]:
+                for key in ("tasks", "events", "quota", "backend_flood"):
+                    window.pop(key)
+            broken = self.verdict(minutes=120, samples=load_samples(120), evidence=evidence)
+            self.assertFalse(broken["counts_as_ops08_evidence"])
+            self.assertIn(name, self.failing(broken))
+
+    def test_evidence_without_the_platform_work_block_fails_every_platform_work_check(self):
+        evidence = child_evidence()
+        del evidence["platform_work"]
+        for window in evidence["windows"]:
+            for key in ("tasks", "events", "quota", "backend_flood"):
+                window.pop(key)
+        self.assertEqual(self.failing(self.verdict(evidence)), set(soak.PLATFORM_WORK_CHECKS))
+
+    def test_the_task_worker_must_complete_tasks_in_every_window(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(succeeded=soak.TASK_WORKER_MIN_COMPLETED_PER_WINDOW - 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_worker_ran_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_worker_ran_in_every_window")["detail"]["windows_below_the_minimum"], [2])
+        evidence["windows"][1]["tasks"] = window_tasks(succeeded=soak.TASK_WORKER_MIN_COMPLETED_PER_WINDOW)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][2]["tasks"] = window_tasks(worker_alive=False)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_worker_ran_in_every_window"})
+
+    def test_a_task_that_failed_was_lost_or_never_finished_fails(self):
+        for state in ("failed", "uncertain", "review_required", "cancelled"):
+            evidence = child_evidence()
+            evidence["windows"][0]["tasks"] = window_tasks(**{state: 1})
+            self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"}, state)
+            evidence = child_evidence()
+            evidence["platform_work"]["tasks_total"]["by_state"][state] = 1
+            self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"}, state)
+        evidence = child_evidence()
+        evidence["platform_work"]["tasks_total"]["created"] += 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"})
+        evidence = child_evidence()
+        evidence["platform_work"]["drain"] = {"seconds": 180, "open_after": 2, "timed_out": True}
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck", "event_queue_bounded"})
+
+    def test_a_due_task_waiting_longer_than_the_stuck_age_fails_in_the_window_it_was_seen(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(oldest_open_age_ms=soak.TASK_STUCK_MAX_AGE_MS)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][1]["tasks"] = window_tasks(oldest_open_age_ms=soak.TASK_STUCK_MAX_AGE_MS + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"no_task_lost_or_stuck"})
+        self.assertEqual(self.check(verdict, "no_task_lost_or_stuck")["detail"]["windows_with_a_stuck_task"], [2])
+
+    def test_task_latency_is_judged_on_the_pooled_p95_and_the_slowest_task(self):
+        evidence = child_evidence()
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, p95=soak.TASK_LATENCY_P95_BOUND_MS)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, p95=soak.TASK_LATENCY_P95_BOUND_MS + 1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, maximum=soak.TASK_LATENCY_MAX_BOUND_MS + 1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=0)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+
+    def test_a_slow_window_is_a_diagnostic_and_does_not_decide_the_pooled_latency(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(latency_ms=task_stats(p95=soak.TASK_LATENCY_P95_BOUND_MS * 3))
+        verdict = self.verdict(evidence)
+        self.assertTrue(verdict["passed"])
+        self.assertEqual(self.check(verdict, "task_latency_within_bound")["detail"]["worst_window"]["minute"], 2)
+
+    def test_the_installation_task_quota_is_enforced_in_every_window_with_a_typed_refusal(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(max_installation_active=soak.TASK_INSTALLATION_QUOTA + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_quota_enforced_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_quota_enforced_in_every_window")["detail"]["windows_over_the_quota"], [2])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(classes={"200": 120, "429:rate_limited": 2280})
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_quota_enforced_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_quota_enforced_in_every_window")["detail"]["windows_without_a_typed_refusal"], [3])
+
+    def test_every_event_must_reach_every_subscribed_app_at_least_once(self):
+        evidence = child_evidence()
+        evidence["platform_work"]["events_total"]["delivered"] -= 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_delivered_at_least_once"})
+        evidence = child_evidence()
+        evidence["platform_work"]["events_total"].update(captured=0, expected_deliveries=0, delivered=0)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_delivered_at_least_once"})
+        evidence = child_evidence()
+        evidence["windows"][1]["events"] = window_events(delivered=0)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"event_delivered_at_least_once"})
+        self.assertEqual(self.check(verdict, "event_delivered_at_least_once")["detail"]["windows_without_a_delivery"], [2])
+
+    def test_the_event_queue_is_bounded_by_the_subscription_inflight_cap_and_drains(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["events"] = window_events(max_inflight_per_subscription=soak.EVENT_MAX_INFLIGHT)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][1]["events"] = window_events(max_inflight_per_subscription=soak.EVENT_MAX_INFLIGHT + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"event_queue_bounded"})
+        self.assertEqual(self.check(verdict, "event_queue_bounded")["detail"]["windows_over_the_bound"], [2])
+        evidence = child_evidence()
+        evidence["platform_work"]["drain"] = {"seconds": 180, "open_after": 4, "timed_out": True}
+        self.assertIn("event_queue_bounded", self.failing(self.verdict(evidence)))
+
+    def test_an_event_queue_that_grows_every_window_fails_even_inside_the_cap(self):
+        evidence = child_evidence(windows=9)
+        for index, window in enumerate(evidence["windows"]):
+            window["events"] = window_events(max_inflight_per_subscription=1 + index)
+        verdict = self.verdict(evidence, minutes=9)
+        self.assertEqual(self.failing(verdict), {"event_queue_bounded"})
+        self.assertTrue(self.check(verdict, "event_queue_bounded")["detail"]["growing"])
+
+    def test_event_refusals_are_typed_workload_subscriptions_stay_active_and_the_saturated_one_is_fenced_for_its_quota(self):
+        for change in ({"capture_errors": 1},):
+            evidence = child_evidence()
+            evidence["platform_work"]["events_total"].update(change)
+            self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"}, change)
+        evidence = child_evidence()
+        evidence["windows"][0]["events"] = window_events(capture_errors=1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][0].update(state="review_required", reason="inflight_limit")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][6].update(reason="something_else")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][6].update(state="active", reason="")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+
+    def test_the_backend_task_flood_must_be_answered_or_refused_with_a_typed_error_in_every_window(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"] = window_backend_flood(requests=soak.BACKEND_FLOOD_MIN_PER_WINDOW - 1, answered=1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"backend_task_flood_answered_or_typed_in_every_window"})
+        self.assertEqual(self.check(verdict, "backend_task_flood_answered_or_typed_in_every_window")["detail"]["windows_below_the_minimum"], [2])
+        for classes in ({"200": 100, "429:task_capacity": 2000, "500:": 2}, {"200": 100, "429:task_capacity": 2000, "transport": 1},
+                        {"200": 100, "429:task_capacity": 2000, "404:app_platform_task_unavailable": 5}, {"200": 100, "429:task_capacity": 2000, "429:": 3}):
+            evidence = child_evidence()
+            evidence["windows"][2]["backend_flood"] = window_backend_flood(classes=classes)
+            verdict = self.verdict(evidence)
+            self.assertEqual(self.failing(verdict), {"backend_task_flood_answered_or_typed_in_every_window"}, classes)
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(classes={"200": 100, "429:task_capacity": 2000, "429:rate_limited": 50})
+        self.assertTrue(self.verdict(evidence)["passed"])
+
+    def test_the_backend_task_flood_must_stay_alive(self):
+        for change in ({"alive": False}, {"heartbeat_age_ms": soak.FLOOD_HEARTBEAT_MAX_AGE_MS + 1}):
+            evidence = child_evidence()
+            evidence["windows"][2]["backend_flood"] = window_backend_flood(**change)
+            verdict = self.verdict(evidence)
+            self.assertEqual(self.failing(verdict), {"backend_task_flood_alive_throughout"}, change)
+
+    def test_the_backend_flood_runs_under_the_unchanged_ops08_bounds_which_still_decide_the_other_tenants_latency(self):
+        self.assertEqual(soak.HOME_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.REPORT_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.DISPATCH_P95_BOUND_US, 25_000)
+        self.assertEqual(soak.BATCH_START_P95_BOUND_US, 100_000)
+        evidence = child_evidence(home=soak.HOME_P95_BOUND_US)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"home_p95_within_absolute_bound"})
+        verdict = self.verdict()
+        self.assertEqual(self.check(verdict, "backend_task_flood_alive_throughout")["detail"]["windows_judged_under_the_flood"], 3)
+        self.assertIn("no_runner_crash", self.failing(self.verdict(exit_ok=False)))
 
 
 class VariantTests(unittest.TestCase):
