@@ -110,6 +110,7 @@ type Server struct {
 	geoUp                 *geoUpdater                                                                // downloads the IP database; the reader notices the new file by itself
 	geo                   *geoService                                                                // IP → place for the audit log; nil-safe, empty until a .mmdb is installed
 	proxySeen             atomic.Value                                                               // bool: a forwarded request arrived from a peer not in trusted_proxies
+	sessionStamps         sessionStampCache                                                          // the last activity stamp seen for each session (read_path.go)
 	seenAt                sync.Map                                                                   // username -> time.Time of the last activity stamp WRITTEN (throttle; see touchSeen)
 	jobRuns               sync.Map                                                                   // jobID -> *jobRun; shared cancel scope for a job's in-flight runs (ADR 0011)
 	itemCancels           sync.Map                                                                   // itemID -> context.CancelFunc; per-row cancel of an in-flight run (ADR 0011)
@@ -835,9 +836,16 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 		// statement that matched nothing and still queued for the writer connection. The read says
 		// whether it is due; the UPDATE keeps its own condition, so two requests racing past the read
 		// still stamp once.
-		var seen int64
-		if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil && seen < stale {
-			s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
+		// The answer is remembered in memory (sessionStamps), so the requests between two stamps do not read it.
+		if !s.sessionStamps.fresh(id, stale) {
+			var seen int64
+			if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil {
+				if seen < stale {
+					s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
+					seen = now
+				}
+				s.sessionStamps.set(id, seen)
+			}
 		}
 	}
 	return user
@@ -1305,7 +1313,7 @@ func (s *Server) loadRep(r *http.Request, user string, id int64) *Rep {
 
 // recordReportReadAs is recordReportRead for a caller that already knows the reader's OU.
 func (s *Server) recordReportReadAs(r *http.Request, user string, ou int64, rep *Rep) {
-	s.st.WriteAudit(AuditEntry{
+	s.st.WriteReportReadAudit(AuditEntry{
 		Actor: user, ActorOU: ou, Action: AuditReportRead,
 		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
 		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),
