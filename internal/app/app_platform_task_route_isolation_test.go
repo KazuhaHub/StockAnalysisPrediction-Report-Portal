@@ -154,46 +154,6 @@ func TestPlatformServiceTaskBudgetIsScopedToOneVerifiedInstallation(t *testing.T
 	}
 }
 
-// Many anonymous callers naming a real installation, and a stalled verified caller of another one, never
-// make a legitimate submission busy.
-func TestPlatformServiceTaskAnonymousFloodNeverStarvesABackend(t *testing.T) {
-	f := newTaskRouteFixture(t)
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	junk := base64.RawURLEncoding.EncodeToString([]byte(`{"not":"verifiable"}`))
-	for w := 0; w < 8; w++ {
-		go func() {
-			client := &http.Client{Timeout: 3 * time.Second}
-			for {
-				select {
-				case <-stop:
-					done <- struct{}{}
-					return
-				default:
-				}
-				request, _ := http.NewRequest(http.MethodPost, f.server.URL+taskRoutePath(f.installation), strings.NewReader(`{"occurrenceId":"anon","handler":"app.backend.task","payload":{}}`))
-				request.Header.Set("Content-Type", "application/json")
-				request.Header.Set("X-Portal-Service-Identity", junk)
-				if response, err := client.Do(request); err == nil {
-					io.Copy(io.Discard, response.Body)
-					response.Body.Close()
-				}
-			}
-		}()
-	}
-	defer func() {
-		close(stop)
-		for w := 0; w < 8; w++ {
-			<-done
-		}
-	}()
-	for i := 0; i < 10; i++ {
-		if code, body := f.legit(t, fmt.Sprintf("under-flood-%d", i)); code != 200 {
-			t.Fatalf("submission %d answered %d %s under an anonymous flood", i, code, body)
-		}
-	}
-}
-
 func TestPlatformServiceTaskBudgetMapStaysBoundedAndEmptiesWhenIdle(t *testing.T) {
 	var b platformInstallationBudgets
 	var releases []func()

@@ -242,48 +242,57 @@ func (s *Server) issuePlatformServiceIdentity(ctx context.Context, installation,
 }
 
 func (s *Server) verifyPlatformServiceIdentity(ctx context.Context, raw []byte, requiredResource string) (appplatform.ServiceIdentityGrant, error) {
+	grant, seed, err := s.verifyPlatformServiceIdentityWithSeed(ctx, raw, requiredResource)
+	clear(seed)
+	return grant, err
+}
+
+// verifyPlatformServiceIdentityWithSeed is the full verification, which also hands back a copy of the
+// installation's identity seed so that the caller can keep verification material in memory
+// (app_platform_service_material.go). The caller clears it.
+func (s *Server) verifyPlatformServiceIdentityWithSeed(ctx context.Context, raw []byte, requiredResource string) (appplatform.ServiceIdentityGrant, []byte, error) {
 	var zero appplatform.ServiceIdentityGrant
 	if len(raw) == 0 || len(raw) > 8192 || !serviceResourceCapability(requiredResource) {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	tx, err := s.st.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	defer tx.Rollback()
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	var installation string
 	var probe map[string]json.RawMessage
 	if json.Unmarshal(raw, &probe) != nil {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	if json.Unmarshal(probe["installation_id"], &installation) != nil || !platformValidUUID(installation) {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	current, err := loadPlatformServiceFacts(e, installation, nil, false)
 	if err != nil {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	now, err := platformDatabaseNow(e)
 	if err != nil {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	seed, err := s.platformServiceSeed(e, installation)
 	if err != nil {
-		return zero, err
+		return zero, nil, err
 	}
 	defer clear(seed)
 	expected := appplatform.ServiceIdentityGrant{Format: appplatform.ServiceIdentityFormat, AppID: current.appID, InstallationID: installation, ControllerEpoch: current.epoch, Generation: current.generation, PolicyRevision: current.policyRevision, ReleaseSHA256: current.release}
 	grant, err := appplatform.VerifyServiceIdentity(raw, seed, expected, requiredResource, now)
 	if err != nil {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	current, err = loadPlatformServiceFacts(e, installation, grant.Resources, false)
 	if err != nil {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
 	if grant.AppID != current.appID || grant.ControllerEpoch != current.epoch || grant.Generation != current.generation || grant.PolicyRevision != current.policyRevision || grant.ReleaseSHA256 != current.release {
-		return zero, errAppPlatformServiceUnavailable
+		return zero, nil, errAppPlatformServiceUnavailable
 	}
-	return grant, nil
+	return grant, append([]byte(nil), seed...), nil
 }

@@ -244,7 +244,8 @@ def window_quota(**changes):
 
 def window_backend_flood(requests=2400, answered=120, **changes):
     value = {"requests": requests, "answered": answered, "refused": requests - answered, "alive": True, "heartbeat_age_ms": 900,
-             "classes": {"200": answered, "429:task_capacity": requests - answered}}
+             "classes": {"200": answered, "429:task_capacity": requests - answered},
+             "forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}}
     value.update(changes)
     return value
 
@@ -795,6 +796,31 @@ class EvaluateTests(unittest.TestCase):
         evidence["windows"][1]["workload_submit"] = window_workload_submit(
             requests=soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW, latency_ms={"count": 24, "p50_ms": 25, "p95_ms": soak.WORKLOAD_SUBMIT_P95_BOUND_MS, "max_ms": soak.WORKLOAD_SUBMIT_MAX_BOUND_MS},
             classes={"200": soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW})
+        self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
+
+    def test_the_forged_credential_flood_must_run_and_every_answer_must_be_a_refusal(self):
+        name = "forged_identity_flood_refused_in_every_window"
+        self.assertIn(name, soak.PLATFORM_WORK_CHECKS)
+        self.assertTrue(self.verdict(child_evidence())["passed"])
+        failures = {
+            "too few": {"forged_requests": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1, "forged_classes": {"404:app_platform_task_unavailable": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1}},
+            "accepted": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "200": 40}},
+            "quota answer": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "429:task_capacity": 40}},
+            "server error": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "500:db_error": 40}},
+            "transport": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "transport": 40}},
+            "no classes": {"forged_requests": 640},
+        }
+        for label, changes in failures.items():
+            evidence = child_evidence()
+            flood = evidence["windows"][1]["backend_flood"]
+            flood.pop("forged_classes", None)
+            flood.update(changes)
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, label)
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"].pop("forged_requests")
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"].update(forged_requests=700, forged_classes={"404:app_platform_task_unavailable": 600, "429:app_platform_busy": 100})
         self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
 
     def test_a_missing_measurement_fails_instead_of_defaulting_to_zero(self):

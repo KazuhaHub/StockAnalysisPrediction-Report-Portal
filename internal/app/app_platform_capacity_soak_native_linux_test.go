@@ -1186,9 +1186,15 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 			t.Fatal("task flood targets", err)
 		}
 	}
+	var forgedTargets []soakFloodTaskTarget
+	if raw := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_FORGED_TARGETS"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &forgedTargets); err != nil {
+			t.Fatal("forged flood targets", err)
+		}
+	}
 	identityPath := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_IDENTITIES")
 	var mu sync.Mutex
-	counters := soakFloodCounters{Classes: map[string]int64{}, TaskClasses: map[string]int64{}}
+	counters := soakFloodCounters{Classes: map[string]int64{}, TaskClasses: map[string]int64{}, ForgedClasses: map[string]int64{}}
 	identities := map[string]string{}
 	loadIdentities := func() {
 		raw, err := os.ReadFile(identityPath)
@@ -1277,6 +1283,39 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 			}(target)
 		}
 	}
+	// The anonymous role: one connection per real installation sends credentials that name it with a wrong MAC, which no backend holds. Every one
+	// must be refused (404, or 429 app_platform_busy when the Portal-wide limit on cold verification is full) and none may hold anything a backend needs.
+	recordForged := func(class string) {
+		mu.Lock()
+		defer mu.Unlock()
+		counters.ForgedRequests++
+		counters.ForgedClasses[class]++
+	}
+	for _, target := range forgedTargets {
+		go func(target soakFloodTaskTarget) {
+			for {
+				mu.Lock()
+				identity := identities[target.Installation]
+				mu.Unlock()
+				status := 0
+				var body []byte
+				request, err := http.NewRequest(http.MethodPost, target.URL, bytes.NewReader(soakBackendFloodBody("forged-"+target.Prefix, sequence.Add(1))))
+				if err == nil {
+					request.Header.Set("Content-Type", "application/json")
+					request.Header.Set(appplatform.TaskServiceIdentityHeader, soakForgedIdentityHeader(identity, int(sequence.Add(1))))
+					var response *http.Response
+					if response, err = client.Do(request); err == nil {
+						status = response.StatusCode
+						body, _ = io.ReadAll(io.LimitReader(response.Body, 4096))
+						_, _ = io.Copy(io.Discard, response.Body)
+						response.Body.Close()
+					}
+				}
+				recordForged(soakFloodClass(status, body, err))
+				time.Sleep(50 * time.Millisecond)
+			}
+		}(target)
+	}
 	deadline := time.Now().Add(time.Duration(soakEnvInt(t, "PORTAL_CAPACITY_SOAK_FLOOD_MINUTES", 1)) * time.Minute)
 	for time.Now().Before(deadline) {
 		if len(taskTargets) > 0 {
@@ -1284,7 +1323,10 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 		}
 		mu.Lock()
 		snapshot := soakFloodCounters{Requests: counters.Requests, Classes: map[string]int64{}, HeartbeatMS: time.Now().UnixMilli(),
-			TaskRequests: counters.TaskRequests, TaskClasses: map[string]int64{}}
+			TaskRequests: counters.TaskRequests, TaskClasses: map[string]int64{}, ForgedRequests: counters.ForgedRequests, ForgedClasses: map[string]int64{}}
+		for class, count := range counters.ForgedClasses {
+			snapshot.ForgedClasses[class] = count
+		}
 		for class, count := range counters.Classes {
 			snapshot.Classes[class] = count
 		}
@@ -1331,6 +1373,14 @@ func (c *soakChild) startFlood(minutes int, saturated []string, identityPath str
 			Installation: installation, Prefix: strconv.Itoa(index)})
 	}
 	rawTaskTargets, _ := json.Marshal(taskTargets)
+	var forgedTargets []soakFloodTaskTarget
+	if len(saturated) > 0 { // the variant without the backend flood has no anonymous half either
+		for index, installation := range c.managed {
+			forgedTargets = append(forgedTargets, soakFloodTaskTarget{URL: "http://" + listener.Addr().String() + "/api/app-platform/installations/" + installation + "/tasks/background",
+				Installation: installation, Prefix: strconv.Itoa(index)})
+		}
+	}
+	rawForgedTargets, _ := json.Marshal(forgedTargets)
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1338,7 +1388,7 @@ func (c *soakChild) startFlood(minutes int, saturated []string, identityPath str
 	out := filepath.Join(os.Getenv("TMPDIR"), "flood-counters.json")
 	flood := exec.Command(executable, "-test.run=^TestPlatformCapacitySoakFlood$", "-test.v", fmt.Sprintf("-test.timeout=%dm", minutes+10))
 	flood.Env = []string{"GOMAXPROCS=1", "PORTAL_CAPACITY_SOAK_FLOOD=1", "PORTAL_CAPACITY_SOAK_FLOOD_TARGETS=" + string(rawTargets),
-		"PORTAL_CAPACITY_SOAK_FLOOD_TASK_TARGETS=" + string(rawTaskTargets), "PORTAL_CAPACITY_SOAK_FLOOD_IDENTITIES=" + identityPath,
+		"PORTAL_CAPACITY_SOAK_FLOOD_TASK_TARGETS=" + string(rawTaskTargets), "PORTAL_CAPACITY_SOAK_FLOOD_FORGED_TARGETS=" + string(rawForgedTargets), "PORTAL_CAPACITY_SOAK_FLOOD_IDENTITIES=" + identityPath,
 		"PORTAL_CAPACITY_SOAK_FLOOD_COOKIE=" + c.cookie, "PORTAL_CAPACITY_SOAK_FLOOD_OUT=" + out,
 		"PORTAL_CAPACITY_SOAK_FLOOD_MINUTES=" + strconv.Itoa(minutes+5), "TMPDIR=" + os.Getenv("TMPDIR"), "HOME=" + os.Getenv("HOME")}
 	var floodOutput platformSyncBuffer

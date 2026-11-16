@@ -51,6 +51,10 @@ type Server struct {
 	// platformServiceTasks holds the slots of the session-free task route, one budget per verified installation
 	// (app_platform_http.go).
 	platformServiceTasks platformInstallationBudgets
+	// platformServiceMaterial and platformUnverified keep a forged credential away from the database
+	// (app_platform_service_material.go).
+	platformServiceMaterial platformServiceMaterialCache
+	platformUnverified      platformDocumentBudget
 	// platformTaskRefusals remembers credentials just refused for their installation's task quota
 	// (app_platform_task_refusal.go).
 	platformTaskRefusals    platformTaskRefusalCache

@@ -277,6 +277,9 @@ type soakFloodCounters struct {
 	// route with a backend's service identity, by status and code.
 	TaskRequests int64            `json:"task_requests"`
 	TaskClasses  map[string]int64 `json:"task_classes"`
+	// ForgedRequests and ForgedClasses count the anonymous half of that flood: credentials that name a real installation and carry a wrong MAC.
+	ForgedRequests int64            `json:"forged_requests"`
+	ForgedClasses  map[string]int64 `json:"forged_classes"`
 }
 
 const (

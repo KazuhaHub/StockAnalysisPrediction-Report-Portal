@@ -113,6 +113,10 @@ type soakBackendFlood struct {
 	Classes        map[string]int64 `json:"classes"`
 	Alive          bool             `json:"alive"`
 	HeartbeatAgeMS int64            `json:"heartbeat_age_ms"`
+	// ForgedRequests and ForgedClasses are the anonymous half of the flood: credentials naming a real installation with a wrong MAC. They are
+	// counted apart so that Requests stays the authenticated backends' count.
+	ForgedRequests int64            `json:"forged_requests"`
+	ForgedClasses  map[string]int64 `json:"forged_classes"`
 }
 
 // soakWorkloadSubmit is what the workload tenants' own submissions through the task route did in one window: how each was answered and how long
@@ -173,8 +177,34 @@ func soakBackendFloodWindow(previous, current soakFloodCounters, alive bool, now
 			classes[class] = delta
 		}
 	}
+	forged := map[string]int64{}
+	for class, count := range current.ForgedClasses {
+		if delta := count - previous.ForgedClasses[class]; delta > 0 {
+			forged[class] = delta
+		}
+	}
 	return soakBackendFlood{Requests: current.TaskRequests - previous.TaskRequests, Answered: classes[soakTaskFloodAnswered], Refused: classes[soakTaskFloodRefused],
-		Classes: classes, Alive: alive, HeartbeatAgeMS: now.UnixMilli() - current.HeartbeatMS}
+		Classes: classes, Alive: alive, HeartbeatAgeMS: now.UnixMilli() - current.HeartbeatMS,
+		ForgedRequests: current.ForgedRequests - previous.ForgedRequests, ForgedClasses: forged}
+}
+
+// soakForgedIdentityHeader is a credential that names the same installation as header and carries another lease id under the MAC of the first: a
+// well-formed, canonical identity whose MAC is wrong. n makes each one different. An unreadable header gives "".
+func soakForgedIdentityHeader(header string, n int) string {
+	raw, err := decodePlatformServiceIdentityHeader(header)
+	if err != nil {
+		return ""
+	}
+	var grant appplatform.ServiceIdentityGrant
+	if json.Unmarshal(raw, &grant) != nil {
+		return ""
+	}
+	grant.LeaseID = fmt.Sprintf("00000000-0000-4000-8000-%012d", n)
+	forged, err := json.Marshal(grant)
+	if err != nil {
+		return ""
+	}
+	return soakIdentityHeader(forged)
 }
 
 // soakTaskWindowOf summarises the workload tenants' tasks over [start, end). rows are the tasks created in or since the window or still open;
@@ -360,6 +390,46 @@ func TestSoakBackendFloodWindowIsTheDeltaOfTheTaskCounters(t *testing.T) {
 	}
 }
 
+// The anonymous half of the flood sends credentials that name a real installation with a wrong MAC; its answers are counted apart.
+func TestSoakBackendFloodWindowCountsTheForgedCredentialsApart(t *testing.T) {
+	previous := soakFloodCounters{TaskRequests: 100, TaskClasses: map[string]int64{"200": 20}, ForgedRequests: 10, ForgedClasses: map[string]int64{"404:app_platform_task_unavailable": 10}}
+	current := soakFloodCounters{TaskRequests: 2_100, TaskClasses: map[string]int64{"200": 520}, ForgedRequests: 510,
+		ForgedClasses: map[string]int64{"404:app_platform_task_unavailable": 480, "429:app_platform_busy": 30}, HeartbeatMS: 61_000}
+	window := soakBackendFloodWindow(previous, current, true, time.UnixMilli(62_000))
+	if window.ForgedRequests != 500 || window.ForgedClasses["404:app_platform_task_unavailable"] != 470 || window.ForgedClasses["429:app_platform_busy"] != 30 {
+		t.Fatalf("window = %+v", window)
+	}
+	if window.Requests != 2_000 {
+		t.Fatalf("the forged requests changed the backend request count: %d", window.Requests)
+	}
+}
+
+func TestSoakForgedIdentityHeaderNamesTheSameInstallationWithAnotherLeaseAndIsNeverTheOriginal(t *testing.T) {
+	grant := appplatform.ServiceIdentityGrant{Format: appplatform.ServiceIdentityFormat, LeaseID: "99999999-9999-4999-8999-999999999999", AppID: "a-app",
+		InstallationID: "11111111-1111-4111-8111-111111111111", ControllerEpoch: "22222222-2222-4222-8222-222222222222", Generation: "1", PolicyRevision: "1",
+		ReleaseSHA256: strings.Repeat("a", 64), Resources: []string{"tasks.schedule"}, IssuedMS: "1", ExpiresMS: "2", Mac: strings.Repeat("b", 64)}
+	raw, _ := json.Marshal(grant)
+	original := soakIdentityHeader(raw)
+	seen := map[string]bool{original: true}
+	for n := 1; n <= 3; n++ {
+		forged := soakForgedIdentityHeader(original, n)
+		if seen[forged] {
+			t.Fatalf("forgery %d repeats", n)
+		}
+		seen[forged] = true
+		decoded, err := decodePlatformServiceIdentityHeader(forged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if named, ok := platformServiceCredentialInstallation(decoded); !ok || named != grant.InstallationID {
+			t.Fatalf("forgery %d names %q", n, named)
+		}
+	}
+	if soakForgedIdentityHeader("not base64!", 1) != "" {
+		t.Fatal("an unreadable header produced a forgery")
+	}
+}
+
 func TestSoakBackendFloodRequestsAreTheTaskRoutesClosedBodyAndOneInFourReplaysTheSaturatingTask(t *testing.T) {
 	now := time.Now().UnixMilli()
 	replays := 0
@@ -464,7 +534,7 @@ func TestSoakFenceReasonIsReadFromTheAuditDetail(t *testing.T) {
 
 // The verdict reads these field names; the Python harness and this file must agree on them.
 func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) {
-	window := soakWindow{Tasks: &soakTaskWindow{}, Events: &soakEventWindow{}, Quota: &soakQuotaWindow{SaturatedActive: map[string]int{}}, BackendFlood: &soakBackendFlood{Classes: map[string]int64{}},
+	window := soakWindow{Tasks: &soakTaskWindow{}, Events: &soakEventWindow{}, Quota: &soakQuotaWindow{SaturatedActive: map[string]int{}}, BackendFlood: &soakBackendFlood{Classes: map[string]int64{}, ForgedClasses: map[string]int64{}},
 		WorkloadSubmit: &soakWorkloadSubmit{Classes: map[string]int64{}}}
 	raw, err := json.Marshal(window)
 	if err != nil {

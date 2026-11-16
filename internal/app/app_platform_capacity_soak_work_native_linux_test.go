@@ -173,6 +173,7 @@ func (w *soakWork) writeIdentities() {
 			t.Fatal("service identity of workload tenant "+installation, err)
 		}
 		workload[installation] = soakIdentityHeader(raw)
+		headers[installation] = workload[installation] // the flood's forged half names the workload tenants too
 		clear(raw)
 	}
 	w.identities.Lock()

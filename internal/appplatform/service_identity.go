@@ -115,6 +115,29 @@ func SignServiceIdentity(seed []byte, g ServiceIdentityGrant, now int64) ([]byte
 	return raw, nil
 }
 
+// ServiceIdentityAuthentic reports whether raw is a canonical service identity whose MAC is valid under
+// seed. It checks nothing else (not the expiry, the installation facts or the resources), so it can only
+// ever refuse a forged credential cheaply; every other check stays with VerifyServiceIdentity.
+func ServiceIdentityAuthentic(raw, seed []byte) bool {
+	if len(seed) != 32 || len(raw) == 0 || len(raw) > 8192 {
+		return false
+	}
+	var g ServiceIdentityGrant
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&g) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(g.Mac) != 64 {
+		return false
+	}
+	canonical, err := json.Marshal(g)
+	if err != nil || !bytes.Equal(canonical, raw) {
+		return false
+	}
+	mac, err := serviceGrantMAC(seed, g)
+	expectedMAC, decodeErr := hex.DecodeString(g.Mac)
+	actualMAC, actualErr := hex.DecodeString(mac)
+	return err == nil && decodeErr == nil && actualErr == nil && hmac.Equal(expectedMAC, actualMAC)
+}
+
 func VerifyServiceIdentity(raw, seed []byte, expected ServiceIdentityGrant, requiredResource string, now int64) (ServiceIdentityGrant, error) {
 	var zero ServiceIdentityGrant
 	if len(seed) != 32 || len(raw) == 0 || len(raw) > 8192 || !serviceResource(requiredResource) {

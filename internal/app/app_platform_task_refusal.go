@@ -10,10 +10,11 @@ import (
 )
 
 // platformTaskRefusalTTL bounds how long one verified credential is remembered as having been refused
-// for its installation's task quota. It is the longest a retired credential can be told 429 instead of
-// 404; the live statement that backs every use re-reads the installation's authority, so in practice a
-// retirement is seen at once and this limit only covers what that statement does not read (a revoked
-// grant that keeps the policy revision, the credential seed, publisher trust).
+// for its installation's task quota. The statements that back every use re-read the installation's
+// authority (state, generation, policy revision, epoch, restore pause, activation, setup bindings, grants
+// and handler resolution), so the only thing this limit covers is what they do not read: publisher trust
+// and the signed descriptor. It is the longest a credential of a publisher retired in the meantime can be
+// told 429 instead of 404.
 const platformTaskRefusalTTL = 2 * time.Second
 
 // platformTaskRefusalMax bounds the memory: one entry per recently refused credential.

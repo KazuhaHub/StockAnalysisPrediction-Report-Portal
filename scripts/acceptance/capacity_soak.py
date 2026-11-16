@@ -67,6 +67,12 @@ TYPED_BACKEND_FLOOD_CLASSES = ("200", "429:task_capacity", "429:rate_limited", "
 WORKLOAD_SUBMIT_MIN_PER_WINDOW = 24
 WORKLOAD_SUBMIT_P95_BOUND_MS = 500
 WORKLOAD_SUBMIT_MAX_BOUND_MS = 5_000
+# The backend flood has an anonymous half (SEC-09, review round 2): credentials that name a real installation with a wrong MAC, sent while the backends
+# flood and submit. Every one must be refused: 404 (refused from the Portal's in-memory verification material, with no database work) or 429
+# app_platform_busy (the Portal-wide limit on verification without material is full). Anything else, above all a 200 or a 5xx, fails. One connection
+# per installation, pausing 50 ms after each answer, makes about 160 a second; fewer than 100 a window means the half did not run.
+FORGED_FLOOD_MIN_PER_WINDOW = 100
+FORGED_FLOOD_CLASSES = ("404:app_platform_task_unavailable", "429:app_platform_busy")
 PLATFORM_WORK_CHECKS = (
     "task_worker_ran_in_every_window",
     "no_task_lost_or_stuck",
@@ -78,6 +84,7 @@ PLATFORM_WORK_CHECKS = (
     "backend_task_flood_answered_or_typed_in_every_window",
     "backend_task_flood_alive_throughout",
     "workload_tenants_submit_through_the_route_in_every_window",
+    "forged_identity_flood_refused_in_every_window",
 )
 # What each backend must show in every one-minute window, from its own cgroup counters.
 MEMORY_HELD_PERCENT = 85
@@ -1189,6 +1196,19 @@ def _platform_work_checks(evidence):
             or w["backend_flood"].get("heartbeat_age_ms", FLOOD_HEARTBEAT_MAX_AGE_MS + 1) > FLOOD_HEARTBEAT_MAX_AGE_MS]
     checks.append(_check("backend_task_flood_alive_throughout", not dead, {"maximum_heartbeat_age_ms": FLOOD_HEARTBEAT_MAX_AGE_MS, "windows_without_a_live_flood": dead[:200],
                                                                          "windows_judged_under_the_flood": len(windows)}))
+
+    bad_forged, forged_by_window = [], []
+    for w in windows:
+        flood = w["backend_flood"]
+        count, classes = flood.get("forged_requests"), flood.get("forged_classes")
+        ok = (isinstance(count, int) and count >= FORGED_FLOOD_MIN_PER_WINDOW and isinstance(classes, dict) and classes
+              and all(k in FORGED_FLOOD_CLASSES or not v for k, v in classes.items()) and sum(classes.values()) >= FORGED_FLOOD_MIN_PER_WINDOW)
+        forged_by_window.append({"requests": count, "classes": classes})
+        if not ok:
+            bad_forged.append(w["minute"])
+    checks.append(_check("forged_identity_flood_refused_in_every_window", not bad_forged, {
+        "minimum_per_window": FORGED_FLOOD_MIN_PER_WINDOW, "allowed_classes": list(FORGED_FLOOD_CLASSES), "windows_failing": bad_forged[:200],
+        "by_window": forged_by_window[:500]}))
 
     bad_submit, by_window = [], []
     for w in windows:

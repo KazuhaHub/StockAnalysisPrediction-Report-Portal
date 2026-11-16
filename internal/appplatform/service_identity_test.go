@@ -114,3 +114,34 @@ func TestServiceIdentityRefusesTamperedOrOpenPayloads(t *testing.T) {
 		t.Fatal("service fixture")
 	}
 }
+
+// ServiceIdentityAuthentic only ever refuses: a credential signed with the seed passes, whatever its
+// expiry, and a tampered, re-keyed or non-canonical one does not.
+func TestServiceIdentityAuthenticChecksOnlyTheCanonicalFormAndTheMAC(t *testing.T) {
+	now := int64(1700000000000)
+	seed := bytes.Repeat([]byte{7}, 32)
+	raw, err := SignServiceIdentity(seed, serviceIdentityFixture(now), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ServiceIdentityAuthentic(raw, seed) {
+		t.Fatal("a signed credential was refused")
+	}
+	if ServiceIdentityAuthentic(raw, bytes.Repeat([]byte{8}, 32)) || ServiceIdentityAuthentic(raw, seed[:31]) {
+		t.Fatal("a credential was accepted under another seed")
+	}
+	var grant ServiceIdentityGrant
+	if err := json.Unmarshal(raw, &grant); err != nil {
+		t.Fatal(err)
+	}
+	grant.LeaseID = "10000000-0000-4000-8000-000000000002"
+	forged, _ := json.Marshal(grant)
+	if ServiceIdentityAuthentic(forged, seed) {
+		t.Fatal("a forged lease id kept the MAC")
+	}
+	for _, bad := range [][]byte{nil, []byte("{}"), append(append([]byte(nil), raw...), ' '), bytes.Replace(raw, []byte(`"format"`), []byte(`"format" `), 1)} {
+		if ServiceIdentityAuthentic(bad, seed) {
+			t.Fatalf("accepted %q", bad)
+		}
+	}
+}

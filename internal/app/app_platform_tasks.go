@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"io"
 	"mime"
 	"net/http"
@@ -89,6 +90,9 @@ func platformTaskFailure(w http.ResponseWriter, err error) {
 	}
 }
 
+// platformTaskSlotHook is a test seam called once a request holds its installation's slot; it is a no-op in production.
+var platformTaskSlotHook = func() {}
+
 // platformTaskBodyTimeout is how long the route waits for a submission's body, as the backend and network relays do.
 var platformTaskBodyTimeout = 5 * time.Second
 
@@ -131,34 +135,85 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 	bodyOK := strings.TrimSpace(string(raw)) != ""
-	// A credential just refused for its installation's task quota is answered from one live statement
-	// (app_platform_task_refusal.go). The lookup is keyed on the digest of the exact credential bytes, so
-	// an anonymous caller never finds an entry; anything but a confirmed refusal takes the full path.
-	refusalKey := platformTaskRefusalKey(rawIdentity)
-	if entry, ok := s.platformTaskRefusals.lookup(refusalKey, r.PathValue("installation")); ok && bodyOK {
-		if s.platformTaskBodyQuotaRefused(entry, raw) {
-			platformTaskFailure(w, errAppPlatformTaskQuota)
-			return
-		}
-		s.platformTaskRefusals.forget(refusalKey)
-	}
-	grant, err := s.verifyPlatformServiceIdentity(r.Context(), rawIdentity, "tasks.schedule")
-	if err != nil || grant.InstallationID != r.PathValue("installation") {
+	// Nothing below may let an unauthenticated caller make the Portal do database work, or hold what a
+	// backend needs. A credential is first checked in memory (app_platform_service_material.go): one that
+	// is malformed, or names another installation than the path, or carries a MAC that is wrong for an
+	// installation whose verification material is warm, is refused 404 with no database access at all.
+	installation := r.PathValue("installation")
+	if named, ok := platformServiceCredentialInstallation(rawIdentity); !ok || named != installation {
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)
 		return
+	}
+	known, authentic := s.platformServiceMaterial.authentic(installation, rawIdentity)
+	if known && !authentic {
+		platformTaskFailure(w, errAppPlatformServiceUnavailable)
+		return
+	}
+	refusalKey := platformTaskRefusalKey(rawIdentity)
+	var grant appplatform.ServiceIdentityGrant
+	var release func()
+	if known {
+		// The MAC is valid: this is a holder of a real credential, and its database work for the
+		// installation, the remembered refusal included, runs inside the installation's own slots, so one
+		// tenant's parallel connections can never take more of the shared pool than that.
+		var ok bool
+		if release, ok = s.platformServiceTasks.acquire(installation); !ok {
+			platformJSONBusy(w)
+			return
+		}
+		defer release()
+		platformTaskSlotHook()
+		// A credential just refused for its installation's task quota is answered from a few live
+		// statements (app_platform_task_refusal.go); anything but a confirmed refusal takes the full path.
+		if entry, ok := s.platformTaskRefusals.lookup(refusalKey, installation); ok && bodyOK {
+			if s.platformTaskBodyQuotaRefused(entry, raw) {
+				platformTaskFailure(w, errAppPlatformTaskQuota)
+				return
+			}
+			s.platformTaskRefusals.forget(refusalKey)
+		}
+		var seed []byte
+		var err error
+		if grant, seed, err = s.verifyPlatformServiceIdentityWithSeed(r.Context(), rawIdentity, "tasks.schedule"); err != nil || grant.InstallationID != installation {
+			clear(seed)
+			s.platformServiceMaterial.forget(installation)
+			platformTaskFailure(w, errAppPlatformServiceUnavailable)
+			return
+		}
+		s.platformServiceMaterial.remember(installation, seed)
+		clear(seed)
+	} else {
+		// No material: the full verification is the only way to authenticate, and it runs under a small
+		// Portal-wide limit that never waits, so an unauthenticated flood can delay other cold verifications
+		// but never a backend whose material is warm or the rest of the Portal's connections.
+		releaseUnverified, ok := s.platformUnverified.acquire()
+		if !ok {
+			platformJSONBusy(w)
+			return
+		}
+		g, seed, err := s.verifyPlatformServiceIdentityWithSeed(r.Context(), rawIdentity, "tasks.schedule")
+		releaseUnverified()
+		if err != nil || g.InstallationID != installation {
+			clear(seed)
+			platformTaskFailure(w, errAppPlatformServiceUnavailable)
+			return
+		}
+		grant = g
+		s.platformServiceMaterial.remember(installation, seed)
+		clear(seed)
+		// The installation's slot is taken after verification, for the verified installation: an
+		// unverified caller never holds one.
+		if release, ok = s.platformServiceTasks.acquire(installation); !ok {
+			platformJSONBusy(w)
+			return
+		}
+		defer release()
+		platformTaskSlotHook()
 	}
 	if !bodyOK {
 		platformTaskFailure(w, errPlatformManagementInput)
 		return
 	}
-	// Admission slots are taken only now, for the verified installation: see platformInstallationBudgets.
-	// The deferred release covers every exit path below.
-	release, ok := s.platformServiceTasks.acquire(grant.InstallationID)
-	if !ok {
-		platformJSONBusy(w)
-		return
-	}
-	defer release()
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
 		platformTaskFailure(w, err)
