@@ -98,6 +98,22 @@ describe('InputsPreview', () => {
     expect(container.textContent).toMatch(/batch\.inputsMore/)
   })
 
+  // A job only carries its FIRST row's inputs. Shown bare on a 20-row batch they read as if the
+  // whole job ran for that one symbol, so a multi-row job says how many rows it has and that
+  // what follows is the first of them.
+  it('labels a multi-row job\'s inputs as its first row, with the row count', () => {
+    const { container } = render(<InputsPreview inputs={json({ symbol: '301001' })} rowCount={20} />)
+    expect(container.textContent).toBe('batch.inputsFirstRow:{"n":20}  symbol=301001')
+  })
+
+  it('leaves a single-row job\'s inputs bare', () => {
+    for (const rowCount of [undefined, 0, 1]) {
+      const { container, unmount } = render(<InputsPreview inputs={json({ symbol: '301001' })} rowCount={rowCount} />)
+      expect(container.textContent).toBe('symbol=301001')
+      unmount()
+    }
+  })
+
   it('renders nothing without inputs', () => {
     const { container } = render(<InputsPreview inputs="" />)
     expect(container.textContent).toBe('')

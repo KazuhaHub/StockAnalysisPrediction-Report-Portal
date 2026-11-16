@@ -590,6 +590,7 @@
   "batch.editor.resizeRow": "調整第 {{row}} 列的高度",
   "batch.editor.submitBlocked": "請先補齊批次資料。",
   "batch.editor.submitReady": "{{n}} 列資料待提交。",
+  "batch.inputsFirstRow": "共 {{n}} 筆，首筆",
   "batch.inputsMore": "…還有 {{n}} 項",
   "batch.jobDetail": "任務詳情",
   "batch.jobNotFound": "找不到這個任務，或者你無權查看。",

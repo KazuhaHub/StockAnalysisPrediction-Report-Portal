@@ -590,6 +590,7 @@
   "batch.editor.resizeRow": "调整第 {{row}} 行的高度",
   "batch.editor.submitBlocked": "请先补全批量数据。",
   "batch.editor.submitReady": "{{n}} 行数据待提交。",
+  "batch.inputsFirstRow": "共 {{n}} 行，首行",
   "batch.inputsMore": "…还有 {{n}} 项",
   "batch.jobDetail": "任务详情",
   "batch.jobNotFound": "找不到这个任务，或者你无权查看。",

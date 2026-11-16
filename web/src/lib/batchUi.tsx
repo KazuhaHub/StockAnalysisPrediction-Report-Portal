@@ -209,21 +209,27 @@ export function summarizeInputs(
 // InputsPreview renders a run's inputs as a compact, clamped label: the summary (see
 // summarizeInputs) on one line, and the same entries one-per-line in the hover tooltip.
 // Returns null when there are no inputs so callers can drop the line entirely.
+//
+// A job carries only its first row's inputs. Pass the job's rowCount so a multi-row job is
+// introduced as "N rows, first row" rather than passing one row's symbol off as the whole job.
 export function InputsPreview({
   inputs,
   rows = 2,
   secondary = true,
   style,
+  rowCount,
 }: {
   inputs?: string
   rows?: number
   secondary?: boolean
   style?: CSSProperties
+  rowCount?: number
 }) {
   const { t } = useTranslation()
   const { entries, hidden } = summarizeInputs(inputs)
   if (entries.length === 0) return null
-  const lines = hidden > 0 ? [...entries, t('batch.inputsMore', { n: hidden })] : entries
+  const lead = rowCount !== undefined && rowCount > 1 ? [t('batch.inputsFirstRow', { n: rowCount })] : []
+  const lines = [...lead, ...entries, ...(hidden > 0 ? [t('batch.inputsMore', { n: hidden })] : [])]
   return (
     <Typography.Paragraph
       type={secondary ? 'secondary' : undefined}
