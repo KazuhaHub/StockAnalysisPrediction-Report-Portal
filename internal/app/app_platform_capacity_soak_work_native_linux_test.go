@@ -188,6 +188,19 @@ func (w *soakWork) writeIdentities() {
 	}
 }
 
+// warm sends one submission for every workload tenant before the flood starts and discards what it measured. A backend that is already running has
+// its verification material warm when an attack begins; the first contact of an installation, or one after 30 seconds of silence, is the case the
+// cold-verification limit trades against (doc 171), which a unit test covers and this load does not model.
+func (w *soakWork) warm(baseURL string) {
+	w.baseURL.Store(baseURL)
+	client := &http.Client{Timeout: 25 * time.Second}
+	for index, installation := range w.workload {
+		w.submitters.Add(1)
+		w.submit(client, index, installation, 0)
+	}
+	w.submits.take()
+}
+
 // submit sends one workload tenant's backend task through the Portal's task route with that tenant's own identity, as a backend would, and records
 // how it was answered and how long it took. Anything but a 200 is an admission error.
 func (w *soakWork) submit(client *http.Client, index int, installation string, number int) {

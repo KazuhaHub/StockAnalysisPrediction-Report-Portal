@@ -1343,7 +1343,7 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 
 // startFlood serves the Portal's routes on a loopback listener and starts the flood process against them. alive reports whether
 // the flood process is still running.
-func (c *soakChild) startFlood(minutes int, saturated []string, identityPath string) (stop func(), read func() soakFloodCounters, alive func() bool) {
+func (c *soakChild) startFlood(minutes int, saturated []string, identityPath string, serving func(baseURL string)) (stop func(), read func() soakFloodCounters, alive func() bool) {
 	t := c.t
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1352,6 +1352,7 @@ func (c *soakChild) startFlood(minutes int, saturated []string, identityPath str
 	c.floodBase = "http://" + listener.Addr().String()
 	server := &http.Server{Handler: c.mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()
+	serving(c.floodBase) // the Portal answers now; the flood process is not started yet
 	var targets []soakFloodTarget
 	body := `{"soak":"` + strings.Repeat("m", 2048) + `"}`
 	for _, installation := range c.managed {
@@ -1435,9 +1436,8 @@ func (c *soakChild) load(minutes int) {
 	if !c.variant.BackendFlood { // a diagnostic variant: the saturated tenants hold their quota and nothing floods the task route
 		floodingBackends = nil
 	}
-	stop, read, alive := c.startFlood(minutes, floodingBackends, work.identityPath)
+	stop, read, alive := c.startFlood(minutes, floodingBackends, work.identityPath, work.warm)
 	defer stop()
-	work.baseURL.Store(c.floodBase)
 	if soakDiagnosing() {
 		c.diagnose("loaded", 60*time.Second)
 	}
