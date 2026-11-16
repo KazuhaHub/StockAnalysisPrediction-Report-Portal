@@ -115,6 +115,51 @@ type soakBackendFlood struct {
 	HeartbeatAgeMS int64            `json:"heartbeat_age_ms"`
 }
 
+// soakWorkloadSubmit is what the workload tenants' own submissions through the task route did in one window: how each was answered and how long
+// it took. It is the cross-tenant measurement: these tenants share the Portal, the database and the route with the flood.
+type soakWorkloadSubmit struct {
+	Requests int64            `json:"requests"`
+	Answered int64            `json:"answered"`
+	Classes  map[string]int64 `json:"classes"`
+	Latency  soakMillisStats  `json:"latency_ms"`
+}
+
+// soakSubmitCollector gathers the workload tenants' submissions between two takes.
+type soakSubmitCollector struct {
+	mu        sync.Mutex
+	classes   map[string]int64
+	latencies []int64
+}
+
+func (c *soakSubmitCollector) record(class string, ms int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.classes == nil {
+		c.classes = map[string]int64{}
+	}
+	c.classes[class]++
+	c.latencies = append(c.latencies, ms)
+}
+
+// take returns what was recorded since the last take and starts over.
+func (c *soakSubmitCollector) take() soakWorkloadSubmit {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	window := soakWorkloadSubmit{Classes: map[string]int64{}, Latency: soakMillisSummarize(c.latencies)}
+	for class, n := range c.classes {
+		window.Classes[class] = n
+		window.Requests += n
+	}
+	window.Answered = window.Classes[soakFloodOK]
+	c.classes, c.latencies = nil, nil
+	return window
+}
+
+// soakWorkloadTaskBody is the backend task one workload tenant submits through the route; every occurrence is new.
+func soakWorkloadTaskBody(index, number int) []byte {
+	return []byte(fmt.Sprintf(`{"occurrenceId":"load:%d:%d","handler":%q,"payload":{"soak":%d}}`, index, number, appplatform.TaskHandlerBackend, number))
+}
+
 const (
 	soakTaskFloodAnswered = "200"
 	soakTaskFloodRefused  = "429:task_capacity"
@@ -344,6 +389,43 @@ func TestSoakBackendFloodRequestsAreTheTaskRoutesClosedBodyAndOneInFourReplaysTh
 	}
 }
 
+// The workload tenants submit their tasks through the task route with their own identity; the window keeps what each submission answered and how
+// long it took.
+func TestSoakWorkloadSubmitWindowCountsClassesAndSummarisesLatencyAndStartsOverOnTake(t *testing.T) {
+	var collector soakSubmitCollector
+	for _, ms := range []int64{10, 20, 30, 40} {
+		collector.record("200", ms)
+	}
+	collector.record("429:app_platform_busy", 90)
+	window := collector.take()
+	if window.Requests != 5 || window.Answered != 4 || window.Classes["200"] != 4 || window.Classes["429:app_platform_busy"] != 1 {
+		t.Fatalf("window = %+v", window)
+	}
+	if window.Latency.Count != 5 || window.Latency.Max != 90 || window.Latency.P95 != 90 || window.Latency.P50 != 30 {
+		t.Fatalf("latency = %+v", window.Latency)
+	}
+	if again := collector.take(); again.Requests != 0 || again.Latency.Count != 0 || len(again.Classes) != 0 {
+		t.Fatalf("a second take starts over: %+v", again)
+	}
+}
+
+func TestSoakWorkloadTaskBodyIsTheRoutesClosedBodyAndNeverRepeatsAnOccurrence(t *testing.T) {
+	now := time.Now().UnixMilli()
+	seen := map[string]bool{}
+	for index := 0; index < 3; index++ {
+		for number := 1; number <= 3; number++ {
+			admission, err := readPlatformTaskAdmission(soakWorkloadTaskBody(index, number), now)
+			if err != nil || admission.Handler != appplatform.TaskHandlerBackend {
+				t.Fatalf("body %d/%d: %+v %v", index, number, admission, err)
+			}
+			if seen[admission.OccurrenceID] {
+				t.Fatalf("occurrence %q repeats", admission.OccurrenceID)
+			}
+			seen[admission.OccurrenceID] = true
+		}
+	}
+}
+
 func TestSoakIdentityHeaderIsTheBase64URLOfTheRawIdentityTheRouteDecodes(t *testing.T) {
 	raw := []byte(`{"format":"x","resources":["tasks.schedule"]}`)
 	header := soakIdentityHeader(raw)
@@ -382,7 +464,8 @@ func TestSoakFenceReasonIsReadFromTheAuditDetail(t *testing.T) {
 
 // The verdict reads these field names; the Python harness and this file must agree on them.
 func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) {
-	window := soakWindow{Tasks: &soakTaskWindow{}, Events: &soakEventWindow{}, Quota: &soakQuotaWindow{SaturatedActive: map[string]int{}}, BackendFlood: &soakBackendFlood{Classes: map[string]int64{}}}
+	window := soakWindow{Tasks: &soakTaskWindow{}, Events: &soakEventWindow{}, Quota: &soakQuotaWindow{SaturatedActive: map[string]int{}}, BackendFlood: &soakBackendFlood{Classes: map[string]int64{}},
+		WorkloadSubmit: &soakWorkloadSubmit{Classes: map[string]int64{}}}
 	raw, err := json.Marshal(window)
 	if err != nil {
 		t.Fatal(err)
@@ -396,6 +479,7 @@ func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) 
 		"events":        {"captured", "capture_errors", "delivered", "max_inflight_per_subscription", "subscriptions_active", "subscriptions_fenced"},
 		"quota":         {"max_installation_active", "saturated_active"},
 		"backend_flood": {"requests", "answered", "refused", "classes", "alive", "heartbeat_age_ms"},
+		"workload_submit": {"requests", "answered", "classes", "latency_ms"},
 	} {
 		for _, field := range fields {
 			fields, _ := generic[section].(map[string]any)
@@ -407,7 +491,7 @@ func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) 
 	raw, _ = json.Marshal(soakPlatformWork{Subscriptions: []soakSubscriptionState{}})
 	var work map[string]any
 	_ = json.Unmarshal(raw, &work)
-	for _, field := range []string{"workload_tenants", "saturated_tenants", "worker_interval_ms", "loaded_latency_ms", "tasks_total", "events_total", "drain", "subscriptions"} {
+	for _, field := range []string{"workload_tenants", "saturated_tenants", "worker_interval_ms", "loaded_latency_ms", "tasks_total", "events_total", "drain", "subscriptions", "saturated_tasks_run"} {
 		if _, ok := work[field]; !ok {
 			t.Errorf("platform_work.%s is missing", field)
 		}

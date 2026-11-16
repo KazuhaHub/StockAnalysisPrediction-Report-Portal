@@ -57,6 +57,16 @@ EVENT_FENCE_REASONS = ("inflight_limit", "task_capacity", "authority_lost", "tas
 # any database work; task_capacity is the quota refusal of a submission that was admitted.
 BACKEND_FLOOD_MIN_PER_WINDOW = 100
 TYPED_BACKEND_FLOOD_CLASSES = ("200", "429:task_capacity", "429:rate_limited", "429:app_platform_busy")
+# Cross-tenant starvation (SEC-09, review of PR 458): the workload tenants submit their tasks through the same session-free route the flood hits, with
+# their own service identities, from the measured process, every ten seconds each. While the flood runs, every one of those submissions must be
+# answered 200 (never app_platform_busy, task_capacity or a transport error) and the window's p95 must stay within the bound. The bound is an
+# engineering decision of this harness: a submission is a synchronous call a backend waits on, the client times out at 25 seconds, and an idle
+# submission costs about 5 ms on PostgreSQL (verification plus the admission transaction), so 500 ms for the p95 is two orders above idle and
+# still far below the timeout, and 5 seconds for the slowest one allows a one-off stall without allowing starvation. Six tenants at one
+# submission each every ten seconds make 36 a window; fewer than 24 means the submitter did not keep its pace.
+WORKLOAD_SUBMIT_MIN_PER_WINDOW = 24
+WORKLOAD_SUBMIT_P95_BOUND_MS = 500
+WORKLOAD_SUBMIT_MAX_BOUND_MS = 5_000
 PLATFORM_WORK_CHECKS = (
     "task_worker_ran_in_every_window",
     "no_task_lost_or_stuck",
@@ -67,6 +77,7 @@ PLATFORM_WORK_CHECKS = (
     "event_refusals_are_typed",
     "backend_task_flood_answered_or_typed_in_every_window",
     "backend_task_flood_alive_throughout",
+    "workload_tenants_submit_through_the_route_in_every_window",
 )
 # What each backend must show in every one-minute window, from its own cgroup counters.
 MEMORY_HELD_PERCENT = 85
@@ -1068,6 +1079,14 @@ def _flood_checks(evidence):
     return [first, second, third]
 
 
+SATURATED_TENANTS = 2
+
+
+def _within(value, bound):
+    """A measurement within its bound; a missing or non-numeric one is not."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value <= bound
+
+
 def _platform_work_checks(evidence):
     """SEC-09: judge the platform task worker, the event delivery coordinator and the backend-originated task flood from the child's
     per-window evidence and its final platform_work block. What the flood does to the other tenants is judged by the unchanged OPS-08 latency
@@ -1075,9 +1094,10 @@ def _platform_work_checks(evidence):
     requires."""
     windows = evidence.get("windows", [])
     work = evidence.get("platform_work") or {}
-    missing = not work or any(not (w.get("tasks") and w.get("events") and w.get("quota") and w.get("backend_flood")) for w in windows) or not windows
+    missing = not work or any(not (w.get("tasks") and w.get("events") and w.get("quota") and w.get("backend_flood") and w.get("workload_submit"))
+                              for w in windows) or not windows
     if missing:
-        detail = {"reason": "the child evidence has no platform_work block or a window lacks its tasks, events, quota or backend_flood data"}
+        detail = {"reason": "the child evidence has no platform_work block or a window lacks its tasks, events, quota, backend_flood or workload_submit data"}
         return [_check(name, False, detail) for name in PLATFORM_WORK_CHECKS]
     drain = work.get("drain") or {}
     totals = work.get("tasks_total") or {}
@@ -1090,7 +1110,7 @@ def _platform_work_checks(evidence):
         "minimum_completed_per_window": TASK_WORKER_MIN_COMPLETED_PER_WINDOW, "windows_below_the_minimum": below[:200],
         "completed_by_window": [w["tasks"].get("succeeded", 0) for w in windows][:500]}))
 
-    stuck = [w["minute"] for w in windows if w["tasks"].get("oldest_open_age_ms", 0) > TASK_STUCK_MAX_AGE_MS]
+    stuck = [w["minute"] for w in windows if not isinstance(w["tasks"].get("oldest_open_age_ms"), (int, float)) or w["tasks"]["oldest_open_age_ms"] > TASK_STUCK_MAX_AGE_MS]
     bad_windows = [w["minute"] for w in windows if any(w["tasks"].get(state, 0) for state in ("failed", "uncertain", "review_required", "cancelled"))]
     bad_states = {state: count for state, count in by_state.items() if state != "succeeded" and count}
     created = totals.get("created", 0)
@@ -1108,15 +1128,21 @@ def _platform_work_checks(evidence):
         p95 = (w["tasks"].get("latency_ms") or {}).get("p95_ms", 0)
         if worst is None or p95 > worst["p95_ms"]:
             worst = {"minute": w["minute"], "p95_ms": p95}
-    checks.append(_check("task_latency_within_bound", pooled.get("count", 0) > 0 and pooled.get("p95_ms", 0) <= TASK_LATENCY_P95_BOUND_MS
-                         and pooled.get("max_ms", 0) <= TASK_LATENCY_MAX_BOUND_MS, {
+    checks.append(_check("task_latency_within_bound", pooled.get("count", 0) > 0 and _within(pooled.get("p95_ms"), TASK_LATENCY_P95_BOUND_MS)
+                         and _within(pooled.get("max_ms"), TASK_LATENCY_MAX_BOUND_MS), {
         "pooled_p95_ms": pooled.get("p95_ms"), "p95_bound_ms": TASK_LATENCY_P95_BOUND_MS, "pooled_max_ms": pooled.get("max_ms"),
         "max_bound_ms": TASK_LATENCY_MAX_BOUND_MS, "pooled_samples": pooled.get("count", 0), "worst_window": worst}))
 
-    over = [w["minute"] for w in windows if w["quota"].get("max_installation_active", TASK_INSTALLATION_QUOTA + 1) > TASK_INSTALLATION_QUOTA]
+    over = [w["minute"] for w in windows if not isinstance(w["quota"].get("max_installation_active"), int)
+            or w["quota"]["max_installation_active"] > TASK_INSTALLATION_QUOTA]
     untyped = [w["minute"] for w in windows if not (w["backend_flood"].get("classes") or {}).get("429:task_capacity", 0)]
-    checks.append(_check("task_quota_enforced_in_every_window", not over and not untyped, {
+    # The saturated tenants hold exactly their quota in every window, and none of their tasks ever runs (they are due after the run).
+    not_held = [w["minute"] for w in windows if not isinstance(w["quota"].get("saturated_active"), dict) or len(w["quota"]["saturated_active"]) < SATURATED_TENANTS
+                or any(v != TASK_INSTALLATION_QUOTA for v in w["quota"]["saturated_active"].values())]
+    saturated_run = work.get("saturated_tasks_run")
+    checks.append(_check("task_quota_enforced_in_every_window", not over and not untyped and not not_held and saturated_run == 0, {
         "quota": TASK_INSTALLATION_QUOTA, "windows_over_the_quota": over[:200], "windows_without_a_typed_refusal": untyped[:200],
+        "windows_where_a_saturated_tenant_did_not_hold_its_quota": not_held[:200], "saturated_tasks_run": saturated_run,
         "refusals_by_window": [(w["backend_flood"].get("classes") or {}).get("429:task_capacity", 0) for w in windows][:500]}))
 
     no_delivery = [w["minute"] for w in windows if w["events"].get("delivered", 0) < 1]
@@ -1126,8 +1152,9 @@ def _platform_work_checks(evidence):
         "captured": events_total.get("captured", 0), "expected_deliveries": expected, "delivered": events_total.get("delivered", 0),
         "windows_without_a_delivery": no_delivery[:200]}))
 
-    depths = [w["events"].get("max_inflight_per_subscription", 0) for w in windows]
-    over_bound = [w["minute"] for w, depth in zip(windows, depths) if depth > EVENT_MAX_INFLIGHT]
+    depths = [w["events"].get("max_inflight_per_subscription") for w in windows]
+    over_bound = [w["minute"] for w, depth in zip(windows, depths) if not _within(depth, EVENT_MAX_INFLIGHT)]
+    depths = [d if isinstance(d, (int, float)) else 0 for d in depths]
     third = max(len(depths) // 3, 1)
     growing = len(depths) >= 6 and min(depths[-third:]) > max(depths[:third]) and depths[-1] > depths[0]
     checks.append(_check("event_queue_bounded", bool(depths) and not over_bound and not growing and drain.get("open_after", 1) == 0
@@ -1162,6 +1189,23 @@ def _platform_work_checks(evidence):
             or w["backend_flood"].get("heartbeat_age_ms", FLOOD_HEARTBEAT_MAX_AGE_MS + 1) > FLOOD_HEARTBEAT_MAX_AGE_MS]
     checks.append(_check("backend_task_flood_alive_throughout", not dead, {"maximum_heartbeat_age_ms": FLOOD_HEARTBEAT_MAX_AGE_MS, "windows_without_a_live_flood": dead[:200],
                                                                          "windows_judged_under_the_flood": len(windows)}))
+
+    bad_submit, by_window = [], []
+    for w in windows:
+        submit = w["workload_submit"]
+        classes = submit.get("classes")
+        latency = submit.get("latency_ms")
+        requests = submit.get("requests")
+        ok = (isinstance(requests, int) and requests >= WORKLOAD_SUBMIT_MIN_PER_WINDOW and isinstance(classes, dict) and classes
+              and all(k == "200" or not v for k, v in classes.items()) and classes.get("200", 0) >= WORKLOAD_SUBMIT_MIN_PER_WINDOW
+              and isinstance(latency, dict) and _within(latency.get("p95_ms"), WORKLOAD_SUBMIT_P95_BOUND_MS) and _within(latency.get("max_ms"), WORKLOAD_SUBMIT_MAX_BOUND_MS))
+        by_window.append({"requests": requests, "classes": classes, "p95_ms": (latency or {}).get("p95_ms"), "max_ms": (latency or {}).get("max_ms")})
+        if not ok:
+            bad_submit.append(w["minute"])
+    checks.append(_check("workload_tenants_submit_through_the_route_in_every_window", not bad_submit, {
+        "minimum_per_window": WORKLOAD_SUBMIT_MIN_PER_WINDOW, "p95_bound_ms": WORKLOAD_SUBMIT_P95_BOUND_MS, "max_bound_ms": WORKLOAD_SUBMIT_MAX_BOUND_MS,
+        "windows_failing": bad_submit[:200], "worst_p95_ms": max((x["p95_ms"] for x in by_window if isinstance(x["p95_ms"], (int, float))), default=None),
+        "worst_max_ms": max((x["max_ms"] for x in by_window if isinstance(x["max_ms"], (int, float))), default=None), "by_window": by_window[:500]}))
     return checks
 
 

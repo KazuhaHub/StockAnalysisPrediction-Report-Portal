@@ -206,6 +206,8 @@ type soakWindow struct {
 	Events       *soakEventWindow  `json:"events,omitempty"`
 	Quota        *soakQuotaWindow  `json:"quota,omitempty"`
 	BackendFlood *soakBackendFlood `json:"backend_flood,omitempty"`
+	// WorkloadSubmit is what the workload tenants' submissions through the task route did in the window while the flood ran (SEC-09).
+	WorkloadSubmit *soakWorkloadSubmit `json:"workload_submit,omitempty"`
 }
 
 // soakLoaded holds the pooled summary of each latency series over the whole loaded period.

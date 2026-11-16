@@ -336,6 +336,8 @@ type soakChild struct {
 	minutes  int
 	baseline int
 	variant  soakVariant
+	// floodBase is the loopback listener the flood and the workload tenants' submissions use.
+	floodBase string
 }
 
 func (c *soakChild) id() string {
@@ -1305,6 +1307,7 @@ func (c *soakChild) startFlood(minutes int, saturated []string, identityPath str
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.floodBase = "http://" + listener.Addr().String()
 	server := &http.Server{Handler: c.mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = server.Serve(listener) }()
 	var targets []soakFloodTarget
@@ -1384,6 +1387,7 @@ func (c *soakChild) load(minutes int) {
 	}
 	stop, read, alive := c.startFlood(minutes, floodingBackends, work.identityPath)
 	defer stop()
+	work.baseURL.Store(c.floodBase)
 	if soakDiagnosing() {
 		c.diagnose("loaded", 60*time.Second)
 	}
@@ -1403,8 +1407,8 @@ func (c *soakChild) load(minutes int) {
 		backend := soakBackendFloodWindow(previous, current, alive(), time.Now())
 		window.BackendFlood = &backend
 		previous = current
-		tasks, events, quota := work.window(windowStart, windowStart.Add(time.Minute))
-		window.Tasks, window.Events, window.Quota = &tasks, &events, &quota
+		tasks, events, quota, submit := work.window(windowStart, windowStart.Add(time.Minute))
+		window.Tasks, window.Events, window.Quota, window.WorkloadSubmit = &tasks, &events, &quota, &submit
 		window.Backends = c.backendStatuses()
 		state := c.s.st.PoolState()
 		window.Database = &state

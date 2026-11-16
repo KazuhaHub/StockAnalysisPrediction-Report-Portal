@@ -249,6 +249,12 @@ def window_backend_flood(requests=2400, answered=120, **changes):
     return value
 
 
+def window_workload_submit(**changes):
+    value = {"requests": 36, "answered": 36, "classes": {"200": 36}, "latency_ms": {"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": 240}}
+    value.update(changes)
+    return value
+
+
 def platform_work(windows):
     subscriptions = [{"installation": f"w-{i}", "role": "workload", "state": "active", "reason": ""} for i in range(6)]
     subscriptions += [{"installation": "sat-1", "role": "saturated", "state": "review_required", "reason": "task_capacity"},
@@ -257,7 +263,7 @@ def platform_work(windows):
     return {"workload_tenants": 6, "saturated_tenants": 2, "worker_interval_ms": 1000, "loaded_latency_ms": task_stats(count=total),
             "tasks_total": {"created": total, "admit_errors": 0, "by_state": {"succeeded": total}},
             "events_total": {"captured": 5 * windows, "expected_deliveries": 30 * windows, "delivered": 30 * windows, "capture_errors": 0},
-            "drain": {"seconds": 4, "open_after": 0, "timed_out": False}, "subscriptions": subscriptions}
+            "drain": {"seconds": 4, "open_after": 0, "timed_out": False}, "subscriptions": subscriptions, "saturated_tasks_run": 0}
 
 
 def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, flood_ok=100):
@@ -270,6 +276,7 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
             "flood": flood(answered=flood_ok),
             "backends": [backend_status(i, window=m) for i in range(8)],
             "tasks": window_tasks(), "events": window_events(), "quota": window_quota(), "backend_flood": window_backend_flood(),
+            "workload_submit": window_workload_submit(),
         }
     return {
         "format": "portal.capacity-soak.child/1-dev.1",
@@ -746,7 +753,7 @@ class EvaluateTests(unittest.TestCase):
             evidence = child_evidence(120)
             del evidence["platform_work"]
             for window in evidence["windows"]:
-                for key in ("tasks", "events", "quota", "backend_flood"):
+                for key in ("tasks", "events", "quota", "backend_flood", "workload_submit"):
                     window.pop(key)
             broken = self.verdict(minutes=120, samples=load_samples(120), evidence=evidence)
             self.assertFalse(broken["counts_as_ops08_evidence"])
@@ -756,9 +763,69 @@ class EvaluateTests(unittest.TestCase):
         evidence = child_evidence()
         del evidence["platform_work"]
         for window in evidence["windows"]:
-            for key in ("tasks", "events", "quota", "backend_flood"):
+            for key in ("tasks", "events", "quota", "backend_flood", "workload_submit"):
                 window.pop(key)
         self.assertEqual(self.failing(self.verdict(evidence)), set(soak.PLATFORM_WORK_CHECKS))
+
+    # ---- SEC-09 (review): cross-tenant starvation, and evidence that is missing must fail ----
+
+    def test_the_workload_tenants_must_submit_through_the_route_within_bound_in_every_window(self):
+        name = "workload_tenants_submit_through_the_route_in_every_window"
+        self.assertIn(name, soak.PLATFORM_WORK_CHECKS)
+        self.assertTrue(self.verdict(child_evidence())["passed"])
+        failures = {
+            "too few": window_workload_submit(requests=soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW - 1),
+            "busy": window_workload_submit(classes={"200": 30, "429:app_platform_busy": 6}),
+            "quota refusal": window_workload_submit(classes={"200": 30, "429:task_capacity": 6}),
+            "transport error": window_workload_submit(classes={"200": 30, "transport": 6}),
+            "p95 over": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "p95_ms": soak.WORKLOAD_SUBMIT_P95_BOUND_MS + 1, "max_ms": 900}),
+            "max over": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": soak.WORKLOAD_SUBMIT_MAX_BOUND_MS + 1}),
+            "no p95": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "max_ms": 240}),
+            "no latency": {"requests": 36, "answered": 36, "classes": {"200": 36}},
+            "no classes": {"requests": 36, "answered": 36, "latency_ms": {"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": 240}},
+        }
+        for label, value in failures.items():
+            evidence = child_evidence()
+            evidence["windows"][1]["workload_submit"] = value
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, label)
+        evidence = child_evidence()
+        del evidence["windows"][1]["workload_submit"]
+        self.assertIn(name, self.failing(self.verdict(evidence)))
+        evidence = child_evidence()
+        evidence["windows"][1]["workload_submit"] = window_workload_submit(
+            requests=soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW, latency_ms={"count": 24, "p50_ms": 25, "p95_ms": soak.WORKLOAD_SUBMIT_P95_BOUND_MS, "max_ms": soak.WORKLOAD_SUBMIT_MAX_BOUND_MS},
+            classes={"200": soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW})
+        self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
+
+    def test_a_missing_measurement_fails_instead_of_defaulting_to_zero(self):
+        cases = (
+            ("no_task_lost_or_stuck", lambda e: e["windows"][0]["tasks"].pop("oldest_open_age_ms")),
+            ("task_latency_within_bound", lambda e: e["platform_work"]["loaded_latency_ms"].pop("p95_ms")),
+            ("task_latency_within_bound", lambda e: e["platform_work"]["loaded_latency_ms"].pop("max_ms")),
+            ("event_queue_bounded", lambda e: e["windows"][1]["events"].pop("max_inflight_per_subscription")),
+        )
+        for name, damage in cases:
+            evidence = child_evidence()
+            damage(evidence)
+            self.assertIn(name, self.failing(self.verdict(evidence)), name)
+
+    def test_the_saturated_tenants_must_hold_their_quota_and_none_of_their_tasks_may_run(self):
+        name = "task_quota_enforced_in_every_window"
+        evidence = child_evidence()
+        evidence["platform_work"]["saturated_tasks_run"] = 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        del evidence["platform_work"]["saturated_tasks_run"]
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(saturated_active={"sat-0": soak.TASK_INSTALLATION_QUOTA, "sat-1": soak.TASK_INSTALLATION_QUOTA - 1})
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(saturated_active={"sat-0": soak.TASK_INSTALLATION_QUOTA})
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = {"max_installation_active": soak.TASK_INSTALLATION_QUOTA}
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
 
     def test_the_task_worker_must_complete_tasks_in_every_window(self):
         evidence = child_evidence()

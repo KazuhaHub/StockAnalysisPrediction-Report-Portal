@@ -3,9 +3,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -35,6 +38,16 @@ type soakWork struct {
 	workCancel   context.CancelFunc
 	workers      sync.WaitGroup
 	workerAlive  atomic.Bool
+
+	// The workload tenants submit through the Portal's own task route (baseURL is the loopback listener the flood uses) with their own service
+	// identities, which are refreshed with the flood's every minute; submits collects what each submission answered and how long it took.
+	baseURL    atomic.Value
+	identities struct {
+		sync.Mutex
+		headers map[string]string
+	}
+	submits    soakSubmitCollector
+	submitters sync.WaitGroup
 
 	captured, captureErrors, admitErrors atomic.Int64
 	reported                             struct{ captured, captureErrors int64 }
@@ -149,6 +162,22 @@ func (w *soakWork) writeIdentities() {
 		headers[installation] = soakIdentityHeader(raw)
 		clear(raw)
 	}
+	workload := map[string]string{}
+	for _, installation := range w.workload {
+		lease, err := platformNewUUID()
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _, err := c.s.issuePlatformServiceIdentity(c.ctx, installation, lease, []string{"tasks.schedule"}, platformServiceIdentityMaxLifetime)
+		if err != nil {
+			t.Fatal("service identity of workload tenant "+installation, err)
+		}
+		workload[installation] = soakIdentityHeader(raw)
+		clear(raw)
+	}
+	w.identities.Lock()
+	w.identities.headers = workload
+	w.identities.Unlock()
 	encoded, _ := json.Marshal(headers)
 	if err := os.WriteFile(w.identityPath+".tmp", encoded, 0o600); err != nil {
 		t.Fatal(err)
@@ -158,7 +187,38 @@ func (w *soakWork) writeIdentities() {
 	}
 }
 
-// produce admits one backend task to every workload tenant every soakTaskEvery and captures one event every soakEventEvery, and refreshes the flood's
+// submit sends one workload tenant's backend task through the Portal's task route with that tenant's own identity, as a backend would, and records
+// how it was answered and how long it took. Anything but a 200 is an admission error.
+func (w *soakWork) submit(client *http.Client, index int, installation string, number int) {
+	defer w.submitters.Done()
+	base, _ := w.baseURL.Load().(string)
+	w.identities.Lock()
+	identity := w.identities.headers[installation]
+	w.identities.Unlock()
+	began := time.Now()
+	status := 0
+	var body []byte
+	request, err := http.NewRequest(http.MethodPost, base+"/api/app-platform/installations/"+installation+"/tasks/background", bytes.NewReader(soakWorkloadTaskBody(index, number)))
+	if err == nil {
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(appplatform.TaskServiceIdentityHeader, identity)
+		var response *http.Response
+		if response, err = client.Do(request); err == nil {
+			status = response.StatusCode
+			body, _ = io.ReadAll(io.LimitReader(response.Body, 4096))
+			_, _ = io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+		}
+	}
+	class := soakFloodClass(status, body, err)
+	w.submits.record(class, time.Since(began).Milliseconds())
+	if class != soakFloodOK {
+		w.admitErrors.Add(1)
+		w.c.t.Logf("SOAK_TASK_SUBMIT_ERROR %s: %s", installation, class)
+	}
+}
+
+// produce submits one backend task for every workload tenant every soakTaskEvery and captures one event every soakEventEvery, and refreshes the flood's
 // identities every minute.
 func (w *soakWork) produce(ctx context.Context, work bool) {
 	c := w.c
@@ -171,6 +231,7 @@ func (w *soakWork) produce(ctx context.Context, work bool) {
 	defer events.Stop()
 	defer identities.Stop()
 	taskNumber, eventNumber := 0, 0
+	client := &http.Client{Timeout: 25 * time.Second}
 	for {
 		select {
 		case <-ctx.Done():
@@ -180,11 +241,8 @@ func (w *soakWork) produce(ctx context.Context, work bool) {
 		case <-tasks.C:
 			taskNumber++
 			for index, installation := range w.workload {
-				if _, _, err := c.s.admitPlatformTask(ctx, installation, platformTaskAdmission{
-					OccurrenceID: fmt.Sprintf("load:%d:%d", index, taskNumber), Handler: appplatform.TaskHandlerBackend, Payload: []byte(fmt.Sprintf(`{"soak":%d}`, taskNumber))}); err != nil && ctx.Err() == nil {
-					w.admitErrors.Add(1)
-					c.t.Logf("SOAK_TASK_ADMISSION_ERROR %s: %v", installation, err)
-				}
+				w.submitters.Add(1)
+				go w.submit(client, index, installation, taskNumber)
 			}
 		case <-events.C:
 			eventNumber++
@@ -242,14 +300,14 @@ func (w *soakWork) args(extra ...any) []any {
 }
 
 // window summarises one minute from the Portal's own tables.
-func (w *soakWork) window(start, end time.Time) (soakTaskWindow, soakEventWindow, soakQuotaWindow) {
+func (w *soakWork) window(start, end time.Time) (soakTaskWindow, soakEventWindow, soakQuotaWindow, soakWorkloadSubmit) {
 	c, t := w.c, w.c.t
 	startMS, endMS, now := start.UnixMilli(), end.UnixMilli(), time.Now().UnixMilli()
 	rows, err := c.s.st.query(`SELECT handler,state,created_ms,COALESCE(completed_ms,0),next_attempt_ms FROM app_platform_tasks
 		WHERE installation_id IN (`+placeholders(len(w.workload))+`) AND (created_ms>=? OR completed_ms>=? OR state IN ('waiting','leased','running'))`, w.args(startMS, startMS)...)
 	if err != nil {
 		t.Errorf("task window query: %v", err)
-		return soakTaskWindow{}, soakEventWindow{}, soakQuotaWindow{}
+		return soakTaskWindow{}, soakEventWindow{}, soakQuotaWindow{}, soakWorkloadSubmit{}
 	}
 	var taskRows []soakTaskRow
 	delivered := 0
@@ -271,7 +329,7 @@ func (w *soakWork) window(start, end time.Time) (soakTaskWindow, soakEventWindow
 	events := soakEventWindow{Captured: int(captured - w.reported.captured), CaptureErrors: int(errors - w.reported.captureErrors), Delivered: delivered,
 		MaxInflightPerSubscription: maxEvent, SubscriptionsActive: active, SubscriptionsFenced: fenced}
 	w.reported.captured, w.reported.captureErrors = captured, errors
-	return tasks, events, soakQuotaWindow{MaxInstallationActive: maxActive, SaturatedActive: saturated}
+	return tasks, events, soakQuotaWindow{MaxInstallationActive: maxActive, SaturatedActive: saturated}, w.submits.take()
 }
 
 // stateCounts is the workload tenants' tasks by state since the load began.
@@ -340,6 +398,7 @@ func (w *soakWork) subscriptionRows() []soakSubscriptionState {
 func (w *soakWork) finish() soakPlatformWork {
 	c, t := w.c, w.c.t
 	w.workCancel()
+	w.submitters.Wait() // a submission in flight is part of the run
 	began := time.Now()
 	open := func() int {
 		return scalar[int](t, c.s.st, `SELECT COUNT(*) FROM app_platform_tasks WHERE installation_id IN (`+placeholders(len(w.workload))+`) AND state IN ('waiting','leased','running')`, w.args()...)
