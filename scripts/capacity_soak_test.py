@@ -1601,6 +1601,131 @@ class ConfigurationTests(unittest.TestCase):
         soak.require_disposable_environment({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}, euid=0, platform="linux", which=lambda tool, path=None: "/bin/" + tool)
 
 
+class ReferenceHostTests(unittest.TestCase):
+    """The owner's reference VM (a self-hosted runner) may run the soak only from a manual dispatch that asked for it (doc 171)."""
+
+    def which(self, tool, path=None):
+        return "/bin/" + tool
+
+    def check_env(self, **env):
+        return soak.require_disposable_environment(env, euid=0, platform="linux", which=self.which)
+
+    def reference(self, **changes):
+        env = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm", "GITHUB_EVENT_NAME": "workflow_dispatch"}
+        env.update(changes)
+        return env
+
+    def test_a_self_hosted_runner_is_accepted_only_for_the_reference_vm_from_a_dispatch(self):
+        self.check_env(**self.reference())
+        self.check_env(GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted")
+
+    def test_every_other_self_hosted_combination_is_refused(self):
+        refused = {
+            "no host flag": self.reference(APP_CAPACITY_SOAK_HOST=""),
+            "github flag": self.reference(APP_CAPACITY_SOAK_HOST="github"),
+            "other flag": self.reference(APP_CAPACITY_SOAK_HOST="my-laptop"),
+            "pull request": self.reference(GITHUB_EVENT_NAME="pull_request"),
+            "push": self.reference(GITHUB_EVENT_NAME="push"),
+            "schedule": self.reference(GITHUB_EVENT_NAME="schedule"),
+            "no event": self.reference(GITHUB_EVENT_NAME=""),
+            "not actions": self.reference(GITHUB_ACTIONS=""),
+            "github-hosted with the reference flag": self.reference(RUNNER_ENVIRONMENT="github-hosted"),
+            "unknown runner environment": self.reference(RUNNER_ENVIRONMENT="something-else"),
+            "no runner environment": {"GITHUB_ACTIONS": "true", "APP_CAPACITY_SOAK_HOST": "reference-vm", "GITHUB_EVENT_NAME": "workflow_dispatch"},
+        }
+        for label, env in refused.items():
+            with self.assertRaises(RuntimeError, msg=label):
+                self.check_env(**env)
+
+    def test_the_reference_vm_still_needs_root_linux_and_the_tools(self):
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=1000, platform="linux", which=self.which)
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=0, platform="darwin", which=self.which)
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=0, platform="linux", which=lambda tool, path=None: None)
+
+    def test_the_host_is_recorded_from_the_environment_and_proc(self):
+        cpuinfo = "processor\t: 0\nmodel name\t: Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz\nprocessor\t: 1\nmodel name\t: Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz\n"
+        meminfo = "MemTotal:       16384000 kB\nMemFree:         1000 kB\n"
+        host = soak.host_identity({"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm", "RUNNER_NAME": "sec09-ref-1"}, cpuinfo, meminfo, 4)
+        self.assertEqual(host, {"kind": "reference-vm", "runner_name": "sec09-ref-1", "cpu_model": "Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz", "nproc": 4, "mem_total_kib": 16384000})
+        hosted = soak.host_identity({"RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_NAME": "GitHub Actions 7"}, "", "", 4)
+        self.assertEqual((hosted["kind"], hosted["cpu_model"], hosted["mem_total_kib"]), ("github-hosted", "unknown", 0))
+        self.assertEqual(soak.host_identity({"RUNNER_ENVIRONMENT": "self-hosted"}, cpuinfo, meminfo, 4)["kind"], "unknown")
+
+    def test_a_passing_reference_vm_dispatch_counts_exactly_like_a_github_hosted_one(self):
+        base = dict(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_SHA="a" * 40)
+        hosted = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="github-hosted", **base))
+        reference = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="self-hosted", APP_CAPACITY_SOAK_HOST="reference-vm", RUNNER_NAME="sec09-ref-1", **base))
+        self.assertTrue(hosted["counts_as_ops08_evidence"], hosted["evidence_blockers"])
+        self.assertTrue(reference["counts_as_ops08_evidence"], reference["evidence_blockers"])
+        self.assertEqual(reference["checks"], hosted["checks"])
+        self.assertEqual(reference["host_identity"]["kind"], "reference-vm")
+        self.assertEqual(reference["host_identity"]["runner_name"], "sec09-ref-1")
+        self.assertEqual(hosted["host_identity"]["kind"], "github-hosted")
+
+    def test_a_reference_vm_run_that_is_not_a_dispatch_is_never_evidence(self):
+        verdict = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="self-hosted", APP_CAPACITY_SOAK_HOST="reference-vm", GITHUB_EVENT_NAME="pull_request"))
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertTrue(any("workflow_dispatch" in b for b in verdict["evidence_blockers"]))
+
+
+class WorkflowHostGuardTests(unittest.TestCase):
+    """No workflow may reach a self-hosted runner from anything but a manual dispatch that asked for the reference VM."""
+
+    SANCTIONED = ("${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm') && fromJSON('[\"self-hosted\",\"sec09-reference-vm\"]') || 'ubuntu-24.04' }}")
+
+    def runs_on(self):
+        found = []
+        for path in sorted((WORKFLOW.parent).glob("*.yml")):
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                match = re.fullmatch(r"\s+runs-on:\s*(.*?)\s*", line)
+                if match:
+                    found.append((path.name, number, match.group(1)))
+        return found
+
+    def test_every_runner_is_a_github_hosted_label_or_the_one_sanctioned_expression(self):
+        found = self.runs_on()
+        self.assertGreater(len(found), 20)
+        for name, number, value in found:
+            if value == self.SANCTIONED:
+                self.assertEqual(name, "app-project-quota-probe.yml", "the self-hosted expression belongs to the capacity soak only")
+                continue
+            self.assertRegex(value, r"ubuntu-(latest|24\.04|24\.04-arm)", f"{name}:{number} runs on {value!r}")
+            self.assertNotIn("self-hosted", value)
+            self.assertNotIn("${{", value, f"{name}:{number} resolves its runner at run time")
+
+    def test_the_sanctioned_expression_is_on_the_capacity_soak_job_and_nowhere_else(self):
+        text = WORKFLOW.read_text()
+        job = text[text.index("\n  capacity-soak:"):]
+        self.assertIn("runs-on: " + self.SANCTIONED, job.split("\n    steps:")[0])
+        live = [line for line in text.splitlines() if "self-hosted" in line and not line.lstrip().startswith("#")]
+        self.assertEqual(live, ["    runs-on: " + self.SANCTIONED], "self-hosted appears outside the capacity soak job's runs-on")
+
+    def test_the_expression_only_selects_self_hosted_for_a_dispatch_that_asked_for_the_reference_vm(self):
+        def resolve(event, soak_host):
+            # the expression, evaluated: (event == dispatch && soak_host == reference-vm) ? self-hosted : ubuntu-24.04
+            return "self-hosted" if (event == "workflow_dispatch" and soak_host == "reference-vm") else "ubuntu-24.04"
+        for event in ("pull_request", "push", "schedule", "workflow_run", "release", ""):
+            for host in ("", "github", "reference-vm"):
+                self.assertEqual(resolve(event, host), "ubuntu-24.04")
+        self.assertEqual(resolve("workflow_dispatch", "github"), "ubuntu-24.04")
+        self.assertEqual(resolve("workflow_dispatch", "reference-vm"), "self-hosted")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm'", self.SANCTIONED)
+
+    def test_the_host_input_defaults_to_github_and_the_flag_follows_the_same_condition(self):
+        text = WORKFLOW.read_text()
+        self.assertIn("soak_host", workflow_dispatch_inputs())
+        block = text[text.index("      soak_host:"):]
+        block = block[:block.index("\n      ", 20) if False else 600]
+        self.assertIn("options: [github, reference-vm]", block)
+        self.assertIn("default: github", block)
+        flag = job_env_line("APP_CAPACITY_SOAK_HOST")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm' && 'reference-vm' || ''", flag)
+        self.assertIn("APP_CAPACITY_SOAK_HOST", text[text.index("sudo --preserve-env="):text.index("python3 scripts/acceptance/capacity_soak.py")])
+
+
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/app-project-quota-probe.yml"
 GOOD = {"parent_passed": True, "unit_tests": {"TestTaskQuotasRefuseAtTheirOwnBoundary": True}}
 

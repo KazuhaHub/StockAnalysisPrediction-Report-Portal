@@ -116,7 +116,7 @@ EXIT_INCONCLUSIVE = 3
 # Every input of the workflow is either neutral (it cannot change what is measured) or diagnostic (it does, so the run is never evidence).
 # A diagnostic input maps to the environment variable the job passes it as and the values that mean "not set"; a test reads the workflow's
 # inputs and fails for one that is in neither list.
-EVIDENCE_NEUTRAL_INPUTS = ("skip_browser", "event_only", "duration_minutes", "soak_only", "expected_commit")
+EVIDENCE_NEUTRAL_INPUTS = ("skip_browser", "event_only", "duration_minutes", "soak_only", "expected_commit", "soak_host")
 DIAGNOSTIC_INPUTS = {
     "soak_db": ("APP_CAPACITY_SOAK_DB", ("", "postgres")),
     "soak_cpu_percent": ("APP_CAPACITY_SOAK_CPU_PERCENT", ("", "50")),
@@ -880,6 +880,10 @@ def render_summary(evidence, verdict):
     outcome = {RESULT_PASSED: "passed", RESULT_FAILED: "FAILED", RESULT_INCONCLUSIVE_SLOW_DISK: "INCONCLUSIVE (slow disk)"}.get(verdict.get("result"), "FAILED")
     diagnostic = bool(verdict.get("diagnostic"))
     lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {outcome}" + (" (DIAGNOSTIC: SQLite)" if diagnostic else "")]
+    host = verdict.get("host_identity") or {}
+    if host:
+        lines += ["", f"Host: {host.get('kind')}, runner {host.get('runner_name') or 'unnamed'}, {host.get('cpu_model')}, {host.get('nproc')} CPUs, "
+                      f"{host.get('mem_total_kib', 0) // 1024} MiB"]
     if diagnostic:
         lines += ["", "The measured Portal's database is SQLite: this run is a diagnostic of the known limit and is never OPS-08 evidence, whatever its "
                   "result. PostgreSQL's WAL sync, if recorded, is a diagnostic here and does not judge the run; the fsync probe of the device holding "
@@ -1376,7 +1380,8 @@ def verdict_arguments(env):
             "platform_weight": env.get("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ""), "database": env.get("APP_CAPACITY_SOAK_DB", ""),
             "runner_profile": env.get("APP_CAPACITY_SOAK_RUNNER_PROFILE", "") == "1", "diagnose": env.get("APP_CAPACITY_SOAK_DIAGNOSE", "") == "1",
             "event": env.get("GITHUB_EVENT_NAME", ""), "commit": env.get("GITHUB_SHA", ""),
-            "expected_commit": env.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", "")}
+            "expected_commit": env.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", ""),
+            "host": host_identity(env, read_proc("/proc/cpuinfo"), read_proc("/proc/meminfo"), os.cpu_count() or 0)}
 
 
 def evidence_blockers(passed, tripped, minutes, db_driver, event, commit, expected, diagnose, diagnostic_values):
@@ -1404,7 +1409,7 @@ def evidence_blockers(passed, tripped, minutes, db_driver, event, commit, expect
 
 
 def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False, platform_weight="",
-             database="", runner_profile=False, diagnose=False, event="", commit="", expected_commit="", disk_probe=None):
+             database="", runner_profile=False, diagnose=False, event="", commit="", expected_commit="", disk_probe=None, host=None):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4.
 
     The result is passed, failed, or inconclusive_slow_disk: the last when the disk-health precheck, judged only from readings taken before the
@@ -1487,7 +1492,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
         # A SQLite run is a diagnostic of the known limit: it is measured and reported, and it is never OPS-08 evidence (the blockers say so).
         "diagnostic": database_kind(driver) == "sqlite",
         "result": result, "passed": passed, "counts_as_ops08_evidence": not blockers, "evidence_blockers": blockers, "precheck": precheck,
-        "event": event, "commit": commit, "expected_commit": expected_commit,
+        "event": event, "commit": commit, "expected_commit": expected_commit, "host_identity": host or {},
         "commit_matches_expected": (expected_commit == commit) if expected_commit else None,
         "platform_cpu_weight": platform_weight,
         "pin_platform": pin_platform,
@@ -1609,14 +1614,50 @@ def baseline_seconds(minutes):
     return 180
 
 
+REFERENCE_HOST = "reference-vm"
+
+
 def require_disposable_environment(env, euid, platform, which):
+    """The soak runs only on a disposable Linux root: a GitHub-hosted worker, or the owner's reference VM, a self-hosted runner that is reverted to a
+    clean snapshot before every run. The reference VM is accepted only when the host flag names it AND the run is a manual workflow_dispatch; a
+    self-hosted runner in any other case, and a github-hosted one that claims to be the reference VM, is refused."""
     if platform != "linux" or euid != 0:
         raise RuntimeError("the soak requires disposable Linux root")
-    if env.get("GITHUB_ACTIONS") != "true" or env.get("RUNNER_ENVIRONMENT") != "github-hosted":
-        raise RuntimeError("the soak refuses hosts outside a disposable GitHub-hosted worker")
+    runner, flag, event = env.get("RUNNER_ENVIRONMENT"), env.get("APP_CAPACITY_SOAK_HOST", ""), env.get("GITHUB_EVENT_NAME", "")
+    if env.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("the soak refuses hosts outside a GitHub Actions job")
+    if runner == "github-hosted":
+        if flag == REFERENCE_HOST:
+            raise RuntimeError("a github-hosted worker cannot be the reference VM")
+    elif runner == "self-hosted":
+        if flag != REFERENCE_HOST or event != "workflow_dispatch":
+            raise RuntimeError("a self-hosted runner is accepted only as the reference VM (APP_CAPACITY_SOAK_HOST=reference-vm) from a workflow_dispatch run")
+    else:
+        raise RuntimeError("the soak refuses hosts outside a disposable GitHub-hosted worker or the reference VM")
     for tool in ("losetup", "blockdev", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "blkid", "docker"):
         if not which(tool, path=PATH):
             raise RuntimeError("missing explicit acceptance tool: " + tool)
+
+
+def host_identity(env, cpuinfo, meminfo, nproc):
+    """What machine the run measured, for the verdict: its kind (the reference VM or a GitHub-hosted worker), the runner's name, the CPU model from
+    /proc/cpuinfo, the CPU count and MemTotal in KiB. Anything that cannot be read is "unknown" or 0, never a guess."""
+    if env.get("RUNNER_ENVIRONMENT") == "self-hosted" and env.get("APP_CAPACITY_SOAK_HOST") == REFERENCE_HOST:
+        kind = REFERENCE_HOST
+    elif env.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        kind = "github-hosted"
+    else:
+        kind = "unknown"
+    model = next((line.split(":", 1)[1].strip() for line in cpuinfo.splitlines() if line.startswith("model name") and ":" in line), "unknown")
+    memory = next((int(line.split()[1]) for line in meminfo.splitlines() if line.startswith("MemTotal:") and len(line.split()) > 1 and line.split()[1].isdigit()), 0)
+    return {"kind": kind, "runner_name": env.get("RUNNER_NAME", ""), "cpu_model": model, "nproc": nproc, "mem_total_kib": memory}
+
+
+def read_proc(path):
+    try:
+        return Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
 
 
 # ---- the run ----

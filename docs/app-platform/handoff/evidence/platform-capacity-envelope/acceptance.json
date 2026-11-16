@@ -291,7 +291,8 @@
       "after_ops08": "SEC-09 is partial. Runs 43825208692 and 43848988368 passed and were each superseded on review; round 2 found that forged credentials naming a real installation reached the database, the remembered refusal ran without an installation slot, the soak never filled a slot, and on the same host class the corrected design lost 14.6 ms of home headroom (33.1 to 47.7 ms). A 120-minute run of the round-2 design must pass every check, including forged_identity_flood_refused_in_every_window.",
       "ops08_dependency": "met by run 43683877826 and again by run 43825208692 under the extended load",
       "closes_when": "a 120-minute dispatch of the round-2 design passes every check, including workload_tenants_submit_through_the_route_in_every_window and forged_identity_flood_refused_in_every_window",
-      "superseded_evidence_runs": ["43825208692", "43848988368"]
+      "superseded_evidence_runs": ["43825208692", "43848988368"],
+      "reference_host": "The GitHub-hosted pool moved to Azure machines on which even the previously passing design (ec21c509) misses the bounds; the owner provided a fixed reference VM (4 vCPU Intel Xeon E-2236, 16 GiB, ephemeral self-hosted runner sec09-reference-vm, workflow_dispatch input soak_host=reference-vm). The bounds are unchanged; SEC-09 stays partial until a 120-minute run there passes every check (doc 171, The reference host)."
     }
   },
   "not_proven_by_the_dispatch_run": [
