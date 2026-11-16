@@ -326,6 +326,15 @@ func (s *Store) capturePlatformEventDeliveries(e migExec, event NotificationEven
 	if err != nil {
 		return err
 	}
+	if len(subscriptions) > 0 {
+		// A task submission takes the task admission lock and then the installation's row. The loop below
+		// locks installation rows (the authority check) before its admissions take the same lock, which
+		// deadlocks against a submission to the same installation; taking the lock first gives every
+		// transaction one order. The admissions would take it anyway, so this adds no waiting.
+		if err := lockPlatformTaskAdmission(e); err != nil {
+			return err
+		}
+	}
 	for _, subscription := range subscriptions {
 		now, err := platformDatabaseNow(e)
 		if err != nil {

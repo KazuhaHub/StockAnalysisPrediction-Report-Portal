@@ -475,10 +475,10 @@ func TestSoakPlatformWorkEvidenceUsesTheFieldNamesTheVerdictReads(t *testing.T) 
 		t.Fatal(err)
 	}
 	for section, fields := range map[string][]string{
-		"tasks":         {"created", "created_backend", "created_event", "succeeded", "failed", "uncertain", "review_required", "cancelled", "open", "oldest_open_age_ms", "latency_ms", "worker_alive"},
-		"events":        {"captured", "capture_errors", "delivered", "max_inflight_per_subscription", "subscriptions_active", "subscriptions_fenced"},
-		"quota":         {"max_installation_active", "saturated_active"},
-		"backend_flood": {"requests", "answered", "refused", "classes", "alive", "heartbeat_age_ms"},
+		"tasks":           {"created", "created_backend", "created_event", "succeeded", "failed", "uncertain", "review_required", "cancelled", "open", "oldest_open_age_ms", "latency_ms", "worker_alive"},
+		"events":          {"captured", "capture_errors", "delivered", "max_inflight_per_subscription", "subscriptions_active", "subscriptions_fenced"},
+		"quota":           {"max_installation_active", "saturated_active"},
+		"backend_flood":   {"requests", "answered", "refused", "classes", "alive", "heartbeat_age_ms"},
 		"workload_submit": {"requests", "answered", "classes", "latency_ms"},
 	} {
 		for _, field := range fields {
