@@ -589,6 +589,7 @@
   "batch.editor.resizeRow": "Resize row {{row}}",
   "batch.editor.submitBlocked": "Complete the batch data before submitting.",
   "batch.editor.submitReady": "{{n}} row(s) ready to submit.",
+  "batch.inputsFirstRow": "{{n}} rows · first:",
   "batch.inputsMore": "…+{{n}} more",
   "batch.jobDetail": "Job detail",
   "batch.jobNotFound": "This job was not found, or it is not yours to view.",

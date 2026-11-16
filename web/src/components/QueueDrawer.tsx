@@ -280,7 +280,7 @@ export default function QueueDrawer({ open, onClose, canRun, canExport, tasks, r
             {j.priority === 'urgent' && <ThunderboltOutlined style={{ color: token.colorError, marginLeft: 6 }} title={t('batch.priority.urgent')} />}
           </>
         }
-        sub={<InputsPreview inputs={j.inputs} rows={1} style={{ whiteSpace: 'nowrap' }} />}
+        sub={<InputsPreview inputs={j.inputs} rowCount={j.total} rows={1} style={{ whiteSpace: 'nowrap' }} />}
         percent={percent}
         detail={detail}
         time={formatTaskTime(live ? j.created_at : j.finished_at, lang, undefined, t('tasks.justNow'))}
