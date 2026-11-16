@@ -65,6 +65,13 @@ func loadPlatformImportSource(e migExec, s *Server, installation, recoverySetID 
 		return r, errAppPlatformStageEvidence
 	}
 	r.manifest = manifest.String
+	// A set whose checkpoint deletion is decided has no archive to import: the runner's claim cannot be undone.
+	if decided, err := platformRecoverySetDeletionDecided(e, r.recoverySetID); err != nil || decided {
+		if err != nil {
+			return r, err
+		}
+		return r, errAppPlatformStageEvidence
+	}
 	var effectID, payload, raw string
 	if err := e.queryRow(`SELECT effect_id,payload_sha256,receipt_json FROM app_platform_operation_effects
 		WHERE operation_id=? AND stage='snapshot' AND effect_number=1 AND state='applied'`, r.operationID).Scan(&effectID, &payload, &raw); err != nil {

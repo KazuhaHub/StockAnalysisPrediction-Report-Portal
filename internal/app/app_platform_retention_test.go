@@ -634,7 +634,7 @@ func TestPlatformRetentionConfigAPIValidatesOnSave(t *testing.T) {
 			t.Errorf("the fixed values omit %s", key)
 		}
 	}
-	if out.RecoveryPrune != "blocked" {
+	if out.RecoveryPrune != "enabled" {
 		t.Errorf("recovery_set_pruning = %q", out.RecoveryPrune)
 	}
 }
@@ -657,8 +657,8 @@ func TestPlatformRetentionConfigAPIReportsTheLastSweep(t *testing.T) {
 	}
 }
 
-// The recovery-set retention is selected on the Portal side; the runner has no command that deletes one
-// checkpoint, so nothing is marked deleted and the selection is only reported.
+// The recovery-set retention is selected on the Portal side and only reported by the sweep: prunePlatformRecoverySets,
+// not the sweep, asks the runner to delete the archives, so the sweep marks nothing deleted.
 func TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN(t *testing.T) {
 	f := newRetFixture(t, false)
 	live := f.liveInstallation(1)

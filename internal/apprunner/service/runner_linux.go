@@ -122,6 +122,12 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 		return ErrNotReady
 	}
 	defer server.Close()
+	// Files a checkpoint removal moved aside as unrecognised stay on disk for an operator: say so at every start.
+	if quarantined, err := checkpointRoot.QuarantineSummary(ctx, checkpointPin); err != nil {
+		logger.Printf("app-runner checkpoint quarantine: not read: %v", err)
+	} else if quarantined.Files > 0 {
+		logger.Printf("app-runner checkpoint quarantine: %d file(s), %d bytes, moved aside by a checkpoint removal and never deleted by the runner", quarantined.Files, quarantined.Bytes)
+	}
 	logger.Printf("app-runner ready profile=%s platform=linux/%s images=%s capacity=%s refined_rows=%d estimated_rows=%d", driver.Profile, runtime.GOARCH, imageProfile(cfg), FormatBudgets(budgets), refined, estimated)
 	if err := server.Serve(ctx); err != nil {
 		if ctx.Err() != nil {

@@ -259,6 +259,8 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 					}
 					log.Printf("app-platform image reclaim: %v", reclaimErr)
 				}
+				// Idle: the checkpoint archives of recovery sets the Portal no longer keeps are deleted, and begun deletions settle.
+				w.server.pruneRecoverySetsOnTick(bulkCtx, w.endpoint)
 			}
 			w.publish("idle", "", "")
 			return nil
@@ -506,6 +508,8 @@ func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
 	if _, err := w.server.reclaimPlatformImages(ctx, w.endpoint); err != nil && ctx.Err() == nil {
 		log.Printf("app-platform image reclaim: %v", err)
 	}
+	// The step is throttled globally (at most once a minute, and not while another operation runs), never per ending.
+	w.server.pruneRecoverySetsOnTick(ctx, w.endpoint)
 }
 
 // Portal startup owns the frontend service and, when a trusted runner endpoint is bound, the

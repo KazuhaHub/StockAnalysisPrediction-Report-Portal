@@ -85,6 +85,13 @@ type Server struct {
 	platformRecoveryStartCursor platformKeysetCursor
 	// platformReclaimCursor rotates the window of the image removal step.
 	platformReclaimCursor int
+	// platformPruneCursor rotates the window of the recovery set pruning step. platformPruneNoted remembers the host
+	// operations whose slot exhaustion was already logged, and platformPruneLast is when the idle tick last ran the step.
+	platformPruneRunner platformPruneRunner
+	platformPruneCursor int
+	platformPruneNoted  sync.Map
+	platformPruneLast   atomic.Int64
+	platformPruneMore   atomic.Bool
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget

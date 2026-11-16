@@ -38,9 +38,9 @@ func (s *Server) apiPlatformRetentionGet(w http.ResponseWriter, r *http.Request,
 			"uninstalled_data":           "until_deleted",
 		},
 		"last_sweep": last,
-		// The runner has no command that deletes one checkpoint, so recovery sets past the retention are
-		// selected and reported but not removed (doc 172 section 6).
-		"recovery_set_pruning": "blocked",
+		// Recovery sets past the retention are deleted through the runner's delete-checkpoint command by
+		// prunePlatformRecoverySets (doc 172 section 6). The storage page shows the notice only for "blocked".
+		"recovery_set_pruning": "enabled",
 	})
 }
 

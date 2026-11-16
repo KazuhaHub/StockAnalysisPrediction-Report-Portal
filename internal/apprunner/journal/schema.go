@@ -18,25 +18,43 @@ type schemaProduct struct{ kind, name, sql, rowCheck string }
 // Version 2 only widens the runner_commands kind list; every other product is
 // identical in both versions. Version 3 adds runner_reservations (doc 171) and its
 // indexes, and widens the runner_commands kind list once more with remove-image
-// (doc 171, PR 4c); every other version 2 product is unchanged.
+// (doc 171, PR 4c) and delete-checkpoint (doc 172, owner decision 2026-11-16);
+// every other version 2 product is unchanged.
 func schemaProducts(version int) []schemaProduct {
-	return buildSchemaProducts(version, version >= 3)
+	return buildSchemaProducts(version, len(v3AddedKinds))
 }
 
-// earlierV3Products is the declaration a v3 journal had before remove-image joined the kind list. It is kept only
-// to recognise such a file and refuse it with a typed error; nothing is ever created from it outside tests.
-func earlierV3Products() []schemaProduct { return buildSchemaProducts(3, false) }
+// v3AddedKinds are the command kinds folded into the v3 declaration after it first shipped on development and CI
+// hosts, in the order they were added. A v3 journal that lacks a suffix of this list is an earlier shape.
+var v3AddedKinds = []string{"remove-image", "delete-checkpoint"}
 
-func earlierV3CommandsSQL() string {
-	for _, product := range earlierV3Products() {
-		if product.name == "runner_commands" {
-			return product.sql
+// earlierV3Shapes are the declarations a v3 journal had before each added kind joined the kind list, oldest first:
+// one without any added kind, and one without the last. They are kept only to recognise such a file and refuse it
+// with a typed error; nothing is ever created from them outside tests.
+func earlierV3Shapes() [][]schemaProduct {
+	shapes := make([][]schemaProduct, 0, len(v3AddedKinds))
+	for added := 0; added < len(v3AddedKinds); added++ {
+		shapes = append(shapes, buildSchemaProducts(3, added))
+	}
+	return shapes
+}
+
+// earlierV3CommandsSQL is the runner_commands declaration of each earlier v3 shape.
+func earlierV3CommandsSQL() []string {
+	var declarations []string
+	for _, shape := range earlierV3Shapes() {
+		for _, product := range shape {
+			if product.name == "runner_commands" {
+				declarations = append(declarations, product.sql)
+			}
 		}
 	}
-	return ""
+	return declarations
 }
 
-func buildSchemaProducts(version int, removeImageKind bool) []schemaProduct {
+// buildSchemaProducts builds a declaration set. At version 3, addedKinds counts how many of v3AddedKinds the
+// runner_commands kind list carries; at every other version it is ignored.
+func buildSchemaProducts(version int, addedKinds int) []schemaProduct {
 	if version < 1 || version > schemaVersion {
 		panic("unknown journal schema version")
 	}
@@ -44,8 +62,8 @@ func buildSchemaProducts(version int, removeImageKind bool) []schemaProduct {
 	if version >= 2 {
 		kinds = append(kinds, "import-checkpoint", "migrate-data", "discard-migration", "load-image")
 	}
-	if removeImageKind {
-		kinds = append(kinds, "remove-image")
+	if version >= 3 {
+		kinds = append(kinds, v3AddedKinds[:addedKinds]...)
 	}
 	tables := []struct {
 		name, fields, keys string

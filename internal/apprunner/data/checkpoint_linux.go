@@ -222,8 +222,14 @@ func checkpointNamespaceStat(source *Root, namespace *os.File, request Checkpoin
 }
 
 func (r *Root) openCheckpointDirectory() (*os.File, error) {
+	return r.openCheckpointDirectoryMode(true)
+}
+
+// openCheckpointDirectoryMode opens and verifies the checkpoint directory. With create it makes a missing directory;
+// without it a missing directory is reported as unix.ENOENT, so a read-only caller never changes the root.
+func (r *Root) openCheckpointDirectoryMode(create bool) (*os.File, error) {
 	fd, err := unix.Openat(int(r.file.Fd()), checkpointDirectory, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
-	if errors.Is(err, unix.ENOENT) {
+	if create && errors.Is(err, unix.ENOENT) {
 		if err := unix.Mkdirat(int(r.file.Fd()), checkpointDirectory, 0700); err != nil && !errors.Is(err, unix.EEXIST) {
 			return nil, err
 		}

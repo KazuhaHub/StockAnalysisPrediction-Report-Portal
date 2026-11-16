@@ -58,6 +58,13 @@ func loadPlatformManagedRestoreReviewCandidate(
 		recoveryEpoch != runtime.controllerEpoch {
 		return result, errAppPlatformStageEvidence
 	}
+	// A set whose checkpoint deletion is decided is gone for restore purposes: the runner's claim cannot be undone.
+	if decided, err := platformRecoverySetDeletionDecided(e, recoverySetID); err != nil || decided {
+		if err != nil {
+			return result, err
+		}
+		return result, errAppPlatformStageEvidence
+	}
 	var updateAction, updateStage, updateError, installationEpoch,
 		appID, publisher, desired, phase, runtimeID string
 	var updateManaged, sourceGeneration, targetGeneration,

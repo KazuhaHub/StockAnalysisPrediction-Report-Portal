@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"sort"
 	"strconv"
 	"time"
 
@@ -152,8 +153,8 @@ type platformRetentionResult struct {
 	Tombstones       int64 `json:"tombstones"`
 	OperationDays    int   `json:"operation_days"`
 	RecoverySetsKept int   `json:"recovery_sets_kept"`
-	// RecoverySetsBeyond counts the recovery sets past the latest-N policy. They are reported, never removed: the
-	// runner has no command that deletes one checkpoint, so marking a set deleted would leak its data on the host.
+	// RecoverySetsBeyond counts the recovery sets past the latest-N policy that are still waiting: prunePlatformRecoverySets
+	// deletes them through the runner, so a set drops out of this count once its deletion is decided.
 	RecoverySetsBeyond int64 `json:"recovery_sets_beyond"`
 }
 
@@ -458,7 +459,87 @@ func loadPlatformRetentionPins(e migExec) (platformRetentionPins, error) {
 	if err := pinRetainedCheckpointSources(e, pins); err != nil {
 		return pins, err
 	}
+	if err := pinCheckpointDeletions(e, pins); err != nil {
+		return pins, err
+	}
 	return pins, nil
+}
+
+// pinCheckpointDeletions keeps the operations that host a recorded checkpoint deletion (pin 9). The effect rows are the
+// Portal's only record of what the runner was asked, and the attempt count an effect id is derived from. Recovery set
+// rows are never deleted (foreign keys name them), so:
+//   - an applied deletion keeps its operation while the set row exists, which is for ever. Without it the effect would
+//     go after the retention period, the selection of sets of deleted namespaces would find the set again, and the
+//     runner could only answer "absent" every period;
+//   - a refused deletion keeps its operation until a deletion of the same set is applied, whether or not the set is
+//     already deleted (a set of a deleted namespace is deleted from the start). A refusal that was swept would reset
+//     the attempt count, and the same effect id would be signed again under another host, which the runner refuses as a
+//     conflict, leaving the row open for ever;
+//   - a row whose receipt names no set is kept, because nothing can say what it was for.
+//
+// A deletion that has no verdict (prepared or unknown) is already kept by the eligibility rule of the sweep.
+func pinCheckpointDeletions(e migExec, pins platformRetentionPins) error {
+	rows, err := e.query(`SELECT id FROM app_platform_recovery_sets`)
+	if err != nil {
+		return err
+	}
+	sets := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		sets[id] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	effects, err := e.query(`SELECT f.operation_id,f.state,f.receipt_json FROM app_platform_operation_effects f WHERE f.kind=? AND f.state IN ('applied','reverted')`, platformDeleteCheckpointKind)
+	if err != nil {
+		return err
+	}
+	type held struct{ op, state, set string }
+	var all []held
+	applied := map[string]bool{}
+	for effects.Next() {
+		var h held
+		var raw string
+		if err := effects.Scan(&h.op, &h.state, &raw); err != nil {
+			effects.Close()
+			return err
+		}
+		var named struct {
+			RecoverySetID string `json:"recovery_set_id"`
+		}
+		if json.Unmarshal([]byte(raw), &named) != nil {
+			pins.ops[h.op] = true
+			continue
+		}
+		h.set = named.RecoverySetID
+		if h.state == "applied" {
+			applied[h.set] = true
+		}
+		all = append(all, h)
+	}
+	err = effects.Err()
+	effects.Close()
+	if err != nil {
+		return err
+	}
+	for _, h := range all {
+		switch {
+		case h.set == "":
+			pins.ops[h.op] = true
+		case !sets[h.set]:
+			// Its set row is gone: nothing can select the set again.
+		case h.state == "applied", !applied[h.set]:
+			pins.ops[h.op] = true
+		}
+	}
+	return nil
 }
 
 // pinImageLedger keeps the operations whose load and removal effects are the Portal's record of what is on a
@@ -753,41 +834,114 @@ func queryRetentionIDs(e migExec, query string, args ...any) ([]string, error) {
 	return ids, rows.Err()
 }
 
-// platformRecoverySetsBeyondRetention lists the retained recovery sets past the latest keep of their
-// installation, leaving out any that is held: by an import grant that is issued or consumed, or by a restore in
-// progress. It is a selection only. The runner has no command that deletes a single checkpoint, so nothing acts
-// on it yet (doc 172 section 6).
-func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) {
-	rows, err := e.query(`SELECT r.id,r.installation_id,r.state,
+// platformBeyondSet is a verified recovery set past the latest keep verified sets of its installation.
+type platformBeyondSet struct {
+	id, installation, state, checkpoint string
+	created                             int64
+}
+
+// platformBeyondRetention lists the verified recovery sets past the latest keep verified sets of their installation,
+// newest first. Newer is the one total order of the runner's latest-checkpoint guard: created_ms greater, or created_ms
+// equal and the checkpoint id smaller. Only verified sets take a place: a set that is restoring, review_required or
+// being cut never takes a verified set's place and is never listed, so the last verified fallback is never pruned
+// because of them. A set held by an import grant that is issued or consumed takes its place but is not listed.
+//
+// The runner refuses to delete the newest checkpoint of a namespace whose volume still exists (checkpoint_latest), and
+// its rule is per namespace while keep is per installation. The Portal mirrors it: the newest verified set of a
+// namespace that is not deleted is never listed, so a refusal does not burn an effect number. A set whose deletion is
+// decided is not retained and is not listed (platformRetainedPredicate).
+func platformBeyondRetention(e migExec, keep int) ([]platformBeyondSet, error) {
+	predicate, err := platformRetainedPredicate(e, "r")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := e.query(`SELECT r.id,r.installation_id,r.state,r.checkpoint_id,r.created_ms,r.data_namespace_id,n.state,
 		EXISTS (SELECT 1 FROM app_platform_import_grants g WHERE g.recovery_set_id=r.id AND g.state IN ('issued','consumed'))
-		FROM app_platform_recovery_sets r WHERE ` + platformRetainedRecoverySetsOf("r") + ` ORDER BY r.installation_id,r.created_ms DESC,r.id DESC`)
+		FROM app_platform_recovery_sets r JOIN app_platform_data_namespaces n ON n.id=r.data_namespace_id
+		WHERE r.state='verified' AND ` + predicate + ` ORDER BY r.installation_id,r.created_ms DESC,r.checkpoint_id ASC`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	var out []platformBeyondSet
 	var current string
 	position := 0
+	seen := map[string]bool{}
 	for rows.Next() {
-		var id, installation, state string
+		var b platformBeyondSet
+		var namespace, namespaceState string
 		var granted bool
-		if err := rows.Scan(&id, &installation, &state, &granted); err != nil {
+		if err := rows.Scan(&b.id, &b.installation, &b.state, &b.checkpoint, &b.created, &namespace, &namespaceState, &granted); err != nil {
 			return nil, err
 		}
-		if installation != current {
-			current, position = installation, 0
+		if b.installation != current {
+			current, position, seen = b.installation, 0, map[string]bool{}
 		}
 		position++
-		if position > keep && state != "restoring" && !granted {
-			out = append(out, id)
+		newestOfNamespace := !seen[namespace]
+		seen[namespace] = true
+		if position > keep && !granted && !(newestOfNamespace && namespaceState != "deleted") {
+			out = append(out, b)
 		}
 	}
 	return out, rows.Err()
 }
 
-// platformRetainedRecoverySetsOf is the retained-set predicate of the recovery bundle, qualified by an alias.
-func platformRetainedRecoverySetsOf(alias string) string {
-	return alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
+// platformRecoverySetsBeyondRetention lists the ids of platformBeyondRetention. The retention sweep reports them;
+// prunePlatformRecoverySets deletes them (doc 172 section 6).
+func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) {
+	beyond, err := platformBeyondRetention(e, keep)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, b := range beyond {
+		out = append(out, b.id)
+	}
+	return out, nil
+}
+
+// platformRetainedPredicate is the retained-set predicate of the recovery bundle, qualified by an alias. A set whose
+// deletion is decided (a delete_checkpoint effect that is prepared, unknown or applied) is not retained: the runner's
+// claim cannot be undone, so the bundle must not require an archive that is going away. The decided sets that are
+// still live (no deleted_ms) are read once per query and named in the predicate; the read is bounded by the live sets
+// (platformDecidedSets), never by the length of the effect ledger. An applied deletion normally retires its set in the transaction that settles it, so the list is the
+// open effects; an applied effect beside a live set is a ledger that disagrees with itself, and the set is excluded.
+func platformRetainedPredicate(e migExec, alias string) (string, error) {
+	predicate := alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
+	rows, err := e.query(`SELECT id,checkpoint_id FROM app_platform_recovery_sets WHERE deleted_ms IS NULL AND manifest_sha256 IS NOT NULL`)
+	if err != nil {
+		return "", err
+	}
+	var live []platformSetRef
+	for rows.Next() {
+		var ref platformSetRef
+		if err := rows.Scan(&ref.id, &ref.checkpoint); err != nil {
+			rows.Close()
+			return "", err
+		}
+		live = append(live, ref)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return "", err
+	}
+	decided, err := platformDecidedSets(e, live)
+	if err != nil {
+		return "", err
+	}
+	var ids []string
+	for _, ref := range live {
+		if decided[ref.id] {
+			ids = append(ids, ref.id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > 0 {
+		predicate += ` AND ` + alias + `.id NOT IN (` + platformUUIDList(ids) + `)`
+	}
+	return predicate, nil
 }
 
 // platformRetentionTick runs the sweep from the cleanup ticker. It waits platformRetentionInterval between sweeps

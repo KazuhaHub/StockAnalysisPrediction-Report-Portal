@@ -22,6 +22,11 @@ type platformEffectRecord struct {
 	created                      bool
 }
 
+// platformInstallationNeutralEffectKinds is the SQL list of effect kinds that are not installation work. Every
+// installation-wide effect counter excludes these kinds with kind NOT IN (...), so a further such kind is added here
+// and nowhere else. TestInstallationWideEffectReadersUseTheSharedKindList requires the constant at each statement.
+const platformInstallationNeutralEffectKinds = `'load_image','remove_image','delete_checkpoint'`
+
 func platformEffectKindAllowed(stage appplatform.Stage, kind string) bool {
 	switch stage {
 	case appplatform.StageStage:
@@ -43,7 +48,7 @@ func platformEffectKindAllowed(stage appplatform.Stage, kind string) bool {
 	case appplatform.StageRemoveCode:
 		return kind == "remove-code"
 	case appplatform.StageRemoveData:
-		return kind == "delete-data"
+		return kind == "delete-data" || kind == platformDeleteCheckpointKind
 	}
 	return false
 }
