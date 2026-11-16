@@ -46,6 +46,11 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 			}
 		}
 	}
+	// Every inspect that fed the verdict has been answered; if any connection of the pass was not a local
+	// dockerd, the "no overlap" verdict is not trusted.
+	if err := requireDaemonIdentified(client); err != nil {
+		return err
+	}
 	return ctx.Err()
 }
 

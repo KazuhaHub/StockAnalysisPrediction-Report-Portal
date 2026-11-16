@@ -54,6 +54,11 @@ func managedCandidateReference(ctx context.Context, client *http.Client, plan co
 			found = entry.ID
 		}
 	}
+	// Every inspect that fed the verdict has been answered; if any connection of the pass was not a local
+	// dockerd, neither a found nor an absent reference is trusted.
+	if err := requireDaemonIdentified(client); err != nil {
+		return "", err
+	}
 	if found == "" {
 		return "", ErrContainerUncertain
 	}

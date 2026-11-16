@@ -1,6 +1,7 @@
 package driver
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,8 +14,6 @@ import (
 // mount namespace; a forwarder to another daemon, another mount namespace and a desktop VM are refused.
 type daemonPeer struct {
 	mu sync.Mutex
-	// vetted are the pids this client has already found to be a dockerd in the runner's mount namespace.
-	vetted map[int]struct{}
 	// seen are the connections already identified: a connection's peer cannot change while it lives.
 	seen map[net.Conn]struct{}
 	// refused is the first refusal of a connection. Requests still run (an image load needs no mount table, and
@@ -24,14 +23,14 @@ type daemonPeer struct {
 }
 
 // verifyOnce identifies the daemon behind a connection the first time it answers and remembers a refusal.
-func (p *daemonPeer) verifyOnce(conn net.Conn) error {
+func (p *daemonPeer) verifyOnce(ctx context.Context, conn net.Conn) error {
 	p.mu.Lock()
 	_, done := p.seen[conn]
 	p.mu.Unlock()
 	if done {
 		return nil
 	}
-	if err := p.verify(conn); err != nil {
+	if err := p.verify(ctx, conn); err != nil {
 		p.mu.Lock()
 		if p.refused == nil {
 			p.refused = err

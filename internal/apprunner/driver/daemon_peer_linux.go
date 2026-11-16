@@ -3,6 +3,7 @@
 package driver
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -45,7 +47,6 @@ func dockerdExecutable(exe string) bool {
 var (
 	daemonPeerInode              = realDaemonPeerInode
 	daemonSocketHolders          = realDaemonSocketHolders
-	daemonHoldsSocket            = realDaemonHoldsSocket
 	daemonExecutableOf           = func(pid int) (string, error) { return os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe") }
 	daemonInRunnerMountNamespace = sharesMountNamespace
 )
@@ -67,29 +68,19 @@ func daemonVouched(pid int) bool {
 	return err == nil && daemonExecutableAccepted(exe) && daemonInRunnerMountNamespace(pid)
 }
 
-// verify identifies the process that holds the daemon end of an established connection. It runs after the
-// daemon has answered, on every connection, and refuses unless every holder is a dockerd in the runner's mount
-// namespace.
-func (p *daemonPeer) verify(conn net.Conn) error {
-	ino, err := daemonPeerInode(conn)
+// verify identifies the processes that hold the daemon end of an established connection. It runs after the
+// daemon has answered, on every new connection, and refuses unless every holder is a dockerd in the runner's
+// mount namespace. There is no shortcut for a daemon vetted earlier: only a scan sees all the holders, and a
+// connection that a forwarder also holds must not pass because a dockerd holds it too.
+func (p *daemonPeer) verify(ctx context.Context, conn net.Conn) error {
+	ino, err := daemonPeerInode(ctx, conn)
 	if err != nil {
 		return p.refuse("sock_diag: %v", err)
 	}
 	if ino == 0 {
 		return p.refuse("the peer socket has no inode, so the connection was not accepted")
 	}
-	p.mu.Lock()
-	var cached []int
-	for pid := range p.vetted {
-		cached = append(cached, pid)
-	}
-	p.mu.Unlock()
-	for _, pid := range cached {
-		if daemonHoldsSocket(pid, ino) && daemonVouched(pid) {
-			return nil
-		}
-	}
-	holders, err := daemonSocketHolders(ino)
+	holders, err := daemonSocketHolders(ctx, ino)
 	if err != nil {
 		return p.refuse("process scan: %v", err)
 	}
@@ -102,12 +93,6 @@ func (p *daemonPeer) verify(conn net.Conn) error {
 			return p.refuse("the connection is held by pid %d (%q, mount namespace shared: %v)", pid, exe, daemonInRunnerMountNamespace(pid))
 		}
 	}
-	p.mu.Lock()
-	p.vetted = map[int]struct{}{}
-	for _, pid := range holders {
-		p.vetted[pid] = struct{}{}
-	}
-	p.mu.Unlock()
 	return nil
 }
 
@@ -127,19 +112,37 @@ func realDaemonHoldsSocket(pid int, ino uint64) bool {
 	return false
 }
 
-// realDaemonSocketHolders finds every process with a descriptor on the socket inode.
-func realDaemonSocketHolders(ino uint64) ([]int, error) {
+// realDaemonSocketHolders finds every process with a descriptor on the socket inode. It checks the context
+// between processes, so a scan stops at its deadline after the process it is reading; one process's descriptor
+// table is read to the end.
+func realDaemonSocketHolders(ctx context.Context, ino uint64) ([]int, error) {
 	processes, err := os.ReadDir("/proc")
 	if err != nil {
 		return nil, err
 	}
 	var holders []int
 	for _, entry := range processes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if pid, err := strconv.Atoi(entry.Name()); err == nil && realDaemonHoldsSocket(pid, ino) {
 			holders = append(holders, pid)
 		}
 	}
 	return holders, nil
+}
+
+// netlinkTimeout is how long the netlink receive may wait: what is left of the request's deadline, or two seconds
+// when the request has none. A receive that is already blocked in the kernel stops at that timeout, not at a
+// cancellation, which is why the deadline is set on the socket.
+func netlinkTimeout(ctx context.Context) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		if left := time.Until(deadline); left > 0 {
+			return left
+		}
+		return time.Millisecond
+	}
+	return 2 * time.Second
 }
 
 const (
@@ -150,7 +153,10 @@ const (
 )
 
 // realDaemonPeerInode returns the inode of the peer of a connected unix socket, from the kernel's sock_diag.
-func realDaemonPeerInode(conn net.Conn) (uint64, error) {
+func realDaemonPeerInode(ctx context.Context, conn net.Conn) (uint64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
 	unixConn, ok := conn.(*net.UnixConn)
 	if !ok {
 		return 0, errors.New("not a unix connection")
@@ -177,7 +183,7 @@ func realDaemonPeerInode(conn net.Conn) (uint64, error) {
 		return 0, fmt.Errorf("netlink: %w", err)
 	}
 	defer unix.Close(nl)
-	timeout := unix.Timeval{Sec: 2}
+	timeout := unix.NsecToTimeval(netlinkTimeout(ctx).Nanoseconds())
 	if err := unix.SetsockoptTimeval(nl, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &timeout); err != nil {
 		return 0, err
 	}

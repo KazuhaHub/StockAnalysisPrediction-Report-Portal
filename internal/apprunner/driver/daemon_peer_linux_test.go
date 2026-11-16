@@ -20,7 +20,6 @@ type fakeDaemonPeer struct {
 	peerErr    error
 	holders    []int
 	holdersErr error
-	holds      map[int]bool // pid -> still holds the inode
 	exe        map[int]string
 	sameNS     map[int]bool
 	scans      int
@@ -28,10 +27,9 @@ type fakeDaemonPeer struct {
 
 func installFakeDaemonPeer(t *testing.T, f *fakeDaemonPeer) {
 	t.Helper()
-	oi, oh, oq, oe, on := daemonPeerInode, daemonSocketHolders, daemonHoldsSocket, daemonExecutableOf, daemonInRunnerMountNamespace
-	daemonPeerInode = func(net.Conn) (uint64, error) { return f.peerInode, f.peerErr }
-	daemonSocketHolders = func(uint64) ([]int, error) { f.scans++; return f.holders, f.holdersErr }
-	daemonHoldsSocket = func(pid int, _ uint64) bool { return f.holds[pid] }
+	oi, oh, oe, on := daemonPeerInode, daemonSocketHolders, daemonExecutableOf, daemonInRunnerMountNamespace
+	daemonPeerInode = func(context.Context, net.Conn) (uint64, error) { return f.peerInode, f.peerErr }
+	daemonSocketHolders = func(context.Context, uint64) ([]int, error) { f.scans++; return f.holders, f.holdersErr }
 	daemonExecutableOf = func(pid int) (string, error) {
 		if e, ok := f.exe[pid]; ok {
 			return e, nil
@@ -40,13 +38,13 @@ func installFakeDaemonPeer(t *testing.T, f *fakeDaemonPeer) {
 	}
 	daemonInRunnerMountNamespace = func(pid int) bool { return f.sameNS[pid] }
 	t.Cleanup(func() {
-		daemonPeerInode, daemonSocketHolders, daemonHoldsSocket, daemonExecutableOf, daemonInRunnerMountNamespace = oi, oh, oq, oe, on
+		daemonPeerInode, daemonSocketHolders, daemonExecutableOf, daemonInRunnerMountNamespace = oi, oh, oe, on
 	})
 }
 
 func goodFake() *fakeDaemonPeer {
 	return &fakeDaemonPeer{
-		peerInode: 4242, holders: []int{900}, holds: map[int]bool{900: true},
+		peerInode: 4242, holders: []int{900},
 		exe: map[int]string{900: "/usr/bin/dockerd", 901: "/usr/bin/socat", 902: "/usr/bin/dockerd"}, sameNS: map[int]bool{900: true, 901: true, 902: false},
 	}
 }
@@ -70,7 +68,7 @@ func TestPeerMustBeADockerdInTheRunnersMountNamespace(t *testing.T) {
 			f := goodFake()
 			tc.change(f)
 			installFakeDaemonPeer(t, f)
-			err := (&daemonPeer{}).verify(nil)
+			err := (&daemonPeer{}).verify(context.Background(), nil)
 			if tc.ok != (err == nil) || (err != nil && !errors.Is(err, ErrUnavailable)) {
 				t.Fatalf("ok=%v: %v", tc.ok, err)
 			}
@@ -78,37 +76,57 @@ func TestPeerMustBeADockerdInTheRunnersMountNamespace(t *testing.T) {
 	}
 }
 
-// The scan of /proc is done for a daemon the client has not vetted, not for every connection.
-func TestVettedDaemonIsReverifiedWithoutAScan(t *testing.T) {
+// Every new connection is checked against all of its holders: a daemon that was vetted for an earlier connection
+// does not vouch for a later one that a forwarder also holds.
+func TestEveryHolderOfEveryConnectionMustPass(t *testing.T) {
 	f := goodFake()
 	installFakeDaemonPeer(t, f)
 	peer := &daemonPeer{}
-	for i := 0; i < 5; i++ {
-		f.peerInode = uint64(5000 + i) // each connection's peer socket is a new inode
-		if err := peer.verify(nil); err != nil {
-			t.Fatal(err)
-		}
+	if err := peer.verify(context.Background(), nil); err != nil {
+		t.Fatal(err)
 	}
-	if f.scans != 1 {
-		t.Fatalf("%d scans for five connections to one daemon", f.scans)
+	// The next connection's peer socket is held by the same dockerd and by a forwarder.
+	f.peerInode = 4343
+	f.holders = []int{900, 901}
+	if err := peer.verify(context.Background(), nil); err == nil {
+		t.Fatal("a connection also held by a forwarder passed because a dockerd was vetted earlier")
 	}
-	// The vetted process no longer holds the new peer socket: it is looked up again.
-	f.holds[900] = false
-	if err := peer.verify(nil); err != nil || f.scans != 2 {
-		t.Fatalf("scans=%d err=%v", f.scans, err)
-	}
-	// The vetted pid now runs something else: it is refused, not trusted from the cache.
-	f.holds[900] = true
-	f.exe[900] = "/usr/bin/socat"
-	if err := peer.verify(nil); err == nil {
-		t.Fatal("a cached pid that became a forwarder was trusted")
-	}
-	// And one that left the runner's mount namespace.
-	f.exe[900] = "/usr/bin/dockerd"
-	f.sameNS[900] = false
+	// And a later connection of only the dockerd passes again.
 	f.holders = []int{900}
-	if err := peer.verify(nil); err == nil {
-		t.Fatal("a cached pid that left the mount namespace was trusted")
+	if err := peer.verify(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The /proc scan and the netlink receive stop with the request's context.
+func TestPeerLookupsStopWithTheContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := realDaemonSocketHolders(ctx, 1); err == nil {
+		t.Fatal("the process scan ignored a cancelled context")
+	}
+	socket := unixDaemon(t)
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := realDaemonPeerInode(ctx, conn); err == nil {
+		t.Fatal("the netlink query ignored a cancelled context")
+	}
+	expired, cancel2 := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel2()
+	time.Sleep(time.Millisecond)
+	if _, err := realDaemonPeerInode(expired, conn); err == nil {
+		t.Fatal("the netlink query ignored an expired deadline")
+	}
+	if timeout := netlinkTimeout(context.Background()); timeout <= 0 {
+		t.Fatal("no default deadline")
+	}
+	short, cancel3 := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel3()
+	if timeout := netlinkTimeout(short); timeout > 300*time.Millisecond || timeout <= 0 {
+		t.Fatalf("the deadline does not follow the context: %v", timeout)
 	}
 }
 

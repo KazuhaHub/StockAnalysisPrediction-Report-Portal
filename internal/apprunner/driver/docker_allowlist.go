@@ -94,6 +94,6 @@ func (t allowListTransport) RoundTrip(request *http.Request) (*http.Response, er
 		t.peer.mu.Unlock()
 		return response, nil
 	}
-	t.peer.verifyOnce(conn) // a refusal is remembered, and the overlap check asks for it
+	t.peer.verifyOnce(request.Context(), conn) // a refusal is remembered, and the overlap check asks for it
 	return response, nil
 }

@@ -590,14 +590,22 @@ because they share it. No schema, journal or wire change.
   (which names the process that listened: systemd under socket activation, the proxy behind a forwarder). After the daemon has answered, the
   runner asks the kernel through NETLINK `sock_diag` (`UNIX_DIAG`, `UDIAG_SHOW_PEER`) for the peer of its own socket, finds the processes with a
   descriptor on that inode through `/proc/*/fd`, and requires every holder to be a `dockerd` (by the executable's base name) in the runner's
-  mount namespace. A pid already found to be one is re-checked on each new connection by what it holds and runs, so the scan of `/proc` is done
-  once per client. If `sock_diag` is unavailable, or the runner cannot read the daemon's descriptors (it is not root), the connection is refused for the overlap check. The refusal is remembered on the client and returned by every inventory read, not by the request itself: an image load or a daemon inspection needs no mount table and still runs, as the unprivileged native image tests do. The `/proc/net/unix` entry with inode 0 that an earlier version
-  treated as an orphan is the server end of the runner's own pending connection, created in the connecting process's network namespace with the
-  listener's path copied onto it; it gets an inode only once the daemon accepts. A listener that does not appear in the runner's
-  `/proc/net/unix` lives in another network namespace, which is why no path is looked up. The runner's client keeps connections alive: a daemon
-  closes a `Connection: close` connection as soon as it has answered, and a closed peer has no inode left to look up. A connection is identified once,
-  when it first answers. A new connection to the vetted daemon cost about 0.1 ms more than a bare one in a unit test; the native job logs the
-  cost against the real daemon's descriptor table (below).
+  mount namespace. There is no shortcut for a daemon vetted on an earlier connection: only a scan sees all the holders of a new connection, and
+  one that a forwarder also holds must not pass because a dockerd holds it too. The scan checks the request's context between processes (one
+  process's descriptor table is read to the end), and the netlink receive timeout is what is left of the request's deadline (two seconds when it
+  has none), because a receive already blocked in the kernel stops at its timeout, not at a cancellation. If `sock_diag` is unavailable, or the
+  runner cannot read the daemon's descriptors (it is not root), the connection is refused for the overlap check.
+  **Identity gates only the overlap read.** The refusal is remembered on the client and returned by every inventory read and by the end of every
+  overlap pass (after all the volume and container inspects that fed the decision, and wherever a pass would return a "no overlap" or
+  "uncertain" verdict), so a connection opened mid-pass by an unidentified peer makes the pass refuse. It does not stop a request: an image load, a
+  daemon inspection and every mutating request (create, start, stop, kill, remove) still reach whatever the socket leads to, and only the overlap
+  decision refuses. An image load or inspection by a runner that cannot read `/proc/<pid>/fd` therefore still works, as the unprivileged native
+  image tests do. The `/proc/net/unix` entry with inode 0 that an earlier version treated as an orphan is the server end of the runner's own
+  pending connection, created in the connecting process's network namespace with the listener's path copied onto it; it gets an inode only once
+  the daemon accepts, and a listener that does not appear in the runner's `/proc/net/unix` lives in another network namespace, which is why no path
+  is looked up. The runner's client keeps connections alive (a daemon closes a `Connection: close` connection as soon as it has answered, and a
+  closed peer has no inode left to look up) and identifies each connection once, when it first answers. Identifying a new connection cost about
+  3 ms in a unit test on a host with about 200 processes, and the native job logs it against the real daemon (below).
 - **Mount choice.** Of several mounts at the longest mount point the one mounted on top by the mount tree (parent ids) is used, not the last
   in the file.
 - **Absent paths.** A `..` after a missing component can return to a directory that exists, and what follows it is resolved for real again.
@@ -611,17 +619,27 @@ because they share it. No schema, journal or wire change.
   device, and a local volume mount without a valid name are refusals. A local volume that is not a bind is judged by what its options mount.
   An overlay (`lowerdir`, `upperdir` or `workdir` as an option or inside `o`, whatever the paths look like, relative or absolute) is refused. A
   network filesystem (`type` nfs, nfs4, cifs, smb3, smbfs, ceph, 9p, glusterfs, ncpfs or afs, or a `device` starting with `:` or `//`) is another host's
-  tree and overlaps only a namespace that itself sits on a network filesystem; the data root is a local XFS project-quota filesystem (the
-  data root is refused otherwise), and the check also reads the namespace's filesystem type from the mount table. A block device under
-  `/dev` is judged by the node's `st_rdev` against the device (major:minor) of the namespace's place: equal is an overlap, different is not, and a
-  device that cannot be statted is a refusal. A volume with no options, or only options that name no path (a size, a uid, `device=tmpfs`), is
+  tree and does not overlap the namespace only when the server is provably not this host and the namespace itself is not on a network filesystem
+  (the data root is a local XFS project-quota filesystem, and the mount table's filesystem type for the namespace confirms it). The server is
+  every address named by `addr=` or `ip=` in `o` and the host part of the device (`//host/share`, `host:/path`, `[v6]:/path`), resolved when it is a
+  name. A server that is loopback or unspecified, equals any address of a local interface, or is a name with such an address is an overlap, because a
+  local NFS or SMB server can export the data root back as a "remote" volume. A volume that names no server, a device that cannot be split (bare IPv6),
+  and a name that does not resolve are refused. A block device under `/dev` is judged by what the two devices are built on, read from sysfs
+  (`/sys/dev/block/M:m`): the device itself and every device under it through `slaves/` (multipath paths, device-mapper targets, the `-real`
+  device under a logical volume), and the whole disk that a partition belongs to. Two devices overlap when their chains share a device, or one is the
+  whole disk of a partition of the other; two partitions of one disk do not overlap. A loop device is backed by a file, not a slave: its
+  `loop/backing_file` is judged like any path against the namespace. A device or chain that sysfs cannot give completely (not listed, a slave that
+  cannot be followed, a chain deeper than 16 or wider than 256) is a refusal. A volume with no options, or only options that name no path (a size, a uid, `device=tmpfs`), is
   judged by the path the list shows. Anything else that names a path or a device (a relative `device`, `LABEL=`, an unknown option with a `/`)
   fails closed. NFS, CIFS and ext4-device volumes elsewhere on the host therefore do not refuse every app. A volume is inspected once per pass whatever the
   number of containers that mount it; a pass over 300 containers on 300 volumes against a daemon on a unix socket took about 35 ms with one
   connection per request, so no connection reuse was added (the 5 s pass deadline is not approached).
-- **Lookups.** Every filesystem lookup, the source canonicalisation, the namespace canonicalisation and the mount table read, runs under
-  the one-in-flight slot and is abandoned when the context ends, so a stuck mount cannot hold the caller past its deadline. A lookup that
-  does not return keeps the slot until it does; further lookups wait for it or give up at their own deadline.
+- **Lookups.** The caller stops waiting at its deadline for: the source canonicalisation, the namespace canonicalisation, the mount table
+  read, the block device stat, the sysfs ancestry reads and the DNS lookup of a network volume's server (each runs under the one-in-flight slot
+  and is abandoned when the context ends), the `/proc` scan for a connection's holders (checked between processes) and the netlink receive (its
+  timeout follows the deadline). A lookup that does not return keeps the slot until it does, and further slotted lookups wait for it or give up
+  at their own deadline. What is not abandonable is a single blocked system call inside one of these, which only returns when the kernel does, and
+  the volume and container inspects' HTTP requests, which the client's own timeout bounds.
 
 **Behaviour change.** An absent source under the namespace used to be "not a reference" by design. That test is replaced by
 `TestSourceAbsentUnderTheNamespaceIsAReference`, which pins the reverse for a bind and a volume mount and pins that a source landing
@@ -652,7 +670,9 @@ touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged
 - A daemon is recognised by the executable's base name `dockerd` only, and a process the runner cannot read is not one. Snap-packaged Docker
   (its own mount namespace), a containerised daemon, a forwarder and Docker Desktop are unsupported and refused. A pid reused between the
   scan and a later connection is re-checked on that connection by what it holds and runs; a pidfd is not used.
-- A block device on a btrfs or LVM layout whose mount table device number differs from the node's `st_rdev` can hide an overlap.
+- Block devices: two logical volumes of one volume group share their physical device in sysfs and are treated as overlapping, because the
+  mapping that would tell them apart is not read; a namespace that itself sits on a loop device is not followed to its backing file; a
+  filesystem whose mount table device number is not a block device in sysfs (btrfs subvolumes) is refused when a block volume is present.
 - A mount hidden because a later mount covers its parent is not detected as hidden; the covering is judged only at the same mount
   point. A submount that is covered is treated as visible, which can only add a refusal.
 - A filesystem the mount table gives one device number for different trees (a btrfs subvolume layout with identical numbers), or one

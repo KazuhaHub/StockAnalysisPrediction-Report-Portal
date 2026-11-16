@@ -464,11 +464,58 @@ var candidateIPCVolumeName = regexp.MustCompile(`^` + dockerVolumeName + `$`)
 
 // The sources a local volume's options can add besides a bind device. Neither is a path.
 const (
-	// candidateIPCNetworkSource stands for a volume on a network filesystem.
+	// candidateIPCNetworkSource stands for a volume on a network filesystem, followed by the server hosts its
+	// options name, comma separated: none, or one that cannot be told apart from a path, is refused.
 	candidateIPCNetworkSource = "netfs:"
 	// candidateIPCBlockSource is followed by the device node a volume is mounted from.
 	candidateIPCBlockSource = "blockdev:"
 )
+
+// candidateIPCNetworkHosts lists the servers a network volume names: the addr and ip options, and the host part
+// of a device written //host/share or host:/path (or [v6]:/path). A device with several colons and no brackets
+// cannot be split and is listed as "?", which no address matches and so is refused.
+func candidateIPCNetworkHosts(options map[string]string) []string {
+	var hosts []string
+	add := func(host string) {
+		host = strings.TrimSpace(host)
+		if host == "" {
+			return
+		}
+		for _, have := range hosts {
+			if have == host {
+				return
+			}
+		}
+		hosts = append(hosts, host)
+	}
+	for _, option := range strings.Split(options["o"], ",") {
+		if key, value, ok := strings.Cut(option, "="); ok && (key == "addr" || key == "ip") {
+			add(value)
+		}
+	}
+	device := options["device"]
+	switch {
+	case strings.HasPrefix(device, "//"):
+		host, _, _ := strings.Cut(strings.TrimPrefix(device, "//"), "/")
+		if _, after, ok := strings.Cut(host, "@"); ok {
+			host = after
+		}
+		add(strings.Trim(host, "[]"))
+	case strings.HasPrefix(device, "["):
+		if end := strings.Index(device, "]"); end > 0 {
+			add(device[1:end])
+		} else {
+			add("?")
+		}
+	case strings.HasPrefix(device, ":"), device == "":
+	case strings.Count(device, ":") == 1:
+		host, _, _ := strings.Cut(device, ":")
+		add(host)
+	default:
+		add("?")
+	}
+	return hosts
+}
 
 // candidateIPCVolumeOptions judges a local volume that is not a bind by what its options mount:
 //
@@ -498,7 +545,7 @@ func candidateIPCVolumeOptions(name string, options map[string]string) (string, 
 	device := options["device"]
 	switch {
 	case candidateIPCNetworkFilesystems[options["type"]] || strings.HasPrefix(device, ":") || strings.HasPrefix(device, "//"):
-		return candidateIPCNetworkSource, nil
+		return candidateIPCNetworkSource + strings.Join(candidateIPCNetworkHosts(options), ","), nil
 	case strings.HasPrefix(device, "/dev/"):
 		for key, value := range options {
 			if key != "device" && strings.Contains(value, "/") {
