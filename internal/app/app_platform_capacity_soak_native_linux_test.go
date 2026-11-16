@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/queue"
 )
 
-// The declared-capacity soak (doc 171, PR 4b; OPS-08; SEC-09 stays partial after it passes) against a real root runner.
+// The declared-capacity soak (doc 171, PR 4b; OPS-08 and SEC-09) against a real root runner.
 //
 // The parent runs as root beside the Docker daemon and owns the runner service, exactly as the managed image
 // delivery acceptance does; the child is the Portal as an unprivileged user and drives everything the soak
@@ -999,9 +1000,10 @@ func (c *soakChild) admit(installation string, n int, prefix string) error {
 // floodQuotas drives the event subscription to its in-flight bound with a flood of source events, each of seven managed
 // installations to its 256 task quota, and the whole Portal to its 10000 global quota. Task admissions are calls of
 // admitPlatformTask in the Portal process: the function the backend task route runs after it has verified the backend's service
-// identity. The soak backends have no outbound channel to the platform, so no admission comes from a backend. The global quota
-// is reached with a backlog of waiting tasks attributed to the static installations (they cannot schedule tasks themselves:
-// they have no backend), inserted with the columns the admission itself writes; the refusals are the real admission.
+// identity. These probes run before the load and leave their tasks behind; the load replaces them (soakWork.saturate), and the backend-originated
+// flood meets the same quota through the real task route. The global quota is reached with a backlog of waiting tasks attributed to the static
+// installations (they cannot schedule tasks themselves: they have no backend), inserted with the columns the admission itself writes; the refusals
+// are the real admission.
 func (c *soakChild) floodQuotas() {
 	t := c.t
 	// Event quota: one subscription that allows one delivery in flight is flooded with source events. The first is delivered
@@ -1153,6 +1155,14 @@ type soakFloodTarget struct {
 	Body string `json:"body"`
 }
 
+// soakFloodTaskTarget is one saturated backend the flood's second role drives: it submits tasks to the Portal's session-free task route with that
+// backend's service identity, as a backend that floods the platform from its side would (SEC-09). Prefix names the backend in the occurrences it submits.
+type soakFloodTaskTarget struct {
+	URL          string `json:"url"`
+	Installation string `json:"installation"`
+	Prefix       string `json:"prefix"`
+}
+
 // TestPlatformCapacitySoakFlood is the flood generator, a process of its own: it sends signed backend requests
 // through the Portal's real HTTP route, one attempt in flight per backend, and counts the outcomes by class in a file it
 // rewrites once a second. The relay admits at most two requests at once Portal-wide (platformDocumentBudget), so the
@@ -1168,8 +1178,38 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 		t.Fatal("no flood targets", err)
 	}
 	cookie, out := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_COOKIE"), os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_OUT")
+	var taskTargets []soakFloodTaskTarget
+	if raw := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_TASK_TARGETS"); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &taskTargets); err != nil {
+			t.Fatal("task flood targets", err)
+		}
+	}
+	identityPath := os.Getenv("PORTAL_CAPACITY_SOAK_FLOOD_IDENTITIES")
 	var mu sync.Mutex
-	counters := soakFloodCounters{Classes: map[string]int64{}}
+	counters := soakFloodCounters{Classes: map[string]int64{}, TaskClasses: map[string]int64{}}
+	identities := map[string]string{}
+	loadIdentities := func() {
+		raw, err := os.ReadFile(identityPath)
+		if err != nil {
+			return
+		}
+		var fresh map[string]string
+		if json.Unmarshal(raw, &fresh) == nil {
+			mu.Lock()
+			identities = fresh
+			mu.Unlock()
+		}
+	}
+	if len(taskTargets) > 0 {
+		loadIdentities()
+	}
+	recordTask := func(class string) {
+		mu.Lock()
+		defer mu.Unlock()
+		counters.TaskRequests++
+		counters.TaskClasses[class]++
+	}
+	var sequence atomic.Int64
 	record := func(class string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1203,12 +1243,51 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 			}
 		}(target)
 	}
+	// The backend role: each saturated backend keeps soakFloodConnectionsPerBackend requests in flight against the task route, and pauses briefly after
+	// anything but an answer, as the message role does.
+	for _, target := range taskTargets {
+		for connection := 0; connection < soakFloodConnectionsPerBackend; connection++ {
+			go func(target soakFloodTaskTarget) {
+				for {
+					mu.Lock()
+					identity := identities[target.Installation]
+					mu.Unlock()
+					status := 0
+					var body []byte
+					request, err := http.NewRequest(http.MethodPost, target.URL, bytes.NewReader(soakBackendFloodBody(target.Prefix, sequence.Add(1))))
+					if err == nil {
+						request.Header.Set("Content-Type", "application/json")
+						request.Header.Set(appplatform.TaskServiceIdentityHeader, identity)
+						var response *http.Response
+						if response, err = client.Do(request); err == nil {
+							status = response.StatusCode
+							body, _ = io.ReadAll(io.LimitReader(response.Body, 4096))
+							_, _ = io.Copy(io.Discard, response.Body)
+							response.Body.Close()
+						}
+					}
+					class := soakFloodClass(status, body, err)
+					recordTask(class)
+					if class != soakFloodOK {
+						time.Sleep(50 * time.Millisecond)
+					}
+				}
+			}(target)
+		}
+	}
 	deadline := time.Now().Add(time.Duration(soakEnvInt(t, "PORTAL_CAPACITY_SOAK_FLOOD_MINUTES", 1)) * time.Minute)
 	for time.Now().Before(deadline) {
+		if len(taskTargets) > 0 {
+			loadIdentities()
+		}
 		mu.Lock()
-		snapshot := soakFloodCounters{Requests: counters.Requests, Classes: map[string]int64{}, HeartbeatMS: time.Now().UnixMilli()}
+		snapshot := soakFloodCounters{Requests: counters.Requests, Classes: map[string]int64{}, HeartbeatMS: time.Now().UnixMilli(),
+			TaskRequests: counters.TaskRequests, TaskClasses: map[string]int64{}}
 		for class, count := range counters.Classes {
 			snapshot.Classes[class] = count
+		}
+		for class, count := range counters.TaskClasses {
+			snapshot.TaskClasses[class] = count
 		}
 		mu.Unlock()
 		raw, _ := json.Marshal(snapshot)
@@ -1220,7 +1299,7 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 
 // startFlood serves the Portal's routes on a loopback listener and starts the flood process against them. alive reports whether
 // the flood process is still running.
-func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodCounters, alive func() bool) {
+func (c *soakChild) startFlood(minutes int, saturated []string, identityPath string) (stop func(), read func() soakFloodCounters, alive func() bool) {
 	t := c.t
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -1243,6 +1322,12 @@ func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodC
 		targets = append(targets, soakFloodTarget{URL: "http://" + listener.Addr().String() + "/api/app-platform/installations/" + installation + "/backend", Body: string(request)})
 	}
 	rawTargets, _ := json.Marshal(targets)
+	var taskTargets []soakFloodTaskTarget
+	for index, installation := range saturated {
+		taskTargets = append(taskTargets, soakFloodTaskTarget{URL: "http://" + listener.Addr().String() + "/api/app-platform/installations/" + installation + "/tasks/background",
+			Installation: installation, Prefix: strconv.Itoa(index)})
+	}
+	rawTaskTargets, _ := json.Marshal(taskTargets)
 	executable, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -1250,6 +1335,7 @@ func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodC
 	out := filepath.Join(os.Getenv("TMPDIR"), "flood-counters.json")
 	flood := exec.Command(executable, "-test.run=^TestPlatformCapacitySoakFlood$", "-test.v", fmt.Sprintf("-test.timeout=%dm", minutes+10))
 	flood.Env = []string{"GOMAXPROCS=1", "PORTAL_CAPACITY_SOAK_FLOOD=1", "PORTAL_CAPACITY_SOAK_FLOOD_TARGETS=" + string(rawTargets),
+		"PORTAL_CAPACITY_SOAK_FLOOD_TASK_TARGETS=" + string(rawTaskTargets), "PORTAL_CAPACITY_SOAK_FLOOD_IDENTITIES=" + identityPath,
 		"PORTAL_CAPACITY_SOAK_FLOOD_COOKIE=" + c.cookie, "PORTAL_CAPACITY_SOAK_FLOOD_OUT=" + out,
 		"PORTAL_CAPACITY_SOAK_FLOOD_MINUTES=" + strconv.Itoa(minutes+5), "TMPDIR=" + os.Getenv("TMPDIR"), "HOME=" + os.Getenv("HOME")}
 	var floodOutput platformSyncBuffer
@@ -1291,7 +1377,8 @@ func (c *soakChild) startFlood(minutes int) (stop func(), read func() soakFloodC
 // flood is a separate process driving the Portal's HTTP route, so the measured process sees platform load only. The backends
 // flood their own memory, CPU, PIDs, log and storage from inside their containers.
 func (c *soakChild) load(minutes int) {
-	stop, read, alive := c.startFlood(minutes)
+	work := c.startWork(soakIdentityFile())
+	stop, read, alive := c.startFlood(minutes, work.saturated, work.identityPath)
 	defer stop()
 	if soakDiagnosing() {
 		c.diagnose("loaded", 60*time.Second)
@@ -1309,7 +1396,11 @@ func (c *soakChild) load(minutes int) {
 		c.rec.SetLoaded(pooled)
 		current := read()
 		window.Flood = soakFloodWindow(previous, current, alive(), time.Now())
+		backend := soakBackendFloodWindow(previous, current, alive(), time.Now())
+		window.BackendFlood = &backend
 		previous = current
+		tasks, events, quota := work.window(windowStart, windowStart.Add(time.Minute))
+		window.Tasks, window.Events, window.Quota = &tasks, &events, &quota
 		window.Backends = c.backendStatuses()
 		state := c.s.st.PoolState()
 		window.Database = &state
@@ -1317,6 +1408,8 @@ func (c *soakChild) load(minutes int) {
 	}
 	c.rec.SetLoad(started.UnixMilli(), time.Now().UnixMilli(), minutes)
 	c.rec.Mark("load_finished")
+	// The worker finishes what is still open before the run ends; no task may be lost or stuck.
+	c.rec.SetPlatformWork(work.finish())
 }
 
 // soakProfileRunner brackets the runner's CPU profile around the loaded diagnostic minute of the Portal child: the child leaves a marker file when

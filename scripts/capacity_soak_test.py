@@ -255,7 +255,7 @@ def platform_work(windows):
                       {"installation": "sat-0", "role": "probe", "state": "review_required", "reason": "inflight_limit"}]
     total = TASK_WINDOW_CREATED * windows
     return {"workload_tenants": 6, "saturated_tenants": 2, "worker_interval_ms": 1000, "loaded_latency_ms": task_stats(count=total),
-            "tasks_total": {"created": total, "by_state": {"succeeded": total}},
+            "tasks_total": {"created": total, "admit_errors": 0, "by_state": {"succeeded": total}},
             "events_total": {"captured": 5 * windows, "expected_deliveries": 30 * windows, "delivered": 30 * windows, "capture_errors": 0},
             "drain": {"seconds": 4, "open_after": 0, "timed_out": False}, "subscriptions": subscriptions}
 
@@ -781,6 +781,9 @@ class EvaluateTests(unittest.TestCase):
             self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"}, state)
         evidence = child_evidence()
         evidence["platform_work"]["tasks_total"]["created"] += 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"})
+        evidence = child_evidence()
+        evidence["platform_work"]["tasks_total"]["admit_errors"] = 1
         self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"})
         evidence = child_evidence()
         evidence["platform_work"]["drain"] = {"seconds": 180, "open_after": 2, "timed_out": True}

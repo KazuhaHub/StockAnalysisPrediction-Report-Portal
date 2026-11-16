@@ -1094,9 +1094,10 @@ def _platform_work_checks(evidence):
     bad_states = {state: count for state, count in by_state.items() if state != "succeeded" and count}
     created = totals.get("created", 0)
     unfinished = created - by_state.get("succeeded", 0)
-    checks.append(_check("no_task_lost_or_stuck", created > 0 and unfinished == 0 and not bad_states and not bad_windows and not stuck
+    admit_errors = totals.get("admit_errors", 1)
+    checks.append(_check("no_task_lost_or_stuck", created > 0 and unfinished == 0 and not bad_states and not bad_windows and not stuck and admit_errors == 0
                          and drain.get("open_after", 1) == 0 and not drain.get("timed_out", True), {
-        "created": created, "succeeded": by_state.get("succeeded", 0), "not_succeeded": unfinished, "other_states": bad_states,
+        "created": created, "admission_errors": admit_errors, "succeeded": by_state.get("succeeded", 0), "not_succeeded": unfinished, "other_states": bad_states,
         "windows_with_a_task_in_another_state": bad_windows[:200], "windows_with_a_stuck_task": stuck[:200],
         "maximum_open_age_ms": TASK_STUCK_MAX_AGE_MS, "drain": drain}))
 
