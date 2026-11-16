@@ -287,11 +287,11 @@
       "evidence_run": "43683877826"
     },
     "SEC-09": {
-      "status": "passed",
-      "after_ops08": "SEC-09 passed on 2026-11-16 on the corrected design: the 120-minute run 43848988368 at b4740c54 (the soak code of the head, which differs only by a test-file edit) passed all 35 checks including the new cross-tenant check and counts as OPS-08 evidence: 4316 workload-tenant submissions through the route all answered 200, worst window p95 309 ms and slowest 346 ms against 500 and 5000; pooled p95 home 47.7 ms (bound 50), report 43.9 (50), dispatch@200 18.5 (25), batch start 65.2 (100); tasks 7920 of 7920, events 3600 of 3600, flood 547454 requests answered 200 or 429 task_capacity. Run 43825208692 is superseded: it did not measure cross-tenant starvation and the route budget was global and taken before the body was read and the identity verified.",
+      "status": "partial",
+      "after_ops08": "SEC-09 is partial. Runs 43825208692 and 43848988368 passed and were each superseded on review; round 2 found that forged credentials naming a real installation reached the database, the remembered refusal ran without an installation slot, the soak never filled a slot, and on the same host class the corrected design lost 14.6 ms of home headroom (33.1 to 47.7 ms). A 120-minute run of the round-2 design must pass every check, including forged_identity_flood_refused_in_every_window.",
       "ops08_dependency": "met by run 43683877826 and again by run 43825208692 under the extended load",
-      "closes_when": "met: run 43848988368",
-      "evidence_run": "43848988368"
+      "closes_when": "a 120-minute dispatch of the round-2 design passes every check, including workload_tenants_submit_through_the_route_in_every_window and forged_identity_flood_refused_in_every_window",
+      "superseded_evidence_runs": ["43825208692", "43848988368"]
     }
   },
   "not_proven_by_the_dispatch_run": [
@@ -300,12 +300,12 @@
     "a backend-originated message flood: not run by either harness"
   ],
   "sec09_extended_soak": {
-    "status": "passed",
+    "status": "partial",
     "plan": "docs/app-platform/171-capacity-envelope-plan.md, SEC-09: platform work under the soak",
     "branch": "test/app-platform-sec09-soak",
     "commit": "ec21c509385ddba7ea7218640955448863daec05",
     "superseded_evidence_run": "43825208692",
-    "evidence_run": "43848988368",
+    "superseded_by_review_round_2": "43848988368",
     "commit_of_evidence_run": "b4740c54c062cf2d15e718c05216b7ad12071bb6",
     "added_checks": [
       "task_worker_ran_in_every_window",

@@ -283,7 +283,7 @@ within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
 Engineering note 2026-11-15 (not the owner's decision): "closes `SEC-09`" above is read as the soak's contribution to `SEC-09`.
-`SEC-09` passed on 2026-11-16 on the corrected design (the first pass was withdrawn on review; the 120-minute run 43848988368 at `b4740c54` passed 35 of 35 checks), after the soak also ran the task worker, the event delivery coordinator and a backend-originated task flood: the 120-minute run 43825208692 at `ec21c509` passed all 34 checks, including the unchanged OPS-08 latency bounds, after the session-free task route got an admission budget and a cheap refused path (doc 171, "SEC-09: platform work under the soak"; `handoff/acceptance-checklist.csv`, `SEC-09`).
+`SEC-09` is partial (two passes were withdrawn on review; run 43848988368 at `b4740c54` passed 35 of 35 checks but is superseded by review round 2), after the soak also ran the task worker, the event delivery coordinator and a backend-originated task flood: the 120-minute run 43825208692 at `ec21c509` passed all 34 checks, including the unchanged OPS-08 latency bounds, after the session-free task route got an admission budget and a cheap refused path (doc 171, "SEC-09: platform work under the soak"; `handoff/acceptance-checklist.csv`, `SEC-09`).
 
 Owner decision 2026-11-13: the latency bound is max(1.5x idle p95, idle p95 + 5 ms), for the home page, the report page and
 the queue's dispatch decision, measured with load generated outside the measured process. The owner decided only that floor.

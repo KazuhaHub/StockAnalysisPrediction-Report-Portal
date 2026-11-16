@@ -176,7 +176,7 @@
       ]
     },
     "SEC-09": {
-      "status": "pass-development",
+      "status": "partial",
       "commands": [
         "npm --prefix web test -- --run src/lib/bridge-v2.test.ts src/components/apps/AppFrameV2.test.tsx",
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/apprunner/transport ./internal/apprunner/driver -run '^(Test(NetworkPool.*|HTTP.*|NetworkHTTP.*|NetworkSession.*|Container.*|Candidate.*|Inspection.*))$' -count=1",
@@ -194,7 +194,7 @@
         "Corrected design (review of PR 458): the task route reads the body first under a 5 s deadline, looks up a remembered refusal by credential digest, verifies the identity, and only then takes one of two slots scoped to the verified installation; the remembered refusal re-checks the activation, setup bindings, grants and handler resolution and compares the credential expiry in the database clock; an event capture takes the task admission lock before installation rows (a PostgreSQL deadlock against a concurrent submission, found by the soak). Run 43848988368 (120 minutes, PostgreSQL, clean disk probe p50 0.21 ms, expected_commit matched): 35 of 35 checks."
       ],
       "limits": [
-        "SEC-09 passed again on the corrected design: the 120-minute run 43848988368 at b4740c54 (the soak code of the head, which differs only by a test-file edit) passed all 35 checks including the new cross-tenant check and counts as OPS-08 evidence: 4316 workload-tenant submissions through the route all answered 200, worst window p95 309 ms and slowest 346 ms against 500 and 5000; pooled p95 home 47.7 ms (bound 50), report 43.9 (50), dispatch@200 18.5 (25), batch start 65.2 (100); tasks 7920 of 7920, events 3600 of 3600, flood 547454 requests answered 200 or 429 task_capacity. The earlier pass (run 43825208692) was withdrawn on review because it did not measure cross-tenant starvation and its route budget was global and taken before the body was read and the identity verified.",
+        "SEC-09 is partial again: run 43848988368 (35 of 35 checks) is superseded by review round 2: forged credentials naming a real installation reached the database, the remembered refusal ran without an installation slot, the soak never filled a slot (0 busy answers) and the page latencies lost headroom on the same host class (home 33.1 to 47.7 ms against 50). The route now refuses forged credentials from in-memory verification material, limits cold verification to two at a time and takes the installation's slot before the remembered refusal; a 120-minute run of that design must pass, including forged_identity_flood_refused_in_every_window.",
         "Repository-level flooding and quota bounds passed, and the deployed memory, PID, log and storage floods, the Portal business executor, the task worker, event delivery and a backend-originated task flood were measured by passing 120-minute runs 43683877826 (OPS-08) and 43825208692 (extended soak).",
         "Backends run with NetworkMode none, so the backend-originated flood is sent by a process outside the container with the backend's own service identity, not by a packet from the container. A message flood from a backend (notifications/background) was not run; the per-application task quota (1000) remains proven at unit level only; the worker ran inside the measured Portal process rather than as cmd/app-task-worker.",
         "The remembered task refusal is process-local and bounded (256 credentials, 2 s, never past the credential's expiry); a worker in another process or another Portal replica does not share it, which is safe because every use re-reads the installation's active task count from the database and only ever refuses."
@@ -223,7 +223,7 @@
   },
   "open": [
     "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
-    "SEC-09 passed in development on run 43848988368 (corrected design); margins are thin (home 47.7 ms against 50) and the limits recorded on the row remain.",
+    "SEC-09 remains partial: a 120-minute run of the round-2 design (verification material, cold-verification limit, slot-first remembered refusal, anonymous forged-credential flood) must pass every check.",
     "SEC-10 has development transport/replay evidence; automatic runner re-enrollment is intentionally absent and remains an operator-approved recovery boundary.",
     "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
   ]
