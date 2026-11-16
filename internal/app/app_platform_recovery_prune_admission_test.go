@@ -15,7 +15,7 @@ func platformInsertDeleteCheckpointRow(t *testing.T, s *Server, operation, set, 
 	id := platformDerivedUUID("test-delete-checkpoint", operation+"/"+set+"/"+state+"/"+strconv.Itoa(number))
 	receipt := `{"recovery_set_id":"` + set + `","checkpoint_id":"` + platformFixtureID(42) + `","source":"retention","attempt":0}`
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-		SELECT id,'remove_data',?,?,'delete_checkpoint',?,NULL,controller_epoch,MAX(fence,1),0,?,?,created_ms,updated_ms FROM app_platform_operations WHERE id=?`,
+		SELECT id,'remove_data',?,?,'delete_checkpoint',?,NULL,controller_epoch,CASE WHEN fence<1 THEN 1 ELSE fence END,0,?,?,created_ms,updated_ms FROM app_platform_operations WHERE id=?`,
 		number, id, platformDigest([]byte(id)), state, receipt, operation)
 	return id
 }

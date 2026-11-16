@@ -10,6 +10,7 @@ import (
 	"log"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
@@ -71,30 +72,81 @@ var (
 	errPlatformPruneNotEligible = errors.New("the recovery set no longer qualifies for deletion")
 )
 
-// platformPruneRetryable lists the refusals that may pass, and the abandonments that say nothing about the runner.
+// platformPruneRetryable lists the refusals that may pass.
 func platformPruneRetryable(outcome string) bool {
 	switch outcome {
-	case journal.DeleteOutcomeLatest, journal.DeleteOutcomeInUse, "abandoned_outcome_unknown":
+	case journal.DeleteOutcomeLatest, journal.DeleteOutcomeInUse:
 		return true
 	}
 	return false
 }
 
-// platformDeletionDecidedSQL is the SQL condition, qualified by the alias of a recovery set, that a delete_checkpoint
-// effect names the set and has not been refused: prepared, unknown or applied. The set id is carried by every
-// receipt shape of the effect (the intent written before the command is sent, the runner's receipt, and the
-// Portal's own abandonment), always as the compact JSON member "recovery_set_id".
-func platformDeletionDecidedSQL(alias string) string {
-	return `EXISTS (SELECT 1 FROM app_platform_operation_effects pf WHERE pf.kind='` + platformDeleteCheckpointKind + `' AND pf.state IN ('prepared','unknown','applied')
-		AND pf.receipt_json LIKE '%"recovery_set_id":"' || ` + alias + `.id || '"%')`
+// platformPruneSuperseded is the outcome of an effect that a later attempt of the same set settled: the later verdict
+// proves what the earlier claim did, and the earlier row says nothing more.
+func platformPruneSuperseded(outcome string) bool { return strings.HasPrefix(outcome, "superseded_") }
+
+// platformDeletionStates reads the delete_checkpoint effects in the given states (a SQL list) and returns the ids of the
+// recovery sets their receipts name. The set id is carried by every receipt shape of the effect (the intent written
+// before the command is sent, the runner's receipt and the Portal's own closures), always as the JSON member
+// "recovery_set_id". The read is one indexed pass over the effects in those states, not a scan per set.
+func platformDeletionStates(e migExec, states string) (map[string]bool, error) {
+	rows, err := e.query(`SELECT receipt_json FROM app_platform_operation_effects WHERE kind=? AND state IN (`+states+`)`, platformDeleteCheckpointKind)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var named struct {
+			RecoverySetID string `json:"recovery_set_id"`
+		}
+		if json.Unmarshal([]byte(raw), &named) == nil && platformValidUUID(named.RecoverySetID) {
+			out[named.RecoverySetID] = true
+		}
+	}
+	return out, rows.Err()
 }
 
-// platformRecoverySetDeletionDecided reports whether a deletion of the set has been decided (see
-// platformDeletionDecidedSQL). Restore admission, import-grant issuance and restore-from-import refuse such a set.
+// platformOpenDeletionSets are the sets with a deletion that has no verdict (prepared or unknown).
+func platformOpenDeletionSets(e migExec) ([]string, error) {
+	sets, err := platformDeletionStates(e, `'prepared','unknown'`)
+	if err != nil {
+		return nil, err
+	}
+	return platformSortedKeys(sets), nil
+}
+
+func platformSortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// platformUUIDList is the SQL list of validated ids. Only a string that passes platformValidUUID is written, so the
+// list cannot carry anything but ids.
+func platformUUIDList(ids []string) string {
+	var list []string
+	for _, id := range ids {
+		if platformValidUUID(id) {
+			list = append(list, `'`+id+`'`)
+		}
+	}
+	return strings.Join(list, ",")
+}
+
+// platformRecoverySetDeletionDecided reports whether a deletion of the set has been decided: an effect that names it is
+// prepared, unknown or applied. A refused (reverted) effect does not decide anything. Restore admission, import-grant
+// issuance and restore-from-import refuse a decided set.
 func platformRecoverySetDeletionDecided(e migExec, id string) (bool, error) {
-	var n int
-	err := e.queryRow(`SELECT COUNT(*) FROM app_platform_recovery_sets r WHERE r.id=? AND `+platformDeletionDecidedSQL("r"), id).Scan(&n)
-	return n != 0, err
+	sets, err := platformDeletionStates(e, `'prepared','unknown','applied'`)
+	return sets[id], err
 }
 
 type platformPruneIntent struct {
@@ -104,6 +156,10 @@ type platformPruneIntent struct {
 	Source string `json:"source"`
 	// Attempt numbers the tries after a refusal; it is part of the effect id, so a retry is a new effect.
 	Attempt int `json:"attempt"`
+	// Stranded marks an open effect whose host operation can no longer settle it (the installation's fence moved).
+	// The effect stays open, so the set stays decided, and a new attempt on the installation's current host
+	// settles the question (see strandDeletion).
+	Stranded bool `json:"stranded,omitempty"`
 }
 
 func platformPruneEffectID(setID, checkpointID string, attempt int) string {
@@ -142,6 +198,9 @@ type platformPruneTarget struct {
 	effectNumber  int64
 	// state is "" for a deletion not begun, otherwise the Portal row's open state ("prepared" or "unknown").
 	state string
+	// retry marks a new attempt for a set whose earlier effects are all stranded: the decision to delete was already
+	// made and cannot be undone, so it is not qualified again.
+	retry bool
 }
 
 // platformPruneRow is one delete_checkpoint effect row as the history reads it.
@@ -149,6 +208,7 @@ type platformPruneRow struct {
 	effectID, operation, runtimeID, state, setID, outcome string
 	number, updated                                       int64
 	intent                                                platformPruneIntent
+	stranded                                              bool
 }
 
 // platformPruneHistory reads every delete_checkpoint row, grouped by the set it names. A row whose receipt names no
@@ -173,12 +233,13 @@ func platformPruneHistory(e migExec) (bySet map[string][]platformPruneRow, open 
 			Source        string `json:"source"`
 			Attempt       int    `json:"attempt"`
 			Outcome       string `json:"outcome"`
+			Stranded      bool   `json:"stranded"`
 		}
 		if json.Unmarshal([]byte(raw), &parsed) != nil || !platformValidUUID(parsed.RecoverySetID) {
 			continue
 		}
-		r.setID, r.outcome = parsed.RecoverySetID, parsed.Outcome
-		r.intent = platformPruneIntent{RecoverySetID: parsed.RecoverySetID, CheckpointID: parsed.CheckpointID, Source: parsed.Source, Attempt: parsed.Attempt}
+		r.setID, r.outcome, r.stranded = parsed.RecoverySetID, parsed.Outcome, parsed.Stranded
+		r.intent = platformPruneIntent{RecoverySetID: parsed.RecoverySetID, CheckpointID: parsed.CheckpointID, Source: parsed.Source, Attempt: parsed.Attempt, Stranded: parsed.Stranded}
 		bySet[r.setID] = append(bySet[r.setID], r)
 		if r.state == "prepared" || r.state == "unknown" {
 			open = append(open, r)
@@ -218,10 +279,16 @@ func platformPruneNumber(e migExec, operation string) (number int64, ok bool, er
 	return number, number <= platformPruneMaxNumber, nil
 }
 
-// platformPruneCandidates lists the sets to start deleting now, oldest first, each with its host operation and the
-// effect id of its next attempt. A set with a deletion that is open or applied, a refusal that is not retried, a
-// backoff still running, a grant, a restore or an installation that is not idle is left out. exhausted names the
-// hosts that had no free effect number.
+// platformPruneRetryReserve is how many effect numbers of a host operation a retry never takes: a refusal that keeps
+// repeating must not use the numbers new deletions need, so a retry waits for the installation's next operation
+// instead.
+const platformPruneRetryReserve = 8
+
+// platformPruneCandidates lists the sets to start deleting now, oldest first (the reverse of the runner's order, so the
+// least recent checkpoint goes first), each with its host operation and the effect id of its next attempt. A set with a
+// deletion that is open or applied, a refusal that is not retried, a backoff still running, a grant, a restore or an
+// installation that is not idle is left out. A set whose earlier effects are all stranded is a retry: the decision was
+// made, so it is not qualified again. exhausted names the hosts that had no free effect number.
 func (s *Server) platformPruneCandidates(e migExec, keep int, history map[string][]platformPruneRow, now int64) (out []platformPruneTarget, exhausted []string, err error) {
 	beyond, err := platformBeyondRetention(e, keep)
 	if err != nil {
@@ -229,51 +296,76 @@ func (s *Server) platformPruneCandidates(e migExec, keep int, history map[string
 	}
 	type candidate struct {
 		id, source string
-		created    int64
+		set        platformPruneSet
 	}
-	var all []candidate
-	for _, b := range beyond {
-		if b.state == "verified" {
-			all = append(all, candidate{b.id, platformPruneSourceRetention, b.created})
+	chosen := map[string]*candidate{}
+	add := func(id, source string) {
+		if chosen[id] == nil {
+			chosen[id] = &candidate{id: id, source: source}
 		}
+	}
+	for _, b := range beyond {
+		add(b.id, platformPruneSourceRetention)
 	}
 	leak, err := platformDeletedNamespaceSets(e)
 	if err != nil {
 		return nil, nil, err
 	}
 	for _, b := range leak {
-		all = append(all, candidate{b.id, platformPruneSourceDeletedNamespace, b.created})
+		add(b.id, platformPruneSourceDeletedNamespace)
 	}
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].created != all[j].created {
-			return all[i].created < all[j].created
-		}
-		return all[i].id < all[j].id
-	})
-	taken := map[string]int64{}
-	for _, c := range all {
-		rows := history[c.id]
-		blocked := false
-		var last int64
-		lastOutcome := ""
+	for id, rows := range history {
 		for _, r := range rows {
-			if r.state == "prepared" || r.state == "unknown" || r.state == "applied" {
-				blocked = true
-			}
-			if r.updated >= last {
-				last, lastOutcome = r.updated, r.outcome
+			if r.stranded && (r.state == "prepared" || r.state == "unknown") {
+				add(id, r.intent.Source)
 			}
 		}
-		attempts := len(rows)
-		if blocked || (attempts > 0 && (!platformPruneRetryable(lastOutcome) || attempts >= platformPruneMaxAttempts || now < last+platformPruneWait(attempts).Milliseconds())) {
-			continue
-		}
-		set, err := loadPlatformPruneSet(e, c.id)
+	}
+	var all []*candidate
+	for id, c := range chosen {
+		set, err := loadPlatformPruneSet(e, id)
 		if errors.Is(err, errPlatformPruneNotEligible) {
 			continue
 		}
 		if err != nil {
 			return nil, nil, err
+		}
+		c.set = set
+		all = append(all, c)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].set.created != all[j].set.created {
+			return all[i].set.created < all[j].set.created
+		}
+		return all[i].set.checkpoint > all[j].set.checkpoint
+	})
+	taken := map[string]int64{}
+	for _, c := range all {
+		set := c.set
+		rows := history[c.id]
+		blocked, retry := false, false
+		var last int64
+		lastOutcome := ""
+		for _, r := range rows {
+			switch {
+			case r.state == "applied":
+				blocked = true
+			case r.state == "prepared" || r.state == "unknown":
+				if r.stranded {
+					retry = true
+				} else {
+					blocked = true
+				}
+			case !platformPruneSuperseded(r.outcome) && r.updated >= last:
+				last, lastOutcome = r.updated, r.outcome
+			}
+		}
+		attempts := len(rows)
+		if blocked || attempts >= platformPruneMaxAttempts {
+			continue
+		}
+		if !retry && attempts > 0 && (!platformPruneRetryable(lastOutcome) || attempts >= platformPruneMaxAttempts || now < last+platformPruneWait(attempts).Milliseconds()) {
+			continue
 		}
 		idle, err := platformPruneIdle(e, set.installation)
 		if err != nil || !idle {
@@ -293,15 +385,19 @@ func (s *Server) platformPruneCandidates(e migExec, keep int, history map[string
 		if !ok || runtimeID == "" {
 			continue
 		}
-		number, free, err := platformPruneNumber(e, host)
+		number, _, err := platformPruneNumber(e, host)
 		if err != nil {
 			return nil, nil, err
 		}
 		// Rows of this driver that were selected earlier in the same pass take their numbers too.
 		if taken[host] != 0 {
-			number, free = taken[host]+1, taken[host]+1 <= platformPruneMaxNumber
+			number = taken[host] + 1
 		}
-		if !free {
+		limit := int64(platformPruneMaxNumber)
+		if attempts > 0 {
+			limit -= platformPruneRetryReserve
+		}
+		if number > limit {
 			exhausted = append(exhausted, host)
 			continue
 		}
@@ -320,7 +416,7 @@ func (s *Server) platformPruneCandidates(e migExec, keep int, history map[string
 		taken[host] = number
 		out = append(out, platformPruneTarget{
 			set: set, intent: platformPruneIntent{RecoverySetID: set.id, CheckpointID: set.checkpoint, Source: c.source, Attempt: attempt},
-			hostOperation: host, installation: set.installation, runtimeID: runtimeID, effectID: effect, effectNumber: number,
+			hostOperation: host, installation: set.installation, runtimeID: runtimeID, effectID: effect, effectNumber: number, retry: retry,
 		})
 	}
 	return out, exhausted, nil
@@ -540,42 +636,66 @@ func (s *Server) checkPruneEligible(e migExec, t platformPruneTarget, lease plat
 	if current != t.set {
 		return errPlatformPruneNotEligible
 	}
-	switch t.intent.Source {
-	case platformPruneSourceRetention:
-		if current.state != "verified" {
-			return errPlatformPruneNotEligible
-		}
-		beyond, err := platformBeyondRetention(e, keep)
+	if t.retry {
+		// The decision was made when the first effect was written and cannot be undone, so a retry is not qualified
+		// again. It needs every earlier effect of the set to be stranded and none applied, read under the locks.
+		history, _, err := platformPruneHistory(e)
 		if err != nil {
 			return err
 		}
-		found := false
-		for _, b := range beyond {
-			found = found || (b.id == current.id && b.state == "verified")
+		stranded := false
+		for _, r := range history[current.id] {
+			switch {
+			case r.state == "applied":
+				return errPlatformPruneNotEligible
+			case r.state == "prepared" || r.state == "unknown":
+				if !r.stranded {
+					return errPlatformPruneNotEligible
+				}
+				stranded = true
+			}
 		}
-		if !found {
+		if !stranded || current.state == "restoring" {
 			return errPlatformPruneNotEligible
 		}
-	case platformPruneSourceDeletedNamespace:
-		leak, err := platformDeletedNamespaceSets(e)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, b := range leak {
-			found = found || b.id == current.id
-		}
-		if !found {
+	} else {
+		switch t.intent.Source {
+		case platformPruneSourceRetention:
+			if current.state != "verified" {
+				return errPlatformPruneNotEligible
+			}
+			beyond, err := platformBeyondRetention(e, keep)
+			if err != nil {
+				return err
+			}
+			found := false
+			for _, b := range beyond {
+				found = found || b.id == current.id
+			}
+			if !found {
+				return errPlatformPruneNotEligible
+			}
+		case platformPruneSourceDeletedNamespace:
+			leak, err := platformDeletedNamespaceSets(e)
+			if err != nil {
+				return err
+			}
+			found := false
+			for _, b := range leak {
+				found = found || b.id == current.id
+			}
+			if !found {
+				return errPlatformPruneNotEligible
+			}
+		default:
 			return errPlatformPruneNotEligible
 		}
-	default:
-		return errPlatformPruneNotEligible
-	}
-	if decided, err := platformRecoverySetDeletionDecided(e, current.id); err != nil || decided {
-		if err != nil {
-			return err
+		if decided, err := platformRecoverySetDeletionDecided(e, current.id); err != nil || decided {
+			if err != nil {
+				return err
+			}
+			return errPlatformPruneNotEligible
 		}
-		return errPlatformPruneNotEligible
 	}
 	idle, err := platformPruneIdle(e, current.installation)
 	if err != nil || !idle {
@@ -592,7 +712,7 @@ func (s *Server) checkPruneEligible(e migExec, t platformPruneTarget, lease plat
 		return errPlatformPruneNotEligible
 	}
 	number, free, err := platformPruneNumber(e, host)
-	if err != nil || !free || number > t.effectNumber {
+	if err != nil || !free || number > t.effectNumber || (t.intent.Attempt > 0 && t.effectNumber > platformPruneMaxNumber-platformPruneRetryReserve) {
 		if err != nil {
 			return err
 		}
@@ -622,6 +742,33 @@ func (s *Server) settleDeletion(ctx context.Context, lease platformOperationLeas
 			// Another settlement already recorded a verdict for this effect.
 			return nil
 		}
+		// The verdict of one attempt proves what the claim of an earlier, stranded one did: a claim marks the runner's
+		// checkpoint deleted before it touches the file, so after a refusal the earlier effect was never claimed, and
+		// after an applied receipt the set is gone whichever effect removed it. Either way the earlier rows are closed.
+		history, _, err := platformPruneHistory(e)
+		if err != nil {
+			return err
+		}
+		closure := "superseded_not_claimed"
+		if state == "applied" {
+			closure = "superseded_applied"
+		}
+		for _, r := range history[t.set.id] {
+			if r.effectID == t.effectID || (r.state != "prepared" && r.state != "unknown") {
+				continue
+			}
+			closed, _ := json.Marshal(struct {
+				RecoverySetID string `json:"recovery_set_id"`
+				CheckpointID  string `json:"checkpoint_id"`
+				Source        string `json:"source"`
+				Attempt       int    `json:"attempt"`
+				Outcome       string `json:"outcome"`
+			}{r.intent.RecoverySetID, r.intent.CheckpointID, r.intent.Source, r.intent.Attempt, closure})
+			if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=? WHERE effect_id=? AND kind=? AND state IN ('prepared','unknown')`,
+				string(closed), now, r.effectID, platformDeleteCheckpointKind); err != nil {
+				return err
+			}
+		}
 		action := "app_platform.recovery_set_pruned"
 		switch {
 		case state == "applied":
@@ -644,20 +791,20 @@ func (s *Server) settleDeletion(ctx context.Context, lease platformOperationLeas
 	})
 }
 
-// abandonDeletion closes a row that can no longer be carried out as reverted, with a typed outcome. It changes nothing
-// on the runner: a claim the runner may hold stays there, and the next attempt under a new id finds the checkpoint
-// deleted and settles absent.
-func (s *Server) abandonDeletion(ctx context.Context, t platformPruneTarget, outcome string) error {
-	raw, _ := json.Marshal(struct {
-		RecoverySetID string `json:"recovery_set_id"`
-		CheckpointID  string `json:"checkpoint_id"`
-		Source        string `json:"source"`
-		Attempt       int    `json:"attempt"`
-		Outcome       string `json:"outcome"`
-	}{t.intent.RecoverySetID, t.intent.CheckpointID, t.intent.Source, t.intent.Attempt, outcome})
+// strandDeletion records that the host operation of an open deletion can no longer settle it: the installation's fence
+// moved after the command was written. The row is never reverted, because the runner may have claimed it: it stays
+// open (unknown), so the set stays decided and neither restore nor the recovery bundle offers it. The next pass signs a
+// new attempt on the installation's current host operation, whose verdict closes this row (settleDeletion).
+func (s *Server) strandDeletion(ctx context.Context, t platformPruneTarget) error {
+	intent := t.intent
+	intent.Stranded = true
+	raw, err := json.Marshal(intent)
+	if err != nil {
+		return err
+	}
 	return s.pruneTx(ctx, nil, false, func(e migExec, now int64) error {
-		_, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=?
-			WHERE operation_id=? AND effect_id=? AND kind=? AND state IN ('prepared','unknown')`, string(raw), now, t.hostOperation, t.effectID, platformDeleteCheckpointKind)
+		_, err := e.exec(`UPDATE app_platform_operation_effects SET state='unknown',receipt_json=? WHERE operation_id=? AND effect_id=? AND kind=? AND state IN ('prepared','unknown')`,
+			string(raw), t.hostOperation, t.effectID, platformDeleteCheckpointKind)
 		return err
 	})
 }
@@ -705,7 +852,7 @@ func (s *Server) pruneRecoverySet(ctx context.Context, endpoint platformRuntimeE
 	lease, err := platformLoadSettlementLease(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}, t.hostOperation)
 	if err != nil {
 		if t.state != "" && errors.Is(err, errAppPlatformStageEvidence) {
-			return pruneLeft, s.abandonDeletion(ctx, t, "abandoned_outcome_unknown")
+			return pruneLeft, s.strandDeletion(ctx, t)
 		}
 		return pruneLeft, err
 	}
@@ -714,10 +861,10 @@ func (s *Server) pruneRecoverySet(ctx context.Context, endpoint platformRuntimeE
 	if err != nil {
 		if errors.Is(err, errAppPlatformLeaseConflict) || errors.Is(err, errAppPlatformStageEvidence) {
 			if t.state != "" {
-				// The installation's fence moved after the decision: this host can no longer settle it. The next attempt
-				// is signed by the installation's new latest operation.
-				log.Printf("app-platform recovery set prune %s: the installation's fence moved; closing the row as abandoned_outcome_unknown", t.effectID)
-				return pruneLeft, s.abandonDeletion(ctx, t, "abandoned_outcome_unknown")
+				// The installation's fence moved after the decision: this host can no longer settle it. The row stays
+				// open, so the set stays decided; the next attempt is signed by the installation's new latest operation.
+				log.Printf("app-platform recovery set prune %s: the installation's fence moved; the row is stranded and a new attempt will settle it", t.effectID)
+				return pruneLeft, s.strandDeletion(ctx, t)
 			}
 			return pruneLeft, nil
 		}
@@ -733,11 +880,9 @@ func (s *Server) pruneRecoverySet(ctx context.Context, endpoint platformRuntimeE
 		return pruneLeft, err
 	}
 	if len(descriptor) == 0 {
-		// The transport refuses a lifecycle action with no release descriptor, so nothing was ever sent for this row. It
-		// is closed as a refusal that is not retried and the set stays; an operator has to restore the release record.
-		if t.state != "" {
-			return pruneLeft, s.abandonDeletion(ctx, t, "release_descriptor_missing")
-		}
+		// The transport refuses a lifecycle action with no release descriptor, so nothing can be sent for this set. A
+		// deletion that is already open stays open (its claim may exist), which the storage status reports once it is
+		// stale; an operator has to restore the release record.
 		log.Printf("app-platform recovery set prune: recovery set %s names release %s, which has no stored descriptor; it is not deleted", t.set.id, t.set.release)
 		return pruneLeft, nil
 	}
@@ -746,6 +891,10 @@ func (s *Server) pruneRecoverySet(ctx context.Context, endpoint platformRuntimeE
 		return pruneLeft, err
 	}
 	state, err := s.prepareDeletion(ctx, lease, signer.runtime.id, t, call.command)
+	if t.state != "" && errors.Is(err, errAppPlatformStageEvidence) {
+		// The row was written under another fence than the host now carries, so its command can no longer be signed.
+		return pruneLeft, s.strandDeletion(ctx, t)
+	}
 	if errors.Is(err, errPlatformPruneNotEligible) || errors.Is(err, errPlatformRetentionPaused) {
 		return pruneLeft, nil
 	}
@@ -827,46 +976,6 @@ type platformPruneResult struct {
 	Settled, Busy, Unclaimed, Exhausted int
 }
 
-// revertDeletionsOfRetiredRuntimes closes, as reverted with the outcome abandoned_outcome_unknown, the deletions
-// issued to a runtime binding that was retired: nothing could read them back.
-func (s *Server) revertDeletionsOfRetiredRuntimes(ctx context.Context) error {
-	return s.pruneTx(ctx, nil, false, func(e migExec, now int64) error {
-		rows, err := e.query(`SELECT effect_id,receipt_json FROM app_platform_operation_effects WHERE kind=? AND state IN ('prepared','unknown')
-			AND runtime_id IN (SELECT id FROM app_platform_runtime_bindings WHERE enabled=0)`, platformDeleteCheckpointKind)
-		if err != nil {
-			return err
-		}
-		type open struct{ id, raw string }
-		var list []open
-		for rows.Next() {
-			var o open
-			if err := rows.Scan(&o.id, &o.raw); err != nil {
-				rows.Close()
-				return err
-			}
-			list = append(list, o)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
-		}
-		for _, o := range list {
-			var intent platformPruneIntent
-			_ = json.Unmarshal([]byte(o.raw), &intent)
-			raw, _ := json.Marshal(struct {
-				platformPruneIntent
-				Outcome string `json:"outcome"`
-			}{intent, "abandoned_outcome_unknown"})
-			if _, err := e.exec(`UPDATE app_platform_operation_effects SET state='reverted',receipt_json=?,updated_ms=? WHERE effect_id=? AND kind=? AND state IN ('prepared','unknown')`,
-				string(raw), now, o.id, platformDeleteCheckpointKind); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
 // prunePlatformRecoverySets deletes the checkpoint archives of the recovery sets the Portal no longer keeps, and
 // settles the deletions it began. It takes one step for up to platformPruneWindow sets. It never fails an operation:
 // whatever it cannot do is left for the next tick. With the restore pause on, or unreadable, nothing is selected.
@@ -891,9 +1000,6 @@ func (s *Server) prunePlatformRecoverySets(ctx context.Context, endpoint platfor
 	if paused {
 		return result, nil
 	}
-	if err := s.revertDeletionsOfRetiredRuntimes(ctx); err != nil && !errors.Is(err, errPlatformRetentionPaused) {
-		return result, err
-	}
 	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
 	history, open, err := platformPruneHistory(pool)
 	if err != nil {
@@ -901,6 +1007,18 @@ func (s *Server) prunePlatformRecoverySets(ctx context.Context, endpoint platfor
 	}
 	var targets []platformPruneTarget
 	for _, r := range open {
+		if r.stranded {
+			// A stranded row is never sent again; a new attempt on the current host settles it (platformPruneCandidates).
+			continue
+		}
+		if r.runtimeID != "" {
+			var enabled int
+			if err := pool.queryRow(`SELECT enabled FROM app_platform_runtime_bindings WHERE id=?`, r.runtimeID).Scan(&enabled); err != nil || enabled == 0 {
+				// A runtime that was retired cannot be read from. The row stays open, so the set stays decided, and the
+				// storage status reports it (platformPruneRefusals); it takes no window slot.
+				continue
+			}
+		}
 		set, err := loadPlatformPruneSet(pool, r.setID)
 		if err != nil {
 			log.Printf("app-platform recovery set prune %s: %v", r.effectID, err)
@@ -919,7 +1037,9 @@ func (s *Server) prunePlatformRecoverySets(ctx context.Context, endpoint platfor
 		targets = append(append([]platformPruneTarget{}, targets[start:]...), targets[:start]...)[:platformPruneWindow]
 		s.platformPruneCursor += platformPruneWindow
 	}
-	if room := platformPruneWindow - len(targets); room > 0 {
+	// New deletions have a window of their own: rows that cannot progress must not stop the others.
+	{
+		room := platformPruneWindow
 		fresh, exhausted, err := s.platformPruneCandidates(pool, s.platformRetentionConfigLoad().RecoverySets, history, time.Now().UnixMilli())
 		if err != nil {
 			// Fail closed: with the selection unreadable nothing new is started.
@@ -967,31 +1087,80 @@ type platformPruneRefused struct {
 	Reason string `json:"reason"`
 }
 
-// platformPruneRefusals lists the sets whose deletion stopped: the last refusal does not pass, or the attempts ran
-// out, and no deletion of the set is applied or open.
+// platformPruneStale is how long a deletion may stay open with no verdict before the storage status reports it.
+const platformPruneStale = 24 * time.Hour
+
+// platformPruneRefusals lists the sets whose deletion needs an operator: the last refusal does not pass, or the attempts
+// ran out, with no deletion of the set applied or open; or a deletion has been open with no verdict for a day
+// (outcome_unknown) or was issued to a runtime that was retired (runtime_retired). An open deletion is never closed
+// without a runner verdict, so the status is the only way such a row leaves the operator's attention.
 func (s *Server) platformPruneRefusals(ctx context.Context) ([]platformPruneRefused, error) {
-	history, _, err := platformPruneHistory(migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}})
+	pool := migExec{s: s.st, ex: platformContextPool{DB: s.st.db, ctx: ctx}}
+	history, _, err := platformPruneHistory(pool)
 	if err != nil {
 		return nil, err
 	}
+	retired := map[string]bool{}
+	rows, err := pool.query(`SELECT id FROM app_platform_runtime_bindings WHERE enabled=0`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		retired[id] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UnixMilli()
 	out := []platformPruneRefused{}
-	for id, rows := range history {
+	for id, set := range history {
 		var last int64
-		lastOutcome, checkpoint := "", ""
-		done := false
-		for _, r := range rows {
-			done = done || r.state == "prepared" || r.state == "unknown" || r.state == "applied"
-			if r.updated >= last {
-				last, lastOutcome, checkpoint = r.updated, r.outcome, r.intent.CheckpointID
+		lastOutcome, checkpoint, openReason := "", "", ""
+		applied := false
+		for _, r := range set {
+			checkpoint = r.intent.CheckpointID
+			switch {
+			case r.state == "applied":
+				applied = true
+			case r.state == "prepared" || r.state == "unknown":
+				switch {
+				case retired[r.runtimeID]:
+					openReason = "runtime_retired"
+				case !r.stranded && now-r.updated > platformPruneStale.Milliseconds() && openReason == "":
+					openReason = "outcome_unknown"
+				}
+			case !platformPruneSuperseded(r.outcome) && r.updated >= last:
+				last, lastOutcome = r.updated, r.outcome
 			}
 		}
-		if done || (platformPruneRetryable(lastOutcome) && len(rows) < platformPruneMaxAttempts) {
+		switch {
+		case applied:
+			continue
+		case openReason != "":
+			lastOutcome = openReason
+		case platformPruneOpen(set) || (platformPruneRetryable(lastOutcome) && len(set) < platformPruneMaxAttempts):
 			continue
 		}
-		out = append(out, platformPruneRefused{RecoverySetID: id, CheckpointID: checkpoint, Attempts: len(rows), Reason: lastOutcome})
+		out = append(out, platformPruneRefused{RecoverySetID: id, CheckpointID: checkpoint, Attempts: len(set), Reason: lastOutcome})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RecoverySetID < out[j].RecoverySetID })
 	return out, nil
+}
+
+func platformPruneOpen(rows []platformPruneRow) bool {
+	for _, r := range rows {
+		if r.state == "prepared" || r.state == "unknown" {
+			return true
+		}
+	}
+	return false
 }
 
 // platformPruneInterval is how often the idle tick runs the pruning step when no deletion is open. The selection reads

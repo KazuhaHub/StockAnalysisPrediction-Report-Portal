@@ -94,9 +94,8 @@ var errPlatformBundle = errors.New("recovery bundle is incomplete or inconsisten
 // platformTestBundleBeforeRecheck lets a test commit a change between the bundle's before-read and after-read.
 var platformTestBundleBeforeRecheck func()
 
-// platformRetainedRecoverySets are the recovery sets whose archive a restored Portal can still import:
-// cut and verified, not deleted. A set that is being cut has no digest to carry.
-var platformRetainedRecoverySets = platformRetainedRecoverySetsOf("app_platform_recovery_sets")
+// The retained recovery sets are the ones whose archive a restored Portal can still import: cut and verified, not
+// deleted, and with no deletion decided (platformRetainedPredicate). A set that is being cut has no digest to carry.
 
 type platformRetainedSet struct {
 	id, installation, checkpoint, namespace, release, manifest string
@@ -104,8 +103,12 @@ type platformRetainedSet struct {
 }
 
 func loadPlatformRetainedSets(e migExec) ([]platformRetainedSet, error) {
+	predicate, err := platformRetainedPredicate(e, "app_platform_recovery_sets")
+	if err != nil {
+		return nil, err
+	}
 	rows, err := e.query(`SELECT id,installation_id,checkpoint_id,data_namespace_id,release_sha256,manifest_sha256,bytes
-		FROM app_platform_recovery_sets WHERE ` + platformRetainedRecoverySets + ` ORDER BY created_ms,id`)
+		FROM app_platform_recovery_sets WHERE ` + predicate + ` ORDER BY created_ms,id`)
 	if err != nil {
 		return nil, err
 	}
@@ -461,7 +464,11 @@ func loadPlatformReleasePins(e migExec, nowMS int64) (map[string]map[string]bool
 		AND a.generation=(SELECT MAX(b.generation) FROM app_platform_activations b WHERE b.installation_id=a.installation_id)`); err != nil {
 		return nil, err
 	}
-	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+platformRetainedRecoverySets); err != nil {
+	retained, err := platformRetainedPredicate(e, "app_platform_recovery_sets")
+	if err != nil {
+		return nil, err
+	}
+	if err := collect("pinned", `SELECT release_sha256 FROM app_platform_recovery_sets WHERE `+retained); err != nil {
 		return nil, err
 	}
 	if nowMS == 0 {

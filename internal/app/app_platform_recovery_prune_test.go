@@ -572,42 +572,160 @@ func TestPruneWaitsWhenTheHostHasNoFreeEffectNumber(t *testing.T) {
 	}
 }
 
-// The host operation of an open deletion can no longer settle it once the installation's fence moved: the row is
-// closed with a typed outcome that is retried, and the set stays.
-func TestPruneClosesADeletionTheHostCanNoLongerSettleAndRetriesIt(t *testing.T) {
+// cloneRow copies one row of a platform table under a new id, with the given columns replaced.
+func cloneRow(t *testing.T, st *Store, table, oldID string, replace map[string]any) {
+	t.Helper()
+	full := platformPrefix + table
+	rows, err := st.query(`SELECT * FROM `+full+` WHERE id=?`, oldID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	columns, err := rows.Columns()
+	rows.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exprs []string
+	var args []any
+	for _, c := range columns {
+		if v, ok := replace[c]; ok {
+			exprs, args = append(exprs, "?"), append(args, v)
+		} else {
+			exprs = append(exprs, c)
+		}
+	}
+	mustExec(t, st, `INSERT INTO `+full+`(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(exprs, ",")+` FROM `+full+` WHERE id=?`, append(args, oldID)...)
+}
+
+// newHost is what a later operation of the installation does to the host of an open deletion: a newer finished
+// operation carries the installation's new fence, so the old host can no longer sign for the installation, and the
+// next deletion is hosted by the new one.
+func (p *pruneFixture) newHost(t *testing.T) {
+	t.Helper()
+	plan := scalar[string](t, p.s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, p.hostOp)
+	fence := scalar[int64](t, p.s.st, `SELECT fence FROM app_platform_operations WHERE id=?`, p.hostOp) + 1
+	completed := scalar[int64](t, p.s.st, `SELECT completed_ms FROM app_platform_operations WHERE id=?`, p.hostOp) + 1000
+	newPlan, newOp := platformFixtureID(9300+p.sets), platformFixtureID(9400+p.sets)
+	p.sets++
+	cloneRow(t, p.s.st, "review_plans", plan, map[string]any{"id": newPlan})
+	cloneRow(t, p.s.st, "operations", p.hostOp, map[string]any{
+		"id": newOp, "review_plan_id": newPlan, "idempotency_sha256": platformDigest([]byte(newOp)), "fence": fence,
+		"completed_ms": completed, "created_ms": completed, "updated_ms": completed,
+	})
+	mustExec(t, p.s.st, `UPDATE app_platform_installations SET control_fence=? WHERE id=?`, fence, p.installation)
+	p.hostOp = newOp
+}
+
+func (p *pruneFixture) decided(t *testing.T, set string) bool {
+	t.Helper()
+	decided, err := platformRecoverySetDeletionDecided(p.s.st.poolExec(), set)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return decided
+}
+
+func (p *pruneFixture) retained(t *testing.T, set string) bool {
+	t.Helper()
+	retained, err := loadPlatformRetainedSets(p.s.st.poolExec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range retained {
+		if r.id == set {
+			return true
+		}
+	}
+	return false
+}
+
+// A deletion with no verdict is never reverted without the runner's word. The host's fence moves: the row is stranded,
+// stays open, and the set stays decided, so restore and the recovery bundle refuse it although its checkpoint may be
+// gone. A new attempt on the current host then settles it, and the old row is closed by that verdict. Fails if the
+// stranded row is reverted (the set would count retained and restorable again), or if the set is offered meanwhile.
+func TestPruneNeverRevertsADeletionWithNoVerdictAndSettlesItWithANewAttempt(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		p := newPruneFixture(t, pg)
+		victim := p.set(t, "verified", 100)
+		p.set(t, "verified", 300)
+		p.runner.loseExecuteReplyOnce, p.runner.readFails = true, true
+		p.prune(t)
+		if p.effects(t, "unknown") != 1 || !p.decided(t, victim) || p.retained(t, victim) {
+			t.Fatal("setup: the lost receipt did not leave a decided, unknown deletion")
+		}
+		p.newHost(t)
+		p.runner.readFails = false
+		sent := len(p.runner.sent)
+		p.prune(t)
+		if p.effects(t, "reverted") != 0 || p.effects(t, "unknown") != 1 || len(p.runner.sent) != sent {
+			t.Fatal("a deletion with no verdict was reverted, or sent under a fence it was not written for")
+		}
+		if !p.decided(t, victim) || p.retained(t, victim) || p.state(t, victim) != "verified" {
+			t.Fatal("the set is offered for restore or the bundle while its deletion has no verdict")
+		}
+		if scalar[string](t, p.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE kind='delete_checkpoint'`) !=
+			`{"recovery_set_id":"`+victim+`","checkpoint_id":"`+p.checkpoint(t, victim)+`","source":"retention","attempt":0,"stranded":true}` {
+			t.Fatal("the row is not marked stranded")
+		}
+		if p.prune(t); len(p.runner.sent) != sent+1 {
+			t.Fatalf("the next pass sent %d commands, want the one new attempt", len(p.runner.sent)-sent)
+		}
+		if p.state(t, victim) != "deleted" || p.effects(t, "applied") != 1 || p.effects(t, "unknown") != 0 {
+			t.Fatal("the new attempt did not settle the set")
+		}
+		if scalar[int](t, p.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE kind='delete_checkpoint' AND state='reverted' AND receipt_json LIKE '%superseded_applied%'`) != 1 {
+			t.Fatal("the stranded row was not closed by the verdict that settled the set")
+		}
+		ids := p.runner.effectIDs()
+		for _, attempt := range []int{0, 1} {
+			if !ids[platformPruneEffectID(victim, p.checkpoint(t, victim), attempt)] {
+				t.Fatalf("attempt %d was not signed", attempt)
+			}
+		}
+	})
+}
+
+// If the stranded claim never happened, the new attempt is refused as an ordinary refusal; the old row is closed as
+// never claimed, and the set is retained again only then.
+func TestPruneStrandedDeletionTheRunnerNeverClaimedIsClosedByTheRefusal(t *testing.T) {
+	p := newPruneFixture(t, false)
+	victim := p.set(t, "verified", 100)
+	p.set(t, "verified", 300)
+	p.runner.unclaimed = true
+	p.prune(t)
+	p.runner.unclaimed = false
+	p.newHost(t)
+	p.runner.refuse[p.checkpoint(t, victim)] = journal.DeleteOutcomeLatest
+	p.prune(t)
+	if !p.decided(t, victim) {
+		t.Fatal("the set was released before any verdict")
+	}
+	p.prune(t)
+	if p.effects(t, "unknown") != 0 || p.effects(t, "prepared") != 0 || p.decided(t, victim) || !p.retained(t, victim) {
+		t.Fatalf("the refusal did not release the set: unknown=%d prepared=%d", p.effects(t, "unknown"), p.effects(t, "prepared"))
+	}
+	if scalar[int](t, p.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE receipt_json LIKE '%superseded_not_claimed%'`) != 1 {
+		t.Fatal("the earlier row is not closed as never claimed")
+	}
+}
+
+// A deletion issued to a runtime that was retired cannot be read back by anyone, and is never reverted: the set stays
+// decided, the row takes no window slot, and the storage status reports it for an operator.
+func TestPruneKeepsADeletionOfARetiredRuntimeOpenAndReportsIt(t *testing.T) {
 	p := newPruneFixture(t, false)
 	victim := p.set(t, "verified", 100)
 	p.set(t, "verified", 300)
 	p.runner.loseExecuteReplyOnce, p.runner.readFails = true, true
 	p.prune(t)
-	mustExec(t, p.s.st, `UPDATE app_platform_installations SET control_fence=control_fence+1 WHERE id=?`, p.installation)
-	sent := len(p.runner.sent)
-	p.prune(t)
-	if len(p.runner.sent) != sent || p.effects(t, "unknown") != 0 {
-		t.Fatalf("an unsettleable row was sent again or left open")
-	}
-	if scalar[string](t, p.s.st, `SELECT receipt_json FROM app_platform_operation_effects WHERE kind='delete_checkpoint'`) !=
-		`{"recovery_set_id":"`+victim+`","checkpoint_id":"`+p.checkpoint(t, victim)+`","source":"retention","attempt":0,"outcome":"abandoned_outcome_unknown"}` {
-		t.Fatal("the row is not closed with its typed outcome")
-	}
-	if !platformPruneRetryable("abandoned_outcome_unknown") {
-		t.Fatal("an abandonment is not retried")
-	}
-}
-
-// A deletion issued to a runtime that was retired cannot be read back by anyone: it is closed.
-func TestPruneClosesDeletionsOfRetiredRuntimes(t *testing.T) {
-	p := newPruneFixture(t, false)
-	p.set(t, "verified", 100)
-	p.set(t, "verified", 300)
-	p.runner.loseExecuteReplyOnce, p.runner.readFails = true, true
-	p.prune(t)
 	mustExec(t, p.s.st, `UPDATE app_platform_runtime_bindings SET enabled=0 WHERE id=?`, p.runtimeID)
-	if err := p.s.revertDeletionsOfRetiredRuntimes(context.Background()); err != nil {
-		t.Fatal(err)
+	sent := len(p.runner.calls)
+	p.prune(t)
+	if p.effects(t, "unknown") != 1 || p.effects(t, "reverted") != 0 || len(p.runner.calls) != sent || !p.decided(t, victim) {
+		t.Fatal("the deletion of a retired runtime was closed or sent")
 	}
-	if p.effects(t, "unknown") != 0 || p.effects(t, "reverted") != 1 {
-		t.Fatal("the deletion of a retired runtime is still open")
+	refused, err := p.s.platformPruneRefusals(context.Background())
+	if err != nil || len(refused) != 1 || refused[0].RecoverySetID != victim || refused[0].Reason != "runtime_retired" {
+		t.Fatalf("the status does not report it: %+v %v", refused, err)
 	}
 }
 
