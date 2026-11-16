@@ -44,7 +44,7 @@ on:
         type: boolean
         default: false
       soak_variant:
-        description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
+        description: Diagnostic variant of the soak, never evidence (empty, or memory-db, no-batch-probes, skip-image-store, no-backend-flood and no-task-worker separated by a comma)
         type: string
         default: ''
       expected_commit:

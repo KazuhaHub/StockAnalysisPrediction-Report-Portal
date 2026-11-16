@@ -1378,7 +1378,11 @@ func (c *soakChild) startFlood(minutes int, saturated []string, identityPath str
 // flood their own memory, CPU, PIDs, log and storage from inside their containers.
 func (c *soakChild) load(minutes int) {
 	work := c.startWork(soakIdentityFile())
-	stop, read, alive := c.startFlood(minutes, work.saturated, work.identityPath)
+	floodingBackends := work.saturated
+	if !c.variant.BackendFlood { // a diagnostic variant: the saturated tenants hold their quota and nothing floods the task route
+		floodingBackends = nil
+	}
+	stop, read, alive := c.startFlood(minutes, floodingBackends, work.identityPath)
 	defer stop()
 	if soakDiagnosing() {
 		c.diagnose("loaded", 60*time.Second)

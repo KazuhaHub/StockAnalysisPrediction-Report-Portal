@@ -1473,8 +1473,9 @@ def duration_minutes(value):
 
 def soak_variant(value):
     """The diagnostic variants of the Go soak: a closed list, empty for an evidence run."""
-    if not re.fullmatch(r"(memory-db|no-batch-probes|skip-image-store)(,(memory-db|no-batch-probes|skip-image-store))*|", value or ""):
-        raise RuntimeError("the soak variant is empty or a list of memory-db and no-batch-probes")
+    names = "memory-db|no-batch-probes|skip-image-store|no-backend-flood|no-task-worker"
+    if not re.fullmatch(rf"({names})(,({names}))*|", value or ""):
+        raise RuntimeError("the soak variant is empty or a list of memory-db, no-batch-probes, skip-image-store, no-backend-flood and no-task-worker")
     return value or ""
 
 

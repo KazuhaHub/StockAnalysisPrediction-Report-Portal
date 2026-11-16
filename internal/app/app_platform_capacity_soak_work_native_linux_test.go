@@ -61,16 +61,19 @@ func (c *soakChild) startWork(identityPath string) *soakWork {
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.workerAlive.Store(true)
-	w.workers.Add(3)
-	go func() {
-		defer w.workers.Done()
-		defer w.workerAlive.Store(false)
-		if err := scheduler.run(workerCtx, false); err != nil && workerCtx.Err() == nil {
-			t.Logf("SOAK_TASK_WORKER_STOPPED %v", err)
-		}
-	}()
-	go func() { defer w.workers.Done(); w.produce(ctx) }()
+	w.workers.Add(2)
+	if c.variant.TaskWorker {
+		w.workerAlive.Store(true)
+		w.workers.Add(1)
+		go func() {
+			defer w.workers.Done()
+			defer w.workerAlive.Store(false)
+			if err := scheduler.run(workerCtx, false); err != nil && workerCtx.Err() == nil {
+				t.Logf("SOAK_TASK_WORKER_STOPPED %v", err)
+			}
+		}()
+	}
+	go func() { defer w.workers.Done(); w.produce(ctx, c.variant.TaskWorker) }()
 	go func() { defer w.workers.Done(); w.sample(ctx) }()
 	t.Log("SOAK_PLATFORM_WORK_STARTED")
 	return w
@@ -157,9 +160,13 @@ func (w *soakWork) writeIdentities() {
 
 // produce admits one backend task to every workload tenant every soakTaskEvery and captures one event every soakEventEvery, and refreshes the flood's
 // identities every minute.
-func (w *soakWork) produce(ctx context.Context) {
+func (w *soakWork) produce(ctx context.Context, work bool) {
 	c := w.c
 	tasks, events, identities := time.NewTicker(soakTaskEvery), time.NewTicker(soakEventEvery), time.NewTicker(time.Minute)
+	if !work { // a diagnostic variant without the task worker: nothing is admitted or captured, the identities are still refreshed
+		tasks.Stop()
+		events.Stop()
+	}
 	defer tasks.Stop()
 	defer events.Stop()
 	defer identities.Stop()

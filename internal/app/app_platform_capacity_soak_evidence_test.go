@@ -476,11 +476,14 @@ type soakVariant struct {
 	SkipImageStore bool // the image store probe stays at unit level whatever the disk allows
 	MemoryDB       bool // the in-memory template store of the unit suite instead of a file-backed SQLite database
 	BatchProbes    bool // the batch enqueue-to-start probes; without them the scheduler still runs and holds its backlog
+	BackendFlood   bool // the backend-originated task flood (SEC-09); without it the saturated tenants only hold their quota
+	TaskWorker     bool // the application task worker with its task and event producers (SEC-09)
 }
 
-// soakParseVariant reads APP_CAPACITY_SOAK_VARIANT: empty, or a comma separated list of memory-db, no-batch-probes and skip-image-store.
+// soakParseVariant reads APP_CAPACITY_SOAK_VARIANT: empty, or a comma separated list of memory-db, no-batch-probes, skip-image-store,
+// no-backend-flood and no-task-worker.
 func soakParseVariant(env string) (soakVariant, error) {
-	v := soakVariant{Name: env, BatchProbes: true}
+	v := soakVariant{Name: env, BatchProbes: true, BackendFlood: true, TaskWorker: true}
 	for _, part := range strings.Split(env, ",") {
 		switch part {
 		case "":
@@ -490,6 +493,10 @@ func soakParseVariant(env string) (soakVariant, error) {
 			v.BatchProbes = false
 		case "skip-image-store":
 			v.SkipImageStore = true
+		case "no-backend-flood":
+			v.BackendFlood = false
+		case "no-task-worker":
+			v.TaskWorker = false
 		default:
 			return soakVariant{}, fmt.Errorf("unknown soak variant %q", part)
 		}
@@ -805,10 +812,24 @@ func TestSoakVariantIsADiagnosticSwitchAndNeverEvidence(t *testing.T) {
 		{"no-batch-probes", false, false, true},
 		{"memory-db,no-batch-probes", true, false, true},
 		{"skip-image-store", false, true, true},
+		{"no-backend-flood", false, true, true},
+		{"no-task-worker", false, true, true},
 		{"unknown", false, false, false},
 	} {
 		v, err := soakParseVariant(tc.env)
 		if (err == nil) != tc.ok || (tc.ok && (v.MemoryDB != tc.memoryDB || v.BatchProbes != tc.batchProbe)) {
+			t.Errorf("variant %q = %+v, %v", tc.env, v, err)
+		}
+	}
+}
+
+func TestSoakVariantsRemoveTheBackendFloodOrTheTaskWorkerAndKeepTheOtherOnByDefault(t *testing.T) {
+	for _, tc := range []struct {
+		env                      string
+		backendFlood, taskWorker bool
+	}{{"", true, true}, {"no-backend-flood", false, true}, {"no-task-worker", true, false}, {"no-backend-flood,no-task-worker", false, false}} {
+		v, err := soakParseVariant(tc.env)
+		if err != nil || v.BackendFlood != tc.backendFlood || v.TaskWorker != tc.taskWorker {
 			t.Errorf("variant %q = %+v, %v", tc.env, v, err)
 		}
 	}

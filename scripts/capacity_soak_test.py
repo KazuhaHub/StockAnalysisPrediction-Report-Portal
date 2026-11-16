@@ -929,6 +929,7 @@ class VariantTests(unittest.TestCase):
         self.assertEqual(soak.soak_variant(""), "")
         self.assertEqual(soak.soak_variant("memory-db,no-batch-probes"), "memory-db,no-batch-probes")
         self.assertEqual(soak.soak_variant("skip-image-store"), "skip-image-store")
+        self.assertEqual(soak.soak_variant("no-backend-flood,no-task-worker"), "no-backend-flood,no-task-worker")
         for bad in ("memory", "no-batch-probes;x", "a b"):
             with self.assertRaises(RuntimeError):
                 soak.soak_variant(bad)
