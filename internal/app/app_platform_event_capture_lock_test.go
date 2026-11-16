@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"testing"
 	"time"
 
@@ -54,7 +53,7 @@ func TestPlatformEventCaptureTakesTheTaskAdmissionLockBeforeAnyInstallationRow(t
 			t.Fatalf("capture: %v", err)
 		}
 	case <-time.After(10 * time.Second):
-		t.Fatal(fmt.Sprint("the capture did not finish"))
+		t.Fatal("the capture did not finish")
 	}
 	if got := scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_tasks WHERE installation_id=? AND handler=?`, installation, appplatform.TaskHandlerEvent); got != 1 {
 		t.Fatalf("%d delivery tasks", got)
