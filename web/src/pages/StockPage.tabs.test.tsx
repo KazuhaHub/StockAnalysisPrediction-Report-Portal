@@ -127,14 +127,19 @@ const reportBusy = () => busy(document.querySelector('.rp-doc-card'))
 describe('StockPage report tabs', () => {
   it('moves the selection at once and shows the report loading until the next one arrives', async () => {
     await loaded()
-    expect(reportBusy()).toBe(false)
+    // antd's Spin copies `spinning` into its own state in an effect, so aria-busy trails the render
+    // that decided it by a tick. Every busy check waits for it; asserting it in the same breath as
+    // the selection failed on slower CI runners.
+    await waitFor(() => expect(reportBusy()).toBe(false))
 
     fireEvent.click(screen.getByText('Sentiment'))
 
     // Before the server has answered: the clicked tab is the selected one, and the report says it is loading.
-    await waitFor(() => expect(selected('Sentiment')).toBe(true))
+    await waitFor(() => {
+      expect(selected('Sentiment')).toBe(true)
+      expect(reportBusy()).toBe(true)
+    })
     expect(selected('Decision')).toBe(false)
-    expect(reportBusy()).toBe(true)
     // A report is far taller than the screen, and antd centres its ring in the whole block: 8,000 px
     // down for an ordinary report, which is why the old page-wide spinner was never seen. The shared
     // tall-content rule holds the ring in view.
@@ -147,8 +152,10 @@ describe('StockPage report tabs', () => {
     expect(call).toBeTruthy()
     await act(async () => call!.resolve(stockFor(2)))
 
-    await waitFor(() => expect(screen.getByTestId('body').textContent).toBe('body 2'))
-    expect(reportBusy()).toBe(false)
+    await waitFor(() => {
+      expect(screen.getByTestId('body').textContent).toBe('body 2')
+      expect(reportBusy()).toBe(false)
+    })
     expect(selected('Sentiment')).toBe(true)
   })
 
@@ -200,8 +207,10 @@ describe('StockPage report tabs', () => {
     )
     await waitFor(() => expect(stockCalls).toHaveLength(1))
     await act(async () => stockCalls[0].resolve(stockFor(2, '2026-11-11')))
-    await waitFor(() => expect(screen.getByTestId('body').textContent).toBe('body 2'))
-    expect(reportBusy()).toBe(false)
+    await waitFor(() => {
+      expect(screen.getByTestId('body').textContent).toBe('body 2')
+      expect(reportBusy()).toBe(false)
+    })
     expect(selected('Sentiment')).toBe(true)
   })
 
