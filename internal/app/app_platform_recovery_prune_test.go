@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -585,16 +586,23 @@ func cloneRow(t *testing.T, st *Store, table, oldID string, replace map[string]a
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The values are written into the statement as literals: an untyped parameter in the select list of an INSERT ...
+	// SELECT is typed text by PostgreSQL, which refuses it for a numeric column.
+	literal := func(v any) string {
+		if text, ok := v.(string); ok {
+			return `'` + strings.ReplaceAll(text, `'`, `''`) + `'`
+		}
+		return fmt.Sprint(v)
+	}
 	var exprs []string
-	var args []any
 	for _, c := range columns {
 		if v, ok := replace[c]; ok {
-			exprs, args = append(exprs, "?"), append(args, v)
+			exprs = append(exprs, literal(v))
 		} else {
 			exprs = append(exprs, c)
 		}
 	}
-	mustExec(t, st, `INSERT INTO `+full+`(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(exprs, ",")+` FROM `+full+` WHERE id=?`, append(args, oldID)...)
+	mustExec(t, st, `INSERT INTO `+full+`(`+strings.Join(columns, ",")+`) SELECT `+strings.Join(exprs, ",")+` FROM `+full+` WHERE id=?`, oldID)
 }
 
 // newHost is what a later operation of the installation does to the host of an open deletion: a newer finished

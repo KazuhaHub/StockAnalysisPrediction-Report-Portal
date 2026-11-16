@@ -408,8 +408,7 @@ func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
 	if _, err := w.server.reclaimPlatformImages(ctx, w.endpoint); err != nil && ctx.Err() == nil {
 		log.Printf("app-platform image reclaim: %v", err)
 	}
-	// An operation just ended: the installation is idle and its host operation is new, so the step runs now.
-	w.server.platformPruneLast.Store(0)
+	// The step is throttled globally (at most once a minute, and not while another operation runs), never per ending.
 	w.server.pruneRecoverySetsOnTick(ctx, w.endpoint)
 }
 

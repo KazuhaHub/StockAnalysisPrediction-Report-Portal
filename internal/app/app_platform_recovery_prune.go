@@ -1163,17 +1163,29 @@ func platformPruneOpen(rows []platformPruneRow) bool {
 	return false
 }
 
-// platformPruneInterval is how often the idle tick runs the pruning step when no deletion is open. The selection reads
-// the effect ledger, which an idle tick that fires every few seconds should not do.
-const platformPruneInterval = time.Minute
+// platformPruneInterval is how often the pruning step runs at most, from the idle tick and from every operation ending
+// together. platformPruneBusyInterval is how long it defers while any operation of any installation is in flight: the
+// step is housekeeping, and under constant churn it must not add reads and lock waits to the operations. It still runs
+// once that long has passed, so a Portal that is never idle is not left with its archives for ever.
+const (
+	platformPruneInterval     = time.Minute
+	platformPruneBusyInterval = time.Hour
+)
 
-// pruneRecoverySetsOnTick runs prunePlatformRecoverySets from the scheduler. It never fails the tick. The step is
-// throttled to platformPruneInterval, except that a pass that left a deletion running on the runner lets the next
-// tick read it back. A deletion the runner refused to claim (an installation busy there) waits for the interval.
+// pruneRecoverySetsOnTick runs prunePlatformRecoverySets from the scheduler. It never fails the tick. The selection
+// reads take no lock; the admission locks are taken only by the short decision, settlement and strand transactions of
+// a deletion that is really begun. A pass that left a deletion running on the runner lets the next tick read it back.
 func (s *Server) pruneRecoverySetsOnTick(ctx context.Context, endpoint platformRuntimeEndpoint) {
 	now := time.Now().UnixMilli()
-	if last := s.platformPruneLast.Load(); last != 0 && now-last < platformPruneInterval.Milliseconds() {
+	last := s.platformPruneLast.Load()
+	if last != 0 && now-last < platformPruneInterval.Milliseconds() {
 		return
+	}
+	if last != 0 && now-last < platformPruneBusyInterval.Milliseconds() {
+		var running int
+		if err := s.st.queryRowContext(ctx, `SELECT COUNT(*) FROM (SELECT 1 FROM app_platform_operations WHERE completed_ms IS NULL LIMIT 1) x`).Scan(&running); err != nil || running != 0 {
+			return
+		}
 	}
 	s.platformPruneLast.Store(now)
 	result, err := s.prunePlatformRecoverySets(ctx, endpoint)

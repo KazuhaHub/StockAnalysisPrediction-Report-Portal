@@ -183,3 +183,35 @@ func TestPruneDoesNotScanTheEffectLedgerPerSet(t *testing.T) {
 		}
 	}
 }
+
+// The step is housekeeping: from every operation ending and the idle tick together it runs at most once a minute, and
+// it defers while any operation is in flight. Fails if an operation ending runs it again at once, or if it runs (and
+// takes its selection reads and locks) under churn.
+func TestPruneTickIsThrottledGloballyAndDefersWhileAnOperationRuns(t *testing.T) {
+	p := newPruneFixture(t, false)
+	p.set(t, "verified", 100)
+	p.set(t, "verified", 300)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	first := p.s.platformPruneLast.Load()
+	if first == 0 || len(p.runner.sent) != 1 {
+		t.Fatalf("the first tick did not run: %d sent", len(p.runner.sent))
+	}
+	p.set(t, "verified", 50)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if len(p.runner.sent) != 1 || p.s.platformPruneLast.Load() != first {
+		t.Fatal("a second tick inside the interval ran the step")
+	}
+	// Past the interval but with an operation in flight: deferred, nothing read.
+	p.s.platformPruneLast.Store(first - 2*platformPruneInterval.Milliseconds())
+	deferred := p.s.platformPruneLast.Load()
+	mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='queued',completed_ms=NULL WHERE id=?`, p.hostOp)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if p.s.platformPruneLast.Load() != deferred || len(p.runner.sent) != 1 {
+		t.Fatal("the step ran while an operation was in flight")
+	}
+	mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='complete',completed_ms=? WHERE id=?`, first, p.hostOp)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if len(p.runner.sent) != 2 {
+		t.Fatalf("the step did not run once the installation was idle: %d sent", len(p.runner.sent))
+	}
+}

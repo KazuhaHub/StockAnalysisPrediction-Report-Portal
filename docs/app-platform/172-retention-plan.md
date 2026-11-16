@@ -271,8 +271,10 @@ schema change.
 
 ### The Portal driver
 
-`prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled to once a
-minute unless a deletion is pending on the runner. It does not run inside the retention transaction classes, which are database-only.
+`prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled together to once a
+minute (never per operation ending), and deferred for up to an hour while any operation of any installation is in flight, so it adds
+no reads or lock waits under churn. The selection reads take no lock; the admission locks are taken only by the short decision,
+settlement and strand transactions of a deletion that is really begun. A deletion pending on the runner lets the next tick read it back. It does not run inside the retention transaction classes, which are database-only.
 
 - **Candidates.** (a) the `verified` sets beyond the retained count, except the newest `verified` set of a namespace that is not
   `deleted`: the runner's latest-checkpoint guard is per namespace while the count is per installation, so the selection mirrors it
