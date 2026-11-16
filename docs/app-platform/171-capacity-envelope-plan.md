@@ -2212,6 +2212,14 @@ cannot make it, and this work did not change the Portal.
 **Options for the owner** (none is applied): (1) add a concurrency budget in front of `tasks/background` in the style of `platformBudgetPrecheck`, so excess submissions are refused `429 app_platform_busy` before the identity is verified, and rerun; the new checks would then also need
 `429:app_platform_busy` as a typed class; (2) decide that the soak's flood is lighter than a flood the platform must carry (two connections for each of two backends, about 45 to 70 requests a second) and set the intensity by decision; or (3) give the platform side more than one reserved CPU on the reference host. Any rerun is a 120-minute dispatch of the same job.
 
+**Remedy tried: a dedicated admission budget on the task route (option 1).** `tasks/background` now has its own two-slot budget (`platformServiceTasks`): a pre-check outside the per-address limit answers
+`429 app_platform_busy` on fullness alone, and the handler takes the slot after its database-free checks and before the identity is verified. A 5-minute smoke on that commit (run 43821284311, `postgres`, 5 minutes, not evidence;
+two earlier attempts, 43819454255 and 43819687463, were `inconclusive_slow_disk`) failed two bounds: report 78.0 ms against 50 and batch start 123.8 ms against 100, while home was 32.4 ms and dispatch 13.7 ms (the 120-minute run
+measured 67.0 and 34.7). All nine platform checks passed, with the flood now classed `200` about 700, `429 app_platform_busy` about 900 and `429 task_capacity` about 2300 a window. The budget refused only a quarter of the flood
+because it bounds concurrency, not rate: a handler that finishes in a millisecond finds a free slot most of the time, so most submissions still verify the identity, take the admission lock and count. The earlier 5-minute smoke of the
+unbudgeted harness (43783839436) passed with report 42.3 ms, so a 5-minute run is within host variance of the bounds and says little either way. The 120-minute run was not dispatched because the smoke did not pass. SEC-09 stays
+partial. A remedy that bounds the rate of refused submissions (for example a per-installation token bucket checked before the identity is verified) is the next candidate; it is a decision for the owner.
+
 **Limits of this evidence.**
 
 - The worker runs inside the measured Portal process, not as the separate `cmd/app-task-worker` process of production, so its cost is charged to the measured process: stricter than production, and the diagnostic above shows it costs little.
