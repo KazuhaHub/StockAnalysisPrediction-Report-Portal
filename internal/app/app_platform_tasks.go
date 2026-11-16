@@ -115,17 +115,37 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer release()
+	// A credential just refused for its installation's task quota is checked against one live statement
+	// first (app_platform_task_refusal.go); anything but a confirmed refusal takes the full path below.
+	var raw []byte
+	refusalKey := platformTaskRefusalKey(rawIdentity)
+	if entry, ok := s.platformTaskRefusals.lookup(refusalKey, r.PathValue("installation")); ok {
+		var readErr error
+		raw, readErr = io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+		if readErr != nil || strings.TrimSpace(string(raw)) == "" {
+			platformTaskFailure(w, errPlatformManagementInput)
+			return
+		}
+		defer clear(raw)
+		if s.platformTaskBodyQuotaRefused(entry, raw) {
+			platformTaskFailure(w, errAppPlatformTaskQuota)
+			return
+		}
+		s.platformTaskRefusals.forget(refusalKey)
+	}
 	grant, err := s.verifyPlatformServiceIdentity(r.Context(), rawIdentity, "tasks.schedule")
 	if err != nil || grant.InstallationID != r.PathValue("installation") {
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)
 		return
 	}
-	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
-	if err != nil || strings.TrimSpace(string(raw)) == "" {
-		platformTaskFailure(w, errPlatformManagementInput)
-		return
+	if raw == nil {
+		raw, err = io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+		if err != nil || strings.TrimSpace(string(raw)) == "" {
+			platformTaskFailure(w, errPlatformManagementInput)
+			return
+		}
+		defer clear(raw)
 	}
-	defer clear(raw)
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
 		platformTaskFailure(w, err)
@@ -137,9 +157,37 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 	id, created, err := s.admitPlatformTask(r.Context(), grant.InstallationID, in)
+	if errors.Is(err, errAppPlatformTaskQuota) {
+		s.platformTaskRefusals.remember(refusalKey, grant)
+	}
 	if err != nil {
 		platformTaskFailure(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "id": id, "created": created})
+}
+
+// platformTaskBodyQuotaRefused applies the cheap quota refusal to a well-formed submission only: a
+// body the full path would refuse for its shape is left to it, so the answer for a malformed request
+// does not depend on the memory.
+func (s *Server) platformTaskBodyQuotaRefused(entry platformTaskRefusalEntry, raw []byte) bool {
+	now, err := platformDatabaseNow(s.st.poolExec())
+	if err != nil {
+		return false
+	}
+	in, err := readPlatformTaskAdmission(raw, now)
+	if err != nil {
+		return false
+	}
+	// The same defaults the admission applies before it validates.
+	if in.RunAtMS == 0 {
+		in.RunAtMS = now
+	}
+	if in.ExpiresMS == 0 {
+		in.ExpiresMS = now + (24 * time.Hour).Milliseconds()
+	}
+	if _, _, err := validatePlatformTaskAdmission(in, now); err != nil {
+		return false
+	}
+	return s.platformTaskQuotaRefused(entry, in.OccurrenceID)
 }
