@@ -188,17 +188,19 @@ func (w *soakWork) writeIdentities() {
 	}
 }
 
-// warm sends one submission for every workload tenant before the flood starts and discards what it measured. A backend that is already running has
-// its verification material warm when an attack begins; the first contact of an installation, or one after 30 seconds of silence, is the case the
-// cold-verification limit trades against (doc 171), which a unit test covers and this load does not model.
+// warm starts the Portal's own refresh of the verification material, as the server does, and runs it once before the flood starts: material is
+// warm for every ready installation without any backend having made contact, so the anonymous flood meets exactly what production has.
 func (w *soakWork) warm(baseURL string) {
 	w.baseURL.Store(baseURL)
-	client := &http.Client{Timeout: 25 * time.Second}
-	for index, installation := range w.workload {
-		w.submitters.Add(1)
-		w.submit(client, index, installation, 0)
+	if err := w.c.s.refreshPlatformServiceMaterial(); err != nil {
+		w.c.t.Fatal("service material refresh: ", err)
 	}
-	w.submits.take()
+	go func() {
+		for {
+			time.Sleep(platformServiceMaterialRefresh)
+			_ = w.c.s.refreshPlatformServiceMaterial()
+		}
+	}()
 }
 
 // submit sends one workload tenant's backend task through the Portal's task route with that tenant's own identity, as a backend would, and records

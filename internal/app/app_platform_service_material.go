@@ -158,3 +158,71 @@ func (c *platformServiceMaterialCache) authentic(installation string, raw []byte
 	defer clear(seed[:])
 	return true, appplatform.ServiceIdentityAuthentic(raw, seed[:])
 }
+
+// platformServiceMaterialRefresh is how often the Portal re-reads the seeds of its ready installations. It
+// is a third of the material's time limit, so a missed round still leaves the material warm.
+const platformServiceMaterialRefresh = 10 * time.Second
+
+// keepOnly evicts the material of every installation not in keep.
+func (c *platformServiceMaterialCache) keepOnly(keep map[string]bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for key := range c.entries {
+		if !keep[key] {
+			c.evictLocked(key)
+		}
+	}
+}
+
+// refreshPlatformServiceMaterial keeps the material warm for every enabled, ready installation, whether or
+// not a backend has made contact. Material is what lets a forged credential be refused without the
+// database, and the limit on cold verification must never be what a real backend meets: an anonymous flood
+// that fills that limit would otherwise answer a backend's first contact, or one after a quiet half minute,
+// 429 app_platform_busy. The refresh costs two statements for each installation (at most platformServiceMaterialMax) every
+// platformServiceMaterialRefresh, and nothing an unauthenticated caller does changes it. It reads no
+// authority: material is only ever a reason to refuse, and the live verification still decides. The
+// material of an installation that is no longer ready is dropped.
+func (s *Server) refreshPlatformServiceMaterial() error {
+	e := s.st.poolExec()
+	rows, err := e.query(`SELECT id FROM app_platform_installations WHERE desired_state='enabled' AND phase='ready' ORDER BY id LIMIT ?`, platformServiceMaterialMax)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	keep := map[string]bool{}
+	for _, id := range ids {
+		if !platformValidUUID(id) {
+			continue
+		}
+		seed, err := s.platformServiceSeed(e, id)
+		if err != nil {
+			continue
+		}
+		s.platformServiceMaterial.remember(id, seed)
+		clear(seed)
+		keep[id] = true
+	}
+	s.platformServiceMaterial.keepOnly(keep)
+	return nil
+}
+
+// platformServiceMaterialLoop refreshes the material at start and then every platformServiceMaterialRefresh.
+func (s *Server) platformServiceMaterialLoop() {
+	for {
+		_ = s.refreshPlatformServiceMaterial()
+		time.Sleep(platformServiceMaterialRefresh)
+	}
+}

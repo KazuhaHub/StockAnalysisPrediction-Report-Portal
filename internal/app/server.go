@@ -336,11 +336,12 @@ func RunServer(cfgPath string) {
 	// above, the engine that runs managed installs, updates, repairs, enables, delete-data, uninstalls, restores,
 	// recovery imports and resumes, their settlements and image reclaim (docs/app-platform/114).
 	stopAppInstalls := s.startPlatformFrontendInstallService()
-	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
-	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
-	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
-	go s.recurringLoop() // fire recurring tasks into the run queue on their cadence (ADR 0018)
-	go s.authSweepLoop() // drop expired pending logins + SAML replay entries (ADR 0023)
+	s.resumeBatchJobs()                // requeue items left in-flight by a restart and relaunch running jobs
+	go s.platformServiceMaterialLoop() // keep the task route's verification material warm for every ready installation
+	go s.scheduleLoop()                // release one-shot 定时 jobs when their run_at passes (ADR 0007)
+	go s.cleanupLoop()                 // run the admin-configured storage-retention pass on its cadence (ADR 0017)
+	go s.recurringLoop()               // fire recurring tasks into the run queue on their cadence (ADR 0018)
+	go s.authSweepLoop()               // drop expired pending logins + SAML replay entries (ADR 0023)
 	// The forecast evaluator (ADR 0029 §6). The loop checks its own switch every tick, so this starts
 	// a goroutine that does nothing at all until an admin turns it on — which is the same shape
 	// geo_update.go uses, and the reason the switch can be a setting rather than a build flag.

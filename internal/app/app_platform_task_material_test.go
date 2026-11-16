@@ -266,3 +266,49 @@ func TestPlatformServiceTaskRememberedRefusalTakesTheInstallationsOwnSlot(t *tes
 		t.Fatal("no submission was refused for the quota")
 	}
 }
+
+// A backend must never be answered busy because of an anonymous flood. Material is therefore kept warm for
+// every enabled, ready installation by the Portal itself, not only after a backend's own first success: a
+// flood that fills the cold-verification limit then delays nothing a real installation sends.
+func TestPlatformServiceMaterialRefreshWarmsEveryReadyInstallationAndSpareTheBackendFromAColdFlood(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	f.s.platformServiceMaterial.reset()
+	if err := f.s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
+	if f.s.platformServiceMaterial.size() != 1 {
+		t.Fatalf("%d installations warm, want 1", f.s.platformServiceMaterial.size())
+	}
+	var held []func()
+	for i := 0; i < platformUnverifiedVerifications; i++ {
+		release, ok := f.s.platformUnverified.acquire()
+		if !ok {
+			t.Fatal("slot refused")
+		}
+		held = append(held, release)
+	}
+	defer func() {
+		for _, release := range held {
+			release()
+		}
+	}()
+	if code, body := f.submit(t, "during-a-cold-flood"); code != 200 {
+		t.Fatalf("a legitimate backend was answered %d %s while the cold-verification limit was full", code, body)
+	}
+	if statements := f.statements(func() { f.forgedSubmit(t, 1) }); len(statements) != 0 {
+		t.Fatalf("a forged credential reached the database: %v", statements)
+	}
+}
+
+func TestPlatformServiceMaterialRefreshSkipsRetiredInstallationsAndDropsTheirMaterial(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	f.s.platformServiceMaterial.reset()
+	f.s.refreshPlatformServiceMaterial()
+	mustExec(t, f.s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, f.installation)
+	if err := f.s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
+	if f.s.platformServiceMaterial.size() != 0 {
+		t.Fatal("the material of a disabled installation was kept")
+	}
+}
