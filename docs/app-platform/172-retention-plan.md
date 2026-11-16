@@ -272,8 +272,11 @@ schema change.
 ### The Portal driver
 
 `prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled together to once a
-minute (never per operation ending), and deferred for up to an hour while any operation of any installation is in flight, so it adds
-no reads or lock waits under churn. The selection reads take no lock; the admission locks are taken only by the short decision,
+minute (never per operation ending), and deferred while any operation of any installation is in flight, so it adds
+no reads or lock waits under churn. The deferral lasts up to an hour after a pass that did nothing; a pass that made progress (a
+deletion settled or running) lets the next follow after a minute even while operations run, so a backlog drains at one window a
+minute instead of one an hour. A busy installation never starves the others: selection leaves out each installation that is not
+idle, so an installation is pruned at its next idle moment. The selection reads take no lock; the admission locks are taken only by the short decision,
 settlement and strand transactions of a deletion that is really begun. A deletion pending on the runner lets the next tick read it back. It does not run inside the retention transaction classes, which are database-only.
 
 - **Candidates.** (a) the `verified` sets beyond the retained count, except the newest `verified` set of a namespace that is not
@@ -289,7 +292,9 @@ settlement and strand transactions of a deletion that is really begun. A deletio
   leaves the Portal. With no free number the set waits for a later operation, and a retry never takes the last eight numbers
   of a host, so a refusal that repeats cannot use the numbers new deletions need.
 - **Settle.** `applied` marks a retention candidate's set `deleted` and writes an `app_platform.recovery_set_pruned` audit row.
-  `checkpoint_latest` and `checkpoint_in_use` are retried under the next attempt with a backoff, at most eight times. `checkpoint_identity_mismatch`, `checkpoint_unrecorded` and `checkpoint_not_verified` are final: they write an
+  `checkpoint_latest` and `checkpoint_in_use` are retried under the next attempt with a backoff, at most eight times. Only refusals count
+  toward that cap and the backoff: stranded and superseded rows never do, and the retry of a stranded deletion is exempt from the cap,
+  because the decision was made and only a verdict can end it. `checkpoint_identity_mismatch`, `checkpoint_unrecorded` and `checkpoint_not_verified` are final: they write an
   `app_platform.recovery_set_prune_refused` audit row and the storage status lists them as needing an operator.
 - **A deletion with no verdict is never reverted.** The runner's claim is irreversible and may have happened, so no Portal path
   closes a `prepared` or `unknown` effect without the runner's word. When the installation's fence moves after the row was written
@@ -298,11 +303,14 @@ settlement and strand transactions of a deletion that is really begun. A deletio
   installation's current host. Its receipt settles the question and closes the stranded rows: an `applied` receipt closes them as
   `superseded_applied`, and a refusal proves the earlier claim never happened (a claim marks the runner's row deleted before it
   touches the file, so a later effect id would have answered `absent`) and closes them as `superseded_not_claimed`. A row issued to a
-  retired runtime, or open for a day with no verdict, stays open and is listed by the storage status (`runtime_retired`,
+  retired runtime, or open for a day with no verdict (a stranded row included: a new attempt should have settled it by then), stays open and is listed by the storage status (`runtime_retired`,
   `outcome_unknown`) for an operator.
 - **A decided deletion is not retained.** `platformRetainedPredicate` excludes a set that a `delete_checkpoint` effect names in
   state `prepared` or `unknown` (an `applied` one retires its set in the transaction that settles it). The sets of the open effects
-  are read once per query and named in the predicate, so the ledger is never scanned per set. Once the decision commits, the bundle writer stops
+  are read once per query and named in the predicate. The read is bounded by the live sets, never by the history of the ledger:
+  open effects come through the state index, and an applied one is found through the unique effect id, one lookup per derived
+  attempt number (sixteen) of each live set. The selection and the storage status read the deletions of their candidate sets the
+  same way. Once the decision commits, the bundle writer stops
   requiring the archive, the retention pins stop holding its operations, a restored Portal (whose dump carries the effect row) agrees,
   and restore admission, import-grant issuance and restore-from-import refuse the set (an `applied`, `prepared` or `unknown` effect
   decides it; a refused one does not) with the existing "recovery set unavailable"

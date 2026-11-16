@@ -904,39 +904,42 @@ func platformRecoverySetsBeyondRetention(e migExec, keep int) ([]string, error) 
 // platformRetainedPredicate is the retained-set predicate of the recovery bundle, qualified by an alias. A set whose
 // deletion is decided (a delete_checkpoint effect that is prepared, unknown or applied) is not retained: the runner's
 // claim cannot be undone, so the bundle must not require an archive that is going away. The decided sets that are
-// still live (no deleted_ms) are read once per query and named in the predicate, so no per-set scan of the effect
-// ledger is made. An applied deletion normally retires its set in the transaction that settles it, so the list is the
+// still live (no deleted_ms) are read once per query and named in the predicate; the read is bounded by the live sets
+// (platformDecidedSets), never by the length of the effect ledger. An applied deletion normally retires its set in the transaction that settles it, so the list is the
 // open effects; an applied effect beside a live set is a ledger that disagrees with itself, and the set is excluded.
 func platformRetainedPredicate(e migExec, alias string) (string, error) {
-	decided, err := platformDeletionStates(e, `'prepared','unknown','applied'`)
-	if err != nil {
-		return "", err
-	}
 	predicate := alias + `.state IN ('verified','restoring','review_required') AND ` + alias + `.deleted_ms IS NULL AND ` + alias + `.manifest_sha256 IS NOT NULL`
-	if len(decided) == 0 {
-		return predicate, nil
-	}
-	rows, err := e.query(`SELECT id FROM app_platform_recovery_sets WHERE deleted_ms IS NULL`)
+	rows, err := e.query(`SELECT id,checkpoint_id FROM app_platform_recovery_sets WHERE deleted_ms IS NULL AND manifest_sha256 IS NOT NULL`)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-	var live []string
+	var live []platformSetRef
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var ref platformSetRef
+		if err := rows.Scan(&ref.id, &ref.checkpoint); err != nil {
+			rows.Close()
 			return "", err
 		}
-		if decided[id] {
-			live = append(live, id)
-		}
+		live = append(live, ref)
 	}
-	if err := rows.Err(); err != nil {
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
 		return "", err
 	}
-	sort.Strings(live)
-	if len(live) > 0 {
-		predicate += ` AND ` + alias + `.id NOT IN (` + platformUUIDList(live) + `)`
+	decided, err := platformDecidedSets(e, live)
+	if err != nil {
+		return "", err
+	}
+	var ids []string
+	for _, ref := range live {
+		if decided[ref.id] {
+			ids = append(ids, ref.id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > 0 {
+		predicate += ` AND ` + alias + `.id NOT IN (` + platformUUIDList(ids) + `)`
 	}
 	return predicate, nil
 }

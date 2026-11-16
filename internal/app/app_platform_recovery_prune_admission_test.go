@@ -9,14 +9,22 @@ import (
 )
 
 // platformInsertDeleteCheckpointRow records a delete_checkpoint effect that names a recovery set, in the state given,
-// on an operation. The receipt is the shape the driver writes before the runner answers.
+// on an operation, with the effect id derived from the set, its checkpoint and the attempt (number-2), as the driver
+// derives it. The receipt is the shape the driver writes before the runner answers. The operation's facts are read
+// first and bound as typed parameters of a plain INSERT: PostgreSQL types a parameter in the select list of an
+// INSERT ... SELECT as text.
 func platformInsertDeleteCheckpointRow(t *testing.T, s *Server, operation, set, state string, number int) string {
 	t.Helper()
-	id := platformDerivedUUID("test-delete-checkpoint", operation+"/"+set+"/"+state+"/"+strconv.Itoa(number))
-	receipt := `{"recovery_set_id":"` + set + `","checkpoint_id":"` + platformFixtureID(42) + `","source":"retention","attempt":0}`
+	checkpoint := scalar[string](t, s.st, `SELECT checkpoint_id FROM app_platform_recovery_sets WHERE id=?`, set)
+	id := platformPruneEffectID(set, checkpoint, number-2)
+	receipt := `{"recovery_set_id":"` + set + `","checkpoint_id":"` + checkpoint + `","source":"retention","attempt":` + strconv.Itoa(number-2) + `}`
+	epoch := scalar[string](t, s.st, `SELECT controller_epoch FROM app_platform_operations WHERE id=?`, operation)
+	fence := max(scalar[int64](t, s.st, `SELECT fence FROM app_platform_operations WHERE id=?`, operation), 1)
+	created := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_operations WHERE id=?`, operation)
+	updated := scalar[int64](t, s.st, `SELECT updated_ms FROM app_platform_operations WHERE id=?`, operation)
 	mustExec(t, s.st, `INSERT INTO app_platform_operation_effects(operation_id,stage,effect_number,effect_id,kind,payload_sha256,runtime_id,controller_epoch,admitted_fence,observed_fence,state,receipt_json,created_ms,updated_ms)
-		SELECT id,'remove_data',?,?,'delete_checkpoint',?,NULL,controller_epoch,CASE WHEN fence<1 THEN 1 ELSE fence END,0,?,?,created_ms,updated_ms FROM app_platform_operations WHERE id=?`,
-		number, id, platformDigest([]byte(id)), state, receipt, operation)
+		VALUES(?,'remove_data',?,?,'delete_checkpoint',?,NULL,?,?,0,?,?,?,?)`,
+		operation, number, id, platformDigest([]byte(id)), epoch, fence, state, receipt, created, updated)
 	return id
 }
 
@@ -296,7 +304,7 @@ func TestPlatformPruneTransactionTakesTheAdmissionLocksOnPostgres(t *testing.T) 
 }
 
 // The SQL of the pruning step and its predicates, on both drivers and with no runtime: the decided-deletion condition
-// (a LIKE over the receipt with a concatenated pattern), the retained-set predicate built from it, the leak selection,
+// (open effects through the state index, applied ones through the derived effect id), the retained-set predicate built from it, the leak selection,
 // the effect history and the effect-number allocation. The driver tests above need a full runtime fixture.
 func TestPlatformPruneQueriesOnBothDrivers(t *testing.T) {
 	eachPlatformDriver(t, func(t *testing.T, pg bool) {
@@ -308,10 +316,7 @@ func TestPlatformPruneQueriesOnBothDrivers(t *testing.T) {
 		plain := f.recoverySet(removed, namespace, cut, "verified", 2)
 		leaked := f.recoverySet(removed, namespace, cut, "deleted", 3)
 		host, _ := f.operation(removed, "disable", "complete", retNow-1*retDay, 3)
-		named := func(set string) string {
-			return `{"recovery_set_id":"` + set + `","checkpoint_id":"` + platformFixtureID(42) + `","source":"retention","attempt":0}`
-		}
-		deletion := f.effectAt(host, "remove_data", 2, "delete_checkpoint", "prepared", named(decided))
+		deletion := platformInsertDeleteCheckpointRow(t, f.s, host, decided, "prepared", 2)
 		e := f.st.poolExec()
 		if yes, err := platformRecoverySetDeletionDecided(e, decided); err != nil || !yes {
 			t.Fatalf("a set with a prepared deletion is not decided: %v %v", yes, err)
@@ -331,9 +336,9 @@ func TestPlatformPruneQueriesOnBothDrivers(t *testing.T) {
 		if err != nil || len(leak) != 1 || leak[0].id != leaked {
 			t.Fatalf("the leak selection = %+v, %v", leak, err)
 		}
-		history, open, err := platformPruneHistory(e)
-		if err != nil || len(open) != 0 || len(history[decided]) != 1 || history[decided][0].effectID != deletion || history[decided][0].intent.Source != "retention" {
-			t.Fatalf("history = %+v open = %+v, %v", history, open, err)
+		history, err := platformPruneHistoryFor(e, []platformSetRef{{decided, scalar[string](t, f.st, `SELECT checkpoint_id FROM app_platform_recovery_sets WHERE id=?`, decided)}})
+		if err != nil || len(history[decided]) != 1 || history[decided][0].effectID != deletion || history[decided][0].intent.Source != "retention" {
+			t.Fatalf("history = %+v, %v", history, err)
 		}
 		number, free, err := platformPruneNumber(e, host)
 		if err != nil || !free || number != 3 {

@@ -2,8 +2,10 @@ package app
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
 )
@@ -203,6 +205,7 @@ func TestPruneTickIsThrottledGloballyAndDefersWhileAnOperationRuns(t *testing.T)
 	}
 	// Past the interval but with an operation in flight: deferred, nothing read.
 	p.s.platformPruneLast.Store(first - 2*platformPruneInterval.Milliseconds())
+	p.s.platformPruneMore.Store(false)
 	deferred := p.s.platformPruneLast.Load()
 	mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='queued',completed_ms=NULL WHERE id=?`, p.hostOp)
 	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
@@ -213,5 +216,115 @@ func TestPruneTickIsThrottledGloballyAndDefersWhileAnOperationRuns(t *testing.T)
 	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
 	if len(p.runner.sent) != 2 {
 		t.Fatalf("the step did not run once the installation was idle: %d sent", len(p.runner.sent))
+	}
+}
+
+// strand marks every open deletion of the fixture stranded, as the driver does when its host cannot settle it.
+func (p *pruneFixture) strandAll(t *testing.T, updated int64) {
+	t.Helper()
+	rows, err := p.s.st.query(`SELECT effect_id,receipt_json FROM app_platform_operation_effects WHERE kind='delete_checkpoint' AND state='unknown'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type row struct{ id, raw string }
+	var list []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.raw); err != nil {
+			t.Fatal(err)
+		}
+		list = append(list, r)
+	}
+	rows.Close()
+	for _, r := range list {
+		mustExec(t, p.s.st, `UPDATE app_platform_operation_effects SET receipt_json=?,updated_ms=? WHERE effect_id=?`, strings.TrimSuffix(r.raw, "}")+`,"stranded":true}`, updated, r.id)
+	}
+}
+
+// Only refusals count toward the attempt cap. A set whose eight earlier rows are all stranded still gets its retry,
+// which settles it and closes them. Fails if the cap counts stranded rows (the set would stay decided for ever).
+func TestPruneStrandedRowsNeverCountTowardTheAttemptCap(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		p := newPruneFixture(t, pg)
+		victim := p.set(t, "verified", 100)
+		p.set(t, "verified", 300)
+		for n := 2; n < 2+platformPruneMaxAttempts; n++ {
+			platformInsertDeleteCheckpointRow(t, p.s, p.hostOp, victim, "unknown", n)
+		}
+		p.strandAll(t, time.Now().UnixMilli())
+		p.prune(t)
+		if p.state(t, victim) != "deleted" || p.effects(t, "applied") != 1 || p.effects(t, "unknown") != 0 {
+			t.Fatal("a set with eight stranded rows was not retried to a verdict")
+		}
+		if scalar[int](t, p.s.st, `SELECT COUNT(*) FROM app_platform_operation_effects WHERE receipt_json LIKE '%superseded_applied%'`) != platformPruneMaxAttempts {
+			t.Fatal("the stranded rows were not closed by the verdict")
+		}
+	})
+}
+
+// A stranded row that has waited a day is reported like any other unknown.
+func TestPruneReportsAStaleStrandedRow(t *testing.T) {
+	p := newPruneFixture(t, false)
+	victim := p.set(t, "verified", 100)
+	p.set(t, "verified", 300)
+	platformInsertDeleteCheckpointRow(t, p.s, p.hostOp, victim, "unknown", 2)
+	p.strandAll(t, 1)
+	refused, err := p.s.platformPruneRefusals(t.Context())
+	if err != nil || len(refused) != 1 || refused[0].RecoverySetID != victim || refused[0].Reason != "outcome_unknown" {
+		t.Fatalf("%+v %v", refused, err)
+	}
+}
+
+// A pass that made progress lets the next one follow after the interval even while operations run, so a backlog
+// drains at a bounded rate; a pass that did nothing defers while any operation runs. Fails if progress is ignored
+// (the backlog would drain one window an hour under churn).
+func TestPruneAfterProgressContinuesWhileOperationsRun(t *testing.T) {
+	p := newPruneFixture(t, false)
+	p.set(t, "verified", 100)
+	p.set(t, "verified", 300)
+	mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='queued',completed_ms=NULL WHERE id=?`, p.hostOp)
+	past := time.Now().UnixMilli() - 5*platformPruneInterval.Milliseconds()
+	p.s.platformPruneLast.Store(past)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if p.s.platformPruneLast.Load() != past {
+		t.Fatal("a pass with no progress ran while an operation was in flight")
+	}
+	p.s.platformPruneMore.Store(true)
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if p.s.platformPruneLast.Load() == past {
+		t.Fatal("a pass after progress was deferred by an operation in flight")
+	}
+	if p.s.platformPruneMore.Load() {
+		t.Fatal("a pass that did nothing kept the progress flag")
+	}
+}
+
+// The reads behind the retained predicate and the selection are bounded by the sets they ask about: a long history of
+// deletions of other sets changes neither the answer nor the statements (no scan of the ledger by kind and state).
+func TestPruneReadsAreBoundedByTheSetsNotTheLedger(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		f := newRetFixture(t, pg)
+		removed := f.removedInstallation()
+		namespace := f.namespace(removed, "active")
+		cut, _ := f.operation(removed, "update", "complete", retNow-1*retDay, 2)
+		decided := f.recoverySet(removed, namespace, cut, "verified", 1)
+		plain := f.recoverySet(removed, namespace, cut, "verified", 2)
+		platformInsertDeleteCheckpointRow(t, f.s, cut, decided, "applied", 2)
+		// A long history: applied deletions of sets that no longer matter, each on a stage of its own.
+		for i := range 400 {
+			f.effectAt(cut, "history"+strconv.Itoa(i), 2, "delete_checkpoint", "applied", `{"recovery_set_id":"`+f.id()+`","outcome":"removed"}`)
+		}
+		e := f.st.poolExec()
+		retained, err := loadPlatformRetainedSets(e)
+		if err != nil || len(retained) != 1 || retained[0].id != plain {
+			t.Fatalf("retained = %+v, %v", retained, err)
+		}
+	})
+	raw, err := os.ReadFile("app_platform_recovery_prune.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "state IN ('prepared','unknown','applied')") {
+		t.Error("a read scans the applied effects of every set by state")
 	}
 }

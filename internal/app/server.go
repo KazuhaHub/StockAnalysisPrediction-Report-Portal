@@ -91,6 +91,7 @@ type Server struct {
 	platformPruneCursor int
 	platformPruneNoted  sync.Map
 	platformPruneLast   atomic.Int64
+	platformPruneMore   atomic.Bool
 
 	platformInstaller     platformFrontendInstallRuntime
 	platformDocuments     platformDocumentBudget
