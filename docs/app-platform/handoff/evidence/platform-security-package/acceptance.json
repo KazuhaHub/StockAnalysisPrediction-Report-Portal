@@ -176,7 +176,7 @@
       ]
     },
     "SEC-09": {
-      "status": "pass-development",
+      "status": "partial",
       "commands": [
         "npm --prefix web test -- --run src/lib/bridge-v2.test.ts src/components/apps/AppFrameV2.test.tsx",
         "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/apprunner/transport ./internal/apprunner/driver -run '^(Test(NetworkPool.*|HTTP.*|NetworkHTTP.*|NetworkSession.*|Container.*|Candidate.*|Inspection.*))$' -count=1",
@@ -193,6 +193,7 @@
         "Native capacity soak on branch test/app-platform-sec09-soak at ec21c509385ddba7ea7218640955448863daec05 (run 43825208692, 120 minutes, PostgreSQL, clean disk precheck, expected_commit matched, counts as OPS-08 evidence): all 34 checks passed. 7920 of 7920 tasks completed (p95 4589 ms), 3600 of 3600 event deliveries, the quota held at 256 in every window, and the backend-originated flood (598257 requests, about 1.85 times the failed run's 322777) was answered 200 (141007), refused 429 task_capacity (422917) or 429 app_platform_busy (34333) with no other class. Pooled loaded p95: home 33116 us (bound 50000), report 35152 (50000), dispatch@200 16328 (25000), batch start 59287 (100000)."
       ],
       "limits": [
+        "SEC-09 is partial again: run 43825208692 passed 34 of 34 checks but did not measure cross-tenant starvation (the workload tenants admitted tasks in process) and its task route budget was global and taken before the body was read and the identity verified. Both were fixed after review; a 120-minute run of the extended soak with the new check workload_tenants_submit_through_the_route_in_every_window must pass before the row is passed.",
         "Repository-level flooding and quota bounds passed, and the deployed memory, PID, log and storage floods, the Portal business executor, the task worker, event delivery and a backend-originated task flood were measured by passing 120-minute runs 43683877826 (OPS-08) and 43825208692 (extended soak).",
         "Backends run with NetworkMode none, so the backend-originated flood is sent by a process outside the container with the backend's own service identity, not by a packet from the container. A message flood from a backend (notifications/background) was not run; the per-application task quota (1000) remains proven at unit level only; the worker ran inside the measured Portal process rather than as cmd/app-task-worker.",
         "The remembered task refusal is process-local and bounded (256 credentials, 2 s, never past the credential's expiry); a worker in another process or another Portal replica does not share it, which is safe because every use re-reads the installation's active task count from the database and only ever refuses."
@@ -221,7 +222,7 @@
   },
   "open": [
     "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
-    "SEC-09 passed in development: run 43825208692 (120-minute extended soak at ec21c509) passed all 34 checks; the limits recorded on the row remain.",
+    "SEC-09 remains partial: the extended soak must pass, over 120 minutes, the new cross-tenant check (workload tenants submit through the task route with their own identities and must not be starved by the flood).",
     "SEC-10 has development transport/replay evidence; automatic runner re-enrollment is intentionally absent and remains an operator-approved recovery boundary.",
     "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
   ]

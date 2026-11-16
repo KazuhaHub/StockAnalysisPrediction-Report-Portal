@@ -287,11 +287,11 @@
       "evidence_run": "43683877826"
     },
     "SEC-09": {
-      "status": "passed",
-      "after_ops08": "SEC-09 passed on 2026-11-16: run 43825208692, a 120-minute dispatch of the extended soak (task worker, event delivery coordinator, backend-originated task flood) at ec21c509, passed all 34 checks and counts as OPS-08 evidence; pooled loaded p95 home 33.1 ms (bound 50), report 35.2 (50), dispatch@200 16.3 (25), batch start 59.3 (100). The first extended run, 43798306468, failed those bounds; the remedy is under sec09_extended_soak.remedy.",
+      "status": "partial",
+      "after_ops08": "SEC-09 is partial. Run 43825208692 (120 minutes, ec21c509) passed all 34 checks of its day but did not measure cross-tenant starvation: the workload tenants admitted in process, and the task route's budget was global, taken before the body was read and before the identity was verified. After review the route reads the body first under a 5 s deadline, takes its slots per verified installation, and the workload tenants submit through the route with their own identities; the verdict has a new check for them. A 120-minute run that passes every check including it must exist before the row is passed.",
       "ops08_dependency": "met by run 43683877826 and again by run 43825208692 under the extended load",
-      "closes_when": "met: run 43825208692",
-      "evidence_run": "43825208692"
+      "closes_when": "a 120-minute dispatch of the extended soak passes every check, including workload_tenants_submit_through_the_route_in_every_window and the four OPS-08 latency bounds",
+      "superseded_evidence_run": "43825208692"
     }
   },
   "not_proven_by_the_dispatch_run": [
@@ -300,11 +300,11 @@
     "a backend-originated message flood: not run by either harness"
   ],
   "sec09_extended_soak": {
-    "status": "passed",
+    "status": "partial",
     "plan": "docs/app-platform/171-capacity-envelope-plan.md, SEC-09: platform work under the soak",
     "branch": "test/app-platform-sec09-soak",
     "commit": "ec21c509385ddba7ea7218640955448863daec05",
-    "evidence_run": "43825208692",
+    "superseded_evidence_run": "43825208692",
     "added_checks": [
       "task_worker_ran_in_every_window",
       "no_task_lost_or_stuck",
