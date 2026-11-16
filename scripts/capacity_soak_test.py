@@ -1671,6 +1671,65 @@ class ReferenceHostTests(unittest.TestCase):
         self.assertTrue(any("workflow_dispatch" in b for b in verdict["evidence_blockers"]))
 
 
+_FAST = {"writes": 200, "bytes_per_write": 4096, "p50_ms": 0.1, "p95_ms": 0.3, "max_ms": 0.9}
+
+
+class ReferenceDiskPrecheckTests(unittest.TestCase):
+    """The reference VM's disk is slower than a GitHub-hosted one by the virtio journal, inherent to its host (doc 171): probe median 1.05 to 1.25 ms.
+    The precheck only decides whether the disk is slower than this host normally is; the latency bounds are not touched."""
+
+    SLOW = dict(_FAST, p50_ms=1.2, p95_ms=1.6)
+
+    def test_the_reference_vm_is_judged_at_1_2_ms_where_a_github_hosted_run_is_inconclusive(self):
+        reference = soak.disk_precheck(1.5, self.SLOW, host_kind="reference-vm")
+        self.assertFalse(reference["tripped"], reference)
+        self.assertFalse(soak.probe_trips(self.SLOW, host_kind="reference-vm"))
+        for kind in ("github-hosted", "unknown", "", None):
+            hosted = soak.disk_precheck(0.06, self.SLOW, host_kind=kind)
+            self.assertTrue(hosted["tripped"], kind)
+            self.assertTrue(soak.probe_trips(self.SLOW, host_kind=kind), kind)
+        self.assertTrue(soak.disk_precheck(0.06, self.SLOW)["tripped"], "the default is the strict threshold")
+        self.assertTrue(soak.probe_trips(self.SLOW))
+
+    def test_the_reference_vm_is_inconclusive_above_2_ms_probe_or_4_ms_wal_sync(self):
+        self.assertFalse(soak.disk_precheck(4.0, dict(_FAST, p50_ms=2.0), host_kind="reference-vm")["tripped"])
+        probe = soak.disk_precheck(0.06, dict(_FAST, p50_ms=2.01), host_kind="reference-vm")
+        self.assertTrue(probe["tripped"])
+        self.assertTrue(soak.probe_trips(dict(_FAST, p50_ms=2.01), host_kind="reference-vm"))
+        wal = soak.disk_precheck(4.01, self.SLOW, host_kind="reference-vm")
+        self.assertTrue(wal["tripped"])
+        self.assertIn("4.0", wal["reasons"][0])
+
+    def test_the_thresholds_the_run_used_and_the_host_kind_are_in_the_precheck(self):
+        reference = soak.disk_precheck(0.06, _FAST, host_kind="reference-vm")
+        self.assertEqual(reference["thresholds"], {"idle_wal_sync_ms": 4.0, "probe_p50_ms": 2.0})
+        self.assertEqual(reference["host_kind"], "reference-vm")
+        hosted = soak.disk_precheck(0.06, _FAST, host_kind="github-hosted")
+        self.assertEqual(hosted["thresholds"], {"idle_wal_sync_ms": 2.0, "probe_p50_ms": 1.0})
+        self.assertEqual(hosted["host_kind"], "github-hosted")
+
+    def test_a_self_hosted_runner_that_is_not_the_reference_vm_never_gets_the_relaxed_thresholds(self):
+        for env in ({"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "github"},
+                    {"RUNNER_ENVIRONMENT": "github-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm"}, {"APP_CAPACITY_SOAK_HOST": "reference-vm"}):
+            kind = soak.host_identity(env, "", "", 4)["kind"]
+            self.assertNotEqual(kind, "reference-vm", env)
+            self.assertTrue(soak.disk_precheck(0.06, self.SLOW, host_kind=kind)["tripped"], env)
+
+    def test_the_verdict_judges_a_reference_vm_run_at_1_2_ms_and_not_a_github_hosted_one(self):
+        evidence = child_evidence(windows=120)
+        probe = dict(self.SLOW, directory="/var/lib/postgresql/16", data_directory="/var/lib/postgresql/16/main")
+        reference = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=probe, event="workflow_dispatch", commit="a" * 40,
+                                  host={"kind": "reference-vm", "runner_name": "r", "cpu_model": "x", "nproc": 4, "mem_total_kib": 1})
+        self.assertEqual(reference["result"], soak.RESULT_PASSED, reference["precheck"])
+        self.assertEqual(reference["precheck"]["host_kind"], "reference-vm")
+        hosted = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=probe, event="workflow_dispatch", commit="a" * 40,
+                               host={"kind": "github-hosted"})
+        self.assertEqual(hosted["result"], soak.RESULT_INCONCLUSIVE_SLOW_DISK)
+        slower = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=dict(probe, p50_ms=2.5), event="workflow_dispatch", commit="a" * 40,
+                               host={"kind": "reference-vm"})
+        self.assertEqual(slower["result"], soak.RESULT_INCONCLUSIVE_SLOW_DISK)
+
+
 class WorkflowHostGuardTests(unittest.TestCase):
     """No workflow may reach a self-hosted runner from anything but a manual dispatch that asked for the reference VM."""
 

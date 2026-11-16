@@ -109,6 +109,15 @@ JOURNAL_FILE_PATTERN = re.compile(r".*(\.db|\.sqlite3?|-wal|-shm)")
 # 43678283415 attempt 1 read 1.3 ms of idle WAL sync, under the 2 ms bound, so the probe's median has its own, lower bound.
 DISK_PRECHECK_WAL_SYNC_MS = 2.0
 DISK_PRECHECK_PROBE_P50_MS = 1.0
+# The owner's reference VM (doc 171) is a KVM guest whose virtio disk adds the guest journal's flushes to every fdatasync: measured in the guest, a 4 KiB
+# write plus fdatasync takes a median of 1.05 to 1.25 ms (p95 1.3 to 1.6 ms), very stable, against 0.445 ms on the host's own ext4 (NVMe RAID1);
+# a raw preallocated disk, io=native, a dedicated iothread, guest haltpoll and zero-filling did not change it. The precheck only decides whether the
+# disk is slower than the host normally is, so that a slow-disk failure is not blamed on the Portal. A slower disk only makes the latency bounds
+# harder to meet, so a higher precheck on a fixed, known host cannot create a false pass; these thresholds are the measured baseline with margin
+# (the median about 1.6 times, the idle WAL sync 2 times the GitHub-hosted bound). The OPS-08 and SEC-09 latency bounds are not touched, and only a
+# host recognised as the reference VM (a self-hosted runner with the reference flag, see host_identity) can get them.
+REFERENCE_PRECHECK_PROBE_P50_MS = 2.0
+REFERENCE_PRECHECK_WAL_SYNC_MS = 4.0
 FSYNC_PROBE_WRITES = 200
 FSYNC_PROBE_BYTES = 4096
 RESULT_PASSED, RESULT_FAILED, RESULT_INCONCLUSIVE_SLOW_DISK = "passed", "failed", "inconclusive_slow_disk"
@@ -756,9 +765,17 @@ def idle_wal_sync_ms(evidence, samples):
     return round(weighted / total, 3) if total else None
 
 
-def probe_trips(probe):
+def precheck_thresholds(host_kind):
+    """The (idle WAL sync, probe median) bounds of the disk precheck in milliseconds: the reference VM's own, or the GitHub-hosted ones for every
+    other kind of host, an unknown one included."""
+    if host_kind == REFERENCE_HOST:
+        return REFERENCE_PRECHECK_WAL_SYNC_MS, REFERENCE_PRECHECK_PROBE_P50_MS
+    return DISK_PRECHECK_WAL_SYNC_MS, DISK_PRECHECK_PROBE_P50_MS
+
+
+def probe_trips(probe, host_kind=""):
     """Whether the fsync probe alone is slow enough to end the run before the load: it is measured before anything else runs."""
-    return bool(probe) and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS
+    return bool(probe) and probe.get("p50_ms", 0) > precheck_thresholds(host_kind)[1]
 
 
 def database_kind(database):
@@ -775,7 +792,7 @@ def probe_directory(database, postgres_data_dir, fixture=None):
     return str(Path(postgres_data_dir).parent) if postgres_data_dir else None
 
 
-def disk_precheck(idle_wal_ms, probe, database="postgres"):
+def disk_precheck(idle_wal_ms, probe, database="postgres", host_kind=""):
     """Whether the disk was too slow before the load began to say anything about the Portal. Only readings taken before the load are given
     to it, and a signal that was not measured cannot trip it.
 
@@ -784,13 +801,14 @@ def disk_precheck(idle_wal_ms, probe, database="postgres"):
     diagnostic (signals.idle_wal_sync_ms, idle_wal_sync_judged false) and never trips the run."""
     kind = database_kind(database)
     judged = kind == "postgres"
+    wal_bound, probe_bound = precheck_thresholds(host_kind)
     reasons = []
-    if judged and idle_wal_ms is not None and idle_wal_ms > DISK_PRECHECK_WAL_SYNC_MS:
-        reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {DISK_PRECHECK_WAL_SYNC_MS} ms")
-    if probe and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS:
-        reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {DISK_PRECHECK_PROBE_P50_MS} ms")
-    return {"tripped": bool(reasons), "reasons": reasons, "database": kind,
-            "thresholds": {"idle_wal_sync_ms": DISK_PRECHECK_WAL_SYNC_MS, "probe_p50_ms": DISK_PRECHECK_PROBE_P50_MS},
+    if judged and idle_wal_ms is not None and idle_wal_ms > wal_bound:
+        reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {wal_bound} ms")
+    if probe and probe.get("p50_ms", 0) > probe_bound:
+        reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {probe_bound} ms")
+    return {"tripped": bool(reasons), "reasons": reasons, "database": kind, "host_kind": host_kind or "unknown",
+            "thresholds": {"idle_wal_sync_ms": wal_bound, "probe_p50_ms": probe_bound},
             "signals": {"idle_wal_sync_ms": idle_wal_ms, "idle_wal_sync_judged": judged, "probe": probe}}
 
 
@@ -1479,7 +1497,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     breakdown = cpu_breakdown(evidence, samples)
     checks_passed = all(c["passed"] for c in checks)
     driver = evidence.get("db_driver") or database
-    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe, driver)
+    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe, driver, (host or {}).get("kind", ""))
     result = RESULT_INCONCLUSIVE_SLOW_DISK if precheck["tripped"] else (RESULT_PASSED if checks_passed else RESULT_FAILED)
     passed = {RESULT_PASSED: True, RESULT_FAILED: False}.get(result)
     diagnostic_values = {"soak_db": database, "soak_cpu_percent": cpu_percent, "soak_reserved_cpus": reserved_cpus,
@@ -1717,9 +1735,9 @@ def exit_code(verdict):
     return 0 if verdict["passed"] else 1
 
 
-def end_before_the_load(out, minutes, probe, database="postgres"):
+def end_before_the_load(out, minutes, probe, database="postgres", host_kind=""):
     """The fsync probe tripped before the load began: nothing was started, so say so and end without spending the soak's duration."""
-    precheck = disk_precheck(None, probe, database)
+    precheck = disk_precheck(None, probe, database, host_kind)
     verdict = {"result": RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "counts_as_ops08_evidence": False, "precheck": precheck,
                "evidence_blockers": ["the disk-health precheck tripped before the load: the run is inconclusive, not evidence"], "checks": []}
     run = {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")}
@@ -1771,6 +1789,7 @@ def main(argv):
     # The disk-health precheck's first reading, taken before anything else runs: a short fsync probe on the device of the database the Portal
     # uses (the PostgreSQL data device, or the device that holds the SQLite file).
     postgres_data_dir, disk_probe = "", None
+    host_kind = host_identity(os.environ, read_proc("/proc/cpuinfo"), read_proc("/proc/meminfo"), os.cpu_count() or 0)["kind"]
     try:
         postgres_data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
     except (RuntimeError, OSError, subprocess.SubprocessError):
@@ -1779,8 +1798,8 @@ def main(argv):
     if probe_dir:
         disk_probe = dict(fsync_probe(probe_dir), directory=str(probe_dir), data_directory=postgres_data_dir)
         print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
-        if probe_trips(disk_probe):
-            return end_before_the_load(out, minutes, disk_probe, database)
+        if probe_trips(disk_probe, host_kind):
+            return end_before_the_load(out, minutes, disk_probe, database, host_kind)
     socket = os.path.realpath("/var/run/docker.sock")
     image_id = run_command("docker", "image", "inspect", image, "--format", "{{.Id}}").strip()
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
@@ -1828,8 +1847,8 @@ def main(argv):
         if sqlite_probe_dir:
             disk_probe = dict(fsync_probe(sqlite_probe_dir), directory=sqlite_probe_dir, data_directory="")
             print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
-            if probe_trips(disk_probe):
-                return end_before_the_load(out, minutes, disk_probe, database)
+            if probe_trips(disk_probe, host_kind):
+                return end_before_the_load(out, minutes, disk_probe, database, host_kind)
         native = dict(ENV, GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted",
                       APP_DATA_NATIVE_UUID=probe.command("blkid", "-p", "-s", "UUID", "-o", "value", loop),
                       APP_DATA_NATIVE_PHASE="prepare", APP_DATA_JOURNAL_ROOT=str(journal_root),
