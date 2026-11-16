@@ -41,6 +41,9 @@ func main() {
 		IdleTimeout: 5 * time.Second, MaxHeaderBytes: 65536,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			served.Add(1)
+			if soakTaskHandler(w, r) {
+				return
+			}
 			switch {
 			case r.URL.Path == "/v1/echo" && (r.Method == http.MethodGet || r.Method == http.MethodPost) &&
 				r.Header.Get("Cookie") == "" && r.Header.Get("Authorization") == "":
