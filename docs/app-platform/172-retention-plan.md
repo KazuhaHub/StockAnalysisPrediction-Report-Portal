@@ -212,10 +212,12 @@ The RUN-08 evidence measured a flood against the old `max-size 1m` policy. It is
 ## 6. Recovery sets
 
 `app_platform_retention_recovery_sets` (default 2, 1-2) is stored and clamped like the other value, and
-`platformRecoverySetsBeyondRetention` selects the retained sets past the latest N of each installation, leaving out a set held by an
-import grant in `issued` or `consumed`, and a set in `restoring`. The selection feeds `prunePlatformRecoverySets`, which asks the
+`platformRecoverySetsBeyondRetention` selects the `verified` sets past the latest N `verified` sets of each installation, leaving out a
+set held by an import grant in `issued` or `consumed`. Only `verified` sets take a place: a `restoring`, `review_required` or
+`preparing` set never takes a verified set's place and is never selected, so the last verified fallback is never pruned because of
+them. "Newer" is the runner's order: `created_ms` greater, or equal and the checkpoint id smaller. The selection feeds `prunePlatformRecoverySets`, which asks the
 runner to delete the checkpoint of each `verified` set, and `recovery_sets_beyond` in the audit row reports the sets still pending.
-A `review_required` set is reported and never pruned.
+
 
 ### The correction to what this section said before
 
@@ -272,28 +274,49 @@ schema change.
 `prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled to once a
 minute unless a deletion is pending on the runner. It does not run inside the retention transaction classes, which are database-only.
 
-- **Candidates.** (a) the `verified` sets beyond the retained count; (b) the leak backlog: `deleted` sets of a `deleted` namespace with
-  no applied deletion. Excluded: a set whose installation has an unfinished operation, a set held by an import grant in `issued` or
-  `consumed`, a set in `restoring`, a `review_required` set, and everything during the restore pause (read again, failing closed).
+- **Candidates.** (a) the `verified` sets beyond the retained count, except the newest `verified` set of a namespace that is not
+  `deleted`: the runner's latest-checkpoint guard is per namespace while the count is per installation, so the selection mirrors it
+  and a refusal never burns an effect number; (b) the leak backlog: `deleted` sets of a `deleted` namespace with no applied deletion;
+  (c) a set whose earlier effects are all stranded (below). Excluded: a set whose installation has an unfinished operation or an
+  operation in `recovery_required`, a set held by an import grant in `issued` or `consumed`, a set in `restoring`, a `review_required`
+  set, and everything during the restore pause (read again, failing closed). New deletions have a window of their own, so deletions
+  that cannot progress never stop the others.
 - **The effect.** Kind `delete_checkpoint`, hosted by the latest finished operation of the installation, at the next free `remove_data`
   number of 2 or above. The id is derived from the set, its checkpoint and the attempt only, not from the host, so every tick and
   restart signs the same id and a lost receipt is read back under it. The row is written, under the admission locks, before the command
-  leaves the Portal. With no free number the set waits for a later operation.
+  leaves the Portal. With no free number the set waits for a later operation, and a retry never takes the last eight numbers
+  of a host, so a refusal that repeats cannot use the numbers new deletions need.
 - **Settle.** `applied` marks a retention candidate's set `deleted` and writes an `app_platform.recovery_set_pruned` audit row.
-  `checkpoint_latest`, `checkpoint_in_use` and an abandoned effect are retried under the next attempt with a backoff, at most eight
-  times. `checkpoint_identity_mismatch`, `checkpoint_unrecorded` and `checkpoint_not_verified` are final: they write an
+  `checkpoint_latest` and `checkpoint_in_use` are retried under the next attempt with a backoff, at most eight times. `checkpoint_identity_mismatch`, `checkpoint_unrecorded` and `checkpoint_not_verified` are final: they write an
   `app_platform.recovery_set_prune_refused` audit row and the storage status lists them as needing an operator.
-- **A decided deletion is not retained.** `platformRetainedRecoverySets` and `platformRetainedRecoverySetsOf` exclude a set that a
-  `delete_checkpoint` effect names in state `prepared`, `unknown` or `applied`. Once the decision commits, the bundle writer stops
+- **A deletion with no verdict is never reverted.** The runner's claim is irreversible and may have happened, so no Portal path
+  closes a `prepared` or `unknown` effect without the runner's word. When the installation's fence moves after the row was written
+  (a later operation ended), the old host can no longer sign for it: the row is marked `stranded` (a member of its receipt) and
+  stays open, so the set stays decided and restore and the bundle keep refusing it. The next pass signs a new attempt on the
+  installation's current host. Its receipt settles the question and closes the stranded rows: an `applied` receipt closes them as
+  `superseded_applied`, and a refusal proves the earlier claim never happened (a claim marks the runner's row deleted before it
+  touches the file, so a later effect id would have answered `absent`) and closes them as `superseded_not_claimed`. A row issued to a
+  retired runtime, or open for a day with no verdict, stays open and is listed by the storage status (`runtime_retired`,
+  `outcome_unknown`) for an operator.
+- **A decided deletion is not retained.** `platformRetainedPredicate` excludes a set that a `delete_checkpoint` effect names in
+  state `prepared` or `unknown` (an `applied` one retires its set in the transaction that settles it). The sets of the open effects
+  are read once per query and named in the predicate, so the ledger is never scanned per set. Once the decision commits, the bundle writer stops
   requiring the archive, the retention pins stop holding its operations, a restored Portal (whose dump carries the effect row) agrees,
-  and restore admission, import-grant issuance and restore-from-import refuse the set with the existing "recovery set unavailable"
+  and restore admission, import-grant issuance and restore-from-import refuse the set (an `applied`, `prepared` or `unknown` effect
+  decides it; a refused one does not) with the existing "recovery set unavailable"
   error. A bundle written while a deletion commits between its two reads refuses (database changed).
 - **Retention pin 9.** An operation holding a completed deletion's effect is kept while its set row exists, and the operation holding
-  the latest refused attempt of a set that is not yet deleted is kept too, because that row is the attempt count. Without the pin the
+  a refused attempt is kept until a deletion of the same set is applied, whether or not the set is already `deleted` (a leak-backlog
+  set is deleted from the start), because that row is the attempt count. A swept refusal would reset the count, and the same effect
+  id would be signed again under another host, which the runner refuses as a conflict, leaving the row open for ever. Pinning was
+  chosen over putting the host in the effect id because it keeps the id derivation of the design (set, checkpoint, attempt) and one
+  rule for every row that carries a count. Without the pin the
   sweep would delete the effect after 90 days, the leak backlog would select the set again, and the runner would answer `absent` for
   ever.
 - **Effect counters.** Every Portal effect counter that ignores `load_image` and `remove_image` rows ignores `delete_checkpoint` rows
-  through the one shared kind list.
+  through the one shared kind list. An open deletion deliberately does not block new operations on the installation: it is hosted by
+  a finished operation, and the decided-state rule above is what keeps restore, import and the bundle away from its set. Blocking
+  operations on an effect the Portal may never settle (a retired runtime) would make the installation unusable.
 
 Doc 167's disk arithmetic, which assumes at most two sets, is now enforced eventually and not at once: a set beyond N waits for an
 idle installation and a free slot. The storage page reports `recovery_set_pruning` as enabled.
