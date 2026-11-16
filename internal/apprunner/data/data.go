@@ -351,3 +351,10 @@ func (o ImportObservation) Snapshot() (ImportSnapshot, error) {
 	}
 	return s, nil
 }
+
+// QuarantineReport counts the files a checkpoint removal moved aside because it did not recognise them, and their
+// total size. The runner never deletes them.
+type QuarantineReport struct {
+	Files int
+	Bytes int64
+}

@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 
 	"golang.org/x/sys/unix"
 )
@@ -191,4 +192,46 @@ func confirmArchiveGone(directory *os.File, names ...string) error {
 		}
 	}
 	return nil
+}
+
+// QuarantineSummary counts the files a checkpoint removal moved aside as unrecognised (see checkpointArchive) and sums
+// their sizes. They are never deleted by the runner; the operator decides. It changes nothing.
+func (r *Root) QuarantineSummary(ctx context.Context, expected RootIdentity) (QuarantineReport, error) {
+	var zero QuarantineReport
+	if r == nil || !expected.valid() {
+		return zero, ErrUnsafe
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return zero, ErrUnsafe
+	}
+	identity, err := r.identity(ctx)
+	if err != nil || identity != expected {
+		return zero, ErrUnsafe
+	}
+	directory, err := r.openCheckpointDirectoryMode(false)
+	if errors.Is(err, unix.ENOENT) {
+		return zero, nil
+	}
+	if err != nil {
+		return zero, err
+	}
+	defer directory.Close()
+	entries, err := directory.ReadDir(-1)
+	if err != nil {
+		return zero, err
+	}
+	for _, entry := range entries {
+		if !strings.Contains(entry.Name(), archiveTrashSuffix+".quarantine-") {
+			continue
+		}
+		var stat unix.Stat_t
+		if err := unix.Fstatat(int(directory.Fd()), entry.Name(), &stat, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			continue
+		}
+		zero.Files++
+		zero.Bytes += stat.Size
+	}
+	return zero, nil
 }

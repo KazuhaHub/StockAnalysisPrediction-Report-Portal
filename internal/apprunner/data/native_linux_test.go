@@ -422,6 +422,9 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if moved, err := filepath.Glob(dir + nativeNamespace(504) + ".tar.deleting.quarantine-*"); err != nil || len(moved) != 1 {
 		t.Fatal("the unrecognised trash entry was not quarantined", moved, err)
 	}
+	if report, err := checkpointRoot.QuarantineSummary(context.Background(), checkpointIdentity); err != nil || report.Files != 1 || report.Bytes != 1 {
+		t.Fatal("the quarantine is not reported", report, err)
+	}
 	// A trash entry that is this checkpoint's archive (matching size and digest) is finished by the next removal,
 	// even beside a live archive of the same name.
 	if err := os.WriteFile(dir+keep.CheckpointID+".tar.deleting", keepBefore, 0400); err != nil {
