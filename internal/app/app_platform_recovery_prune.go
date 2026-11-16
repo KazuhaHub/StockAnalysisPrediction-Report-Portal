@@ -65,9 +65,6 @@ func platformPruneWait(attempts int) time.Duration {
 var (
 	// errPlatformPruneUncertain is a deletion whose outcome is not known; the same effect is read again.
 	errPlatformPruneUncertain = errors.New("the outcome of the checkpoint deletion is not known")
-	// errPlatformPruneNotClaimed is the runner's proof that it never claimed the effect (for example the installation
-	// has unsettled work there). The row stays prepared and the same effect is sent again on a later tick.
-	errPlatformPruneNotClaimed = errors.New("the runner has not claimed the checkpoint deletion")
 	// errPlatformPruneNotEligible is not a failure: under the admission locks the set no longer qualifies.
 	errPlatformPruneNotEligible = errors.New("the recovery set no longer qualifies for deletion")
 )
@@ -109,24 +106,6 @@ func platformDeletionStates(e migExec, states string) (map[string]bool, error) {
 		}
 	}
 	return out, rows.Err()
-}
-
-// platformOpenDeletionSets are the sets with a deletion that has no verdict (prepared or unknown).
-func platformOpenDeletionSets(e migExec) ([]string, error) {
-	sets, err := platformDeletionStates(e, `'prepared','unknown'`)
-	if err != nil {
-		return nil, err
-	}
-	return platformSortedKeys(sets), nil
-}
-
-func platformSortedKeys(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // platformUUIDList is the SQL list of validated ids. Only a string that passes platformValidUUID is written, so the
