@@ -1372,7 +1372,7 @@ numbers need filling (`handoff/evidence/platform-capacity-envelope/acceptance.js
     attempts, the answered and the busy counts and every other outcome by status and code (`classes`); the verdict requires a
     minimum of answered requests in every window, a typed refusal for the rest (no 5xx, no transport error) and a live flood
     process with a fresh heartbeat throughout (resolution 65). "As many messages as the platform lets a backend send" is not
-    exercised as a backend-originated flood; this is a stated gap.
+    exercised as a backend-originated flood; this is a stated gap. (Superseded for tasks by the section "SEC-09: platform work under the soak": a backend-originated task flood now runs.)
 56. **Image store: native when the daemon disk holds it, unit level otherwise.** The first version claimed the store needs "three
     real 4 GiB images". The refusal happens when the third is reserved, so two loaded images (8 GiB declared) are enough, and the
     probe now runs natively. A descriptor declares at most 4 GiB of layers for one image and at most 1 GiB for one layer (the first
@@ -1493,7 +1493,8 @@ is evidence for OPS-08.
     pooled and judged with the same floor rule as the pages (`batch_start`), idle baseline included. The task worker and the event
     delivery coordinator are not started: the soak's tasks are admitted with a run time an hour out, so none is due, and the event
     subscription is fenced and its source events kept; running them under the load is not done and stays a stated gap, as are
-    backend-originated requests (the fixture has no outbound channel) and PostgreSQL.
+    backend-originated requests (the fixture has no outbound channel) and PostgreSQL. (PostgreSQL has since been added; the worker, the
+    events and a backend-originated task flood are the section "SEC-09: platform work under the soak".)
 70. **Probe descriptions say what they drive.** The staging probe is a store-level probe (384 MiB reservations against the real staging store,
     the refusal mapped by the real error handler); driving the upload route would write gigabytes of unpinned packages, since the route
     holds at most 768 MiB at once. The event probe floods 64 source events at a subscription that allows one delivery in flight and asserts the
@@ -2112,12 +2113,117 @@ Other results:
 
 **Remaining limits.**
 
-- SEC-09 stays partial: the task worker and event delivery coordinator are not exercised by the soak, and no request originates from a backend. Its OPS-08 dependency is met.
+- SEC-09 stays partial. The soak now also runs the task worker, the event delivery coordinator and a backend-originated task flood (section "SEC-09: platform work under the soak" below), and all nine new checks passed on a healthy host, but the unchanged OPS-08 latency bounds failed under that combined load. Its OPS-08 dependency is met (run 43683877826).
 - The per-application task quota is proven at unit level only, and the runner's own refusal of an over-declared layer is covered by the blob channel unit tests.
 - One host class, one run: the earlier two runs of the same configuration measured home at 20.1 and 37.3 ms (5 minutes), so a rerun on another host can differ; the bounds leave a factor of 1.7 to 4.6 over the worst windows and pooled values of this run.
+
+### SEC-09: platform work under the soak
+
+Status 2026-11-16: implemented and measured; **not passed**. The nine new checks passed on every run of the full configuration (the diagnostic variants fail the check of the part they remove), but the unchanged OPS-08 latency bounds
+failed on a healthy host under the backend task flood, so SEC-09 stays partial. Nothing here changes a bound, the schema or the journal.
+
+**What now runs.** `soakWork` (`app_platform_capacity_soak_work_native_linux_test.go`) starts three things beside the existing loads, in the measured Portal process:
+
+- *The task worker.* The real `platformTaskScheduler` of `cmd/app-task-worker`, polling at its default 1 s, against the real runner and the soak backends (generation-1
+  writable installs, so the path PR #453 added). Six of the eight managed installations (the workload tenants) get one backend task each every 10 s and one
+  event every 12 s that fans out to all six: 36 backend tasks and 30 event deliveries a minute, 66 a minute in all, which the one-task-at-a-time worker keeps up with.
+  The tasks go to `POST /v1/tasks/run` and `POST /v1/events/deliver` of the soak backend (`scripts/acceptance/soak_app/tasks.go`, which answers each with a stable
+  success after checking the body and a current service identity for the resource).
+- *The event delivery coordinator.* Each workload tenant holds a subscription to the soak's report with the largest in-flight bound (16). Events are captured with
+  `CaptureNotification`, the store call the publishers use, so the coordinator fans each out through `capturePlatformEventDeliveries` into one `app.event.delivery` task
+  per subscription. The second saturated tenant also holds a subscription: its first event meets its full task quota, so the coordinator fences it for review with the
+  reason `task_capacity` (a typed refusal provoked in the run); the first saturated tenant keeps the subscription the quota probe fenced for `inflight_limit`.
+- *The backend-originated task flood.* The two other installations (the saturated tenants) hold exactly their installation task quota (256) with tasks that are not due until
+  after the run, so the worker never takes one. The flood process (a second role of `TestPlatformCapacitySoakFlood`, outside the measured process) keeps two
+  requests in flight for each of them against the Portal's session-free route `POST /api/app-platform/installations/{installation}/tasks/background`, with that
+  backend's own service identity in `X-Portal-Service-Identity` (issued by `issuePlatformServiceIdentity` for `tasks.schedule`, refreshed every minute, since an
+  identity lives at most five minutes) and no cookie. One request in four replays the tenant's existing occurrence (answered 200, `created=false`); the others are new occurrences that meet the
+  quota (refused `429 task_capacity`). After any refusal the connection pauses 50 ms, as the message flood does.
+
+The tasks the quota probes leave behind are deleted when the load starts and the saturated tenants are refilled with the far-future tasks, because those probe tasks
+were due within the hour and the worker would have run them. After the last window the producers stop and the worker is given three minutes to finish what is open.
+
+**Not a packet from a container.** The managed backends run with `NetworkMode none`: a container cannot send a request to the Portal at all, and the platform has
+no channel for one. "Originates from a backend" therefore means the backend's service principal: the request carries the installation's own service identity and arrives
+at the route a background service would use, sent by a process outside the container. That is the strongest backend-originated flood the platform allows.
+
+**The new checks** (each in `PLATFORM_WORK_CHECKS` of `capacity_soak.py`, in the same verdict as OPS-08, so `counts_as_ops08_evidence` needs all of them;
+the bounds are engineering decisions of this harness, not the owner's, and are listed with the check):
+
+| Check | Judges |
+| --- | --- |
+| `task_worker_ran_in_every_window` | at least 20 tasks completed in every one-minute window and the worker alive at its end |
+| `no_task_lost_or_stuck` | every admitted task reached `succeeded`: none failed, uncertain, review-required or cancelled, none with an admission error, none due and open longer than 60 s at a window end, and nothing open after the three-minute drain |
+| `task_latency_within_bound` | admission to completion over the whole load: pooled p95 at most 10 s and the slowest task at most 60 s |
+| `task_quota_enforced_in_every_window` | no installation ever held more than 256 active tasks, and the flood was refused `429 task_capacity` in every window |
+| `event_delivered_at_least_once` | every captured event reached every one of the six subscribed installations (3600 of 3600 for 600 events), and every window delivered at least one |
+| `event_queue_bounded` | the active event deliveries of a subscription never passed its bound of 16, did not grow window over window, and drained |
+| `event_refusals_are_typed` | no capture error, every workload subscription still active, every fence carries a reason from the closed set (`inflight_limit`, `task_capacity`, `authority_lost`, `task_authority_lost`), and the saturated tenant was fenced for `task_capacity` |
+| `backend_task_flood_answered_or_typed_in_every_window` | at least 100 flood requests in every window and every answer `200`, `429:task_capacity` or `429:rate_limited` (no 5xx, no other code, no transport error) |
+| `backend_task_flood_alive_throughout` | the flood process alive with a fresh heartbeat in every window, so every latency window was measured under the flood |
+
+What the flood does to the other tenants is judged by the four OPS-08 latency checks and the two crash checks of the same run, unchanged. The unit level per-application
+quota probe is unchanged.
+
+**Runs.** All on `test/app-platform-sec09-soak` at `df5b40147dfa8260f89246c60a4ce95644f592c7` (`soak_only=true`, PostgreSQL 16, `expected_commit` matching for the dispatches of 120 minutes).
+
+| Run | What | Result |
+| --- | --- | --- |
+| [43783839436](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43783839436) | smoke, 5 minutes | passed, 34 of 34 checks; not evidence |
+| [43785123008](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43785123008) | 120 minutes | `inconclusive_slow_disk`: idle WAL sync 4.425 ms against the 2.0 ms precheck bound (the idle report p95 was already 34.6 ms and batch start 129 ms); never evidence. All nine new checks passed |
+| [43798306468](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43798306468) | 120 minutes, the evidence attempt | **failed**: precheck clean (idle WAL sync 0.132 ms, probe p50 0.300 ms); all nine new checks passed; four OPS-08 latency checks failed |
+| [43812011524](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43812011524) | 20 minutes, `no-backend-flood` (diagnostic) | all four latency bounds passed |
+| [43812014614](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43812014614) | 20 minutes, `no-task-worker` (diagnostic) | all four latency bounds passed, home with two windows over |
+
+**The evidence attempt, run 43798306468** (job 2026-11-16 03:27:36Z to 05:33:36Z, 7514 s of harness time; `passed=false`, `counts_as_ops08_evidence=false`, blocker "the run did not pass"; 34 checks, 30 passed).
+The platform work, all passing:
+
+- Tasks: 7920 admitted, 7920 `succeeded`, none in any other state, no admission error; admission to completion p50 3807 ms, p95 8389 ms (bound 10000), slowest 11478 ms (60000); oldest due open task 17 ms at a window end (60000); drained in 3 s.
+- Events: 600 captured, 3600 of 3600 deliveries succeeded, at most 1 active delivery per subscription in every window (bound 16), no capture error, all six workload subscriptions active, the saturated tenant's subscription fenced for `task_capacity` and the probe's for `inflight_limit`.
+- Quota: the most active tasks any installation held was 256 in every window; the saturated tenants stayed at 256; none of their tasks ran.
+- Backend flood: 322777 requests, 80694 answered (replays) and 242083 refused `429 task_capacity`, no other class, about 2700 requests a minute, alive in every window.
+- Message flood: 16978 answered and 796924 refused `429 app_platform_busy`, typed and alive in every window.
+
+The OPS-08 latency bounds, unchanged, pooled over the 120 windows (microseconds):
+
+| Series | Idle p95 | Pooled p95 | Bound | Windows over the bound | Worst window |
+| --- | --- | --- | --- | --- | --- |
+| home | 2697 | 66997 | 50000 | 120 of 120 | 88844 (minute 10) |
+| report | 4613 | 68425 | 50000 | 120 of 120 | 82847 (minute 18) |
+| dispatch@200 | 1490 | 34726 | 25000 | 85 of 120 | 53135 (minute 116) |
+| batch start | 16305 | 110573 | 100000 | 61 of 120 | 135879 (minute 95) |
+
+The other checks passed: backends at least 0.7 of their CPU quota and holding their PIDs in every window, no backend or runner crash, host memory at least 69% available, journal growth 0 bytes, 240 of 240 host samples.
+
+**What it shows.** The run on the previous harness (43683877826, no worker, no events, no backend flood) measured 10.8, 17.5, 9.9 and 43.7 ms. With the added work the host is 97.7% busy over windows 2 to 120 against about 84% before: the
+Portal's share rose from about 7% to 12% of the host, PostgreSQL and the rest from about 11% to 21%, and the runner stays near 13%. The platform side has the one reserved CPU
+(`reserved_cpus=1`), which the Portal, PostgreSQL, the runner and Docker share, so that CPU is saturated and every page and queue decision waits. The two diagnostics
+split the cause: the worker and events alone (`no-backend-flood`) left the host 85% busy and every bound passed (home 33.9, report 29.0, dispatch 9.7, batch start 57.5 ms over 20 minutes); the flood alone
+(`no-task-worker`) left it 90% busy, 86321 requests in 20 minutes (about 72 a second), and passed with home at 43.8 ms against 50. Neither is evidence (20 minutes, a diagnostic variant), and the two are one host class each, so they say where the cost is, not that either part passes
+for 120 minutes. The message flood is the part that changed least in its demand but not in what it gets: its relay answered 16978 requests instead of 80045 because the admitted ones now wait longer.
+
+**The finding.** The session-free task route has no admission budget. The routes a user session reaches (`/backend`, `/reports`, documents, `/network`) pass through `platformBudgetPrecheck`
+and answer `429 app_platform_busy` before any database work, at about 11 microseconds a refusal. `POST .../tasks/background` is wrapped only in `platformDocumentHeaders(rateLimitV1(...))`, and
+`rateLimitV1` is a per-IP limit that is off in the soak server (it did not trigger once). Each refused submission therefore still verifies the service identity (a transaction), then takes the global task admission lock and
+counts three times, so a backend that floods the route consumes the reserved CPU in proportion to its rate and the other tenants wait for it. The quota itself held in every window and every refusal was typed, so the bound the platform enforces is the
+quota; what it does not bound is the work of being refused. Whether the quota and the typed refusal are enough, or the route needs a busy gate of its own like the other backend-facing routes, is a product decision: the soak
+cannot make it, and this work did not change the Portal.
+
+**Options for the owner** (none is applied): (1) add a concurrency budget in front of `tasks/background` in the style of `platformBudgetPrecheck`, so excess submissions are refused `429 app_platform_busy` before the identity is verified, and rerun; the new checks would then also need
+`429:app_platform_busy` as a typed class; (2) decide that the soak's flood is lighter than a flood the platform must carry (two connections for each of two backends, about 45 to 70 requests a second) and set the intensity by decision; or (3) give the platform side more than one reserved CPU on the reference host. Any rerun is a 120-minute dispatch of the same job.
+
+**Limits of this evidence.**
+
+- The worker runs inside the measured Portal process, not as the separate `cmd/app-task-worker` process of production, so its cost is charged to the measured process: stricter than production, and the diagnostic above shows it costs little.
+- The pace of the workload (66 tasks a minute) and the flood (two connections a backend, a 50 ms pause after a refusal) are this harness's choices, recorded in `soakWorkloadTenants`, `soakTaskEvery`, `soakEventEvery` and `soakFloodConnectionsPerBackend`.
+- The flood is a task-submission flood. A message flood from a backend (`notifications/background`) is not run: the soak manifests do not declare `notifications.publish`.
+- The flooding backends' tasks never run, because the saturated tenants stay at their quota with tasks due after the run; the worker's behaviour under a flood that is admitted and executed is not measured.
+- The per-application quota (1000) is still proven at unit level only; every application has one installation in this soak.
+- The task handlers exercised are `app.backend.task` and `app.event.delivery`; the digest handler has its own native acceptance.
+- The two diagnostics are 20-minute runs on hosts of their own, and they carry host variance of the size already seen between runs of this configuration (home 20 to 37 ms over five minutes).
 
 **Follow-ups that still block the integration to main merge.**
 
 - **SQLite read pool: implemented, one diagnostic soak.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); run 43764872093 (`soak_db=sqlite-file`, 120 minutes, not evidence, verdict `inconclusive_slow_disk` for a PostgreSQL disk reading that does not apply) met all four absolute bounds, with the WAL flat at 8.0 MiB; no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
-- **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
+- **SEC-09 partial:** exercised now (section "SEC-09: platform work under the soak"), but the 120-minute run failed the OPS-08 latency bounds under the backend task flood; it needs an owner decision on the remedy before it can close.

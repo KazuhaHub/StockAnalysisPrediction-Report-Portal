@@ -187,11 +187,14 @@
         "Network executor pools independently cap per-installation concurrency and global concurrency before allocating resources; policy revision and epoch aliases cannot bypass the installation budget.",
         "HTTP, control, readiness, registration, handshake and receipt channels reject oversized, truncated, trailing, unknown and malformed frames before admission.",
         "Container limits set fixed memory/swap/CPU/PID bounds and refuse missing or unbounded log policy. Plugin/object/account/global storage limits are separately enforced before use.",
-        "Authentication/verification budgets remain distinct from authenticated data paths and cannot replace authentication with throttling."
+        "Authentication/verification budgets remain distinct from authenticated data paths and cannot replace authentication with throttling.",
+        "Native capacity soak on branch test/app-platform-sec09-soak at df5b40147dfa8260f89246c60a4ce95644f592c7 (run 43798306468, 120 minutes, PostgreSQL, clean disk precheck): the real task worker completed 7920 of 7920 tasks (admission to completion p95 8389 ms, slowest 11478 ms, none lost or stuck, drained in 3 s); the event delivery coordinator delivered 3600 of 3600 deliveries for 600 events with at most 1 active delivery per subscription against a bound of 16 and a typed task_capacity fence for the saturated tenant; the installation task quota held at 256 in every window while a backend-originated task flood (the saturated backends' own service identity at the session-free task route, 322777 requests) was answered 200 or refused 429 task_capacity with no other class. The nine new platform-work checks passed.",
+        "The same run failed the four unchanged OPS-08 latency bounds under that combined load: home 66997 us (bound 50000), report 68425 (50000), dispatch@200 34726 (25000), batch start 110573 (100000). Diagnostic 20-minute runs 43812011524 (no backend flood) and 43812014614 (no task worker) each passed the bounds, so the combined work saturates the one reserved CPU; the cause is that the session-free task route has no admission budget, so a refused submission still costs a service-identity verification and the task admission transaction."
       ],
       "limits": [
-        "Repository-level flooding and quota bounds passed. No measured maximum-capacity benchmark, deployed memory/PID pressure run, log-volume soak or Portal business-queue starvation measurement has been performed.",
-        "SEC-09 remains partial until OPS-08-style measured capacity and sustained attack evidence exists."
+        "Repository-level flooding and quota bounds passed, and the deployed memory, PID, log and storage floods and the Portal business executor were measured by OPS-08 run 43683877826. The task worker, event delivery and a backend-originated task flood were measured by run 43798306468, which failed the OPS-08 latency bounds; no passing run of the extended soak exists.",
+        "SEC-09 remains partial until the owner decides the remedy for the unbudgeted session-free task route (a busy gate in front of tasks/background, the flood intensity, or more reserved CPU on the reference host) and a 120-minute dispatch run of the extended soak passes every check, including the four OPS-08 latency bounds.",
+        "Backends run with NetworkMode none, so the backend-originated flood is sent by a process outside the container with the backend's own service identity, not by a packet from the container. A message flood from a backend (notifications/background) was not run; the per-application task quota (1000) remains proven at unit level only; the worker ran inside the measured Portal process rather than as cmd/app-task-worker."
       ]
     },
     "SEC-10": {
@@ -217,7 +220,7 @@
   },
   "open": [
     "SEC-01 remains limited by the absence of a production registry-authentication path; the current implementation deliberately has no registry credentials to scope or forward.",
-    "SEC-09 remains partial pending measured-capacity evidence.",
+    "SEC-09 remains partial: the extended soak (task worker, event delivery, backend-originated task flood) failed the OPS-08 latency bounds in run 43798306468 and needs an owner decision on the session-free task route before a passing run can exist.",
     "SEC-10 has development transport/replay evidence; automatic runner re-enrollment is intentionally absent and remains an operator-approved recovery boundary.",
     "SEC-03, SEC-04, SEC-05 and SEC-08 have development evidence on their stated surfaces; formal deployed-origin review and final H16 approval remain open."
   ]

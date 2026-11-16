@@ -203,8 +203,11 @@ Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 
 [doc 171](171-capacity-envelope-plan.md). **OPS-08 passed on 2026-11-15:** the 120-minute `workflow_dispatch` run
 [43683877826](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43683877826) of the `capacity-soak` job, at commit
 `8121574b90c9aa8110ada71dcfe8a19604608e50` (the `expected_commit` matched), PostgreSQL 16.15, passed all 25 checks with no evidence blocker.
-Pooled loaded p95: home 10.8 ms (bound 50), report 17.5 ms (50), dispatch@200 9.9 ms (25), batch start 43.7 ms (100). **SEC-09 stays partial:** the
-task worker and event delivery coordinator are not exercised by the soak; its OPS-08 dependency is met. Only that run counts. The
+Pooled loaded p95: home 10.8 ms (bound 50), report 17.5 ms (50), dispatch@200 9.9 ms (25), batch start 43.7 ms (100). **SEC-09 stays partial:** the soak
+now also runs the task worker, the event delivery coordinator and a backend-originated task flood, and the nine new checks passed in the 120-minute run
+[43798306468](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43798306468), but that run failed the unchanged OPS-08 latency bounds under the combined
+load (home 67.0 ms, report 68.4, dispatch 34.7, batch start 110.6, against 50, 50, 25 and 100); the cause and the options are in doc 171, "SEC-09: platform work under the soak". The OPS-08 pass above is the earlier run, which did not carry
+that work. Only a passing run counts. The
 job exists on the branch `feat/app-platform-capacity-soak`, which targets `integration/app-platform`, not on `main`, so the
 evidence run is a `workflow_dispatch` of that branch at the reviewed commit with `soak_only=true`; the evidence records the
 branch (`GITHUB_REF_NAME`), the commit and the event. The same configuration runs for five minutes, with a diagnosis added, on

@@ -3,7 +3,7 @@
   "status": "passed",
   "plan": "docs/app-platform/171-capacity-envelope-plan.md",
   "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 4",
-  "note": "Filled from the capacity-soak-evidence artifact of the passing 120-minute workflow_dispatch run 43683877826 of app-project-quota-probe.yml (job capacity-soak) on the branch feat/app-platform-capacity-soak at commit 8121574b90c9aa8110ada71dcfe8a19604608e50 (expected_commit matched), soak_only=true, PostgreSQL. No pull request smoke is cited. SEC-09 stays partial: the task worker and event delivery coordinator are not exercised by the soak.",
+  "note": "Filled from the capacity-soak-evidence artifact of the passing 120-minute workflow_dispatch run 43683877826 of app-project-quota-probe.yml (job capacity-soak) on the branch feat/app-platform-capacity-soak at commit 8121574b90c9aa8110ada71dcfe8a19604608e50 (expected_commit matched), soak_only=true, PostgreSQL. No pull request smoke is cited. This run did not carry the task worker, the event delivery coordinator or a backend-originated flood. SEC-09 stays partial: the extended soak that does (section sec09_extended_soak) failed the OPS-08 latency bounds.",
   "dispatch_run": {
     "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43683877826",
     "run_id": "43683877826",
@@ -288,14 +288,88 @@
     },
     "SEC-09": {
       "status": "partial",
-      "after_ops08": "SEC-09 stays partial after OPS-08 passes: the task worker and event delivery coordinator are not exercised by the soak. OPS-08 supplies the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load",
-      "ops08_dependency": "met by run 43683877826; SEC-09 stays partial"
+      "after_ops08": "SEC-09 stays partial after OPS-08 passes. OPS-08 supplies the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load. The soak now also runs the task worker, the event delivery coordinator and a backend-originated task flood (sec09_extended_soak); the nine new checks pass, but the same 120-minute run failed the four unchanged OPS-08 latency bounds",
+      "ops08_dependency": "met by run 43683877826; SEC-09 stays partial",
+      "closes_when": "a 120-minute dispatch run of the extended soak passes every check, including the four OPS-08 latency bounds; blocked on an owner decision about the session-free task route (sec09_extended_soak.finding)"
     }
   },
   "not_proven_by_the_dispatch_run": [
     "the per-application task quota (1000) natively; it is proven at its boundary at unit level only, and the unit tests run in the dispatch job",
-    "the task worker and event delivery coordinator under the load, and a backend-originated message or task flood: none runs in the soak"
+    "the task worker and event delivery coordinator under the load, and a backend-originated task flood: none ran in this run; the extended soak runs them (sec09_extended_soak) and has not passed",
+    "a backend-originated message flood: not run by either harness"
   ],
+  "sec09_extended_soak": {
+    "status": "failed",
+    "plan": "docs/app-platform/171-capacity-envelope-plan.md, SEC-09: platform work under the soak",
+    "branch": "test/app-platform-sec09-soak",
+    "commit": "df5b40147dfa8260f89246c60a4ce95644f592c7",
+    "added_checks": [
+      "task_worker_ran_in_every_window",
+      "no_task_lost_or_stuck",
+      "task_latency_within_bound",
+      "task_quota_enforced_in_every_window",
+      "event_delivered_at_least_once",
+      "event_queue_bounded",
+      "event_refusals_are_typed",
+      "backend_task_flood_answered_or_typed_in_every_window",
+      "backend_task_flood_alive_throughout"
+    ],
+    "bounds_are_engineering_decisions": {
+      "task_worker_min_completed_per_window": 20,
+      "task_latency_p95_ms": 10000,
+      "task_latency_max_ms": 60000,
+      "task_stuck_max_age_ms": 60000,
+      "installation_task_quota": 256,
+      "event_max_inflight_per_subscription": 16,
+      "backend_flood_min_requests_per_window": 100,
+      "typed_backend_flood_classes": ["200", "429:task_capacity", "429:rate_limited"]
+    },
+    "runs": {
+      "43783839436": {"kind": "smoke, 5 minutes", "checks": "34 of 34", "evidence": false},
+      "43785123008": {"kind": "dispatch, 120 minutes", "result": "inconclusive_slow_disk", "reason": "idle WAL sync 4.425 ms against the 2.0 ms bound", "platform_work_checks": "9 of 9 passed", "latency_bounds": "failed on a host whose idle report p95 was 34.6 ms", "evidence": false},
+      "43798306468": {
+        "kind": "dispatch, 120 minutes, the evidence attempt",
+        "job_started_utc": "2026-11-16T03:27:36Z",
+        "job_finished_utc": "2026-11-16T05:33:36Z",
+        "elapsed_seconds": 7514,
+        "expected_commit_matched": true,
+        "soak_db": "postgres",
+        "disk_precheck": {"idle_wal_sync_ms": 0.132, "fsync_probe_p50_ms": 0.300, "fsync_probe_p95_ms": 0.459, "tripped": false},
+        "result": "failed",
+        "checks_passed": "30 of 34",
+        "counts_as_ops08_evidence": false,
+        "evidence_blockers": ["the run did not pass"],
+        "platform_work_checks": "9 of 9 passed",
+        "tasks": {"admitted": 7920, "succeeded": 7920, "other_states": 0, "latency_ms": {"p50": 3807, "p95": 8389, "max": 11478}, "drain_seconds": 3},
+        "events": {"captured": 600, "expected_deliveries": 3600, "delivered": 3600, "max_inflight_per_subscription": 1, "inflight_bound": 16},
+        "quota": {"installation_quota": 256, "max_active_in_any_window": 256},
+        "backend_flood": {"requests": 322777, "answered_200": 80694, "refused_429_task_capacity": 242083, "other_classes": 0},
+        "message_flood": {"answered": 16978, "refused_429_app_platform_busy": 796924},
+        "latency_p95_us": {
+          "home": {"idle": 2697, "pooled": 66997, "bound": 50000, "windows_over": 120},
+          "report": {"idle": 4613, "pooled": 68425, "bound": 50000, "windows_over": 120},
+          "dispatch": {"idle": 1490, "pooled": 34726, "bound": 25000, "windows_over": 85},
+          "batch_start": {"idle": 16305, "pooled": 110573, "bound": 100000, "windows_over": 61}
+        },
+        "host_busy_percent_windows_2_to_120": 97.7
+      },
+      "43812011524": {"kind": "diagnostic, 20 minutes, no-backend-flood", "latency_p95_us": {"home": 33896, "report": 28997, "dispatch": 9651, "batch_start": 57520}, "host_busy_percent": 84.8, "evidence": false},
+      "43812014614": {"kind": "diagnostic, 20 minutes, no-task-worker", "latency_p95_us": {"home": 43831, "report": 35281, "dispatch": 10950, "batch_start": 48217}, "host_busy_percent": 89.7, "flood_requests": 86321, "evidence": false}
+    },
+    "finding": "The session-free route POST /api/app-platform/installations/{installation}/tasks/background has no admission budget (the user-session backend-facing routes pass through platformBudgetPrecheck and refuse 429 app_platform_busy before any database work). A refused submission still verifies the service identity and takes the global task admission lock and three counts, so a flooding backend consumes the one reserved CPU shared by the Portal, PostgreSQL, the runner and Docker and the other tenants' latency exceeds the OPS-08 bounds. The quota held and every refusal was typed.",
+    "options_for_the_owner": [
+      "a concurrency budget in front of tasks/background refusing 429 app_platform_busy before the identity is verified, then rerun",
+      "set the flood intensity by decision (the soak uses two connections for each of two backends, about 45 to 70 requests a second)",
+      "more than one reserved CPU for the platform side of the reference host"
+    ],
+    "limits": [
+      "the managed backends run with NetworkMode none, so the flood is sent by a process outside the container with the backend's own service identity",
+      "the worker runs inside the measured Portal process, not as cmd/app-task-worker",
+      "the flooding backends' tasks never run (their tasks are due after the run)",
+      "the per-application task quota (1000) remains unit level only",
+      "no backend message flood (notifications/background)"
+    ]
+  },
   "known_limits": {
     "sqlite": {
       "decision": "OPS-08 evidence is a PostgreSQL run (owner, 2026-11-14); SQLite is a recorded known limit and never evidence",

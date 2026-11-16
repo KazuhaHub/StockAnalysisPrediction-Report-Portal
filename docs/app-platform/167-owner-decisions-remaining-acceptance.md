@@ -283,8 +283,9 @@ within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
 Engineering note 2026-11-15 (not the owner's decision): "closes `SEC-09`" above is read as the soak's contribution to `SEC-09`.
-`SEC-09` stays partial after `OPS-08` passes: the task worker and event delivery coordinator are not exercised by the soak
-(`handoff/acceptance-checklist.csv`, `SEC-09`).
+`SEC-09` stays partial after `OPS-08` passes. The soak now exercises the task worker, the event delivery coordinator and a backend-originated task flood, but the
+120-minute run failed the unchanged OPS-08 latency bounds under that load; the owner decision it needs (a busy gate on the session-free task route, the flood's
+intensity, or more reserved CPU) is set out in doc 171, "SEC-09: platform work under the soak" (`handoff/acceptance-checklist.csv`, `SEC-09`).
 
 Owner decision 2026-11-13: the latency bound is max(1.5x idle p95, idle p95 + 5 ms), for the home page, the report page and
 the queue's dispatch decision, measured with load generated outside the measured process. The owner decided only that floor.
