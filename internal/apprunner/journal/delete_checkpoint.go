@@ -545,6 +545,17 @@ func (s *Store) deleteCheckpointDecision(ctx context.Context, tx *sql.Tx, c cont
 			return "", false, err
 		}
 		if unproven != 0 {
+			// Finishing an earlier claim removes a file on the strength of it: the retry's size and digest must be the
+			// checkpoint row's and every earlier claim's, or the removal is refused before anything is claimed.
+			var disagreeing int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE kind='delete-checkpoint' AND state='unknown' AND json_extract(receipt_json,'$.checkpoint_id')=?
+				AND (json_extract(receipt_json,'$.manifest_sha256')<>? OR json_extract(receipt_json,'$.archive_bytes')<>?)`,
+				p.CheckpointID, p.ManifestSHA256, p.ArchiveBytes).Scan(&disagreeing); err != nil {
+				return "", false, err
+			}
+			if disagreeing != 0 || !row.manifest.Valid || row.manifest.String != p.ManifestSHA256 || row.bytes != mustDataInt(p.ArchiveBytes) {
+				return DeleteOutcomeIdentityMismatch, false, nil
+			}
 			return "", true, nil
 		}
 		return DeleteOutcomeAbsent, false, nil

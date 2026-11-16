@@ -704,6 +704,34 @@ func TestDeleteCheckpointRetryFinishesAnUnprovenEarlierClaim(t *testing.T) {
 			}
 		})
 	}
+	// The retry names another size or digest than the row and the earlier claim: nothing is claimed, removed or settled.
+	for name, mutate := range map[string]func(*control.DeleteCheckpointCommand){
+		"size":   func(c *control.DeleteCheckpointCommand) { c.Payload.ArchiveBytes = "4097" },
+		"digest": func(c *control.DeleteCheckpointCommand) { c.Payload.ManifestSHA256 = strings.Repeat("e", 64) },
+	} {
+		t.Run("a retry with another "+name+" is refused", func(t *testing.T) {
+			d := newDeleteCheckpointFixture(t)
+			d.native.removeErr = errors.New("crashed before the unlink")
+			if _, err := d.dispatch(); err == nil {
+				t.Fatal("a failed removal settled")
+			}
+			d.native.removeErr = nil
+			_, raw, sig := d.build(t, 3, 5800, func(c *control.DeleteCheckpointCommand) {
+				c.InstallationFence, c.TargetGeneration = "95", "95"
+				mutate(c)
+			})
+			receipt := mustDeleteReceipt(t)(d.dispatchCommand(raw, sig))
+			if receipt.Outcome != DeleteOutcomeIdentityMismatch || receipt.Applied() {
+				t.Fatalf("receipt: %+v", receipt)
+			}
+			if !d.native.has(d.checkpoint.CheckpointID) {
+				t.Fatal("a mismatching retry removed the archive")
+			}
+			if state, _ := d.commandRow(t, d.command.EffectID); state != "unknown" {
+				t.Fatalf("the earlier claim was settled by a mismatching retry: %q", state)
+			}
+		})
+	}
 	t.Run("a settled earlier claim answers absent without touching the disk", func(t *testing.T) {
 		d := newDeleteCheckpointFixture(t)
 		mustDeleteReceipt(t)(d.dispatch())
