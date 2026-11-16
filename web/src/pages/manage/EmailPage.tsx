@@ -75,7 +75,7 @@ export default function EmailPage() {
         <Alert type="info" showIcon title={t('email.testSaved')} style={{ marginBottom: 16 }} />
         <Space wrap>
           <Input aria-label={t('email.testTo')} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder={t('email.testTo')} style={{ width: 260, maxWidth: '100%' }} />
-          <Button loading={testing} disabled={dirty || saving || !v.enabled || !testTo.trim()} onClick={sendTest}>{t('email.test')}</Button>
+          <Button loading={testing} disabled={dirty || saving || !v.enabled} onClick={sendTest}>{t('email.test')}</Button>
         </Space>
       </SettingsPanel>
     </SettingsWorkspace>

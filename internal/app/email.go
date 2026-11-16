@@ -133,7 +133,7 @@ func (s *Server) apiEmailTest(w http.ResponseWriter, r *http.Request, user strin
 		}
 	}
 	if to == "" {
-		jsonError(w, http.StatusBadRequest, "no recipient")
+		jsonErrorCode(w, http.StatusBadRequest, "no_recipient", "no recipient")
 		return
 	}
 	release, ok := s.notificationTestSlot()

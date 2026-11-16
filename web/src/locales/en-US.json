@@ -50,6 +50,7 @@
   "ou.targetsInherit": "Inherit the parent's workflow list",
   "ou.targetsOverride": "Set workflows here (empty means allow none)",
   "ou.targetsEffective": "Effective workflows: {{count}}",
+  "err.no_recipient": "Your account has no email address. Enter a recipient to send the test email.",
   "err.ou_name_required": "Enter an organizational unit name.",
   "err.ou_invalid_parent": "Choose an existing parent outside this unit's subtree.",
   "err.ou_duplicate_name": "An organizational unit already uses that name.",
