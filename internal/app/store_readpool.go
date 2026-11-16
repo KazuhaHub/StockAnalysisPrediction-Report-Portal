@@ -183,12 +183,14 @@ func (s *Store) beginReadPool(ctx context.Context, opts *sql.TxOptions) (*sql.Tx
 // such row", runs it again on the writer. The settings and account reads that decide whether a request
 // is allowed, a queue is paused or a feature is on are written to treat an error as "use the default" or
 // "not found"; a read-pool failure (a connection that cannot open, a pool closed under it) must not turn
-// into that. do receives the Scan of the row and returns its error. The first failure is logged once.
+// into that. do receives the Scan of the row and returns its error. The first failure is logged once and every
+// one is counted (StorePoolState.ReadFallbacks), so a pool that keeps failing is visible.
 func (s *Store) readScan(q string, args []any, do func(scan func(dest ...any) error) error) error {
 	err := do(s.readQueryRow(q, args...).Scan)
 	if err == nil || errors.Is(err, sql.ErrNoRows) || s.rp.Load() == nil {
 		return err
 	}
+	s.readFallbacks.Add(1)
 	s.readFallbackOnce.Do(func() {
 		log.Printf("sqlite read pool: a read failed (%v); retrying on the writer connection (logged once)", err)
 	})
@@ -300,7 +302,15 @@ func (s *Store) openReadPool(source string) {
 		s.disableReadPool("the filesystem of " + file + " could not be identified (" + err.Error() + ")")
 		return
 	case unsafeFS:
-		s.disableReadPool("the database is on a " + fsName + " filesystem, which cannot run WAL safely")
+		reason := "the database is on a " + fsName + " filesystem, which cannot run WAL safely"
+		if strings.Contains(source, "journal_mode") {
+			// The operator pinned a journal mode in the source: theirs to keep, whatever the filesystem.
+		} else if reverted, err := s.leaveWAL(); err != nil {
+			reason += "; its journal mode could not be switched back from WAL (" + err.Error() + ")"
+		} else if reverted {
+			reason += "; it was in WAL from an earlier build and its journal mode was switched back to DELETE"
+		}
+		s.disableReadPool(reason)
 		return
 	}
 	s.walPath = file + "-wal"
@@ -331,6 +341,28 @@ func (s *Store) openReadPool(source string) {
 	s.rp.Store(&readPool{db: rdb, stmts: newStmtCache(s.driver, rdb)})
 	s.setReadPoolStatus(readPoolOpen, "")
 	s.startWALMaintenance()
+}
+
+// leaveWAL switches a file that an earlier build put in WAL back to the rollback journal, on the writer
+// connection. The mode is persistent in the file, so without this an unsafe filesystem would keep running
+// WAL. It reports whether it changed anything. The switch needs no other connection on the file, which is
+// the case at startup, and checkpoints the log into the database first.
+func (s *Store) leaveWAL() (bool, error) {
+	var mode string
+	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return false, nil
+	}
+	if err := s.db.QueryRow("PRAGMA journal_mode=DELETE").Scan(&mode); err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(mode, "delete") {
+		return false, errors.New("the journal mode is still " + mode)
+	}
+	log.Printf("sqlite journal mode switched from WAL back to DELETE: the filesystem cannot run WAL safely")
+	return true, nil
 }
 
 func errString(err error) string {
@@ -461,6 +493,9 @@ type StorePoolState struct {
 	Writer     PoolConnections  `json:"writer"`
 	Reader     *PoolConnections `json:"reader,omitempty"`
 	WALBytes   int64            `json:"wal_bytes"`
+	// ReadFallbacks counts reads the read pool failed and the writer answered instead. It should stay at
+	// zero: a number that grows is a read pool that is failing while the Portal keeps answering.
+	ReadFallbacks int64 `json:"read_fallbacks"`
 }
 
 // PoolState reports the pools. It reads counters only and takes no connection.
@@ -472,7 +507,7 @@ func (s *Store) PoolState() StorePoolState {
 		state = readPoolNotApplicable
 	}
 	out := StorePoolState{Driver: s.driver, ReadPool: state, Reason: reason, Filesystem: s.fsName,
-		Writer: poolConnections(s.db), WALBytes: s.WALBytes()}
+		Writer: poolConnections(s.db), WALBytes: s.WALBytes(), ReadFallbacks: s.readFallbacks.Load()}
 	if rp := s.rp.Load(); rp != nil {
 		r := poolConnections(rp.db)
 		out.Reader = &r

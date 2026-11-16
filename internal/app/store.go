@@ -98,7 +98,8 @@ type Store struct {
 	walStop, walDone chan struct{}
 	walErrOnce       sync.Once
 	readFallbackOnce sync.Once
-	ticketMu         sync.Mutex // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
+	readFallbacks    atomic.Int64 // reads the read pool failed and the writer answered; see readScan
+	ticketMu         sync.Mutex   // serializes SpendTicket's read-refill-decrement so a concurrent double-spend can't over-draw a user's urgent quota (ADR 0005)
 	// onSettingRead is a test-only observer of GetSetting. It is nil in production; a test sets it to
 	// assert that a code path does NOT read a setting it must not (e.g. the benchmark evaluator must
 	// never fall back to forecast_bench for a set whose frozen code is empty).

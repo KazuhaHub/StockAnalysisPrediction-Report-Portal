@@ -13,8 +13,9 @@ type fsKind struct {
 }
 
 // linuxFilesystems maps statfs f_type magic numbers (linux/magic.h) to what the read pool needs to know.
-// A type that is not listed is treated as local: the list names what is known to fail, and the detection
-// error path, not this table, is the fail-safe.
+// A type that is not listed is treated as LOCAL, so it gets WAL and the read pool: the table names what is
+// known to fail and is not exhaustive. The only fail-safe is the error path (a statfs error, or a platform
+// with no implementation), which disables WAL and the pool.
 var linuxFilesystems = map[uint32]fsKind{
 	0x6969:     {"nfs", true},
 	0x517B:     {"smb", true},
@@ -25,7 +26,13 @@ var linuxFilesystems = map[uint32]fsKind{
 	0x01021997: {"9p", true}, // Docker Desktop and WSL host mounts
 	0x5346414F: {"afs", true},
 	0x00C36400: {"ceph", true},
-	0x19800202: {"ceph-fuse", true},
+	// Cluster and parallel filesystems: shared memory and locking are not coherent across nodes the way WAL needs.
+	0x0BD00BD0: {"lustre", true},
+	0x47504653: {"gpfs", true},
+	0x7461636F: {"ocfs2", true},
+	0x01161970: {"gfs2", true},
+	0x19830326: {"beegfs", true},
+	0x20030528: {"orangefs", true},
 	0x786F4256: {"vboxsf", true},
 	0x6B414653: {"afs-kafs", true},
 	0x73757245: {"coda", true},

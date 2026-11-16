@@ -719,12 +719,12 @@ def database_kind(database):
     return "sqlite" if str(database or "").startswith("sqlite") else "postgres"
 
 
-def probe_directory(database, postgres_data_dir):
+def probe_directory(database, postgres_data_dir, fixture=None):
     """Where the fsync probe is taken: the device that holds the database the Portal actually uses. A PostgreSQL run probes the parent of the
-    server's data directory (None when it cannot be found). A SQLite run probes /tmp, the parent of the directory the soak puts the SQLite
-    file in, whatever PostgreSQL service the host also runs."""
+    server's data directory (None when it cannot be found). A SQLite run probes the fixture directory the soak creates for the measured
+    Portal, which is where its SQLite file lives (None until that directory exists), whatever PostgreSQL service the host also runs."""
     if database_kind(database) == "sqlite":
-        return "/tmp"
+        return str(fixture) if fixture else None
     return str(Path(postgres_data_dir).parent) if postgres_data_dir else None
 
 
@@ -1576,6 +1576,13 @@ def main(argv):
         control.mkdir(mode=0o700)
         fixture = root / "portal-fixture"
         fixture.mkdir(mode=0o755)
+        # A SQLite run's probe is taken on the fixture's own directory, the device that holds the SQLite file, as soon as it exists.
+        sqlite_probe_dir = probe_directory(database, postgres_data_dir, fixture) if database_kind(database) == "sqlite" else None
+        if sqlite_probe_dir:
+            disk_probe = dict(fsync_probe(sqlite_probe_dir), directory=sqlite_probe_dir, data_directory="")
+            print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
+            if probe_trips(disk_probe):
+                return end_before_the_load(out, minutes, disk_probe, database)
         native = dict(ENV, GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted",
                       APP_DATA_NATIVE_UUID=probe.command("blkid", "-p", "-s", "UUID", "-o", "value", loop),
                       APP_DATA_NATIVE_PHASE="prepare", APP_DATA_JOURNAL_ROOT=str(journal_root),

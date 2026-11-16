@@ -601,8 +601,12 @@ func TestNetworkAndFuseFilesystemsAreUnsafeForWAL(t *testing.T) {
 	}{
 		0x6969: {"nfs", true}, 0x517B: {"smb", true}, 0xFF534D42: {"cifs", true}, 0xFE534D42: {"smb2", true},
 		0x65735546: {"fuse", true}, 0x01021997: {"9p", true},
+		// Cluster and parallel filesystems: coherent shared memory across nodes is not something WAL can rely on.
+		0x0BD00BD0: {"lustre", true}, 0x47504653: {"gpfs", true}, 0x7461636F: {"ocfs2", true}, 0x01161970: {"gfs2", true},
+		0x19830326: {"beegfs", true}, 0x20030528: {"orangefs", true},
 		0xEF53: {"ext4", false}, 0x58465342: {"xfs", false}, 0x01021994: {"tmpfs", false}, 0x794C7630: {"overlayfs", false},
 		0x12345678: {"unlisted", false},
+		0x19800202: {"unlisted", false}, // MQUEUE_MAGIC: not a database filesystem, and never was ceph-fuse
 	} {
 		name, unsafe := classifyLinuxFilesystem(magic)
 		if name != want.name || unsafe != want.unsafe {
@@ -884,5 +888,105 @@ func TestStorageUsageEndpointReportsThePoolState(t *testing.T) {
 	}
 	if body.Database.ReadPool != readPoolOpen || body.Database.Reader == nil {
 		t.Fatalf("database = %+v", body.Database)
+	}
+}
+
+// ---------- reverting a WAL file on an unsafe filesystem ----------
+
+func journalModeOf(t *testing.T, path string) string {
+	t.Helper()
+	db, err := sql.Open(portalSQLiteDriver, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		t.Fatal(err)
+	}
+	return strings.ToLower(mode)
+}
+
+func TestAFileAlreadyInWALIsSwitchedBackOnAnUnsafeFilesystem(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "portal.db")
+	first, err := OpenStore("sqlite", path) // an earlier build: local filesystem, so WAL
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SetSetting("keep", "me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := journalModeOf(t, path); got != "wal" {
+		t.Fatalf("setup: journal_mode = %q, want wal", got)
+	}
+	withFilesystemCheck(t, func(string) (string, bool, error) { return "nfs", true, nil })
+	st, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.readPoolOrNil() != nil {
+		t.Fatal("a read pool on an unsafe filesystem")
+	}
+	var mode string
+	if err := st.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || strings.ToLower(mode) != "delete" {
+		t.Fatalf("journal_mode on the writer = %q (%v), want delete", mode, err)
+	}
+	if reason := st.PoolState().Reason; !strings.Contains(reason, "nfs") || !strings.Contains(reason, "journal mode") {
+		t.Errorf("the reason should say the WAL was switched back: %q", reason)
+	}
+	if got := st.GetSetting("keep", ""); got != "me" {
+		t.Fatalf("data lost across the switch back: %q", got)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := journalModeOf(t, path); got != "delete" {
+		t.Fatalf("the file is still %q after the store closed", got)
+	}
+}
+
+func TestAFileNotInWALIsLeftAloneOnAnUnsafeFilesystem(t *testing.T) {
+	withFilesystemCheck(t, func(string) (string, bool, error) { return "nfs", true, nil })
+	path := filepath.Join(t.TempDir(), "portal.db")
+	st, err := OpenStore("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if strings.Contains(st.PoolState().Reason, "switched back") {
+		t.Errorf("nothing was switched: %q", st.PoolState().Reason)
+	}
+}
+
+// ---------- fallback counter ----------
+
+func TestReadPoolFallbacksAreCountedAndReported(t *testing.T) {
+	st := openFileStore(t)
+	if got := st.PoolState().ReadFallbacks; got != 0 {
+		t.Fatalf("fresh store: %d fallbacks", got)
+	}
+	if err := st.SetSetting("k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	// A row that is simply absent is an answer, not a failure.
+	_ = st.GetSetting("absent", "")
+	if got := st.PoolState().ReadFallbacks; got != 0 {
+		t.Fatalf("an absent row counted as a fallback: %d", got)
+	}
+	readDBOf(st).Close() // the pool keeps failing
+	for i := 0; i < 3; i++ {
+		if got := st.GetSetting("k", ""); got != "v" {
+			t.Fatalf("fallback read = %q", got)
+		}
+	}
+	if got := st.PoolState().ReadFallbacks; got != 3 {
+		t.Fatalf("ReadFallbacks = %d, want 3", got)
+	}
+	raw, _ := json.Marshal(st.PoolState())
+	if !strings.Contains(string(raw), `"read_fallbacks":3`) {
+		t.Fatalf("not in the JSON the storage page and the soak windows carry: %s", raw)
 	}
 }

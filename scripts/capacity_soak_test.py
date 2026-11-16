@@ -1504,12 +1504,21 @@ class DiskPrecheckTests(unittest.TestCase):
         self.assertEqual(pg["result"], "inconclusive_slow_disk")
         self.assertFalse(pg.get("diagnostic", False))
 
-    def test_the_fsync_probe_is_taken_on_the_device_of_the_database_the_portal_uses(self):
-        self.assertEqual(soak.probe_directory("sqlite", "/var/lib/postgresql/16/main"), "/tmp")
-        self.assertEqual(soak.probe_directory("sqlite-file", ""), "/tmp")
-        self.assertEqual(soak.probe_directory("postgres", "/var/lib/postgresql/16/main"), "/var/lib/postgresql/16")
+    def test_the_fsync_probe_is_taken_where_the_database_the_portal_uses_lives(self):
+        # SQLite: the fixture's own directory, whatever it is, and nothing before it exists.
+        self.assertEqual(soak.probe_directory("sqlite", "/var/lib/postgresql/16/main", "/run/x/portal-fixture"), "/run/x/portal-fixture")
+        self.assertEqual(soak.probe_directory("sqlite-file", "", "/mnt/y/portal-fixture"), "/mnt/y/portal-fixture")
+        self.assertIsNone(soak.probe_directory("sqlite", "/var/lib/postgresql/16/main"))
+        self.assertNotIn("/tmp", [soak.probe_directory("sqlite", "", "/data/fixture")])
+        # PostgreSQL: the parent of the server's data directory; the fixture is irrelevant.
+        self.assertEqual(soak.probe_directory("postgres", "/var/lib/postgresql/16/main", "/run/x/portal-fixture"), "/var/lib/postgresql/16")
         self.assertEqual(soak.probe_directory("", "/var/lib/postgresql/16/main"), "/var/lib/postgresql/16")
         self.assertIsNone(soak.probe_directory("postgres", ""))
+
+    def test_the_runner_probes_the_fixture_it_creates_not_a_hard_coded_directory(self):
+        source = SOURCE.read_text()
+        self.assertNotIn('return "/tmp"', source)
+        self.assertIn("probe_directory(database, postgres_data_dir, fixture)", source)
 
     def test_a_tripped_precheck_ends_the_run_as_inconclusive_never_evidence_neither_passed_nor_failed(self):
         samples = load_samples(120) + [wal_sample(30_000, 3.0)]

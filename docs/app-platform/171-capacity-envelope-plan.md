@@ -939,11 +939,13 @@ time, and every page read queued behind them.
 - **Filesystem detection, with a fail-safe.** The answer to `PRAGMA journal_mode=WAL` proves nothing about the filesystem: the Unix VFS always
   has shared memory, so the pragma answers `wal` on NFS, SMB and Docker Desktop mounts too, and the failures (locking that does not work, a
   shared index that is not shared) surface later, inside requests. The filesystem is therefore asked first, by type (`statfs` `f_type` on
-  Linux: NFS, SMB, CIFS, FUSE (virtiofs, gRPC FUSE, sshfs), 9p, AFS, Ceph, vboxsf and similar; `f_fstypename` on macOS), before the file is
-  switched. A network or FUSE filesystem keeps the file in its previous mode and every read on the one connection, and the store logs why.
+  Linux: NFS, SMB, CIFS, FUSE (virtiofs, gRPC FUSE, sshfs), 9p, AFS, Ceph, vboxsf, and the cluster and parallel filesystems Lustre, GPFS, OCFS2, GFS2, BeeGFS and OrangeFS; `f_fstypename` on macOS), before the file is
+  switched. A network, FUSE or cluster filesystem keeps every read on the one connection and the store logs why; a file that an earlier build already put in WAL is switched back to `DELETE` on the writer at startup (and logged), because the mode is persistent in the file and the filesystem cannot run it, unless the operator pinned a journal mode in the source.
   **If the filesystem cannot be identified (a `statfs` error, or an OS without an implementation, which today is every platform other than
-  Linux and macOS) there is no WAL and no pool.** A type that is not in the table is treated as local: the table lists what is known to
-  fail. The result is recorded and reported (`PoolState`: `open`, `disabled` with the reason, `not_applicable`, `closed`).
+  Linux and macOS) there is no WAL and no pool.** A type that is not in the table is treated as LOCAL and gets WAL and the pool: the table lists what is known to
+  fail and is not exhaustive; only the error path is a fail-safe. The result is recorded and reported (`PoolState`: `open`, `disabled` with the reason, `not_applicable`, `closed`).
+- **A failing pool is visible.** Every read the pool failed and the writer answered is counted (`StorePoolState.ReadFallbacks`, `read_fallbacks`),
+  on the storage usage endpoint and in every soak window; it should stay at zero.
 - **The pool never turns a failure into a default.** `GetSetting`, `GetUser` and the two session reads treat an error as "unset", "not
   found" or "invalid". A read-pool error other than "no such row" is retried on the writer (`readScan`) and logged once, so a broken pool
   cannot make `notification_dispatch_paused` or a switch like it read as its default, or an existing account look missing. The pool pointer is
@@ -1011,7 +1013,7 @@ and memory budgets, no crash, the runner journal grew 0 bytes), and the job stil
 with `inconclusive_slow_disk` because it read **PostgreSQL's** idle WAL sync mean (7.7 ms against its 2 ms bound) in a run whose Portal does
 not use PostgreSQL (its fsync probe, taken on the PostgreSQL data device, was normal: median 0.22 ms). That was a harness defect, fixed in the
 same pull request: the precheck now judges the disk the Portal uses. A PostgreSQL run keeps the rule (idle WAL sync and the fsync probe); a
-SQLite run is judged on the fsync probe of the device that holds the SQLite file (`/tmp`, the parent of the soak's fixture directory) only, and
+SQLite run is judged on the fsync probe of the device that holds the SQLite file (the fixture directory the soak creates for the measured Portal, probed once it exists) only, and
 PostgreSQL's idle WAL sync is recorded as a diagnostic (`precheck.signals.idle_wal_sync_ms`, `idle_wal_sync_judged: false`) and never trips it
 (`DiskPrecheckTests`, with the 7.7 ms reading of this run as a SQLite case that must not trip and as a PostgreSQL case that must). A SQLite
 verdict carries `diagnostic: true`, its step summary is headed "DIAGNOSTIC: SQLite" and says it is never OPS-08 evidence, and the evidence
