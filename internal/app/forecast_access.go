@@ -41,7 +41,7 @@ func (s *Server) loadForecastSubjectSnapshot(user string, afterAccountRead func(
 	if s.st.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
 	}
-	tx, err := s.st.db.BeginTx(context.Background(), opts)
+	tx, err := s.st.beginRead(context.Background(), opts)
 	if err != nil {
 		return forecastSubject{}, ouIndex{}, err
 	}

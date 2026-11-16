@@ -196,6 +196,10 @@ type soakWindow struct {
 	// Backends is what each soak backend reports about its own loads, read through a signed request after
 	// the window's samples: the proof that the floods really ran inside the containers.
 	Backends []soakBackendStatus `json:"backends,omitempty"`
+	// Database is how the Portal's database was being served at the end of the window: the SQLite read pool's
+	// state, both pools' connection counts and the write-ahead log's size in bytes. The series of
+	// Database.WALBytes over the windows is the WAL size over the run.
+	Database *StorePoolState `json:"database,omitempty"`
 }
 
 // soakLoaded holds the pooled summary of each latency series over the whole loaded period.

@@ -1458,7 +1458,67 @@ class DiskPrecheckTests(unittest.TestCase):
         # A signal that was not measured cannot trip: the other one still can.
         self.assertFalse(soak.disk_precheck(None, None)["tripped"])
         self.assertTrue(soak.disk_precheck(None, dict(FAST_PROBE, p50_ms=3.0))["tripped"])
-        self.assertEqual(ok["signals"], {"idle_wal_sync_ms": 0.06, "probe": FAST_PROBE})
+        self.assertEqual(ok["signals"], {"idle_wal_sync_ms": 0.06, "idle_wal_sync_judged": True, "probe": FAST_PROBE})
+
+    def test_a_slow_postgres_wal_does_not_trip_a_sqlite_run_but_is_recorded(self):
+        # Run 43764872093 (SQLite): PostgreSQL's idle WAL sync averaged 7.7 ms, on a database the Portal did not use.
+        sqlite = soak.disk_precheck(7.7, FAST_PROBE, "sqlite")
+        self.assertFalse(sqlite["tripped"])
+        self.assertEqual(sqlite["reasons"], [])
+        self.assertEqual(sqlite["signals"]["idle_wal_sync_ms"], 7.7)
+        self.assertFalse(sqlite["signals"]["idle_wal_sync_judged"])
+        self.assertEqual(sqlite["database"], "sqlite")
+        # PostgreSQL runs keep the rule, with the driver named or left to the default.
+        for postgres in (soak.disk_precheck(7.7, FAST_PROBE, "postgres"), soak.disk_precheck(7.7, FAST_PROBE)):
+            self.assertTrue(postgres["tripped"])
+            self.assertTrue(any("WAL sync" in r for r in postgres["reasons"]))
+            self.assertTrue(postgres["signals"]["idle_wal_sync_judged"])
+            self.assertEqual(postgres["database"], "postgres")
+
+    def test_a_sqlite_run_is_still_judged_on_the_fsync_probe_of_the_device_holding_its_file(self):
+        slow = soak.disk_precheck(0.06, dict(FAST_PROBE, p50_ms=1.5), "sqlite")
+        self.assertTrue(slow["tripped"])
+        self.assertTrue(any("fsync probe" in r for r in slow["reasons"]))
+        self.assertFalse(any("WAL sync" in r for r in slow["reasons"]))
+        self.assertFalse(soak.disk_precheck(None, dict(FAST_PROBE, p50_ms=1.0), "sqlite")["tripped"])
+
+    def test_the_verdict_of_a_sqlite_run_ignores_a_slow_postgres_wal_and_says_it_is_diagnostic(self):
+        evidence = child_evidence(windows=120)
+        evidence["db_driver"] = "sqlite"
+        evidence["idle_windows"] = [{"minute": 0, "started_ms": 0, "ended_ms": 180_000}]
+        samples = load_samples(120) + [wal_sample(30_000, 7.7)]
+        verdict = soak.evaluate(evidence, samples, disk_probe=FAST_PROBE, database="sqlite-file", event="workflow_dispatch", **GOOD)
+        self.assertEqual(verdict["result"], "passed")
+        self.assertTrue(verdict["passed"])
+        self.assertFalse(verdict["precheck"]["tripped"])
+        self.assertEqual(verdict["precheck"]["signals"]["idle_wal_sync_ms"], 7.7)
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertTrue(verdict["diagnostic"])
+        self.assertTrue(any("not postgres" in b for b in verdict["evidence_blockers"]))
+        text = soak.render_summary(evidence, verdict)
+        self.assertIn("DIAGNOSTIC", text.splitlines()[0])
+        self.assertIn("never OPS-08 evidence", text)
+        # The same readings on a PostgreSQL run still end it as inconclusive.
+        evidence["db_driver"] = "postgres"
+        pg = soak.evaluate(evidence, samples, disk_probe=FAST_PROBE, event="workflow_dispatch", **GOOD)
+        self.assertEqual(pg["result"], "inconclusive_slow_disk")
+        self.assertFalse(pg.get("diagnostic", False))
+
+    def test_the_fsync_probe_is_taken_where_the_database_the_portal_uses_lives(self):
+        # SQLite: the fixture's own directory, whatever it is, and nothing before it exists.
+        self.assertEqual(soak.probe_directory("sqlite", "/var/lib/postgresql/16/main", "/run/x/portal-fixture"), "/run/x/portal-fixture")
+        self.assertEqual(soak.probe_directory("sqlite-file", "", "/mnt/y/portal-fixture"), "/mnt/y/portal-fixture")
+        self.assertIsNone(soak.probe_directory("sqlite", "/var/lib/postgresql/16/main"))
+        self.assertNotIn("/tmp", [soak.probe_directory("sqlite", "", "/data/fixture")])
+        # PostgreSQL: the parent of the server's data directory; the fixture is irrelevant.
+        self.assertEqual(soak.probe_directory("postgres", "/var/lib/postgresql/16/main", "/run/x/portal-fixture"), "/var/lib/postgresql/16")
+        self.assertEqual(soak.probe_directory("", "/var/lib/postgresql/16/main"), "/var/lib/postgresql/16")
+        self.assertIsNone(soak.probe_directory("postgres", ""))
+
+    def test_the_runner_probes_the_fixture_it_creates_not_a_hard_coded_directory(self):
+        source = SOURCE.read_text()
+        self.assertNotIn('return "/tmp"', source)
+        self.assertIn("probe_directory(database, postgres_data_dir, fixture)", source)
 
     def test_a_tripped_precheck_ends_the_run_as_inconclusive_never_evidence_neither_passed_nor_failed(self):
         samples = load_samples(120) + [wal_sample(30_000, 3.0)]

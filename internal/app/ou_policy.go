@@ -148,7 +148,7 @@ func (s *Store) loadOUPolicySubject(username string) (ouSubject, ouPolicySnapsho
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
 	}
-	tx, err := s.db.BeginTx(context.Background(), opts)
+	tx, err := s.beginRead(context.Background(), opts)
 	if err != nil {
 		return ouSubject{}, ouPolicySnapshot{}, err
 	}

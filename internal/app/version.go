@@ -116,7 +116,7 @@ func isManualVersion(name string) bool { return normalizeVersion(name) == manual
 func (s *Store) DefaultVersion() string { return defaultVersionName }
 
 // Versions lists the registry in display order.
-func (s *Store) Versions() []ReportVersion { return s.versionsFrom(s.poolExec()) }
+func (s *Store) Versions() []ReportVersion { return s.versionsFrom(s.readExec()) }
 
 // versionsFrom is Versions on a given executor, so a caller can run it inside a read transaction.
 func (s *Store) versionsFrom(e migExec) []ReportVersion {

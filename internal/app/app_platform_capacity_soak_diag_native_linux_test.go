@@ -55,6 +55,9 @@ type soakDiagnosisDB struct {
 	// MeanOccupancy is the average share of the pool's connections in use (the pool is 10 on PostgreSQL, 1 on SQLite).
 	MeanOccupancy float64 `json:"mean_occupancy"`
 	Samples       int     `json:"samples"`
+	// Pool is the store's own account of how it is served at the end of the minute: the read pool's state and
+	// both pools' connection statistics (MaxOpenConnections above is the writer pool only) and the WAL size.
+	Pool StorePoolState `json:"pool"`
 }
 
 type soakDiagnosisGC struct {
@@ -202,6 +205,7 @@ func (c *soakChild) diagnose(label string, duration time.Duration) {
 			MaxOpenConnections: statsAfter.MaxOpenConnections, WaitCount: statsAfter.WaitCount - statsBefore.WaitCount,
 			WaitMillis:     float64(statsAfter.WaitDuration-statsBefore.WaitDuration) / float64(time.Millisecond),
 			SaturatedShare: soakUtilization(inUse, statsAfter.MaxOpenConnections), MeanOccupancy: soakMeanOccupancy(inUse, statsAfter.MaxOpenConnections), Samples: len(inUse),
+			Pool: c.s.st.PoolState(),
 		},
 		Runtime: soakDiagnosisGC{
 			GCCycles: memAfter.NumGC - memBefore.NumGC, GCPauseTotalMs: float64(memAfter.PauseTotalNs-memBefore.PauseTotalNs) / 1e6,

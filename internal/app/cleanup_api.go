@@ -209,6 +209,9 @@ func (s *Server) apiCleanupUsage(w http.ResponseWriter, r *http.Request, user st
 	}
 	writeJSON(w, map[string]any{
 		"db_bytes": s.st.DBSizeBytes(),
+		// How the database is being served: the SQLite read pool's state (and why it is off), both pools'
+		// connection counts and the write-ahead log's size.
+		"database": s.st.PoolState(),
 		"categories": []map[string]any{
 			cat("batch",
 				s.st.usageCount("batch_jobs"),

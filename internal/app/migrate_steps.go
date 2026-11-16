@@ -54,6 +54,19 @@ type execer interface {
 type migExec struct {
 	s  *Store
 	ex execer
+	// rp is set for an executor that belongs to the SQLite read pool (the pool itself or a transaction
+	// begun on it), so its statements use that pool's statement cache: a statement is bound to the pool
+	// it was prepared on and cannot be used on another. It is the pool the executor was made from, not
+	// whatever pool is current when a statement runs.
+	rp *readPool
+}
+
+// pool is the pool whose statement cache this executor uses.
+func (e migExec) pool() poolRef {
+	if e.rp != nil {
+		return poolRef{db: e.rp.db, stmts: e.rp.stmts}
+	}
+	return e.s.writerPool()
 }
 
 func (s *Store) poolExec() migExec { return migExec{s: s, ex: s.db} }
@@ -64,15 +77,15 @@ func (e migExec) exec(q string, args ...any) (sql.Result, error) {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.execBound(context.Background(), q, args...)
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().execBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.execBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txExecContext(context.Background(), x, q, args...)
+		return e.pool().txExecContext(context.Background(), x, q, args...)
 	}
 	return e.ex.Exec(q, args...)
 }
@@ -81,15 +94,15 @@ func (e migExec) queryRow(q string, args ...any) *sql.Row {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.queryRowBound(context.Background(), q, args...)
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().queryRowBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.queryRowBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txQueryRowContext(context.Background(), x, q, args...)
+		return e.pool().txQueryRowContext(context.Background(), x, q, args...)
 	}
 	return e.ex.QueryRow(q, args...)
 }
@@ -98,15 +111,15 @@ func (e migExec) query(q string, args ...any) (*sql.Rows, error) {
 	q = e.s.bind(q)
 	switch x := e.ex.(type) {
 	case *sql.DB:
-		if x == e.s.db {
-			return e.s.queryBound(context.Background(), q, args...)
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().queryBound(context.Background(), q, args...)
 		}
 	case platformContextPool:
 		if x.DB == e.s.db {
 			return e.s.queryBound(x.ctx, q, args...)
 		}
 	case *sql.Tx:
-		return e.s.txQueryContext(context.Background(), x, q, args...)
+		return e.pool().txQueryContext(context.Background(), x, q, args...)
 	}
 	return e.ex.Query(q, args...)
 }

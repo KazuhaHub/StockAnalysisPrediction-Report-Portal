@@ -991,6 +991,161 @@ held, and a request that passes the pre-check and loses the acquire gets the sam
 against a full budget, 2000 small reads): small-read p95 263 to 776 microseconds with authentication first, 76 to 98
 microseconds with admission first (p50 37 to 83, against 33 to 42).
 
+## Resolution (SQLite read pool)
+
+This is the follow-up that resolution 73 recorded and the follow-up list below blocked the integration merge on: a read pool for the
+file-backed SQLite Portal. It changes no schema.
+
+**Cause (from resolution 73).** SQLite ran on one connection. The backend relay's two admitted requests held it about a third of the
+time, and every page read queued behind them.
+
+**Decision.**
+
+- **WAL and a second pool.** A file-backed SQLite store switches its file to WAL once, after initialization (`openReadPool`, called by
+  `OpenStore` and not by `connectStore`, so the schema inspection that only looks at a database does not change it), and opens a pool of
+  four read-only connections (`sqliteReadPoolSize`, a constant: `config.yaml` carries infrastructure only) on the same file beside the
+  single writer connection. Each reader is opened `mode=ro` with `query_only(1)` and the same busy timeout as the writer (the cherry-pick of
+  #431 in this branch; the connection hook that enforces foreign keys applies to every connection of the driver). In WAL a reader never
+  blocks the writer and the writer never blocks a reader.
+- **Read-your-writes.** A write that has returned (autocommit, or `Commit`) is visible to every read that begins afterwards, on any
+  connection, so a client that saves and then reloads sees what it saved. A reader does not see a write that is still uncommitted, which is
+  the isolation a snapshot read already had on PostgreSQL. This is stated at the top of `store_readpool.go`.
+- **Explicit routing, not a heuristic.** The call sites that are standalone read-only queries use `Store.readQuery`, `readQueryRow` (and
+  their context forms), `readExec` (the pool as a `migExec`, for the readers written once over a snapshot and a standalone call) and
+  `beginRead` (a read transaction). Everything else (every write, every transaction that writes, every read-modify-write, the schema work,
+  and every read inside a transaction that must see that transaction's writes) is unchanged on the writer. The alternative, inspecting the
+  SQL text and sending `SELECT` to the pool, was rejected: `SELECT` is not the same as "may run on a snapshot" (a read that follows a write
+  of its own transaction, a read whose caller holds a lock for it, `RETURNING`, a `SELECT` of a function with a side effect), and a
+  heuristic fails silently on exactly those. A read that is not named here simply stays where it was; the cost of forgetting one is latency,
+  never a wrong answer.
+- **No-op elsewhere.** On PostgreSQL there is no second pool, no WAL and no second statement cache: `readDB` is `db`, the read accessors are
+  the one pool, and `openReadPool` returns at its first line. The same holds for an in-memory database (each connection would be its own
+  database) and a source that already names a `mode`. A source that names its own `journal_mode` is honoured: the pool opens only if that
+  mode is WAL.
+- **Filesystem detection, with a fail-safe.** The answer to `PRAGMA journal_mode=WAL` proves nothing about the filesystem: the Unix VFS always
+  has shared memory, so the pragma answers `wal` on NFS, SMB and Docker Desktop mounts too, and the failures (locking that does not work, a
+  shared index that is not shared) surface later, inside requests. The filesystem is therefore asked first, by type (`statfs` `f_type` on
+  Linux: NFS, SMB, CIFS, FUSE (virtiofs, gRPC FUSE, sshfs), 9p, AFS, Ceph, vboxsf, and the cluster and parallel filesystems Lustre, GPFS, OCFS2, GFS2, BeeGFS and OrangeFS; `f_fstypename` on macOS), before the file is
+  switched. A network, FUSE or cluster filesystem keeps every read on the one connection and the store logs why; a file that an earlier build already put in WAL is switched back to `DELETE` on the writer at startup (and logged), because the mode is persistent in the file and the filesystem cannot run it, unless the operator pinned a journal mode in the source.
+  **If the filesystem cannot be identified (a `statfs` error, or an OS without an implementation, which today is every platform other than
+  Linux and macOS) there is no WAL and no pool.** A type that is not in the table is treated as LOCAL and gets WAL and the pool: the table lists what is known to
+  fail and is not exhaustive; only the error path is a fail-safe. The result is recorded and reported (`PoolState`: `open`, `disabled` with the reason, `not_applicable`, `closed`).
+- **A failing pool is visible.** Every read the pool failed and the writer answered is counted (`StorePoolState.ReadFallbacks`, `read_fallbacks`),
+  on the storage usage endpoint and in every soak window; it should stay at zero.
+- **The pool never turns a failure into a default.** `GetSetting`, `GetUser` and the two session reads treat an error as "unset", "not
+  found" or "invalid". A read-pool error other than "no such row" is retried on the writer (`readScan`) and logged once, so a broken pool
+  cannot make `notification_dispatch_paused` or a switch like it read as its default, or an existing account look missing. The pool pointer is
+  atomic and `Close` swaps it out before closing it, so a read racing `Close` gets either a live pool or a closed-database error, never a
+  panic (`-race` test).
+- **The reader opens the file the writer opens.** The driver cuts a plain (non-`file:`) source at its first `?`; the read source is derived
+  with the same rule, so `portal.db?_pragma=...` opens `portal.db` for both. A busy timeout the operator already set (`_pragma`, `_timeout`
+  or `_busy_timeout`) is not overridden.
+- **Statement caches.** A prepared statement belongs to the pool it was prepared on, so the read pool carries its own cache
+  (`rstmts`, same bound) and a `migExec` carries a flag (`ro`) that picks the cache for a transaction it wraps.
+
+**Routed call sites** (the paths the soak measures and the gate every request passes):
+
+| Path | Reads now on the read pool |
+| --- | --- |
+| Every session route | the cookie's session row (`verify`), `GetUser`, the settings read (`GetSetting`: panel timezone, policy), the enrolment gate's and the viewer scope's read transactions (`loadOUPolicySubject`, `viewerScopeSnapshot`) |
+| Relay and app routes | the session and account-generation reads of `platformHTTPReader` |
+| Home | `SearchNewLatest`, `NewTypes`, `ReportKinds`, `ReportVersionsPresent`, `Versions`, `LinkGroups`, `Links`, `KindColors` |
+| Report and stock page | the read snapshot (`beginReadSnapshot`: symbol timeline, type and version registries, report body, reader's OU), `NewBySymbol`, `GetNew`, `TypeConfigs`, the forecast access read transaction and `forecastTimelineDates` |
+| Dispatch | `QueuedJobs`, `RecentJobActivity` and the settings the priority weights read |
+
+One write was removed from the request path rather than moved: `currentActiveUser` issued `UPDATE user_sessions SET last_seen ...` on every
+authenticated request, a statement that matched nothing until the stamp was due (once per five minutes) and still queued for the writer
+connection. A read now says whether the stamp is due, and the `UPDATE` keeps its own `last_seen<?` condition, so two racing requests still
+stamp once.
+
+**Tests** (`store_readpool_test.go`, written first). Reads proceed, with the committed state and not the uncommitted write, while a write
+transaction holds the writer (with a control that shows the writer pool is in fact blocked); a write is visible to the next read-pool query
+across 300 alternating values and across `Commit`; the read pool rejects writes four ways (raw pool, cached executor, snapshot, and a
+`PRAGMA query_only=0` followed by a write, which `mode=ro` still refuses); the read snapshot runs on the pool while the writer is held;
+the derivation of the read source (in-memory refused, path characters escaped, one busy timeout); a source pinned to another journal mode
+gets no pool; `Close` closes the readers first and leaves no WAL; the session check, the home reads, the stock page's reads, the report body
+and the dispatch decision complete while the writer is held; the two pages answer end to end on a file-backed store; on PostgreSQL the pool
+is absent, the accessor is the one pool and a write is read back (gated on `TEST_POSTGRES_DSN`).
+`TestReadsAreNotSerializedBehindTheWriter` holds the writer connection 10 ms of every 30 ms and compares the single connection with the pool;
+`BenchmarkSQLiteReadBehindWriter` and the new `grouped/cache/single-connection` case of `BenchmarkStockPage` report the same comparison.
+
+**What was measured** (an Apple M5 laptop, ten cores, local disk, `go test -bench`, file-backed SQLite; not the soak host, not CI, none of it
+evidence). The single-connection shape is the same code with the pool switched off (`closeReadPool`).
+
+| Benchmark | single connection | read pool |
+| --- | --- | --- |
+| `BenchmarkSQLiteReadBehindWriter`, read p95 behind a writer held a third of the time (three runs) | 12.2, 11.8, 11.8 ms | 0.15, 0.67, 0.44 ms |
+| the same, read p50 | 85 to 146 us | 51 to 109 us |
+| `BenchmarkStockPage/grouped/cache` (`GET /api/stock/{symbol}`, ten parallel readers, two paced writers, 3000 requests, three runs), p50 | 21.5, 24.3, 24.2 ms | 7.2, 6.0, 4.8 ms |
+| the same, p95 | 49.9, 51.6, 49.5 ms | 20.8, 19.0, 16.6 ms |
+
+A read that does not touch the writer no longer waits for it. The stock page still ends in the report-read audit row, which is a write on
+the writer connection, so its tail is lowered by the removed reads and not independent of the writer (see the limits).
+
+**Diagnostic soak on the read pool** (run [43764872093](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43764872093),
+`workflow_dispatch` on `5f0b30a6`, `soak_db=sqlite-file`, `soak_only`, 120 minutes, every other input at its default; ext4; the reference
+host class). It is a diagnostic: a SQLite run never counts as OPS-08 evidence, and this one ended `inconclusive_slow_disk` (see below).
+Pooled p95 over the 120 loaded windows against the absolute bounds of resolution 74, microseconds:
+
+| Series | Idle p95 | Pooled loaded p95 | Bound | Samples | Within the bound |
+| --- | --- | --- | --- | --- | --- |
+| home page | 694 | 2040 | 50000 | 12000 | yes (2.0 ms) |
+| report page | 3580 | 25865 | 50000 | 12000 | yes (25.9 ms; p50 2.4 ms, worst single request 446 ms) |
+| dispatch@200 | 651 | 5975 | 25000 | 12000 | yes (6.0 ms) |
+| batch start | 108743 | 98807 | 100000 | 2400 | yes, by 1.2 ms (p50 12.9 ms, worst 482 ms) |
+
+Every check of the verdict passed (the four latency bounds, the message flood answered and typed in every window, backends at their CPU, PID
+and memory budgets, no crash, the runner journal grew 0 bytes), and the job still failed: the harness's disk precheck replaced the verdict
+with `inconclusive_slow_disk` because it read **PostgreSQL's** idle WAL sync mean (7.7 ms against its 2 ms bound) in a run whose Portal does
+not use PostgreSQL (its fsync probe, taken on the PostgreSQL data device, was normal: median 0.22 ms). That was a harness defect, fixed in the
+same pull request: the precheck now judges the disk the Portal uses. A PostgreSQL run keeps the rule (idle WAL sync and the fsync probe); a
+SQLite run is judged on the fsync probe of the device that holds the SQLite file (the fixture directory the soak creates for the measured Portal, probed once it exists) only, and
+PostgreSQL's idle WAL sync is recorded as a diagnostic (`precheck.signals.idle_wal_sync_ms`, `idle_wal_sync_judged: false`) and never trips it
+(`DiskPrecheckTests`, with the 7.7 ms reading of this run as a SQLite case that must not trip and as a PostgreSQL case that must). A SQLite
+verdict carries `diagnostic: true`, its step summary is headed "DIAGNOSTIC: SQLite" and says it is never OPS-08 evidence, and the evidence
+blockers are unchanged (`not postgres`, and the `soak_db` input). The run above was not repeated with the fix.
+
+What the run shows for the read pool (end-of-run `database` record of the last window): the pool was `open` on `ext4`; the read pool's
+four connections waited 3826 times for 0.5 s in total over the run, while the writer's single connection waited 26535 times for 170.9 s
+(the relay's own transactions and the page writes still share it, as the limits say). **The WAL stayed at 8,380,112 bytes (8.0 MiB) in every
+one of the 120 windows**: it did not grow over the run.
+
+What this does and does not say. In this one run, all four series met the owner's absolute bounds on SQLite, where resolution 73 recorded
+two to three of four failing in every run before the read pool. It is one run on one host class that the earlier runs showed can vary by
+a factor of two between hosts; the batch start series passed by 1% of its bound (its idle baseline, 108.7 ms, was above it, so that
+series is dominated by something the load does not change); the run is inconclusive by the harness's own rule and not evidence. **No claim is made that the SQLite envelope is proven.**
+
+**Not measured.** The relay flood against the pool in isolation, and PostgreSQL under load (the change is a no-op there; its test run is
+described in the pull request).
+
+**Limits.**
+
+- **One diagnostic soak, not evidence.** The run above met all four bounds, with a thin margin on batch start and an inconclusive verdict;
+  a repeat, and a run the harness accepts, are what would turn this from a measurement into a claim.
+- **Writes and every transaction stay on one connection.** The relay's admitted work (launch, backend, network and document routes read and
+  write inside write-capable transactions) and the report-read audit row, the activity stamp and the batch scheduler's writes still queue
+  for it, so a page that writes still waits for a held writer. Moving the relay's read-only transactions, or taking the audit row off the
+  response path, is a separate decision (the second changes when an audit row becomes durable) and was not made here.
+- **A file-level copy of a live database.** Every existing file-backed SQLite database is switched to WAL, permanently, on its first start
+  with this change. The Portal's own backup and the recovery bundle dump the database logically and are unaffected; a copy of `portal.db`
+  taken with `cp` while the Portal runs misses what is still in `portal.db-wal` and must include that file and `portal.db-shm`, or use
+  SQLite's backup API. The README, its Chinese edition and ADR 0027 say so beside the backup commands.
+- **An unlisted network filesystem.** Detection is by filesystem type and the table names what is known to fail. A type it does not list
+  (an exotic or newly introduced network filesystem) is treated as local and gets WAL. Windows and other platforms without an
+  implementation get no pool. The pool's state is reported, so an operator can see which case applies.
+- **WAL growth.** The writer carries `journal_size_limit` (64 MiB, a DSN pragma on every writer connection), so SQLite truncates the log to
+  that size when it restarts after a checkpoint, and a maintenance ticker on the writer (every 30 s: a passive checkpoint, which never waits
+  on a reader, then a truncating checkpoint if the log is fully copied and larger than the limit) retries what the automatic checkpoint
+  could not finish while short readers kept overlapping. Tests: the log grows past 12 MiB behind a pinned reader and is empty after one
+  maintenance pass, and is cut back to the limit when it restarts; the ticker is shown to bring it down on its own and to stop with the
+  store. A caller that held a read snapshot for long would still pin the log; the snapshots here span a handler's reads.
+  **What the soak should watch is the WAL size over time**: every one-minute window of the evidence records `database.wal_bytes` (and the
+  read pool's state and both pools' connection counts), so a log that only ever grows shows as a rising series.
+- **Two statement caches** of 256 entries each, and four more connections' page caches, are the memory cost.
+- **Where the state is reported.** The admin storage usage endpoint (`GET /api/admin/cleanup/usage`, field `database`) returns the pool
+  state, both pools' connection statistics and the WAL size; every soak window and the diagnostic minute carry the same record. The public
+  `/healthz` stays silent about detail by design and does not.
+
 ## PR 4b implementation notes
 
 PR 4b is the acceptance harness: no production code, no schema and no journal change. OPS-08 stays pending until a real 120-minute dispatch run has passed, and SEC-09 stays partial even then; the records are written so that only the run URL and the
@@ -1545,13 +1700,13 @@ is evidence for OPS-08.
     averaged 6.9%, while the CPU figures were those of the other runs (Portal CPU pressure 12.4%, host 79% to 80% busy). A noisy shared disk can therefore fail the gate on the report page and the batch start, which write or wait on commits; the
     absolute bounds leave a factor of 1.3 to 5 over the green runs, not over a disk this slow.
 
-    Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73); PostgreSQL on the
+    Measurement history of the relative gate (pooled p95 against it, five-minute runs on PostgreSQL unless noted; none evidence): SQLite file-backed, 2 to 3 of the four series failing in every run (resolution 73, before the read pool); PostgreSQL on the
     first run, all four failing (home 10.1 ms against 6.8, report 34.0 against 8.8, batch start 72.2 against 16.9); at 37% and 25% of the CPU budget, home and report still about 9 to 18 ms against 6 to 8; with the app containers'
     CPU weight (#442) 17.7 ms and 27.0 ms; with CPU 0 reserved (#443) 8.5 ms and 10.6 ms (dispatch passing for the first time); two reserved CPUs, platform pinning, platform weights 1000: no better (12 to 13 ms); with the cheaper
     relay (#445) 13.7 ms and 27.9 ms in a run with the diagnosis on. The host is two physical cores (four SMT threads): the apps burn their 2 CPUs of quota continuously and the platform shares what is left, so a relative floor of
     a few milliseconds over an idle host's 1 to 3 ms cannot hold under full declared load.
 
-    **Known limit of the SQLite Portal.** On a SQLite Portal, sustained app-backend relay traffic raises page and scheduler latency beyond the
+    **Known limit of the SQLite Portal (as measured before the read pool; see the section "Resolution (SQLite read pool)").** On a SQLite Portal, sustained app-backend relay traffic raised page and scheduler latency beyond the
     gate. The cause is the single connection: the relay's admission cap keeps two admitted requests in flight at all times, and they hold the
     one connection for about a third of the time (connection occupied 26.5% to 33.5% of 2 ms samples in the diagnostic minute against 5.6% to
     13.8% idle, 6111 to 31948 pool waits a minute). Measured this round, five-minute pull request smokes and dispatch runs, none evidence
@@ -1566,8 +1721,8 @@ is evidence for OPS-08.
     | 43590645282 (`85376438`, with #440) | 3147 / 14924 / 8147 fail | 9598 / 48249 / 14598 fail |
 
     The in-memory store (run 43568354287, `memory-db`) passed the report page and failed the batch start (4174 / 16911 / 9174). #440 removed
-    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. A SQLite read pool is a tracked follow-up, and
-    until it lands no claim is made that the SQLite envelope is proven.
+    the database work of a refused attempt (pool waits down 81%) but the admitted requests remain. The SQLite read pool has since been implemented (the
+    section "Resolution (SQLite read pool)"); one diagnostic soak met the absolute bounds (not evidence), so no claim is made that the SQLite envelope is proven.
 
 75. **Round 2 of the review of PR #433 (before the 120-minute run).**
 
@@ -1813,7 +1968,7 @@ Other results:
 
 **Follow-ups that still block the integration to main merge.**
 
-- **SQLite known limit and its read pool.** On a SQLite Portal the relay's two admitted requests keep the single connection about a third occupied and the gate is missed (resolution 73); a SQLite read pool is the tracked follow-up, and no claim is made that the SQLite envelope is proven.
+- **SQLite read pool: implemented, one diagnostic soak.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); run 43764872093 (`soak_db=sqlite-file`, 120 minutes, not evidence, verdict `inconclusive_slow_disk` for a PostgreSQL disk reading that does not apply) met all four absolute bounds, with the WAL flat at 8.0 MiB; no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
 - **Inventory overlap by device and inode** (the follow-up above), together with an absent bind source under the data root, which is to be treated as a reference to the namespace rather than as no overlap.
 - **SEC-09 partial:** exercising the task worker and event delivery coordinator under the load, and a backend-originated message or task flood.
