@@ -287,10 +287,11 @@
       "evidence_run": "43683877826"
     },
     "SEC-09": {
-      "status": "partial",
-      "after_ops08": "SEC-09 stays partial after OPS-08 passes. OPS-08 supplies the deployed memory, PID, log and storage floods, and the Portal business executor measured by the real batch scheduler's enqueue-to-start latency under the platform load. The soak now also runs the task worker, the event delivery coordinator and a backend-originated task flood (sec09_extended_soak); the nine new checks pass, but the same 120-minute run failed the four unchanged OPS-08 latency bounds",
-      "ops08_dependency": "met by run 43683877826; SEC-09 stays partial",
-      "closes_when": "a 120-minute dispatch run of the extended soak passes every check, including the four OPS-08 latency bounds; blocked on an owner decision about the session-free task route (sec09_extended_soak.finding)"
+      "status": "passed",
+      "after_ops08": "SEC-09 passed on 2026-11-16: run 43825208692, a 120-minute dispatch of the extended soak (task worker, event delivery coordinator, backend-originated task flood) at ec21c509, passed all 34 checks and counts as OPS-08 evidence; pooled loaded p95 home 33.1 ms (bound 50), report 35.2 (50), dispatch@200 16.3 (25), batch start 59.3 (100). The first extended run, 43798306468, failed those bounds; the remedy is under sec09_extended_soak.remedy.",
+      "ops08_dependency": "met by run 43683877826 and again by run 43825208692 under the extended load",
+      "closes_when": "met: run 43825208692",
+      "evidence_run": "43825208692"
     }
   },
   "not_proven_by_the_dispatch_run": [
@@ -299,10 +300,11 @@
     "a backend-originated message flood: not run by either harness"
   ],
   "sec09_extended_soak": {
-    "status": "failed",
+    "status": "passed",
     "plan": "docs/app-platform/171-capacity-envelope-plan.md, SEC-09: platform work under the soak",
     "branch": "test/app-platform-sec09-soak",
-    "commit": "df5b40147dfa8260f89246c60a4ce95644f592c7",
+    "commit": "ec21c509385ddba7ea7218640955448863daec05",
+    "evidence_run": "43825208692",
     "added_checks": [
       "task_worker_ran_in_every_window",
       "no_task_lost_or_stuck",
@@ -354,15 +356,16 @@
         "host_busy_percent_windows_2_to_120": 97.7
       },
       "43812011524": {"kind": "diagnostic, 20 minutes, no-backend-flood", "latency_p95_us": {"home": 33896, "report": 28997, "dispatch": 9651, "batch_start": 57520}, "host_busy_percent": 84.8, "evidence": false},
-      "43812014614": {"kind": "diagnostic, 20 minutes, no-task-worker", "latency_p95_us": {"home": 43831, "report": 35281, "dispatch": 10950, "batch_start": 48217}, "host_busy_percent": 89.7, "flood_requests": 86321, "evidence": false}
+      "43812014614": {"kind": "diagnostic, 20 minutes, no-task-worker", "latency_p95_us": {"home": 43831, "report": 35281, "dispatch": 10950, "batch_start": 48217}, "host_busy_percent": 89.7, "flood_requests": 86321, "evidence": false},
+      "43819454255": {"kind": "smoke, 5 minutes", "result": "inconclusive_slow_disk", "evidence": false, "note": "fsync probe median 1.37 ms"},
+      "43819687463": {"kind": "smoke, 5 minutes", "result": "inconclusive_slow_disk", "evidence": false, "note": "idle WAL sync 4.986 ms"},
+      "43821284311": {"kind": "smoke, 5 minutes, dedicated admission budget only", "result": "failed", "evidence": false, "latency_p95_us": {"home": 32373, "report": 77968, "dispatch": 13707, "batch_start": 123764}},
+      "43823927164": {"kind": "smoke, 5 minutes, budget and remembered refusal", "result": "passed", "evidence": false, "latency_p95_us": {"home": 27901, "report": 22697, "dispatch": 6483, "batch_start": 57547}},
+      "43825208692": {"kind": "dispatch, 120 minutes, the evidence run", "job_started_utc": "2026-11-16T07:38:10Z", "job_finished_utc": "2026-11-16T09:43:48Z", "elapsed_seconds": 7461, "expected_commit_matched": true, "soak_db": "postgres", "commit": "ec21c509385ddba7ea7218640955448863daec05", "disk_precheck": {"fsync_probe_p50_ms": 0.157, "fsync_probe_p95_ms": 0.218, "tripped": false}, "result": "passed", "checks_passed": "34 of 34", "counts_as_ops08_evidence": true, "evidence_blockers": [], "platform_work_checks": "9 of 9 passed", "tasks": {"admitted": 7920, "succeeded": 7920, "other_states": 0, "latency_ms": {"p95": 4589, "max": 6671}, "drain_seconds": 3}, "events": {"captured": 600, "expected_deliveries": 3600, "delivered": 3600, "max_inflight_per_subscription": 1, "inflight_bound": 16}, "quota": {"installation_quota": 256}, "backend_flood": {"requests": 598257, "answered_200": 141007, "refused_429_app_platform_busy": 34333, "refused_429_task_capacity": 422917, "other_classes": 0}, "message_flood": {"answered": 43553, "refused_429_app_platform_busy": 823398}, "latency_p95_us": {"home": {"idle": 2024, "pooled": 33116, "bound": 50000, "windows_over": 1}, "report": {"idle": 2319, "pooled": 35152, "bound": 50000, "windows_over": 0}, "dispatch": {"idle": 830, "pooled": 16328, "bound": 25000, "windows_over": 0}, "batch_start": {"idle": 9298, "pooled": 59287, "bound": 100000, "windows_over": 1}}, "host_busy_percent_mean": 88.9}
     },
     "finding": "The session-free route POST /api/app-platform/installations/{installation}/tasks/background has no admission budget (the user-session backend-facing routes pass through platformBudgetPrecheck and refuse 429 app_platform_busy before any database work). A refused submission still verifies the service identity and takes the global task admission lock and three counts, so a flooding backend consumes the one reserved CPU shared by the Portal, PostgreSQL, the runner and Docker and the other tenants' latency exceeds the OPS-08 bounds. The quota held and every refusal was typed.",
-    "remedy_attempt": {"change": "dedicated two-slot admission budget on tasks/background (platformServiceTasks), 429 app_platform_busy before identity verification", "smoke_run": "43821284311", "inconclusive_slow_disk_attempts": ["43819454255", "43819687463"], "latency_p95_us": {"home": 32373, "report": 77968, "dispatch": 13707, "batch_start": 123764}, "nine_platform_checks_passed": true, "flood_classes_window_1": {"200": 677, "429:app_platform_busy": 949, "429:task_capacity": 2146}, "passed": false, "evidence": false, "note": "the budget bounds concurrency, not rate, so about three quarters of the flood still reached identity verification; the 120-minute run was not dispatched"},
-    "options_for_the_owner": [
-      "a concurrency budget in front of tasks/background refusing 429 app_platform_busy before the identity is verified, then rerun",
-      "set the flood intensity by decision (the soak uses two connections for each of two backends, about 45 to 70 requests a second)",
-      "more than one reserved CPU for the platform side of the reference host"
-    ],
+    "remedy": {"changes": ["a dedicated two-slot admission budget on tasks/background (platformServiceTasks): 429 app_platform_busy from a pre-check outside the per-address limit and from the handler's own acquire, before the service identity is verified (ae00061f)", "a bounded, process-local memory of credentials just refused for the installation task quota (keyed on the digest of the exact credential bytes, at most 2 s and never past the credential's expiry), answering a repeat from one live statement that re-reads authority, restore pause, occurrence existence and the installation's active task count; the database count stays the source of truth, nothing admits from it, a restart starts empty (ec21c509)"], "profile_of_one_task_capacity_refusal_ms": {"postgres": {"verify_identity": 2.27, "admission_transaction": 1.72, "lock": 0.21, "count_each": 0.1, "handler_full_path": 4.71, "handler_remembered": 0.35}, "sqlite": {"verify_identity": 0.35, "admission_transaction": 0.36, "lock": 0.001, "count_each": 0.05, "handler_full_path": 0.72, "handler_remembered": 0.07}}, "budget_alone": {"smoke_run": "43821284311", "passed": false, "note": "the budget bounds concurrency, not rate, so about three quarters of the flood still reached identity verification"}, "owner_decision": "no pre-verification token bucket keyed on an unauthenticated installation id (anyone could exhaust a real backend's bucket); make the refused path cheap instead"},
+    "options_for_the_owner": ["superseded: the owner chose to make the refused path cheap; see remedy"],
     "limits": [
       "the managed backends run with NetworkMode none, so the flood is sent by a process outside the container with the backend's own service identity",
       "the worker runs inside the measured Portal process, not as cmd/app-task-worker",

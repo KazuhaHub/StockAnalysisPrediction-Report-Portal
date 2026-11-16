@@ -2113,14 +2113,13 @@ Other results:
 
 **Remaining limits.**
 
-- SEC-09 stays partial. The soak now also runs the task worker, the event delivery coordinator and a backend-originated task flood (section "SEC-09: platform work under the soak" below), and all nine new checks passed on a healthy host, but the unchanged OPS-08 latency bounds failed under that combined load. Its OPS-08 dependency is met (run 43683877826).
+- SEC-09 passed on 2026-11-16 (section "SEC-09: platform work under the soak" below): the soak also runs the task worker, the event delivery coordinator and a backend-originated task flood, and the 120-minute run 43825208692 passed all 34 checks. This run (43683877826) is its OPS-08 dependency.
 - The per-application task quota is proven at unit level only, and the runner's own refusal of an over-declared layer is covered by the blob channel unit tests.
 - One host class, one run: the earlier two runs of the same configuration measured home at 20.1 and 37.3 ms (5 minutes), so a rerun on another host can differ; the bounds leave a factor of 1.7 to 4.6 over the worst windows and pooled values of this run.
 
 ### SEC-09: platform work under the soak
 
-Status 2026-11-16: implemented and measured; **not passed**. The nine new checks passed on every run of the full configuration (the diagnostic variants fail the check of the part they remove), but the unchanged OPS-08 latency bounds
-failed on a healthy host under the backend task flood, so SEC-09 stays partial. Nothing here changes a bound, the schema or the journal.
+Status 2026-11-16: implemented and measured; **passed** by run 43825208692 after the refused submission was made cheap (see "Remedy, and the result"). The first full-configuration run, 43798306468, passed the nine new checks but failed the unchanged OPS-08 latency bounds on a healthy host under the backend task flood; the diagnostic variants fail the check of the part they remove. No bound, the flood, the reserved CPUs, the schema or the journal changed.
 
 **What now runs.** `soakWork` (`app_platform_capacity_soak_work_native_linux_test.go`) starts three things beside the existing loads, in the measured Portal process:
 
@@ -2212,13 +2211,20 @@ cannot make it, and this work did not change the Portal.
 **Options for the owner** (none is applied): (1) add a concurrency budget in front of `tasks/background` in the style of `platformBudgetPrecheck`, so excess submissions are refused `429 app_platform_busy` before the identity is verified, and rerun; the new checks would then also need
 `429:app_platform_busy` as a typed class; (2) decide that the soak's flood is lighter than a flood the platform must carry (two connections for each of two backends, about 45 to 70 requests a second) and set the intensity by decision; or (3) give the platform side more than one reserved CPU on the reference host. Any rerun is a 120-minute dispatch of the same job.
 
-**Remedy tried: a dedicated admission budget on the task route (option 1).** `tasks/background` now has its own two-slot budget (`platformServiceTasks`): a pre-check outside the per-address limit answers
-`429 app_platform_busy` on fullness alone, and the handler takes the slot after its database-free checks and before the identity is verified. A 5-minute smoke on that commit (run 43821284311, `postgres`, 5 minutes, not evidence;
-two earlier attempts, 43819454255 and 43819687463, were `inconclusive_slow_disk`) failed two bounds: report 78.0 ms against 50 and batch start 123.8 ms against 100, while home was 32.4 ms and dispatch 13.7 ms (the 120-minute run
-measured 67.0 and 34.7). All nine platform checks passed, with the flood now classed `200` about 700, `429 app_platform_busy` about 900 and `429 task_capacity` about 2300 a window. The budget refused only a quarter of the flood
-because it bounds concurrency, not rate: a handler that finishes in a millisecond finds a free slot most of the time, so most submissions still verify the identity, take the admission lock and count. The earlier 5-minute smoke of the
-unbudgeted harness (43783839436) passed with report 42.3 ms, so a 5-minute run is within host variance of the bounds and says little either way. The 120-minute run was not dispatched because the smoke did not pass. SEC-09 stays
-partial. A remedy that bounds the rate of refused submissions (for example a per-installation token bucket checked before the identity is verified) is the next candidate; it is a decision for the owner.
+**Remedy, and the result.** The owner ruled out a token bucket keyed on the installation id before the identity is verified, since anyone could then exhaust a real backend's bucket, and asked for the refused path to be made cheap.
+
+1. *A dedicated admission budget* (`platformServiceTasks`, two slots) answers `429 app_platform_busy` before the identity is verified, from a pre-check outside the per-address limit (which reads a setting on every request) and from the handler's own acquire. Alone it was not enough: it
+bounds concurrency, not rate, so a handler that finishes in a millisecond found a free slot most of the time and the budget refused about a quarter of the flood. A 5-minute smoke (43821284311) still failed report (78.0 ms) and batch start (123.8 ms). Two earlier attempts, 43819454255 and 43819687463, were `inconclusive_slow_disk`.
+2. *The profile of one `task_capacity` refusal* (test `TestPlatformTaskRefusalProfile*`, 300 refusals at 256 active tasks): on PostgreSQL identity verification 2.3 ms, the admission transaction 1.7 ms (the advisory lock 0.21 ms, each of the three counts 0.10 ms, the rest the authority and handler checks that run before the counts), 4.7 ms through the handler; on SQLite 0.35, 0.36 and 0.72 ms. The counts were not the cost.
+3. *A remembered refusal.* A credential that was fully verified and then refused for the installation quota is remembered in a bounded (256), process-local table, keyed on the digest of the exact credential bytes, for at most 2 s and never past the credential's own expiry. A repeat is answered from one statement
+that re-reads the installation's enabled and ready state, generation, policy revision and epoch, the restore pause, whether the occurrence already exists and the installation's active task count; only a confirmed "at its limit" refuses, and every other outcome, including an error, takes the full path. The database count is the source of truth on every use, no admitting path reads the table, so the quota
+cannot be exceeded; a slot freed by completion, cancellation, failure or expiry is used by the next submission; a replay or a changed body under an existing occurrence is still answered 200 or 409 by the full path; an installation disabled, removed, re-versioned or paused is seen at once; a restart starts empty, so nothing is rebuilt. A well-formed body is required before the refusal applies, so a malformed request is answered as before. The one visible difference is that a remembered credential at quota is told
+`429 task_capacity` where the full path would first say `404` for a handler that does not resolve, which an authenticated holder of the credential may know anyway. A refusal drops to 0.35 ms on PostgreSQL (13 times) and 0.07 ms on SQLite (10 times). The table is not shared with another process or replica, which is safe because each use re-reads the count.
+4. *Smoke 43823927164* (5 minutes, `ec21c509`) passed: home 27.9 ms, report 22.7, dispatch 6.5, batch start 57.5.
+5. *Evidence run 43825208692* (120 minutes, PostgreSQL, `expected_commit` `ec21c509385ddba7ea7218640955448863daec05` matched, fsync probe median 0.16 ms, 7461 s) **passed all 34 checks and counts as OPS-08 evidence**. Pooled loaded p95: home 33.1 ms (bound 50), report 35.2 (50), dispatch@200 16.3 (25), batch start 59.3 (100); one window over the bound for home and one for batch start, none for the others. The nine platform checks: 7920 of 7920 tasks completed (p95 4.6 s, slowest 6.7 s), 3600 of 3600 event deliveries, the quota held at 256 in every window, and the backend flood of 598257 requests (against 322777 in the failed run) was
+answered 200 (141007), refused `429 task_capacity` (422917) or `429 app_platform_busy` (34333), with no other class. The message flood answered 43553 and refused 823398. The latency bounds, the flood intensity and the reserved CPUs are unchanged.
+
+**SEC-09 is recorded as passed** on this evidence, with the limits below still standing.
 
 **Limits of this evidence.**
 
@@ -2234,4 +2240,4 @@ partial. A remedy that bounds the rate of refused submissions (for example a per
 
 - **SQLite read pool: implemented, one diagnostic soak.** On a SQLite Portal the relay's two admitted requests kept the single connection about a third occupied and the gate was missed (resolution 73). Page and dispatch reads now run on a read pool beside the writer (the section "Resolution (SQLite read pool)"); run 43764872093 (`soak_db=sqlite-file`, 120 minutes, not evidence, verdict `inconclusive_slow_disk` for a PostgreSQL disk reading that does not apply) met all four absolute bounds, with the WAL flat at 8.0 MiB; no claim is made that the SQLite envelope is proven. The writes and the relay's own transactions still share the one writer connection.
 - **PR 4c residuals** (the section above): the orphaned restore start, enable or repair left `recovery_required`, the enable start held only as reserved, a transient error abandoning a removal, held-start settlement starving itself, and the late-create window.
-- **SEC-09 partial:** exercised now (section "SEC-09: platform work under the soak"), but the 120-minute run failed the OPS-08 latency bounds under the backend task flood; it needs an owner decision on the remedy before it can close.
+- **SEC-09 passed:** the extended soak passed 34 of 34 checks in the 120-minute run 43825208692 after the task route's refused path was made cheap (section "SEC-09: platform work under the soak"); its limits stand.
