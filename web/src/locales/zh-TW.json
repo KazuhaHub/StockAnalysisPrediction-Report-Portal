@@ -50,6 +50,7 @@
   "ou.targetsInherit": "繼承父層工作流清單",
   "ou.targetsOverride": "在此設定工作流（空清單表示全部禁止）",
   "ou.targetsEffective": "目前生效工作流：{{count}} 個",
+  "err.no_recipient": "你的帳號沒有填寫電子郵件，請輸入收件人後再傳送測試郵件。",
   "err.ou_name_required": "請輸入組織單位名稱。",
   "err.ou_invalid_parent": "請選擇已存在且不屬於本單位子樹的父層組織單位。",
   "err.ou_duplicate_name": "已有組織單位使用該名稱。",
