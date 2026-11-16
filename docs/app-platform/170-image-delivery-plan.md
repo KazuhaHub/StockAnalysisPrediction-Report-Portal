@@ -813,8 +813,9 @@ run had started the exact Scheduled Digest image through a real root runner afte
    - while the app runs, the parent inspects the daemon and then releases the child, which uninstalls the app.
 3. **Asserted:** the effect row and the runner's receipt (`loaded`, not `present`, so the image was absent), image
    ID, store and the claim's manifest and config digests against the package; every blob stored over the control
-   socket; readiness evidence on the activation; the running app answering through the platform (as built, a signed
-   session request, see the implementation notes; the plan had a scheduled digest task); on the daemon, the stored image's ID, platform, layer chain and the
+   socket; readiness evidence on the activation; the running app answering through the platform (a signed
+   session request, and its scheduled digest task through the writable generation-1 service-task registration kind,
+   see the implementation notes); on the daemon, the stored image's ID, platform, layer chain and the
    absence of any name; the store changed by exactly that image; every container created from it created from
    the image ID, one running; no image `pull`, `tag`, `untag`, `push` or `import` event while the scenario ran,
    with a watcher proven live by a container creation event.
@@ -861,23 +862,58 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   no tag and no digest reference, its `RootFS.Layers` equal to the descriptor's `diff_id` list, and one running
   container created from that image ID; the event stream showed one image `load`, one container `create` and no
   pull; the app answered `GET /v1/digest` with status 200; the uninstall removed the container.
-- **Deviation from the plan: the answer is a session request, not a task.** The first design ran the exact-image test's
-  Scheduled Digest task. It failed with `backend_preflight_unavailable`. For generation 1, `preparePlatformServiceTask`
-  read the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
-  `portal.managed-install-review` and exactly three non-load effects. An app installed by the install worker uses
-  `portal.writable-install-review`, so no service task (digest, event or backend) can run for it at generation 1.
-  Later generations had a second, separate defect: the task preflight called the update reader directly and skipped
-  the resume and restore readers, so a task after a completed resume or restore failed the same way. The second is
-  fixed: generation 2 and later now go through the shared writable selector, exactly as launch does, and the choice
-  is covered for update, restore and resume. The first is **not** fixed by the controller alone: the runner verifies a
-  service-task registration only in the managed initial format and the update-start format, so a writable
-  generation-1 registration has no runner-side counterpart (control verification, journal forwarding, native
-  delivery). The preflight now refuses a writable generation-1 install explicitly instead of reading it as managed.
-  The scenario still answers with `requestPlatformWritableBackend` (`GET /v1/digest`), the path the enable and repair
-  acceptances use, until the runner gains that registration kind.
-  Prerequisite: shipping the writable install scheduler, which is development-only today, requires the runner-side
-  writable generation-1 service-task registration kind first. Until that exists, a freshly installed writable app's
-  scheduled, event and backend tasks are refused.
+- **Scheduled digest task at generation 1, and the runner kind it needed.** The first design ran the exact-image test's
+  Scheduled Digest task. It failed with `backend_preflight_unavailable`, for two reasons. Generation 1: the task
+  preflight read the managed-install history (`loadPlatformManagedBackendHistory`), which requires the plan format
+  `portal.managed-install-review` and exactly three non-load effects, while an app installed by the install worker
+  uses `portal.writable-install-review`; and the runner verified a service-task registration only in the managed
+  initial format and the update-start format, so a writable generation-1 registration had no runner-side
+  counterpart. Later generations: the preflight called the update reader directly and skipped the resume and
+  restore readers; generation 2 and later now go through the shared writable selector, as launch does, covered
+  for update, restore and resume.
+  Both are now closed. The runner's `service-backend-task` command accepts a third embedded registration format,
+  `WritableBackendRegistrationFormat`: the signed registration the writable launch and session-request path already
+  uses, read from the existing applied writable registration row. It adds no journal table, column, kind or
+  version, writes no row and needs no Portal DDL; a runner that does not know the case refuses it as
+  `registration kind`. The Portal routes a generation-1 writable install to it, and the data execution gate is
+  taken because the target is a writer's container. The scenario still answers a signed session request
+  (`GET /v1/digest`), and then runs its Scheduled Digest task through the new kind
+  (`SCHEDULED_DIGEST_WRITABLE_GENERATION_ONE_TASK_VERIFIED`; the child test is CI-only).
+  The platform's operation engine now ships in production startup (doc 114). It is the writable
+  install scheduler, but it runs every runner-backed operation, not only writable installs: managed
+  updates, repairs and enables, delete-data, managed uninstall and disable, managed restore, recovery
+  imports and resumes, and, when idle, the settlements and image reclaim. When a valid `RP_APP_RUNNER_*`
+  set binds a trusted runner endpoint at startup, the installer service starts it beside the frontend
+  scheduler (separate worker identities, disjoint queues) and stops both at shutdown; with no endpoint it
+  starts only the frontend scheduler. A runner that cannot be reached never spends an operation's
+  attempts (bounded backoff, state-change logging); see doc 114.
+- **Finding while building it: the runner assumed a fixed policy revision.** The runner derived the
+  identity's policy revision from the registration (the constant `"1"` for the managed initial kind, the
+  update's target revision for the update-start family). The revision can rise without a new generation
+  (an access change raises it), and the runner then refused every task as `task tuple` even when the
+  Portal would have issued one. The runner now takes the revision from the signed command for all three
+  kinds and requires a canonical number at or above the registration's floor (1, the update's target
+  revision, 1); the grant's own revision must equal it. **This is half of the fix, and the claim is
+  narrow.** The Portal requires the capability rows to sit at the installation's current revision, and
+  `invalidateAppPlatformPrincipal` raises the revision without moving them, by design: the app fails
+  closed. **At the same generation no production re-grant exists for runner-backed apps.** The recovery
+  action that carries capability rows to a new revision applies to static installs only
+  (`runtime_id IS NULL`), and the managed restore's resume moves the app to a new generation. After an
+  access change a runner-backed app's tasks therefore stay refused until a managed restore or an update.
+  The runner relaxation at generation 1 is consequently not reached by any real flow today; it is
+  harmless and kept for the follow-up. Tested through the real admit and identity paths at generation 1:
+  `TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange` pins the refusal without a re-grant; its
+  second half moves the rows with a raw `UPDATE` as a fixture device only, not as a model of a production
+  flow. The runner-side acceptance is tested separately against the Portal's real history and signing for
+  the backend, digest and event handlers (`TestPlatformServiceTaskAfterGrantChange*`).
+  **Not closed at generation 2 and later:** see the follow-up below.
+- **Limit: what the runner verifies of the service identity.** The runner checks the command signature, the
+  registration (signature, expiry, tuple) and that the grant's installation, lease, generation, epoch, release
+  and policy revision equal the command's, that its resources carry what the handler needs, and that its MAC
+  field has the right length. It does not hold the identity key, so it does not verify the MAC; giving it the
+  key would move a Portal secret across the trust boundary. An access change between prepare and delivery can
+  therefore still run the handler once within the 30 s registration lifetime; the app's callbacks are refused
+  by `verifyPlatformServiceIdentity`. Kept as a documented limit.
 - **Finding while building it: digest forms differ.** The descriptor writes digests as bare hex, while the Docker
   API and the runner's receipt use `sha256:<hex>`. The first run compared the two directly, which would have made
   "the image is absent from the store" pass on a store that still held it (the removal worked only because Docker
@@ -939,6 +975,37 @@ earlier run (42716037743) predates these changes; its claims are re-established 
 9. **Other images' references.** The store-diff check compares every other image's digest references as well as
    its tags.
 
-The generation-1 service-task limit above is narrowed to writable installs and needs a runner-side registration kind; the generation 2 and later routing is fixed. Shipping the writable install scheduler
-requires that runner-side registration kind first; until then a freshly installed writable app's scheduled, event and
-backend tasks are refused.
+## Follow-up: policy revision at generation 2 and later (not implemented)
+
+The runner relaxation above is half of the change. At generation 2 and later the Portal's update, restore
+and resume history readers pin the installation's and the active activation's policy revision to the
+update's target revision (`loadCompletedUpdateHistorySource` and its restore and resume counterparts), so
+after an access change plus a re-grant the Portal still fails to resolve the history, before any runner is
+involved, and launch is affected the same way. The review's design for the follow-up:
+
+- The Portal's history readers and launch move from "revision equals the target" to "revision at least the
+  target, **and** capability rows at the current revision from a consumed plan for this generation".
+- The registration stays pinned to the target revision it was derived at; only the checks around it relax.
+- The runner's verifiers for backend, session and network requests get the same floor rule the service-task
+  verifier now has (a canonical revision at or above the registration's floor, equal to the grant's).
+
+Tests it needs, test first:
+
+- the history readers accept a later revision with rows re-granted at that revision from a consumed plan,
+  and refuse it without the rows, with rows from another generation's plan, or from an unconsumed plan,
+  for update, restore and resume;
+- launch and a session request at generation 2 after an access change plus a re-grant succeed, and fail
+  closed without the re-grant;
+- the runner verifiers refuse a revision below the floor and a non-canonical one, and accept a later one,
+  for each request kind;
+- a generation-2 task after an access change plus a re-grant reaches `succeeded` through the fake runner for
+  the backend, digest and event handlers (the test that today can only run without the change).
+
+Open owner questions:
+
+1. Should a runner-backed app regain tasks after an access change at the same generation (a
+   re-review flow), or stay refused until a restore or update?
+2. What does a policy-revision bump grant? Today a bump means "everything granted at the
+   old revision must be re-approved"; the follow-up lets an approved re-grant carry a running generation
+   forward without a new update. The owner has to say whether a re-grant may do that for every capability,
+   only for those that already existed at the target revision, or never for capabilities that widen access.

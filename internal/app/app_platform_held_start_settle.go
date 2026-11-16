@@ -65,6 +65,9 @@ func (s *Server) settlePlatformHeldStarts(ctx context.Context, endpoint platform
 			if ctx.Err() != nil {
 				return progressed, ctx.Err()
 			}
+			if platformRunnerDown(ctx, err) {
+				return progressed, err
+			}
 			log.Printf("app-platform held start settlement %s: %v", id, err)
 			continue
 		}

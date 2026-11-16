@@ -66,11 +66,45 @@ just because a new worker exists.
 
 ## Explicit service mode
 
-`newPlatformWritableInstallScheduler` requires the existing valid explicit native
-endpoint, worker UUID and interval bounds. Empty frontend bootstrap is refused.
-Construction starts no goroutine. `serve` retains its supported-Linux and exact
-non-root controller UID gate, single-start guard, cancellation/join behavior and
-serial gate. Production frontend startup does not call the new constructor.
+`newPlatformOperationEngine` (built on `newPlatformWritableInstallScheduler`) requires the existing
+valid explicit native endpoint, worker UUID and interval bounds. Empty frontend bootstrap is refused.
+Construction starts no goroutine. `serve` retains its supported-Linux and exact non-root controller
+UID gate, single-start guard, cancellation/join behavior and serial gate.
+
+This scheduler is the platform's **operation engine**, not only the writable install worker, and
+production runs it. When a trusted runner endpoint is bound at startup (`RP_APP_RUNNER_*`, validated
+at startup), the installer service starts it beside the frontend scheduler, with its own worker
+identity, and stops and joins both at shutdown. With no endpoint bound only the frontend scheduler
+runs. Neither scheduler's failure to start prevents the other from running; each failure is logged.
+In one serial loop the engine runs, in this order of selection:
+
+- writable installs;
+- managed updates, repairs and enables;
+- delete-data;
+- managed uninstall and disable;
+- managed restore;
+- while a restore pause is on (and nothing else): recovery imports and resumes, and the reconcile of
+  imports and resumes it left unsettled;
+- when idle: the settlement of failed migrations and open starts, of image loads and image
+  removals, and the reclaim of images no release references.
+
+Frontend (static) operations belong to the frontend scheduler. The runner-side generation-1
+service-task registration kind that the engine's installs need ships with it (doc 170).
+
+### A runner that cannot be reached
+
+Failing to reach the runner (control socket absent or its runtime directory gone, connection
+refused or not accepted) is not a verdict on any operation: nothing was sent. The engine therefore
+never counts such a failure toward an operation's attempt budget (three). It backs the whole tick
+off with a bounded exponential delay (the interval doubling to 30 s, +-20% jitter), renews the
+active operation's lease each tick so a long outage never lets it lapse into review, probes the
+socket first on every tick while it is down, and resumes the same operation when the runner answers.
+Only definite runner verdicts, and failures after the runner was reached, count. The transport marks
+the former with `transport.ErrRunnerUnreachable`; a process-wide count of such dials backs the
+classification up where a stage wrapped the error without `%w`. Logging records state changes only:
+one line when the runner becomes unreachable, a reminder at most every five minutes, one line when it
+is reachable again; never one per tick or per item. A runner that dies after receiving a command is
+not covered: that stays an ordinary failure, read back by effect id as before.
 
 A writable tick selects its own queue, renews only at a serial boundary, invokes
 the writable driver and retains the last confirmed result token. No concurrent

@@ -8,7 +8,9 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -103,10 +105,17 @@ func safeParent(path string, profile endpointProfile) bool {
 }
 func socketInfo(path string, profile endpointProfile) (os.FileInfo, error) {
 	if !safeParent(path, profile) {
+		// A runner that is down may have removed its runtime directory with it.
+		if _, err := os.Lstat(filepath.Dir(path)); errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %w", ErrUnsafeEndpoint, ErrRunnerUnreachable)
+		}
 		return nil, ErrUnsafeEndpoint
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %w", ErrUnsafeEndpoint, ErrRunnerUnreachable)
+		}
 		return nil, ErrUnsafeEndpoint
 	}
 	st, ok := info.Sys().(*syscall.Stat_t)
@@ -480,12 +489,20 @@ func exchangeProfile(parent context.Context, path string, profile endpointProfil
 func connectEndpoint(ctx context.Context, path string, profile endpointProfile) (*net.UnixConn, error) {
 	before, err := socketInfo(path, profile)
 	if err != nil {
-		return nil, ErrUnsafeEndpoint
+		noteDial(ctx, errors.Is(err, ErrRunnerUnreachable))
+		return nil, err
 	}
 	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
 	if err != nil {
-		return nil, ErrRefused
+		if ctx.Err() != nil {
+			// The caller's budget ran out before or during the dial: not a statement about the runner.
+			noteDial(ctx, false)
+			return nil, fmt.Errorf("%w: %w", ErrRefused, ctx.Err())
+		}
+		noteDial(ctx, true)
+		return nil, fmt.Errorf("%w: %w", ErrRefused, ErrRunnerUnreachable)
 	}
+	noteDial(ctx, false)
 	conn, ok := connection.(*net.UnixConn)
 	if !ok {
 		connection.Close()

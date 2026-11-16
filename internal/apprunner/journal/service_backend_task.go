@@ -86,6 +86,10 @@ func (s *Store) ForwardServiceBackendTask(
 		return s.forwardUpdateStartServiceBackendTask(
 			ctx, verified, raw, signature, descriptor, body, native)
 	}
+	if identity.Format == control.WritableBackendRegistrationFormat {
+		return s.forwardWritableServiceBackendTask(
+			ctx, verified, raw, signature, descriptor, body, native)
+	}
 	initial, ok := verified.InitialRegistration()
 	if !ok || identity.Format != control.BackendRegistrationFormat {
 		return zero, ErrFenceReconciliation
@@ -310,4 +314,142 @@ func serviceTaskAppID(raw []byte) string {
 		return ""
 	}
 	return grant.AppID
+}
+
+// forwardWritableServiceBackendTask forwards a generation-1 task to a writable
+// install. It reads the existing applied writable registration row and writes
+// nothing durable. It holds the data execution gate because the target is a
+// writer's container. Any error after native IO can follow an app write; the
+// caller never retries here.
+func (s *Store) forwardWritableServiceBackendTask(
+	ctx context.Context,
+	verified control.VerifiedServiceBackendTask,
+	raw, signature, descriptor, body []byte,
+	native *driver.CandidateRuntime,
+) (ServiceBackendTaskResult, error) {
+	var zero ServiceBackendTaskResult
+	if native == nil || s.closing.Load() ||
+		len(raw) == 0 || len(raw) > control.MaxCommandBytes ||
+		len(signature) != 64 || len(descriptor) == 0 ||
+		len(descriptor) > appplatform.MaxDescriptorBytes ||
+		len(body) == 0 || len(body) > appplatform.MaxTaskBackendBody {
+		return zero, ErrFenceReconciliation
+	}
+	registration, ok := verified.WritableRegistration()
+	if !ok {
+		return zero, ErrFenceReconciliation
+	}
+	command := verified.Command()
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.Manifest.Backend == nil ||
+		parsed.SHA256 != registration.Candidate().Index().Payload.ReleaseSHA256 ||
+		parsed.Manifest.ID != serviceTaskAppID(command.ServiceIdentity) {
+		return zero, ErrFenceReconciliation
+	}
+	expires, err := strconv.ParseInt(
+		verified.RegistrationIdentity().ExpiresMS, 10, 64)
+	if err != nil || expires <= time.Now().UnixMilli() {
+		return zero, ErrFenceReconciliation
+	}
+	ctx, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
+	defer cancel()
+	if err := s.acquireDataExecution(ctx); err != nil {
+		return zero, err
+	}
+	defer s.releaseDataExecution()
+	if s.closing.Load() {
+		return zero, ErrFenceReconciliation
+	}
+	before, err := s.prepareWritableBackendExchange(
+		ctx, command.RegistrationRaw, command.RegistrationSignature, descriptor)
+	if err != nil {
+		return zero, fmt.Errorf("writable service registration exchange: %w", err)
+	}
+	if _, err := control.VerifyServiceBackendTask(
+		raw, signature, before.facts.source.authority,
+		time.Now().UnixMilli()); err != nil {
+		return zero, err
+	}
+	if s.closing.Load() {
+		return zero, ErrFenceReconciliation
+	}
+	observed, err := native.ForwardWritableCandidateServiceTask(
+		ctx, before.request, before.binding, body,
+		command.ServiceIdentity, command.Handler)
+	if err != nil {
+		return zero, fmt.Errorf("writable service native exchange: %w", err)
+	}
+	actual, err := observed.Snapshot()
+	if err != nil {
+		return zero, ErrFenceReconciliation
+	}
+	return s.finishWritableServiceBackendTask(
+		ctx, before, raw, signature, body, actual)
+}
+
+func (s *Store) finishWritableServiceBackendTask(
+	ctx context.Context,
+	before writableBackendExchangePreflight,
+	raw, signature, body []byte,
+	actual driver.WritableServiceTaskSnapshot,
+) (ServiceBackendTaskResult, error) {
+	var zero ServiceBackendTaskResult
+	tx, f, err := s.beginWritableRegistration(
+		ctx, before.facts.raw, before.facts.signature, "applied")
+	if err != nil {
+		return zero, err
+	}
+	defer tx.Rollback()
+	if s.closing.Load() || !sameWritableRegistrationSource(before.facts, f) {
+		return zero, ErrFenceReconciliation
+	}
+	verified, err := control.VerifyServiceBackendTask(
+		raw, signature, f.source.authority, time.Now().UnixMilli())
+	if err != nil {
+		return zero, err
+	}
+	command := verified.Command()
+	if !bytes.Equal(command.RegistrationRaw, before.facts.raw) ||
+		!bytes.Equal(command.RegistrationSignature, before.facts.signature) ||
+		control.ValidateServiceBackendTaskData(verified, body) != nil {
+		return zero, ErrFenceReconciliation
+	}
+	identitySHA := candidateHash(command.ServiceIdentity)
+	if actual.Registration != before.binding ||
+		!writableSnapshotMatches(actual.Registration.Launch, f.source, f.running.Claim) ||
+		actual.Handler != command.Handler ||
+		actual.BodySHA256 != candidateHash(body) ||
+		actual.ServiceIdentitySHA256 != identitySHA ||
+		actual.ObservedMS < before.facts.source.now ||
+		actual.ObservedMS > f.source.now {
+		return zero, ErrFenceReconciliation
+	}
+	if err := checkWritableRegistrationCurrent(ctx, f); err != nil {
+		return zero, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, err
+	}
+	if s.closing.Load() {
+		return zero, ErrFenceReconciliation
+	}
+	if err := checkWritableRegistrationCurrent(ctx, f); err != nil {
+		return zero, err
+	}
+	if _, err := control.VerifyServiceBackendTask(
+		raw, signature, f.source.authority, time.Now().UnixMilli()); err != nil {
+		return zero, err
+	}
+	result := ServiceBackendTaskResult{
+		Format:    ServiceBackendTaskResultFormat,
+		RequestID: command.RequestID, TaskID: command.TaskID,
+		LeaseID:               command.LeaseID,
+		RequestSHA256:         candidateHash(raw),
+		DeliveryReceiptSHA256: candidateHash([]byte(f.row.receipt)),
+		NativeID:              actual.Registration.NativeID, BootID: command.BootID,
+		Response:   actual.Response,
+		ObservedMS: strconv.FormatInt(actual.ObservedMS, 10),
+	}
+	encoded, _ := json.Marshal(result)
+	return ParseServiceBackendTaskResult(encoded)
 }

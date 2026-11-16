@@ -57,6 +57,17 @@ func platformHandshakeServiceBackend(
 			return "", errAppPlatformStageEvidence
 		}
 		return proof.Evidence().Answer, nil
+	case control.WritableBackendRegistrationFormat:
+		if history.writable == nil {
+			return "", errAppPlatformStageEvidence
+		}
+		proof, err := platformHandshakeWritableBackend(
+			ctx, endpoint, *history.writable, challenge)
+		if err != nil || !validPlatformWritableHandshakeObservation(
+			proof, *history.writable, endpoint, challenge) {
+			return "", errAppPlatformStageEvidence
+		}
+		return proof.Evidence().Answer, nil
 	default:
 		return "", errAppPlatformStageEvidence
 	}

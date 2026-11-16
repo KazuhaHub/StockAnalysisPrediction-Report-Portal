@@ -322,6 +322,9 @@ func RunServer(cfgPath string) {
 	s.runForecastRepair()
 
 	stopNotifications := s.startNotificationRuntime()
+	// The platform's operation engine: the frontend scheduler always, and, when a runner endpoint was bound
+	// above, the engine that runs managed installs, updates, repairs, enables, delete-data, uninstalls, restores,
+	// recovery imports and resumes, their settlements and image reclaim (docs/app-platform/114).
 	stopAppInstalls := s.startPlatformFrontendInstallService()
 	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
 	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)

@@ -19,8 +19,9 @@ import (
 // JSON string escaping can expand each byte of the 64 KiB body sixfold.
 const platformBackendHTTPBodyLimit = 400 << 10
 
-// Trusted development bootstrap only. Production deliberately does not invoke
-// this binder. No session, app package or HTTP payload can select an endpoint.
+// Trusted bootstrap only: production calls this binder at startup, from the
+// RP_APP_RUNNER_* deployment configuration. No session, app package or HTTP
+// payload can select an endpoint.
 // A Server's endpoint cannot be replaced while requests are in flight.
 func (s *Server) bindPlatformBackendHTTP(endpoint platformRuntimeEndpoint) error {
 	if s == nil || s.st == nil || runtime.GOOS != "linux" || !filepath.IsAbs(endpoint.path) || filepath.Clean(endpoint.path) != endpoint.path || len(endpoint.path) > 107 || strings.ContainsAny(endpoint.path, "\x00\r\n") || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0) || uint32(os.Geteuid()) != endpoint.controllerUID || !s.platformBackendEndpoint.CompareAndSwap(nil, &endpoint) {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
 
 const platformInstallAttemptLimit = 3
@@ -72,6 +73,9 @@ type platformInstallScheduler struct {
 	writable bool
 	// reconciledAt is when recovery-mode reconciliation last ran.
 	reconciledAt time.Time
+	// health tracks whether the runner answers; probe replaces the reachability probe in tests.
+	health platformRunnerHealth
+	probe  func(context.Context) error
 	// runOverride replaces the action dispatch of a tick. Only tests set it.
 	runOverride func(context.Context, platformOperationLease) (platformInstallRun, error)
 }
@@ -84,8 +88,21 @@ func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, wo
 	return &platformInstallScheduler{server: s, endpoint: endpoint, worker: worker, interval: interval, gate: make(chan struct{}, 1)}, nil
 }
 
-// Explicit development bootstrap only; the portable production service keeps
-// its frontend-only constructor and cannot select managed installations.
+// newPlatformOperationEngine builds the scheduler that production starts when a trusted runner
+// endpoint is bound. It is the platform's operation engine, not only the writable install worker.
+// In one serial loop, with the runner endpoint, it runs: writable installs; managed updates,
+// repairs and enables; delete-data; managed uninstall and disable; managed restore; recovery
+// imports and resumes while a restore pause is on; and, when idle, the settlements of failed
+// migrations, held starts, image loads and image removals and the reclaim of unreferenced images.
+// Each operation keeps its fenced lease, and a runner that cannot be reached backs the loop off
+// without spending any operation's attempts (see app_platform_runner_health.go).
+// Frontend (static) operations are run by the frontend scheduler beside it.
+func newPlatformOperationEngine(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
+	return newPlatformWritableInstallScheduler(s, endpoint, worker, interval)
+}
+
+// newPlatformWritableInstallScheduler is the constructor behind the operation engine. It requires
+// an explicit runner endpoint; an empty endpoint is refused.
 func newPlatformWritableInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
 	if endpoint == (platformRuntimeEndpoint{}) {
 		return nil, errAppPlatformRuntimeConflict
@@ -117,8 +134,26 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	defer cancel()
 	bulkCtx, bulkCancel := platformImportAttemptContext(parent)
 	defer bulkCancel()
+	// The idle steps and the claimed attempt each observe their own connection attempts.
+	ctx, _ = transport.WithUnreachableWitness(ctx)
+	bulkCtx, _ = transport.WithUnreachableWitness(bulkCtx)
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if w.health.down {
+		// The runner was unreachable: probe before any work. While it stays down the whole tick
+		// backs off, and an operation in flight keeps its lease (no attempt is spent).
+		probe := w.probe
+		if probe == nil {
+			probe = func(ctx context.Context) error { return probePlatformRunner(ctx, w.endpoint) }
+		}
+		if err := probe(ctx); err != nil {
+			w.health.unreachable("app-platform scheduler")
+			w.publish("runner_unreachable", w.active.id, w.active.snapshot.Stage)
+			w.keepLeaseWhileDown(ctx)
+			return err
+		}
+		w.health.reachable("app-platform scheduler")
 	}
 	if w.active.id == "" {
 		var selected platformInstallSelection
@@ -135,11 +170,17 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 				// Idle: read back any import left unsettled by an earlier attempt.
 				w.reconciledAt = time.Now()
 				if _, reconcileErr := w.server.reconcilePlatformRecoveryImports(ctx, w.endpoint); reconcileErr != nil {
+					if w.idleUnreachable(ctx, reconcileErr) {
+						return reconcileErr
+					}
 					log.Printf("app-platform recovery reconcile: %v", reconcileErr)
 				}
 				// A resume whose start is settled as applied comes back as a lease at the probe stage, which
 				// the scheduler runs on like any claimed operation.
 				if resumed, reconcileErr := w.server.reconcilePlatformRecoveryResumes(ctx, w.endpoint, w.worker); reconcileErr != nil {
+					if w.idleUnreachable(ctx, reconcileErr) {
+						return reconcileErr
+					}
 					log.Printf("app-platform recovery resume reconcile: %v", reconcileErr)
 				} else {
 					selected = resumed
@@ -200,13 +241,22 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 			// Idle, in normal and in paused mode: a failed migration waiting for settlement needs no lease.
 			if w.endpoint.path != "" {
 				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
+					if w.idleUnreachable(bulkCtx, settleErr) {
+						return settleErr
+					}
 					log.Printf("app-platform migration settlement: %v", settleErr)
 				}
 				if _, settleErr := w.server.settlePlatformLoadImages(bulkCtx, w.endpoint); settleErr != nil {
+					if w.idleUnreachable(bulkCtx, settleErr) {
+						return settleErr
+					}
 					log.Printf("app-platform load-image settlement: %v", settleErr)
 				}
 				// Idle: the images of releases nothing references any more are removed, and begun removals settle.
 				if _, reclaimErr := w.server.reclaimPlatformImages(bulkCtx, w.endpoint); reclaimErr != nil {
+					if w.idleUnreachable(bulkCtx, reclaimErr) {
+						return reclaimErr
+					}
 					log.Printf("app-platform image reclaim: %v", reclaimErr)
 				}
 			}
@@ -235,6 +285,10 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		ctx = bulkCtx
 	}
 	w.publish("running", w.active.id, w.active.snapshot.Stage)
+	// Connection attempts under this attempt's context report to the witness, so a failure whose
+	// error was wrapped without %w by a stage can still be told from a verdict. The witness is
+	// scoped to this attempt: other goroutines' dials never touch it.
+	ctx, witness := transport.WithUnreachableWitness(ctx)
 	var result platformInstallRun
 	if w.runOverride != nil {
 		result, err = w.runOverride(ctx, w.active)
@@ -286,6 +340,7 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 		return nil
 	}
 	if err == nil {
+		w.health.reachable("app-platform scheduler")
 		if result.lease.id != "" &&
 			result.lease.snapshot.Stage != appplatform.StageComplete {
 			w.active, w.attempts = result.lease, 0
@@ -308,6 +363,13 @@ func (w *platformInstallScheduler) tick(parent context.Context) error {
 	if parent.Err() != nil {
 		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
 		return parent.Err()
+	}
+	if w.endpoint.path != "" && platformAttemptFoundRunnerDown(ctx, err, witness) {
+		// The runner could not be reached: nothing was sent, so this is not a verdict and spends
+		// no attempt. The operation keeps its lease and the tick backs off until it answers.
+		w.health.unreachable("app-platform scheduler")
+		w.publish("runner_unreachable", w.active.id, w.active.snapshot.Stage)
+		return err
 	}
 	if refusal, ok := platformCapacityRefusalOf(err); ok {
 		// A definite refusal by the runner is not retried: the operation ends with the typed outcome.
@@ -397,6 +459,44 @@ func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode st
 	return nil
 }
 
+// platformAttemptFoundRunnerDown reports whether a failed attempt failed because the runner could
+// not be reached. An attempt whose own budget is exhausted is never an outage: the stage reached the
+// runner and ran out of time, which spends an attempt (or a busy wait) as it always did.
+func platformAttemptFoundRunnerDown(ctx context.Context, err error, witness *transport.UnreachableWitness) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return platformRunnerUnreachable(err) || witness.Seen()
+}
+
+// idleUnreachable records an idle step's failure as an unreachable runner when it is one, so the
+// step's own per-item logging stays quiet and the tick backs off.
+func (w *platformInstallScheduler) idleUnreachable(ctx context.Context, err error) bool {
+	if !platformRunnerDown(ctx, err) {
+		return false
+	}
+	w.health.unreachable("app-platform scheduler")
+	w.publish("runner_unreachable", "", "")
+	return true
+}
+
+// keepLeaseWhileDown renews the active operation's lease while the runner is down, so a long
+// outage never lets the lease lapse into a review; the next tick that reaches the runner
+// continues the same operation.
+func (w *platformInstallScheduler) keepLeaseWhileDown(ctx context.Context) {
+	if w.active.id == "" {
+		return
+	}
+	renewed, err := w.server.st.updatePlatformOperationLeaseContext(ctx, w.active.id, w.worker, &w.active)
+	if err != nil {
+		if errors.Is(err, errAppPlatformLeaseConflict) {
+			w.active, w.attempts = platformOperationLease{}, 0
+		}
+		return
+	}
+	w.active = renewed
+}
+
 // reclaimImages runs the image removal step after an operation ended. It never fails the tick: whatever it cannot
 // do is left for the idle tick, which repeats it.
 func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
@@ -408,8 +508,9 @@ func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
 	}
 }
 
-// Portal startup owns the portable no-data service separately. Native execution
-// still requires explicit bootstrap and the exact Linux UID.
+// Portal startup owns the frontend service and, when a trusted runner endpoint is bound, the
+// operation engine (newPlatformOperationEngine). Native execution requires that endpoint and the
+// exact Linux UID.
 // It does not enroll a runner, create OS identities, release uncertain leases or
 // reclaim data effects. Cancellation waits for its current context-bound attempt.
 func (w *platformInstallScheduler) serve(ctx context.Context) error {
@@ -424,13 +525,13 @@ func (w *platformInstallScheduler) serve(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
-			if err := w.tick(ctx); err != nil && ctx.Err() == nil {
+			if err := w.tick(ctx); err != nil && ctx.Err() == nil && !platformRunnerUnreachable(err) {
 				log.Printf("app-platform scheduler tick: %v", err)
 			}
 			if ctx.Err() != nil {
 				return nil
 			}
-			timer.Reset(w.interval)
+			timer.Reset(w.health.delay(w.interval))
 		}
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -45,10 +46,11 @@ type ServiceBackendTaskRegistrationIdentity struct {
 }
 
 type VerifiedServiceBackendTask struct {
-	command             ServiceBackendTaskCommand
-	registration        ServiceBackendTaskRegistrationIdentity
-	initialRegistration *VerifiedBackendRegistrationCommand
-	updateRegistration  *VerifiedUpdateStartRegistrationCommand
+	command              ServiceBackendTaskCommand
+	registration         ServiceBackendTaskRegistrationIdentity
+	initialRegistration  *VerifiedBackendRegistrationCommand
+	updateRegistration   *VerifiedUpdateStartRegistrationCommand
+	writableRegistration *VerifiedWritableBackendRegistrationCommand
 }
 
 func (v VerifiedServiceBackendTask) Command() ServiceBackendTaskCommand {
@@ -75,6 +77,15 @@ func (v VerifiedServiceBackendTask) UpdateStartRegistration() (VerifiedUpdateSta
 		return VerifiedUpdateStartRegistrationCommand{}, false
 	}
 	return *v.updateRegistration, true
+}
+
+// WritableRegistration returns the generation-1 writable install registration
+// a task was bound to. It is present only for WritableBackendRegistrationFormat.
+func (v VerifiedServiceBackendTask) WritableRegistration() (VerifiedWritableBackendRegistrationCommand, bool) {
+	if v.writableRegistration == nil {
+		return VerifiedWritableBackendRegistrationCommand{}, false
+	}
+	return *v.writableRegistration, true
 }
 
 func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (VerifiedServiceBackendTask, error) {
@@ -106,6 +117,7 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	var registration ServiceBackendTaskRegistrationIdentity
 	var initial *VerifiedBackendRegistrationCommand
 	var update *VerifiedUpdateStartRegistrationCommand
+	var writable *VerifiedWritableBackendRegistrationCommand
 	switch format.Format {
 	case BackendRegistrationFormat:
 		verified, err := VerifyBackendRegistration(
@@ -115,11 +127,21 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 				"initial registration: %w", ErrInvalidCommand)
 		}
 		candidate := verified.Candidate()
+		// The initial registration binds no policy revision. The revision can
+		// rise without a new generation (an access change raises it, and the
+		// app runs tasks again once its grants are reviewed again, which is a
+		// Portal-side requirement), so it is taken from the signed command and
+		// must be a canonical number at least 1. The grant's own revision is
+		// compared below.
+		if !policyRevisionAtLeast(c.PolicyRevision, "1") {
+			return zero, fmt.Errorf(
+				"initial registration tuple: %w", ErrInvalidCommand)
+		}
 		initial = &verified
 		registration = ServiceBackendTaskRegistrationIdentity{
 			Format:         BackendRegistrationFormat,
 			InstallationID: candidate.InstallationID,
-			Generation:     candidate.TargetGeneration, PolicyRevision: "1",
+			Generation:     candidate.TargetGeneration, PolicyRevision: c.PolicyRevision,
 			ControllerEpoch: candidate.ControllerEpoch,
 			ReleaseSHA256:   candidate.Payload.ReleaseSHA256,
 			ExpiresMS:       candidate.ExpiresMS,
@@ -132,16 +154,40 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 				"update registration: %w", ErrInvalidCommand)
 		}
 		start := verified.Start().Command()
+		// The update was started at TargetPolicyRevision. The revision can rise
+		// later without a new generation, so the command may carry any
+		// canonical revision at or above that floor, never below. This is the
+		// runner half of a larger change: the Portal's readers still pin the
+		// target revision (doc 170, follow-up).
+		if !policyRevisionAtLeast(
+			c.PolicyRevision, start.Payload.TargetPolicyRevision) {
+			return zero, fmt.Errorf(
+				"update registration tuple: %w", ErrInvalidCommand)
+		}
 		update = &verified
 		registration = ServiceBackendTaskRegistrationIdentity{
 			Format:          UpdateStartRegistrationFormat,
 			InstallationID:  start.InstallationID,
 			Generation:      start.TargetGeneration,
-			PolicyRevision:  start.Payload.TargetPolicyRevision,
+			PolicyRevision:  c.PolicyRevision,
 			ControllerEpoch: start.ControllerEpoch,
 			ReleaseSHA256:   start.Payload.TargetReleaseSHA256,
 			ExpiresMS:       start.ExpiresMS,
 		}
+	case WritableBackendRegistrationFormat:
+		verified, err := VerifyWritableBackendRegistration(
+			c.RegistrationRaw, c.RegistrationSignature, a, nowMS)
+		if err != nil {
+			return zero, fmt.Errorf(
+				"writable registration: %w", ErrInvalidCommand)
+		}
+		identity, err := writableServiceTaskIdentity(
+			verified.Candidate().Index(), c.PolicyRevision)
+		if err != nil {
+			return zero, err
+		}
+		writable = &verified
+		registration = identity
 	default:
 		return zero, fmt.Errorf(
 			"registration kind: %w", ErrInvalidCommand)
@@ -170,6 +216,11 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 		return zero, fmt.Errorf(
 			"task signature: %w", ErrInvalidCommand)
 	}
+	// The grant is checked for its shape and for equality with the command's
+	// tuple, its resources and a 64-character MAC field. The runner does not
+	// hold the identity key, so it does not verify the MAC itself: a grant whose
+	// MAC is wrong is rejected by the app and by Portal's callback checks, not
+	// here. The runner's own authority is the controller-signed command.
 	var grant appplatform.ServiceIdentityGrant
 	identityDecoder := json.NewDecoder(bytes.NewReader(c.ServiceIdentity))
 	identityDecoder.DisallowUnknownFields()
@@ -193,6 +244,42 @@ func VerifyServiceBackendTask(raw, signature []byte, a Authority, nowMS int64) (
 	return VerifiedServiceBackendTask{
 		command: c, registration: registration,
 		initialRegistration: initial, updateRegistration: update,
+		writableRegistration: writable,
+	}, nil
+}
+
+// policyRevisionAtLeast reports whether v is a canonical decimal revision (no sign,
+// no leading zero) that is at least floor. A floor that is not itself a canonical
+// revision admits nothing.
+func policyRevisionAtLeast(v, floor string) bool {
+	n, err := strconv.ParseUint(v, 10, 63)
+	if err != nil || strconv.FormatUint(n, 10) != v {
+		return false
+	}
+	least, err := strconv.ParseUint(floor, 10, 63)
+	if err != nil || strconv.FormatUint(least, 10) != floor || least < 1 {
+		return false
+	}
+	return n >= least
+}
+
+// writableServiceTaskIdentity derives the task identity of a generation-1 writable
+// registration. The registration's own generation must be "1" (a writable install is
+// registered at generation 1 only), and its policy revision, which it does not bind,
+// comes from the command.
+func writableServiceTaskIdentity(index CandidateCommand, policy string) (ServiceBackendTaskRegistrationIdentity, error) {
+	if index.TargetGeneration != "1" || !policyRevisionAtLeast(policy, "1") {
+		return ServiceBackendTaskRegistrationIdentity{}, fmt.Errorf(
+			"writable registration tuple: %w", ErrInvalidCommand)
+	}
+	return ServiceBackendTaskRegistrationIdentity{
+		Format:          WritableBackendRegistrationFormat,
+		InstallationID:  index.InstallationID,
+		Generation:      index.TargetGeneration,
+		PolicyRevision:  policy,
+		ControllerEpoch: index.ControllerEpoch,
+		ReleaseSHA256:   index.Payload.ReleaseSHA256,
+		ExpiresMS:       index.ExpiresMS,
 	}, nil
 }
 
