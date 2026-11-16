@@ -546,8 +546,8 @@ container using it, and the writer must return `ErrContainerConflict`.
 
 ## Resolution (inventory overlap by device and inode)
 
-**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43777959838
-(`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43777959838/job/133008525485`), passed
+**Status: resolved.** The native acceptance run is green: the foreign container job of the app runner probe workflow, run 43779611043
+(`https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43779611043/job/133013665385`), passed
 `TestDockerAcceptanceBindBackedVolumeIsAConflict`, `TestBindMountAliasIsAnOverlap` and `TestDockerAcceptancePeerIdentity` (the real connection passes; a socat forwarder is refused) as
 root against a real daemon, with the daemon listing the bind-backed volume as `/var/lib/docker/volumes/<name>/_data`. Real hosts show
 mounts whose root is not a path (`nsfs` namespace files, root `net:[...]`); the table reader skips them.

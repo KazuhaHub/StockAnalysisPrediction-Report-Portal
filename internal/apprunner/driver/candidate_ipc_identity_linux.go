@@ -228,7 +228,7 @@ var candidateIPCNetworkFilesystems = map[string]bool{
 // namespace only when every server is a literal address that is provably not this host and the namespace itself sits on a network
 // filesystem. A server that is this host (loopback, the unspecified address, or any address of a local
 // interface) can export the data root back as a "remote" volume, so it is an overlap; a server that is not named,
-// or whose name does not resolve, cannot be told and is refused. The data root is a local XFS project-quota
+// or that is a name rather than a literal address, cannot be told and is refused. The data root is a local XFS project-quota
 // filesystem, which the mount table's filesystem type for the namespace also confirms.
 func (p *candidateIPCPass) networkVolumeReferences(ctx context.Context, path string, hosts []string) (bool, error) {
 	if len(hosts) == 0 || (len(hosts) == 1 && hosts[0] == "") {
