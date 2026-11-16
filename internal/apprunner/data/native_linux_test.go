@@ -384,13 +384,13 @@ func TestNativeDataPrimitive(t *testing.T) {
 	if err != nil || !archive.Found || archive.Bytes != checkpointSnapshot.ArchiveBytes {
 		t.Fatalf("inspect archive: %+v %v", archive, err)
 	}
-	if _, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes+1); !errors.Is(err, ErrArchiveMismatch) {
+	if _, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes+1, checkpointSnapshot.ManifestSHA256); !errors.Is(err, ErrArchiveMismatch) {
 		t.Fatal("archive of another size was removed", err)
 	}
 	if again, err := checkpointRoot.InspectCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID); err != nil || !again.Found {
 		t.Fatal("a refused removal changed the archive", again, err)
 	}
-	removed, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes)
+	removed, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes, checkpointSnapshot.ManifestSHA256)
 	if err != nil || !removed.Found || removed.Bytes != checkpointSnapshot.ArchiveBytes {
 		t.Fatalf("remove archive: %+v %v", removed, err)
 	}
@@ -408,16 +408,34 @@ func TestNativeDataPrimitive(t *testing.T) {
 		t.Fatal("another archive changed", err)
 	}
 	// An interrupted removal leaves the archive under its trash name: the next removal finishes it.
-	if err := os.WriteFile(checkpointPath+"/.portal-checkpoints/"+nativeNamespace(504)+".tar.deleting", []byte("x"), 0400); err != nil {
+	// A trash entry that is not this checkpoint's archive is quarantined, never deleted, and does not block the removal.
+	dir := checkpointPath + "/.portal-checkpoints/"
+	if err := os.WriteFile(dir+nativeNamespace(504)+".tar.deleting", []byte("x"), 0400); err != nil {
 		t.Fatal(err)
 	}
-	if left, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, nativeNamespace(504), 1); err != nil || left.Found {
-		t.Fatal("a leftover trash entry was not finished", left, err)
+	if left, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, nativeNamespace(504), 1, strings.Repeat("a", 64)); err != nil || left.Found {
+		t.Fatal("an unrecognised trash entry blocked the removal", left, err)
 	}
-	if _, err := os.Lstat(checkpointPath + "/.portal-checkpoints/" + nativeNamespace(504) + ".tar.deleting"); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("the leftover trash entry remains", err)
+	if _, err := os.Lstat(dir + nativeNamespace(504) + ".tar.deleting"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the unrecognised trash entry was not moved aside", err)
 	}
-	gone, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes)
+	if moved, err := filepath.Glob(dir + nativeNamespace(504) + ".tar.deleting.quarantine-*"); err != nil || len(moved) != 1 {
+		t.Fatal("the unrecognised trash entry was not quarantined", moved, err)
+	}
+	// A trash entry that is this checkpoint's archive (matching size and digest) is finished by the next removal,
+	// even beside a live archive of the same name.
+	if err := os.WriteFile(dir+keep.CheckpointID+".tar.deleting", keepBefore, 0400); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, keep.CheckpointID, keepSnapshot.ArchiveBytes, keepSnapshot.ManifestSHA256); err != nil {
+		t.Fatal("a matching leftover beside a live archive", err)
+	}
+	for _, name := range []string{".tar", ".tar.deleting"} {
+		if _, err := os.Lstat(dir + keep.CheckpointID + name); !errors.Is(err, os.ErrNotExist) {
+			t.Fatal("a matching leftover was not removed", name, err)
+		}
+	}
+	gone, err := checkpointRoot.RemoveCheckpointArchive(context.Background(), checkpointIdentity, request.CheckpointID, checkpointSnapshot.ArchiveBytes, checkpointSnapshot.ManifestSHA256)
 	if err != nil || gone.Found {
 		t.Fatalf("removing an absent archive: %+v %v", gone, err)
 	}

@@ -28,6 +28,8 @@ var (
 	ErrArchiveMismatch = errors.New("checkpoint archive does not match the claimed file")
 	// ErrArchiveRemovalIncomplete is a removal whose unlink returned but whose absence could not be confirmed.
 	ErrArchiveRemovalIncomplete = errors.New("checkpoint archive removal requires reconciliation")
+	// ErrArchiveRenameUnsupported is a checkpoint filesystem without a no-replace rename, which the safe removal needs.
+	ErrArchiveRenameUnsupported = errors.New("checkpoint filesystem does not support a no-replace rename")
 )
 
 // CheckpointArchive is an observation of one retained checkpoint archive file. Found is false when no such file

@@ -29,6 +29,8 @@ type fakeDeleteNative struct {
 	// afterRemoveErr removes the file and then fails (a crash after the unlink, before the settlement).
 	afterRemoveErr error
 	inspectErr     error
+	// trash holds the checkpoint ids whose archive was left under a trash name by an interrupted removal.
+	trash map[string]bool
 }
 
 func (n *fakeDeleteNative) InspectCheckpointArchive(_ context.Context, id string) (data.CheckpointArchive, error) {
@@ -42,7 +44,7 @@ func (n *fakeDeleteNative) InspectCheckpointArchive(_ context.Context, id string
 	return data.CheckpointArchive{Found: ok, Bytes: size}, nil
 }
 
-func (n *fakeDeleteNative) RemoveCheckpointArchive(_ context.Context, id string, archiveBytes int64) (data.CheckpointArchive, error) {
+func (n *fakeDeleteNative) RemoveCheckpointArchive(_ context.Context, id string, archiveBytes int64, _ string) (data.CheckpointArchive, error) {
 	n.mu.Lock()
 	n.removes++
 	hook := n.onRemove
@@ -54,6 +56,9 @@ func (n *fakeDeleteNative) RemoveCheckpointArchive(_ context.Context, id string,
 	defer n.mu.Unlock()
 	if n.removeErr != nil {
 		return data.CheckpointArchive{}, n.removeErr
+	}
+	if n.trash[id] {
+		delete(n.trash, id)
 	}
 	size, ok := n.files[id]
 	if !ok {
@@ -645,6 +650,70 @@ func TestDeleteCheckpointResolvesEveryCrashWindow(t *testing.T) {
 		}
 		if state, _ := d.commandRow(t, d.command.EffectID); state != "unknown" {
 			t.Fatalf("command row %q", state)
+		}
+	})
+}
+
+// An earlier claim marked the row deleted and its removal never finished; the fence then moved and the Portal signed
+// a new attempt. The retry must finish the removal, trash leftover included, settle both rows and only then answer.
+// Fails if the retry answers absent without touching the disk, which leaks the archive for ever.
+func TestDeleteCheckpointRetryFinishesAnUnprovenEarlierClaim(t *testing.T) {
+	for _, leftover := range []bool{false, true} {
+		name := "archive"
+		if leftover {
+			name = "trash leftover"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := newDeleteCheckpointFixture(t)
+			d.native.removeErr = errors.New("crashed before the unlink")
+			if _, err := d.dispatch(); err == nil {
+				t.Fatal("a failed removal settled")
+			}
+			if leftover {
+				// The interrupted removal had already moved the archive to its trash name.
+				d.native.trash = map[string]bool{d.checkpoint.CheckpointID: true}
+			}
+			d.native.removeErr = nil
+			// The fence moves: a newer operation of the installation, and a retry under a new effect on a new host.
+			c, raw, sig := d.build(t, 3, 5600, func(c *control.DeleteCheckpointCommand) {
+				c.InstallationFence, c.TargetGeneration = "95", "95"
+			})
+			receipt := mustDeleteReceipt(t)(d.dispatchCommand(raw, sig))
+			if receipt.Outcome != DeleteOutcomeRemoved || !receipt.ArchiveFound || !DeleteCheckpointReceiptMatchesCommand(receipt, c) {
+				t.Fatalf("the retry did not finish the removal: %+v", receipt)
+			}
+			if d.native.has(d.checkpoint.CheckpointID) || d.native.trash[d.checkpoint.CheckpointID] {
+				t.Fatal("the archive or its leftover was leaked")
+			}
+			if state, _ := d.commandRow(t, d.command.EffectID); state != "applied" {
+				t.Fatalf("the earlier claim stayed %q", state)
+			}
+			if state, _ := d.commandRow(t, c.EffectID); state != "applied" {
+				t.Fatalf("the retry row is %q", state)
+			}
+			var raw1 string
+			if err := d.store.db.QueryRow(`SELECT receipt_json FROM runner_commands WHERE effect_id=?`, d.command.EffectID).Scan(&raw1); err != nil {
+				t.Fatal(err)
+			}
+			settled, err := ParseDeleteCheckpointReceipt([]byte(raw1))
+			if err != nil || !DeleteCheckpointReceiptMatchesCommand(settled, d.command) || settled.Outcome != DeleteOutcomeRemoved {
+				t.Fatalf("the earlier claim's receipt: %+v %v", settled, err)
+			}
+			if state, rev := d.checkpointRow(t); state != "deleted" || rev != 3 {
+				t.Fatalf("checkpoint row %s/%d", state, rev)
+			}
+		})
+	}
+	t.Run("a settled earlier claim answers absent without touching the disk", func(t *testing.T) {
+		d := newDeleteCheckpointFixture(t)
+		mustDeleteReceipt(t)(d.dispatch())
+		_, removes := d.native.counts()
+		_, raw, sig := d.build(t, 3, 5700, func(c *control.DeleteCheckpointCommand) { c.InstallationFence, c.TargetGeneration = "95", "95" })
+		if receipt := mustDeleteReceipt(t)(d.dispatchCommand(raw, sig)); receipt.Outcome != DeleteOutcomeAbsent {
+			t.Fatalf("receipt: %+v", receipt)
+		}
+		if _, after := d.native.counts(); after != removes {
+			t.Fatal("a proven deletion was removed again")
 		}
 	})
 }

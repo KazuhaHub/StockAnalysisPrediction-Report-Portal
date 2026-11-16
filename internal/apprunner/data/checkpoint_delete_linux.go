@@ -4,7 +4,12 @@ package data
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
+	"io"
+	"log"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -13,23 +18,35 @@ import (
 // InspectCheckpointArchive reports whether the retained archive of one checkpoint exists, and its size. It changes
 // nothing, not even a missing checkpoint directory. A file that is not a regular, singly linked file is refused.
 func (r *Root) InspectCheckpointArchive(ctx context.Context, expected RootIdentity, checkpointID string) (CheckpointArchive, error) {
-	return r.checkpointArchive(ctx, expected, checkpointID, -1)
+	return r.checkpointArchive(ctx, expected, checkpointID, -1, "")
 }
 
 // RemoveCheckpointArchive deletes the retained archive of one checkpoint: the file is opened relative to the
 // verified checkpoint directory without following links, must be a regular file with one link and exactly
-// archiveBytes, and is then unlinked, the directory synced and the absence confirmed. A file that is already gone
-// is reported with Found false, which is how an interrupted removal resolves. The archive is not read: its name is
-// the checkpoint's identifier and re-reading it would only cost I/O.
-func (r *Root) RemoveCheckpointArchive(ctx context.Context, expected RootIdentity, checkpointID string, archiveBytes int64) (CheckpointArchive, error) {
-	if archiveBytes <= 0 {
+// archiveBytes, and is then removed through a trash name (see checkpointArchive), the directory synced and the
+// absence confirmed. A file that is already gone is reported with Found false, which is how an interrupted removal
+// resolves. manifestSHA256 is the SHA-256 of the whole archive file as the checkpoint row records it; it identifies
+// a leftover trash entry of an interrupted removal, which is hashed once, and is not used on the normal path, where
+// re-reading the archive would only cost I/O.
+func (r *Root) RemoveCheckpointArchive(ctx context.Context, expected RootIdentity, checkpointID string, archiveBytes int64, manifestSHA256 string) (CheckpointArchive, error) {
+	if archiveBytes <= 0 || !sha256Value(manifestSHA256) {
 		return CheckpointArchive{}, ErrArchiveMismatch
 	}
-	return r.checkpointArchive(ctx, expected, checkpointID, archiveBytes)
+	return r.checkpointArchive(ctx, expected, checkpointID, archiveBytes, manifestSHA256)
 }
 
+const archiveTrashSuffix = ".deleting"
+
 // checkpointArchive inspects (remove < 0) or removes (remove is the expected size) the archive.
-func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, checkpointID string, remove int64) (CheckpointArchive, error) {
+//
+// Removal never unlinks by the archive's own name, which could be swapped between the checks and the unlink: the
+// verified file is first renamed to a fixed trash name without replacing anything, identified again by device and
+// inode against the verified descriptor, and only then unlinked. A different file is moved back, never deleted.
+// A trash entry that already exists is the leftover of an interrupted removal or something else: it is unlinked only
+// when it is a regular, singly linked file of the claimed size whose digest is the checkpoint's recorded digest, and
+// is otherwise moved aside under a unique quarantine name and logged, so it can neither be deleted wrongly nor block
+// this removal for ever. Without a no-replace rename the removal is refused with ErrArchiveRenameUnsupported.
+func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, checkpointID string, remove int64, manifest string) (CheckpointArchive, error) {
 	var zero CheckpointArchive
 	if r == nil || !namespaceID.MatchString(checkpointID) || !expected.valid() {
 		return zero, ErrUnsafe
@@ -52,20 +69,14 @@ func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, che
 	}
 	defer directory.Close()
 	name := checkpointID + ".tar"
+	trash := name + archiveTrashSuffix
+	if remove >= 0 {
+		if err := settleLeftoverTrash(ctx, directory, trash, remove, manifest); err != nil {
+			return zero, err
+		}
+	}
 	fd, err := unix.Openat(int(directory.Fd()), name, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if errors.Is(err, unix.ENOENT) {
-		if remove >= 0 {
-			// An interrupted removal may have moved the archive to its trash name and not unlinked it yet.
-			var leftover unix.Stat_t
-			if unix.Fstatat(int(directory.Fd()), name+".deleting", &leftover, unix.AT_SYMLINK_NOFOLLOW) == nil {
-				if leftover.Mode&unix.S_IFMT != unix.S_IFREG || leftover.Nlink != 1 || leftover.Size != remove {
-					return zero, ErrArchiveMismatch
-				}
-				if err := r.finishTrash(directory, name+".deleting", leftover, name); err != nil {
-					return zero, err
-				}
-			}
-		}
 		return zero, nil
 	}
 	if err != nil {
@@ -87,44 +98,93 @@ func (r *Root) checkpointArchive(ctx context.Context, expected RootIdentity, che
 	if err := ctx.Err(); err != nil {
 		return zero, err
 	}
-	// Unlink only the file that was verified. A name can be swapped between the checks above and an unlink by name,
-	// so the file is first moved to a fixed trash name (without replacing anything), identified again by device and
-	// inode against the verified descriptor, and only then unlinked. A different file is moved back, never deleted.
-	trash := name + ".deleting"
-	if err := unix.Renameat2(int(directory.Fd()), name, int(directory.Fd()), trash, unix.RENAME_NOREPLACE); err != nil {
-		if errors.Is(err, unix.ENOENT) {
-			return found, r.finishTrash(directory, trash, stat, name)
-		}
+	if err := renameNoReplace(directory, name, trash); err != nil {
 		return zero, err
 	}
-	if err := r.finishTrash(directory, trash, stat, name); err != nil {
+	var moved unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), trash, &moved, unix.AT_SYMLINK_NOFOLLOW); err != nil ||
+		moved.Mode&unix.S_IFMT != unix.S_IFREG || moved.Nlink != 1 || moved.Dev != stat.Dev || moved.Ino != stat.Ino {
+		// Not the file that was verified: put whatever was moved back and refuse.
+		_ = renameNoReplace(directory, trash, name)
+		return zero, ErrArchiveMismatch
+	}
+	if err := unix.Unlinkat(int(directory.Fd()), trash, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+		return zero, err
+	}
+	if err := confirmArchiveGone(directory, name, trash); err != nil {
 		return zero, err
 	}
 	return found, nil
 }
 
-// finishTrash unlinks the trash name when it is the verified file (same device and inode, a regular file with one
-// link), syncs the directory and confirms that neither name remains. A trash entry that is another file is moved back
-// to the archive name when that is free and reported as a mismatch. A missing trash name is an interrupted earlier
-// attempt that already finished the unlink.
-func (r *Root) finishTrash(directory *os.File, trash string, verified unix.Stat_t, name string) error {
-	var current unix.Stat_t
-	err := unix.Fstatat(int(directory.Fd()), trash, &current, unix.AT_SYMLINK_NOFOLLOW)
-	if err == nil {
-		if current.Mode&unix.S_IFMT != unix.S_IFREG || current.Nlink != 1 || current.Dev != verified.Dev || current.Ino != verified.Ino {
-			_ = unix.Renameat2(int(directory.Fd()), trash, int(directory.Fd()), name, unix.RENAME_NOREPLACE)
-			return ErrArchiveMismatch
-		}
-		if err := unix.Unlinkat(int(directory.Fd()), trash, 0); err != nil && !errors.Is(err, unix.ENOENT) {
-			return err
-		}
-	} else if !errors.Is(err, unix.ENOENT) {
+func renameNoReplace(directory *os.File, from, to string) error {
+	err := unix.Renameat2(int(directory.Fd()), from, int(directory.Fd()), to, unix.RENAME_NOREPLACE)
+	if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOSYS) {
+		return ErrArchiveRenameUnsupported
+	}
+	return err
+}
+
+// settleLeftoverTrash deals with an existing trash entry before a removal starts: unlink it when it is this
+// checkpoint's archive, quarantine it when it is anything else.
+func settleLeftoverTrash(ctx context.Context, directory *os.File, trash string, bytes int64, manifest string) error {
+	fd, err := unix.Openat(int(directory.Fd()), trash, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if err != nil {
+		return quarantineTrash(directory, trash)
+	}
+	file := os.NewFile(uintptr(fd), "runner-checkpoint-leftover")
+	if file == nil {
+		return ErrUnsafe
+	}
+	defer file.Close()
+	var stat unix.Stat_t
+	if err := unix.Fstat(fd, &stat); err != nil || stat.Mode&unix.S_IFMT != unix.S_IFREG || stat.Nlink != 1 || stat.Size != bytes {
+		return quarantineTrash(directory, trash)
+	}
+	sum := sha256.New()
+	if n, err := io.Copy(sum, io.LimitReader(file, bytes+1)); err != nil || n != bytes {
+		return quarantineTrash(directory, trash)
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if hex.EncodeToString(sum.Sum(nil)) != manifest {
+		return quarantineTrash(directory, trash)
+	}
+	// The digest matched this descriptor, but a name can still be swapped: unlink only if the name still is that file.
+	var current unix.Stat_t
+	if err := unix.Fstatat(int(directory.Fd()), trash, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil || current.Dev != stat.Dev || current.Ino != stat.Ino {
+		return quarantineTrash(directory, trash)
+	}
+	if err := unix.Unlinkat(int(directory.Fd()), trash, 0); err != nil && !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	return directory.Sync()
+}
+
+// quarantineTrash moves an unrecognised trash entry to a unique name, never deleting it.
+func quarantineTrash(directory *os.File, trash string) error {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return err
+	}
+	to := trash + ".quarantine-" + hex.EncodeToString(suffix[:])
+	if err := renameNoReplace(directory, trash, to); err != nil {
+		return err
+	}
+	log.Printf("checkpoint archive removal: an unrecognised %s was moved aside to %s", trash, to)
+	return directory.Sync()
+}
+
+// confirmArchiveGone syncs the directory and confirms that neither name remains.
+func confirmArchiveGone(directory *os.File, names ...string) error {
 	if err := directory.Sync(); err != nil {
 		return err
 	}
-	for _, n := range []string{name, trash} {
+	for _, n := range names {
 		var after unix.Stat_t
 		if err := unix.Fstatat(int(directory.Fd()), n, &after, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
 			return ErrArchiveRemovalIncomplete

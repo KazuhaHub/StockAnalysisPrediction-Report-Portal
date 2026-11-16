@@ -55,6 +55,6 @@ func (*Root) ReadSchemaMarker(context.Context, RootIdentity, string, uint32) (Sc
 func (*Root) InspectCheckpointArchive(context.Context, RootIdentity, string) (CheckpointArchive, error) {
 	return CheckpointArchive{}, ErrUnsupported
 }
-func (*Root) RemoveCheckpointArchive(context.Context, RootIdentity, string, int64) (CheckpointArchive, error) {
+func (*Root) RemoveCheckpointArchive(context.Context, RootIdentity, string, int64, string) (CheckpointArchive, error) {
 	return CheckpointArchive{}, ErrUnsupported
 }

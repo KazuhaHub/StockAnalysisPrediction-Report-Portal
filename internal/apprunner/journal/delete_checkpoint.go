@@ -66,7 +66,8 @@ type DeleteCheckpointNative interface {
 	InspectCheckpointArchive(ctx context.Context, checkpointID string) (data.CheckpointArchive, error)
 	// RemoveCheckpointArchive removes the archive, which must be a regular, singly linked file of exactly
 	// archiveBytes, and confirms its absence. An archive that is already gone is reported with Found false.
-	RemoveCheckpointArchive(ctx context.Context, checkpointID string, archiveBytes int64) (data.CheckpointArchive, error)
+	// manifestSHA256 is the SHA-256 of the archive file, used to identify a leftover of an interrupted removal.
+	RemoveCheckpointArchive(ctx context.Context, checkpointID string, archiveBytes int64, manifestSHA256 string) (data.CheckpointArchive, error)
 }
 
 type rootDeleteCheckpointNative struct {
@@ -86,11 +87,11 @@ func (n rootDeleteCheckpointNative) InspectCheckpointArchive(ctx context.Context
 	return n.root.InspectCheckpointArchive(ctx, n.pin, id)
 }
 
-func (n rootDeleteCheckpointNative) RemoveCheckpointArchive(ctx context.Context, id string, archiveBytes int64) (data.CheckpointArchive, error) {
+func (n rootDeleteCheckpointNative) RemoveCheckpointArchive(ctx context.Context, id string, archiveBytes int64, manifestSHA256 string) (data.CheckpointArchive, error) {
 	if n.root == nil {
 		return data.CheckpointArchive{}, ErrDeleteCheckpointUnavailable
 	}
-	return n.root.RemoveCheckpointArchive(ctx, n.pin, id, archiveBytes)
+	return n.root.RemoveCheckpointArchive(ctx, n.pin, id, archiveBytes, manifestSHA256)
 }
 
 type deleteCheckpointClaim struct {
@@ -443,7 +444,7 @@ func (s *Store) beginDeleteCheckpoint(ctx context.Context, raw, signature []byte
 		return zero, ErrDeleteCheckpointUnavailable
 	}
 	intent := deleteCheckpointIntent{full: c, raw: bytes.Clone(raw), signature: bytes.Clone(signature), marker: marker, markerRaw: string(markerRaw)}
-	outcome, err := s.deleteCheckpointDecision(ctx, tx, c, native)
+	outcome, finishEarlier, err := s.deleteCheckpointDecision(ctx, tx, c, native)
 	if err != nil {
 		return zero, err
 	}
@@ -459,12 +460,14 @@ func (s *Store) beginDeleteCheckpoint(ctx context.Context, raw, signature []byte
 		if err := insert("unknown", string(markerRaw)); err != nil {
 			return zero, err
 		}
-		changed, err := tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='deleted',revision=revision+1,updated_ms=? WHERE id=? AND state='verified'`, now, p.CheckpointID)
-		if err != nil {
-			return zero, err
-		}
-		if n, err := changed.RowsAffected(); err != nil || n != 1 {
-			return zero, fmt.Errorf("delete-checkpoint claim rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
+		if !finishEarlier {
+			changed, err := tx.ExecContext(ctx, `UPDATE runner_checkpoints SET state='deleted',revision=revision+1,updated_ms=? WHERE id=? AND state='verified'`, now, p.CheckpointID)
+			if err != nil {
+				return zero, err
+			}
+			if n, err := changed.RowsAffected(); err != nil || n != 1 {
+				return zero, fmt.Errorf("delete-checkpoint claim rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
+			}
 		}
 	} else {
 		// Settled in the claim transaction: nothing native is done, so the verdict is final.
@@ -501,49 +504,59 @@ func (s *Store) beginDeleteCheckpoint(ctx context.Context, raw, signature []byte
 // proceed, or the outcome that settles the effect in the claim transaction. Identity is checked first, against the
 // fields every state carries; the manifest and size, which only a verified checkpoint has, are checked once the state
 // is known to be verified.
-func (s *Store) deleteCheckpointDecision(ctx context.Context, tx *sql.Tx, c control.DeleteCheckpointCommand, native DeleteCheckpointNative) (string, error) {
+func (s *Store) deleteCheckpointDecision(ctx context.Context, tx *sql.Tx, c control.DeleteCheckpointCommand, native DeleteCheckpointNative) (outcome string, finishEarlier bool, err error) {
 	p := c.Payload
 	row, err := loadCheckpointRow(ctx, tx, p.CheckpointID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if row == nil {
 		// A fresh host: the old host's checkpoint was never recorded here. With no file there is nothing to retire.
 		// A file with no record is never deleted by the runner.
 		if native == nil {
-			return "", ErrDeleteCheckpointUnavailable
+			return "", false, ErrDeleteCheckpointUnavailable
 		}
 		archive, err := native.InspectCheckpointArchive(ctx, p.CheckpointID)
 		if err != nil {
-			return "", fmt.Errorf("inspect unrecorded archive: %w", err)
+			return "", false, fmt.Errorf("inspect unrecorded archive: %w", err)
 		}
 		if archive.Found {
-			return DeleteOutcomeUnrecorded, nil
+			return DeleteOutcomeUnrecorded, false, nil
 		}
-		return DeleteOutcomeAbsent, nil
+		return DeleteOutcomeAbsent, false, nil
 	}
 	if row.namespace != p.NamespaceID || row.installation != c.InstallationID || row.operation != p.SourceOperationID ||
 		row.release != p.ReleaseSHA256 || row.format != mustDataInt(p.DataFormat) || row.writer != mustDataInt(p.WriterFence) {
-		return DeleteOutcomeIdentityMismatch, nil
+		return DeleteOutcomeIdentityMismatch, false, nil
 	}
 	switch row.state {
 	case "preparing", "review_required":
-		return DeleteOutcomeNotVerified, nil
+		return DeleteOutcomeNotVerified, false, nil
 	case "restoring":
-		return DeleteOutcomeInUse, nil
+		return DeleteOutcomeInUse, false, nil
 	case "deleted":
-		// Deleted by another effect: this one has nothing left to retire. The same effect's own replay never gets
-		// here, because its command row already exists.
-		return DeleteOutcomeAbsent, nil
+		// Deleted by another effect. When that effect's removal is proven (its row is settled) there is nothing left
+		// to retire. When an earlier claim marked the row deleted and its removal was never proven (a claim whose
+		// effect is still unknown, for instance after the installation's fence moved and the Portal signed a new
+		// attempt), the archive, or its trash entry, may still be on disk: this effect finishes that removal under
+		// its own claim and settles the earlier one with it, before it answers.
+		var unproven int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_commands WHERE kind='delete-checkpoint' AND state='unknown' AND json_extract(receipt_json,'$.checkpoint_id')=?`, p.CheckpointID).Scan(&unproven); err != nil {
+			return "", false, err
+		}
+		if unproven != 0 {
+			return "", true, nil
+		}
+		return DeleteOutcomeAbsent, false, nil
 	case "verified":
 	default:
-		return DeleteOutcomeNotVerified, nil
+		return DeleteOutcomeNotVerified, false, nil
 	}
 	if !row.manifest.Valid || row.manifest.String != p.ManifestSHA256 || row.bytes != mustDataInt(p.ArchiveBytes) {
-		return DeleteOutcomeIdentityMismatch, nil
+		return DeleteOutcomeIdentityMismatch, false, nil
 	}
 	if row.revision != 2 && row.revision != 4 {
-		return DeleteOutcomeNotVerified, nil
+		return DeleteOutcomeNotVerified, false, nil
 	}
 	// Defence in depth: the Portal never selects the newest verified checkpoint of a namespace that still exists. The
 	// order is created_ms, newer first, then checkpoint id, smaller first (the order validateCheckpointRecord reads
@@ -553,15 +566,15 @@ func (s *Store) deleteCheckpointDecision(ctx context.Context, tx *sql.Tx, c cont
 	var newer, live int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_checkpoints WHERE data_namespace_id=? AND state='verified' AND id<>? AND (created_ms>? OR (created_ms=? AND id<?))`,
 		row.namespace, p.CheckpointID, row.created, row.created, p.CheckpointID).Scan(&newer); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runner_resources WHERE data_namespace_id=? AND kind='volume' AND observed_state<>'absent'`, row.namespace).Scan(&live); err != nil {
-		return "", err
+		return "", false, err
 	}
 	if newer == 0 && live != 0 {
-		return DeleteOutcomeLatest, nil
+		return DeleteOutcomeLatest, false, nil
 	}
-	return "", nil
+	return "", false, nil
 }
 
 func deleteCheckpointReceiptFor(intent deleteCheckpointIntent, outcome string, found bool, observed, settled int64) DeleteCheckpointReceipt {
@@ -627,10 +640,71 @@ func (s *Store) settleDeleteCheckpoint(ctx context.Context, intent deleteCheckpo
 	if n, err := changed.RowsAffected(); err != nil || n != 1 {
 		return zero, fmt.Errorf("delete-checkpoint settlement rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
 	}
+	// An earlier claim of the same checkpoint that never reached a verdict is finished by this removal: the archive
+	// it was meant to remove is gone now, so it settles with the same observation.
+	if err := settleEarlierDeleteCheckpointClaims(ctx, tx, deployment, c, archive, receipt, now); err != nil {
+		return zero, err
+	}
 	if err := tx.Commit(); err != nil {
 		return zero, err
 	}
 	return receipt, nil
+}
+
+// settleEarlierDeleteCheckpointClaims settles every other unknown claim of the checkpoint the command names. The
+// gate is held, so none of them is running. Their receipts are built from their own claim markers and rows.
+func settleEarlierDeleteCheckpointClaims(ctx context.Context, tx *sql.Tx, deployment Deployment, c control.DeleteCheckpointCommand, archive data.CheckpointArchive, own DeleteCheckpointReceipt, now int64) error {
+	rows, err := tx.QueryContext(ctx, `SELECT effect_id FROM runner_commands WHERE kind='delete-checkpoint' AND state='unknown' AND effect_id<>? AND json_extract(receipt_json,'$.checkpoint_id')=?`,
+		c.EffectID, c.Payload.CheckpointID)
+	if err != nil {
+		return err
+	}
+	var earlier []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		earlier = append(earlier, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, id := range earlier {
+		row, err := loadImportRow(ctx, tx, id)
+		if err != nil || row == nil {
+			return fmt.Errorf("earlier delete-checkpoint claim: %w", ErrFenceReconciliation)
+		}
+		var claim deleteCheckpointClaim
+		if !canonicalDataJSON(row.receipt, &claim) || !validDeleteCheckpointClaim(claim) || claim.CheckpointID != c.Payload.CheckpointID {
+			return fmt.Errorf("earlier delete-checkpoint claim marker: %w", ErrFenceReconciliation)
+		}
+		claimed := mustDataInt(claim.ClaimedMS)
+		observed := maxInt64(mustDataInt(own.ObservedMS), claimed)
+		receipt := DeleteCheckpointReceipt{
+			Format: deleteCheckpointReceiptFormat, Claim: claim, DeploymentID: deployment.DeploymentID, ControllerEpoch: row.epoch,
+			InstallationID: row.installation, OperationID: row.operation, TargetGeneration: strconv.FormatInt(row.generation, 10), Stage: row.stage,
+			EffectID: id, PayloadSHA256: row.payload, RecoverySetID: claim.RecoverySetID, CheckpointID: claim.CheckpointID, NamespaceID: claim.NamespaceID,
+			ManifestSHA256: claim.ManifestSHA256, ArchiveBytes: claim.ArchiveBytes, Outcome: DeleteOutcomeRemoved, ArchiveFound: archive.Found,
+			ObservedMS: strconv.FormatInt(observed, 10), SettledMS: strconv.FormatInt(maxInt64(now, observed), 10),
+		}
+		encoded, err := json.Marshal(receipt)
+		if err != nil || len(encoded) > 16384 || !validDeleteCheckpointReceipt(receipt) {
+			return fmt.Errorf("earlier delete-checkpoint receipt: %w", ErrFenceReconciliation)
+		}
+		changed, err := tx.ExecContext(ctx, `UPDATE runner_commands SET state='applied',receipt_json=?,updated_ms=? WHERE effect_id=? AND state='unknown' AND receipt_json=? AND ack_attempted_ms IS NULL`,
+			string(encoded), now, id, row.receipt)
+		if err != nil {
+			return err
+		}
+		if n, err := changed.RowsAffected(); err != nil || n != 1 {
+			return fmt.Errorf("earlier delete-checkpoint settlement rows=%d err=%v: %w", n, err, ErrFenceReconciliation)
+		}
+	}
+	return nil
 }
 
 // deleteCheckpointTimeout bounds the native removal of one claimed deletion: a stat, an unlink and a directory sync.
@@ -673,7 +747,7 @@ func (s *Store) DispatchDeleteCheckpoint(ctx context.Context, raw, signature []b
 	// The claim is committed: the deletion runs to a definite end whatever happens to the connection.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deleteCheckpointTimeout)
 	defer cancel()
-	archive, err := native.RemoveCheckpointArchive(ctx, intent.full.Payload.CheckpointID, mustDataInt(intent.full.Payload.ArchiveBytes))
+	archive, err := native.RemoveCheckpointArchive(ctx, intent.full.Payload.CheckpointID, mustDataInt(intent.full.Payload.ArchiveBytes), intent.full.Payload.ManifestSHA256)
 	if err != nil {
 		// Nothing is settled: the effect stays unknown and the next attempt finishes it. A file that is not the claimed
 		// archive is never touched.
