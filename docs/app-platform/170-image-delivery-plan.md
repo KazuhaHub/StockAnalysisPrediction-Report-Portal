@@ -1005,7 +1005,7 @@ Open owner questions:
 
 1. Should a runner-backed app regain tasks after an access change at the same generation (a
    re-review flow), or stay refused until a restore or update?
-2. What does a policy-revision bump grant?    Today a bump means "everything granted at the
+2. What does a policy-revision bump grant? Today a bump means "everything granted at the
    old revision must be re-approved"; the follow-up lets an approved re-grant carry a running generation
    forward without a new update. The owner has to say whether a re-grant may do that for every capability,
    only for those that already existed at the target revision, or never for capabilities that widen access.
