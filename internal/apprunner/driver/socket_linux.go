@@ -73,18 +73,26 @@ func dockerDialer(path string) func(context.Context, string, string) (net.Conn, 
 }
 
 func rootPeer(conn net.Conn) bool {
+	credential := peerCredential(conn)
+	return credential != nil && credential.Uid == 0
+}
+
+func peerCredential(conn net.Conn) *syscall.Ucred {
 	unix, ok := conn.(*net.UnixConn)
 	if !ok {
-		return false
+		return nil
 	}
 	raw, err := unix.SyscallConn()
 	if err != nil {
-		return false
+		return nil
 	}
 	var credential *syscall.Ucred
 	var credentialErr error
 	err = raw.Control(func(fd uintptr) {
 		credential, credentialErr = syscall.GetsockoptUcred(int(fd), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
 	})
-	return err == nil && credentialErr == nil && credential != nil && credential.Uid == 0
+	if err != nil || credentialErr != nil {
+		return nil
+	}
+	return credential
 }

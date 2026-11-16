@@ -27,16 +27,17 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 	if containers == nil {
 		return ErrInvalidResponse
 	}
+	pass := newCandidateIPCPass()
 	for _, container := range containers {
 		if !containerSHA.MatchString(container.ID) {
 			return ErrInvalidResponse
 		}
-		sources, err := candidateIPCContainerSources(ctx, client, container)
+		sources, err := pass.containerSources(ctx, client, container)
 		if err != nil {
 			return err
 		}
 		for _, source := range sources {
-			referenced, err := candidateIPCReferenced(ctx, path, source)
+			referenced, err := pass.referenced(ctx, path, source)
 			if err != nil {
 				return err
 			}
@@ -44,6 +45,11 @@ func requireNoContainerMountReferences(ctx context.Context, client *http.Client,
 				return ErrContainerConflict
 			}
 		}
+	}
+	// Every inspect that fed the verdict has been answered; if any connection of the pass was not a local
+	// dockerd, the "no overlap" verdict is not trusted.
+	if err := requireDaemonIdentified(client); err != nil {
+		return err
 	}
 	return ctx.Err()
 }

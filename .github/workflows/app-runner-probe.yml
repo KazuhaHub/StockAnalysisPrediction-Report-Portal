@@ -357,6 +357,9 @@ jobs:
           go test -p 2 -race -c -o "$portal_binary" ./internal/app
           chmod 0500 "$portal_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_RUNTIME_CONFIRM_ACCEPTANCE=1 "$portal_binary" -test.v -test.timeout=90s -test.run='^TestPlatformRuntimeEndpointAcceptance$'
+  # Also runs, as root on a real daemon, the overlap checks that need privilege: a bind-backed local volume of a
+  # namespace must conflict, and real bind mounts of the namespace, its parent and a descendant must be seen in
+  # the mount table (TestBindMountAliasIsAnOverlap, which skips without root).
   foreign-container-beside-writer:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -393,6 +396,11 @@ jobs:
           id=$(jq -er '[.[] | select(.Image == "postgres:16-alpine")][0].Id' "$RUNNER_TEMP/foreign/containers.json")
           sudo curl -sSf --unix-socket "$sock" "http://localhost/v1.47/containers/$id/json" | jq '{Id, Name, Mounts}' > "$RUNNER_TEMP/foreign/container-inspect.json"
           docker version --format '{{.Server.Version}} api {{.Server.APIVersion}}' | tee "$RUNNER_TEMP/foreign/docker-version.txt"
+          # The overlap check reads the runner's mount table, so keep it with the payload.
+          sudo cat /proc/self/mountinfo | tee "$RUNNER_TEMP/foreign/mountinfo.txt" > /dev/null
+          sudo readlink /proc/self/root | tee "$RUNNER_TEMP/foreign/proc-self-root.txt"
+      - name: Install the forwarder the peer identity test refuses
+        run: command -v socat >/dev/null || sudo apt-get install -y --no-install-recommends socat
       - name: Run the writer's container inventory beside the service container
         env:
           GOWORK: 'off'
@@ -406,7 +414,7 @@ jobs:
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted \
             PORTAL_APP_RUNNER_FOREIGN_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$sock" \
             "$RUNNER_TEMP/driver-foreign.test" -test.v -test.timeout=60s \
-            -test.run='^(TestDockerAcceptanceForeignContainerBesideDataWriterInventory|TestInventory.*|TestPluginVolume.*|TestVolumeWith.*|TestPendingVolume.*|TestFailedInspect.*|TestLocalAnonymous.*)$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
+            -test.run='^(TestDockerAcceptanceForeignContainerBesideDataWriterInventory|TestDockerAcceptanceBindBackedVolumeIsAConflict|TestBindMountAliasIsAnOverlap|TestDockerAcceptancePeerIdentity|TestInventory.*|TestPluginVolume.*|TestVolumeWith.*|TestPendingVolume.*|TestFailedInspect.*|TestLocalAnonymous.*)$' 2>&1 | tee "$RUNNER_TEMP/foreign/test.log"
       - name: Preserve the daemon payload and the test output
         if: always()
         uses: actions/upload-artifact@v7
