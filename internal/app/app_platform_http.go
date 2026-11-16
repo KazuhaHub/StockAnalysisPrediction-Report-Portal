@@ -141,20 +141,48 @@ func (s *Server) platformBudgetPrecheck(budget *platformDocumentBudget, busy fun
 	}
 }
 
-// platformServiceBudgetPrecheck is platformBudgetPrecheck for a route that carries no session cookie:
-// a service backend authenticates with its own identity, which only the database can verify, so there
-// is nothing to check offline and the 429 is given on fullness alone. It sits outside the per-address
-// rate limit too, because that limit reads a setting from the database on every request, which a
-// refusal must not do. Like the session pre-check it never takes a slot; the handler's own acquire
-// stays authoritative. The 429 tells a caller only that the budget is full.
-func (s *Server) platformServiceBudgetPrecheck(budget *platformDocumentBudget, busy func(http.ResponseWriter), next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if budget.full() {
-			busy(w)
-			return
-		}
-		next(w, r)
+// platformServiceTaskSlots is how many submissions of one installation may be in the admission path at
+// once. The admission serialises on one lock anyway, so more would only queue; two keep a backend's
+// concurrent submissions flowing while one is waiting on the database.
+const platformServiceTaskSlots = 2
+
+// platformInstallationBudgets holds the slots of the session-free task route, one small budget for each
+// installation that has verified work in flight. Scoping them to the verified installation is the
+// point: a slot is taken only after the service identity is verified, so an anonymous caller can never
+// hold one, and one installation's flood or stall can never take another installation's. The map holds
+// an entry only while something is in flight, so it is bounded by the concurrent requests and empty when
+// idle; the zero value is ready to use.
+type platformInstallationBudgets struct {
+	mu   sync.Mutex
+	held map[string]int
+}
+
+func (b *platformInstallationBudgets) acquire(installation string) (func(), bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.held == nil {
+		b.held = map[string]int{}
 	}
+	if b.held[installation] >= platformServiceTaskSlots {
+		return nil, false
+	}
+	b.held[installation]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.held[installation]--; b.held[installation] <= 0 {
+				delete(b.held, installation)
+			}
+		})
+	}, true
+}
+
+func (b *platformInstallationBudgets) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.held)
 }
 
 func platformDocumentHeaders(next http.HandlerFunc) http.HandlerFunc {

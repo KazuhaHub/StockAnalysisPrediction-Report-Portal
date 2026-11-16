@@ -21,7 +21,10 @@ const platformTaskRefusalMax = 256
 
 type platformTaskRefusalEntry struct {
 	installation, generation, policyRevision, epoch string
-	until                                           time.Time
+	// expiresMS is the credential's own expiry, stamped by the database; it is compared with the database's
+	// clock in platformTaskBodyQuotaRefused, never with this process's.
+	expiresMS int64
+	until     time.Time
 }
 
 // platformTaskRefusalCache remembers credentials that were fully verified and then refused for their
@@ -50,12 +53,6 @@ func (c *platformTaskRefusalCache) remember(key [32]byte, grant appplatform.Serv
 	}
 	now := c.clock()
 	until := now.Add(platformTaskRefusalTTL)
-	if credential := time.UnixMilli(expires); credential.Before(until) {
-		until = credential
-	}
-	if !until.After(now) {
-		return
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.entries == nil {
@@ -76,7 +73,7 @@ func (c *platformTaskRefusalCache) remember(key [32]byte, grant appplatform.Serv
 	}
 	c.entries[key] = platformTaskRefusalEntry{
 		installation: grant.InstallationID, generation: grant.Generation,
-		policyRevision: grant.PolicyRevision, epoch: grant.ControllerEpoch, until: until,
+		policyRevision: grant.PolicyRevision, epoch: grant.ControllerEpoch, expiresMS: expires, until: until,
 	}
 }
 
@@ -112,28 +109,69 @@ func (c *platformTaskRefusalCache) size() int {
 	return len(c.entries)
 }
 
-// platformTaskQuotaRefused answers, from one live statement and without a transaction or the admission
-// lock, whether a submission for a remembered credential is refused for the installation's quota. It
-// is true only when the installation is still enabled and ready on the remembered generation, policy
-// revision and epoch, the restore is not paused, the occurrence does not already exist (a replay or a
-// conflict is answered by the full path) and the installation's active task count is at its limit. Any
-// other outcome, including an error, is false and the caller takes the full path.
-func (s *Server) platformTaskQuotaRefused(entry platformTaskRefusalEntry, occurrence string) bool {
+// platformTaskQuotaRefused answers, from a few live statements and without a transaction or the admission
+// lock, whether a submission for a remembered credential would be refused for the installation's quota
+// by the full path. It is true only when the full path would reach its quota count and that count is at
+// its limit, so every check the full path makes before the count is made here too:
+//
+//   - the installation is enabled and ready on the remembered generation, policy revision and epoch, the
+//     restore is not paused and the controller epoch is the remembered one (one statement, which also
+//     carries the active count, whether the occurrence already exists, and whether the activation is
+//     still active);
+//   - the application's business setup bindings are present;
+//   - the handler resolves against the capability grants of the installation's policy revision, and for
+//     an event delivery the delivery payload parses and events.subscribe (and reports.read for a report
+//     event) are granted.
+//
+// Any other outcome, including an error, is false and the caller takes the full path, which then gives
+// its own answer. One divergence remains by design: publisher trust and the signed descriptor, which the
+// full path re-verifies, are not re-read here, so a publisher retired in the last platformTaskRefusalTTL
+// is still told 429 by a credential that was verified before that.
+func (s *Server) platformTaskQuotaRefused(entry platformTaskRefusalEntry, in platformTaskAdmission) bool {
 	var generation, policyRevision int64
-	var epoch string
-	var active, existing int64
+	var epoch, appID string
+	var active, existing, activations int64
 	var current, paused string
-	err := s.st.poolExec().queryRow(`SELECT i.generation,i.policy_revision,i.controller_epoch,
+	e := s.st.poolExec()
+	err := e.queryRow(`SELECT i.app_id,i.generation,i.policy_revision,i.controller_epoch,
 		(SELECT COUNT(*) FROM app_platform_tasks t WHERE t.installation_id=i.id AND t.state NOT IN ('succeeded','failed','cancelled')),
 		(SELECT COUNT(*) FROM app_platform_tasks t WHERE t.installation_id=i.id AND t.occurrence_id=?),
+		(SELECT COUNT(*) FROM app_platform_activations a WHERE a.installation_id=i.id AND a.generation=i.generation AND a.policy_revision=i.policy_revision AND a.state='active'),
 		COALESCE((SELECT v FROM meta WHERE k='app_platform_controller_epoch'),''),
 		COALESCE((SELECT v FROM meta WHERE k='app_platform_restore_paused'),'')
 		FROM app_platform_installations i WHERE i.id=? AND i.desired_state='enabled' AND i.phase='ready'`,
-		occurrence, entry.installation).Scan(&generation, &policyRevision, &epoch, &active, &existing, &current, &paused)
-	if err != nil || existing != 0 || paused != "0" || current != epoch ||
+		in.OccurrenceID, entry.installation).Scan(&appID, &generation, &policyRevision, &epoch, &active, &existing, &activations, &current, &paused)
+	if err != nil || existing != 0 || activations != 1 || paused != "0" || current != epoch ||
 		platformCounterString(generation) != entry.generation ||
 		platformCounterString(policyRevision) != entry.policyRevision || epoch != entry.epoch {
 		return false
 	}
-	return active >= appplatform.MaxInstallationActiveTasks
+	if active < appplatform.MaxInstallationActiveTasks {
+		return false
+	}
+	if missing, err := platformMissingSetupBindings(e, entry.installation, appID, policyRevision); err != nil || len(missing) > 0 {
+		return false
+	}
+	granted, err := platformTaskGrantedCapabilities(e, entry.installation, platformCounterString(policyRevision))
+	if err != nil {
+		return false
+	}
+	resources := []string{"tasks.schedule"}
+	if in.Handler == appplatform.TaskHandlerEvent {
+		delivery, err := appplatform.ParseEventDelivery(in.Payload)
+		if err != nil {
+			return false
+		}
+		resources = append(resources, "events.subscribe")
+		if delivery.EventType == appplatform.EventReportIngested {
+			resources = append(resources, "reports.read")
+		}
+	}
+	for _, resource := range resources {
+		if !granted[resource] {
+			return false
+		}
+	}
+	_, err = appplatform.ResolveTaskHandler(appID, in.Handler, granted)
+	return err == nil
 }

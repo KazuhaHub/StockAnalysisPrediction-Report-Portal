@@ -213,23 +213,17 @@ func TestPlatformTaskRememberedRefusalIsPerCredentialAndLostOnRestart(t *testing
 	}
 }
 
-func TestPlatformTaskRefusalMemoryExpiresWithTheCredentialAndIsBounded(t *testing.T) {
+func TestPlatformTaskRefusalMemoryExpiresAfterItsTimeLimitAndIsBounded(t *testing.T) {
 	var c platformTaskRefusalCache
 	now := time.Unix(1_000, 0)
 	c.now = func() time.Time { return now }
 	grant := appplatform.ServiceIdentityGrant{InstallationID: "i", Generation: "1", PolicyRevision: "1", ControllerEpoch: "e",
-		ExpiresMS: fmt.Sprint(now.Add(500 * time.Millisecond).UnixMilli())}
+		ExpiresMS: fmt.Sprint(now.Add(time.Hour).UnixMilli())}
 	key := platformTaskRefusalKey([]byte("credential"))
 	c.remember(key, grant)
-	if _, ok := c.lookup(key, "i"); !ok {
-		t.Fatal("entry missing")
+	if e, ok := c.lookup(key, "i"); !ok || e.expiresMS != now.Add(time.Hour).UnixMilli() {
+		t.Fatalf("entry missing or without the credential's expiry: %+v %t", e, ok)
 	}
-	now = now.Add(501 * time.Millisecond)
-	if _, ok := c.lookup(key, "i"); ok {
-		t.Fatal("entry outlived the credential")
-	}
-	grant.ExpiresMS = fmt.Sprint(now.Add(time.Hour).UnixMilli())
-	c.remember(key, grant)
 	now = now.Add(platformTaskRefusalTTL + time.Millisecond)
 	if _, ok := c.lookup(key, "i"); ok {
 		t.Fatal("entry outlived its own time limit")
@@ -237,17 +231,16 @@ func TestPlatformTaskRefusalMemoryExpiresWithTheCredentialAndIsBounded(t *testin
 	if _, ok := c.lookup(platformTaskRefusalKey([]byte("other")), "i"); ok {
 		t.Fatal("a different credential found an entry")
 	}
-	grant.ExpiresMS = fmt.Sprint(now.Add(time.Hour).UnixMilli())
 	c.remember(key, grant)
 	if _, ok := c.lookup(key, "another-installation"); ok {
 		t.Fatal("an entry served another installation")
 	}
-	grant.ExpiresMS = "not-a-number"
-	c.remember(platformTaskRefusalKey([]byte("bad")), grant)
+	bad := grant
+	bad.ExpiresMS = "not-a-number"
+	c.remember(platformTaskRefusalKey([]byte("bad")), bad)
 	if _, ok := c.lookup(platformTaskRefusalKey([]byte("bad")), "i"); ok {
 		t.Fatal("an entry was kept for an unreadable expiry")
 	}
-	grant.ExpiresMS = fmt.Sprint(now.Add(time.Hour).UnixMilli())
 	for i := 0; i < platformTaskRefusalMax*3; i++ {
 		c.remember(platformTaskRefusalKey([]byte(fmt.Sprint("c", i))), grant)
 	}

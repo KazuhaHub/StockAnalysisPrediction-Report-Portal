@@ -48,11 +48,9 @@ type Server struct {
 	platformBackendRequests platformDocumentBudget
 	platformNetworkRequests platformDocumentBudget
 	platformNetworkStreams  platformDocumentBudget
-	// platformServiceTasks bounds the session-free task submission route. It is dedicated so a flooding
-	// backend can neither starve the session-facing relays nor be starved by them; the route has no
-	// cookie to pre-check, so it takes its slot itself, after the database-free checks and before the
-	// service identity is verified.
-	platformServiceTasks platformDocumentBudget
+	// platformServiceTasks holds the slots of the session-free task route, one budget per verified installation
+	// (app_platform_http.go).
+	platformServiceTasks platformInstallationBudgets
 	// platformTaskRefusals remembers credentials just refused for their installation's task quota
 	// (app_platform_task_refusal.go).
 	platformTaskRefusals    platformTaskRefusalCache

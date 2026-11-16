@@ -89,6 +89,18 @@ func platformTaskFailure(w http.ResponseWriter, err error) {
 	}
 }
 
+// platformTaskBodyTimeout is how long the route waits for a submission's body, as the backend and network relays do.
+var platformTaskBodyTimeout = 5 * time.Second
+
+// platformTaskReadBody reads the closed 16 KiB body under the read deadline.
+func platformTaskReadBody(w http.ResponseWriter, r *http.Request) ([]byte, error) {
+	controller := http.NewResponseController(w)
+	if err := controller.SetReadDeadline(time.Now().Add(platformTaskBodyTimeout)); err == nil {
+		defer controller.SetReadDeadline(time.Time{})
+	}
+	return io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
+}
+
 func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.Request) {
 	if !platformHTTPPath(r) || !platformValidUUID(r.PathValue("installation")) {
 		platformTaskFailure(w, errAppPlatformTaskUnavailable)
@@ -105,28 +117,25 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer clear(rawIdentity)
-	// Admission comes before any database work: identity verification, the admission lock and the
-	// quota counts are what a flooding backend would otherwise spend on every refusal, on the one CPU
-	// the Portal shares. The checks above read nothing, so a malformed request never holds a slot,
-	// and the deferred release covers every exit path below.
-	release, ok := s.platformServiceTasks.acquire()
-	if !ok {
-		platformJSONBusy(w)
+	// The body is read first, under a read deadline and a size cap, and no slot is held while it is read:
+	// a stalled or slow sender costs a connection, never a slot. A body the transport could not deliver
+	// (a deadline, a cut connection, over the cap) is answered 400 at once, before any database work and
+	// whatever the credential: the answer says nothing about the credential, and the request context is
+	// already cancelled by then. An empty body that did arrive is answered after the credential is
+	// verified, so a stranger and a retired credential get the same unauthenticated answer whether or not
+	// the credential was just remembered.
+	raw, readErr := platformTaskReadBody(w, r)
+	defer clear(raw)
+	if readErr != nil {
+		platformTaskFailure(w, errPlatformManagementInput)
 		return
 	}
-	defer release()
-	// A credential just refused for its installation's task quota is checked against one live statement
-	// first (app_platform_task_refusal.go); anything but a confirmed refusal takes the full path below.
-	var raw []byte
+	bodyOK := strings.TrimSpace(string(raw)) != ""
+	// A credential just refused for its installation's task quota is answered from one live statement
+	// (app_platform_task_refusal.go). The lookup is keyed on the digest of the exact credential bytes, so
+	// an anonymous caller never finds an entry; anything but a confirmed refusal takes the full path.
 	refusalKey := platformTaskRefusalKey(rawIdentity)
-	if entry, ok := s.platformTaskRefusals.lookup(refusalKey, r.PathValue("installation")); ok {
-		var readErr error
-		raw, readErr = io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
-		if readErr != nil || strings.TrimSpace(string(raw)) == "" {
-			platformTaskFailure(w, errPlatformManagementInput)
-			return
-		}
-		defer clear(raw)
+	if entry, ok := s.platformTaskRefusals.lookup(refusalKey, r.PathValue("installation")); ok && bodyOK {
 		if s.platformTaskBodyQuotaRefused(entry, raw) {
 			platformTaskFailure(w, errAppPlatformTaskQuota)
 			return
@@ -138,14 +147,18 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)
 		return
 	}
-	if raw == nil {
-		raw, err = io.ReadAll(http.MaxBytesReader(w, r.Body, 16384))
-		if err != nil || strings.TrimSpace(string(raw)) == "" {
-			platformTaskFailure(w, errPlatformManagementInput)
-			return
-		}
-		defer clear(raw)
+	if !bodyOK {
+		platformTaskFailure(w, errPlatformManagementInput)
+		return
 	}
+	// Admission slots are taken only now, for the verified installation: see platformInstallationBudgets.
+	// The deferred release covers every exit path below.
+	release, ok := s.platformServiceTasks.acquire(grant.InstallationID)
+	if !ok {
+		platformJSONBusy(w)
+		return
+	}
+	defer release()
 	now, err := platformDatabaseNow(s.st.poolExec())
 	if err != nil {
 		platformTaskFailure(w, err)
@@ -186,8 +199,13 @@ func (s *Server) platformTaskBodyQuotaRefused(entry platformTaskRefusalEntry, ra
 	if in.ExpiresMS == 0 {
 		in.ExpiresMS = now + (24 * time.Hour).Milliseconds()
 	}
-	if _, _, err := validatePlatformTaskAdmission(in, now); err != nil {
+	validated, _, err := validatePlatformTaskAdmission(in, now)
+	if err != nil {
 		return false
 	}
-	return s.platformTaskQuotaRefused(entry, in.OccurrenceID)
+	in = validated
+	if entry.expiresMS <= now {
+		return false // the credential's own expiry, in the clock that stamped it
+	}
+	return s.platformTaskQuotaRefused(entry, in)
 }
