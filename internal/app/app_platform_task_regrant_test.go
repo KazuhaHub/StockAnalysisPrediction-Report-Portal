@@ -11,11 +11,16 @@ import (
 
 // A generation-1 task is admitted and its service identity issued only while the capability rows
 // sit at the installation's current policy revision. invalidateAppPlatformPrincipal raises the
-// revision without moving those rows, by design: the app fails closed until its grants are
-// reviewed again. So a task after an access change runs only after a re-grant, which carries the
-// approved rows to the new revision (the recovery actions do exactly this once their review plan
-// is consumed). Runs through the real admit and issue paths, and the facts the task preflight
+// revision without moving those rows, by design: the app fails closed. Step (a) pins that
+// fail-closed behaviour through the real admit and issue paths, and the facts the task preflight
 // reads first.
+//
+// Step (b) is a fixture device, not a production flow: it moves the rows with a raw UPDATE to show
+// that the paths accept rows at the current revision. At the same generation no production re-grant
+// exists for runner-backed apps. The recovery action that carries rows forward
+// (app_platform_recovery_actions.go) applies to static installs only, and the managed restore's
+// resume moves the app to a new generation. After an access change a runner-backed app's tasks stay
+// refused until a managed restore or an update; see doc 170, follow-up.
 func testPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange(t *testing.T, pg bool) {
 	s, installation := platformServiceIdentityFixtureWithDatabase(t, pg)
 	ctx := context.Background()
@@ -65,7 +70,7 @@ func testPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange(t *testing.T,
 	if err := issue(platformFixtureID(7602)); !errors.Is(err, errAppPlatformServiceUnavailable) {
 		t.Fatal("an identity was issued after an access change without a re-grant:", err)
 	}
-	// (b) After the re-grant (the approved rows carried to the new revision) the task runs.
+	// (b) Fixture device only (see above): rows at the current revision are accepted.
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=?,updated_ms=? WHERE installation_id=?`, revision, time.Now().UnixMilli(), installation)
 	if err := admit("after:2"); err != nil {
 		t.Fatal("admission after the re-grant:", err)

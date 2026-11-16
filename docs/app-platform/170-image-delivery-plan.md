@@ -896,14 +896,16 @@ scenario uses fresh Portal identifiers, so it does not collide with earlier fixt
   revision, 1); the grant's own revision must equal it. **This is half of the fix, and the claim is
   narrow.** The Portal requires the capability rows to sit at the installation's current revision, and
   `invalidateAppPlatformPrincipal` raises the revision without moving them, by design: the app fails
-  closed until its grants are reviewed again. A task therefore runs after an access change **only after a
-  re-grant** (a consumed review plan carries the approved rows to the new revision, as the recovery
-  actions do). Tested end to end through the real admit and identity paths at generation 1:
-  `TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange` (refused without a re-grant, admitted
-  and issued after it; the re-grant is the recovery actions' row update, not a user review flow, which the
-  fixtures cannot drive). The runner-side acceptance is tested separately against the Portal's real
-  history and signing for the backend, digest and event handlers
-  (`TestPlatformServiceTaskAfterGrantChange*`).
+  closed. **At the same generation no production re-grant exists for runner-backed apps.** The recovery
+  action that carries capability rows to a new revision applies to static installs only
+  (`runtime_id IS NULL`), and the managed restore's resume moves the app to a new generation. After an
+  access change a runner-backed app's tasks therefore stay refused until a managed restore or an update.
+  The runner relaxation at generation 1 is consequently not reached by any real flow today; it is
+  harmless and kept for the follow-up. Tested through the real admit and identity paths at generation 1:
+  `TestPlatformGenerationOneTaskNeedsAReGrantAfterAnAccessChange` pins the refusal without a re-grant; its
+  second half moves the rows with a raw `UPDATE` as a fixture device only, not as a model of a production
+  flow. The runner-side acceptance is tested separately against the Portal's real history and signing for
+  the backend, digest and event handlers (`TestPlatformServiceTaskAfterGrantChange*`).
   **Not closed at generation 2 and later:** see the follow-up below.
 - **Limit: what the runner verifies of the service identity.** The runner checks the command signature, the
   registration (signature, expiry, tuple) and that the grant's installation, lease, generation, epoch, release
@@ -999,7 +1001,11 @@ Tests it needs, test first:
 - a generation-2 task after an access change plus a re-grant reaches `succeeded` through the fake runner for
   the backend, digest and event handlers (the test that today can only run without the change).
 
-Open owner question: what does a policy-revision bump grant? Today a bump means "everything granted at the
-old revision must be re-approved"; the follow-up lets an approved re-grant carry a running generation
-forward without a new update. The owner has to say whether a re-grant may do that for every capability,
-only for those that already existed at the target revision, or never for capabilities that widen access.
+Open owner questions:
+
+1. Should a runner-backed app regain tasks after an access change at the same generation (a
+   re-review flow), or stay refused until a restore or update?
+2. What does a policy-revision bump grant?    Today a bump means "everything granted at the
+   old revision must be re-approved"; the follow-up lets an approved re-grant carry a running generation
+   forward without a new update. The owner has to say whether a re-grant may do that for every capability,
+   only for those that already existed at the target revision, or never for capabilities that widen access.
