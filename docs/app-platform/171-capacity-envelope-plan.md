@@ -621,21 +621,27 @@ because they share it. No schema, journal or wire change.
   network filesystem (`type` nfs, nfs4, cifs, smb3, smbfs, ceph, 9p, glusterfs, ncpfs or afs, or a `device` starting with `:` or `//`) is another host's
   tree and does not overlap the namespace only when the server is provably not this host and the namespace itself is not on a network filesystem
   (the data root is a local XFS project-quota filesystem, and the mount table's filesystem type for the namespace confirms it). The server is
-  every address named by `addr=` or `ip=` in `o` and the host part of the device (`//host/share`, `host:/path`, `[v6]:/path`), resolved when it is a
-  name. A server that is loopback or unspecified, equals any address of a local interface, or is a name with such an address is an overlap, because a
-  local NFS or SMB server can export the data root back as a "remote" volume. A volume that names no server, a device that cannot be split (bare IPv6),
-  and a name that does not resolve are refused. A block device under `/dev` is judged by what the two devices are built on, read from sysfs
-  (`/sys/dev/block/M:m`): the device itself and every device under it through `slaves/` (multipath paths, device-mapper targets, the `-real`
-  device under a logical volume), and the whole disk that a partition belongs to. Two devices overlap when their chains share a device, or one is the
-  whole disk of a partition of the other; two partitions of one disk do not overlap. A loop device is backed by a file, not a slave: its
-  `loop/backing_file` is judged like any path against the namespace. A device or chain that sysfs cannot give completely (not listed, a slave that
-  cannot be followed, a chain deeper than 16 or wider than 256) is a refusal. A volume with no options, or only options that name no path (a size, a uid, `device=tmpfs`), is
+  every address named by `addr=` or `ip=` in `o` and the host part of the device (`//host/share`, `host:/path`, `[v6]:/path`), and only a
+  literal IP address is accepted: a hostname is refused, because the mount resolves it again and DNS could answer differently then (rebinding), and
+  because resolving it here would hold the resolver. A server that is loopback or the unspecified address, or equals any address of a local
+  interface, is an overlap, since a local NFS or SMB server can export the data root back as a "remote" volume. A volume that names no server and
+  a device that cannot be split (bare IPv6) are refused. A network volume is also refused when the daemon's network namespace
+  (`/proc/<dockerd pid>/ns/net`, for the holders found when its connection was identified) differs from the runner's
+  (`/proc/self/ns/net`), since its address then says nothing about this host. A block device under `/dev` is judged by what the two devices are
+  built on, read from sysfs (`/sys/dev/block/M:m`), and only for device kinds whose sysfs backing is fully described: sd, vd, xvd, nvme, dm, md and
+  loop, with their partitions. Any other kind (nbd, ublk, rbd, zram, optical, ...) is refused on either side. The chain is the device itself and
+  every device under it through `slaves/` (multipath paths, device-mapper targets, the `-real` device under a logical volume), and the whole disk
+  that a partition belongs to. Two devices overlap when their chains share a device, or one is the whole disk of a partition of the other; two
+  partitions of one disk do not overlap. A loop device is backed by a file, not a slave: its `loop/backing_file` is judged like any path against the
+  namespace, and two loop devices (one on each side's chain) that share a backing file overlap, whether the files have the same canonical path or the
+  same place on the mount table. A backing file that ends in ` (deleted)` is refused. A device or chain that sysfs cannot give completely (not
+  listed, a slave that cannot be followed, a chain deeper than 16 or wider than 256) is a refusal. A volume with no options, or only options that name no path (a size, a uid, `device=tmpfs`), is
   judged by the path the list shows. Anything else that names a path or a device (a relative `device`, `LABEL=`, an unknown option with a `/`)
   fails closed. NFS, CIFS and ext4-device volumes elsewhere on the host therefore do not refuse every app. A volume is inspected once per pass whatever the
   number of containers that mount it; a pass over 300 containers on 300 volumes against a daemon on a unix socket took about 35 ms with one
   connection per request, so no connection reuse was added (the 5 s pass deadline is not approached).
 - **Lookups.** The caller stops waiting at its deadline for: the source canonicalisation, the namespace canonicalisation, the mount table
-  read, the block device stat, the sysfs ancestry reads and the DNS lookup of a network volume's server (each runs under the one-in-flight slot
+  read, the block device stat, the sysfs ancestry reads (each runs under the one-in-flight slot
   and is abandoned when the context ends), the `/proc` scan for a connection's holders (checked between processes) and the netlink receive (its
   timeout follows the deadline). A lookup that does not return keeps the slot until it does, and further slotted lookups wait for it or give up
   at their own deadline. What is not abandonable is a single blocked system call inside one of these, which only returns when the kernel does, and
@@ -670,6 +676,11 @@ touches `internal/apprunner/**`. Everywhere else (the unit job runs unprivileged
 - A daemon is recognised by the executable's base name `dockerd` only, and a process the runner cannot read is not one. Snap-packaged Docker
   (its own mount namespace), a containerised daemon, a forwarder and Docker Desktop are unsupported and refused. A pid reused between the
   scan and a later connection is re-checked on that connection by what it holds and runs; a pidfd is not used.
+- Host root, out of scope but recorded: a crafted partition table (a partition that overlaps another is not seen as overlapping by sysfs);
+  mounts ordered so that one covers another in a way the mount table's stacking does not reveal (the overmount ordering); and a loopback iSCSI
+  or similar target, whose device is a plain `sd` node backed by a server on this host. The per-connection `/proc` scan costs about 3 ms on a host
+  with about 200 processes and grows with the number of processes and descriptors, so a loaded host with many processes and a daemon with many
+  descriptors pays more for each new connection; the client's kept-alive connections bound how many a pass makes.
 - Block devices: two logical volumes of one volume group share their physical device in sysfs and are treated as overlapping, because the
   mapping that would tell them apart is not read; a namespace that itself sits on a loop device is not followed to its backing file; a
   filesystem whose mount table device number is not a block device in sysfs (btrfs subvolumes) is refused when a block volume is present.

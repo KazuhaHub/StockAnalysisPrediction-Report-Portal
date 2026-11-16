@@ -21,6 +21,12 @@ const (
 
 var candidateIPCMajMin = regexp.MustCompile(`^[0-9]+:[0-9]+$`)
 
+// candidateIPCBlockKinds are the device kinds whose sysfs backing is fully described (what they are built on is in
+// slaves/, partition or loop/backing_file): SCSI/SATA, NVMe, virtio, Xen, device-mapper, MD RAID and loop,
+// each with its partitions. Anything else (nbd, ublk, rbd, zram, optical, ...) is backed by something sysfs does
+// not describe and is refused.
+var candidateIPCBlockKinds = regexp.MustCompile(`^(sd[a-z]+[0-9]*|vd[a-z]+[0-9]*|xvd[a-z]+[0-9]*|nvme[0-9]+n[0-9]+(p[0-9]+)?|dm-[0-9]+|md[0-9]+(p[0-9]+)?|loop[0-9]+(p[0-9]+)?)$`)
+
 // candidateIPCBlockAncestry is what one block device is built on, read from sysfs.
 //
 //   - exact: the device itself and every device it is stacked on through slaves/ (multipath paths, device-mapper
@@ -70,6 +76,9 @@ func (r *candidateIPCBlockAncestry) visit(dir string, into map[string]struct{}, 
 	if depth > candidateIPCBlockDepth {
 		return errors.New("the block device chain is too deep")
 	}
+	if name := filepath.Base(dir); !candidateIPCBlockKinds.MatchString(name) {
+		return fmt.Errorf("%s is not a block device kind whose backing sysfs describes", name)
+	}
 	raw, err := os.ReadFile(filepath.Join(dir, "dev"))
 	if err != nil {
 		return err
@@ -86,11 +95,14 @@ func (r *candidateIPCBlockAncestry) visit(dir string, into map[string]struct{}, 
 	}
 	into[dev] = struct{}{}
 	if raw, err := os.ReadFile(filepath.Join(dir, "loop", "backing_file")); err == nil {
-		if file := strings.TrimSpace(string(raw)); filepath.IsAbs(file) {
-			r.files = append(r.files, file)
-		} else {
+		file := strings.TrimSpace(string(raw))
+		switch {
+		case strings.HasSuffix(file, " (deleted)"):
+			return fmt.Errorf("loop backing file %q is deleted and cannot be judged", file)
+		case !filepath.IsAbs(file):
 			return fmt.Errorf("loop backing file %q is not absolute", file)
 		}
+		r.files = append(r.files, file)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}

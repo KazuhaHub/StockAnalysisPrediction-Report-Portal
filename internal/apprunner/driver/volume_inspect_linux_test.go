@@ -271,44 +271,28 @@ func fakeBlockDevice(t *testing.T, devices map[string]string) {
 	t.Cleanup(func() { candidateIPCBlockDevice = old })
 }
 
-// fakeNetwork stands in for DNS and the host's interfaces: the host has 10.1.1.1 and fe80::1 and the names
-// resolve as the table says; anything else is unresolvable.
-func fakeNetwork(t *testing.T, names map[string][]string) {
+// fakeNetwork gives the host the addresses 10.1.1.1 and fe80::1.
+func fakeNetwork(t *testing.T) {
 	t.Helper()
-	oldLookup, oldLocal := candidateIPCLookupHost, candidateIPCLocalAddresses
-	candidateIPCLookupHost = func(_ context.Context, host string) ([]net.IP, error) {
-		if ip := net.ParseIP(host); ip != nil {
-			return []net.IP{ip}, nil
-		}
-		addrs, ok := names[host]
-		if !ok {
-			return nil, errors.New("no such host")
-		}
-		var out []net.IP
-		for _, a := range addrs {
-			out = append(out, net.ParseIP(a))
-		}
-		return out, nil
-	}
+	old := candidateIPCLocalAddresses
 	candidateIPCLocalAddresses = func() ([]net.IP, error) { return []net.IP{net.ParseIP("10.1.1.1"), net.ParseIP("fe80::1")}, nil }
-	t.Cleanup(func() { candidateIPCLookupHost, candidateIPCLocalAddresses = oldLookup, oldLocal })
+	t.Cleanup(func() { candidateIPCLocalAddresses = old })
 }
 
 // Network filesystem volumes on another host do not refuse an app; they overlap only a namespace that itself
-// sits on a network filesystem. One whose server is this host (loopback, one of its addresses, a name that
-// resolves to one) exports local data back as a volume and is refused, as is one whose server cannot be told.
+// sits on a network filesystem. One whose server is this host (loopback, one of its addresses) exports local
+// data back as a volume and is refused, as is one whose server is not a literal address: a name is resolved
+// again by the mount, and could answer differently then.
 func TestNetworkFilesystemVolumesDoNotRefuseEveryApp(t *testing.T) {
 	f := newInspectFixture(t)
-	fakeNetwork(t, map[string][]string{"nas.example": {"203.0.113.9"}, "me.example": {"10.1.1.1"}, "both.example": {"203.0.113.9", "10.1.1.1"}, "localhost": {"127.0.0.1", "::1"}})
+	fakeNetwork(t)
 	for name, tc := range map[string]struct {
 		options string
 		want    error
 	}{
 		"nfs on a remote address":              {`{"type":"nfs","o":"addr=198.51.100.7,rw","device":":/export/data"}`, nil},
 		"nfs4 on a remote host in the device":  {`{"type":"nfs4","o":"vers=4","device":"198.51.100.7:/export"}`, nil},
-		"nfs by a leading colon":               {`{"o":"addr=198.51.100.7","device":":/export/data"}`, nil},
-		"cifs by a double slash and a name":    {`{"type":"cifs","o":"username=u","device":"//nas.example/share"}`, nil},
-		"smb3 with an ip option":               {`{"type":"smb3","o":"ip=198.51.100.7","device":"//nas.example/share/sub"}`, nil},
+		"cifs with an ip option and a name":    {`{"type":"smb3","o":"ip=198.51.100.7","device":"//198.51.100.7/share/sub"}`, nil},
 		"nfs on a remote IPv6 address":         {`{"type":"nfs","o":"addr=2001:db8::5","device":":/export"}`, nil},
 		"bracketed IPv6 in the device":         {`{"type":"nfs","device":"[2001:db8::5]:/export"}`, nil},
 		"nfs on loopback":                      {`{"type":"nfs","o":"addr=127.0.0.1","device":":/data"}`, ErrContainerConflict},
@@ -317,10 +301,10 @@ func TestNetworkFilesystemVolumesDoNotRefuseEveryApp(t *testing.T) {
 		"nfs on a local interface address":     {`{"type":"nfs","o":"addr=10.1.1.1","device":":/data"}`, ErrContainerConflict},
 		"nfs on a local IPv6 address":          {`{"type":"nfs","o":"addr=fe80::1","device":":/data"}`, ErrContainerConflict},
 		"nfs on a local address in the device": {`{"type":"nfs","device":"10.1.1.1:/data"}`, ErrContainerConflict},
-		"cifs to a name that resolves locally": {`{"type":"cifs","device":"//me.example/share"}`, ErrContainerConflict},
-		"cifs to localhost":                    {`{"type":"cifs","device":"//localhost/share"}`, ErrContainerConflict},
-		"a name with one local address":        {`{"type":"cifs","device":"//both.example/share"}`, ErrContainerConflict},
-		"an unresolvable name":                 {`{"type":"cifs","device":"//nowhere.example/share"}`, ErrUnavailable},
+		"a hostname in the device":             {`{"type":"cifs","device":"//nas.example/share"}`, ErrContainerConflict},
+		"localhost in the device":              {`{"type":"cifs","device":"//localhost/share"}`, ErrContainerConflict},
+		"a hostname in addr":                   {`{"type":"nfs","o":"addr=nas.example","device":":/export"}`, ErrContainerConflict},
+		"a hostname beside a remote address":   {`{"type":"nfs","o":"addr=198.51.100.7","device":"nas.example:/export"}`, ErrContainerConflict},
 		"no server address at all":             {`{"type":"nfs","device":":/export"}`, ErrContainerConflict},
 		"an ambiguous bare IPv6 device":        {`{"type":"nfs","device":"2001:db8::5:/export"}`, ErrContainerConflict},
 		"a remote option but a local device":   {`{"type":"nfs","o":"addr=198.51.100.7","device":"127.0.0.1:/data"}`, ErrContainerConflict},
@@ -339,6 +323,33 @@ func TestNetworkFilesystemVolumesDoNotRefuseEveryApp(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A network volume mounts in the daemon's network namespace: when it is not the runner's, the address says
+// nothing about this host.
+func TestNetworkVolumeIsRefusedWhenTheDaemonIsInAnotherNetworkNamespace(t *testing.T) {
+	f := newInspectFixture(t)
+	fakeNetwork(t)
+	fakeMountsFor(t, f, "xfs")
+	listing := `[{"Id":"` + strings.Repeat("9", 64) + `","Mounts":[{"Type":"volume","Name":"v","Driver":"local","Source":"` + filepath.Join(f.root, "docker", "v", "_data") + `","Destination":"/v"}]}]`
+	oldNet := daemonSharesNetworkNamespace
+	t.Cleanup(func() { daemonSharesNetworkNamespace = oldNet })
+	run := func(shared bool, options string) error {
+		daemonSharesNetworkNamespace = func(int) bool { return shared }
+		f.volumes["v"] = volumeBody(options)
+		return f.checkWithPeer(listing)
+	}
+	remote := `{"type":"nfs","o":"addr=198.51.100.7","device":":/export"}`
+	if err := run(true, remote); err != nil {
+		t.Fatalf("a remote network volume with a shared network namespace was refused: %v", err)
+	}
+	if err := run(false, remote); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a network volume with the daemon in another network namespace passed: %v", err)
+	}
+	// Only network volumes depend on it.
+	if err := run(false, `null`); err != nil {
+		t.Fatalf("a plain volume was refused for the network namespace: %v", err)
 	}
 }
 
@@ -532,5 +543,120 @@ func TestMountInfoCarriesTheFilesystemType(t *testing.T) {
 	}
 	if _, err := parseCandidateIPCMountInfo([]byte("1 0 8:1 / / rw shared:1 ext4 /dev/vda1 rw\n")); err == nil {
 		t.Fatal("a line without the separator was accepted")
+	}
+}
+
+// checkWithPeer is check against a daemon on a real unix socket, so the connection's peer is identified (as a
+// dockerd: this process stands in for it).
+func (f *inspectFixture) checkWithPeer(listing string) error {
+	dir, err := os.MkdirTemp("/tmp", "portal-inspect-")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.t.Cleanup(func() { os.RemoveAll(dir) })
+	acceptExecutable(f.t, func(string) bool { return true })
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v"+APIVersion+"/containers/json", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(listing)) })
+	mux.HandleFunc("/v"+APIVersion+"/volumes/", func(w http.ResponseWriter, r *http.Request) {
+		body, ok := f.volumes[strings.TrimPrefix(r.URL.Path, "/v"+APIVersion+"/volumes/")]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(body))
+	})
+	socket := filepath.Join(dir, "d.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	server := &http.Server{Handler: mux}
+	go server.Serve(listener)
+	f.t.Cleanup(func() { server.Close() })
+	return requireNoContainerMountReferences(context.Background(), realPeerClient(socket), f.data)
+}
+
+// Two loop devices overlap when they share a backing file, whatever path names it; a deleted backing file
+// cannot be judged and is refused.
+func TestLoopDevicesSharingABackingFileOverlap(t *testing.T) {
+	f := newInspectFixture(t)
+	sys := newSysfs(t)
+	sys.disk("sdd", "8:48")
+	image := filepath.Join(f.root, "images", "data.img")
+	os.MkdirAll(filepath.Dir(image), 0755)
+	os.WriteFile(image, nil, 0600)
+	link := filepath.Join(f.root, "images", "alias.img")
+	os.Symlink(image, link)
+	loopNS := sys.dir("loop5", "7:5") // the namespace's filesystem is on this loop device
+	loopSame := sys.dir("loop6", "7:6")
+	loopAlias := sys.dir("loop7", "7:7")
+	loopOther := sys.dir("loop8", "7:8")
+	loopGone := sys.dir("loop9", "7:9")
+	sys.loop(loopNS, image)
+	sys.loop(loopSame, image)
+	sys.loop(loopAlias, link)
+	sys.loop(loopOther, filepath.Join(f.root, "images", "other.img"))
+	sys.loop(loopGone, image+" (deleted)")
+	fakeBlockDevice(t, map[string]string{"/dev/loop6": "7:6", "/dev/loop7": "7:7", "/dev/loop8": "7:8", "/dev/loop9": "7:9", "/dev/sdd": "8:48"})
+	fakeMountsOn(t, f, "7:5", "xfs")
+	for name, tc := range map[string]struct {
+		device string
+		want   error
+	}{
+		"the same backing file":              {"/dev/loop6", ErrContainerConflict},
+		"the backing file through a symlink": {"/dev/loop7", ErrContainerConflict},
+		"another backing file":               {"/dev/loop8", nil},
+		"a deleted backing file":             {"/dev/loop9", ErrUnavailable},
+		"an unrelated disk":                  {"/dev/sdd", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f.volumes["v"] = volumeBody(`{"type":"ext4","device":"` + tc.device + `"}`)
+			err := f.check(f.listing("v", "local"))
+			if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+				t.Fatalf("want %v, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+// Only device kinds whose sysfs backing is fully described are judged; others are refused.
+func TestBlockDeviceKindAllowList(t *testing.T) {
+	f := newInspectFixture(t)
+	sys := newSysfs(t)
+	sys.disk("sda", "8:0")
+	nodes := map[string]string{
+		"sda": "8:0", "vdb": "252:16", "xvdc": "202:32", "nvme0n1": "259:0", "dm-2": "253:2", "md0": "9:0", "loop3": "7:3",
+		"nbd0": "43:0", "ublkb0": "259:9", "sr0": "11:0", "zram0": "253:5", "rbd0": "251:0",
+	}
+	fake := map[string]string{}
+	for name, dev := range nodes {
+		if name != "sda" {
+			sys.disk(name, dev)
+		}
+		fake["/dev/"+name] = dev
+	}
+	sys.partition("nvme0n1", "nvme0n1p1", "259:1")
+	fake["/dev/nvme0n1p1"] = "259:1"
+	fakeBlockDevice(t, fake)
+	fakeMountsOn(t, f, "8:0", "xfs")
+	ok := []string{"vdb", "xvdc", "nvme0n1", "nvme0n1p1", "dm-2", "md0"}
+	refused := []string{"nbd0", "ublkb0", "sr0", "zram0", "rbd0"}
+	for _, name := range ok {
+		f.volumes["v"] = volumeBody(`{"type":"ext4","device":"/dev/` + name + `"}`)
+		if err := f.check(f.listing("v", "local")); err != nil {
+			t.Fatalf("%s is a described device and must not refuse: %v", name, err)
+		}
+	}
+	for _, name := range refused {
+		f.volumes["v"] = volumeBody(`{"type":"ext4","device":"/dev/` + name + `"}`)
+		if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%s is not a described device kind and must be refused: %v", name, err)
+		}
+	}
+	// The namespace's own device is held to the same list.
+	fakeMountsOn(t, f, "43:0", "xfs")
+	f.volumes["v"] = volumeBody(`{"type":"ext4","device":"/dev/vdb"}`)
+	if err := f.check(f.listing("v", "local")); !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("a namespace on an nbd device passed: %v", err)
 	}
 }

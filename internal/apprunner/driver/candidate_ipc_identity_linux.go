@@ -63,7 +63,6 @@ type candidateIPCPass struct {
 	sources    map[string]candidateIPCResolution
 	namespaces map[string]candidateIPCNamespace
 	volumes    map[string]candidateIPCVolumeAnswer
-	hosts      map[string][]net.IP
 	local      []net.IP
 }
 
@@ -85,7 +84,7 @@ type candidateIPCNamespace struct {
 }
 
 func newCandidateIPCPass() *candidateIPCPass {
-	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]candidateIPCNamespace{}, volumes: map[string]candidateIPCVolumeAnswer{}, hosts: map[string][]net.IP{}}
+	return &candidateIPCPass{sources: map[string]candidateIPCResolution{}, namespaces: map[string]candidateIPCNamespace{}, volumes: map[string]candidateIPCVolumeAnswer{}}
 }
 
 // candidateIPCReferenced reports whether a mount source overlaps the namespace directory path. See
@@ -226,7 +225,7 @@ var candidateIPCNetworkFilesystems = map[string]bool{
 }
 
 // networkVolumeReferences: a volume on a network filesystem mounts another host's tree, so it overlaps the
-// namespace only when the server is provably not this host and the namespace itself sits on a network
+// namespace only when every server is a literal address that is provably not this host and the namespace itself sits on a network
 // filesystem. A server that is this host (loopback, the unspecified address, or any address of a local
 // interface) can export the data root back as a "remote" volume, so it is an overlap; a server that is not named,
 // or whose name does not resolve, cannot be told and is refused. The data root is a local XFS project-quota
@@ -235,29 +234,20 @@ func (p *candidateIPCPass) networkVolumeReferences(ctx context.Context, path str
 	if len(hosts) == 0 || (len(hosts) == 1 && hosts[0] == "") {
 		return true, nil
 	}
+	local, err := p.localAddresses()
+	if err != nil {
+		return false, err
+	}
 	for _, host := range hosts {
-		if host == "?" { // a device the host cannot be read from
+		// Only a literal address is accepted: a name is resolved again by the mount and could answer
+		// differently then (DNS rebinding), and resolving it here would hold the resolver.
+		address := net.ParseIP(strings.SplitN(host, "%", 2)[0])
+		if address == nil || address.IsLoopback() || address.IsUnspecified() {
 			return true, nil
 		}
-		addresses, err := p.hostAddresses(ctx, host)
-		if err != nil {
-			return false, err
-		}
-		local, err := p.localAddresses()
-		if err != nil {
-			return false, err
-		}
-		if len(addresses) == 0 {
-			return false, ErrUnavailable
-		}
-		for _, address := range addresses {
-			if address.IsLoopback() || address.IsUnspecified() {
+		for _, mine := range local {
+			if address.Equal(mine) {
 				return true, nil
-			}
-			for _, mine := range local {
-				if address.Equal(mine) {
-					return true, nil
-				}
 			}
 		}
 	}
@@ -266,22 +256,6 @@ func (p *candidateIPCPass) networkVolumeReferences(ctx context.Context, path str
 		return false, err
 	}
 	return candidateIPCNetworkFilesystems[namespace.place.fstype], nil
-}
-
-// candidateIPCLookupHost resolves a server name or literal address. A variable so a test can fake DNS.
-var candidateIPCLookupHost = func(ctx context.Context, host string) ([]net.IP, error) {
-	if ip := net.ParseIP(strings.SplitN(host, "%", 2)[0]); ip != nil {
-		return []net.IP{ip}, nil
-	}
-	found, err := net.DefaultResolver.LookupIPAddr(ctx, host)
-	if err != nil {
-		return nil, err
-	}
-	ips := make([]net.IP, 0, len(found))
-	for _, a := range found {
-		ips = append(ips, a.IP)
-	}
-	return ips, nil
 }
 
 // candidateIPCLocalAddresses lists this host's interface addresses. A variable so a test can fake them.
@@ -299,19 +273,6 @@ var candidateIPCLocalAddresses = func() ([]net.IP, error) {
 			ips = append(ips, v.IP)
 		}
 	}
-	return ips, nil
-}
-
-// hostAddresses resolves a server once per pass. A name that does not resolve is a refusal.
-func (p *candidateIPCPass) hostAddresses(ctx context.Context, host string) ([]net.IP, error) {
-	if ips, ok := p.hosts[host]; ok {
-		return ips, nil
-	}
-	ips, err := candidateIPCSlotted(ctx, func() ([]net.IP, error) { return candidateIPCLookupHost(ctx, host) })
-	if err != nil {
-		return nil, candidateIPCLookupError(ctx, err)
-	}
-	p.hosts[host] = ips
 	return ips, nil
 }
 
@@ -374,7 +335,48 @@ func (p *candidateIPCPass) blockVolumeReferences(ctx context.Context, path, devi
 			return referenced, err
 		}
 	}
+	// Two loop devices over one backing file are one store, whatever path names the file.
+	if len(volume.files) > 0 && len(hosting.files) > 0 {
+		wanted := map[string]bool{}
+		var wantedPlaces []candidateIPCPlace
+		for _, file := range hosting.files {
+			canonical, place, err := p.backingFile(ctx, file)
+			if err != nil {
+				return false, err
+			}
+			wanted[canonical] = true
+			wantedPlaces = append(wantedPlaces, place)
+		}
+		for _, file := range volume.files {
+			canonical, place, err := p.backingFile(ctx, file)
+			if err != nil {
+				return false, err
+			}
+			if wanted[canonical] {
+				return true, nil
+			}
+			for _, other := range wantedPlaces {
+				if other.dev == place.dev && other.path == place.path {
+					return true, nil
+				}
+			}
+		}
+	}
 	return false, nil
+}
+
+// backingFile is a loop device's backing file as its canonical path and its place on the mount table.
+func (p *candidateIPCPass) backingFile(ctx context.Context, file string) (string, candidateIPCPlace, error) {
+	canonical, err := resolveCandidateIPCSource(ctx, file, candidateIPCCanonicalize)
+	if err != nil {
+		return "", candidateIPCPlace{}, candidateIPCLookupError(ctx, err)
+	}
+	mounts, err := p.mountTable(ctx)
+	if err != nil {
+		return "", candidateIPCPlace{}, err
+	}
+	place, err := mounts.place(canonical)
+	return canonical, place, err
 }
 
 func candidateIPCPlacesOverlap(a, b candidateIPCPlace) bool {

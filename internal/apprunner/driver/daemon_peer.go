@@ -20,6 +20,8 @@ type daemonPeer struct {
 	// a runner without the privilege to read /proc/<pid>/fd can still load one); the overlap check, which does,
 	// asks for it through requireDaemonIdentified.
 	refused error
+	// netDiffers is set when a holder of a connection is in another network namespace than the runner.
+	netDiffers bool
 }
 
 // verifyOnce identifies the daemon behind a connection the first time it answers and remembers a refusal.
@@ -63,4 +65,19 @@ func requireDaemonIdentified(client *http.Client) error {
 	transport.peer.mu.Lock()
 	defer transport.peer.mu.Unlock()
 	return transport.peer.refused
+}
+
+// requireDaemonNetworkNamespace refuses a network volume when the daemon, which mounts it, is in another network
+// namespace than the runner: the volume's address and the runner's interfaces then say nothing about each other.
+func requireDaemonNetworkNamespace(client *http.Client) error {
+	transport, ok := client.Transport.(allowListTransport)
+	if !ok || transport.peer == nil {
+		return nil
+	}
+	transport.peer.mu.Lock()
+	defer transport.peer.mu.Unlock()
+	if transport.peer.netDiffers {
+		return fmt.Errorf("%w: a network volume is mounted by a daemon in another network namespace than the runner", ErrUnavailable)
+	}
+	return nil
 }

@@ -49,6 +49,7 @@ var (
 	daemonSocketHolders          = realDaemonSocketHolders
 	daemonExecutableOf           = func(pid int) (string, error) { return os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe") }
 	daemonInRunnerMountNamespace = sharesMountNamespace
+	daemonSharesNetworkNamespace = sharesNetworkNamespace
 )
 
 // sharesMountNamespace reports whether a process is in the runner's mount namespace. A namespace file that
@@ -59,6 +60,16 @@ func sharesMountNamespace(pid int) bool {
 		return false
 	}
 	ours, err := os.Stat("/proc/self/ns/mnt")
+	return err == nil && os.SameFile(ours, theirs)
+}
+
+// sharesNetworkNamespace reports whether a process is in the runner's network namespace.
+func sharesNetworkNamespace(pid int) bool {
+	theirs, err := os.Stat("/proc/" + strconv.Itoa(pid) + "/ns/net")
+	if err != nil {
+		return false
+	}
+	ours, err := os.Stat("/proc/self/ns/net")
 	return err == nil && os.SameFile(ours, theirs)
 }
 
@@ -91,6 +102,13 @@ func (p *daemonPeer) verify(ctx context.Context, conn net.Conn) error {
 		if !daemonVouched(pid) {
 			exe, _ := daemonExecutableOf(pid)
 			return p.refuse("the connection is held by pid %d (%q, mount namespace shared: %v)", pid, exe, daemonInRunnerMountNamespace(pid))
+		}
+	}
+	for _, pid := range holders {
+		if !daemonSharesNetworkNamespace(pid) {
+			p.mu.Lock()
+			p.netDiffers = true
+			p.mu.Unlock()
 		}
 	}
 	return nil

@@ -644,6 +644,11 @@ func (p *candidateIPCPass) containerSources(ctx context.Context, client *http.Cl
 		if err != nil {
 			return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
 		}
+		if strings.HasPrefix(device, candidateIPCNetworkSource) {
+			if err := requireDaemonNetworkNamespace(client); err != nil {
+				return nil, fmt.Errorf("container %s: %w", shortContainerID(container.ID), err)
+			}
+		}
 		if device != "" {
 			sources = append(sources, device)
 		}
