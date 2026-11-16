@@ -105,6 +105,16 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer clear(rawIdentity)
+	// Admission comes before any database work: identity verification, the admission lock and the
+	// quota counts are what a flooding backend would otherwise spend on every refusal, on the one CPU
+	// the Portal shares. The checks above read nothing, so a malformed request never holds a slot,
+	// and the deferred release covers every exit path below.
+	release, ok := s.platformServiceTasks.acquire()
+	if !ok {
+		platformJSONBusy(w)
+		return
+	}
+	defer release()
 	grant, err := s.verifyPlatformServiceIdentity(r.Context(), rawIdentity, "tasks.schedule")
 	if err != nil || grant.InstallationID != r.PathValue("installation") {
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)

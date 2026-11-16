@@ -48,6 +48,11 @@ type Server struct {
 	platformBackendRequests platformDocumentBudget
 	platformNetworkRequests platformDocumentBudget
 	platformNetworkStreams  platformDocumentBudget
+	// platformServiceTasks bounds the session-free task submission route. It is dedicated so a flooding
+	// backend can neither starve the session-facing relays nor be starved by them; the route has no
+	// cookie to pre-check, so it takes its slot itself, after the database-free checks and before the
+	// service identity is verified.
+	platformServiceTasks    platformDocumentBudget
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
 	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the

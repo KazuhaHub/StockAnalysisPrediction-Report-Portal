@@ -894,6 +894,14 @@ class EvaluateTests(unittest.TestCase):
         evidence = child_evidence()
         evidence["windows"][2]["backend_flood"] = window_backend_flood(classes={"200": 100, "429:task_capacity": 2000, "429:rate_limited": 50})
         self.assertTrue(self.verdict(evidence)["passed"])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(
+            classes={"200": 100, "429:task_capacity": 40, "429:app_platform_busy": 9000})
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(
+            classes={"200": 100, "429:task_capacity": 40, "429:app_platform_busy": 9000, "503:app_platform_busy": 1})
+        self.assertEqual(self.failing(self.verdict(evidence)), {"backend_task_flood_answered_or_typed_in_every_window"})
 
     def test_the_backend_task_flood_must_stay_alive(self):
         for change in ({"alive": False}, {"heartbeat_age_ms": soak.FLOOD_HEARTBEAT_MAX_AGE_MS + 1}):

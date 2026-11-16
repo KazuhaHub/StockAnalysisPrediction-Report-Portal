@@ -141,6 +141,22 @@ func (s *Server) platformBudgetPrecheck(budget *platformDocumentBudget, busy fun
 	}
 }
 
+// platformServiceBudgetPrecheck is platformBudgetPrecheck for a route that carries no session cookie:
+// a service backend authenticates with its own identity, which only the database can verify, so there
+// is nothing to check offline and the 429 is given on fullness alone. It sits outside the per-address
+// rate limit too, because that limit reads a setting from the database on every request, which a
+// refusal must not do. Like the session pre-check it never takes a slot; the handler's own acquire
+// stays authoritative. The 429 tells a caller only that the budget is full.
+func (s *Server) platformServiceBudgetPrecheck(budget *platformDocumentBudget, busy func(http.ResponseWriter), next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if budget.full() {
+			busy(w)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func platformDocumentHeaders(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

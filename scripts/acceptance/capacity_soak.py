@@ -53,9 +53,10 @@ TASK_INSTALLATION_QUOTA = 256
 EVENT_MAX_INFLIGHT = 16
 EVENT_FENCE_REASONS = ("inflight_limit", "task_capacity", "authority_lost", "task_authority_lost")
 # The backend-originated flood is driven at the Portal's session-free task route with a backend's service identity; every window must carry a
-# live flood and every answer must be a success or a typed refusal.
+# live flood and every answer must be a success or a typed refusal. app_platform_busy is the route's own admission budget answering before
+# any database work; task_capacity is the quota refusal of a submission that was admitted.
 BACKEND_FLOOD_MIN_PER_WINDOW = 100
-TYPED_BACKEND_FLOOD_CLASSES = ("200", "429:task_capacity", "429:rate_limited")
+TYPED_BACKEND_FLOOD_CLASSES = ("200", "429:task_capacity", "429:rate_limited", "429:app_platform_busy")
 PLATFORM_WORK_CHECKS = (
     "task_worker_ran_in_every_window",
     "no_task_lost_or_stuck",

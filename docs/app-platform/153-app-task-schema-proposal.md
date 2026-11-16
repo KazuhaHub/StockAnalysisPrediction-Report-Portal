@@ -125,7 +125,10 @@ PostgreSQL, and backup round trip.
   one H07 service assertion with `tasks.schedule`. The closed body is
   `occurrenceId`, `handler`, `payload`, and optional bounded `runAt`/`expiresAt`.
   Occurrence replay is stable; changed bytes under the same occurrence return
-  `409`.
+  `409`. The route has its own two-slot admission budget: a submission that finds
+  it full is refused `429 app_platform_busy` before the identity is verified or
+  any database work is done. The other refusals are `429 task_capacity` (the
+  quota) and `429 rate_limited` (the per-address limit).
 - `cmd/app-task-worker` owns the separate polling process. A task claim, fence
   increment, revision increment and attempt insert commit together. PostgreSQL
   uses `FOR UPDATE SKIP LOCKED`; SQLite relies on its single-writer transaction.

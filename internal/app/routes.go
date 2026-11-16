@@ -526,7 +526,7 @@ func (s *Server) wireRoutes(mux *http.ServeMux) {
 	s.route(mux, "POST /api/app-platform/installations/{installation}/network/stream", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformNetworkStreams, platformJSONBusy, s.requireUserJSON(s.apiPlatformNetworkStream))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/notifications", authSession, "", platformDocumentHeaders(s.requireUserJSON(s.apiPlatformNotificationPublish)))
 	s.public(mux, "POST /api/app-platform/installations/{installation}/notifications/background", platformDocumentHeaders(s.rateLimitV1(s.apiPlatformServiceNotificationPublish)))
-	s.public(mux, "POST /api/app-platform/installations/{installation}/tasks/background", platformDocumentHeaders(s.rateLimitV1(s.apiPlatformServiceTaskSchedule)))
+	s.public(mux, "POST /api/app-platform/installations/{installation}/tasks/background", platformDocumentHeaders(s.platformServiceBudgetPrecheck(&s.platformServiceTasks, platformJSONBusy, s.rateLimitV1(s.apiPlatformServiceTaskSchedule))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/reports", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformReports))))
 	s.route(mux, "POST /api/app-platform/installations/{installation}/objects", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.apiPlatformObjects))))
 	s.route(mux, "GET /app-documents/{installation}/{generation}/{policy}/{release}/{frontend}/{entry...}", authSession, "", platformDocumentHeaders(s.platformBudgetPrecheck(&s.platformDocuments, platformHTTPBusy, s.requireUserJSON(s.platformAppDocument))))
