@@ -116,22 +116,9 @@ func (s *Store) dropHomeConfig() {
 	s.homeConfigMu.Unlock()
 }
 
-// WriteReportReadAudit records a report read. On PostgreSQL the row is inserted in one statement whose commit does
-// not wait for the WAL flush (synchronous_commit off for that transaction only): a report read is the audit row
-// with the highest rate, a page load must not wait on the disk for it, and the only thing given up is that a host
-// crash can lose the last fraction of a second of read rows, never an earlier one and never a change record. The
-// row is visible at once, and the setting does not outlive the statement's transaction.
+// WriteReportReadAudit records a report read. Audit records stay durable: the row commits synchronously like every
+// other audit row, and no synchronous_commit setting is used, not even one scoped to a statement. It is the same
+// insert WriteAudit issues, kept as its own entry point so that the report-read path is named at its one call site.
 func (s *Store) WriteReportReadAudit(e AuditEntry) {
-	if s.driver != "postgres" {
-		s.WriteAudit(e)
-		return
-	}
-	at := e.At
-	if at == "" {
-		at = time.Now().UTC().Format(time.RFC3339)
-	}
-	s.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip)
-		SELECT CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS BIGINT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT),CAST(? AS TEXT)
-		FROM (SELECT set_config('synchronous_commit','off',true)) AS c`,
-		at, e.Actor, e.ActorOU, e.Action, e.TargetType, e.TargetID, e.Detail, e.IP)
+	s.WriteAudit(e)
 }
