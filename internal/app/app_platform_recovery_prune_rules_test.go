@@ -328,3 +328,68 @@ func TestPruneReadsAreBoundedByTheSetsNotTheLedger(t *testing.T) {
 		t.Error("a read scans the applied effects of every set by state")
 	}
 }
+
+// An open deletion the runner still reports pending must cost no more than one locked transaction a minute: the
+// pending read-back keeps the one-minute floor, and an open row is read without the admission locks. Fails if a pending
+// pass resets the throttle (the step would run, and lock, on every idle tick) or if an open row is re-read under the
+// locks.
+func TestPruneAnOpenPendingDeletionTakesAtMostOneLockedTransactionAMinute(t *testing.T) {
+	p := newPruneFixture(t, false)
+	p.set(t, "verified", 100)
+	p.set(t, "verified", 300)
+	locked := 0
+	platformPruneLockedHook = func() { locked++ }
+	t.Cleanup(func() { platformPruneLockedHook = nil })
+	p.runner.pendingFor = 1
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	begun := locked
+	if p.effects(t, "unknown") != 1 || !p.s.platformPruneMore.Load() {
+		t.Fatal("the fixture did not leave a deletion pending on the runner")
+	}
+	p.runner.readPending = true
+	for range 10 {
+		p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	}
+	if locked != begun {
+		t.Fatalf("ten idle ticks inside one minute took %d locked transactions", locked-begun)
+	}
+	// A minute later the pass reads the open row back: still pending, still no more than one locked transaction.
+	p.s.platformPruneLast.Store(time.Now().UnixMilli() - 2*platformPruneInterval.Milliseconds())
+	p.s.pruneRecoverySetsOnTick(t.Context(), p.endpoint)
+	if locked-begun > 1 {
+		t.Fatalf("a pending read-back took %d locked transactions", locked-begun)
+	}
+	if p.runner.count("read") == 0 {
+		t.Fatal("the open deletion was never read back")
+	}
+}
+
+// A set with more attempts than the first id range still picks a fresh id, and its applied row is still seen. Fails if
+// the lookups stop at sixteen attempts: the retry would sign an id that exists and the row would stay stuck.
+func TestPruneASetWithMoreThanTwentyFourRowsPicksAFreshIdAndSeesItsAppliedRow(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		p := newPruneFixture(t, pg)
+		victim := p.set(t, "verified", 100)
+		p.set(t, "verified", 300)
+		for n := 2; n < 2+20; n++ {
+			platformInsertDeleteCheckpointRow(t, p.s, p.hostOp, victim, "unknown", n)
+		}
+		p.strandAll(t, time.Now().UnixMilli())
+		p.prune(t)
+		if p.state(t, victim) != "deleted" || p.effects(t, "applied") != 1 || p.effects(t, "unknown") != 0 {
+			t.Fatal("a set with twenty stranded rows was not retried to a verdict under a fresh id")
+		}
+		// Twenty-seven rows: the applied one sits past the first two id batches and must still be found.
+		p = newPruneFixture(t, pg)
+		other := p.set(t, "verified", 200)
+		for n := 2; n < 28; n++ {
+			platformInsertDeleteCheckpointRow(t, p.s, p.hostOp, other, "reverted", n)
+		}
+		platformInsertDeleteCheckpointRow(t, p.s, p.hostOp, other, "applied", 28)
+		checkpoint := p.checkpoint(t, other)
+		decided, err := platformDecidedSets(p.s.st.poolExec(), []platformSetRef{{other, checkpoint}})
+		if err != nil || !decided[other] {
+			t.Fatalf("the applied row of a set with 27 attempts was not seen: %v %v", decided, err)
+		}
+	})
+}

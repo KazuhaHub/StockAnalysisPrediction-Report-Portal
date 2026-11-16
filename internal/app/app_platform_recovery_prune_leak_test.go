@@ -25,6 +25,7 @@ type deleteDataLeak struct {
 func newDeleteDataLeak(t *testing.T, pg bool) *deleteDataLeak {
 	t.Helper()
 	s, actor, installation, namespace := platformDeleteDataFixture(t, pg)
+	clearPruneLedger(t, s.st)
 	l := &deleteDataLeak{s: s, installation: installation, namespace: namespace, endpoint: platformManagedRemovalFixtureEndpoint()}
 	installOperation := scalar[string](t, s.st, `SELECT id FROM app_platform_operations WHERE installation_id=? AND action='install' ORDER BY completed_ms DESC LIMIT 1`, installation)
 	release := scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=? AND data_namespace_id=? ORDER BY generation DESC LIMIT 1`, installation, namespace)

@@ -219,6 +219,14 @@ type pruneFixture struct {
 	sets      int
 }
 
+// clearPruneLedger removes the deletion effects and prune audit rows an earlier test left in a shared database, so the
+// counts a test makes are its own. The PostgreSQL database outlives the tests that use it.
+func clearPruneLedger(t *testing.T, st *Store) {
+	t.Helper()
+	mustExec(t, st, `DELETE FROM app_platform_operation_effects WHERE kind='delete_checkpoint'`)
+	mustExec(t, st, `DELETE FROM audit_log WHERE action IN ('app_platform.recovery_set_pruned','app_platform.recovery_set_prune_refused')`)
+}
+
 func newPruneFixture(t *testing.T, pg bool) *pruneFixture {
 	t.Helper()
 	f := newReclaimFixtureFor(t, pg)
@@ -230,6 +238,7 @@ func newPruneFixture(t *testing.T, pg bool) *pruneFixture {
 	noPruneBackoff(t)
 	// The sets the fixture inherited are not part of what a test says.
 	mustExec(t, f.s.st, `DELETE FROM app_platform_recovery_sets`)
+	clearPruneLedger(t, f.s.st)
 	// Keep one set per installation unless a test says otherwise.
 	f.s.st.SetSetting(platformRetentionRecoverySetsKey, "1")
 	return p

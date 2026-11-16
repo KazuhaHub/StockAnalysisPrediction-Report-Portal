@@ -269,6 +269,16 @@ journal at either earlier v3 shape (before `remove-image`, and before `delete-ch
 says to start from a fresh journal. `runner_checkpoints` needs no change (`deleted` is already in its state check). There is no Portal
 schema change.
 
+**Retry, trash and quarantine.** A claim marks the row `deleted` before the file is touched, so a retry under a new effect id (after the
+installation's fence moved) finds a deleted row. When an earlier claim of the checkpoint is still `unknown`, the retry first compares its
+size and digest with the row and with that claim (a mismatch is `checkpoint_identity_mismatch` and nothing is claimed), then removes the
+archive and any `<id>.tar.deleting` leftover under its own claim and settles the earlier claim with the same observation. The archive is
+unlinked through a no-replace rename to that fixed trash name and re-identified by device and inode first. A trash entry that is not the
+checkpoint's archive (size and SHA-256 of the whole file as the row records it) is moved aside as `<id>.tar.deleting.quarantine-<random>`,
+logged, and never deleted; a filesystem without no-replace rename refuses the removal with a typed error. The quarantined files are counted
+(files and bytes) and written to the runner log at every start. The runner has no status channel to the Portal, so the storage page does not
+show them; an operator reads the runner log.
+
 ### The Portal driver
 
 `prunePlatformRecoverySets` runs where `reclaimPlatformImages` runs: when an operation ends, and on the idle tick, throttled together to once a

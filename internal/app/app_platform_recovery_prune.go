@@ -97,9 +97,13 @@ func platformUUIDList(ids []string) string {
 // platformSetRef names a recovery set and its checkpoint, from which every effect id of its deletions is derived.
 type platformSetRef struct{ id, checkpoint string }
 
-// platformPruneIDRange is how many attempt numbers of a set the id lookups cover. Refusals are capped at
-// platformPruneMaxAttempts and stranded rows are rare, so sixteen covers every row a set can have in practice.
-const platformPruneIDRange = 16
+// platformPruneIDRange is how many attempt numbers of a set one id lookup covers. A lookup walks forward in batches of
+// this size and stops at the first batch that finds no row of the set, so the number of attempts a set can have is not
+// bounded by it (refusals are capped, stranded retries are not). platformPruneIDLimit is the safety bound of the walk.
+const (
+	platformPruneIDRange = 16
+	platformPruneIDLimit = 4096
+)
 
 // platformDecidedSets returns, among the given sets, those with a deletion decided: an effect that names the set is
 // prepared, unknown or applied. The open effects are read through the state index (they are few, whatever the
@@ -244,28 +248,47 @@ func platformPruneOpenRows(e migExec) ([]platformPruneRow, error) {
 	return scanPlatformPruneRows(rows)
 }
 
-// platformPruneRowsByID reads the deletions of the given sets through the unique effect id, one lookup per derived id.
+// platformPruneRowsByID reads the deletions of the given sets through the unique effect id. Each set is walked in
+// batches of platformPruneIDRange derived ids from attempt 0, and a set's walk ends at the first batch that finds none of
+// its rows, so a set with any number of attempts is seen whole and the cost stays bounded by the rows the sets have.
 func platformPruneRowsByID(e migExec, refs []platformSetRef) ([]platformPruneRow, error) {
-	var ids []string
-	for _, ref := range refs {
-		for attempt := range platformPruneIDRange {
-			ids = append(ids, platformPruneEffectID(ref.id, ref.checkpoint, attempt))
-		}
-	}
 	var out []platformPruneRow
-	for len(ids) > 0 {
-		n := min(len(ids), 300)
-		rows, err := e.query(`SELECT `+platformPruneRowColumns+` FROM app_platform_operation_effects WHERE kind=? AND effect_id IN (`+platformUUIDList(ids[:n])+`)`, platformDeleteCheckpointKind)
-		if err != nil {
-			return nil, err
+	active := append([]platformSetRef(nil), refs...)
+	for base := 0; len(active) > 0 && base < platformPruneIDLimit; base += platformPruneIDRange {
+		byID := map[string]platformSetRef{}
+		var ids []string
+		for _, ref := range active {
+			for attempt := base; attempt < base+platformPruneIDRange; attempt++ {
+				id := platformPruneEffectID(ref.id, ref.checkpoint, attempt)
+				byID[id] = ref
+				ids = append(ids, id)
+			}
 		}
-		got, err := scanPlatformPruneRows(rows)
-		rows.Close()
-		if err != nil {
-			return nil, err
+		foundFor := map[string]bool{}
+		for len(ids) > 0 {
+			n := min(len(ids), 300)
+			rows, err := e.query(`SELECT `+platformPruneRowColumns+` FROM app_platform_operation_effects WHERE kind=? AND effect_id IN (`+platformUUIDList(ids[:n])+`)`, platformDeleteCheckpointKind)
+			if err != nil {
+				return nil, err
+			}
+			got, err := scanPlatformPruneRows(rows)
+			rows.Close()
+			if err != nil {
+				return nil, err
+			}
+			for _, r := range got {
+				foundFor[byID[r.effectID].id] = true
+			}
+			out = append(out, got...)
+			ids = ids[n:]
 		}
-		out = append(out, got...)
-		ids = ids[n:]
+		var next []platformSetRef
+		for _, ref := range active {
+			if foundFor[ref.id] {
+				next = append(next, ref)
+			}
+		}
+		active = next
 	}
 	return out, nil
 }
@@ -471,7 +494,7 @@ func (s *Server) platformPruneCandidates(e migExec, keep int, now int64) (out []
 		}
 		attempt := attempts
 		effect := platformPruneEffectID(set.id, set.checkpoint, attempt)
-		for ; attempt < attempts+platformPruneMaxAttempts; attempt++ {
+		for ; attempt < platformPruneIDLimit; attempt++ {
 			effect = platformPruneEffectID(set.id, set.checkpoint, attempt)
 			var exists int
 			if err := e.queryRow(`SELECT COUNT(*) FROM app_platform_operation_effects WHERE effect_id=?`, effect).Scan(&exists); err != nil {
@@ -601,6 +624,9 @@ func (g *platformImageSigner) deleteCheckpointCall(t platformPruneTarget, descri
 // pruneTx runs fn in one transaction under the locks operation admission takes, in their order (the OU mutation lock,
 // then the publisher trust lock). guard, when given, confirms that the host operation is still what the command was
 // derived from. pause re-reads the restore pause and fails closed.
+// platformPruneLockedHook, when set by a test, is called once for every transaction that took the admission locks.
+var platformPruneLockedHook func()
+
 func (s *Server) pruneTx(ctx context.Context, lease *platformOperationLease, pause bool, fn func(e migExec, now int64) error) error {
 	for attempt := 0; ; attempt++ {
 		err := s.pruneTxOnce(ctx, lease, pause, fn)
@@ -623,6 +649,9 @@ func (s *Server) pruneTxOnce(ctx context.Context, lease *platformOperationLease,
 	}
 	if err := lockPlatformPublisherTrust(e); err != nil {
 		return err
+	}
+	if platformPruneLockedHook != nil {
+		platformPruneLockedHook()
 	}
 	if pause {
 		paused, err := platformRecoveryPaused(e)
@@ -657,7 +686,25 @@ func (s *Server) prepareDeletion(ctx context.Context, lease platformOperationLea
 	}
 	// The retention setting is read before the transaction: the store's pool is not reachable from inside it.
 	keep := s.platformRetentionConfigLoad().RecoverySets
-	err = s.pruneTx(ctx, &lease, t.state == "", func(e migExec, now int64) error {
+	if t.state != "" {
+		// A deletion that is already open is read without any lock: its row is the decision, and the locks are taken
+		// only to write a verdict. This keeps a deletion the runner is still working on from costing one locked
+		// transaction per tick.
+		var id, kind, digest string
+		qerr := s.st.queryRowContext(ctx, `SELECT effect_id,kind,payload_sha256,state FROM app_platform_operation_effects WHERE operation_id=? AND stage=? AND effect_number=?`,
+			lease.id, control.DeleteCheckpointStage, t.effectNumber).Scan(&id, &kind, &digest, &state)
+		if qerr != nil {
+			if errors.Is(qerr, sql.ErrNoRows) {
+				return "", errAppPlatformStageEvidence
+			}
+			return "", qerr
+		}
+		if kind != platformDeleteCheckpointKind || id != c.EffectID || digest != c.PayloadSHA256 {
+			return "", errAppPlatformStageEvidence
+		}
+		return state, nil
+	}
+	err = s.pruneTx(ctx, &lease, true, func(e migExec, now int64) error {
 		lock := ""
 		if e.s.driver == "postgres" {
 			lock = " FOR UPDATE"
@@ -1287,8 +1334,7 @@ func (s *Server) pruneRecoverySetsOnTick(ctx context.Context, endpoint platformR
 	if err != nil && ctx.Err() == nil {
 		log.Printf("app-platform recovery set prune: %v", err)
 	}
+	// A pass that left a deletion running (Busy) keeps the one-minute floor like every other pass: the next read-back
+	// follows after platformPruneInterval, never on the next idle tick.
 	s.platformPruneMore.Store(result.Settled > 0 || result.Busy > 0)
-	if result.Busy > 0 {
-		s.platformPruneLast.Store(0)
-	}
 }
