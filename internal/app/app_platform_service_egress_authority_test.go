@@ -264,6 +264,48 @@ func testPlatformServiceEgressManagedInitialInstallHasNoNetwork(t *testing.T, pg
 	}
 }
 
+// Every admit, check and drift reload reads the authority in one transaction.
+// Two of them must not serialise: one that is held open (before its commit)
+// does not stop another from loading, so a slow load never queues the rest.
+func TestPlatformServiceEgressConcurrentLoadsDoNotSerializePostgres(t *testing.T) {
+	s, installation := platformServiceEgressFixture(t, true, true)
+	state := platformServiceEgressState(t, s, installation, "network.http", "notifications.publish")
+	held, release := make(chan struct{}), make(chan struct{})
+	first := make(chan error, 1)
+	go func() {
+		a, err := s.loadPlatformServiceEgressCurrent(context.Background(), installation, platformServiceEgressLoad{
+			identity: state.identity, resources: state.resources,
+			beforeCommit: func() { close(held); <-release },
+		})
+		a.Close()
+		first <- err
+	}()
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first load did not reach its commit")
+	}
+	second := make(chan error, 1)
+	go func() {
+		a, err := s.loadServiceEgressForSession(context.Background(), state)
+		a.Close()
+		second <- err
+	}()
+	select {
+	case err := <-second:
+		if err != nil {
+			t.Fatal("second load:", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("a second authority load waited for the first one's transaction")
+	}
+	close(release)
+	if err := <-first; err != nil {
+		t.Fatal("first load:", err)
+	}
+}
+
 func TestPlatformServiceEgressRequiresBackgroundAndNetworkGrantSQLite(t *testing.T) {
 	testPlatformServiceEgressRequiresBackgroundAndNetworkGrant(t, false)
 }

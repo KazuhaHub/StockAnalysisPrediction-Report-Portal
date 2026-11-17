@@ -32,12 +32,23 @@ func serviceResourceCapability(resource string) bool {
 }
 
 func loadPlatformServiceFacts(e migExec, installation string, resources []string, lock bool) (platformServiceFacts, error) {
+	mode := ""
+	if lock {
+		mode = " FOR UPDATE"
+	}
+	return loadPlatformServiceFactsLocked(e, installation, resources, mode)
+}
+
+// loadPlatformServiceFactsLocked reads the facts with the given row lock clause
+// on Postgres: " FOR UPDATE" for a caller that goes on to change the
+// installation, " FOR SHARE" for a read-only one (it still blocks every writer of
+// the row, but concurrent readers do not queue), "" for none.
+func loadPlatformServiceFactsLocked(e migExec, installation string, resources []string, lockSQL string) (platformServiceFacts, error) {
 	var facts platformServiceFacts
 	var generation, policyRevision int64
 	var runtime sql.NullString
-	lockSQL := ""
-	if lock && e.s.driver == "postgres" {
-		lockSQL = " FOR UPDATE"
+	if e.s.driver != "postgres" {
+		lockSQL = ""
 	}
 	if err := e.queryRow(`SELECT app_id,publisher_id,generation,policy_revision,controller_epoch,runtime_id FROM app_platform_installations WHERE id=? AND desired_state='enabled' AND phase='ready'`+lockSQL, installation).
 		Scan(&facts.appID, &facts.publisherID, &generation, &policyRevision, &facts.epoch, &runtime); err != nil {

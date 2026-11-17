@@ -114,6 +114,8 @@ type platformServiceEgressLoad struct {
 	identity  []byte
 	resources []string
 	history   bool
+	// beforeCommit is a test seam: it runs with the transaction still open.
+	beforeCommit func()
 }
 
 // loadPlatformServiceEgressCurrent reads the complete current authority of one
@@ -159,7 +161,9 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 	}
 	defer tx.Rollback()
 	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
-	if err := lockPlatformPublisherTrust(e); err != nil {
+	// Read-only: the shared locks keep every writer out exactly as the
+	// exclusive ones do, without making concurrent egress loads queue.
+	if err := lockPlatformPublisherTrustShared(e); err != nil {
 		return zero, errPlatformServiceEgressUnavailable
 	}
 	if discover {
@@ -184,7 +188,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 			return zero, errPlatformServiceEgressUnavailable
 		}
 	}
-	facts, err := loadPlatformServiceFacts(e, installation, resources, true)
+	facts, err := loadPlatformServiceFactsLocked(e, installation, resources, " FOR SHARE")
 	if err != nil {
 		return zero, errPlatformServiceEgressUnavailable
 	}
@@ -197,7 +201,7 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 		return zero, errPlatformServiceEgressUnavailable
 	}
 	defer clear(dek)
-	runtime, seed, err := s.platformDataRuntime(e, facts.epoch, dek)
+	runtime, seed, err := s.platformDataRuntimeLocked(e, facts.epoch, dek, " FOR SHARE")
 	failed := true
 	defer func() {
 		if failed {
@@ -273,6 +277,9 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 			return zero, errPlatformServiceEgressUnavailable
 		}
 		result.history = &history
+	}
+	if o.beforeCommit != nil {
+		o.beforeCommit()
 	}
 	if err := tx.Commit(); err != nil {
 		result.Close()
