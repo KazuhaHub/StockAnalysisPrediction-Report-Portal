@@ -411,3 +411,59 @@ func TestOfflineManagedPackageWhoseLaterBlobWriteFailsLeavesNoBlobsAndNoRelease(
 		t.Fatal("the same package did not stage afterwards:", code, body)
 	}
 }
+
+// blobPath is the test shorthand for the path of a blob whose digest is known to be valid.
+func (p *platformImageStore) blobPath(digest string) string {
+	path, _ := p.blobFile(digest)
+	return path
+}
+
+// Fails (a file is created or removed outside the blob directory, or a relative ".partial" appears in the working
+// directory) if any entry point builds a path from a digest that is not exactly 64 lowercase hex characters.
+func TestImageStoreRefusesDigestsThatAreNotLowercaseHex(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	store := newTestImageStore(t)
+	root := filepath.Dir(store.blobs)
+	// A victim next to the blob directory that a "../" digest would reach.
+	victim := filepath.Join(root, "victim")
+	if err := os.WriteFile(victim, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(root)
+	before := len(entries)
+	bad := []string{"", "../victim", "../../x", "a/b", strings.Repeat("A", 64), strings.Repeat("a", 63), strings.Repeat("a", 65), strings.Repeat("a", 63) + "g"}
+	for _, digest := range bad {
+		if path, ok := store.blobFile(digest); ok || path != "" {
+			t.Fatalf("blobFile(%q) = %q, %v", digest, path, ok)
+		}
+		blob := appplatform.ImageBlob{Digest: digest, Kind: appplatform.ImageBlobLayer, Size: 4}
+		if err := store.putBlob(blob, strings.NewReader("data")); err == nil {
+			t.Fatalf("putBlob accepted %q", digest)
+		}
+		if f, err := store.openBlob(blob); err == nil {
+			f.Close()
+			t.Fatalf("openBlob accepted %q", digest)
+		}
+		if _, err := store.readMetadata(digest); !errors.Is(err, errPlatformImageBlobMissing) {
+			t.Fatalf("readMetadata(%q) = %v", digest, err)
+		}
+		if got := store.missingBlobs([]appplatform.ImageBlob{blob}); len(got) != 1 {
+			t.Fatalf("missingBlobs(%q) = %v", digest, got)
+		}
+		store.removeUnpinned([]string{digest}, map[string]bool{})
+		store.removeProven(digest, nil)
+	}
+	if raw, err := os.ReadFile(victim); err != nil || string(raw) != "keep" {
+		t.Fatalf("file outside the blob directory changed: %q %v", raw, err)
+	}
+	if entries, _ := os.ReadDir(cwd); len(entries) != 0 {
+		t.Fatalf("working directory gained %v", entries)
+	}
+	if entries, _ := os.ReadDir(store.blobs); len(entries) != 0 {
+		t.Fatalf("blob directory gained %v", entries)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != before {
+		t.Fatalf("store root changed: %v", entries)
+	}
+}

@@ -25,7 +25,10 @@ func (p *platformImageStore) metadata(digest string, remove bool) ([]byte, os.Fi
 	if !platformValidSHA(digest) {
 		return nil, nil, errPlatformImageBlobMissing
 	}
-	path := p.blobPath(digest)
+	path, ok := p.blobFile(digest)
+	if !ok {
+		return nil, nil, errPlatformImageBlobMissing
+	}
 	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -73,12 +76,16 @@ func (p *platformImageStore) removeProven(digest string, seen os.FileInfo) {
 	if seen == nil {
 		return
 	}
+	path, ok := p.blobFile(digest)
+	if !ok {
+		return
+	}
 	defer p.lockDigest(digest)()
-	current, err := os.Lstat(p.blobPath(digest))
+	current, err := os.Lstat(path)
 	if err != nil || !os.SameFile(current, seen) || current.Size() != seen.Size() || !current.ModTime().Equal(seen.ModTime()) {
 		return
 	}
-	_ = os.Remove(p.blobPath(digest))
+	_ = os.Remove(path)
 }
 
 // planFor rebuilds the verified plan of a descriptor's image entry from the stored manifest and config. It

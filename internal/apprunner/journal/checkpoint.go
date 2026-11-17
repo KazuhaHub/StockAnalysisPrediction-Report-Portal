@@ -776,6 +776,29 @@ func mustDataUint(value string) uint64 {
 	return n
 }
 
+// mustDataProjectID is the project id of a signed payload as a uint32. A value that is not a decimal number that
+// fits 32 bits (including one a 64-bit parse would accept and a conversion would silently truncate into a
+// different, valid-looking id) is 0, which is never a project id, so every comparison and read it feeds fails
+// closed the way an unparsable value already does.
+func mustDataProjectID(value string) uint32 {
+	n, err := strconv.ParseUint(value, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return uint32(n)
+}
+
+// mustDataSchema is a data schema number of a signed payload. Schemas are small positive integers (the descriptor
+// minimum is 1); a value that does not fit 32 bits is 0, which is below that minimum and so matches no step and
+// no marker, instead of depending on the width of int (on a 32-bit target the conversion would truncate).
+func mustDataSchema(value string) int {
+	n, err := strconv.ParseInt(value, 10, 32)
+	if err != nil {
+		return 0
+	}
+	return int(n)
+}
+
 func (s *Store) ReadCheckpointReceipt(ctx context.Context, raw, signature []byte) (CheckpointReceipt, error) {
 	var zero CheckpointReceipt
 	if s.closing.Load() {

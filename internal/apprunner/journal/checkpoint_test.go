@@ -302,3 +302,20 @@ func resignCheckpoint(t *testing.T, f checkpointFixture, mutate func(*control.Ch
 	}
 	return raw, sig
 }
+
+// Fails if a project id or schema that does not fit 32 bits is truncated into a different, valid-looking value.
+func TestMustDataProjectIDAndSchemaRefuseOutOfRangeValues(t *testing.T) {
+	for _, value := range []string{"4294967297", "4294967296", "18446744073709551615", "99999999999999999999", "-1", "", "x"} {
+		if got := mustDataProjectID(value); got != 0 {
+			t.Fatalf("project id %q = %d", value, got)
+		}
+	}
+	for _, value := range []string{"2147483648", "4294967297", "9223372036854775807", "-2147483649", "", "x"} {
+		if got := mustDataSchema(value); got != 0 {
+			t.Fatalf("schema %q = %d", value, got)
+		}
+	}
+	if mustDataProjectID("4294967295") != 4294967295 || mustDataSchema("12") != 12 {
+		t.Fatal("in-range values changed")
+	}
+}

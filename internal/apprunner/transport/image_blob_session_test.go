@@ -438,3 +438,18 @@ func TestBlobProviderHoldsNoJournalOrNative(t *testing.T) {
 		t.Fatalf("the blob provider gained a capability: %v", typ)
 	}
 }
+
+// A command larger than the control maximum (or empty) is refused before any frame is built or written.
+func TestSendImageBlobRefusesACommandOutsideTheControlBound(t *testing.T) {
+	h := newBlobHarness(t)
+	for _, size := range []int{0, control.MaxCommandBytes + 1} {
+		raw := make([]byte, size)
+		client, server := net.Pipe()
+		_, err := SendImageBlob(context.Background(), client, raw, make([]byte, 64), h.authority, ProveImageBlobWithKey(h.key), bytes.NewReader(nil))
+		client.Close()
+		server.Close()
+		if !errors.Is(err, ErrImageBlobSession) {
+			t.Fatalf("size %d: %v", size, err)
+		}
+	}
+}

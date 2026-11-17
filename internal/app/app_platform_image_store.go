@@ -44,6 +44,11 @@ var (
 	errPlatformImageBlobRead = errors.New("a stored application image blob could not be read")
 )
 
+// platformBlobDigest is the only shape a blob name may take: 64 lowercase hex characters. Every path built from a
+// digest goes through blobFile, which checks it with this expression first, so a digest that is not exactly this
+// can never reach a file system call, whatever the callers upstream validated.
+var platformBlobDigest = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 var platformStoreName = regexp.MustCompile(`^[0-9a-f]{64}(\.partial|\.validator\.partial)?$`)
 
 type platformImageStore struct {
@@ -356,7 +361,15 @@ func (p *platformImageStore) finishPartial(key string) (string, int64, error) {
 
 // ---------- blobs ----------
 
-func (p *platformImageStore) blobPath(digest string) string { return filepath.Join(p.blobs, digest) }
+// blobFile is the path of a finished blob. It refuses (false) anything that is not a 64-character lowercase hex
+// digest, so a name with a separator, a dot-dot or the wrong length never becomes a path inside or outside the
+// blob directory; the callers treat a refusal as a blob that is not there.
+func (p *platformImageStore) blobFile(digest string) (string, bool) {
+	if !platformBlobDigest.MatchString(digest) {
+		return "", false
+	}
+	return filepath.Join(p.blobs, digest), true
+}
 
 // blobBytes is the size of every finished blob.
 func (p *platformImageStore) blobBytes() int64 {
@@ -379,7 +392,12 @@ func (p *platformImageStore) missingBlobs(blobs []appplatform.ImageBlob) []apppl
 			continue
 		}
 		seen[blob.Digest] = true
-		if info, err := os.Lstat(p.blobPath(blob.Digest)); err != nil || !info.Mode().IsRegular() || info.Size() != blob.Size {
+		path, ok := p.blobFile(blob.Digest)
+		if !ok {
+			missing = append(missing, blob)
+			continue
+		}
+		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() || info.Size() != blob.Size {
 			missing = append(missing, blob)
 		}
 	}
@@ -409,7 +427,11 @@ func (p *platformImageStore) putBlob(blob appplatform.ImageBlob, source io.Reade
 	if blob.Size < 1 || blob.Size > appplatform.MaxImageBlobBytes || !platformValidSHA(blob.Digest) {
 		return errPlatformImageBlobCorrupt
 	}
-	temp := p.blobPath(blob.Digest) + ".partial"
+	final, ok := p.blobFile(blob.Digest)
+	if !ok {
+		return errPlatformImageBlobCorrupt
+	}
+	temp := final + ".partial"
 	// Under the digest lock nothing else owns this name; a stale file (or a link planted in its place) is removed
 	// and the file is created new, never followed.
 	_ = os.Remove(temp)
@@ -425,7 +447,7 @@ func (p *platformImageStore) putBlob(blob appplatform.ImageBlob, source io.Reade
 		_ = os.Remove(temp)
 		return errPlatformImageBlobCorrupt
 	}
-	if err := os.Rename(temp, p.blobPath(blob.Digest)); err != nil {
+	if err := os.Rename(temp, final); err != nil {
 		_ = os.Remove(temp)
 		return err
 	}
@@ -437,7 +459,10 @@ func (p *platformImageStore) putBlob(blob appplatform.ImageBlob, source io.Reade
 // needs its package again. A read that merely fails (EIO, EMFILE) deletes nothing: the attempt fails and the blob
 // stays for the next one.
 func (p *platformImageStore) openBlob(blob appplatform.ImageBlob) (*os.File, error) {
-	path := p.blobPath(blob.Digest)
+	path, ok := p.blobFile(blob.Digest)
+	if !ok {
+		return nil, errPlatformImageBlobMissing
+	}
 	file, err := os.OpenFile(path, os.O_RDONLY|platformNoFollow, 0)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -504,8 +529,8 @@ func (p *platformImageStore) sweep(pinned map[string]bool) []string {
 // staging wrote itself.
 func (p *platformImageStore) removeUnpinned(digests []string, pinned map[string]bool) {
 	for _, d := range digests {
-		if !pinned[d] && !p.isHeld(d) {
-			_ = os.Remove(p.blobPath(d))
+		if path, ok := p.blobFile(d); ok && !pinned[d] && !p.isHeld(d) {
+			_ = os.Remove(path)
 		}
 	}
 }

@@ -314,7 +314,7 @@ func discardJobRequest(c control.DiscardMigrationCommand, migrate migrateClaimMa
 		},
 		Descriptor: bytes.Clone(descriptor), Platform: "linux/" + runtime.GOARCH,
 		Data: driver.CandidateDataEvidence{
-			Root: pin, ProjectID: uint32(mustDataUint(migrate.ProjectID)), Device: mustDataUint(migrate.Device),
+			Root: pin, ProjectID: mustDataProjectID(migrate.ProjectID), Device: mustDataUint(migrate.Device),
 			NamespaceInode: mustDataUint(migrate.NamespaceInode), QuotaBytes: mustDataInt(migrate.QuotaBytes), QuotaInodes: mustDataInt(migrate.QuotaInodes),
 		},
 		Step: step,
@@ -327,7 +327,7 @@ func bindDiscardDescriptor(migrate migrateClaimMarker, descriptor []byte) (apppl
 	if err != nil || parsed.Manifest.Backend == nil || parsed.SHA256 != migrate.TargetReleaseSHA256 {
 		return zero, ErrFenceReconciliation
 	}
-	step, err := appplatform.PlanDataUpgrade(int(mustDataInt(migrate.SourceSchema)), parsed.Manifest.Data)
+	step, err := appplatform.PlanDataUpgrade(mustDataSchema(migrate.SourceSchema), parsed.Manifest.Data)
 	if err != nil || step == nil {
 		return zero, ErrFenceReconciliation
 	}

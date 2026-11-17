@@ -119,6 +119,11 @@ func SendImageBlob(parent context.Context, conn net.Conn, raw, signature []byte,
 	if parent == nil || conn == nil || prove == nil || body == nil || len(signature) != 64 || len(a.PublicKey) != ed25519.PublicKeySize {
 		return zero, ErrImageBlobSession
 	}
+	// A signed command is never larger than control.MaxCommandBytes (VerifyImageBlob refuses more), so the frame
+	// below is bounded by that constant, an empty command is refused too, and its allocation size cannot overflow.
+	if len(raw) == 0 || len(raw) > control.MaxCommandBytes {
+		return zero, ErrImageBlobSession
+	}
 	verified, err := control.VerifyImageBlob(raw, signature, a, time.Now().UnixMilli())
 	if err != nil {
 		return zero, ErrImageBlobSession

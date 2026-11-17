@@ -967,7 +967,7 @@ func migrateJobRequest(c control.MigrateDataCommand, marker migrateClaimMarker, 
 		},
 		Descriptor: bytes.Clone(descriptor), Platform: "linux/" + runtime.GOARCH,
 		Data: driver.CandidateDataEvidence{
-			Root: pin, ProjectID: uint32(mustDataUint(p.ProjectID)), Device: mustDataUint(p.Device),
+			Root: pin, ProjectID: mustDataProjectID(p.ProjectID), Device: mustDataUint(p.Device),
 			NamespaceInode: mustDataUint(p.NamespaceInode), QuotaBytes: mustDataInt(p.QuotaBytes), QuotaInodes: mustDataInt(p.QuotaInodes),
 		},
 		Step: step,
@@ -983,7 +983,7 @@ func bindMigrateDescriptor(c control.MigrateDataCommand, descriptor []byte) (app
 		strconv.Itoa(parsed.Manifest.Data.Schema) != c.Payload.TargetSchema {
 		return zero, ErrFenceReconciliation
 	}
-	step, err := appplatform.PlanDataUpgrade(int(mustDataInt(c.Payload.SourceSchema)), parsed.Manifest.Data)
+	step, err := appplatform.PlanDataUpgrade(mustDataSchema(c.Payload.SourceSchema), parsed.Manifest.Data)
 	if err != nil || step == nil || strconv.Itoa(step.To) != c.Payload.TargetSchema ||
 		control.MigrationEntrypointSHA256(step.Entrypoint) != c.Payload.EntrypointSHA256 ||
 		time.Duration(driver.MigrationWallClock(*step).Seconds()) != time.Duration(mustDataInt(c.Payload.WallClockSeconds)) {
@@ -1030,11 +1030,11 @@ func (s *Store) DispatchMigrateData(ctx context.Context, raw, signature, descrip
 		ctx = withBackendResources(ctx, parsed.Manifest.Backend.Resources)
 	}
 	// The marker is checked before any claim: a namespace already past the source schema is not migrated.
-	before, err := native.ReadSchemaMarker(ctx, pin, command.Payload.NamespaceID, uint32(mustDataUint(command.Payload.ProjectID)))
+	before, err := native.ReadSchemaMarker(ctx, pin, command.Payload.NamespaceID, mustDataProjectID(command.Payload.ProjectID))
 	if err != nil {
 		return zero, fmt.Errorf("read schema marker: %w", err)
 	}
-	if before.Present && before.Schema != int(mustDataInt(command.Payload.SourceSchema)) {
+	if before.Present && before.Schema != mustDataSchema(command.Payload.SourceSchema) {
 		return zero, fmt.Errorf("%w: namespace schema marker %d is not the source schema", ErrFenceReconciliation, before.Schema)
 	}
 	// A target image that is no longer in the daemon refuses the job before its claim.
@@ -1080,7 +1080,7 @@ func observeMigrationOutcome(ctx context.Context, native MigrationNative, pin da
 		o.outcome = "exit_nonzero"
 		return o, nil
 	}
-	marker, err := native.ReadSchemaMarker(ctx, pin, p.NamespaceID, uint32(mustDataUint(p.ProjectID)))
+	marker, err := native.ReadSchemaMarker(ctx, pin, p.NamespaceID, mustDataProjectID(p.ProjectID))
 	if errors.Is(err, data.ErrMigrationUnsafe) {
 		o.outcome = "marker_invalid"
 		return o, nil
@@ -1088,7 +1088,7 @@ func observeMigrationOutcome(ctx context.Context, native MigrationNative, pin da
 	if err != nil {
 		return o, fmt.Errorf("read schema marker after job: %w", err)
 	}
-	if marker.NamespaceID != p.NamespaceID || marker.ProjectID != uint32(mustDataUint(p.ProjectID)) ||
+	if marker.NamespaceID != p.NamespaceID || marker.ProjectID != mustDataProjectID(p.ProjectID) ||
 		marker.NamespaceInode != mustDataUint(p.NamespaceInode) || marker.NamespaceDevice != mustDataUint(p.Device) ||
 		marker.ByteLimit != mustDataInt(p.QuotaBytes) || marker.InodeLimit != mustDataInt(p.QuotaInodes) {
 		return o, fmt.Errorf("schema marker binding: %w", ErrFenceReconciliation)
@@ -1100,7 +1100,7 @@ func observeMigrationOutcome(ctx context.Context, native MigrationNative, pin da
 	switch {
 	case !marker.Present:
 		o.outcome = "marker_missing"
-	case marker.Schema != int(mustDataInt(p.TargetSchema)):
+	case marker.Schema != mustDataSchema(p.TargetSchema):
 		o.outcome = "marker_mismatch"
 	case marker.UsedBytes > mustDataInt(p.QuotaBytes) || marker.UsedInodes > mustDataInt(p.QuotaInodes):
 		o.outcome = "over_quota"
