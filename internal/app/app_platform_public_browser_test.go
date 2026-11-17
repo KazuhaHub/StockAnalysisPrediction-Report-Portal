@@ -93,6 +93,11 @@ fetch('/api/me', {credentials: 'include'}).then(r => { out.me = r.status }).catc
 	}
 	mu.Lock()
 	defer mu.Unlock()
+	// The request did reach the server (it is cross-origin from the sandbox, blocked only in the
+	// page), so "no cookie" is a measurement and not an absence of traffic.
+	if len(apiCookies) == 0 {
+		t.Fatal("the credentialed request never reached the server")
+	}
 	for _, c := range apiCookies {
 		if c != "" {
 			t.Fatal("the session cookie was sent with a request of the public document", c)

@@ -72,6 +72,43 @@ func platformPublicFixture(t *testing.T, pg bool) *platformPublicEnv {
 	return env
 }
 
+// dropData forgets cached responses and keeps the verified release.
+func (e *platformPublicEnv) dropData() {
+	e.s.platformPublic.mu.Lock()
+	defer e.s.platformPublic.mu.Unlock()
+	for key, entry := range e.s.platformPublic.entries {
+		if entry.installation == e.id && entry.verified == nil {
+			e.s.platformPublic.removeLocked(entry)
+			delete(e.s.platformPublic.entries, key)
+		}
+	}
+}
+
+// dataEntries counts cached responses, not the verified release that stands behind them.
+func (e *platformPublicEnv) dataEntries() int {
+	e.s.platformPublic.mu.Lock()
+	defer e.s.platformPublic.mu.Unlock()
+	n := 0
+	for _, entry := range e.s.platformPublic.entries {
+		if entry.installation == e.id && entry.verified == nil {
+			n++
+		}
+	}
+	return n
+}
+
+func (e *platformPublicEnv) authority() (platformPublicAuthority, error) {
+	light, err := e.s.readPlatformPublicLight(context.Background(), e.id)
+	if err != nil {
+		return platformPublicAuthority{}, err
+	}
+	verified, err := e.s.verifyPlatformPublicRelease(context.Background(), light)
+	if err != nil {
+		return platformPublicAuthority{}, err
+	}
+	return platformPublicAuthority{platformPublicLight: light, platformPublicVerified: verified}, nil
+}
+
 func (e *platformPublicEnv) admin(t *testing.T, method, suffix, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(method, "/api/admin/app-platform/installations/"+e.id+"/"+suffix, strings.NewReader(body))
@@ -274,7 +311,7 @@ func TestPublicBackendAccessCarriesNoViewerAndNeedsTheGrant(t *testing.T) {
 		if a.viewer.Subject != "" || a.viewer.Role != "" || len(a.viewer.OUs) != 0 || a.account != (platformActorAccount{}) || a.publicPolicy == "" {
 			t.Fatalf("anonymous access carries identity: %+v", a)
 		}
-		auth, err := e.s.readPlatformPublicAuthority(context.Background(), e.id)
+		auth, err := e.authority()
 		if err != nil || a.publicPolicy != auth.policyJSON {
 			t.Fatal("access and authority disagree", err)
 		}
@@ -397,12 +434,12 @@ func TestPublicBackendAnswersAreBounded(t *testing.T) {
 		}
 		for name, c := range cases {
 			e.response = func(appplatform.PublicRoute, string) (driver.BackendResponse, error) { return c.resp, c.err }
-			e.s.platformPublic.purge(e.id)
+			e.dropData()
 			w := e.data("status", "")
 			if w.Code != c.want || strings.Contains(w.Body.String(), "html") || w.Header().Get("Cache-Control") != "no-store" {
 				t.Fatal(name, w.Code, w.Body.String(), w.Header().Get("Cache-Control"))
 			}
-			if n, _ := e.s.platformPublic.cacheSize(e.id); n != 0 {
+			if n := e.dataEntries(); n != 0 {
 				t.Fatal(name, "a refused answer was cached")
 			}
 			// A refusal frees the single flight and the concurrency slot: the next call fetches.
@@ -412,7 +449,7 @@ func TestPublicBackendAnswersAreBounded(t *testing.T) {
 		e.response = func(appplatform.PublicRoute, string) (driver.BackendResponse, error) {
 			return driver.BackendResponse{Status: 200, Body: []byte(`{"ok":1}`)}, nil
 		}
-		e.s.platformPublic.purge(e.id)
+		e.dropData()
 		if w := e.data("status", ""); w.Code != 200 {
 			t.Fatal("recovery", w.Code, w.Body.String())
 		}
@@ -429,8 +466,8 @@ func TestPublicWithdrawalIsImmediateAndEmptiesTheCache(t *testing.T) {
 		if w := e.get("/public/apps/"+e.id+"/app.js", "", nil); w.Code != 200 {
 			t.Fatal(w.Code)
 		}
-		if n, _ := e.s.platformPublic.cacheSize(e.id); n != 2 {
-			t.Fatal("cache entries", n)
+		if n, _ := e.s.platformPublic.cacheSize(e.id); n != 2 || e.dataEntries() != 1 {
+			t.Fatal("cache entries (the verified release and one response)", n)
 		}
 		if w := e.disable(t); w.Code != 200 {
 			t.Fatal(w.Code, w.Body.String())
@@ -459,7 +496,7 @@ func TestPublicWithdrawalIsImmediateAndEmptiesTheCache(t *testing.T) {
 		if w := e.enableWith(t, []string{"status"}, false, 600, 5); w.Code != 200 {
 			t.Fatal("policy change", w.Code, w.Body.String())
 		}
-		if n, _ := e.s.platformPublic.cacheSize(e.id); n != 0 {
+		if n := e.dataEntries(); n != 0 {
 			t.Fatal("cache survived a policy change")
 		}
 		if w := e.data("history", ""); w.Code != 404 {

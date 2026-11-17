@@ -265,44 +265,61 @@ func TestPublicSummaryWindowRollsOver(t *testing.T) {
 	}
 }
 
-func TestPublicLimiterCannotBeUsedToFlushOtherCallers(t *testing.T) {
-	l := &platformPublicLimiter{capacity: 64}
+func TestPublicLimiterGivesNewSourcesTheirOwnAllowanceWhenFull(t *testing.T) {
+	var l platformPublicLimiter
 	now := time.Now()
-	for i := 0; i < 63; i++ {
-		l.allow(fmt.Sprintf("ip:10.0.0.%d", i), 1, time.Minute, now)
+	// 8192 live attacker keys fill the table. A source that has never been seen still gets
+	// through, and the table does not grow.
+	for i := 0; i < platformPublicLimiterCapacity; i++ {
+		l.allow(fmt.Sprintf("ip:attacker-%d", i), 1, time.Minute, now)
 	}
+	if l.size() > platformPublicLimiterCapacity {
+		t.Fatal("table over capacity", l.size())
+	}
+	for i := 0; i < 200; i++ {
+		if !l.allow(fmt.Sprintf("ip:visitor-%d", i), 1, time.Minute, now) {
+			t.Fatal("a new visitor was starved by a full table", i)
+		}
+	}
+	if l.size() > platformPublicLimiterCapacity {
+		t.Fatal("table grew past its capacity", l.size())
+	}
+	// A visitor that keeps calling keeps its counter: a modest flood does not reset it.
+	hot := "ip:hot"
 	for i, want := range []bool{true, true, false} {
-		if l.allow("ip:victim", 2, time.Minute, now) != want {
-			t.Fatal("victim allowance", i)
+		if l.allow(hot, 2, time.Minute, now) != want {
+			t.Fatal("hot allowance", i)
 		}
 	}
-	// A flood of fresh keys fills nothing and resets nothing: the victim stays at its ceiling and
-	// the keys without room share one bounded allowance.
-	allowed := 0
-	for i := 0; i < 5000; i++ {
-		if l.allow(fmt.Sprintf("ip:198.51.%d.%d", i/250, i%250), 1, time.Minute, now) {
-			allowed++
-		}
+	for i := 0; i < 200; i++ {
+		l.allow(fmt.Sprintf("ip:flood-%d", i), 1, time.Minute, now)
+		l.allow(hot, 2, time.Minute, now)
 	}
-	if l.allow("ip:victim", 2, time.Minute, now) || l.allow("ip:10.0.0.1", 1, time.Minute, now) {
-		t.Fatal("a flood reset a live caller")
+	if l.allow(hot, 2, time.Minute, now) {
+		t.Fatal("a flood reset an active source")
 	}
-	if allowed > platformPublicOverflowPerWindow {
-		t.Fatal("unbounded overflow", allowed)
-	}
-	if len(l.recs) > 64 {
-		t.Fatal("table grew past its capacity", len(l.recs))
-	}
-	// Records that have lapsed make room again.
-	later := now.Add(2 * time.Minute)
-	if !l.allow("ip:fresh", 1, time.Minute, later) {
-		t.Fatal("no room after the windows lapsed")
+	// Lapsed windows count again.
+	if !l.allow(hot, 2, time.Minute, now.Add(2*time.Minute)) {
+		t.Fatal("window did not lapse")
 	}
 	if platformPublicClientKey("2001:db8:1:2:3:4:5:6") != platformPublicClientKey("2001:db8:1:2:ffff::1") || platformPublicClientKey("2001:db8:1:2::1") == platformPublicClientKey("2001:db8:1:3::1") {
 		t.Fatal("an IPv6 client owns one /64")
 	}
 	if platformPublicClientKey("192.0.2.1") == platformPublicClientKey("192.0.2.2") {
 		t.Fatal("IPv4 clients are distinct")
+	}
+}
+
+func TestPublicLimiterSmallCapacityStaysBounded(t *testing.T) {
+	l := &platformPublicLimiter{capacity: 64}
+	now := time.Now()
+	for i := 0; i < 5000; i++ {
+		if !l.allow(fmt.Sprintf("ip:%d", i), 1, time.Minute, now) {
+			t.Fatal("a new key was refused", i)
+		}
+	}
+	if l.size() > 64 {
+		t.Fatal("size", l.size())
 	}
 }
 
