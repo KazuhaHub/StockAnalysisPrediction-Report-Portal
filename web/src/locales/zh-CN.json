@@ -3905,6 +3905,7 @@
   "err.app_platform_plan_expired": "安装方案已过期，请重新审核。",
   "err.app_platform_plan_changed": "安装方案已变化，请重新审核。",
   "err.app_platform_installation_not_ready": "安装尚未就绪，或有操作正在进行。请在其完成后重试。",
+  "err.not_permitted": "你无权执行此操作。",
   "err.app_platform_operation_conflict": "此请求与已有的应用操作冲突。",
   "err.app_platform_package_untrusted": "软件包签名或发布者信任已变化。",
   "err.app_platform_requirements_unavailable": "此应用需要尚未支持的平台能力。",

@@ -3905,6 +3905,7 @@
   "err.app_platform_plan_expired": "This installation plan has expired. Review it again.",
   "err.app_platform_plan_changed": "The installation plan has changed. Review it again.",
   "err.app_platform_installation_not_ready": "The installation is not ready, or an operation is in progress. Try again when it has finished.",
+  "err.not_permitted": "You are not permitted to do this.",
   "err.app_platform_operation_conflict": "This request conflicts with an existing application operation.",
   "err.app_platform_package_untrusted": "The package signature or publisher trust has changed.",
   "err.app_platform_requirements_unavailable": "This application requires platform features that are not available yet.",

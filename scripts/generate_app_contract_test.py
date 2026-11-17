@@ -57,10 +57,11 @@ class AppContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "shared validator domains differ"):
             contract.render(json.dumps(self.schema).encode())
 
-    def test_capability_domain_difference_refused(self):
+    def test_required_capability_outside_the_optional_domain_refused(self):
+        # The optional list is the capability domain; a required capability it does not name is refused.
         node = self.schema["$defs"]["Capabilities"]["properties"]["optional"]["anyOf"][0]
-        node["items"]["enum"] = copy.copy(node["items"]["enum"][:-1])
-        with self.assertRaisesRegex(ValueError, "capability domains differ"):
+        node["items"]["enum"] = [c for c in node["items"]["enum"] if c != "reports.read"]
+        with self.assertRaisesRegex(ValueError, "required capability domain is not inside the optional domain"):
             contract.render(json.dumps(self.schema).encode())
 
     def test_apps_check_is_read_only_and_needs_no_go_or_network(self):
