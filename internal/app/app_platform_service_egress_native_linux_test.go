@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -361,38 +362,18 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	}
 	// The installation declares no background.run (the foreground fixture does not
 	// need it); give it the row the reviewed selection would, for this test only.
-	// Everything the test changes is put back by a cleanup that runs however the
-	// test ends: the original network.http state, the background.run row, and the
-	// notification events it captured.
-	grantWas := scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	eventsBefore := map[string]bool{}
-	for _, id := range platformServiceEgressEventIDs(t, s) {
-		eventsBefore[id] = true
-	}
+	// The steps that follow this one (ancestor OU access, policy changes, more
+	// launches) check the launch capability snapshot, which an extra granted
+	// capability would break, so everything the test changes is put back right at
+	// the end of this function, and again by a cleanup if the test ends early.
+	state := platformServiceEgressCaptureState(t, s, installation)
 	var withdrawal <-chan error
 	t.Cleanup(func() {
-		if withdrawal != nil {
-			select {
-			case <-withdrawal:
-			case <-time.After(5 * time.Second):
-			}
-		}
-		mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=? WHERE installation_id=? AND capability='network.http'`, grantWas, installation)
-		mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
-		for _, id := range platformServiceEgressEventIDs(t, s) {
-			if eventsBefore[id] {
-				continue
-			}
-			mustExec(t, s.st, `DELETE FROM notification_attempts WHERE delivery_id IN (SELECT id FROM notification_deliveries WHERE event_id=?)`, id)
-			mustExec(t, s.st, `DELETE FROM notification_deliveries WHERE event_id=?`, id)
-			mustExec(t, s.st, `DELETE FROM notification_recipients WHERE event_id=?`, id)
-			mustExec(t, s.st, `DELETE FROM notification_events WHERE id=?`, id)
+		if err := state.restore(s, installation, withdrawal); err != nil {
+			t.Error("restoring the installation after the egress test:", err)
 		}
 	})
-	review := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	stamp := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,'background.run',1,'{}',?,?,?,?)`, installation, policy, review, stamp, stamp)
+	state.addBackgroundRun(t, s, installation)
 	// The fixture app (notes-writer-notify-demo) declares secrets.use but requires
 	// no setup binding, so nothing is missing; if that ever changes this says so
 	// here instead of as an opaque "no session" later.
@@ -484,6 +465,149 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if opened := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action=? AND target_id=?`, platformServiceEgressAuditOpened, installation); opened < 1 {
 		t.Fatal("no opened audit")
 	}
+	// Put everything back now, and prove the grants are exactly as they were: the
+	// launch capability snapshot compares them with the reviewed selection.
+	if err := state.restore(s, installation, withdrawal); err != nil {
+		t.Fatal("restoring the installation after the egress test:", err)
+	}
+}
+
+// platformServiceEgressRestoreState is what the egress test changes in the database and
+// how to undo it. restore is idempotent: the first call undoes, later ones only
+// re-check.
+type platformServiceEgressRestoreState struct {
+	grants        []string
+	events        map[string]bool
+	insertedBgRun bool
+	restored      bool
+}
+
+func platformServiceEgressGrantRows(t *testing.T, s *Server, installation string) []string {
+	t.Helper()
+	rows, err := s.st.query(`SELECT capability||'|'||granted||'|'||policy_json||'|'||policy_revision||'|'||review_plan_id||'|'||created_ms||'|'||updated_ms FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, row)
+	}
+	return out
+}
+
+func platformServiceEgressCaptureState(t *testing.T, s *Server, installation string) *platformServiceEgressRestoreState {
+	t.Helper()
+	st := &platformServiceEgressRestoreState{grants: platformServiceEgressGrantRows(t, s, installation), events: map[string]bool{}}
+	for _, id := range platformServiceEgressEventIDs(t, s) {
+		st.events[id] = true
+	}
+	return st
+}
+
+// addBackgroundRun gives the installation the background.run row the reviewed
+// selection would, copied from its network.http grant; restore removes it again.
+func (st *platformServiceEgressRestoreState) addBackgroundRun(t *testing.T, s *Server, installation string) {
+	t.Helper()
+	review := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	stamp := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,'background.run',1,'{}',?,?,?,?)`, installation, policy, review, stamp, stamp)
+	st.insertedBgRun = true
+}
+
+// restore waits for the withdrawal goroutine, puts network.http back as it was,
+// removes the background.run row it added and the notification rows it caused,
+// then compares every grant row of the installation with the captured ones.
+func (st *platformServiceEgressRestoreState) restore(s *Server, installation string, withdrawal <-chan error) error {
+	if !st.restored {
+		if withdrawal != nil {
+			select {
+			case <-withdrawal:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		var was int
+		for _, row := range st.grants {
+			if fields := strings.Split(row, "|"); fields[0] == "network.http" {
+				was, _ = strconv.Atoi(fields[1])
+			}
+		}
+		steps := []struct {
+			q    string
+			args []any
+		}{{`UPDATE app_platform_capability_grants SET granted=? WHERE installation_id=? AND capability='network.http'`, []any{was, installation}}}
+		if st.insertedBgRun {
+			steps = append(steps, struct {
+				q    string
+				args []any
+			}{`DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, []any{installation}})
+		}
+		ids, err := platformServiceEgressEventIDsErr(s)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if st.events[id] {
+				continue
+			}
+			for _, q := range []string{
+				`DELETE FROM notification_attempts WHERE delivery_id IN (SELECT id FROM notification_deliveries WHERE event_id=?)`,
+				`DELETE FROM notification_deliveries WHERE event_id=?`,
+				`DELETE FROM notification_recipients WHERE event_id=?`,
+				`DELETE FROM notification_events WHERE id=?`,
+			} {
+				steps = append(steps, struct {
+					q    string
+					args []any
+				}{q, []any{id}})
+			}
+		}
+		for _, step := range steps {
+			if _, err := s.st.exec(step.q, step.args...); err != nil {
+				return err
+			}
+		}
+		st.restored = true
+	}
+	rows, err := s.st.query(`SELECT capability||'|'||granted||'|'||policy_json||'|'||policy_revision||'|'||review_plan_id||'|'||created_ms||'|'||updated_ms FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var now []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			return err
+		}
+		now = append(now, row)
+	}
+	if !slices.Equal(now, st.grants) {
+		return fmt.Errorf("grant rows differ from before the test:\nbefore %q\nafter  %q", st.grants, now)
+	}
+	return nil
+}
+
+func platformServiceEgressEventIDsErr(s *Server) ([]string, error) {
+	rows, err := s.st.query(`SELECT id FROM notification_events`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // The request and reply plumbing between the Portal child and the acceptance
@@ -586,5 +710,33 @@ func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
 	}
 	if status != 502 || platformServiceEgressErrorCode(body) != "uncertain" {
 		t.Fatal("error through the client process", status, body)
+	}
+}
+
+// The restore helper puts back exactly what the egress test changes, leaves what
+// it did not add, is idempotent, and notices a difference it cannot undo.
+func TestPlatformServiceEgressNativeStateRestore(t *testing.T) {
+	s, installation := platformServiceEgressFixture(t, false, true)
+	// The unit fixture already grants background.run; take it away so the helper
+	// adds it the way the native fixture needs.
+	mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
+	state := platformServiceEgressCaptureState(t, s, installation)
+	state.addBackgroundRun(t, s, installation)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
+	now := time.Now().UnixMilli()
+	mustExec(t, s.st, `INSERT INTO notification_events(id,source_key,event_type,payload,created_at,expires_at) VALUES('egress-restore-1','egress-restore-1','app.notice','{}',?,?)`, now, now+1000)
+	if err := state.restore(s, installation, nil); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events WHERE id='egress-restore-1'`) != 0 {
+		t.Fatal("the captured notification event was kept")
+	}
+	if err := state.restore(s, installation, nil); err != nil { // idempotent
+		t.Fatal("second restore", err)
+	}
+	// Something the helper never touched is a difference it reports.
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision+1 WHERE installation_id=? AND capability='notifications.publish'`, installation)
+	if err := state.restore(s, installation, nil); err == nil {
+		t.Fatal("an unrestorable difference was not reported")
 	}
 }
