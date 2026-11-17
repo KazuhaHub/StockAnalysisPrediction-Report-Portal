@@ -17,7 +17,7 @@ import (
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
-func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint, original platformWritableRegistrationIntent, ipcRoot string) {
+func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platformOperationLease, endpoint platformRuntimeEndpoint, original platformWritableRegistrationIntent, app platformServiceEgressApp) {
 	t.Helper()
 	ctx := context.Background()
 	actor := platformManagedFixtureSession(t, s)
@@ -124,7 +124,7 @@ func testNativeWritableActivationAndAccess(t *testing.T, s *Server, lease platfo
 		t.Fatal("actual writable viewer request", err)
 	}
 	count, viewer := decode(response)
-	testNativePlatformNetworkAuthority(t, s, actor, lease.installationID, endpoint, ipcRoot)
+	testNativePlatformNetworkAuthority(t, s, actor, lease.installationID, endpoint, app)
 	if count != 3 {
 		t.Fatal("viewer request omitted or repeated write")
 	}
