@@ -44,6 +44,24 @@ interface Binding {
   state: 'active' | 'revoked' | 'review_required'
   policy_revision: number
   revision: number
+  principals?: Principal[]
+}
+
+type Principal = 'viewer' | 'service'
+// Who may use a binding, as the review form offers it.
+type Use = 'viewer' | 'both' | 'service'
+
+const useToPrincipals = (use: Use): Principal[] =>
+  use === 'service' ? ['service'] : use === 'both' ? ['service', 'viewer'] : ['viewer']
+
+const principalsToUse = (principals?: Principal[]): Use =>
+  principals?.includes('service') ? (principals.includes('viewer') ? 'both' : 'service') : 'viewer'
+
+interface BindingForm {
+  name: string
+  credential_id: string
+  operation: string
+  use: Use
 }
 
 interface CredentialReview {
@@ -63,6 +81,7 @@ interface BindingPlan {
     credential_label: string
     operation: string
     network_policy_sha256: string
+    principals?: Principal[]
   }
 }
 
@@ -92,7 +111,8 @@ export default function AppCredentialsPage() {
   const [bindingOpen, setBindingOpen] = useState(false)
   const [bindingSeed, setBindingSeed] = useState<Binding | null>(null)
   const [credentialForm] = Form.useForm<{ label: string; value: string }>()
-  const [bindingForm] = Form.useForm<{ name: string; credential_id: string; operation: string }>()
+  const [bindingForm] = Form.useForm<BindingForm>()
+  const bindingOperation = Form.useWatch('operation', bindingForm)
 
   const load = async () => {
     if (!appKey) return
@@ -230,11 +250,18 @@ export default function AppCredentialsPage() {
     }, t)
   }
 
-  const finishBinding = async (values: { name: string; credential_id: string; operation: string }) => {
+  const finishBinding = async (values: BindingForm) => {
     try {
+      // A setup-only credential is never offered to background work.
+      const request: Record<string, unknown> = {
+        name: values.name,
+        credential_id: values.credential_id,
+        operation: values.operation,
+      }
+      if (values.operation !== 'raw_read') request.principals = useToPrincipals(values.use ?? 'viewer')
       const plan = await api.post<BindingPlan>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings/plan`,
-        values,
+        request,
       )
       await new Promise<void>((resolve, reject) => {
         confirmAction(modal, {
@@ -246,6 +273,12 @@ export default function AppCredentialsPage() {
               <Typography.Text type="secondary">
                 {plan.review.operation} · {plan.review.network_policy_sha256.slice(0, 12)}
               </Typography.Text>
+              <Typography.Text>
+                {t(`appCredentials.principals.${principalsToUse(plan.review.principals)}`)}
+              </Typography.Text>
+              {plan.review.principals?.includes('service') && (
+                <Alert type="warning" showIcon title={t('appCredentials.backgroundDisclosure')} />
+              )}
             </Space>
           ),
           okText: t('appCredentials.approve'),
@@ -295,11 +328,13 @@ export default function AppCredentialsPage() {
             name: binding.name,
             credential_id: binding.credential_id,
             operation: binding.operation,
+            use: principalsToUse(binding.principals),
           }
         : {
             name: appKey === 'scheduled-digest' ? 'digest-feed' : '',
             credential_id: '',
             operation: appKey === 'scheduled-digest' ? 'raw_read' : 'http_bearer',
+            use: 'viewer',
           },
     )
     setBindingOpen(true)
@@ -352,6 +387,12 @@ export default function AppCredentialsPage() {
       render: (operation: string) => t(`appCredentials.operation.${operation}`),
     },
     {
+      title: t('appCredentials.usedBy'),
+      key: 'principals',
+      render: (_: unknown, binding: Binding) =>
+        binding.operation === 'raw_read' ? null : t(`appCredentials.principals.${principalsToUse(binding.principals)}`),
+    },
+    {
       title: t('appCredentials.state'),
       dataIndex: 'state',
       render: (state: string) => <Tag>{t(`appCredentials.state.${state}`)}</Tag>,
@@ -359,22 +400,29 @@ export default function AppCredentialsPage() {
     {
       title: t('appPlatform.action'),
       key: 'actions',
-      width: 180,
+      width: 260,
       render: (_: unknown, binding: Binding) =>
         binding.state === 'revoked' ? null : binding.state === 'review_required' ? (
           <Button size="small" icon={<SafetyCertificateOutlined aria-hidden="true" />} onClick={() => openBinding(binding)}>
             {t('appCredentials.reapprove')}
           </Button>
         ) : (
-          <Confirm
-            title={t('appCredentials.revokeBindingConfirm')}
-            okText={t('appCredentials.revoke')}
-            onConfirm={() => revokeBinding(binding)}
-          >
-            <Button size="small" danger>
-              {t('appCredentials.revoke')}
-            </Button>
-          </Confirm>
+          <Space size={4}>
+            {binding.operation !== 'raw_read' && (
+              <Button size="small" onClick={() => openBinding(binding)}>
+                {t('appCredentials.changeUse')}
+              </Button>
+            )}
+            <Confirm
+              title={t('appCredentials.revokeBindingConfirm')}
+              okText={t('appCredentials.revoke')}
+              onConfirm={() => revokeBinding(binding)}
+            >
+              <Button size="small" danger>
+                {t('appCredentials.revoke')}
+              </Button>
+            </Confirm>
+          </Space>
         ),
     },
   ]
@@ -472,6 +520,21 @@ export default function AppCredentialsPage() {
               ]}
             />
           </Form.Item>
+          {bindingOperation !== 'raw_read' && (
+            <Form.Item
+              name="use"
+              label={t('appCredentials.principals')}
+              extra={t('appCredentials.principalsHint')}
+              rules={[{ required: true }]}
+            >
+              <Select
+                options={(['viewer', 'both', 'service'] as Use[]).map((use) => ({
+                  value: use,
+                  label: t(`appCredentials.principals.${use}`),
+                }))}
+              />
+            </Form.Item>
+          )}
           <Button type="primary" htmlType="submit">
             {t('appCredentials.reviewBinding')}
           </Button>

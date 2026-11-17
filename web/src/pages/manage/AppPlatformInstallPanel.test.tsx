@@ -233,6 +233,23 @@ describe('application installation confirmation', () => {
       }
     })
 
+    it('tells the administrator that reviewed credentials may be used in the background', async () => {
+      const credentialSentence = 'appPlatform.backgroundCredentialsNote'
+      for (const [item, declined, shown] of [
+        [release_(['background.run', 'network.http', 'secrets.use'], []), [], true],
+        [release_(['background.run', 'network.http'], ['secrets.use']), [], true],
+        [release_(['background.run', 'network.http'], ['secrets.use']), ['secrets.use'], false],
+        [release_(['network.http', 'secrets.use'], []), [], false],
+        [release_(['background.run', 'network.http'], []), [], false],
+      ] as [Record<string, unknown>, string[], boolean][]) {
+        serve(item, declined)
+        const view = mount()
+        await preview()
+        expect(screen.queryByText(credentialSentence) !== null).toBe(shown)
+        view.unmount()
+      }
+    })
+
     it('shows it for an update review too', async () => {
       const installed = { ...release_(['background.run', 'network.http'], []), installable: false, reason: 'already_installed', installation_id: operation, current_release_sha256: 'c'.repeat(64), updateable: true }
       mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installed], next_cursor: '' } : { items: [], next_cursor: '' }))

@@ -44,6 +44,7 @@ const binding = {
   state: 'active' as const,
   policy_revision: 1,
   revision: 1,
+  principals: ['viewer'] as ('viewer' | 'service')[],
 }
 
 function renderPage(algorithm = theme.defaultAlgorithm, appKey = 'hello') {
@@ -125,6 +126,124 @@ describe('application credential settings', () => {
         { plan_id: planID, plan_sha256: 'a'.repeat(64) },
       ),
     )
+  })
+
+  it('says who may use each binding', async () => {
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/hello/secret-bindings')
+        return {
+          bindings: [
+            binding,
+            { ...binding, id: '00000000-0000-4000-8000-000000000112', name: 'both-api', principals: ['service', 'viewer'] },
+            { ...binding, id: '00000000-0000-4000-8000-000000000113', name: 'service-api', principals: ['service'] },
+          ],
+        }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    expect(screen.getByText('appCredentials.principals.viewer')).toBeTruthy()
+    expect(screen.getByText('appCredentials.principals.both')).toBeTruthy()
+    expect(screen.getByText('appCredentials.principals.service')).toBeTruthy()
+  })
+
+  it('asks for background use explicitly and discloses it before approval', async () => {
+    const user = userEvent.setup()
+    const planID = '00000000-0000-4000-8000-000000000114'
+    apiMock.post
+      .mockResolvedValueOnce({
+        installation_id: '00000000-0000-4000-8000-000000000105',
+        plan_id: planID,
+        plan_sha256: 'a'.repeat(64),
+        review: {
+          name: 'second-api',
+          credential_id: credential.id,
+          credential_label: credential.label,
+          operation: 'http_bearer',
+          network_policy_sha256: 'b'.repeat(64),
+          principals: ['service', 'viewer'],
+        },
+      })
+      .mockResolvedValueOnce({ ...binding, name: 'second-api', principals: ['service', 'viewer'] })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    await user.type(screen.getByLabelText('appCredentials.name'), 'second-api')
+    await user.click(screen.getByLabelText('appCredentials.credential'))
+    fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByLabelText('appCredentials.principals'))
+    fireEvent.click(await screen.findByText('appCredentials.principals.both', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
+    expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/apps/hello/secret-bindings/plan', {
+      name: 'second-api',
+      credential_id: credential.id,
+      operation: 'http_bearer',
+      principals: ['service', 'viewer'],
+    })
+    expect(await screen.findByText('appCredentials.backgroundDisclosure')).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'appCredentials.approve' }))
+    await waitFor(() =>
+      expect(apiMock.post).toHaveBeenLastCalledWith(
+        `/api/admin/app-platform/secret-binding-reviews/${planID}`,
+        { plan_id: planID, plan_sha256: 'a'.repeat(64) },
+      ),
+    )
+  })
+
+  it('shows no background disclosure for a viewer-only binding', async () => {
+    const user = userEvent.setup()
+    apiMock.post.mockResolvedValueOnce({
+      installation_id: '00000000-0000-4000-8000-000000000105',
+      plan_id: '00000000-0000-4000-8000-000000000115',
+      plan_sha256: 'a'.repeat(64),
+      review: { name: 'second-api', credential_id: credential.id, credential_label: credential.label, operation: 'http_bearer', network_policy_sha256: 'b'.repeat(64), principals: ['viewer'] },
+    })
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    await user.type(screen.getByLabelText('appCredentials.name'), 'second-api')
+    await user.click(screen.getByLabelText('appCredentials.credential'))
+    fireEvent.click(await screen.findByText('Upstream API', { selector: '.ant-select-item-option-content' }))
+    await user.click(screen.getByRole('button', { name: 'appCredentials.reviewBinding' }))
+    await screen.findAllByText('appCredentials.confirmBinding')
+    // The default is the viewer only: background use is never preselected.
+    expect(apiMock.post).toHaveBeenCalledWith('/api/admin/app-platform/apps/hello/secret-bindings/plan', {
+      name: 'second-api',
+      credential_id: credential.id,
+      operation: 'http_bearer',
+      principals: ['viewer'],
+    })
+    expect(screen.queryByText('appCredentials.backgroundDisclosure')).toBeNull()
+  })
+
+  it('lets the administrator change who may use an active binding', async () => {
+    const user = userEvent.setup()
+    renderPage()
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: 'appCredentials.changeUse' }))
+    expect((screen.getByLabelText('appCredentials.name') as HTMLInputElement).value).toBe('upstream-api')
+    expect(screen.getByLabelText('appCredentials.principals')).toBeTruthy()
+  })
+
+  it('offers no background use for a setup-only credential', async () => {
+    const user = userEvent.setup()
+    apiMock.get.mockImplementation(async (url: string) => {
+      if (url === '/api/admin/apps/layout') return { apps: layout() }
+      if (url === '/api/apps') return { apps: installed }
+      if (url.startsWith('/api/admin/app-platform/credentials?'))
+        return { credentials: [credential], next_after: '' }
+      if (url === '/api/admin/app-platform/apps/scheduled-digest/secret-bindings')
+        return { bindings: [] }
+      throw new Error(`unexpected ${url}`)
+    })
+    renderPage(theme.defaultAlgorithm, 'scheduled-digest')
+    await screen.findAllByText('Upstream API')
+    await user.click(screen.getByRole('button', { name: /appCredentials.addBinding/ }))
+    expect(screen.queryByLabelText('appCredentials.principals')).toBeNull()
   })
 
   it('prefills the required Scheduled Digest binding name', async () => {
