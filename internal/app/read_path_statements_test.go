@@ -1,6 +1,8 @@
 package app
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -60,6 +62,9 @@ func (f *readPathFixture) get(t *testing.T, path string) (int, []string) {
 	}
 	return w.Code, out
 }
+
+// treeRead matches a statement that reads the organisation tree: the tree on its own, or the account row with it.
+const treeRead = `FROM user_groups$|LEFT JOIN user_groups g ON 1=1`
 
 func countMatching(statements []string, pattern string) int {
 	re := regexp.MustCompile(pattern)
@@ -232,14 +237,13 @@ func TestReadPathAccountSnapshotIsReadOncePerPage(t *testing.T) {
 	if _, _, err := f.s.st.UpsertReport(Rep{Symbol: "600010", Name: "Forecast Co", Date: "2026-11-13", RType: predTestRtype, Title: "covered", MD: "body"}); err != nil {
 		t.Fatal(err)
 	}
-	const tree = `FROM user_groups$`
 	for _, path := range []string{"/api/home", "/api/stock/600010", "/api/stock/600000"} {
 		f.get(t, path) // warm the caches that are not under test
 		code, statements := f.get(t, path)
 		if code != http.StatusOK {
 			t.Fatalf("%s: %d", path, code)
 		}
-		if n := countMatching(statements, tree); n != 1 {
+		if n := countMatching(statements, treeRead); n != 1 {
 			t.Fatalf("%s read the organisation tree %d times, want 1: %v", path, n, statements)
 		}
 	}
@@ -250,7 +254,7 @@ func TestReadPathAccountSnapshotIsNotSharedBetweenRequests(t *testing.T) {
 	f := newReadPathFixture(t)
 	_, first := f.get(t, "/api/home")
 	_, second := f.get(t, "/api/home")
-	if countMatching(first, `FROM user_groups$`) != 1 || countMatching(second, `FROM user_groups$`) != 1 {
+	if countMatching(first, treeRead) != 1 || countMatching(second, treeRead) != 1 {
 		t.Fatalf("each request must read the tree itself: %v / %v", first, second)
 	}
 }
@@ -284,7 +288,7 @@ func TestRequestAccountSnapshotOnlyForSafeRequestsAndItsOwnAccount(t *testing.T)
 	}
 	other := f.s.viewerScopeFor(r.Context(), "someone-else")
 	f.spy.mu.Lock()
-	n := countMatching(f.spy.trace, `FROM user_groups$`)
+	n := countMatching(f.spy.trace, treeRead)
 	f.spy.tracing = false
 	f.spy.mu.Unlock()
 	if n != 2 {
@@ -327,7 +331,7 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 		forecast := f.s.forecastAccessFor(r.Context(), c.user)
 		_ = f.s.viewerScopeFor(r.Context(), c.user)
 		f.spy.mu.Lock()
-		reads := countMatching(f.spy.trace, `FROM user_groups$`)
+		reads := countMatching(f.spy.trace, treeRead)
 		f.spy.tracing = false
 		f.spy.mu.Unlock()
 		if reads != c.treeReads {
@@ -343,5 +347,95 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 		if !reflect.DeepEqual(forecast, f.s.forecastAccess(c.user)) {
 			t.Errorf("%s: forecast = %+v, want %+v", c.user, forecast, f.s.forecastAccess(c.user))
 		}
+	}
+}
+
+// The account row and the organisation tree are one statement, so they need no explicit transaction to be read
+// from one state: four round trips on PostgreSQL (begin, the row, the tree, commit) become one, on every page.
+func TestOUPolicySubjectIsOneStatementAndEqualsTheTransactionalRead(t *testing.T) {
+	f := newReadPathFixture(t)
+	users := seedOUPolicySubjects(t, f.s.st)
+	for _, user := range append([]string{f.session.username}, users...) {
+		f.spy.mu.Lock()
+		f.spy.tracing, f.spy.trace = true, nil
+		f.spy.mu.Unlock()
+		assertOUPolicySubjectEqualsTransactionalRead(t, f.s.st, user)
+		f.spy.mu.Lock()
+		var statements []string
+		for _, line := range f.spy.trace {
+			if !strings.HasPrefix(line, "--") {
+				statements = append(statements, line)
+			}
+		}
+		f.spy.tracing = false
+		f.spy.mu.Unlock()
+		// The single read, then the reference read's two statements inside its transaction.
+		if len(statements) != 3 || countMatching(statements[:1], treeRead) != 1 {
+			t.Fatalf("%s: the loader issued %v, want one statement before the reference read", user, statements)
+		}
+	}
+	// An empty tree: the account's row carries a null OU, which is not a node.
+	mustExec(t, f.s.st, `DELETE FROM user_groups`)
+	assertOUPolicySubjectEqualsTransactionalRead(t, f.s.st, f.session.username)
+	if _, _, err := f.s.st.loadOUPolicySubject("nobody"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("a missing account: %v, want sql.ErrNoRows", err)
+	}
+}
+
+// The same results on PostgreSQL, where the statement replaces a REPEATABLE READ transaction (the statement count
+// is pinned on SQLite, where the spy driver can see it).
+func TestOUPolicySubjectEqualsTheTransactionalReadOnPostgres(t *testing.T) {
+	st := pgStore(t, "users", "user_groups")
+	t.Cleanup(func() {
+		for _, tbl := range []string{"users", "user_groups"} {
+			if _, err := st.exec("DELETE FROM " + tbl); err != nil {
+				t.Errorf("clean %s: %v", tbl, err)
+			}
+		}
+	})
+	if _, err := st.CreateUserGroup("Default", "", 0); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, st, `UPDATE user_groups SET is_default=1`)
+	users := seedOUPolicySubjects(t, st)
+	for _, user := range users {
+		assertOUPolicySubjectEqualsTransactionalRead(t, st, user)
+	}
+	mustExec(t, st, `DELETE FROM user_groups`)
+	assertOUPolicySubjectEqualsTransactionalRead(t, st, users[0])
+	if _, _, err := st.loadOUPolicySubject("nobody"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("a missing account: %v, want sql.ErrNoRows", err)
+	}
+}
+
+// seedOUPolicySubjects adds an OU with overrides and three accounts: one in it, one in no OU, one inactive.
+func seedOUPolicySubjects(t *testing.T, st *Store) []string {
+	t.Helper()
+	ou, err := st.CreateUserGroup("tenants", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, st, `UPDATE user_groups SET restricted=1, forecast_scope='own', require_2fa=1, daily_run_quota=3, run_quota_period='week' WHERE id=?`, ou)
+	mustExec(t, st, `INSERT INTO users(username,password_hash,role,group_id,restricted) VALUES(?,?,?,?,1)`, "in-an-ou", "h", "user", ou)
+	mustExec(t, st, `INSERT INTO users(username,password_hash,role) VALUES(?,?,?)`, "in-no-ou", "h", "user")
+	mustExec(t, st, `INSERT INTO users(username,password_hash,role,active) VALUES(?,?,?,0)`, "inactive", "h", "user")
+	return []string{"in-an-ou", "in-no-ou", "inactive"}
+}
+
+// assertOUPolicySubjectEqualsTransactionalRead compares the one-statement loader with the transactional read.
+func assertOUPolicySubjectEqualsTransactionalRead(t *testing.T, st *Store, user string) {
+	t.Helper()
+	sub, snap, err := st.loadOUPolicySubject(user)
+	if err != nil {
+		t.Fatalf("%s: %v", user, err)
+	}
+	tx, err := st.db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	wantSub, wantSnap, wantErr := st.loadOUPolicySubjectFrom(tx, user)
+	if wantErr != nil || !reflect.DeepEqual(sub, wantSub) || !reflect.DeepEqual(snap, wantSnap) {
+		t.Fatalf("%s: got %+v %+v, want %+v %+v (%v)", user, sub, snap, wantSub, wantSnap, wantErr)
 	}
 }
