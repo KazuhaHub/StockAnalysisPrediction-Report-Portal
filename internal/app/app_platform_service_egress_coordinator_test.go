@@ -181,14 +181,21 @@ func testPlatformServiceEgressCoordinatorOpensRenewsCloses(t *testing.T, pg bool
 	if _, opens := f.counts(); opens != 1 {
 		t.Fatal("a session was opened again before renewal", opens)
 	}
-	// 60 s before expiry the replacement is opened, and only then the old one closes.
+	// 60 s before expiry the replacement is opened. Portal does not close the old
+	// session: the runner drains it and closes it when nothing is in flight.
 	clock.Advance(4*time.Minute + 10*time.Second)
 	c.tick(ctx)
 	second := nextEgressSession(t, f)
 	if second.command.SessionID == cmd.SessionID {
 		t.Fatal("renewal reused the session id")
 	}
-	waitEgressEnded(t, first.runner, transport.EgressCloseRenewed)
+	select {
+	case <-first.runner.Done():
+		t.Fatal("Portal closed the replaced session itself")
+	case <-time.After(200 * time.Millisecond):
+	}
+	first.runner.Close(transport.EgressCloseRenewed)
+	waitEgress(t, func() bool { return len(egressAuditRows(t, s, platformServiceEgressAuditClosed, installation)) == 1 })
 	rows := egressAuditRows(t, s, platformServiceEgressAuditOpened, installation)
 	if len(rows) != 2 || egressAuditField(t, rows[1], "replaced_session_id") != cmd.SessionID {
 		t.Fatal("renewal audit", rows)
@@ -209,6 +216,111 @@ func testPlatformServiceEgressCoordinatorOpensRenewsCloses(t *testing.T, pg bool
 	requireNoEgressSession(t, f)
 	if c.current(installation) != nil {
 		t.Fatal("a closed session is still current")
+	}
+}
+
+// A call that is in flight when the session is renewed keeps its session: its
+// remaining checks are answered on the old one until the runner closes it.
+func testPlatformServiceEgressCoordinatorRenewalKeepsInFlightCalls(t *testing.T, pg bool) {
+	s, installation := platformServiceEgressFixture(t, pg, true)
+	f := newFakeEgressRunner()
+	c, clock := newEgressTestCoordinator(t, s, f)
+	ctx := context.Background()
+	c.tick(ctx)
+	first := nextEgressSession(t, f)
+	payload, _ := transport.EncodeEgressAdmit(platformServiceEgressAdmit())
+	call, err := first.runner.NewCall()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer call.Finish()
+	if err := call.Send(transport.EgressFrameAdmit, payload); err != nil {
+		t.Fatal(err)
+	}
+	raw, signature, err := transport.DecodeEgressCommand(egressRecv(t, call, transport.EgressFrameCommand).Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verified, err := control.VerifyNetworkHTTPRequest(raw, signature, first.authority, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := verified.Command()
+	check := func(seq byte) {
+		t.Helper()
+		var nonce [32]byte
+		nonce[0], nonce[31] = 'n', seq
+		if err := call.Send(transport.EgressFrameChallenge, transport.EncodeEgressChallenge(seq, nonce)); err != nil {
+			t.Fatal(err)
+		}
+		proof, sig, err := transport.DecodeEgressProof(egressRecv(t, call, transport.EgressFrameProof).Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := control.VerifyNetworkHTTPCheck(command, hex.EncodeToString(nonce[:]), proof, sig, first.authority, time.Now().UnixMilli()); err != nil {
+			t.Fatal("proof does not verify:", err)
+		}
+	}
+	check(1)
+	// The renewal happens in the middle of the call.
+	clock.Advance(4*time.Minute + 10*time.Second)
+	c.tick(ctx)
+	second := nextEgressSession(t, f)
+	check(2)
+	check(3)
+	check(4)
+	outcome, _ := transport.EncodeEgressOutcome(transport.EgressOutcome{Class: transport.EgressOutcomeOK, Status: 200, ResponseBytes: 5, RetryAfter: -1})
+	if err := call.Send(transport.EgressFrameOutcome, outcome); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-first.runner.Done():
+		t.Fatal("the replaced session was closed while a call was in flight")
+	default:
+	}
+	// New calls go to the new session; the old one closes when the runner says so.
+	if c.current(installation).state.sessionID != second.command.SessionID {
+		t.Fatal("the replacement is not current")
+	}
+	first.runner.Close(transport.EgressCloseRenewed)
+	waitEgress(t, func() bool { return len(egressAuditRows(t, s, platformServiceEgressAuditClosed, installation)) == 1 })
+	if closed := egressAuditRows(t, s, platformServiceEgressAuditClosed, installation)[0]; egressAuditField(t, closed, "reason") != "renewed" ||
+		egressAuditField(t, closed, "session_id") != first.command.SessionID {
+		t.Fatal("close audit", closed)
+	}
+	select {
+	case <-second.runner.Done():
+		t.Fatal("the new session ended with the old one")
+	default:
+	}
+}
+
+// A replaced session that the runner has not closed yet is guarded like any
+// other: drift closes it, and so does the end of its assertion.
+func testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t *testing.T, pg bool) {
+	for _, name := range []string{"drift", "expiry"} {
+		t.Run(name, func(t *testing.T) {
+			s, installation := platformServiceEgressFixture(t, pg, true)
+			f := newFakeEgressRunner()
+			c, clock := newEgressTestCoordinator(t, s, f)
+			ctx := context.Background()
+			c.tick(ctx)
+			first := nextEgressSession(t, f)
+			clock.Advance(4*time.Minute + 10*time.Second)
+			c.tick(ctx)
+			second := nextEgressSession(t, f)
+			if name == "drift" {
+				mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, installation)
+				c.tick(ctx)
+				waitEgressEnded(t, first.runner, transport.EgressCloseDisabled)
+				waitEgressEnded(t, second.runner, transport.EgressCloseDisabled)
+				return
+			}
+			clock.Advance(time.Minute)
+			c.tick(ctx)
+			waitEgressEnded(t, first.runner, transport.EgressCloseExpired)
+			waitEgressEnded(t, second.runner, transport.EgressCloseExpired)
+		})
 	}
 }
 
@@ -549,6 +661,18 @@ func TestPlatformServiceEgressCoordinatorOpensRenewsClosesSQLite(t *testing.T) {
 }
 func TestPlatformServiceEgressCoordinatorOpensRenewsClosesPostgres(t *testing.T) {
 	testPlatformServiceEgressCoordinatorOpensRenewsCloses(t, true)
+}
+func TestPlatformServiceEgressCoordinatorRenewalKeepsInFlightCallsSQLite(t *testing.T) {
+	testPlatformServiceEgressCoordinatorRenewalKeepsInFlightCalls(t, false)
+}
+func TestPlatformServiceEgressCoordinatorRenewalKeepsInFlightCallsPostgres(t *testing.T) {
+	testPlatformServiceEgressCoordinatorRenewalKeepsInFlightCalls(t, true)
+}
+func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedSQLite(t *testing.T) {
+	testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t, false)
+}
+func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedPostgres(t *testing.T) {
+	testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t, true)
 }
 func TestPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfileSQLite(t *testing.T) {
 	testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t, false)

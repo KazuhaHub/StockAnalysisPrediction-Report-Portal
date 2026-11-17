@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -82,6 +83,7 @@ type platformServiceEgressCoordinator struct {
 
 	mu               sync.Mutex
 	live             map[string]*platformServiceEgressLive
+	draining         map[string]*platformServiceEgressLive // replaced sessions, by session id, until the runner closes them
 	retryAt          map[string]time.Time
 	unsupportedUntil time.Time
 }
@@ -91,7 +93,7 @@ func newPlatformServiceEgressCoordinator(server *Server, t platformServiceEgress
 	return &platformServiceEgressCoordinator{
 		server: server, transport: t, endpoint: server.platformRuntimeEndpoint, now: time.Now,
 		audit: newPlatformServiceEgressAggregator(), root: root, rootCancel: cancel, stopped: make(chan struct{}),
-		live: map[string]*platformServiceEgressLive{}, retryAt: map[string]time.Time{},
+		live: map[string]*platformServiceEgressLive{}, draining: map[string]*platformServiceEgressLive{}, retryAt: map[string]time.Time{},
 	}
 }
 
@@ -130,18 +132,18 @@ func (c *platformServiceEgressCoordinator) shutdown() {
 func (c *platformServiceEgressCoordinator) snapshot() []*platformServiceEgressLive {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	out := make([]*platformServiceEgressLive, 0, len(c.live))
+	out := make([]*platformServiceEgressLive, 0, len(c.live)+len(c.draining))
 	for _, l := range c.live {
 		out = append(out, l)
 	}
+	for _, l := range c.draining {
+		out = append(out, l)
+	}
 	slices.SortFunc(out, func(a, b *platformServiceEgressLive) int {
-		switch {
-		case a.state.pin.installation < b.state.pin.installation:
-			return -1
-		case a.state.pin.installation > b.state.pin.installation:
-			return 1
+		if r := strings.Compare(a.state.pin.installation, b.state.pin.installation); r != 0 {
+			return r
 		}
-		return 0
+		return strings.Compare(a.state.sessionID, b.state.sessionID)
 	})
 	return out
 }
@@ -254,8 +256,8 @@ func (s *Server) classifyPlatformServiceEgressLoss(ctx context.Context, pin plat
 
 // open issues an assertion for exactly the resources granted now, reads the
 // authority again with a fresh registration proof, and asks the runner for the
-// session. The runner swaps it in only after verifying it; Portal then closes
-// the session it replaces (renewed).
+// session. The runner swaps it in only after verifying it and drains the session
+// it replaces (renewed); Portal keeps serving that one until the runner closes it.
 func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint platformRuntimeEndpoint, installation string, replaced *platformServiceEgressLive) error {
 	s := c.server
 	plan, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{})
@@ -313,6 +315,9 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 	c.mu.Lock()
 	previous := c.live[installation]
 	c.live[installation] = l
+	if previous != nil && !previous.ended() {
+		c.draining[previous.state.sessionID] = previous
+	}
 	delete(c.retryAt, installation)
 	c.mu.Unlock()
 	c.wg.Add(3)
@@ -328,9 +333,10 @@ func (c *platformServiceEgressCoordinator) open(ctx context.Context, endpoint pl
 		"generation": a.facts.generation, "policy_revision": a.facts.policyRevision,
 		"release_sha256": a.facts.release, "concurrency": a.concurrency,
 	})
-	if previous != nil {
-		c.closeLive(previous, "renewed")
-	}
+	// The replaced session is not closed here: calls in flight on it still need
+	// their remaining checks answered. The runner marks it draining and closes it
+	// once nothing is in flight; until then the coordinator keeps serving it, and
+	// the drift loop still guards it and ends it when its assertion does.
 	return nil
 }
 
@@ -382,6 +388,7 @@ func (c *platformServiceEgressCoordinator) watch(l *platformServiceEgressLive) {
 	if c.live[installation] == l {
 		delete(c.live, installation)
 	}
+	delete(c.draining, l.state.sessionID)
 	c.mu.Unlock()
 	c.auditLog(platformServiceEgressAuditClosed, installation, map[string]any{"session_id": l.state.sessionID, "reason": reason})
 	clear(l.state.identity)
