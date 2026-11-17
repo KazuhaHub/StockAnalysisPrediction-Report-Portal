@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // Native end-to-end of background broker egress (doc 174 sections 3 and 7: items
@@ -60,7 +62,71 @@ func platformServiceIPCRootFromEnv(getenv func(string) string) string {
 // platformServiceEgressBrokerSocket is the application broker socket the runner
 // serves for one installation generation.
 func platformServiceEgressBrokerSocket(ipcRoot, installation string, generation int64) string {
-	return filepath.Join(ipcRoot, installation, strconv.FormatInt(generation, 10), "broker", "broker.sock")
+	return filepath.Join(platformServiceEgressBrokerDir(ipcRoot, installation, generation), "broker.sock")
+}
+
+func platformServiceEgressBrokerDir(ipcRoot, installation string, generation int64) string {
+	return filepath.Join(ipcRoot, installation, strconv.FormatInt(generation, 10), "broker")
+}
+
+// platformBindMounter is the mount(2) side of the application's view of the
+// broker directory; tests without root substitute one.
+type platformBindMounter interface {
+	mountReadOnly(source, target string) error
+	unmount(target string) error
+}
+
+type platformUnixMounter struct{}
+
+func (platformUnixMounter) mountReadOnly(source, target string) error {
+	if err := unix.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
+		return err
+	}
+	if err := unix.Mount("", target, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY, ""); err != nil {
+		_ = unix.Unmount(target, 0)
+		return err
+	}
+	return nil
+}
+
+func (platformUnixMounter) unmount(target string) error {
+	if err := unix.Unmount(target, 0); err != nil {
+		return unix.Unmount(target, unix.MNT_DETACH)
+	}
+	return nil
+}
+
+// platformServiceEgressBrokerView mirrors production: the application never
+// walks the host's IPC directories (root and the runner group only), it sees the
+// generation's broker directory through a read-only bind mount. The view is a
+// fresh root-owned 0755 directory under /tmp; the mount is removed by a cleanup
+// that runs however the test ends, and the directory is removed only after a
+// successful unmount (a recursive removal under a live mount would reach the
+// runner's real directory). It returns the socket path the application dials.
+func platformServiceEgressBrokerView(t *testing.T, m platformBindMounter, brokerDir string) string {
+	t.Helper()
+	view, err := os.MkdirTemp("/tmp", "portal-egress-broker-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(view, 0755); err != nil {
+		_ = os.Remove(view)
+		t.Fatal(err)
+	}
+	if err := m.mountReadOnly(brokerDir, view); err != nil {
+		_ = os.Remove(view)
+		t.Fatal("bind-mounting the broker directory read-only for the application:", err)
+	}
+	t.Cleanup(func() {
+		if err := m.unmount(view); err != nil {
+			t.Error("unmounting the broker view; it is left in place:", view, err)
+			return
+		}
+		if err := os.Remove(view); err != nil {
+			t.Error("removing the broker view:", err)
+		}
+	})
+	return filepath.Join(view, "broker.sock")
 }
 
 // The foreground acceptance reads up to 10 hits of the HTTPS fixture; the egress
@@ -207,7 +273,7 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	}
 	ctx := context.Background()
 	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation)
-	socket := platformServiceEgressBrokerSocket(ipcRoot, installation, generation)
+	brokerDir := platformServiceEgressBrokerDir(ipcRoot, installation, generation)
 	clientBinary := platformServiceEgressClientBinary(t)
 	// The installation declares no background.run (the foreground fixture does not
 	// need it); give it the row the reviewed selection would, for this test only.
@@ -266,6 +332,9 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if live == nil || live.ended() {
 		t.Fatal("the coordinator opened no session on the real runner")
 	}
+	// The application reaches the socket the way its container does: through a
+	// read-only bind mount of the broker directory, never the host IPC parents.
+	socket := platformServiceEgressBrokerView(t, platformUnixMounter{}, brokerDir)
 	if status, body := platformServiceEgressAppCall(t, clientBinary, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("broker status", status, body)
 	}
@@ -400,5 +469,38 @@ func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
 	status, body := platformServiceEgressAppCall(t, binary, socket, "POST", "/v1/network/http", `{}`)
 	if status != 502 || platformServiceEgressErrorCode(body) != "uncertain" {
 		t.Fatal("error through the client process", status, body)
+	}
+}
+
+type fakeBindMounter struct{ events []string }
+
+func (f *fakeBindMounter) mountReadOnly(source, target string) error {
+	f.events = append(f.events, "mount "+source)
+	return nil
+}
+func (f *fakeBindMounter) unmount(target string) error {
+	f.events = append(f.events, "unmount")
+	return nil
+}
+
+// The view of the broker directory: a root-owned-style 0755 directory under /tmp,
+// the mount taken on it, the socket named inside it, and the cleanup that
+// unmounts before it removes.
+func TestPlatformServiceEgressBrokerViewLifecycle(t *testing.T) {
+	var view string
+	var f fakeBindMounter
+	t.Run("lifecycle", func(t *testing.T) {
+		socket := platformServiceEgressBrokerView(t, &f, "/run/x/ipc/inst/1/broker")
+		view = filepath.Dir(socket)
+		info, err := os.Stat(view)
+		if err != nil || info.Mode().Perm() != 0755 || filepath.Base(socket) != "broker.sock" || !strings.HasPrefix(view, "/tmp/portal-egress-broker-") {
+			t.Fatal("view", view, info, err)
+		}
+		if len(f.events) != 1 || f.events[0] != "mount /run/x/ipc/inst/1/broker" {
+			t.Fatal("mount", f.events)
+		}
+	})
+	if _, err := os.Stat(view); !os.IsNotExist(err) || len(f.events) != 2 || f.events[1] != "unmount" {
+		t.Fatal("cleanup did not unmount and remove", f.events, err)
 	}
 }
