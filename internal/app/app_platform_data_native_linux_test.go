@@ -188,7 +188,6 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 			t.Fatal(err)
 		}
 		serviceFixture = startPlatformServiceFixture(t, binaryPath, dir, deployment)
-		platformNativeServiceIPCRoot = serviceFixture.ipcRoot
 		path = serviceFixture.socket
 	} else if managed {
 		sockets, openErr := os.MkdirTemp("/run", "portal-pf-")
@@ -279,6 +278,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
 		child.Env = append(child.Env, "PORTAL_NETWORK_NAMESPACE=1", "GODEBUG=netdns=go")
+	}
+	if serviceFixture != nil {
+		child.Env = append(child.Env, platformChildServiceEnv(true, serviceFixture.ipcRoot)...)
 	}
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		for _, key := range []string{"APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH"} {
