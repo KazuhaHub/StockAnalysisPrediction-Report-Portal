@@ -95,7 +95,7 @@ inspection never reads registry credentials. The disposable Linux runner run
 `41623015662` executed the real closed container policy, repeated exit,
 mount-pin substitution, service-profile, controller-identity, successor-epoch
 refusal and inert old-intent replay checks. `SEC-06`, `SEC-07` and `SEC-10` are
-therefore `pass-development`. `SEC-09` remains partial for measured capacity.
+therefore `pass-development`. `SEC-09` was partial for measured capacity until 2026-11-16, when the owner accepted the 120-minute reference-VM run 44010587394 (commit `2125bd8a`; harness verdict failed on one check, 35 of 36 passed) as SEC-09 evidence; it is passed by owner acceptance, not a harness pass.
 
 Latest H16 runtime/data evidence binds Portal `8911a9fc` and
 [runtime/data matrix](evidence/platform-runtime-data-matrix/acceptance.json).
