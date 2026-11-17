@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"sync"
@@ -547,5 +548,127 @@ func TestServiceEgressPayloadCodecsAreClosed(t *testing.T) {
 	}
 	if _, err := DecodeEgressNotice([]byte(`{"occurrenceId":"o","title":"t","message":"m","severity":"info"}`)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// hostilePeer runs a mux of the given role against a raw peer that the test
+// writes frames to by hand. For the runner role a call is already started
+// (kind is EgressFrameAdmit or EgressFrameNotice) and its ID returned; for
+// Portal the returned ID is the one the peer must start itself.
+func hostilePeer(t *testing.T, role EgressRole, kind byte) (mux *EgressMux, peer net.Conn, id EgressCallID, result chan error) {
+	t.Helper()
+	a, b := net.Pipe()
+	t.Cleanup(func() { a.Close(); b.Close() })
+	mux = NewEgressMux(a, role)
+	go io.Copy(io.Discard, b)
+	result = make(chan error, 1)
+	go func() { result <- mux.Run(context.Background()) }()
+	if role == EgressRunner {
+		call, err := mux.NewCall()
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload := mustAdmit(t)
+		if kind == EgressFrameNotice {
+			payload = []byte(`{}`)
+		}
+		if err := call.Send(kind, payload); err != nil {
+			t.Fatal(err)
+		}
+		id = call.ID()
+	} else {
+		id[0] = 7
+		if _, err := b.Write(rawFrame(kind, id, startPayload(t, kind))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return mux, b, id, result
+}
+
+func startPayload(t *testing.T, kind byte) []byte {
+	if kind == EgressFrameNotice {
+		return []byte(`{}`)
+	}
+	return mustAdmit(t)
+}
+
+func expectClosed(t *testing.T, mux *EgressMux, result chan error) {
+	t.Helper()
+	select {
+	case err := <-result:
+		if err == nil {
+			t.Fatal("session survived")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("session not closed")
+	}
+	select {
+	case <-mux.Done():
+	default:
+		t.Fatal("Done is not closed")
+	}
+}
+
+// A hostile peer can only close the session: a frame below its type's minimum
+// length is a protocol violation on both roles, never a panic.
+func TestServiceEgressShortFramesCloseSessionWithoutPanic(t *testing.T) {
+	type tc struct {
+		role EgressRole
+		typ  byte
+		kind byte // the start frame of the live call
+		min  int
+	}
+	cases := []tc{
+		{EgressPortal, EgressFrameAdmit, EgressFrameAdmit, 1},
+		{EgressPortal, EgressFrameNotice, EgressFrameAdmit, 1},
+		{EgressPortal, EgressFrameChallenge, EgressFrameAdmit, 33},
+		{EgressPortal, EgressFrameOutcome, EgressFrameAdmit, 11},
+		{EgressRunner, EgressFrameCommand, EgressFrameAdmit, 4 + 1 + 64},
+		{EgressRunner, EgressFrameRefusal, EgressFrameAdmit, 1},
+		{EgressRunner, EgressFrameProof, EgressFrameAdmit, 4 + 1 + 64},
+		{EgressRunner, EgressFrameNoticeResult, EgressFrameNotice, 1},
+	}
+	for _, c := range cases {
+		lengths := []int{0}
+		if c.min > 1 {
+			lengths = append(lengths, c.min-1)
+		}
+		for _, n := range lengths {
+			t.Run(fmt.Sprintf("role%d/type%d/len%d", c.role, c.typ, n), func(t *testing.T) {
+				mux, peer, id, result := hostilePeer(t, c.role, c.kind)
+				if c.role == EgressPortal && (c.typ == EgressFrameAdmit || c.typ == EgressFrameNotice) {
+					// A start frame is its own call: use a fresh ID.
+					id[0] = 9
+				}
+				peer.Write(rawFrame(c.typ, id, make([]byte, n)))
+				expectClosed(t, mux, result)
+			})
+		}
+	}
+}
+
+// A second answer on a live call is an out-of-order frame, not a queue entry.
+func TestServiceEgressRunnerRejectsSecondAnswer(t *testing.T) {
+	command := make([]byte, 4+1+64)
+	binary.BigEndian.PutUint32(command, 1)
+	notice := []byte(`{"eventId":"e","created":true}`)
+	for _, tc := range []struct {
+		name   string
+		kind   byte
+		frames [][2]any
+	}{
+		{"command twice", EgressFrameAdmit, [][2]any{{EgressFrameCommand, command}, {EgressFrameCommand, command}}},
+		{"refusal twice", EgressFrameAdmit, [][2]any{{EgressFrameRefusal, []byte{EgressRefusalDenied}}, {EgressFrameRefusal, []byte{EgressRefusalDenied}}}},
+		{"command then refusal", EgressFrameAdmit, [][2]any{{EgressFrameCommand, command}, {EgressFrameRefusal, []byte{EgressRefusalDenied}}}},
+		{"refusal then command", EgressFrameAdmit, [][2]any{{EgressFrameRefusal, []byte{EgressRefusalDenied}}, {EgressFrameCommand, command}}},
+		{"notice result twice", EgressFrameNotice, [][2]any{{EgressFrameNoticeResult, notice}, {EgressFrameNoticeResult, notice}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux, peer, id, result := hostilePeer(t, EgressRunner, tc.kind)
+			for _, f := range tc.frames {
+				peer.Write(rawFrame(f[0].(byte), id, f[1].([]byte)))
+			}
+			expectClosed(t, mux, result)
+		})
 	}
 }

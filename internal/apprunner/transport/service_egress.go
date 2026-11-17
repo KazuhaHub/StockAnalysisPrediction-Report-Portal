@@ -164,6 +164,20 @@ func egressFrameLimit(t byte) (int, bool) {
 	return 0, false
 }
 
+// egressFrameMin is the payload floor of a frame type: the shortest payload a
+// receiver may index or decode. The fixed-size types are exact.
+func egressFrameMin(t byte) int {
+	switch t {
+	case EgressFrameChallenge:
+		return 33
+	case EgressFrameOutcome:
+		return 11
+	case EgressFrameCommand, EgressFrameProof:
+		return 4 + 1 + 64
+	}
+	return 1
+}
+
 // readEgressFrame reads one frame. The type and the length are checked against
 // the type's bound before any payload is allocated or read.
 func readEgressFrame(r io.Reader) (EgressFrame, error) {
@@ -330,7 +344,10 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 		m.mu.Unlock()
 		return ErrEgressClosed
 	}
-	if f.Call == (EgressCallID{}) || !m.role.receives(f.Type) {
+	if f.Call == (EgressCallID{}) || !m.role.receives(f.Type) || len(f.Payload) < egressFrameMin(f.Type) {
+		return ErrEgressProtocol
+	}
+	if limit, _ := egressFrameLimit(f.Type); len(f.Payload) > limit {
 		return ErrEgressProtocol
 	}
 	m.mu.Lock()
@@ -347,7 +364,7 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 		if m.role != EgressPortal || (f.Type != EgressFrameAdmit && f.Type != EgressFrameNotice) || len(m.calls) >= egressMaxCalls {
 			return ErrEgressProtocol
 		}
-		call = &EgressCall{mux: m, id: f.Call, in: make(chan EgressFrame, egressCallBuffer)}
+		call = &EgressCall{mux: m, id: f.Call, kind: f.Type, in: make(chan EgressFrame, egressCallBuffer)}
 		select {
 		case m.incoming <- call:
 		default:
@@ -359,7 +376,7 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 	}
 	switch f.Type {
 	case EgressFrameChallenge:
-		if f.Payload[0] != call.rxSeq+1 || call.rxSeq >= EgressMaxChecks {
+		if len(f.Payload) != 33 || f.Payload[0] != call.rxSeq+1 || call.rxSeq >= EgressMaxChecks {
 			return ErrEgressProtocol
 		}
 		call.rxSeq++
@@ -368,6 +385,20 @@ func (m *EgressMux) dispatch(f EgressFrame) error {
 			return ErrEgressProtocol // a proof nobody asked for
 		}
 		call.proofs++
+	case EgressFrameCommand, EgressFrameRefusal, EgressFrameNoticeResult:
+		// Portal answers a call once; a second answer is out of order, not a queue.
+		// A command answers an admit and a result a notice, nothing else.
+		if call.answered || call.kind == 0 ||
+			f.Type == EgressFrameCommand && call.kind != EgressFrameAdmit ||
+			f.Type == EgressFrameNoticeResult && call.kind != EgressFrameNotice {
+			return ErrEgressProtocol
+		}
+		call.answered = true
+	case EgressFrameOutcome:
+		if call.outcome {
+			return ErrEgressProtocol
+		}
+		call.outcome = true
 	}
 	select {
 	case call.in <- f:
@@ -451,6 +482,12 @@ type EgressCall struct {
 	// sequence sent/received, proofs the proofs received (runner) or sent (Portal).
 	txSeq, rxSeq, proofs byte
 	finished             bool
+	// kind is the start frame this call began with (EgressFrameAdmit or
+	// EgressFrameNotice), answered whether Portal's one answer has arrived and
+	// outcome whether the runner's one outcome has.
+	kind     byte
+	answered bool
+	outcome  bool
 }
 
 // ID is the call's identifier.
@@ -469,6 +506,12 @@ func (c *EgressCall) Send(t byte, payload []byte) error {
 	case c.finished:
 		m.mu.Unlock()
 		return ErrEgressClosed
+	case (t == EgressFrameAdmit || t == EgressFrameNotice) && m.role == EgressRunner:
+		if c.kind != 0 {
+			m.mu.Unlock()
+			return ErrEgressProtocol
+		}
+		c.kind = t
 	case t == EgressFrameChallenge:
 		if len(payload) != 33 || payload[0] != c.txSeq+1 || c.txSeq >= EgressMaxChecks {
 			m.mu.Unlock()
