@@ -157,8 +157,57 @@ type platformPublicState struct {
 	backendRate map[string]*platformPublicBucket
 	stats       map[string]*platformPublicStats
 
+	// verifyFailed remembers, per installation, the tuple whose release could not be verified and
+	// until when not to try again. Only installations that passed the cheap read are keyed.
+	verifyFailed map[string]platformPublicFailure
+
+	stopOnce sync.Once
+	stop     chan struct{}
+
 	clients       platformPublicLimiter
 	installations platformPublicLimiter
+}
+
+type platformPublicFailure struct {
+	tuple string
+	until time.Time
+}
+
+// platformPublicVerifyBackoff is how long an unverifiable release is left alone before the next try.
+const platformPublicVerifyBackoff = 5 * time.Second
+
+// stopped is closed by shutdown; background loops end on it.
+func (p *platformPublicState) stopped() <-chan struct{} {
+	p.stopOnce.Do(func() { p.stop = make(chan struct{}) })
+	return p.stop
+}
+
+func (p *platformPublicState) shutdown() {
+	p.stopped()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	select {
+	case <-p.stop:
+	default:
+		close(p.stop)
+	}
+}
+
+// verifyBlocked reports whether the release of this tuple failed verification recently.
+func (p *platformPublicState) verifyBlocked(installation, tuple string, now time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f, ok := p.verifyFailed[installation]
+	return ok && f.tuple == tuple && now.Before(f.until)
+}
+
+func (p *platformPublicState) noteVerifyFailure(installation, tuple string, now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.verifyFailed == nil {
+		p.verifyFailed = map[string]platformPublicFailure{}
+	}
+	p.verifyFailed[installation] = platformPublicFailure{tuple: tuple, until: now.Add(platformPublicVerifyBackoff)}
 }
 
 type platformPublicBucket struct {
@@ -198,6 +247,7 @@ func (p *platformPublicState) purge(installation string) {
 	p.init()
 	p.dropLocked(installation)
 	delete(p.tuples, installation)
+	delete(p.verifyFailed, installation)
 }
 
 func (p *platformPublicState) dropLocked(installation string) {
@@ -236,6 +286,12 @@ func (p *platformPublicState) lookup(key string, now time.Time) *platformPublicE
 		p.removeLocked(entry)
 		return nil
 	}
+	if entry.verified != nil {
+		// Standing behind every response of its installation, a verified release is the last
+		// thing to evict: a hit makes it the newest.
+		p.seq++
+		entry.seq = p.seq
+	}
 	return entry
 }
 
@@ -271,8 +327,13 @@ func (p *platformPublicState) store(entry *platformPublicEntry, now time.Time) b
 			p.removeLocked(e)
 		}
 	}
-	for p.countLocked(entry.installation) >= platformPublicEntriesPerInstallation || p.bytes[entry.installation]+entry.size > platformPublicBytesPerInstallation {
-		if !p.evictOldestLocked(entry.installation) {
+	for entry.verified == nil && p.countLocked(entry.installation) >= platformPublicEntriesPerInstallation {
+		if !p.evictOldestLocked(entry.installation, false) {
+			return false
+		}
+	}
+	for p.bytes[entry.installation]+entry.size > platformPublicBytesPerInstallation {
+		if !p.evictOldestLocked(entry.installation, true) {
 			return false
 		}
 	}
@@ -283,7 +344,7 @@ func (p *platformPublicState) store(entry *platformPublicEntry, now time.Time) b
 				victim, largest = installation, size
 			}
 		}
-		if victim == "" || !p.evictOldestLocked(victim) {
+		if victim == "" || !p.evictOldestLocked(victim, true) {
 			return false
 		}
 	}
@@ -293,21 +354,32 @@ func (p *platformPublicState) store(entry *platformPublicEntry, now time.Time) b
 	return true
 }
 
+// countLocked counts the cached responses of an installation. The verified release is not one of
+// them: it is bounded by bytes with everything else, but 256 distinct queries cannot push it out.
 func (p *platformPublicState) countLocked(installation string) int {
 	n := 0
 	for _, e := range p.entries {
-		if e.installation == installation {
+		if e.installation == installation && e.verified == nil {
 			n++
 		}
 	}
 	return n
 }
 
-func (p *platformPublicState) evictOldestLocked(installation string) bool {
+// evictOldestLocked removes the oldest cached response of an installation and, only when it has no
+// response left and viewOnly is false, its verified release (a last resort under byte pressure).
+func (p *platformPublicState) evictOldestLocked(installation string, verifiedToo bool) bool {
 	var oldest *platformPublicEntry
 	for _, e := range p.entries {
-		if e.installation == installation && (oldest == nil || e.seq < oldest.seq) {
+		if e.installation == installation && e.verified == nil && (oldest == nil || e.seq < oldest.seq) {
 			oldest = e
+		}
+	}
+	if oldest == nil && verifiedToo {
+		for _, e := range p.entries {
+			if e.installation == installation && e.verified != nil {
+				oldest = e
+			}
 		}
 	}
 	if oldest == nil {

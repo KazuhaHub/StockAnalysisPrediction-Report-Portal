@@ -92,8 +92,14 @@ func (s *Server) writePlatformPublicSummary(installation string, st *platformPub
 func (s *Server) platformPublicSummaryLoop() {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
-	for range ticker.C {
-		s.writePlatformPublicDue(time.Now())
+	stop := s.platformPublic.stopped()
+	for {
+		select {
+		case <-ticker.C:
+			s.writePlatformPublicDue(time.Now())
+		case <-stop:
+			return
+		}
 	}
 }
 
@@ -106,6 +112,7 @@ func (s *Server) writePlatformPublicDue(now time.Time) {
 // stopPlatformPublic writes every open window at shutdown. Its detail ends at the shutdown, not at
 // the end the window would have had.
 func (s *Server) stopPlatformPublic(context.Context) {
+	s.platformPublic.shutdown()
 	for installation, st := range s.platformPublic.takeAll() {
 		s.writePlatformPublicSummary(installation, st)
 	}
@@ -155,7 +162,12 @@ func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPu
 		class := platformPublicClassify(w, err)
 		// Nothing is counted for an installation that is unknown or has the projection off, and
 		// an unavailable answer only exists for one whose grant is on.
-		if class != "not_found" {
+		switch {
+		case errors.Is(err, errPlatformPublicStore):
+			// A database failure says nothing about this identifier: one global counter, never a
+			// per identifier record.
+			s.recordPlatformPublic("", "store_error")
+		case class != "not_found":
 			s.recordPlatformPublic(installation, class)
 		}
 		return zero, false
@@ -190,14 +202,21 @@ func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPu
 // (single flight, at most platformPublicVerifyPerSecond builds a second per installation) when it is absent or has expired.
 func (s *Server) platformPublicVerifiedFor(l platformPublicLight) (*platformPublicVerified, error) {
 	key := strings.Join([]string{l.installation, l.tuple(), "verified"}, "\x00")
+	// A release that could not be verified is left alone for a while: the answer is 503 at no cost,
+	// not another archive read per request.
+	if s.platformPublic.verifyBlocked(l.installation, l.tuple(), time.Now()) {
+		return nil, errPlatformPublicUnavailable
+	}
 	entry, _, err := s.platformPublicLoad(key, func(ctx context.Context) (*platformPublicEntry, error) {
 		end, ok := s.platformPublic.beginFetch(l.installation+"#verify", platformPublicVerifyPerSecond, time.Now())
 		if !ok {
-			return nil, errPlatformPublicRate
+			// Not the visitor's rate: the Portal is busy verifying, so it is unavailable.
+			return nil, errPlatformPublicUnavailable
 		}
 		defer end()
 		v, err := s.verifyPlatformPublicRelease(ctx, l)
 		if err != nil {
+			s.platformPublic.noteVerifyFailure(l.installation, l.tuple(), time.Now())
 			return nil, err
 		}
 		now := time.Now()
