@@ -6,38 +6,66 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 )
 
-// What an anonymous public read may rely on, read fresh for every request (doc 179 section 3.3
-// step 3). There is no session: authority is the installation, its active release and the
-// public.projection grant. The grant is the whole consent; a request is never trusted for more.
+// What an anonymous public read may rely on (doc 179 section 3.3 step 3), in two parts so that the
+// work an anonymous request costs stays small and bounded:
+//
+//   - platformPublicLight is read for EVERY request, cache hits included, in one indexed statement
+//     with no archive and no lock: the installation is enabled and ready, the grant is on, and the
+//     tuple (generation, policy revision, release, policy) is current. Withdrawal, a policy change
+//     and a release change are therefore honoured on the very next request.
+//   - platformPublicVerified is the expensive part: publisher trust, the stored release signature,
+//     the frontend archive and the public/ file index. It is built once per tuple, kept in memory
+//     under the cache bounds, and rebuilt when the tuple changes, the entry is purged or its
+//     bounded lifetime ends (so a trust change is noticed within platformPublicVerifiedTTL).
+//
+// There is no session: authority is the installation, its active release and the grant.
 
 var (
 	// errPlatformPublicNotFound is the uniform refusal: unknown installation, not enabled or not
-	// ready, projection off or not declared. They are indistinguishable to the caller.
+	// ready, projection off or not declared. They are indistinguishable to the caller, and they
+	// cost the same single read.
 	errPlatformPublicNotFound = errors.New("public projection not found")
 	// errPlatformPublicUnavailable means the projection is on but cannot be served right now:
 	// a restore pause, an unfinished operation, a trust or release check that failed.
 	errPlatformPublicUnavailable = errors.New("public projection unavailable")
 )
 
-type platformPublicAuthority struct {
+// platformPublicVerifiedTTL bounds how long a verified release is trusted without looking again.
+const platformPublicVerifiedTTL = 5 * time.Minute
+
+type platformPublicLight struct {
 	installation   string
 	generation     int64
 	policyRevision int64
 	release        string
-	frontendSHA    string
-	manifest       appplatform.Manifest
-	declared       appplatform.Public
-	policy         appplatform.PublicPolicy
 	policyJSON     string
 }
 
 // tuple is the identity of this authority's content. Cache entries live and die by it.
-func (a platformPublicAuthority) tuple() string {
-	return strconv.FormatInt(a.generation, 10) + "|" + strconv.FormatInt(a.policyRevision, 10) + "|" + a.release + "|" + platformDigest([]byte(a.policyJSON))
+func (l platformPublicLight) tuple() string {
+	return strconv.FormatInt(l.generation, 10) + "|" + strconv.FormatInt(l.policyRevision, 10) + "|" + l.release + "|" + platformDigest([]byte(l.policyJSON))
+}
+
+// platformPublicVerified is a release whose signature, trust and archive were checked, reduced to
+// what the public routes need.
+type platformPublicVerified struct {
+	manifest    appplatform.Manifest
+	declared    appplatform.Public
+	policy      appplatform.PublicPolicy
+	frontendSHA string
+	files       map[string]appplatform.FrontendFile
+	filesBytes  int64
+}
+
+// platformPublicAuthority is the light read joined with the verified release of the same tuple.
+type platformPublicAuthority struct {
+	platformPublicLight
+	*platformPublicVerified
 }
 
 func (a platformPublicAuthority) route(id string) (appplatform.PublicRoute, bool) {
@@ -54,88 +82,69 @@ func (a platformPublicAuthority) route(id string) (appplatform.PublicRoute, bool
 	return appplatform.PublicRoute{}, false
 }
 
-func (s *Server) readPlatformPublicAuthority(ctx context.Context, installation string) (platformPublicAuthority, error) {
-	var zero platformPublicAuthority
+// readPlatformPublicLight is the one statement every anonymous request pays for.
+func (s *Server) readPlatformPublicLight(ctx context.Context, installation string) (platformPublicLight, error) {
+	var zero platformPublicLight
 	if !platformValidUUID(installation) {
 		return zero, errPlatformPublicNotFound
 	}
-	tx, err := s.st.db.BeginTx(ctx, nil)
-	if err != nil {
-		return zero, fmt.Errorf("%w: %v", errPlatformPublicUnavailable, err)
-	}
-	defer tx.Rollback()
-	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
-	lock := ""
-	if e.s.driver == "postgres" {
-		lock = " FOR SHARE"
-	}
+	e := migExec{s: s.st, ex: s.st.db}
+	query := `SELECT i.desired_state,i.phase,i.controller_epoch,i.runtime_id,i.generation,i.policy_revision,
+		a.release_sha256,a.generation,a.policy_revision,g.granted,g.policy_json,
+		(SELECT v FROM meta WHERE k='app_platform_controller_epoch'),
+		(SELECT COUNT(*) FROM meta WHERE k='app_platform_restore_paused' AND v='0'),
+		(SELECT COUNT(*) FROM app_platform_operations o JOIN app_platform_installations i ON i.id=o.installation_id WHERE o.installation_id=? AND ` + platformUnresolvedOperationPredicate(e) + `),
+		(SELECT COUNT(*) FROM app_platform_operation_effects f JOIN app_platform_operations o ON o.id=f.operation_id JOIN app_platform_installations i ON i.id=o.installation_id WHERE o.installation_id=? AND f.state IN ('prepared','unknown') AND ` + platformUnsafeEffectPredicate(e) + `)
+		FROM app_platform_installations i
+		LEFT JOIN app_platform_activations a ON a.installation_id=i.id AND a.state='active'
+		LEFT JOIN app_platform_capability_grants g ON g.installation_id=i.id AND g.capability='public.projection' AND g.policy_revision=i.policy_revision
+		WHERE i.id=?`
 	var desired, phase, storedEpoch string
-	var runtimeID sql.NullString
+	var runtimeID, release, policyJSON, epoch sql.NullString
 	var generation, policy int64
-	if err := e.queryRow(`SELECT desired_state,phase,controller_epoch,runtime_id,generation,policy_revision FROM app_platform_installations WHERE id=?`+lock, installation).Scan(&desired, &phase, &storedEpoch, &runtimeID, &generation, &policy); err != nil {
+	var ag, ap, granted sql.NullInt64
+	var markers, operations, effects int
+	if err := s.st.queryRowContext(ctx, query, installation, installation, installation).Scan(&desired, &phase, &storedEpoch, &runtimeID, &generation, &policy, &release, &ag, &ap, &granted, &policyJSON, &epoch, &markers, &operations, &effects); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return zero, errPlatformPublicNotFound
 		}
 		return zero, fmt.Errorf("%w: %v", errPlatformPublicUnavailable, err)
 	}
-	if desired != "enabled" || phase != "ready" || !runtimeID.Valid {
+	// The grant decides first: an installation with the projection off answers 404 whatever else
+	// is going on, so a busy installation cannot be told apart from an absent one.
+	if desired != "enabled" || phase != "ready" || !runtimeID.Valid || !release.Valid || !granted.Valid || granted.Int64 != 1 || !policyJSON.Valid || !appplatform.ValidPublicPolicyShape(policyJSON.String) {
 		return zero, errPlatformPublicNotFound
 	}
-	var release string
-	var ag, ap int64
-	var descriptor []byte
-	if err := e.queryRow(`SELECT a.release_sha256,a.generation,a.policy_revision,r.descriptor FROM app_platform_activations a JOIN app_platform_releases r ON r.sha256=a.release_sha256 WHERE a.installation_id=? AND a.state='active'`+lock, installation).Scan(&release, &ag, &ap, &descriptor); err != nil {
-		return zero, errPlatformPublicNotFound
+	if !epoch.Valid || epoch.String != storedEpoch || markers != 1 || !ag.Valid || !ap.Valid || ag.Int64 != generation || ap.Int64 != policy || operations != 0 || effects != 0 {
+		return zero, errPlatformPublicUnavailable
 	}
-	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || parsed.SHA256 != release || parsed.Manifest.Public == nil || parsed.Manifest.Backend == nil {
-		return zero, errPlatformPublicNotFound
-	}
-	// The grant is read before any state that could reveal that the installation exists but is
-	// busy: an installation with the projection off answers 404 whatever else is going on.
-	var granted int
-	var policyJSON string
-	if err := e.queryRow(`SELECT granted,policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='public.projection' AND policy_revision=?`+lock, installation, policy).Scan(&granted, &policyJSON); err != nil || granted != 1 {
-		return zero, errPlatformPublicNotFound
-	}
-	declared := *parsed.Manifest.Public
-	chosen, err := appplatform.ParsePublicPolicy(policyJSON, declared)
+	return platformPublicLight{installation: installation, generation: generation, policyRevision: policy, release: release.String, policyJSON: policyJSON.String}, nil
+}
+
+// verifyPlatformPublicRelease is the heavy check, run once per tuple (see platformPublicVerifiedTTL).
+// It reads the stored release and its archive, so every call is counted.
+func (s *Server) verifyPlatformPublicRelease(ctx context.Context, l platformPublicLight) (*platformPublicVerified, error) {
+	s.platformPublicArchiveReads.Add(1)
+	tx, err := s.st.db.BeginTx(ctx, nil)
 	if err != nil {
-		return zero, errPlatformPublicNotFound
+		return nil, fmt.Errorf("%w: %v", errPlatformPublicUnavailable, err)
 	}
-	var epoch string
-	var markers int
-	if err := e.queryRow(`SELECT v FROM meta WHERE k='app_platform_controller_epoch'`).Scan(&epoch); err != nil || epoch != storedEpoch {
-		return zero, errPlatformPublicUnavailable
-	}
-	if err := e.queryRow(`SELECT COUNT(*) FROM meta WHERE k='app_platform_restore_paused' AND v='0'`).Scan(&markers); err != nil || markers != 1 {
-		return zero, errPlatformPublicUnavailable
-	}
-	if ag != generation || ap != policy {
-		return zero, errPlatformPublicUnavailable
-	}
-	operations, err := platformUnresolvedOperationCount(e, installation)
-	if err != nil || operations != 0 {
-		return zero, errPlatformPublicUnavailable
-	}
-	effects, err := platformUnresolvedOperationEffectCount(e, installation)
-	if err != nil || effects != 0 {
-		return zero, errPlatformPublicUnavailable
-	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: platformContextTx{Tx: tx, ctx: ctx}}
 	now, err := platformDatabaseNow(e)
 	if err != nil {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
 	var appID, publisher string
-	if err := e.queryRow(`SELECT app_id,publisher_id FROM app_platform_installations WHERE id=?`, installation).Scan(&appID, &publisher); err != nil {
-		return zero, errPlatformPublicUnavailable
+	if err := e.queryRow(`SELECT app_id,publisher_id FROM app_platform_installations WHERE id=?`, l.installation).Scan(&appID, &publisher); err != nil {
+		return nil, errPlatformPublicUnavailable
 	}
 	if err := lockPlatformPublisherTrust(e); err != nil {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
 	trust, err := loadPlatformPublisherTrust(e)
 	if err != nil {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
 	var trustRevision int64
 	for _, p := range trust.Publishers {
@@ -143,17 +152,37 @@ func (s *Server) readPlatformPublicAuthority(ctx context.Context, installation s
 			trustRevision, _ = strconv.ParseInt(p.Revision, 10, 64)
 		}
 	}
-	rows, err := platformReadStoredRelease(e, release)
+	rows, err := platformReadStoredRelease(e, l.release)
 	if err != nil {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
 	if err := tx.Commit(); err != nil {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
 	// What remains reads nothing: it verifies the rows read above against current publisher trust.
-	verified, err := verifyPlatformStoredReleaseRows(rows, release, trustRevision, trust, now)
+	verified, err := verifyPlatformStoredReleaseRows(rows, l.release, trustRevision, trust, now)
 	if err != nil || verified.appID != appID || verified.publisherID != publisher {
-		return zero, errPlatformPublicUnavailable
+		return nil, errPlatformPublicUnavailable
 	}
-	return platformPublicAuthority{installation: installation, generation: generation, policyRevision: policy, release: release, frontendSHA: parsed.Manifest.Frontend.SHA256, manifest: parsed.Manifest, declared: declared, policy: chosen, policyJSON: policyJSON}, nil
+	parsed, err := appplatform.ParseDescriptor(rows.raw)
+	if err != nil || parsed.SHA256 != l.release || parsed.Manifest.Public == nil || parsed.Manifest.Backend == nil {
+		return nil, errPlatformPublicNotFound
+	}
+	declared := *parsed.Manifest.Public
+	policy, err := appplatform.ParsePublicPolicy(l.policyJSON, declared)
+	if err != nil {
+		return nil, errPlatformPublicNotFound
+	}
+	result := &platformPublicVerified{manifest: parsed.Manifest, declared: declared, policy: policy, frontendSHA: parsed.Manifest.Frontend.SHA256}
+	if policy.Document && declared.Document != "" {
+		files, err := appplatform.ReadFrontendDirectory(parsed.Manifest, rows.archive, "public/", platformPublicMaxDocumentBytes)
+		if err != nil {
+			return nil, errPlatformPublicUnavailable
+		}
+		result.files = files
+		for name, file := range files {
+			result.filesBytes += int64(len(file.Content)) + int64(len(name))
+		}
+	}
+	return result, nil
 }

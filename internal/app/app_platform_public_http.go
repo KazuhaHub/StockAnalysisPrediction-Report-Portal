@@ -27,6 +27,10 @@ import (
 // is answered exactly as one without. The handlers see only the reviewed routes of a ready,
 // enabled installation whose grant is on.
 
+// platformPublicVerifyPerSecond bounds release verifications per installation. Only a failed or an
+// invalidated verification repeats (a success is kept), and neither is something a visitor can cause.
+const platformPublicVerifyPerSecond = 4
+
 const (
 	platformPublicDataCSP     = "default-src 'none'; frame-ancestors 'none'"
 	platformPublicDocumentCSP = "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
@@ -74,12 +78,36 @@ func (s *Server) recordPlatformPublic(installation, class string) {
 // writePlatformPublicSummary is the aggregated traffic audit (doc 179 section 5): counts per
 // window and class, never a client address.
 func (s *Server) writePlatformPublicSummary(installation string, st *platformPublicStats) {
-	detail, err := json.Marshal(st.detail(platformPublicSummaryWindow))
+	detail, err := json.Marshal(st.detail(time.Now()))
 	if err != nil {
 		return
 	}
 	if _, err := s.st.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,'system',0,?,'app_platform_installation',?,?,'')`, time.Now().UTC().Format(time.RFC3339), platformPublicSummaryAudit, installation, string(detail)); err != nil {
 		log.Printf("app-platform public projection audit: %v", err)
+	}
+}
+
+// platformPublicSummaryLoop writes each traffic window within a minute of its end, so a summary
+// never waits for the next request and never covers more than its window.
+func (s *Server) platformPublicSummaryLoop() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.writePlatformPublicDue(time.Now())
+	}
+}
+
+func (s *Server) writePlatformPublicDue(now time.Time) {
+	for installation, st := range s.platformPublic.takeDue(now) {
+		s.writePlatformPublicSummary(installation, st)
+	}
+}
+
+// stopPlatformPublic writes every open window at shutdown. Its detail ends at the shutdown, not at
+// the end the window would have had.
+func (s *Server) stopPlatformPublic(context.Context) {
+	for installation, st := range s.platformPublic.takeAll() {
+		s.writePlatformPublicSummary(installation, st)
 	}
 }
 
@@ -102,8 +130,10 @@ func (s *Server) publicClientLimit(w http.ResponseWriter, r *http.Request, insta
 	return false
 }
 
-// admit runs the common front of both route kinds: the source ceiling, the authority read, the
-// cache identity and the per installation ceiling. It has answered the request when ok is false.
+// publicAdmit runs the common front of both route kinds. The order is the cost control: the source
+// ceiling, one cheap indexed read (installation, grant, tuple), the reviewed per client and per
+// installation ceilings, and only then the verified release, which is in memory unless this is the
+// first request of a tuple. It has answered the request when ok is false.
 func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPublicAuthority, bool) {
 	var zero platformPublicAuthority
 	now := time.Now()
@@ -120,19 +150,25 @@ func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPu
 	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
 	defer cancel()
-	auth, err := s.readPlatformPublicAuthority(ctx, installation)
+	light, err := s.readPlatformPublicLight(ctx, installation)
 	if err != nil {
 		class := platformPublicClassify(w, err)
-		// An unknown or unprojected installation leaves no trace: nothing is keyed by it.
+		// Nothing is counted for an installation that is unknown or has the projection off, and
+		// an unavailable answer only exists for one whose grant is on.
 		if class != "not_found" {
 			s.recordPlatformPublic(installation, class)
 		}
 		return zero, false
 	}
 	s.recordPlatformPublic(installation, "request")
+	var chosen appplatform.PublicPolicy
+	if json.Unmarshal([]byte(light.policyJSON), &chosen) != nil {
+		platformPublicFail(w, 404, "not_found", 0)
+		return zero, false
+	}
 	// 2. The reviewed ceilings, now that the policy is known. They are keyed by a real
 	// installation, so they cannot be filled by guessing identifiers.
-	if !s.publicClientLimit(w, r, installation, auth.policy.ClientPerMinute, now) {
+	if !s.publicClientLimit(w, r, installation, chosen.ClientPerMinute, now) {
 		s.recordPlatformPublic(installation, "rate_client")
 		return zero, false
 	}
@@ -141,8 +177,38 @@ func (s *Server) publicAdmit(w http.ResponseWriter, r *http.Request) (platformPu
 		s.recordPlatformPublic(installation, "rate_installation")
 		return zero, false
 	}
-	s.platformPublic.useTuple(installation, auth.tuple())
-	return auth, true
+	s.platformPublic.useTuple(installation, light.tuple())
+	verified, err := s.platformPublicVerifiedFor(light)
+	if err != nil {
+		s.publicLoadFailure(w, installation, err)
+		return zero, false
+	}
+	return platformPublicAuthority{platformPublicLight: light, platformPublicVerified: verified}, true
+}
+
+// platformPublicVerifiedFor returns the verified release of a tuple from memory, building it once
+// (single flight, at most platformPublicVerifyPerSecond builds a second per installation) when it is absent or has expired.
+func (s *Server) platformPublicVerifiedFor(l platformPublicLight) (*platformPublicVerified, error) {
+	key := strings.Join([]string{l.installation, l.tuple(), "verified"}, "\x00")
+	entry, _, err := s.platformPublicLoad(key, func(ctx context.Context) (*platformPublicEntry, error) {
+		end, ok := s.platformPublic.beginFetch(l.installation+"#verify", platformPublicVerifyPerSecond, time.Now())
+		if !ok {
+			return nil, errPlatformPublicRate
+		}
+		defer end()
+		v, err := s.verifyPlatformPublicRelease(ctx, l)
+		if err != nil {
+			return nil, err
+		}
+		now := time.Now()
+		entry := &platformPublicEntry{key: key, installation: l.installation, tuple: l.tuple(), verified: v, extra: v.filesBytes, cacheSeconds: int(platformPublicVerifiedTTL / time.Second), expires: now.Add(platformPublicVerifiedTTL)}
+		s.platformPublic.store(entry, now)
+		return entry, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return entry.verified, nil
 }
 
 func (s *Server) publicAppData(w http.ResponseWriter, r *http.Request) {
@@ -324,24 +390,16 @@ func (s *Server) publicAppDocument(w http.ResponseWriter, r *http.Request) {
 		s.recordPlatformPublic(auth.installation, "route_refused")
 		return
 	}
-	key := strings.Join([]string{auth.installation, auth.tuple(), "document"}, "\x00")
-	entry, class, err := s.platformPublicLoad(key, func(ctx context.Context) (*platformPublicEntry, error) {
-		return s.loadPlatformPublicDocuments(ctx, auth, key)
-	})
-	if err != nil {
-		s.publicLoadFailure(w, auth.installation, err)
-		return
-	}
-	file, found := entry.files[name]
+	file, found := auth.files[name]
 	if !found {
 		platformPublicFail(w, 404, "not_found", 0)
 		s.recordPlatformPublic(auth.installation, "route_refused")
 		return
 	}
-	s.recordPlatformPublic(auth.installation, class)
+	s.recordPlatformPublic(auth.installation, "hit")
 	h := w.Header()
 	h.Set("Content-Type", file.Metadata.ContentType)
-	h.Set("Cache-Control", "public, max-age="+strconv.Itoa(remainingSeconds(entry, time.Now())))
+	h.Set("Cache-Control", "public, max-age="+strconv.Itoa(platformPublicDocumentSeconds(auth.declared)))
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", platformPublicDocumentCSP)
 	h.Set("Referrer-Policy", "no-referrer")
@@ -351,32 +409,12 @@ func (s *Server) publicAppDocument(w http.ResponseWriter, r *http.Request) {
 	w.Write(file.Content)
 }
 
-// loadPlatformPublicDocuments reads the verified files under public/ of the active frontend
-// artifact once, so a request for a name that does not exist costs a map lookup, not an archive scan.
-func (s *Server) loadPlatformPublicDocuments(ctx context.Context, a platformPublicAuthority, key string) (*platformPublicEntry, error) {
-	end, ok := s.platformPublic.beginFetch(a.installation+"#document", 1, time.Now())
-	if !ok {
-		return nil, errPlatformPublicRate
-	}
-	defer end()
-	var archive []byte
-	if err := s.st.queryRowContext(ctx, `SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, a.frontendSHA).Scan(&archive); err != nil {
-		return nil, errPlatformPublicUnavailable
-	}
-	files, err := appplatform.ReadFrontendDirectory(a.manifest, archive, "public/", platformPublicMaxDocumentBytes)
-	if err != nil {
-		return nil, errPlatformPublicUnavailable
-	}
+// platformPublicDocumentSeconds is the browser lifetime of a public file: the shortest cache time
+// any route of the page declares, since the page and its data change together.
+func platformPublicDocumentSeconds(declared appplatform.Public) int {
 	seconds := 300
-	for _, route := range a.declared.Routes {
+	for _, route := range declared.Routes {
 		seconds = min(seconds, route.CacheSeconds)
 	}
-	var extra int64
-	for name, file := range files {
-		extra += int64(len(file.Content)) + int64(len(name))
-	}
-	now := time.Now()
-	entry := &platformPublicEntry{key: key, installation: a.installation, tuple: a.tuple(), files: files, extra: extra, cacheSeconds: seconds, expires: now.Add(time.Duration(seconds) * time.Second)}
-	s.platformPublic.store(entry, now)
-	return entry, nil
+	return seconds
 }

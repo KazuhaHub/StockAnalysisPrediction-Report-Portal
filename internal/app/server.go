@@ -167,8 +167,10 @@ type Server struct {
 
 	// platformPublic is the cache, limiters and counters of the anonymous public projection
 	// (doc 179). platformPublicFetchHook replaces the runner fetch in tests only.
-	platformPublic          platformPublicState
-	platformPublicFetchHook func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
+	platformPublic platformPublicState
+	// platformPublicArchiveReads counts the verifications that read a stored release and its archive.
+	platformPublicArchiveReads atomic.Int64
+	platformPublicFetchHook    func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
 
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
@@ -212,7 +214,10 @@ func (s *Server) logMiddleware(next http.Handler) http.Handler {
 		p := r.URL.Path
 		if strings.HasPrefix(p, "/assets/") || strings.HasPrefix(p, "/app-assets/") || strings.HasPrefix(p, "/site-assets/") ||
 			p == "/healthz" || p == "/favicon.svg" || p == "/favicon.ico" || p == "/manifest.webmanifest" ||
-			p == "/pwa-icon" || p == "/sw.js" {
+			p == "/pwa-icon" || p == "/sw.js" ||
+			// The public projection is anonymous traffic: a log line would carry the visitor's address
+			// and query. Its aggregate, address-free summary is the audit record (doc 179 section 5).
+			strings.HasPrefix(p, "/public/apps/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -370,6 +375,7 @@ func RunServer(cfgPath string) {
 	go s.forecastWatchdog()
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
+	go s.platformPublicSummaryLoop() // writes the public projection traffic windows that have ended
 	s.wireExportCleanup()
 	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
 	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
@@ -390,7 +396,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail, s.stopPlatformPublic)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter

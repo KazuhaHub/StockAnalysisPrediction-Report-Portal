@@ -1,7 +1,9 @@
 package app
 
 import (
+	"container/list"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"hash/fnv"
 	"net"
 	"sort"
 	"sync"
@@ -20,68 +22,90 @@ const (
 	// authority reads an anonymous flood can cause; it is not a policy knob.
 	platformPublicInstallationPerSecond = 200
 	platformPublicSummaryWindow         = 10 * time.Minute
+	platformPublicStatsInstallations    = 1024
 )
 
-// platformPublicLimiter is a fixed-window counter that cannot be used to reset other callers. The
-// shared platform limiter drops its whole table when a flood of distinct keys fills it, which hands
-// every other caller a fresh allowance; this one keeps the live records and charges keys it has no
-// room for to one shared overflow allowance instead.
+// platformPublicLimiter is a fixed-window counter over a bounded, sharded least-recently-used table.
+// The shared platform limiter drops its whole table when a flood of distinct keys fills it, which
+// hands every other caller a fresh allowance. This one never resets anyone: a full shard evicts its
+// least recently used record, so a new key always gets its own allowance and memory stays bounded.
+// The cost is the honest one: a source that is idle while more than a shard's capacity of fresh
+// sources arrive loses its counter (and so gets a fresh allowance); a source that keeps calling
+// keeps its counter. The per installation and backend ceilings do not depend on this table.
 type platformPublicLimiter struct {
-	mu       sync.Mutex
-	recs     map[string]*platformPublicRec
-	overflow platformPublicRec
+	once     sync.Once
+	shards   []*platformPublicShard
 	capacity int
 }
 
+type platformPublicShard struct {
+	mu   sync.Mutex
+	recs map[string]*list.Element
+	lru  *list.List // front = most recently used
+	max  int
+}
+
 type platformPublicRec struct {
+	key     string
 	n       int
 	resetAt time.Time
 }
 
-const platformPublicLimiterCapacity = 8192
+const (
+	platformPublicLimiterCapacity = 8192
+	platformPublicLimiterShards   = 16
+)
 
-// platformPublicOverflowPerWindow is what every key without a record shares while the table is full.
-const platformPublicOverflowPerWindow = 600
+func (l *platformPublicLimiter) init() {
+	l.once.Do(func() {
+		capacity := l.capacity
+		if capacity == 0 {
+			capacity = platformPublicLimiterCapacity
+		}
+		shards := min(platformPublicLimiterShards, capacity)
+		l.shards = make([]*platformPublicShard, shards)
+		for i := range l.shards {
+			l.shards[i] = &platformPublicShard{recs: map[string]*list.Element{}, lru: list.New(), max: max(1, capacity/shards)}
+		}
+	})
+}
+
+func (l *platformPublicLimiter) size() int {
+	l.init()
+	n := 0
+	for _, sh := range l.shards {
+		sh.mu.Lock()
+		n += len(sh.recs)
+		sh.mu.Unlock()
+	}
+	return n
+}
 
 func (l *platformPublicLimiter) allow(key string, limit int, window time.Duration, now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.recs == nil {
-		l.recs = map[string]*platformPublicRec{}
-	}
-	capacity := l.capacity
-	if capacity == 0 {
-		capacity = platformPublicLimiterCapacity
-	}
-	r := l.recs[key]
-	if r == nil {
-		if len(l.recs) >= capacity {
-			for k, rec := range l.recs {
-				if now.After(rec.resetAt) {
-					delete(l.recs, k)
-				}
-			}
+	l.init()
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	sh := l.shards[int(h.Sum32())%len(l.shards)]
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if el := sh.recs[key]; el != nil {
+		sh.lru.MoveToFront(el)
+		r := el.Value.(*platformPublicRec)
+		if now.After(r.resetAt) {
+			r.n, r.resetAt = 0, now.Add(window)
 		}
-		if len(l.recs) >= capacity {
-			if now.After(l.overflow.resetAt) {
-				l.overflow = platformPublicRec{resetAt: now.Add(window)}
-			}
-			if l.overflow.n >= platformPublicOverflowPerWindow {
-				return false
-			}
-			l.overflow.n++
-			return true
+		if r.n >= limit {
+			return false
 		}
-		l.recs[key] = &platformPublicRec{n: 1, resetAt: now.Add(window)}
+		r.n++
 		return true
 	}
-	if now.After(r.resetAt) {
-		r.n, r.resetAt = 0, now.Add(window)
+	for len(sh.recs) >= sh.max {
+		oldest := sh.lru.Back()
+		delete(sh.recs, oldest.Value.(*platformPublicRec).key)
+		sh.lru.Remove(oldest)
 	}
-	if r.n >= limit {
-		return false
-	}
-	r.n++
+	sh.recs[key] = sh.lru.PushFront(&platformPublicRec{key: key, n: 1, resetAt: now.Add(window)})
 	return true
 }
 
@@ -103,6 +127,7 @@ type platformPublicEntry struct {
 	body                     []byte
 	contentType              string
 	files                    map[string]appplatform.FrontendFile
+	verified                 *platformPublicVerified
 	extra                    int64
 	cacheSeconds             int
 	expires                  time.Time
@@ -353,6 +378,12 @@ func (p *platformPublicState) record(installation string, now time.Time, class s
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.init()
+	// Counters exist only for installations the caller has shown to be real, and no more than
+	// platformPublicStatsInstallations of them; past that they share one bucket, so a flood of
+	// identifiers cannot grow this table.
+	if _, known := p.stats[installation]; !known && len(p.stats) >= platformPublicStatsInstallations {
+		installation = ""
+	}
 	st := p.stats[installation]
 	if st != nil && now.Sub(st.start) >= platformPublicSummaryWindow {
 		done, st = st, nil
@@ -374,6 +405,32 @@ func (p *platformPublicState) record(installation string, now time.Time, class s
 	return done
 }
 
+// takeDue removes and returns every window that has run its course. Called by the timer, so a window
+// is written within a minute of its end even when no further request arrives.
+func (p *platformPublicState) takeDue(now time.Time) map[string]*platformPublicStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.init()
+	due := map[string]*platformPublicStats{}
+	for installation, st := range p.stats {
+		if now.Sub(st.start) >= platformPublicSummaryWindow {
+			due[installation] = st
+			delete(p.stats, installation)
+		}
+	}
+	return due
+}
+
+// takeAll removes every open window (shutdown).
+func (p *platformPublicState) takeAll() map[string]*platformPublicStats {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.init()
+	all := p.stats
+	p.stats = map[string]*platformPublicStats{}
+	return all
+}
+
 // takeStats removes and returns an installation's open window (disable, shutdown, tests).
 func (p *platformPublicState) takeStats(installation string) *platformPublicStats {
 	p.mu.Lock()
@@ -384,7 +441,13 @@ func (p *platformPublicState) takeStats(installation string) *platformPublicStat
 	return st
 }
 
-func (st *platformPublicStats) detail(window time.Duration) map[string]any {
+// detail states the window the counts cover: from its start to the earlier of now and its end, so a
+// summary never claims more time than it counted.
+func (st *platformPublicStats) detail(now time.Time) map[string]any {
+	end := now
+	if limit := st.start.Add(platformPublicSummaryWindow); limit.Before(end) {
+		end = limit
+	}
 	classes := make([]string, 0, len(st.refusals))
 	for class := range st.refusals {
 		classes = append(classes, class)
@@ -394,5 +457,5 @@ func (st *platformPublicStats) detail(window time.Duration) map[string]any {
 	for _, class := range classes {
 		refusals[class] = st.refusals[class]
 	}
-	return map[string]any{"window_start": st.start.UTC().Format(time.RFC3339), "window_seconds": int(window / time.Second), "requests": st.requests, "cache_hits": st.hits, "backend_fetches": st.fetches, "refusals": refusals}
+	return map[string]any{"window_start": st.start.UTC().Format(time.RFC3339), "window_end": end.UTC().Format(time.RFC3339), "requests": st.requests, "cache_hits": st.hits, "backend_fetches": st.fetches, "refusals": refusals}
 }

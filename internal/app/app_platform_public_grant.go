@@ -232,6 +232,34 @@ func (s *Server) setPlatformPublicGrant(ctx context.Context, session platformAct
 			}
 			return err
 		}
+		// Withdrawal is allowed in any state (doc 179 section 4): it only removes exposure, so
+		// neither a pending operation nor a disabled installation may stand in its way, and it
+		// acts on the row of the current revision whatever page asked. Enabling or changing
+		// the policy needs a ready installation with no unfinished operation, because install,
+		// enable and update read the grant rows as evidence.
+		if !change.enabled {
+			var granted int
+			var stored string
+			if err := e.queryRow(`SELECT granted,policy_json FROM app_platform_capability_grants WHERE installation_id=? AND capability='public.projection' AND policy_revision=?`+lock, installation, current).Scan(&granted, &stored); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return errAppPlatformPlanChanged
+				}
+				return err
+			}
+			if granted == 0 && stored == "{}" {
+				return nil
+			}
+			changed, err := e.exec(`UPDATE app_platform_capability_grants SET granted=0,policy_json='{}',updated_ms=? WHERE installation_id=? AND capability='public.projection' AND policy_revision=? AND granted=? AND policy_json=?`, control.nowMS, installation, current, granted, stored)
+			if err := platformLeaseCAS(changed, err); err != nil {
+				return errAppPlatformPlanChanged
+			}
+			detail, err := json.Marshal(map[string]any{"capability": "public.projection", "policy_revision": current, "policy": json.RawMessage("{}")})
+			if err != nil {
+				return err
+			}
+			_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,'app_platform_installation',?,?,'')`, time.UnixMilli(control.nowMS).UTC().Format(time.RFC3339), actor.username, actor.ouID, platformPublicDisabledAudit, installation, string(detail))
+			return err
+		}
 		if desired != "enabled" || phase != "ready" {
 			return errPlatformPublicGrantBusy
 		}
@@ -296,6 +324,10 @@ func (s *Server) setPlatformPublicGrant(ctx context.Context, session platformAct
 	})
 	if err == nil {
 		s.platformPublic.purge(installation)
+		if !change.enabled {
+			// The open traffic window ends with the exposure it describes.
+			s.flushPlatformPublicSummary(installation)
+		}
 	}
 	return err
 }
