@@ -60,7 +60,9 @@ func SignNetworkHTTPCheck(c NetworkHTTPRequestCommand, challenge string, key ed2
 // by the SHA-256 of its signed bytes and its expiry. It is for a caller that has
 // already judged the request and has wiped it (a request carrying a credential),
 // and it signs exactly what SignNetworkHTTPCheck signs for that request. It
-// validates nothing about the request: the caller must have.
+// validates nothing about the request: the caller must have, and must pass the
+// digest it computed over the exact signed bytes it sent to the runner, not a
+// digest it was handed. A proof for any other digest is refused by the runner.
 func SignNetworkHTTPCheckDigest(requestSHA256, challenge string, requestExpiresMS int64, key ed25519.PrivateKey, nowMS int64) ([]byte, []byte, error) {
 	if len(key) != ed25519.PrivateKeySize || !shaPattern.MatchString(requestSHA256) || !shaPattern.MatchString(challenge) || challenge == strings.Repeat("0", 64) || requestExpiresMS <= nowMS {
 		return nil, nil, ErrInvalidCommand

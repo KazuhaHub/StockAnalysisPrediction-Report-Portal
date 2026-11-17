@@ -200,8 +200,22 @@ What shipped, and where it differs from sections 3 to 5.
   value back as it is, in any letter case, in base64 (both alphabets, any byte
   alignment), hex, URL-encoded or JSON-escaped, for the value and for a Bearer
   token without its prefix, on the foreground, background and stream paths.
-  Values shorter than 8 bytes are matched as they are. This is a recognition of
-  those forms, not a guarantee against every encoding; the console says so.
+  Values shorter than 8 bytes are matched as they are, and transformed forms are
+  looked for only for values up to 4096 bytes; a longer value is matched as it
+  is and ASCII case-folded, so the longest form stays proportional to the value.
+  This is a recognition of those forms, not a guarantee against every encoding;
+  the console says so.
+- **Streams.** The stream guard holds back only the suffix of what it has that is
+  a proper prefix of a recognised form, since only that can still become a
+  match; everything before it is released at once, so a 4-byte NDJSON event with
+  no partial match pending is delivered without waiting for the next chunk. A
+  held suffix is released as soon as a later chunk shows it cannot match, and at
+  the end of the stream. It is not released on an idle timer, because releasing
+  a partial match would let its remainder through undetected. Each chunk scans
+  the carry plus the new bytes, with an ASCII-only lower-casing that keeps
+  offsets. A 1 MiB stream of small events with a 47-byte Bearer value took
+  596 ms, 42 ms, 6.6 ms and 3.0 ms in 1-byte, 16-byte, 256-byte and 4 KiB
+  chunks before, and 136 ms, 10.8 ms, 3.3 ms and 1.8 ms after.
 - **Audit.** The binding review audit detail carries `Principals`. The summary
   row gains `bindings: [{binding, count, outcomes}]` for calls whose binding
   resolved to a reviewed one, and `credential_unresolved` (outcome counts, no

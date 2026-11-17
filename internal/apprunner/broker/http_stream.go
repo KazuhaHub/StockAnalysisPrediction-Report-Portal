@@ -333,15 +333,18 @@ func (g *httpStreamEchoGuard) Accept(data []byte) ([]byte, bool) {
 		clear(window)
 		return nil, true
 	}
-	// Keep enough to catch any recognised form that straddles two chunks.
-	keep := g.echo.span - 1
-	if len(window) <= keep {
-		g.tail = window
+	// Hold back only what could still become the credential (see pending): an
+	// ordinary event is released as it arrives, not a chunk late. Held bytes are
+	// released as soon as a later chunk shows they cannot match, and at the end of
+	// the stream by Flush; they are never released while a match is possible.
+	hold := g.echo.pending(window)
+	safe := bytes.Clone(window[:len(window)-hold])
+	clear(g.tail)
+	g.tail = bytes.Clone(window[len(window)-hold:])
+	clear(window)
+	if len(safe) == 0 {
 		return nil, false
 	}
-	safe := bytes.Clone(window[:len(window)-keep])
-	g.tail = bytes.Clone(window[len(window)-keep:])
-	clear(window)
 	return safe, false
 }
 

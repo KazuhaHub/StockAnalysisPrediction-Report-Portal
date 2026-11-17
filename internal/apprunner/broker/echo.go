@@ -8,10 +8,15 @@ import (
 	"net/url"
 )
 
-// echoTransformMinBytes is the shortest credential whose transformed forms are
-// looked for. A few characters transformed would withhold ordinary responses;
-// real credentials are far longer. Shorter ones are matched as they are.
-const echoTransformMinBytes = 8
+// Transformed forms of a credential are looked for only for values between these
+// bounds. A few characters transformed would withhold ordinary responses; real
+// credentials are far longer. A value over the upper bound is matched as it is and
+// case-folded only, which keeps the longest form (and so the work and the memory a
+// stream scan needs) proportional to the value, not a multiple of it.
+const (
+	echoTransformMinBytes = 8
+	echoTransformMaxBytes = 4096
+)
 
 // echoMatcher recognises a response that gives a credential back. It looks for
 // the value (and, for a Bearer header, the token without its prefix) as it is,
@@ -21,8 +26,24 @@ const echoTransformMinBytes = 8
 // forms, not a guarantee against every possible encoding.
 type echoMatcher struct {
 	exact  [][]byte // matched case-sensitively
-	folded [][]byte // lower-cased, matched against a lower-cased response
-	span   int      // the longest form: how much of a stream must be kept
+	folded [][]byte // ASCII lower-cased, matched against an ASCII lower-cased response
+	span   int      // the longest form
+	// First bytes of the forms, so a stream scan looks closely only where a form
+	// could begin.
+	firstExact, firstFolded [256]bool
+}
+
+// asciiLower lower-cases A-Z only. Unlike bytes.ToLower it never changes the
+// length, so offsets in the lowered copy are offsets in the original.
+func asciiLower(b []byte) []byte {
+	out := make([]byte, len(b))
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		out[i] = c
+	}
+	return out
 }
 
 func newEchoMatcher(header string, value []byte) *echoMatcher {
@@ -34,21 +55,44 @@ func newEchoMatcher(header string, value []byte) *echoMatcher {
 	if header == "Authorization" && bytes.HasPrefix(value, []byte("Bearer ")) && len(value) > len("Bearer ") {
 		secrets = append(secrets, value[len("Bearer "):])
 	}
+	seenExact, seenFolded := map[string]bool{}, map[string]bool{}
+	addExact := func(f []byte) {
+		if len(f) > 0 && !seenExact[string(f)] {
+			seenExact[string(f)] = true
+			m.exact = append(m.exact, bytes.Clone(f))
+		}
+	}
+	addFolded := func(f []byte) {
+		if f = asciiLower(f); len(f) > 0 && !seenFolded[string(f)] {
+			seenFolded[string(f)] = true
+			m.folded = append(m.folded, f)
+		}
+	}
 	for _, s := range secrets {
-		m.exact = append(m.exact, bytes.Clone(s))
+		addExact(s)
 		if len(s) < echoTransformMinBytes {
 			continue
 		}
-		m.folded = append(m.folded, bytes.ToLower(s))
-		m.folded = append(m.folded, bytes.ToLower([]byte(hex.EncodeToString(s))))
-		m.folded = append(m.folded, bytes.ToLower([]byte(url.QueryEscape(string(s)))))
-		m.folded = append(m.folded, bytes.ToLower([]byte(url.PathEscape(string(s)))))
-		m.folded = append(m.folded, bytes.ToLower(jsonEscaped(s, true)))
-		m.folded = append(m.folded, bytes.ToLower(jsonEscaped(s, false)))
-		m.exact = append(m.exact, base64Forms(s)...)
+		addFolded(s)
+		if len(s) > echoTransformMaxBytes {
+			continue
+		}
+		addFolded([]byte(hex.EncodeToString(s)))
+		addFolded([]byte(url.QueryEscape(string(s))))
+		addFolded([]byte(url.PathEscape(string(s))))
+		addFolded(jsonEscaped(s, true))
+		addFolded(jsonEscaped(s, false))
+		for _, f := range base64Forms(s) {
+			addExact(f)
+		}
 	}
-	for _, f := range append(append([][]byte{}, m.exact...), m.folded...) {
+	for _, f := range m.exact {
 		m.span = max(m.span, len(f))
+		m.firstExact[f[0]] = true
+	}
+	for _, f := range m.folded {
+		m.span = max(m.span, len(f))
+		m.firstFolded[f[0]] = true
 	}
 	return m
 }
@@ -104,7 +148,7 @@ func (m *echoMatcher) Match(data []byte) bool {
 	if len(m.folded) == 0 {
 		return false
 	}
-	lower := bytes.ToLower(data)
+	lower := asciiLower(data)
 	defer clear(lower)
 	for _, f := range m.folded {
 		if len(f) > 0 && bytes.Contains(lower, f) {
@@ -112,6 +156,42 @@ func (m *echoMatcher) Match(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// pending is how many bytes at the end of window must be held back: the longest
+// suffix that is a proper prefix of a recognised form, that is a match a later
+// chunk could still complete. Everything before it can be released: a match that
+// started there would already have been found by Match or would be a pending
+// suffix. Only the last span-1 bytes can begin an uncompleted match, so that is
+// all that is looked at, and only where a form's first byte occurs.
+func (m *echoMatcher) pending(window []byte) int {
+	var lower []byte
+	defer func() { clear(lower) }()
+	for i := max(0, len(window)-(m.span-1)); i < len(window); i++ {
+		rest := window[i:]
+		if m.firstExact[rest[0]] {
+			for _, f := range m.exact {
+				if len(f) > len(rest) && bytes.HasPrefix(f, rest) {
+					return len(rest)
+				}
+			}
+		}
+		c := rest[0]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if m.firstFolded[c] {
+			if lower == nil {
+				lower = asciiLower(window)
+			}
+			for _, f := range m.folded {
+				if len(f) > len(rest) && bytes.HasPrefix(f, lower[i:]) {
+					return len(rest)
+				}
+			}
+		}
+	}
+	return 0
 }
 
 // Clear wipes the matcher's copies of the credential and its forms.
