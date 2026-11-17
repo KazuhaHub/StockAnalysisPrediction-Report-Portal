@@ -49,7 +49,9 @@ func TestPlatformPrincipalRoutesRefuseEveryOtherCaller(t *testing.T) {
 				alice := platformReportSession(t, p.s, "alice")
 				return p.s.managedCookie(*p.s.st.GetUser("alice"), alice.sessionID, alice.expires.Unix()), body(p)
 			},
-			"capability revoked": func(t *testing.T, p *platformPrincipalEnv, b map[string]string) (string, map[string]any) {
+			// The fixture declares principals.read optional, so a withdrawn grant still launches
+			// and only the directory's own granted check can refuse the call.
+			"capability withdrawn": func(t *testing.T, p *platformPrincipalEnv, b map[string]string) (string, map[string]any) {
 				mustExec(t, p.s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='principals.read'`, p.installation)
 				return p.cookie, body(p)
 			},
