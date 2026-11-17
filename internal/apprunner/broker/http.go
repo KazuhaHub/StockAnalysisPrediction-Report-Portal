@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -23,6 +24,10 @@ var (
 	// ErrUncertain means dispatch was attempted; a remote effect may have happened.
 	// Callers must not automatically replay it, even when no response is returned.
 	ErrUncertain = errors.New("broker outcome uncertain")
+	// ErrBusy is ErrUnavailable because a concurrency or rate budget is spent, not
+	// because anything is wrong; the caller may retry shortly. It wraps
+	// ErrUnavailable so every existing errors.Is(err, ErrUnavailable) holds.
+	ErrBusy = fmt.Errorf("%w: budget exhausted", ErrUnavailable)
 )
 
 // HTTPPolicy is an internal development policy, not a public wire format or a
