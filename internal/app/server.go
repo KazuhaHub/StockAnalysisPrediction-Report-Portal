@@ -131,7 +131,9 @@ type Server struct {
 	cleanupMu             sync.Mutex                                                                 // serializes a storage-cleanup pass so the scheduled ticker and a manual "clean now" never overlap (ADR 0017)
 	loginThr              *loginThrottle                                                             // per-IP + per-account failed-login rate limiter (brute-force + bcrypt DoS)
 	v1Rate                *rateLimiter                                                               // per-source request ceiling on the machine API (limits.go); off until configured
-	trustedNets           []*net.IPNet                                                               // reverse proxies allowed to supply the client IP chain
+	platformPrincipalRate rateLimiter                                                                // per viewer and installation call ceiling of the app principal directory (app_platform_principals.go)
+	platformPrincipalAudit sync.Mutex                                                                // serializes the hourly principal-directory audit row
+	trustedNets           []*net.IPNet                                                              // reverse proxies allowed to supply the client IP chain
 	mermaidCharts         mermaidChartCache                                                          // user-scoped, bounded rendered SVG cache for PDF export (ADR 0020)
 	quotes                quoteCache                                                                 // vendor quotes: its OWN bounded LRU + single-flight + upstream ceiling; lazily initialised (quote_cache.go)
 	ssoInsecureForTest    bool                                                                       // test-only: permit a plain-http loopback IdP (ADR 0023)
