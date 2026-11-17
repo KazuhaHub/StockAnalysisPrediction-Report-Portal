@@ -443,3 +443,29 @@ func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *tes
 		t.Fatal("a directly granted account with an unusable chain is listed", labels)
 	}
 }
+
+// Only a real installation the viewer may use reaches the limiter, so arbitrary installation ids
+// cannot grow the table past its cap and flush an exhausted viewer's counter.
+func TestPlatformPrincipalRateLimitSurvivesArbitraryInstallationIDs(t *testing.T) {
+	p := platformPrincipalEnvironment(t)
+	body := map[string]any{"kind": "ou"}
+	for n := 1; n <= 30; n++ {
+		if w := p.post(t, "search", body); w.Code != 200 {
+			t.Fatal("call", n, w.Code)
+		}
+	}
+	binding := p.binding(t)
+	raw, err := json.Marshal(map[string]any{"binding": binding, "kind": "ou"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := 0; n < 4097; n++ {
+		path := fmt.Sprintf("/api/app-platform/installations/%08x-0000-4000-8000-%012x/principals/search", n, n)
+		if w := sessionTestRequest(p.mux, "POST", path, p.cookie, string(raw)); w.Code == 200 || w.Code == http.StatusTooManyRequests {
+			t.Fatal("an unknown installation was answered", w.Code)
+		}
+	}
+	if w := p.post(t, "search", body); w.Code != http.StatusTooManyRequests {
+		t.Fatal("the limit was reset by unrelated installation ids", w.Code)
+	}
+}

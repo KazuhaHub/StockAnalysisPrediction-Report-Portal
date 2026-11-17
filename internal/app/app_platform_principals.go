@@ -32,6 +32,7 @@ const (
 
 var (
 	errPlatformPrincipalDenied = errors.New("principal directory not permitted")
+	errPlatformPrincipalRate   = errors.New("principal directory rate limited")
 	platformPrincipalPattern   = regexp.MustCompile(`^(user|ou):[0-9a-f]{64}$`)
 )
 
@@ -88,6 +89,9 @@ func platformPrincipalDenied(w http.ResponseWriter) {
 
 func platformPrincipalFailure(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errPlatformPrincipalRate):
+		w.Header().Set("Retry-After", "60")
+		jsonErrorCode(w, 429, "rate_limited", "too many principal directory calls")
 	case errors.Is(err, errPlatformPrincipalDenied), errors.Is(err, errAppPlatformLaunchUnavailable), errors.Is(err, errAppPlatformActorUnavailable):
 		platformPrincipalDenied(w)
 	default:
@@ -345,6 +349,12 @@ func (s *Server) platformPrincipalAccess(ctx context.Context, session platformAc
 		declared := slices.Contains(manifest.Capabilities.Required, "principals.read") || slices.Contains(manifest.Capabilities.Optional, "principals.read")
 		if granted != 1 || !declared || account.role != "admin" {
 			return errPlatformPrincipalDenied
+		}
+		// The ceiling counts only a caller that already passed every check above: a real, ready
+		// installation the administrator may use. Unknown installation ids never reach the limiter,
+		// so they cannot grow its table and flush an exhausted viewer's counter.
+		if !s.platformPrincipalRate.allow(account.username+"\x00"+installation, platformPrincipalCallsPerMinute, time.Minute, time.Now()) {
+			return errPlatformPrincipalRate
 		}
 		now, err := platformDatabaseNow(e)
 		if err != nil {

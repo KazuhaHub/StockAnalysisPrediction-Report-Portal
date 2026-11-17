@@ -33,7 +33,8 @@ func strictPlatformPrincipalJSON(raw []byte, into any) bool {
 }
 
 // platformPrincipalCall is the shared front of both routes: path and origin, session, document
-// budget, body, per viewer rate, then the access transaction. The answer stays buffered until that
+// budget, body, then the access transaction (which applies the per viewer rate once the caller is
+// known to be allowed). The answer stays buffered until that
 // transaction's final session and trust checks commit, and the audit row is written before it is sent.
 func (s *Server) platformPrincipalCall(w http.ResponseWriter, r *http.Request, user, route string, parse platformPrincipalParse) {
 	installation := r.PathValue("installation")
@@ -61,11 +62,6 @@ func (s *Server) platformPrincipalCall(w http.ResponseWriter, r *http.Request, u
 	binding, answer, ok := parse(raw)
 	if !ok || !binding.valid() {
 		platformPrincipalInvalid(w)
-		return
-	}
-	if !s.platformPrincipalRate.allow(user+"\x00"+installation, platformPrincipalCallsPerMinute, time.Minute, time.Now()) {
-		w.Header().Set("Retry-After", "60")
-		jsonErrorCode(w, 429, "rate_limited", "too many principal directory calls")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), platformDocumentTimeout)
