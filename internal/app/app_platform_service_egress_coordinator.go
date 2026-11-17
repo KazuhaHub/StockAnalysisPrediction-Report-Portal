@@ -506,12 +506,14 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 		return
 	}
 	origin := platformServiceEgressOrigin(admit.URL)
-	// record counts one finished call, and for a call that named a binding it
-	// counts the call against that binding too (the name only, never a value).
+	// record counts one finished call. A call that named a binding is also counted
+	// against that binding, but only once the binding resolved to a reviewed one:
+	// a name the application made up is counted as unresolved, never by name.
+	resolved := ""
 	record := func(class byte, bytesOut int, bytesIn uint32) {
 		c.audit.recordCall(installation, l.state.sessionID, c.now(), class, origin, bytesOut, bytesIn)
 		if admit.Credential != "" {
-			c.audit.recordBinding(installation, l.state.sessionID, c.now(), admit.Credential, class)
+			c.audit.recordBinding(installation, l.state.sessionID, c.now(), resolved, class)
 		}
 	}
 	load, cancel := context.WithTimeout(ctx, platformServiceEgressAdmitLoadTimeout)
@@ -530,6 +532,9 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 		return
 	}
 	binding := a.binding
+	if binding.id != "" {
+		resolved = admit.Credential
+	}
 	command, raw, signature, err := a.signServiceEgressCommand(l.state.sessionID, admit, time.Now().UnixMilli(), l.state.expiresMS)
 	a.Close()
 	// The signed command is the one place the value lives in Portal outside the

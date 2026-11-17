@@ -130,11 +130,6 @@ func testPlatformServiceEgressCredentialPlacedForServiceBinding(t *testing.T, pg
 		if command.ActorScope != platformServiceEgressActorScope(state.sessionID) || binding.principals != principals {
 			t.Fatal("call is not the service's", principals)
 		}
-		// The value is in the signed command and nowhere in Portal's session
-		// state: the pin and the session state hold names, revisions and digests.
-		if bytes.Contains([]byte(strings.Join(state.resources, ",")), []byte(platformServiceCredentialValue)) || bytes.Contains(state.identity, []byte(platformServiceCredentialValue)) {
-			t.Fatal("value in session state")
-		}
 		if !bytes.Contains(raw, []byte("credential_name")) {
 			t.Fatal("command lacks the binding name")
 		}

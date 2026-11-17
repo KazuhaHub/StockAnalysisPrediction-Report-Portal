@@ -63,7 +63,10 @@ func (s *Server) sealPlatformCredentialValue(id string, revision int64, value []
 
 // platformCredentialOpenCount counts every attempt to open a sealed value. It
 // holds no value and no name; tests read it to prove that a refused use never
-// reached the custody.
+// reached the custody. It is process-wide because the custody primitive is, and
+// that is safe: an atomic counter that decides nothing, read by tests as a before
+// and after inside one test that opens no other credential concurrently (none of
+// them runs in parallel).
 var platformCredentialOpenCount atomic.Int64
 
 // Custody primitive only. A future use adapter must prove current installation,

@@ -84,10 +84,14 @@ type platformServiceEgressWindow struct {
 	bytesOut, bytesIn int64
 	origins           map[string]bool
 	deniedSuppressed  int
-	// bindings counts the calls that named a credential binding (doc 176), by
-	// binding name and outcome class. Names are the reviewed binding names, never
-	// values; at most platformSecretBindingLimit of them.
+	// bindings counts the calls that named a credential binding (doc 176) which
+	// resolved to a reviewed one, by binding name and outcome class. Names are
+	// reviewed binding names, never values; at most platformSecretBindingLimit.
 	bindings map[string]map[string]int
+	// unresolved counts, by outcome class, the calls that named a binding that did
+	// not resolve (unknown, revoked, awaiting review, not for the service, or for
+	// another target). The application chose that name, so it is not recorded.
+	unresolved map[string]int
 }
 
 // platformServiceEgressAggregator turns the per-call facts into one summary row
@@ -181,7 +185,9 @@ func (a *platformServiceEgressAggregator) recordCall(installation, session strin
 	}
 }
 
-// recordBinding counts one finished call against the credential binding it used.
+// recordBinding counts one finished call that named a credential binding:
+// against the binding if it resolved (binding is its reviewed name), else as
+// unresolved.
 func (a *platformServiceEgressAggregator) recordBinding(installation, session string, now time.Time, binding string, class byte) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -191,6 +197,13 @@ func (a *platformServiceEgressAggregator) recordBinding(installation, session st
 	}
 	name, ok := platformServiceEgressClassNames[class]
 	if !ok {
+		return
+	}
+	if binding == "" {
+		if w.unresolved == nil {
+			w.unresolved = map[string]int{}
+		}
+		w.unresolved[name]++
 		return
 	}
 	if w.bindings == nil {
@@ -284,6 +297,9 @@ func (a *platformServiceEgressAggregator) due(now time.Time, flush bool) []platf
 			}
 			slices.SortFunc(used, func(x, y bindingCount) int { return strings.Compare(x.Binding, y.Binding) })
 			summary["bindings"] = used
+		}
+		if len(w.unresolved) > 0 {
+			summary["credential_unresolved"] = w.unresolved
 		}
 		detail, err := json.Marshal(summary)
 		if err == nil {

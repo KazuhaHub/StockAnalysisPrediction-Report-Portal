@@ -123,7 +123,7 @@ func testPlatformServiceEgressCoordinatorServesCredentialCalls(t *testing.T, pg 
 		c.audit.mu.Lock()
 		defer c.audit.mu.Unlock()
 		w := c.audit.windows[installation]
-		return w != nil && w.bindings["upstream-api"]["denied"] == 1 && w.bindings["upstream-api"]["uncertain"] == 1
+		return w != nil && w.unresolved["denied"] == 1 && w.bindings["upstream-api"]["uncertain"] == 1
 	})
 	clock.Advance(11 * time.Minute)
 	c.flushSummaries(clock.Now(), false)
@@ -137,9 +137,10 @@ func testPlatformServiceEgressCoordinatorServesCredentialCalls(t *testing.T, pg 
 			Count    int            `json:"count"`
 			Outcomes map[string]int `json:"outcomes"`
 		} `json:"bindings"`
+		Unresolved map[string]int `json:"credential_unresolved"`
 	}
-	if err := json.Unmarshal([]byte(rows[0]), &summary); err != nil || len(summary.Bindings) != 1 || summary.Bindings[0].Binding != "upstream-api" || summary.Bindings[0].Count != 2 ||
-		summary.Bindings[0].Outcomes["denied"] != 1 || summary.Bindings[0].Outcomes["uncertain"] != 1 {
+	if err := json.Unmarshal([]byte(rows[0]), &summary); err != nil || len(summary.Bindings) != 1 || summary.Bindings[0].Binding != "upstream-api" || summary.Bindings[0].Count != 1 ||
+		summary.Bindings[0].Outcomes["uncertain"] != 1 || summary.Unresolved["denied"] != 1 {
 		t.Fatal("per-binding summary", rows[0], err)
 	}
 	// Nothing Portal wrote carries the value, the header or the sealed form.
@@ -175,6 +176,13 @@ func testPlatformServiceEgressCoordinatorRefusesViewerOnlyBinding(t *testing.T, 
 	}
 	// The denial is audited as a denial, with method and origin only.
 	waitEgress(t, func() bool { return len(egressAuditRows(t, s, platformServiceEgressAuditDenied, installation)) == 1 })
+	// A name that did not resolve is counted as unresolved, never recorded by name.
+	waitEgress(t, func() bool {
+		c.audit.mu.Lock()
+		defer c.audit.mu.Unlock()
+		w := c.audit.windows[installation]
+		return w != nil && w.unresolved["denied"] == 1 && len(w.bindings) == 0
+	})
 	if row := egressAuditRows(t, s, platformServiceEgressAuditDenied, installation)[0]; strings.Contains(row, "upstream-api") || strings.Contains(row, platformServiceCredentialValue) {
 		t.Fatal("denied row", row)
 	}
