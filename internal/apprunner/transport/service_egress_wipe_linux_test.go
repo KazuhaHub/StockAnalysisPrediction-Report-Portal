@@ -4,7 +4,11 @@ package transport
 
 import (
 	"bytes"
+	"encoding/base64"
+	"log"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -52,5 +56,60 @@ func TestServiceEgressRunnerWipesTheCommandItHeld(t *testing.T) {
 	raw, _ := f.lastRaw.Load().([]byte)
 	if len(raw) == 0 || !bytes.Equal(raw, make([]byte, len(raw))) {
 		t.Fatal("the command bytes survived the call", len(raw))
+	}
+}
+
+type logCapture struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *logCapture) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.Write(p)
+}
+
+func (l *logCapture) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
+}
+
+// Credential calls through the real egress registry and broker, accepted and
+// refused, leave no value in anything the runner side logs or replies.
+func TestServiceEgressCredentialCallsLeaveNoValueInLogsOrReplies(t *testing.T) {
+	const token = "s3cret-token-value"
+	var logs logCapture
+	previousOutput := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousOutput) })
+	f := newEgrFixture(t)
+	p := f.open(egrOptions{resources: egrCredentialResources})
+	var replies []string
+	p.mu.Lock()
+	p.mutate = egrPlaceCredential("upstream", "Authorization", "Bearer "+token)
+	p.mu.Unlock()
+	replies = append(replies, f.network(t, egrCredentialRequest).body)
+	// A mismatched command, a missing credential and a malformed request.
+	p.mu.Lock()
+	p.mutate = egrPlaceCredential("other", "Authorization", "Bearer "+token)
+	p.mu.Unlock()
+	replies = append(replies, f.network(t, egrCredentialRequest).body)
+	p.mu.Lock()
+	p.mutate = nil
+	p.mu.Unlock()
+	replies = append(replies, f.network(t, egrCredentialRequest).body)
+	replies = append(replies, f.network(t, `{"credential":"upstream"}`).body)
+	f.registry.close()
+	for _, text := range append(replies, logs.String()) {
+		if strings.Contains(text, token) || strings.Contains(text, "Bearer") || strings.Contains(text, base64.StdEncoding.EncodeToString([]byte("Bearer "+token))) {
+			t.Fatalf("credential material in %q", text)
+		}
+	}
+	// The per-call path does not touch the runner journal: it is written only
+	// when a session is bound (the registry's binder), never with a call.
+	if f.binds.Load() > 1 {
+		t.Fatal("a call caused a journal binding", f.binds.Load())
 	}
 }

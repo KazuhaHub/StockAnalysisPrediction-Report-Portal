@@ -1,17 +1,38 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"log"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
 )
+
+// syncLogBuffer captures log output from the coordinator's goroutines.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 // platformServiceCredentialAuditText is every audit row's detail, joined.
 func platformServiceCredentialAuditText(t *testing.T, s *Server) string {
@@ -34,6 +55,11 @@ func platformServiceCredentialAuditText(t *testing.T, s *Server) string {
 
 func testPlatformServiceEgressCoordinatorServesCredentialCalls(t *testing.T, pg bool) {
 	s, admin, installation, _ := platformServiceCredentialFixture(t, pg, platformPrincipalsBoth)
+	// Everything Portal logs while it serves credential calls is captured.
+	var logs syncLogBuffer
+	previousOutput, previousFlags := log.Writer(), log.Flags()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(previousOutput); log.SetFlags(previousFlags) })
 	f := newFakeEgressRunner()
 	c, clock := newEgressTestCoordinator(t, s, f)
 	c.tick(context.Background())
@@ -142,6 +168,12 @@ func testPlatformServiceEgressCoordinatorServesCredentialCalls(t *testing.T, pg 
 	if err := json.Unmarshal([]byte(rows[0]), &summary); err != nil || len(summary.Bindings) != 1 || summary.Bindings[0].Binding != "upstream-api" || summary.Bindings[0].Count != 1 ||
 		summary.Bindings[0].Outcomes["uncertain"] != 1 || summary.Unresolved["denied"] != 1 {
 		t.Fatal("per-binding summary", rows[0], err)
+	}
+	c.shutdown()
+	for _, secret := range []string{platformServiceCredentialValue, base64.StdEncoding.EncodeToString([]byte("Bearer " + platformServiceCredentialValue)), "Bearer "} {
+		if strings.Contains(logs.String(), secret) {
+			t.Fatal("Portal's log carries credential material", secret)
+		}
 	}
 	// Nothing Portal wrote carries the value, the header or the sealed form.
 	audit := platformServiceCredentialAuditText(t, s)
