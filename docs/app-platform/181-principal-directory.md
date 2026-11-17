@@ -1,6 +1,6 @@
 # Proposal: principal directory for app grant pickers
 
-Status: proposal, 2026-11-17. Not owner-approved. No dependency on 174–180.
+Status: accepted 2026-11-17; implementation pending. No dependency on 174–180.
 Index and order: doc [174](174-background-broker-egress.md).
 
 ## 1. Problem and evidence
@@ -145,18 +145,20 @@ the app.
 7. Response contains no username when a display name exists, and no email,
    role, numeric OU ID or creation time.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change
 
 None. Results are computed from `users`, `user_groups`, the installation's
 audience rows and its sealed identity seed; the capability row fits
 `app_platform_capability_grants` with `{}` policy.
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. Who may call it. Recommended: Portal administrators only, matching the
-   legacy endpoint; delegating to an app-defined manager role would let any app
-   grant itself a directory.
-2. Username fallback in labels. Recommended: yes when no display name exists;
+The owner decided every question below on 2026-11-17.
+
+1. Who may call it. Decided: Portal administrators only, matching the legacy
+   endpoint; delegating to an app-defined manager role would let any app grant
+   itself a directory.
+2. Username fallback in labels. Decided: yes when no display name exists;
    administrators already see usernames in Portal.
 3. Scope beyond the audience (all OUs, to pre-grant before widening the
-   audience). Recommended: no; widen the audience first.
+   audience). Decided: no; widen the audience first.

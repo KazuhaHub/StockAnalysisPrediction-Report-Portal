@@ -1,6 +1,6 @@
 # Proposal: anonymous reviewed public projection
 
-Status: proposal, 2026-11-17. Not owner-approved. No dependency on 174–178.
+Status: accepted 2026-11-17; implementation pending. No dependency on 174–178.
 Index and order: doc [174](174-background-broker-egress.md).
 
 ## 1. Problem and evidence
@@ -162,7 +162,7 @@ line is a fresh install).
    and the cache is empty.
 8. Backend returns HTML, a 302, or 2 MiB: 503, nothing released.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change
 
 None. The grant and its policy fit `app_platform_capability_grants`
 (`capability` T96, `policy_json` J16384, `app_platform_schema.go:45`); review
@@ -171,11 +171,13 @@ stays `user`/`ou`. Contract changes needing sign-off: the capability, the
 descriptor `public` block, the policy format, the public request command and
 assertion, and the `/public/apps/` URL space.
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. A friendly URL (`/status` instead of the installation UUID). Recommended:
-   not now; it needs a unique slug column. Operators can map a path at the
-   reverse proxy.
-2. A separate public hostname. Recommended: allow as deployment configuration
+The owner decided every question below on 2026-11-17.
+
+1. A friendly URL (`/status` instead of the installation UUID). Decided: not
+   now; it needs a unique slug column. Operators can map a path at the reverse
+   proxy.
+2. A separate public hostname. Decided: allowed as deployment configuration
    later; the CSP sandbox already removes same-origin authority.
-3. Allow `POST` for public forms. Recommended: no; this capability is read-only.
+3. Allow `POST` for public forms. Decided: no; this capability is read-only.

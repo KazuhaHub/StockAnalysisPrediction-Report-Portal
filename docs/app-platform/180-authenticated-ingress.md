@@ -1,6 +1,6 @@
 # Proposal: authenticated inbound ingress for heartbeats
 
-Status: proposal, 2026-11-17. Not owner-approved. No dependency on 174–178;
+Status: accepted 2026-11-17; implementation pending. No dependency on 174–178;
 shares the anonymous-route machinery of [179](179-public-projection.md).
 Index and order: doc [174](174-background-broker-egress.md).
 
@@ -144,13 +144,16 @@ digest as the observation key, and maps the endpoint name to a monitor.
 7. Body larger than the route bound: 413 before authentication work.
 8. SQLite and PostgreSQL; native run with the Status fixture.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change (approved by the owner on 2026-11-17)
+
+Approved by the owner on 2026-11-17, together with the schema changes in docs
+177, 178 and 180, as one migration, `0022`.
 
 Yes: widen the `operation` CHECK of `app_platform_secret_bindings` with
 `ingress_hmac_sha256` (19 bytes, within `operation` T24). Same mechanism,
 constraint names and caveats as doc [177](177-provider-request-signing.md) §8
-(PostgreSQL `_ck_15`, SQLite `_ck_29`); shipped in one step with any other
-approved value.
+(PostgreSQL `_ck_15`, SQLite `_ck_29`); shipped in migration `0022`, one step with
+`acs3_hmac_sha256` and `pg_password`.
 
 PostgreSQL (shown alone):
 
@@ -182,14 +185,16 @@ by the timestamp window plus the app's durable deduplication on the forwarded
 nonce digest. If the owner wants Portal-side durable replay protection, the
 alternative is one table
 `app_platform_ingress_nonces(installation_id ID, endpoint T64, nonce_sha256 SHA, expires_ms MS, PRIMARY KEY(installation_id, endpoint, nonce_sha256))`
-with a sweep; it costs one write per accepted heartbeat and is not
-recommended.
+with a sweep; it costs one write per accepted heartbeat. The owner
+rejected it on 2026-11-17 (question 2).
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
+
+The owner decided every question below on 2026-11-17.
 
 1. Also accept a plain bearer token for senders that cannot compute an HMAC.
-   Recommended: no; a bearer token is replayable for its whole life, and cron
-   with `openssl` can sign.
-2. Durable nonce table. Recommended: no (above).
-3. Portal-generated secrets shown once. Recommended: not now; it would be the
+   Decided: no; a bearer token is replayable for its whole life, and cron with
+   `openssl` can sign.
+2. Durable nonce table. Decided: no (above).
+3. Portal-generated secrets shown once. Decided: not now; it would be the
    first value-reveal path in custody and needs its own review.

@@ -1,6 +1,6 @@
 # Proposal: provider request signing, Alibaba ACS3 first
 
-Status: proposal, 2026-11-17. Not owner-approved. Depends on
+Status: accepted 2026-11-17; implementation pending. Depends on
 [176](176-background-credential-use.md) (and therefore 174, 175). Index and
 order: doc 174.
 
@@ -149,16 +149,20 @@ backend and sends the `signing` object instead.
 8. Native: a disposable TLS upstream verifies the ACS3 signature with the
    fixture key and returns a fixed balance document.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change (approved by the owner on 2026-11-17)
+
+Approved by the owner on 2026-11-17, together with the schema changes in docs
+177, 178 and 180, as one migration, `0022`.
 
 Yes: widen the `operation` CHECK of `app_platform_secret_bindings` by one value.
 No column, table or row changes; the new list is a strict superset, so every
-stored row still satisfies it. Implement as the next free migration ID after
-`0021`, following the `0021` pattern
+stored row still satisfies it. Implement as migration `0022` (the next free ID after
+`0021`), following the `0021` pattern
 (`internal/app/app_platform_import_grant_schema.go:91-180`): migration `0016`
 keeps creating the frozen three-value list, and the new step widens it for
-fresh and upgraded databases alike. If docs 178 and 180 are approved, their
-values are added in the same step.
+fresh and upgraded databases alike. Docs 178 and 180 are approved too; their
+values (`pg_password`, `ingress_hmac_sha256`) are added in the same step, so
+the `0022` CHECK carries all three new values.
 
 The constraint carrying this check is `app_platform_secret_bindings_ck_15` on
 PostgreSQL and `app_platform_secret_bindings_ck_29` on SQLite (rendered from
@@ -194,12 +198,14 @@ The update must change exactly one row, or find the new text already present
 step declares `restoreRule{olderDumpOK: true}`, as `0021` does
 (`app_platform_import_grant_schema.go:203-205`).
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. Sign in Portal (proposed) or in the runner. Recommended: Portal, so the
-   AccessKey secret never crosses the runner socket; the runner only needs the
-   derived header values.
-2. Accept STS security tokens. Recommended: yes; they are shorter-lived than
+The owner decided every question below on 2026-11-17.
+
+1. Sign in Portal or in the runner. Decided: Portal, so the AccessKey secret
+   never crosses the runner socket; the runner only needs the derived header
+   values.
+2. Accept STS security tokens. Decided: yes; they are shorter-lived than
    AccessKeys and cost nothing extra.
-3. Next schemes (AWS SigV4, Tencent TC3). Recommended: not now; add each as
-   its own operation value and review when an app needs it.
+3. Next schemes (AWS SigV4, Tencent TC3). Decided: not now; add each as its own
+   operation value and review when an app needs it.

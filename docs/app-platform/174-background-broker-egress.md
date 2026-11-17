@@ -1,7 +1,7 @@
 # Proposal: background broker egress
 
-Status: proposal, 2026-11-17. Not owner-approved. No code, schema or contract
-has changed. This is the first of eight proposals (174–181) that close the
+Status: accepted 2026-11-17; implementation pending. No code, schema or
+contract has changed yet. This is the first of eight proposals (174–181) that close the
 platform gaps blocking the Status application on the v2 platform. Nothing here
 authorizes production deployment, a stable SDK freeze or a Status release.
 
@@ -15,15 +15,16 @@ Implement in this order. A proposal may start once every proposal in its
 | 174 | Background broker egress (`network.http` and notifications from a backend) | — | None |
 | [175](175-reviewed-multi-origin-and-private-network.md) | Reviewed multi-origin and private-network targets | 174 | None (policy format revision) |
 | [176](176-background-credential-use.md) | `secrets.use` under the background identity | 174 | None (binding policy format revision) |
-| [177](177-provider-request-signing.md) | Broker-side request signing, Alibaba ACS3 first | 176 | Yes: `app_platform_secret_bindings.operation` CHECK |
-| [178](178-postgresql-liveness-probe.md) | PostgreSQL liveness probe as a restricted stream capability | 174, 175, 176 | Yes: `app_platform_secret_bindings.operation` CHECK |
+| [177](177-provider-request-signing.md) | Broker-side request signing, Alibaba ACS3 first | 176 | Yes: `app_platform_secret_bindings.operation` CHECK (migration `0022`) |
+| [178](178-postgresql-liveness-probe.md) | PostgreSQL liveness probe as a restricted stream capability | 174, 175, 176 | Yes: `app_platform_secret_bindings.operation` CHECK (migration `0022`) |
 | [179](179-public-projection.md) | Anonymous reviewed read-only public projection | — | None |
-| [180](180-authenticated-ingress.md) | Authenticated inbound ingress for heartbeats | — | Yes: `app_platform_secret_bindings.operation` CHECK |
+| [180](180-authenticated-ingress.md) | Authenticated inbound ingress for heartbeats | — | Yes: `app_platform_secret_bindings.operation` CHECK (migration `0022`) |
 | [181](181-principal-directory.md) | Principal directory for app grant pickers | — | None |
 
-177, 178 and 180 widen the same CHECK. If more than one is approved, they ship
-as one forward migration (the next free ID after `0021`) that adds every
-approved value at once. Every proposal also revises contracts (policy formats,
+The owner approved the schema changes in 177, 178 and 180 together on
+2026-11-17. They widen the same CHECK and ship as one forward migration, `0022`
+(the next free ID after `0021`), that adds `acs3_hmac_sha256`, `pg_password`
+and `ingress_hmac_sha256` at once. Every proposal also revises contracts (policy formats,
 descriptor capabilities, broker and runner command formats); those need owner
 sign-off as contracts, but they are not database changes. 179, 180 and 181 do not depend on 174 and
 can proceed in parallel with it; enabling their capabilities *after* install
@@ -284,7 +285,7 @@ opens a session against a runner that lacks it.
 10. Native: the Scheduled Digest fixture gains a broker probe to a disposable
     TLS upstream on SQLite and PostgreSQL.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change
 
 None. Sessions and budgets are in-memory runner state bound to a signed,
 expiring command; authority is re-derived from existing rows on every call.
@@ -293,16 +294,18 @@ Audit uses the existing `audit_log`. The new formats are contract additions
 field `service_egress_format`) and need owner sign-off as contracts, not as
 schema.
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. Where the coordinator runs. Recommended: `cmd/app-task-worker`, which
-   already owns H07 issuance and runner connections; the Portal web process
-   stays free of long-lived controller sessions.
-2. Fixed or reviewed rate budget. Recommended: fixed 120/min, burst 20 for this
-   release; Status at 50 monitors × 30 s needs 100/min. Revisit with the
+The owner decided every question below on 2026-11-17.
+
+1. Where the coordinator runs. Decided: `cmd/app-task-worker`, which already
+   owns H07 issuance and runner connections; the Portal web process stays free
+   of long-lived controller sessions.
+2. Fixed or reviewed rate budget. Decided: fixed 120/min, burst 20 for this
+   release; Status at 50 monitors x 30 s needs 100/min. Revisit with the
    capacity envelope (doc [171](171-capacity-envelope-plan.md)).
-3. Whether to release `retryAfterSeconds` on the foreground route too.
-   Recommended: yes, same parser, same bound.
-4. Whether `tasks/background` should also be reachable through the broker so a
-   backend can schedule its own tasks. Recommended: yes, as a follow-up using
-   the same session frames; not needed by Status.
+3. Whether to release `retryAfterSeconds` on the foreground route too. Decided:
+   yes, same parser, same bound.
+4. Whether `tasks/background` is also reachable through the broker so a backend
+   can schedule its own tasks. Decided: yes, as a follow-up using the same
+   session frames; not needed by Status.

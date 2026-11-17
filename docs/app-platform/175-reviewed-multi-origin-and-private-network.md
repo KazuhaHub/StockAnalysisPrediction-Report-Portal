@@ -1,6 +1,6 @@
 # Proposal: reviewed multi-origin and private-network targets
 
-Status: proposal, 2026-11-17. Not owner-approved. Depends on
+Status: accepted 2026-11-17; implementation pending. Depends on
 [174](174-background-broker-egress.md). Index and order: doc 174.
 
 ## 1. Problem and evidence
@@ -211,7 +211,7 @@ to target scope. The SDK `requestTargets` is new and capability-gated.
 9. SQLite and PostgreSQL, plus a native run against a disposable private
    upstream on a test-only allowlisted prefix.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change
 
 None. The v2 policy fits `app_platform_capability_grants.policy_json`
 (J16384); the review uses `app_platform_review_plans` with the existing
@@ -220,14 +220,16 @@ configuration. Contract changes needing sign-off: `portal.http-policy/2-dev.1`,
 `portal.capability-policy-review/1-dev.1`, the network runtime profile fields,
 the binding policy target digest, and the `network.requestTargets` bridge call.
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. Who may approve in context. Recommended: Portal administrators only; an app
+The owner decided every question below on 2026-11-17.
+
+1. Who may approve in context. Decided: Portal administrators only; an app
    role never suffices.
-2. Wildcard hosts (`*.example.com`). Recommended: no; 128 explicit targets
-   cover Status, and wildcards defeat per-target review.
-3. Allowlist owner. Recommended: the host operator via runner configuration,
-   not the Portal UI, so a Portal administrator alone cannot open the LAN.
-4. Whether a policy change should bump `installations.policy_revision`
-   (reloading open app documents). Recommended: yes, for one authority
-   revision; the binding target scope removes the main cost.
+2. Wildcard hosts (`*.example.com`). Decided: not supported; 128 explicit
+   targets cover Status, and wildcards defeat per-target review.
+3. Allowlist owner. Decided: the host operator via runner configuration, not
+   the Portal UI, so a Portal administrator alone cannot open the LAN.
+4. Whether a policy change bumps `installations.policy_revision` (reloading
+   open app documents). Decided: yes, for one authority revision; the binding
+   target scope removes the main cost.

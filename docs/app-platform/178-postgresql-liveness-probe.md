@@ -1,6 +1,6 @@
 # Proposal: PostgreSQL liveness probe as a restricted stream capability
 
-Status: proposal, 2026-11-17. Not owner-approved. Depends on
+Status: accepted 2026-11-17; implementation pending. Depends on
 [174](174-background-broker-egress.md), [175](175-reviewed-multi-origin-and-private-network.md)
 and [176](176-background-credential-use.md). Index and order: doc 174.
 
@@ -167,12 +167,16 @@ without it. Status replaces `postgresCheck` with the broker call and drops the
    check ends and returns `denied`/`unavailable`.
 8. SQLite and PostgreSQL control stores; native run with the fixture server.
 
-## 10. Schema change (needs owner approval)
+## 10. Schema change (approved by the owner on 2026-11-17)
+
+Approved by the owner on 2026-11-17, together with the schema changes in docs
+177, 178 and 180, as one migration, `0022`.
 
 Yes: widen the `operation` CHECK of `app_platform_secret_bindings` with
 `pg_password`. Same mechanism, constraint names and caveats as doc
 [177](177-provider-request-signing.md) §8 (PostgreSQL `_ck_15`, SQLite
-`_ck_29`); shipped in the same migration step as any other approved value.
+`_ck_29`); shipped in migration `0022`, the same step as `acs3_hmac_sha256` and
+`ingress_hmac_sha256`.
 
 PostgreSQL (shown alone; the combined step lists every approved value):
 
@@ -203,12 +207,14 @@ The grant and its policy need no change: the `network.postgres` row fits
 `app_platform_capability_grants` (`capability` T96, `policy_json` J16384,
 `internal/app/app_platform_schema.go:45`).
 
-## 11. Open questions
+## 11. Owner decisions (2026-11-17)
 
-1. Private CAs. Many internal databases use one. Recommended: allow an optional
-   reviewed CA certificate (PEM ≤ 4 KiB) per target in the policy, pinned by the
-   review; never a "skip verification" switch.
-2. Return the server version. Recommended: no; it is fingerprinting data with no
+The owner decided every question below on 2026-11-17.
+
+1. Private CAs. Decided: allow an optional reviewed CA certificate (PEM
+   <= 4 KiB) per target in the policy, pinned by the review; never a "skip
+   verification" switch.
+2. Return the server version. Decided: no; it is fingerprinting data with no
    liveness value.
-3. Other databases (MySQL, Redis). Recommended: separate capabilities with
-   their own fixed exchanges, only on demand.
+3. Other databases (MySQL, Redis). Decided: separate capabilities with their
+   own fixed exchanges, only on demand.

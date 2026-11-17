@@ -1,6 +1,6 @@
 # Proposal: background credential use
 
-Status: proposal, 2026-11-17. Not owner-approved. Depends on
+Status: accepted 2026-11-17; implementation pending. Depends on
 [174](174-background-broker-egress.md); uses the target digest from
 [175](175-reviewed-multi-origin-and-private-network.md). Index and order: doc 174.
 
@@ -136,7 +136,7 @@ now" button continues to use the viewer path.
 8. SQLite and PostgreSQL, plus the native Scheduled Digest fixture with a
    service-principal binding.
 
-## 8. Schema change (needs owner approval)
+## 8. Schema change
 
 None. Principals and target scope live in the binding's `policy_json`
 (J8192), which is canonical, reviewed and already part of the binding review.
@@ -146,10 +146,12 @@ principal and every use parses the policy anyway. Contract changes needing
 sign-off: binding policy v2, the H07 resource list, the broker `credential`
 field and the binding review plan field.
 
-## 9. Open questions
+## 9. Owner decisions (2026-11-17)
 
-1. May one binding carry both principals? Recommended: yes; Status uses the
-   same key for background probes and the foreground test button.
-2. Should tasks (doc 153) also use credentials through the broker? Recommended:
+The owner decided every question below on 2026-11-17.
+
+1. May one binding carry both principals? Decided: yes; Status uses the same
+   key for background probes and the foreground test button.
+2. Should tasks (doc 153) also use credentials through the broker? Decided:
    yes, through the same egress session, with doc 153's rule narrowed to "no
    credential in task payload or result"; needed by no Status feature now.
