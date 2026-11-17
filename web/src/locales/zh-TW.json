@@ -3562,6 +3562,7 @@
   "appPlatform.capability.secrets.read": "讀取指定憑據明文",
   "appPlatform.capability.background.run": "持續後臺執行",
   "appPlatform.capability.files.export": "匯出檔案",
+  "appPlatform.capability.principals.read": "此應用程式的管理員可以檢視能夠使用此應用程式的使用者與組織單位（OU）的名稱。",
   "appPlatform.events.tab": "事件訂閱",
   "appPlatform.events.explanation": "每個訂閱只對應一種事件和準確資源。任務容量不足時會暫停並等待複核。",
   "appPlatform.events.create": "建立訂閱",
