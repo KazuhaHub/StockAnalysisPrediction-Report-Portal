@@ -107,7 +107,9 @@ func TestServiceBrokerStaleSocketIsRemovedOnlyIfOurs(t *testing.T) {
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("close left the socket behind")
 	}
-	// A socket of another owner is refused, not removed.
+	// A socket in a directory of another owner is refused, not removed (the
+	// directory check; the stale-socket owner check is in
+	// TestStaleSocketRemovable).
 	stale, err = net.Listen("unix", path)
 	if err != nil {
 		t.Fatal(err)
@@ -253,5 +255,24 @@ func TestBindServiceBrokerInDirDoesNotFollowASymlink(t *testing.T) {
 	}
 	if _, err := os.Lstat(filepath.Join(real, ServiceBrokerSocketName)); err == nil {
 		t.Fatal("a socket was created through the link")
+	}
+}
+
+func TestStaleSocketRemovable(t *testing.T) {
+	const owner = 1000
+	for _, tc := range []struct {
+		name string
+		st   unix.Stat_t
+		want bool
+	}{
+		{"socket of the owner, one link", unix.Stat_t{Mode: unix.S_IFSOCK | 0666, Uid: owner, Nlink: 1}, true},
+		{"socket of another owner", unix.Stat_t{Mode: unix.S_IFSOCK | 0666, Uid: owner + 1, Nlink: 1}, false},
+		{"socket with two links", unix.Stat_t{Mode: unix.S_IFSOCK | 0666, Uid: owner, Nlink: 2}, false},
+		{"regular file", unix.Stat_t{Mode: unix.S_IFREG | 0600, Uid: owner, Nlink: 1}, false},
+		{"symlink", unix.Stat_t{Mode: unix.S_IFLNK | 0777, Uid: owner, Nlink: 1}, false},
+	} {
+		if got := staleSocketRemovable(&tc.st, owner); got != tc.want {
+			t.Errorf("%s: %v", tc.name, got)
+		}
 	}
 }

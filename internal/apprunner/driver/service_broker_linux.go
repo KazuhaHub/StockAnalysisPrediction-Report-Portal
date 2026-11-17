@@ -149,6 +149,12 @@ type serviceBrokerListener struct {
 	closeError error
 }
 
+// staleSocketRemovable reports whether what sits at the socket name is a stale
+// socket of ours: a socket, owned by owner, with a single link.
+func staleSocketRemovable(st *unix.Stat_t, owner uint32) bool {
+	return st.Mode&unix.S_IFMT == unix.S_IFSOCK && st.Uid == owner && st.Nlink == 1
+}
+
 // bindServiceBrokerSocket binds ServiceBrokerSocketName inside the directory
 // open at parent. The socket is created relative to the directory descriptor (no
 // path resolution of an untrusted path), then made 0666: the application runs as
@@ -176,7 +182,7 @@ func bindServiceBrokerSocket(parent int, owner uint32) (*serviceBrokerListener, 
 	var st unix.Stat_t
 	switch err := unix.Fstatat(dir, ServiceBrokerSocketName, &st, unix.AT_SYMLINK_NOFOLLOW); {
 	case err == nil:
-		if st.Mode&unix.S_IFMT != unix.S_IFSOCK || st.Uid != owner || st.Nlink != 1 {
+		if !staleSocketRemovable(&st, owner) {
 			return fail(ErrUnsafeSocket)
 		}
 		if err := unix.Unlinkat(dir, ServiceBrokerSocketName, 0); err != nil {
