@@ -215,6 +215,58 @@ def flood(answered=600, busy=7000, errors=0, alive=True, heartbeat_age_ms=1500, 
             "classes": classes if classes is not None else {"200": answered, "429:app_platform_busy": busy}}
 
 
+TASK_WINDOW_CREATED = 66
+
+
+def task_stats(count=66, p95=800, maximum=2500):
+    return {"count": count, "p50_ms": 200, "p95_ms": p95, "max_ms": maximum}
+
+
+def window_tasks(**changes):
+    value = {"created": TASK_WINDOW_CREATED, "created_backend": 36, "created_event": 30, "succeeded": TASK_WINDOW_CREATED, "failed": 0,
+             "uncertain": 0, "review_required": 0, "cancelled": 0, "open": 3, "oldest_open_age_ms": 1500, "latency_ms": task_stats(),
+             "worker_alive": True}
+    value.update(changes)
+    return value
+
+
+def window_events(**changes):
+    value = {"captured": 5, "capture_errors": 0, "delivered": 30, "max_inflight_per_subscription": 3, "subscriptions_active": 6, "subscriptions_fenced": 0}
+    value.update(changes)
+    return value
+
+
+def window_quota(**changes):
+    value = {"max_installation_active": soak.TASK_INSTALLATION_QUOTA, "saturated_active": {"sat-0": soak.TASK_INSTALLATION_QUOTA, "sat-1": soak.TASK_INSTALLATION_QUOTA}}
+    value.update(changes)
+    return value
+
+
+def window_backend_flood(requests=2400, answered=120, **changes):
+    value = {"requests": requests, "answered": answered, "refused": requests - answered, "alive": True, "heartbeat_age_ms": 900,
+             "classes": {"200": answered, "429:task_capacity": requests - answered},
+             "forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}}
+    value.update(changes)
+    return value
+
+
+def window_workload_submit(**changes):
+    value = {"requests": 36, "answered": 36, "classes": {"200": 36}, "latency_ms": {"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": 240}}
+    value.update(changes)
+    return value
+
+
+def platform_work(windows):
+    subscriptions = [{"installation": f"w-{i}", "role": "workload", "state": "active", "reason": ""} for i in range(6)]
+    subscriptions += [{"installation": "sat-1", "role": "saturated", "state": "review_required", "reason": "task_capacity"},
+                      {"installation": "sat-0", "role": "probe", "state": "review_required", "reason": "inflight_limit"}]
+    total = TASK_WINDOW_CREATED * windows
+    return {"workload_tenants": 6, "saturated_tenants": 2, "worker_interval_ms": 1000, "loaded_latency_ms": task_stats(count=total),
+            "tasks_total": {"created": total, "admit_errors": 0, "by_state": {"succeeded": total}},
+            "events_total": {"captured": 5 * windows, "expected_deliveries": 30 * windows, "delivered": 30 * windows, "capture_errors": 0},
+            "drain": {"seconds": 4, "open_after": 0, "timed_out": False}, "subscriptions": subscriptions, "saturated_tasks_run": 0}
+
+
 def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, flood_ok=100):
     def window(m, scale):
         return {
@@ -224,6 +276,8 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
             "batch_start": stats(int(batch * scale), 20),
             "flood": flood(answered=flood_ok),
             "backends": [backend_status(i, window=m) for i in range(8)],
+            "tasks": window_tasks(), "events": window_events(), "quota": window_quota(), "backend_flood": window_backend_flood(),
+            "workload_submit": window_workload_submit(),
         }
     return {
         "format": "portal.capacity-soak.child/1-dev.1",
@@ -241,6 +295,7 @@ def child_evidence(windows=3, home=1000, report=2000, dispatch=300, batch=400, f
         "session_expires_ms": LOAD_START_MS + PERIOD_MS * windows + 3_600_000,
         "db_driver": "postgres", "db_version": "16.4",
         "markers": ["load_finished"],
+        "platform_work": platform_work(windows),
     }
 
 
@@ -682,6 +737,283 @@ class EvaluateTests(unittest.TestCase):
         self.assertTrue(full["passed"], self.failing(full))
         self.assertTrue(full["counts_as_ops08_evidence"])
 
+    # ---- SEC-09: the task worker, the event delivery coordinator and a backend-originated flood, judged beside OPS-08 ----
+
+    def test_the_step_summary_names_every_platform_work_check(self):
+        evidence = child_evidence()
+        text = soak.render_summary(evidence, self.verdict(evidence))
+        for name in soak.PLATFORM_WORK_CHECKS:
+            self.assertIn(name + ": pass", text)
+
+    def test_the_platform_work_checks_are_in_the_verdict_and_so_in_the_evidence_decision(self):
+        verdict = self.verdict(minutes=120, samples=load_samples(120), evidence=child_evidence(120))
+        names = {c["name"] for c in verdict["checks"]}
+        self.assertTrue(set(soak.PLATFORM_WORK_CHECKS) <= names, set(soak.PLATFORM_WORK_CHECKS) - names)
+        self.assertTrue(verdict["counts_as_ops08_evidence"], self.failing(verdict))
+        for name in soak.PLATFORM_WORK_CHECKS:
+            evidence = child_evidence(120)
+            del evidence["platform_work"]
+            for window in evidence["windows"]:
+                for key in ("tasks", "events", "quota", "backend_flood", "workload_submit"):
+                    window.pop(key)
+            broken = self.verdict(minutes=120, samples=load_samples(120), evidence=evidence)
+            self.assertFalse(broken["counts_as_ops08_evidence"])
+            self.assertIn(name, self.failing(broken))
+
+    def test_evidence_without_the_platform_work_block_fails_every_platform_work_check(self):
+        evidence = child_evidence()
+        del evidence["platform_work"]
+        for window in evidence["windows"]:
+            for key in ("tasks", "events", "quota", "backend_flood", "workload_submit"):
+                window.pop(key)
+        self.assertEqual(self.failing(self.verdict(evidence)), set(soak.PLATFORM_WORK_CHECKS))
+
+    # ---- SEC-09 (review): cross-tenant starvation, and evidence that is missing must fail ----
+
+    def test_the_workload_tenants_must_submit_through_the_route_within_bound_in_every_window(self):
+        name = "workload_tenants_submit_through_the_route_in_every_window"
+        self.assertIn(name, soak.PLATFORM_WORK_CHECKS)
+        self.assertTrue(self.verdict(child_evidence())["passed"])
+        failures = {
+            "too few": window_workload_submit(requests=soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW - 1),
+            "busy": window_workload_submit(classes={"200": 30, "429:app_platform_busy": 6}),
+            "quota refusal": window_workload_submit(classes={"200": 30, "429:task_capacity": 6}),
+            "transport error": window_workload_submit(classes={"200": 30, "transport": 6}),
+            "p95 over": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "p95_ms": soak.WORKLOAD_SUBMIT_P95_BOUND_MS + 1, "max_ms": 900}),
+            "max over": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": soak.WORKLOAD_SUBMIT_MAX_BOUND_MS + 1}),
+            "no p95": window_workload_submit(latency_ms={"count": 36, "p50_ms": 25, "max_ms": 240}),
+            "no latency": {"requests": 36, "answered": 36, "classes": {"200": 36}},
+            "no classes": {"requests": 36, "answered": 36, "latency_ms": {"count": 36, "p50_ms": 25, "p95_ms": 90, "max_ms": 240}},
+        }
+        for label, value in failures.items():
+            evidence = child_evidence()
+            evidence["windows"][1]["workload_submit"] = value
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, label)
+        evidence = child_evidence()
+        del evidence["windows"][1]["workload_submit"]
+        self.assertIn(name, self.failing(self.verdict(evidence)))
+        evidence = child_evidence()
+        evidence["windows"][1]["workload_submit"] = window_workload_submit(
+            requests=soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW, latency_ms={"count": 24, "p50_ms": 25, "p95_ms": soak.WORKLOAD_SUBMIT_P95_BOUND_MS, "max_ms": soak.WORKLOAD_SUBMIT_MAX_BOUND_MS},
+            classes={"200": soak.WORKLOAD_SUBMIT_MIN_PER_WINDOW})
+        self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
+
+    def test_the_forged_credential_flood_must_run_and_every_answer_must_be_a_refusal(self):
+        name = "forged_identity_flood_refused_in_every_window"
+        self.assertIn(name, soak.PLATFORM_WORK_CHECKS)
+        self.assertTrue(self.verdict(child_evidence())["passed"])
+        failures = {
+            "too few": {"forged_requests": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1, "forged_classes": {"404:app_platform_task_unavailable": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1}},
+            "accepted": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "200": 40}},
+            "quota answer": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "429:task_capacity": 40}},
+            "server error": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "500:db_error": 40}},
+            "transport": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "transport": 40}},
+            "no classes": {"forged_requests": 640},
+        }
+        for label, changes in failures.items():
+            evidence = child_evidence()
+            flood = evidence["windows"][1]["backend_flood"]
+            flood.pop("forged_classes", None)
+            flood.update(changes)
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, label)
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"].pop("forged_requests")
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"].update(forged_requests=700, forged_classes={"404:app_platform_task_unavailable": 600, "429:app_platform_busy": 100})
+        self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
+
+    def test_a_missing_measurement_fails_instead_of_defaulting_to_zero(self):
+        cases = (
+            ("no_task_lost_or_stuck", lambda e: e["windows"][0]["tasks"].pop("oldest_open_age_ms")),
+            ("task_latency_within_bound", lambda e: e["platform_work"]["loaded_latency_ms"].pop("p95_ms")),
+            ("task_latency_within_bound", lambda e: e["platform_work"]["loaded_latency_ms"].pop("max_ms")),
+            ("event_queue_bounded", lambda e: e["windows"][1]["events"].pop("max_inflight_per_subscription")),
+        )
+        for name, damage in cases:
+            evidence = child_evidence()
+            damage(evidence)
+            self.assertIn(name, self.failing(self.verdict(evidence)), name)
+
+    def test_the_saturated_tenants_must_hold_their_quota_and_none_of_their_tasks_may_run(self):
+        name = "task_quota_enforced_in_every_window"
+        evidence = child_evidence()
+        evidence["platform_work"]["saturated_tasks_run"] = 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        del evidence["platform_work"]["saturated_tasks_run"]
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(saturated_active={"sat-0": soak.TASK_INSTALLATION_QUOTA, "sat-1": soak.TASK_INSTALLATION_QUOTA - 1})
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(saturated_active={"sat-0": soak.TASK_INSTALLATION_QUOTA})
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = {"max_installation_active": soak.TASK_INSTALLATION_QUOTA}
+        self.assertEqual(self.failing(self.verdict(evidence)), {name})
+
+    def test_the_task_worker_must_complete_tasks_in_every_window(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(succeeded=soak.TASK_WORKER_MIN_COMPLETED_PER_WINDOW - 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_worker_ran_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_worker_ran_in_every_window")["detail"]["windows_below_the_minimum"], [2])
+        evidence["windows"][1]["tasks"] = window_tasks(succeeded=soak.TASK_WORKER_MIN_COMPLETED_PER_WINDOW)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][2]["tasks"] = window_tasks(worker_alive=False)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_worker_ran_in_every_window"})
+
+    def test_a_task_that_failed_was_lost_or_never_finished_fails(self):
+        for state in ("failed", "uncertain", "review_required", "cancelled"):
+            evidence = child_evidence()
+            evidence["windows"][0]["tasks"] = window_tasks(**{state: 1})
+            self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"}, state)
+            evidence = child_evidence()
+            evidence["platform_work"]["tasks_total"]["by_state"][state] = 1
+            self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"}, state)
+        evidence = child_evidence()
+        evidence["platform_work"]["tasks_total"]["created"] += 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"})
+        evidence = child_evidence()
+        evidence["platform_work"]["tasks_total"]["admit_errors"] = 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck"})
+        evidence = child_evidence()
+        evidence["platform_work"]["drain"] = {"seconds": 180, "open_after": 2, "timed_out": True}
+        self.assertEqual(self.failing(self.verdict(evidence)), {"no_task_lost_or_stuck", "event_queue_bounded"})
+
+    def test_a_due_task_waiting_longer_than_the_stuck_age_fails_in_the_window_it_was_seen(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(oldest_open_age_ms=soak.TASK_STUCK_MAX_AGE_MS)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][1]["tasks"] = window_tasks(oldest_open_age_ms=soak.TASK_STUCK_MAX_AGE_MS + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"no_task_lost_or_stuck"})
+        self.assertEqual(self.check(verdict, "no_task_lost_or_stuck")["detail"]["windows_with_a_stuck_task"], [2])
+
+    def test_task_latency_is_judged_on_the_pooled_p95_and_the_slowest_task(self):
+        evidence = child_evidence()
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, p95=soak.TASK_LATENCY_P95_BOUND_MS)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, p95=soak.TASK_LATENCY_P95_BOUND_MS + 1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=200, maximum=soak.TASK_LATENCY_MAX_BOUND_MS + 1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+        evidence["platform_work"]["loaded_latency_ms"] = task_stats(count=0)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"task_latency_within_bound"})
+
+    def test_a_slow_window_is_a_diagnostic_and_does_not_decide_the_pooled_latency(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["tasks"] = window_tasks(latency_ms=task_stats(p95=soak.TASK_LATENCY_P95_BOUND_MS * 3))
+        verdict = self.verdict(evidence)
+        self.assertTrue(verdict["passed"])
+        self.assertEqual(self.check(verdict, "task_latency_within_bound")["detail"]["worst_window"]["minute"], 2)
+
+    def test_the_installation_task_quota_is_enforced_in_every_window_with_a_typed_refusal(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["quota"] = window_quota(max_installation_active=soak.TASK_INSTALLATION_QUOTA + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_quota_enforced_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_quota_enforced_in_every_window")["detail"]["windows_over_the_quota"], [2])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(classes={"200": 120, "429:rate_limited": 2280})
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"task_quota_enforced_in_every_window"})
+        self.assertEqual(self.check(verdict, "task_quota_enforced_in_every_window")["detail"]["windows_without_a_typed_refusal"], [3])
+
+    def test_every_event_must_reach_every_subscribed_app_at_least_once(self):
+        evidence = child_evidence()
+        evidence["platform_work"]["events_total"]["delivered"] -= 1
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_delivered_at_least_once"})
+        evidence = child_evidence()
+        evidence["platform_work"]["events_total"].update(captured=0, expected_deliveries=0, delivered=0)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_delivered_at_least_once"})
+        evidence = child_evidence()
+        evidence["windows"][1]["events"] = window_events(delivered=0)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"event_delivered_at_least_once"})
+        self.assertEqual(self.check(verdict, "event_delivered_at_least_once")["detail"]["windows_without_a_delivery"], [2])
+
+    def test_the_event_queue_is_bounded_by_the_subscription_inflight_cap_and_drains(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["events"] = window_events(max_inflight_per_subscription=soak.EVENT_MAX_INFLIGHT)
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence["windows"][1]["events"] = window_events(max_inflight_per_subscription=soak.EVENT_MAX_INFLIGHT + 1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"event_queue_bounded"})
+        self.assertEqual(self.check(verdict, "event_queue_bounded")["detail"]["windows_over_the_bound"], [2])
+        evidence = child_evidence()
+        evidence["platform_work"]["drain"] = {"seconds": 180, "open_after": 4, "timed_out": True}
+        self.assertIn("event_queue_bounded", self.failing(self.verdict(evidence)))
+
+    def test_an_event_queue_that_grows_every_window_fails_even_inside_the_cap(self):
+        evidence = child_evidence(windows=9)
+        for index, window in enumerate(evidence["windows"]):
+            window["events"] = window_events(max_inflight_per_subscription=1 + index)
+        verdict = self.verdict(evidence, minutes=9)
+        self.assertEqual(self.failing(verdict), {"event_queue_bounded"})
+        self.assertTrue(self.check(verdict, "event_queue_bounded")["detail"]["growing"])
+
+    def test_event_refusals_are_typed_workload_subscriptions_stay_active_and_the_saturated_one_is_fenced_for_its_quota(self):
+        for change in ({"capture_errors": 1},):
+            evidence = child_evidence()
+            evidence["platform_work"]["events_total"].update(change)
+            self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"}, change)
+        evidence = child_evidence()
+        evidence["windows"][0]["events"] = window_events(capture_errors=1)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][0].update(state="review_required", reason="inflight_limit")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][6].update(reason="something_else")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+        evidence = child_evidence()
+        evidence["platform_work"]["subscriptions"][6].update(state="active", reason="")
+        self.assertEqual(self.failing(self.verdict(evidence)), {"event_refusals_are_typed"})
+
+    def test_the_backend_task_flood_must_be_answered_or_refused_with_a_typed_error_in_every_window(self):
+        evidence = child_evidence()
+        evidence["windows"][1]["backend_flood"] = window_backend_flood(requests=soak.BACKEND_FLOOD_MIN_PER_WINDOW - 1, answered=1)
+        verdict = self.verdict(evidence)
+        self.assertEqual(self.failing(verdict), {"backend_task_flood_answered_or_typed_in_every_window"})
+        self.assertEqual(self.check(verdict, "backend_task_flood_answered_or_typed_in_every_window")["detail"]["windows_below_the_minimum"], [2])
+        for classes in ({"200": 100, "429:task_capacity": 2000, "500:": 2}, {"200": 100, "429:task_capacity": 2000, "transport": 1},
+                        {"200": 100, "429:task_capacity": 2000, "404:app_platform_task_unavailable": 5}, {"200": 100, "429:task_capacity": 2000, "429:": 3}):
+            evidence = child_evidence()
+            evidence["windows"][2]["backend_flood"] = window_backend_flood(classes=classes)
+            verdict = self.verdict(evidence)
+            self.assertEqual(self.failing(verdict), {"backend_task_flood_answered_or_typed_in_every_window"}, classes)
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(classes={"200": 100, "429:task_capacity": 2000, "429:rate_limited": 50})
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(
+            classes={"200": 100, "429:task_capacity": 40, "429:app_platform_busy": 9000})
+        self.assertTrue(self.verdict(evidence)["passed"])
+        evidence = child_evidence()
+        evidence["windows"][2]["backend_flood"] = window_backend_flood(
+            classes={"200": 100, "429:task_capacity": 40, "429:app_platform_busy": 9000, "503:app_platform_busy": 1})
+        self.assertEqual(self.failing(self.verdict(evidence)), {"backend_task_flood_answered_or_typed_in_every_window"})
+
+    def test_the_backend_task_flood_must_stay_alive(self):
+        for change in ({"alive": False}, {"heartbeat_age_ms": soak.FLOOD_HEARTBEAT_MAX_AGE_MS + 1}):
+            evidence = child_evidence()
+            evidence["windows"][2]["backend_flood"] = window_backend_flood(**change)
+            verdict = self.verdict(evidence)
+            self.assertEqual(self.failing(verdict), {"backend_task_flood_alive_throughout"}, change)
+
+    def test_the_backend_flood_runs_under_the_unchanged_ops08_bounds_which_still_decide_the_other_tenants_latency(self):
+        self.assertEqual(soak.HOME_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.REPORT_P95_BOUND_US, 50_000)
+        self.assertEqual(soak.DISPATCH_P95_BOUND_US, 25_000)
+        self.assertEqual(soak.BATCH_START_P95_BOUND_US, 100_000)
+        evidence = child_evidence(home=soak.HOME_P95_BOUND_US)
+        self.assertEqual(self.failing(self.verdict(evidence)), {"home_p95_within_absolute_bound"})
+        verdict = self.verdict()
+        self.assertEqual(self.check(verdict, "backend_task_flood_alive_throughout")["detail"]["windows_judged_under_the_flood"], 3)
+        self.assertIn("no_runner_crash", self.failing(self.verdict(exit_ok=False)))
+
 
 class VariantTests(unittest.TestCase):
     def test_a_diagnostic_variant_never_counts_as_ops08_evidence_even_when_it_passes_for_two_hours(self):
@@ -698,6 +1030,7 @@ class VariantTests(unittest.TestCase):
         self.assertEqual(soak.soak_variant(""), "")
         self.assertEqual(soak.soak_variant("memory-db,no-batch-probes"), "memory-db,no-batch-probes")
         self.assertEqual(soak.soak_variant("skip-image-store"), "skip-image-store")
+        self.assertEqual(soak.soak_variant("no-backend-flood,no-task-worker"), "no-backend-flood,no-task-worker")
         for bad in ("memory", "no-batch-probes;x", "a b"):
             with self.assertRaises(RuntimeError):
                 soak.soak_variant(bad)
@@ -1266,6 +1599,268 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             soak.require_disposable_environment({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}, euid=0, platform="linux", which=lambda tool, path=None: None)
         soak.require_disposable_environment({"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}, euid=0, platform="linux", which=lambda tool, path=None: "/bin/" + tool)
+
+
+class ReferenceHostTests(unittest.TestCase):
+    """The owner's reference VM (a self-hosted runner) may run the soak only from a manual dispatch that asked for it (doc 171)."""
+
+    def which(self, tool, path=None):
+        return "/bin/" + tool
+
+    def check_env(self, **env):
+        return soak.require_disposable_environment(env, euid=0, platform="linux", which=self.which)
+
+    def reference(self, **changes):
+        env = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm", "GITHUB_EVENT_NAME": "workflow_dispatch"}
+        env.update(changes)
+        return env
+
+    def test_a_self_hosted_runner_is_accepted_only_for_the_reference_vm_from_a_dispatch(self):
+        self.check_env(**self.reference())
+        self.check_env(GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted")
+
+    def test_every_other_self_hosted_combination_is_refused(self):
+        refused = {
+            "no host flag": self.reference(APP_CAPACITY_SOAK_HOST=""),
+            "github flag": self.reference(APP_CAPACITY_SOAK_HOST="github"),
+            "other flag": self.reference(APP_CAPACITY_SOAK_HOST="my-laptop"),
+            "pull request": self.reference(GITHUB_EVENT_NAME="pull_request"),
+            "push": self.reference(GITHUB_EVENT_NAME="push"),
+            "schedule": self.reference(GITHUB_EVENT_NAME="schedule"),
+            "no event": self.reference(GITHUB_EVENT_NAME=""),
+            "not actions": self.reference(GITHUB_ACTIONS=""),
+            "github-hosted with the reference flag": self.reference(RUNNER_ENVIRONMENT="github-hosted"),
+            "unknown runner environment": self.reference(RUNNER_ENVIRONMENT="something-else"),
+            "no runner environment": {"GITHUB_ACTIONS": "true", "APP_CAPACITY_SOAK_HOST": "reference-vm", "GITHUB_EVENT_NAME": "workflow_dispatch"},
+        }
+        for label, env in refused.items():
+            with self.assertRaises(RuntimeError, msg=label):
+                self.check_env(**env)
+
+    def test_the_reference_vm_still_needs_root_linux_and_the_tools(self):
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=1000, platform="linux", which=self.which)
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=0, platform="darwin", which=self.which)
+        with self.assertRaises(RuntimeError):
+            soak.require_disposable_environment(self.reference(), euid=0, platform="linux", which=lambda tool, path=None: None)
+
+    def test_the_host_is_recorded_from_the_environment_and_proc(self):
+        cpuinfo = "processor\t: 0\nmodel name\t: Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz\nprocessor\t: 1\nmodel name\t: Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz\n"
+        meminfo = "MemTotal:       16384000 kB\nMemFree:         1000 kB\n"
+        host = soak.host_identity({"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm", "RUNNER_NAME": "sec09-ref-1"}, cpuinfo, meminfo, 4)
+        self.assertEqual(host, {"kind": "reference-vm", "runner_name": "sec09-ref-1", "cpu_model": "Intel(R) Xeon(R) E-2236 CPU @ 3.40GHz", "nproc": 4, "mem_total_kib": 16384000})
+        hosted = soak.host_identity({"RUNNER_ENVIRONMENT": "github-hosted", "RUNNER_NAME": "GitHub Actions 7"}, "", "", 4)
+        self.assertEqual((hosted["kind"], hosted["cpu_model"], hosted["mem_total_kib"]), ("github-hosted", "unknown", 0))
+        self.assertEqual(soak.host_identity({"RUNNER_ENVIRONMENT": "self-hosted"}, cpuinfo, meminfo, 4)["kind"], "unknown")
+
+    def test_a_passing_reference_vm_dispatch_counts_exactly_like_a_github_hosted_one(self):
+        base = dict(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_SHA="a" * 40)
+        hosted = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="github-hosted", **base))
+        reference = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="self-hosted", APP_CAPACITY_SOAK_HOST="reference-vm", RUNNER_NAME="sec09-ref-1", **base))
+        self.assertTrue(hosted["counts_as_ops08_evidence"], hosted["evidence_blockers"])
+        self.assertTrue(reference["counts_as_ops08_evidence"], reference["evidence_blockers"])
+        # The same checks with the same outcome; only the latency bound itself and the host kind it was judged for differ (owner decision
+        # 2026-11-16: the reference VM is judged at 1.5 times the absolute bounds).
+        def without_bounds(checks):
+            out = []
+            for check in checks:
+                detail = {k: v for k, v in check["detail"].items()
+                          if k not in ("bound_us", "threshold_us", "bound_host_kind", "window_thresholds")} if isinstance(check.get("detail"), dict) else check.get("detail")
+                out.append({**check, "detail": detail})
+            return out
+        self.assertEqual(without_bounds(reference["checks"]), without_bounds(hosted["checks"]))
+        self.assertEqual([c["passed"] for c in reference["checks"]], [c["passed"] for c in hosted["checks"]])
+        self.assertEqual(reference["host_identity"]["kind"], "reference-vm")
+        self.assertEqual(reference["host_identity"]["runner_name"], "sec09-ref-1")
+        self.assertEqual(hosted["host_identity"]["kind"], "github-hosted")
+
+    def test_a_reference_vm_run_that_is_not_a_dispatch_is_never_evidence(self):
+        verdict = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="self-hosted", APP_CAPACITY_SOAK_HOST="reference-vm", GITHUB_EVENT_NAME="pull_request"))
+        self.assertFalse(verdict["counts_as_ops08_evidence"])
+        self.assertTrue(any("workflow_dispatch" in b for b in verdict["evidence_blockers"]))
+
+
+_FAST = {"writes": 200, "bytes_per_write": 4096, "p50_ms": 0.1, "p95_ms": 0.3, "max_ms": 0.9}
+
+
+class ReferenceDiskPrecheckTests(unittest.TestCase):
+    """The reference VM's disk is slower than a GitHub-hosted one by the virtio journal, inherent to its host (doc 171): probe median 1.05 to 1.25 ms.
+    The precheck only decides whether the disk is slower than this host normally is; the latency bounds are not touched."""
+
+    SLOW = dict(_FAST, p50_ms=1.2, p95_ms=1.6)
+
+    def test_the_reference_vm_is_judged_at_1_2_ms_where_a_github_hosted_run_is_inconclusive(self):
+        reference = soak.disk_precheck(1.5, self.SLOW, host_kind="reference-vm")
+        self.assertFalse(reference["tripped"], reference)
+        self.assertFalse(soak.probe_trips(self.SLOW, host_kind="reference-vm"))
+        for kind in ("github-hosted", "unknown", "", None):
+            hosted = soak.disk_precheck(0.06, self.SLOW, host_kind=kind)
+            self.assertTrue(hosted["tripped"], kind)
+            self.assertTrue(soak.probe_trips(self.SLOW, host_kind=kind), kind)
+        self.assertTrue(soak.disk_precheck(0.06, self.SLOW)["tripped"], "the default is the strict threshold")
+        self.assertTrue(soak.probe_trips(self.SLOW))
+
+    def test_the_reference_vm_is_inconclusive_above_2_ms_probe_or_4_ms_wal_sync(self):
+        self.assertFalse(soak.disk_precheck(4.0, dict(_FAST, p50_ms=2.0), host_kind="reference-vm")["tripped"])
+        probe = soak.disk_precheck(0.06, dict(_FAST, p50_ms=2.01), host_kind="reference-vm")
+        self.assertTrue(probe["tripped"])
+        self.assertTrue(soak.probe_trips(dict(_FAST, p50_ms=2.01), host_kind="reference-vm"))
+        wal = soak.disk_precheck(4.01, self.SLOW, host_kind="reference-vm")
+        self.assertTrue(wal["tripped"])
+        self.assertIn("4.0", wal["reasons"][0])
+
+    def test_the_thresholds_the_run_used_and_the_host_kind_are_in_the_precheck(self):
+        reference = soak.disk_precheck(0.06, _FAST, host_kind="reference-vm")
+        self.assertEqual(reference["thresholds"], {"idle_wal_sync_ms": 4.0, "probe_p50_ms": 2.0})
+        self.assertEqual(reference["host_kind"], "reference-vm")
+        hosted = soak.disk_precheck(0.06, _FAST, host_kind="github-hosted")
+        self.assertEqual(hosted["thresholds"], {"idle_wal_sync_ms": 2.0, "probe_p50_ms": 1.0})
+        self.assertEqual(hosted["host_kind"], "github-hosted")
+
+    def test_a_self_hosted_runner_that_is_not_the_reference_vm_never_gets_the_relaxed_thresholds(self):
+        for env in ({"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "github"},
+                    {"RUNNER_ENVIRONMENT": "github-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm"}, {"APP_CAPACITY_SOAK_HOST": "reference-vm"}):
+            kind = soak.host_identity(env, "", "", 4)["kind"]
+            self.assertNotEqual(kind, "reference-vm", env)
+            self.assertTrue(soak.disk_precheck(0.06, self.SLOW, host_kind=kind)["tripped"], env)
+
+    def test_the_verdict_judges_a_reference_vm_run_at_1_2_ms_and_not_a_github_hosted_one(self):
+        evidence = child_evidence(windows=120)
+        probe = dict(self.SLOW, directory="/var/lib/postgresql/16", data_directory="/var/lib/postgresql/16/main")
+        reference = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=probe, event="workflow_dispatch", commit="a" * 40,
+                                  host={"kind": "reference-vm", "runner_name": "r", "cpu_model": "x", "nproc": 4, "mem_total_kib": 1})
+        self.assertEqual(reference["result"], soak.RESULT_PASSED, reference["precheck"])
+        self.assertEqual(reference["precheck"]["host_kind"], "reference-vm")
+        hosted = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=probe, event="workflow_dispatch", commit="a" * 40,
+                               host={"kind": "github-hosted"})
+        self.assertEqual(hosted["result"], soak.RESULT_INCONCLUSIVE_SLOW_DISK)
+        slower = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=dict(probe, p50_ms=2.5), event="workflow_dispatch", commit="a" * 40,
+                               host={"kind": "reference-vm"})
+        self.assertEqual(slower["result"], soak.RESULT_INCONCLUSIVE_SLOW_DISK)
+
+
+class ReferenceLatencyBoundTests(unittest.TestCase):
+    """Owner decision 2026-11-16: the reference VM (4 vCPU KVM guest of an Intel Xeon E-2236, 8 GiB) is judged at 1.5 times the absolute latency
+    bounds, because its idle latency alone is two to three times a GitHub-hosted AWS machine's; every other host keeps the bounds of 2026-11-15.
+    The security and isolation checks, the load and the duration are the same on every host."""
+
+    REFERENCE = {"home": 75_000, "report": 75_000, "dispatch": 37_500, "batch_start": 150_000}
+    ORIGINAL = {"home": 50_000, "report": 50_000, "dispatch": 25_000, "batch_start": 100_000}
+
+    def verdict(self, evidence, kind):
+        return soak.evaluate(evidence, load_samples(3), parent_passed=True, unit_tests={"TestTaskQuotasRefuseAtTheirOwnBoundary": True},
+                             event="workflow_dispatch", host={"kind": kind, "runner_name": "r", "cpu_model": "x", "nproc": 4, "mem_total_kib": 1})
+
+    def failing(self, verdict):
+        return {c["name"] for c in verdict["checks"] if not c["passed"]}
+
+    def test_the_reference_vm_bounds_are_one_and_a_half_times_the_others(self):
+        self.assertEqual(soak.absolute_bounds_us("reference-vm"), self.REFERENCE)
+        for kind in ("github-hosted", "unknown", "", None):
+            self.assertEqual(soak.absolute_bounds_us(kind), self.ORIGINAL, kind)
+        self.assertEqual(soak.ABSOLUTE_P95_BOUND_US, self.ORIGINAL, "the bounds of 2026-11-15 are unchanged")
+
+    def test_each_series_passes_at_the_reference_bound_and_fails_one_microsecond_beyond(self):
+        for series, bound in self.REFERENCE.items():
+            name = f"{series}_p95_within_absolute_bound"
+            evidence = child_evidence()
+            evidence["loaded"][series]["p95_us"] = bound
+            self.assertTrue(self.verdict(evidence, "reference-vm")["passed"], series)
+            evidence["loaded"][series]["p95_us"] = bound + 1
+            self.assertEqual(self.failing(self.verdict(evidence, "reference-vm")), {name}, series)
+
+    def test_a_github_hosted_run_is_still_judged_at_the_original_bounds(self):
+        for series, bound in self.ORIGINAL.items():
+            evidence = child_evidence()
+            evidence["loaded"][series]["p95_us"] = bound + 1
+            self.assertEqual(self.failing(self.verdict(evidence, "github-hosted")), {f"{series}_p95_within_absolute_bound"}, series)
+
+    def test_the_verdict_records_the_bound_and_the_host_kind_it_was_judged_for(self):
+        evidence = child_evidence()
+        evidence["loaded"]["report"]["p95_us"] = 60_000
+        verdict = self.verdict(evidence, "reference-vm")
+        detail = next(c for c in verdict["checks"] if c["name"] == "report_p95_within_absolute_bound")["detail"]
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        self.assertEqual((detail["bound_us"], detail["threshold_us"], detail["bound_host_kind"]), (75_000, 75_000, "reference-vm"))
+        hosted = next(c for c in self.verdict(evidence, "github-hosted")["checks"] if c["name"] == "report_p95_within_absolute_bound")["detail"]
+        self.assertEqual((hosted["bound_us"], hosted["bound_host_kind"]), (50_000, "github-hosted"))
+
+    def test_the_step_summary_states_the_bounds_the_run_was_judged_at(self):
+        evidence = child_evidence()
+        reference = soak.render_summary(evidence, self.verdict(evidence, "reference-vm"))
+        self.assertIn("at most 75 ms for home and report, 37.5 ms for dispatch@200 and 150 ms for batch start", reference)
+        self.assertIn("2026-11-16", reference)
+        hosted = soak.render_summary(evidence, self.verdict(evidence, "github-hosted"))
+        self.assertIn("at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start", hosted)
+
+    def test_a_run_that_ends_before_the_load_states_the_bounds_of_its_own_host(self):
+        slow = dict(_FAST, p50_ms=4.4)
+        for kind, text in (("reference-vm", "at most 75 ms for home and report"), ("github-hosted", "at most 50 ms for home and report")):
+            verdict = {"result": soak.RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "checks": [],
+                       "precheck": soak.disk_precheck(None, slow, host_kind=kind)}
+            self.assertIn(text, soak.render_summary({"duration_minutes": 5}, verdict), kind)
+
+    def test_a_self_hosted_runner_that_is_not_the_reference_vm_never_gets_the_reference_bounds(self):
+        for env in ({"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "github"},
+                    {"RUNNER_ENVIRONMENT": "github-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm"}, {"APP_CAPACITY_SOAK_HOST": "reference-vm"}):
+            kind = soak.host_identity(env, "", "", 4)["kind"]
+            self.assertEqual(soak.absolute_bounds_us(kind), self.ORIGINAL, env)
+
+
+class WorkflowHostGuardTests(unittest.TestCase):
+    """No workflow may reach a self-hosted runner from anything but a manual dispatch that asked for the reference VM."""
+
+    SANCTIONED = ("${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm') && fromJSON('[\"self-hosted\",\"sec09-reference-vm\"]') || 'ubuntu-24.04' }}")
+
+    def runs_on(self):
+        found = []
+        for path in sorted((WORKFLOW.parent).glob("*.yml")):
+            for number, line in enumerate(path.read_text().splitlines(), 1):
+                match = re.fullmatch(r"\s+runs-on:\s*(.*?)\s*", line)
+                if match:
+                    found.append((path.name, number, match.group(1)))
+        return found
+
+    def test_every_runner_is_a_github_hosted_label_or_the_one_sanctioned_expression(self):
+        found = self.runs_on()
+        self.assertGreater(len(found), 20)
+        for name, number, value in found:
+            if value == self.SANCTIONED:
+                self.assertEqual(name, "app-project-quota-probe.yml", "the self-hosted expression belongs to the capacity soak only")
+                continue
+            self.assertRegex(value, r"ubuntu-(latest|24\.04|24\.04-arm)", f"{name}:{number} runs on {value!r}")
+            self.assertNotIn("self-hosted", value)
+            self.assertNotIn("${{", value, f"{name}:{number} resolves its runner at run time")
+
+    def test_the_sanctioned_expression_is_on_the_capacity_soak_job_and_nowhere_else(self):
+        text = WORKFLOW.read_text()
+        job = text[text.index("\n  capacity-soak:"):]
+        self.assertIn("runs-on: " + self.SANCTIONED, job.split("\n    steps:")[0])
+        live = [line for line in text.splitlines() if "self-hosted" in line and not line.lstrip().startswith("#")]
+        self.assertEqual(live, ["    runs-on: " + self.SANCTIONED], "self-hosted appears outside the capacity soak job's runs-on")
+
+    def test_the_expression_only_selects_self_hosted_for_a_dispatch_that_asked_for_the_reference_vm(self):
+        def resolve(event, soak_host):
+            # the expression, evaluated: (event == dispatch && soak_host == reference-vm) ? self-hosted : ubuntu-24.04
+            return "self-hosted" if (event == "workflow_dispatch" and soak_host == "reference-vm") else "ubuntu-24.04"
+        for event in ("pull_request", "push", "schedule", "workflow_run", "release", ""):
+            for host in ("", "github", "reference-vm"):
+                self.assertEqual(resolve(event, host), "ubuntu-24.04")
+        self.assertEqual(resolve("workflow_dispatch", "github"), "ubuntu-24.04")
+        self.assertEqual(resolve("workflow_dispatch", "reference-vm"), "self-hosted")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm'", self.SANCTIONED)
+
+    def test_the_host_input_defaults_to_github_and_the_flag_follows_the_same_condition(self):
+        text = WORKFLOW.read_text()
+        self.assertIn("soak_host", workflow_dispatch_inputs())
+        block = text[text.index("      soak_host:"):]
+        block = block[:block.index("\n      ", 20) if False else 600]
+        self.assertIn("options: [github, reference-vm]", block)
+        self.assertIn("default: github", block)
+        flag = job_env_line("APP_CAPACITY_SOAK_HOST")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm' && 'reference-vm' || ''", flag)
+        self.assertIn("APP_CAPACITY_SOAK_HOST", text[text.index("sudo --preserve-env="):text.index("python3 scripts/acceptance/capacity_soak.py")])
 
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/app-project-quota-probe.yml"

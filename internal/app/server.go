@@ -48,6 +48,16 @@ type Server struct {
 	platformBackendRequests platformDocumentBudget
 	platformNetworkRequests platformDocumentBudget
 	platformNetworkStreams  platformDocumentBudget
+	// platformServiceTasks holds the slots of the session-free task route, one budget per verified installation
+	// (app_platform_http.go).
+	platformServiceTasks platformInstallationBudgets
+	// platformServiceMaterial and platformUnverified keep a forged credential away from the database
+	// (app_platform_service_material.go).
+	platformServiceMaterial platformServiceMaterialCache
+	platformUnverified      platformDocumentBudget
+	// platformTaskRefusals remembers credentials just refused for their installation's task quota
+	// (app_platform_task_refusal.go).
+	platformTaskRefusals    platformTaskRefusalCache
 	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
 	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
 	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
@@ -107,6 +117,7 @@ type Server struct {
 	geoUp                 *geoUpdater                                                                // downloads the IP database; the reader notices the new file by itself
 	geo                   *geoService                                                                // IP → place for the audit log; nil-safe, empty until a .mmdb is installed
 	proxySeen             atomic.Value                                                               // bool: a forwarded request arrived from a peer not in trusted_proxies
+	sessionStamps         sessionStampCache                                                          // the last activity stamp seen for each session (read_path.go)
 	seenAt                sync.Map                                                                   // username -> time.Time of the last activity stamp WRITTEN (throttle; see touchSeen)
 	jobRuns               sync.Map                                                                   // jobID -> *jobRun; shared cancel scope for a job's in-flight runs (ADR 0011)
 	itemCancels           sync.Map                                                                   // itemID -> context.CancelFunc; per-row cancel of an in-flight run (ADR 0011)
@@ -333,11 +344,12 @@ func RunServer(cfgPath string) {
 	// above, the engine that runs managed installs, updates, repairs, enables, delete-data, uninstalls, restores,
 	// recovery imports and resumes, their settlements and image reclaim (docs/app-platform/114).
 	stopAppInstalls := s.startPlatformFrontendInstallService()
-	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
-	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
-	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
-	go s.recurringLoop() // fire recurring tasks into the run queue on their cadence (ADR 0018)
-	go s.authSweepLoop() // drop expired pending logins + SAML replay entries (ADR 0023)
+	s.resumeBatchJobs()                // requeue items left in-flight by a restart and relaunch running jobs
+	go s.platformServiceMaterialLoop() // keep the task route's verification material warm for every ready installation
+	go s.scheduleLoop()                // release one-shot 定时 jobs when their run_at passes (ADR 0007)
+	go s.cleanupLoop()                 // run the admin-configured storage-retention pass on its cadence (ADR 0017)
+	go s.recurringLoop()               // fire recurring tasks into the run queue on their cadence (ADR 0018)
+	go s.authSweepLoop()               // drop expired pending logins + SAML replay entries (ADR 0023)
 	// The forecast evaluator (ADR 0029 §6). The loop checks its own switch every tick, so this starts
 	// a goroutine that does nothing at all until an admin turns it on — which is the same shape
 	// geo_update.go uses, and the reason the switch can be a setting rather than a build flag.
@@ -831,9 +843,16 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 		// statement that matched nothing and still queued for the writer connection. The read says
 		// whether it is due; the UPDATE keeps its own condition, so two requests racing past the read
 		// still stamp once.
-		var seen int64
-		if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil && seen < stale {
-			s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
+		// The answer is remembered in memory (sessionStamps), so the requests between two stamps do not read it.
+		if !s.sessionStamps.fresh(id, stale) {
+			var seen int64
+			if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil {
+				if seen < stale {
+					s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
+					seen = now
+				}
+				s.sessionStamps.set(id, seen)
+			}
 		}
 	}
 	return user
@@ -1301,7 +1320,7 @@ func (s *Server) loadRep(r *http.Request, user string, id int64) *Rep {
 
 // recordReportReadAs is recordReportRead for a caller that already knows the reader's OU.
 func (s *Server) recordReportReadAs(r *http.Request, user string, ou int64, rep *Rep) {
-	s.st.WriteAudit(AuditEntry{
+	s.st.WriteReportReadAudit(AuditEntry{
 		Actor: user, ActorOU: ou, Action: AuditReportRead,
 		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
 		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),

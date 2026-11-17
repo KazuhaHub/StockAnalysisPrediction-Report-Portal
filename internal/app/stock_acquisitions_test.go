@@ -111,7 +111,7 @@ func (s *Server) apiStockReference(w http.ResponseWriter, r *http.Request, user 
 		selID = defID
 	}
 	rep := s.loadRep(r, user, selID)
-	predictedDates := s.forecastTimelineDates(user, symbol, all)
+	predictedDates := s.forecastTimelineDates(r.Context(), user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {
 		node := map[string]any{"date": d, "n": len(byDate[d])}

@@ -1,6 +1,9 @@
 package app
 
-import "net/http"
+import (
+	"context"
+	"net/http"
+)
 
 type forecastReadingSummary struct {
 	*ForecastReadingSetSummary
@@ -34,11 +37,11 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 	if report == nil || !predictionCovered(report.RType) || r.Header.Get("X-Prefetch") == "1" {
 		return nil
 	}
-	d := s.forecastAccess(user)
+	d := s.forecastAccessFor(r.Context(), user)
 	if s.forecastReaderStage(d) != "full" {
 		return nil
 	}
-	view := forecastPredictionViewFor(d, s.viewerScope(user))
+	view := forecastPredictionViewFor(d, s.viewerScopeFor(r.Context(), user))
 	bodyHash := sha256Hex([]byte(report.MD + "\x00" + report.HTML))
 	identities, err := s.st.reportPredictionIdentitiesWithBodyHash(report.ID, view.scope, bodyHash)
 	if err != nil {
@@ -131,8 +134,8 @@ func (s *Server) forecastReadingSummary(r *http.Request, user string, report *Re
 
 // forecastTimelineDates intersects ledger presence with the caller's already-scoped reports.
 // A ledger failure is optional reading metadata, never a reason to hide the report itself.
-func (s *Server) forecastTimelineDates(user, symbol string, readable []Rep) map[string]bool {
-	if s.forecastReaderStage(s.forecastAccess(user)) != "full" {
+func (s *Server) forecastTimelineDates(ctx context.Context, user, symbol string, readable []Rep) map[string]bool {
+	if s.forecastReaderStage(s.forecastAccessFor(ctx, user)) != "full" {
 		return nil
 	}
 	rows, err := s.st.readQuery(`SELECT DISTINCT report_id, rtype FROM prediction_sets

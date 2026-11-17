@@ -526,7 +526,7 @@ func TestNamedReadPathsDoNotWaitForTheWriter(t *testing.T) {
 		}
 		_ = st.typeConfigsFrom(snap)
 		_ = st.versionsFrom(snap)
-		_ = s.forecastTimelineDates("alice", "600519", reps)
+		_ = s.forecastTimelineDates(context.Background(), "alice", "600519", reps)
 	})
 	within("report body", func() {
 		rep, err := st.GetNew(id, nil)

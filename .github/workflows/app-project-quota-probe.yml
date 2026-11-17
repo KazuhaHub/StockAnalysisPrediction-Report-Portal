@@ -18,6 +18,11 @@ on:
         description: Run only the capacity soak, not the quota and image delivery jobs
         type: boolean
         default: false
+      soak_host:
+        description: Where the capacity soak runs. github is the GitHub-hosted pool; reference-vm is the owner's fixed reference VM, an ephemeral runner labelled sec09-reference-vm (doc 171). Same checks either way; the reference VM is judged at 1.5 times the latency bounds (owner decision 2026-11-16, doc 167); only a manual dispatch can choose it
+        type: choice
+        options: [github, reference-vm]
+        default: github
       soak_db:
         description: Database of the measured Portal. postgres is the evidence shape (owner decision 2026-11-14); sqlite-file is the known-limit measurement and never counts as OPS-08 evidence
         type: choice
@@ -44,7 +49,7 @@ on:
         type: boolean
         default: false
       soak_variant:
-        description: Diagnostic variant of the soak, never evidence (empty, or memory-db and no-batch-probes separated by a comma)
+        description: Diagnostic variant of the soak, never evidence (empty, or memory-db, no-batch-probes, skip-image-store, no-backend-flood and no-task-worker separated by a comma)
         type: string
         default: ''
       expected_commit:
@@ -555,7 +560,7 @@ jobs:
   # GitHub-hosted ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
   capacity-soak:
     if: github.event_name != 'push'
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm') && fromJSON('["self-hosted","sec09-reference-vm"]') || 'ubuntu-24.04' }}
     timeout-minutes: 170
     env:
       APP_CAPACITY_SOAK_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_db || 'postgres' }}
@@ -570,6 +575,7 @@ jobs:
       APP_CAPACITY_SOAK_PIN_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_pin_platform && 'true' || '' }}
       APP_CAPACITY_SOAK_VARIANT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_variant || '' }}
       APP_CAPACITY_SOAK_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit || '' }}
+      APP_CAPACITY_SOAK_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm' && 'reference-vm' || '' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -629,7 +635,7 @@ jobs:
         timeout-minutes: 160
         run: |
           set -euo pipefail
-          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY,APP_CAPACITY_SOAK_EXPECTED_COMMIT \
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,RUNNER_NAME,APP_CAPACITY_SOAK_HOST,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY,APP_CAPACITY_SOAK_EXPECTED_COMMIT \
             python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
             --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
             --journal-binary "$RUNNER_TEMP/app-journal-native.test" \

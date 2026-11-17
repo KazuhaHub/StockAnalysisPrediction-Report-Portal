@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Declared-capacity soak on a disposable GitHub-hosted worker (doc 171, PR 4b; OPS-08; SEC-09 stays partial after it passes).
+"""Declared-capacity soak on a disposable GitHub-hosted worker (doc 171, PR 4b; OPS-08 and SEC-09).
 
 It builds a newly owned 16 GiB XFS project-quota loop volume, prepares the runner's journal on it, and runs the
 Go acceptance TestPlatformCapacitySoak (a real root runner, a Portal child, fifty installations, the excess probes
@@ -39,6 +39,53 @@ HOST_MIN_AVAILABLE_FRACTION = 0.10
 FLOOD_MIN_ANSWERED_PER_WINDOW = 20
 FLOOD_HEARTBEAT_MAX_AGE_MS = 10_000
 TYPED_FLOOD_CLASSES = ("200", "429:app_platform_busy")
+
+# SEC-09 (doc 171): the load also runs the platform task worker, the event delivery coordinator and a backend-originated task flood. These bounds
+# are engineering decisions of this harness (the owner's OPS-08 bounds above are unchanged and still judge the Portal's own latency).
+# Workload tenants get tasks and events at a steady pace the worker can keep up with; the worker must complete at least this many in every window.
+TASK_WORKER_MIN_COMPLETED_PER_WINDOW = 20
+# Task latency is the time from admission to the completed state. The worker takes one task at a time and a lease lasts 90 seconds, so a task
+# older than 60 seconds while due is stuck, and the slowest task of the whole run may not take longer either.
+TASK_LATENCY_P95_BOUND_MS = 10_000
+TASK_LATENCY_MAX_BOUND_MS = 60_000
+TASK_STUCK_MAX_AGE_MS = 60_000
+TASK_INSTALLATION_QUOTA = 256
+EVENT_MAX_INFLIGHT = 16
+EVENT_FENCE_REASONS = ("inflight_limit", "task_capacity", "authority_lost", "task_authority_lost")
+# The backend-originated flood is driven at the Portal's session-free task route with a backend's service identity; every window must carry a
+# live flood and every answer must be a success or a typed refusal. app_platform_busy is the route's own admission budget answering before
+# any database work; task_capacity is the quota refusal of a submission that was admitted.
+BACKEND_FLOOD_MIN_PER_WINDOW = 100
+TYPED_BACKEND_FLOOD_CLASSES = ("200", "429:task_capacity", "429:rate_limited", "429:app_platform_busy")
+# Cross-tenant starvation (SEC-09, review of PR 458): the workload tenants submit their tasks through the same session-free route the flood hits, with
+# their own service identities, from the measured process, every ten seconds each. While the flood runs, every one of those submissions must be
+# answered 200 (never app_platform_busy, task_capacity or a transport error) and the window's p95 must stay within the bound. The bound is an
+# engineering decision of this harness: a submission is a synchronous call a backend waits on, the client times out at 25 seconds, and an idle
+# submission costs about 5 ms on PostgreSQL (verification plus the admission transaction), so 500 ms for the p95 is two orders above idle and
+# still far below the timeout, and 5 seconds for the slowest one allows a one-off stall without allowing starvation. Six tenants at one
+# submission each every ten seconds make 36 a window; fewer than 24 means the submitter did not keep its pace.
+WORKLOAD_SUBMIT_MIN_PER_WINDOW = 24
+WORKLOAD_SUBMIT_P95_BOUND_MS = 500
+WORKLOAD_SUBMIT_MAX_BOUND_MS = 5_000
+# The backend flood has an anonymous half (SEC-09, review round 2): credentials that name a real installation with a wrong MAC, sent while the backends
+# flood and submit. Every one must be refused: 404 (refused from the Portal's in-memory verification material, with no database work) or 429
+# app_platform_busy (the Portal-wide limit on verification without material is full). Anything else, above all a 200 or a 5xx, fails. One connection
+# per installation, pausing 50 ms after each answer, makes about 160 a second; fewer than 100 a window means the half did not run.
+FORGED_FLOOD_MIN_PER_WINDOW = 100
+FORGED_FLOOD_CLASSES = ("404:app_platform_task_unavailable", "429:app_platform_busy")
+PLATFORM_WORK_CHECKS = (
+    "task_worker_ran_in_every_window",
+    "no_task_lost_or_stuck",
+    "task_latency_within_bound",
+    "task_quota_enforced_in_every_window",
+    "event_delivered_at_least_once",
+    "event_queue_bounded",
+    "event_refusals_are_typed",
+    "backend_task_flood_answered_or_typed_in_every_window",
+    "backend_task_flood_alive_throughout",
+    "workload_tenants_submit_through_the_route_in_every_window",
+    "forged_identity_flood_refused_in_every_window",
+)
 # What each backend must show in every one-minute window, from its own cgroup counters.
 MEMORY_HELD_PERCENT = 85
 MEMORY_HELD_FRACTION = MEMORY_HELD_PERCENT / 100.0
@@ -62,6 +109,15 @@ JOURNAL_FILE_PATTERN = re.compile(r".*(\.db|\.sqlite3?|-wal|-shm)")
 # 43678283415 attempt 1 read 1.3 ms of idle WAL sync, under the 2 ms bound, so the probe's median has its own, lower bound.
 DISK_PRECHECK_WAL_SYNC_MS = 2.0
 DISK_PRECHECK_PROBE_P50_MS = 1.0
+# The owner's reference VM (doc 171) is a KVM guest whose virtio disk adds the guest journal's flushes to every fdatasync: measured in the guest, a 4 KiB
+# write plus fdatasync takes a median of 1.05 to 1.25 ms (p95 1.3 to 1.6 ms), very stable, against 0.445 ms on the host's own ext4 (NVMe RAID1);
+# a raw preallocated disk, io=native, a dedicated iothread, guest haltpoll and zero-filling did not change it. The precheck only decides whether the
+# disk is slower than the host normally is, so that a slow-disk failure is not blamed on the Portal. A slower disk only makes the latency bounds
+# harder to meet, so a higher precheck on a fixed, known host cannot create a false pass; these thresholds are the measured baseline with margin
+# (the median about 1.6 times, the idle WAL sync 2 times the GitHub-hosted bound). The OPS-08 and SEC-09 latency bounds are not touched, and only a
+# host recognised as the reference VM (a self-hosted runner with the reference flag, see host_identity) can get them.
+REFERENCE_PRECHECK_PROBE_P50_MS = 2.0
+REFERENCE_PRECHECK_WAL_SYNC_MS = 4.0
 FSYNC_PROBE_WRITES = 200
 FSYNC_PROBE_BYTES = 4096
 RESULT_PASSED, RESULT_FAILED, RESULT_INCONCLUSIVE_SLOW_DISK = "passed", "failed", "inconclusive_slow_disk"
@@ -69,7 +125,7 @@ EXIT_INCONCLUSIVE = 3
 # Every input of the workflow is either neutral (it cannot change what is measured) or diagnostic (it does, so the run is never evidence).
 # A diagnostic input maps to the environment variable the job passes it as and the values that mean "not set"; a test reads the workflow's
 # inputs and fails for one that is in neither list.
-EVIDENCE_NEUTRAL_INPUTS = ("skip_browser", "event_only", "duration_minutes", "soak_only", "expected_commit")
+EVIDENCE_NEUTRAL_INPUTS = ("skip_browser", "event_only", "duration_minutes", "soak_only", "expected_commit", "soak_host")
 DIAGNOSTIC_INPUTS = {
     "soak_db": ("APP_CAPACITY_SOAK_DB", ("", "postgres")),
     "soak_cpu_percent": ("APP_CAPACITY_SOAK_CPU_PERCENT", ("", "50")),
@@ -709,9 +765,17 @@ def idle_wal_sync_ms(evidence, samples):
     return round(weighted / total, 3) if total else None
 
 
-def probe_trips(probe):
+def precheck_thresholds(host_kind):
+    """The (idle WAL sync, probe median) bounds of the disk precheck in milliseconds: the reference VM's own, or the GitHub-hosted ones for every
+    other kind of host, an unknown one included."""
+    if host_kind == REFERENCE_HOST:
+        return REFERENCE_PRECHECK_WAL_SYNC_MS, REFERENCE_PRECHECK_PROBE_P50_MS
+    return DISK_PRECHECK_WAL_SYNC_MS, DISK_PRECHECK_PROBE_P50_MS
+
+
+def probe_trips(probe, host_kind=""):
     """Whether the fsync probe alone is slow enough to end the run before the load: it is measured before anything else runs."""
-    return bool(probe) and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS
+    return bool(probe) and probe.get("p50_ms", 0) > precheck_thresholds(host_kind)[1]
 
 
 def database_kind(database):
@@ -728,7 +792,7 @@ def probe_directory(database, postgres_data_dir, fixture=None):
     return str(Path(postgres_data_dir).parent) if postgres_data_dir else None
 
 
-def disk_precheck(idle_wal_ms, probe, database="postgres"):
+def disk_precheck(idle_wal_ms, probe, database="postgres", host_kind=""):
     """Whether the disk was too slow before the load began to say anything about the Portal. Only readings taken before the load are given
     to it, and a signal that was not measured cannot trip it.
 
@@ -737,13 +801,14 @@ def disk_precheck(idle_wal_ms, probe, database="postgres"):
     diagnostic (signals.idle_wal_sync_ms, idle_wal_sync_judged false) and never trips the run."""
     kind = database_kind(database)
     judged = kind == "postgres"
+    wal_bound, probe_bound = precheck_thresholds(host_kind)
     reasons = []
-    if judged and idle_wal_ms is not None and idle_wal_ms > DISK_PRECHECK_WAL_SYNC_MS:
-        reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {DISK_PRECHECK_WAL_SYNC_MS} ms")
-    if probe and probe.get("p50_ms", 0) > DISK_PRECHECK_PROBE_P50_MS:
-        reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {DISK_PRECHECK_PROBE_P50_MS} ms")
-    return {"tripped": bool(reasons), "reasons": reasons, "database": kind,
-            "thresholds": {"idle_wal_sync_ms": DISK_PRECHECK_WAL_SYNC_MS, "probe_p50_ms": DISK_PRECHECK_PROBE_P50_MS},
+    if judged and idle_wal_ms is not None and idle_wal_ms > wal_bound:
+        reasons.append(f"idle WAL sync averaged {idle_wal_ms} ms, above {wal_bound} ms")
+    if probe and probe.get("p50_ms", 0) > probe_bound:
+        reasons.append(f"the fsync probe's median was {probe['p50_ms']} ms, above {probe_bound} ms")
+    return {"tripped": bool(reasons), "reasons": reasons, "database": kind, "host_kind": host_kind or "unknown",
+            "thresholds": {"idle_wal_sync_ms": wal_bound, "probe_p50_ms": probe_bound},
             "signals": {"idle_wal_sync_ms": idle_wal_ms, "idle_wal_sync_judged": judged, "probe": probe}}
 
 
@@ -795,16 +860,28 @@ BATCH_START_P95_BOUND_US = 100_000
 DISPATCH_P95_BOUND_US = 25_000
 ABSOLUTE_P95_BOUND_US = {"home": HOME_P95_BOUND_US, "report": REPORT_P95_BOUND_US, "dispatch": DISPATCH_P95_BOUND_US, "batch_start": BATCH_START_P95_BOUND_US}
 LATENCY_SERIES = ("home", "report", "dispatch", "batch_start")
+# Owner decision 2026-11-16: the reference VM (a 4 vCPU KVM guest of an Intel Xeon E-2236 on the owner's shared server, 8 GiB) is judged at 1.5 times
+# the absolute bounds above. Its idle latency alone is two to three times a GitHub-hosted AWS machine's (home idle p95 5 to 11 ms against about
+# 2 ms), so the same absolute number measured the host's speed more than the Portal's behaviour under the load. Every other host, an unknown one
+# included, keeps the bounds of 2026-11-15; the security and isolation checks, the load and the duration are the same on every host.
+REFERENCE_P95_BOUND_NUMERATOR, REFERENCE_P95_BOUND_DENOMINATOR = 3, 2
+
+
+def absolute_bounds_us(host_kind):
+    """The pooled p95 bound of each latency series for a host kind: 1.5 times ABSOLUTE_P95_BOUND_US on the reference VM, unchanged elsewhere."""
+    if host_kind == REFERENCE_HOST:
+        return {series: bound * REFERENCE_P95_BOUND_NUMERATOR // REFERENCE_P95_BOUND_DENOMINATOR for series, bound in ABSOLUTE_P95_BOUND_US.items()}
+    return dict(ABSOLUTE_P95_BOUND_US)
 
 
 def latency_threshold_us(idle_p95_us):
     return max(idle_p95_us * RATIO_LIMIT_NUMERATOR // RATIO_LIMIT_DENOMINATOR, idle_p95_us + LATENCY_FLOOR_US)
 
 
-def _latency_check(name, series, evidence):
+def _latency_check(name, series, evidence, host_kind=""):
     baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 0)
     relative = latency_threshold_us(baseline)
-    bound = ABSOLUTE_P95_BOUND_US.get(series, relative)
+    bound = absolute_bounds_us(host_kind).get(series, relative)
     pooled = evidence.get("loaded", {}).get(series, {})
     pooled_p95, pooled_count = pooled.get("p95_us", 0), pooled.get("count", 0)
     rows, over, empty, worst = [], [], [], None
@@ -821,6 +898,7 @@ def _latency_check(name, series, evidence):
             worst = {"minute": window["minute"], "p95_us": p95}
     return _check(name, pooled_count > 0 and pooled_p95 <= bound and not empty, {
         "idle_p95_us": baseline, "threshold_us": bound, "bound_us": bound, "bound_kind": "absolute" if series in ABSOLUTE_P95_BOUND_US else "relative",
+        "bound_host_kind": host_kind or "unknown",
         "relative_threshold_us": relative, "within_relative_threshold": pooled_count > 0 and pooled_p95 <= relative,
         "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
         "pooled_ratio": round(pooled_p95 / max(baseline, 1), 3), "worst_ratio": round((worst or {"p95_us": 0})["p95_us"] / max(baseline, 1), 3),
@@ -833,6 +911,10 @@ def render_summary(evidence, verdict):
     outcome = {RESULT_PASSED: "passed", RESULT_FAILED: "FAILED", RESULT_INCONCLUSIVE_SLOW_DISK: "INCONCLUSIVE (slow disk)"}.get(verdict.get("result"), "FAILED")
     diagnostic = bool(verdict.get("diagnostic"))
     lines = [f"## Capacity soak ({evidence.get('duration_minutes')} minutes): {outcome}" + (" (DIAGNOSTIC: SQLite)" if diagnostic else "")]
+    host = verdict.get("host_identity") or {}
+    if host:
+        lines += ["", f"Host: {host.get('kind')}, runner {host.get('runner_name') or 'unnamed'}, {host.get('cpu_model')}, {host.get('nproc')} CPUs, "
+                      f"{host.get('mem_total_kib', 0) // 1024} MiB"]
     if diagnostic:
         lines += ["", "The measured Portal's database is SQLite: this run is a diagnostic of the known limit and is never OPS-08 evidence, whatever its "
                   "result. PostgreSQL's WAL sync, if recorded, is a diagnostic here and does not judge the run; the fsync probe of the device holding "
@@ -840,7 +922,18 @@ def render_summary(evidence, verdict):
     if verdict.get("result") == RESULT_INCONCLUSIVE_SLOW_DISK:
         lines += ["", "The disk-health precheck, judged only from readings taken before the load, tripped: this run says nothing about the Portal, is neither "
                   "passed nor failed and is never evidence. Rerun the job. Reasons: " + "; ".join(verdict["precheck"]["reasons"]) + "."]
-    lines += ["", "Latency verdict (owner decision 2026-11-15): pooled loaded p95 at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start. "
+    used = {c["name"].split("_p95_within_absolute_bound")[0]: c.get("detail", {}) for c in verdict.get("checks", [])
+            if c["name"].endswith("_p95_within_absolute_bound")}
+    # A run that ended before the load has no latency checks; its precheck still records the host it ran on.
+    host_kind = next((d.get("bound_host_kind") for d in used.values() if d.get("bound_host_kind")), (verdict.get("precheck") or {}).get("host_kind", ""))
+    bounds = absolute_bounds_us(host_kind)
+    for series, detail in used.items():
+        bounds[series] = detail.get("bound_us", bounds.get(series))
+    ms = {series: f"{bound / 1000:g}" for series, bound in bounds.items()}
+    decision = ("owner decisions 2026-11-15 and 2026-11-16: the reference VM is judged at 1.5 times the bounds" if host_kind == REFERENCE_HOST
+                else "owner decision 2026-11-15")
+    lines += ["", f"Latency verdict ({decision}): pooled loaded p95 at most {ms['home']} ms for home and report, {ms['dispatch']} ms for dispatch@200 "
+             f"and {ms['batch_start']} ms for batch start. "
              "The pooling is an engineering decision; windows, the relative threshold max(1.5 x idle p95, idle p95 + 5 ms) and the ratio to idle are diagnostics."]
     for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
@@ -868,6 +961,19 @@ def render_summary(evidence, verdict):
         lines += ["", "### Backend fractions achieved (lowest backend)", ""]
         lines += [f"- {name}: {value['min']:.3f} (per backend {', '.join(f'{v:.3f}' for v in value['per_backend'].values())})"
                   for name, value in achieved.items() if value.get("per_backend")]
+    work = evidence.get("platform_work") or {}
+    if work:
+        pooled, totals, events = work.get("loaded_latency_ms") or {}, work.get("tasks_total") or {}, work.get("events_total") or {}
+        lines += ["", "### Platform work (SEC-09)", "",
+                  f"- tasks: {totals.get('created', 0)} admitted, states {totals.get('by_state')}; admission to completion p50 {pooled.get('p50_ms')} ms, "
+                  f"p95 {pooled.get('p95_ms')} ms, max {pooled.get('max_ms')} ms over {pooled.get('count', 0)} tasks",
+                  f"- events: {events.get('captured', 0)} captured, {events.get('delivered', 0)} of {events.get('expected_deliveries', 0)} deliveries "
+                  f"succeeded, {events.get('capture_errors', 0)} capture errors",
+                  f"- drain after the load: {work.get('drain')}"]
+        for name in PLATFORM_WORK_CHECKS:
+            check = next((c for c in verdict["checks"] if c["name"] == name), None)
+            if check is not None:
+                lines.append(f"- {name}: {'pass' if check['passed'] else 'FAIL'}")
     for item in verdict.get("unit_level_probes", []):
         lines.append(f"- unit level, not observed in this run: {item['name']} (tests {', '.join(item['tests'])}: "
                      f"{'passed' if item['tests_passed'] else 'NOT PASSED'})")
@@ -1026,6 +1132,149 @@ def _flood_checks(evidence):
     return [first, second, third]
 
 
+SATURATED_TENANTS = 2
+
+
+def _within(value, bound):
+    """A measurement within its bound; a missing or non-numeric one is not."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value <= bound
+
+
+def _platform_work_checks(evidence):
+    """SEC-09: judge the platform task worker, the event delivery coordinator and the backend-originated task flood from the child's
+    per-window evidence and its final platform_work block. What the flood does to the other tenants is judged by the unchanged OPS-08 latency
+    bounds and the crash checks of the same run; the flood must be live in every one of those windows, which backend_task_flood_alive_throughout
+    requires."""
+    windows = evidence.get("windows", [])
+    work = evidence.get("platform_work") or {}
+    missing = not work or any(not (w.get("tasks") and w.get("events") and w.get("quota") and w.get("backend_flood") and w.get("workload_submit"))
+                              for w in windows) or not windows
+    if missing:
+        detail = {"reason": "the child evidence has no platform_work block or a window lacks its tasks, events, quota, backend_flood or workload_submit data"}
+        return [_check(name, False, detail) for name in PLATFORM_WORK_CHECKS]
+    drain = work.get("drain") or {}
+    totals = work.get("tasks_total") or {}
+    by_state = totals.get("by_state") or {}
+    events_total = work.get("events_total") or {}
+    checks = []
+
+    below = [w["minute"] for w in windows if (w["tasks"].get("succeeded", 0) < TASK_WORKER_MIN_COMPLETED_PER_WINDOW) or not w["tasks"].get("worker_alive")]
+    checks.append(_check("task_worker_ran_in_every_window", not below, {
+        "minimum_completed_per_window": TASK_WORKER_MIN_COMPLETED_PER_WINDOW, "windows_below_the_minimum": below[:200],
+        "completed_by_window": [w["tasks"].get("succeeded", 0) for w in windows][:500]}))
+
+    stuck = [w["minute"] for w in windows if not isinstance(w["tasks"].get("oldest_open_age_ms"), (int, float)) or w["tasks"]["oldest_open_age_ms"] > TASK_STUCK_MAX_AGE_MS]
+    bad_windows = [w["minute"] for w in windows if any(w["tasks"].get(state, 0) for state in ("failed", "uncertain", "review_required", "cancelled"))]
+    bad_states = {state: count for state, count in by_state.items() if state != "succeeded" and count}
+    created = totals.get("created", 0)
+    unfinished = created - by_state.get("succeeded", 0)
+    admit_errors = totals.get("admit_errors", 1)
+    checks.append(_check("no_task_lost_or_stuck", created > 0 and unfinished == 0 and not bad_states and not bad_windows and not stuck and admit_errors == 0
+                         and drain.get("open_after", 1) == 0 and not drain.get("timed_out", True), {
+        "created": created, "admission_errors": admit_errors, "succeeded": by_state.get("succeeded", 0), "not_succeeded": unfinished, "other_states": bad_states,
+        "windows_with_a_task_in_another_state": bad_windows[:200], "windows_with_a_stuck_task": stuck[:200],
+        "maximum_open_age_ms": TASK_STUCK_MAX_AGE_MS, "drain": drain}))
+
+    pooled = work.get("loaded_latency_ms") or {}
+    worst = None
+    for w in windows:
+        p95 = (w["tasks"].get("latency_ms") or {}).get("p95_ms", 0)
+        if worst is None or p95 > worst["p95_ms"]:
+            worst = {"minute": w["minute"], "p95_ms": p95}
+    checks.append(_check("task_latency_within_bound", pooled.get("count", 0) > 0 and _within(pooled.get("p95_ms"), TASK_LATENCY_P95_BOUND_MS)
+                         and _within(pooled.get("max_ms"), TASK_LATENCY_MAX_BOUND_MS), {
+        "pooled_p95_ms": pooled.get("p95_ms"), "p95_bound_ms": TASK_LATENCY_P95_BOUND_MS, "pooled_max_ms": pooled.get("max_ms"),
+        "max_bound_ms": TASK_LATENCY_MAX_BOUND_MS, "pooled_samples": pooled.get("count", 0), "worst_window": worst}))
+
+    over = [w["minute"] for w in windows if not isinstance(w["quota"].get("max_installation_active"), int)
+            or w["quota"]["max_installation_active"] > TASK_INSTALLATION_QUOTA]
+    untyped = [w["minute"] for w in windows if not (w["backend_flood"].get("classes") or {}).get("429:task_capacity", 0)]
+    # The saturated tenants hold exactly their quota in every window, and none of their tasks ever runs (they are due after the run).
+    not_held = [w["minute"] for w in windows if not isinstance(w["quota"].get("saturated_active"), dict) or len(w["quota"]["saturated_active"]) < SATURATED_TENANTS
+                or any(v != TASK_INSTALLATION_QUOTA for v in w["quota"]["saturated_active"].values())]
+    saturated_run = work.get("saturated_tasks_run")
+    checks.append(_check("task_quota_enforced_in_every_window", not over and not untyped and not not_held and saturated_run == 0, {
+        "quota": TASK_INSTALLATION_QUOTA, "windows_over_the_quota": over[:200], "windows_without_a_typed_refusal": untyped[:200],
+        "windows_where_a_saturated_tenant_did_not_hold_its_quota": not_held[:200], "saturated_tasks_run": saturated_run,
+        "refusals_by_window": [(w["backend_flood"].get("classes") or {}).get("429:task_capacity", 0) for w in windows][:500]}))
+
+    no_delivery = [w["minute"] for w in windows if w["events"].get("delivered", 0) < 1]
+    expected = events_total.get("expected_deliveries", 0)
+    checks.append(_check("event_delivered_at_least_once", events_total.get("captured", 0) > 0 and expected > 0 and events_total.get("delivered", 0) >= expected
+                         and not no_delivery, {
+        "captured": events_total.get("captured", 0), "expected_deliveries": expected, "delivered": events_total.get("delivered", 0),
+        "windows_without_a_delivery": no_delivery[:200]}))
+
+    depths = [w["events"].get("max_inflight_per_subscription") for w in windows]
+    over_bound = [w["minute"] for w, depth in zip(windows, depths) if not _within(depth, EVENT_MAX_INFLIGHT)]
+    depths = [d if isinstance(d, (int, float)) else 0 for d in depths]
+    third = max(len(depths) // 3, 1)
+    growing = len(depths) >= 6 and min(depths[-third:]) > max(depths[:third]) and depths[-1] > depths[0]
+    checks.append(_check("event_queue_bounded", bool(depths) and not over_bound and not growing and drain.get("open_after", 1) == 0
+                         and not drain.get("timed_out", True), {
+        "inflight_bound": EVENT_MAX_INFLIGHT, "windows_over_the_bound": over_bound[:200], "growing": growing, "max_inflight_by_window": depths[:500],
+        "drain": drain}))
+
+    subscriptions = work.get("subscriptions") or []
+    workload = [s for s in subscriptions if s.get("role") == "workload"]
+    saturated = [s for s in subscriptions if s.get("role") == "saturated"]
+    fenced_workload = [s for s in workload if s.get("state") != "active"]
+    untyped_fences = [s for s in subscriptions if s.get("state") != "active" and s.get("reason") not in EVENT_FENCE_REASONS]
+    provoked = bool(saturated) and all(s.get("state") == "review_required" and s.get("reason") == "task_capacity" for s in saturated)
+    capture_errors = events_total.get("capture_errors", 0) + sum(w["events"].get("capture_errors", 0) for w in windows)
+    checks.append(_check("event_refusals_are_typed", bool(workload) and not fenced_workload and not untyped_fences and provoked and capture_errors == 0, {
+        "allowed_reasons": list(EVENT_FENCE_REASONS), "workload_subscriptions": len(workload), "workload_subscriptions_fenced": fenced_workload,
+        "subscriptions_fenced_for_another_reason": untyped_fences, "saturated_subscription_fenced_for_its_task_quota": provoked,
+        "capture_errors": capture_errors}))
+
+    small = [w["minute"] for w in windows if w["backend_flood"].get("requests", 0) < BACKEND_FLOOD_MIN_PER_WINDOW]
+    classes_by_window, bad = [], []
+    for w in windows:
+        classes = dict(w["backend_flood"].get("classes") or {})
+        classes_by_window.append(classes)
+        if any(k not in TYPED_BACKEND_FLOOD_CLASSES and v for k, v in classes.items()):
+            bad.append(w["minute"])
+    checks.append(_check("backend_task_flood_answered_or_typed_in_every_window", not small and not bad, {
+        "minimum_per_window": BACKEND_FLOOD_MIN_PER_WINDOW, "allowed_classes": list(TYPED_BACKEND_FLOOD_CLASSES), "windows_below_the_minimum": small[:200],
+        "windows_with_other_classes": bad[:200], "classes_by_window": classes_by_window[:500]}))
+
+    dead = [w["minute"] for w in windows if not w["backend_flood"].get("alive")
+            or w["backend_flood"].get("heartbeat_age_ms", FLOOD_HEARTBEAT_MAX_AGE_MS + 1) > FLOOD_HEARTBEAT_MAX_AGE_MS]
+    checks.append(_check("backend_task_flood_alive_throughout", not dead, {"maximum_heartbeat_age_ms": FLOOD_HEARTBEAT_MAX_AGE_MS, "windows_without_a_live_flood": dead[:200],
+                                                                         "windows_judged_under_the_flood": len(windows)}))
+
+    bad_forged, forged_by_window = [], []
+    for w in windows:
+        flood = w["backend_flood"]
+        count, classes = flood.get("forged_requests"), flood.get("forged_classes")
+        ok = (isinstance(count, int) and count >= FORGED_FLOOD_MIN_PER_WINDOW and isinstance(classes, dict) and classes
+              and all(k in FORGED_FLOOD_CLASSES or not v for k, v in classes.items()) and sum(classes.values()) >= FORGED_FLOOD_MIN_PER_WINDOW)
+        forged_by_window.append({"requests": count, "classes": classes})
+        if not ok:
+            bad_forged.append(w["minute"])
+    checks.append(_check("forged_identity_flood_refused_in_every_window", not bad_forged, {
+        "minimum_per_window": FORGED_FLOOD_MIN_PER_WINDOW, "allowed_classes": list(FORGED_FLOOD_CLASSES), "windows_failing": bad_forged[:200],
+        "by_window": forged_by_window[:500]}))
+
+    bad_submit, by_window = [], []
+    for w in windows:
+        submit = w["workload_submit"]
+        classes = submit.get("classes")
+        latency = submit.get("latency_ms")
+        requests = submit.get("requests")
+        ok = (isinstance(requests, int) and requests >= WORKLOAD_SUBMIT_MIN_PER_WINDOW and isinstance(classes, dict) and classes
+              and all(k == "200" or not v for k, v in classes.items()) and classes.get("200", 0) >= WORKLOAD_SUBMIT_MIN_PER_WINDOW
+              and isinstance(latency, dict) and _within(latency.get("p95_ms"), WORKLOAD_SUBMIT_P95_BOUND_MS) and _within(latency.get("max_ms"), WORKLOAD_SUBMIT_MAX_BOUND_MS))
+        by_window.append({"requests": requests, "classes": classes, "p95_ms": (latency or {}).get("p95_ms"), "max_ms": (latency or {}).get("max_ms")})
+        if not ok:
+            bad_submit.append(w["minute"])
+    checks.append(_check("workload_tenants_submit_through_the_route_in_every_window", not bad_submit, {
+        "minimum_per_window": WORKLOAD_SUBMIT_MIN_PER_WINDOW, "p95_bound_ms": WORKLOAD_SUBMIT_P95_BOUND_MS, "max_bound_ms": WORKLOAD_SUBMIT_MAX_BOUND_MS,
+        "windows_failing": bad_submit[:200], "worst_p95_ms": max((x["p95_ms"] for x in by_window if isinstance(x["p95_ms"], (int, float))), default=None),
+        "worst_max_ms": max((x["max_ms"] for x in by_window if isinstance(x["max_ms"], (int, float))), default=None), "by_window": by_window[:500]}))
+    return checks
+
+
 def _probe_checks(probes, unit_tests):
     names = {p["name"] for p in probes}
     native = [p for p in probes if p.get("level") == "native"]
@@ -1173,7 +1422,8 @@ def verdict_arguments(env):
             "platform_weight": env.get("APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT", ""), "database": env.get("APP_CAPACITY_SOAK_DB", ""),
             "runner_profile": env.get("APP_CAPACITY_SOAK_RUNNER_PROFILE", "") == "1", "diagnose": env.get("APP_CAPACITY_SOAK_DIAGNOSE", "") == "1",
             "event": env.get("GITHUB_EVENT_NAME", ""), "commit": env.get("GITHUB_SHA", ""),
-            "expected_commit": env.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", "")}
+            "expected_commit": env.get("APP_CAPACITY_SOAK_EXPECTED_COMMIT", ""),
+            "host": host_identity(env, read_proc("/proc/cpuinfo"), read_proc("/proc/meminfo"), os.cpu_count() or 0)}
 
 
 def evidence_blockers(passed, tripped, minutes, db_driver, event, commit, expected, diagnose, diagnostic_values):
@@ -1201,7 +1451,7 @@ def evidence_blockers(passed, tripped, minutes, db_driver, event, commit, expect
 
 
 def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None, variant="", cpu_percent="", reserved_cpus="", pin_platform=False, platform_weight="",
-             database="", runner_profile=False, diagnose=False, event="", commit="", expected_commit="", disk_probe=None):
+             database="", runner_profile=False, diagnose=False, event="", commit="", expected_commit="", disk_probe=None, host=None):
     """Judge the Go evidence and the host samples against the pass criteria of doc 167 section 4.
 
     The result is passed, failed, or inconclusive_slow_disk: the last when the disk-health precheck, judged only from readings taken before the
@@ -1222,10 +1472,11 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
                          {"windows": len(windows), "minutes": minutes}))
     checks.append(_check("session_outlives_the_run", evidence.get("session_expires_ms", 0) > evidence.get("load_finished_ms", 0) > 0,
                          {"session_expires_ms": evidence.get("session_expires_ms"), "load_finished_ms": evidence.get("load_finished_ms")}))
-    ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence),
-                    "report": _latency_check("report_p95_within_absolute_bound", "report", evidence),
-                    "dispatch": _latency_check("dispatch_p95_within_absolute_bound", "dispatch", evidence),
-                    "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence)}
+    host_kind = (host or {}).get("kind", "")
+    ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence, host_kind),
+                    "report": _latency_check("report_p95_within_absolute_bound", "report", evidence, host_kind),
+                    "dispatch": _latency_check("dispatch_p95_within_absolute_bound", "dispatch", evidence, host_kind),
+                    "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence, host_kind)}
     checks.extend(ratio_checks.values())
     checks.extend(_flood_checks(evidence))
 
@@ -1258,6 +1509,8 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     crashes = [s["at_ms"] for s in load if s["backends"]["running"] != expected or s["backends"]["exited"] or s["backends"]["restarting"]
                or s["backends"]["oom_killed"] or s["backends"]["restart_count"]]
     checks.append(_check("no_backend_crash", load and not crashes, {"expected_running": expected, "bad_samples": crashes[:20]}))
+    platform_checks = _platform_work_checks(evidence)
+    checks.extend(platform_checks)
     ratios = {series: check["detail"]["worst_ratio"] for series, check in ratio_checks.items()}
     # The shallow-backlog dispatch decision is recorded beside the judged one, never judged.
     shallow_idle = max(idle.get("dispatch_shallow", {}).get("p95_us", 0), 1)
@@ -1269,7 +1522,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
     breakdown = cpu_breakdown(evidence, samples)
     checks_passed = all(c["passed"] for c in checks)
     driver = evidence.get("db_driver") or database
-    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe, driver)
+    precheck = disk_precheck(idle_wal_sync_ms(evidence, samples), disk_probe, driver, (host or {}).get("kind", ""))
     result = RESULT_INCONCLUSIVE_SLOW_DISK if precheck["tripped"] else (RESULT_PASSED if checks_passed else RESULT_FAILED)
     passed = {RESULT_PASSED: True, RESULT_FAILED: False}.get(result)
     diagnostic_values = {"soak_db": database, "soak_cpu_percent": cpu_percent, "soak_reserved_cpus": reserved_cpus,
@@ -1282,7 +1535,7 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
         # A SQLite run is a diagnostic of the known limit: it is measured and reported, and it is never OPS-08 evidence (the blockers say so).
         "diagnostic": database_kind(driver) == "sqlite",
         "result": result, "passed": passed, "counts_as_ops08_evidence": not blockers, "evidence_blockers": blockers, "precheck": precheck,
-        "event": event, "commit": commit, "expected_commit": expected_commit,
+        "event": event, "commit": commit, "expected_commit": expected_commit, "host_identity": host or {},
         "commit_matches_expected": (expected_commit == commit) if expected_commit else None,
         "platform_cpu_weight": platform_weight,
         "pin_platform": pin_platform,
@@ -1333,8 +1586,9 @@ def duration_minutes(value):
 
 def soak_variant(value):
     """The diagnostic variants of the Go soak: a closed list, empty for an evidence run."""
-    if not re.fullmatch(r"(memory-db|no-batch-probes|skip-image-store)(,(memory-db|no-batch-probes|skip-image-store))*|", value or ""):
-        raise RuntimeError("the soak variant is empty or a list of memory-db and no-batch-probes")
+    names = "memory-db|no-batch-probes|skip-image-store|no-backend-flood|no-task-worker"
+    if not re.fullmatch(rf"({names})(,({names}))*|", value or ""):
+        raise RuntimeError("the soak variant is empty or a list of memory-db, no-batch-probes, skip-image-store, no-backend-flood and no-task-worker")
     return value or ""
 
 
@@ -1403,14 +1657,50 @@ def baseline_seconds(minutes):
     return 180
 
 
+REFERENCE_HOST = "reference-vm"
+
+
 def require_disposable_environment(env, euid, platform, which):
+    """The soak runs only on a disposable Linux root: a GitHub-hosted worker, or the owner's reference VM, a self-hosted runner that is reverted to a
+    clean snapshot before every run. The reference VM is accepted only when the host flag names it AND the run is a manual workflow_dispatch; a
+    self-hosted runner in any other case, and a github-hosted one that claims to be the reference VM, is refused."""
     if platform != "linux" or euid != 0:
         raise RuntimeError("the soak requires disposable Linux root")
-    if env.get("GITHUB_ACTIONS") != "true" or env.get("RUNNER_ENVIRONMENT") != "github-hosted":
-        raise RuntimeError("the soak refuses hosts outside a disposable GitHub-hosted worker")
+    runner, flag, event = env.get("RUNNER_ENVIRONMENT"), env.get("APP_CAPACITY_SOAK_HOST", ""), env.get("GITHUB_EVENT_NAME", "")
+    if env.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError("the soak refuses hosts outside a GitHub Actions job")
+    if runner == "github-hosted":
+        if flag == REFERENCE_HOST:
+            raise RuntimeError("a github-hosted worker cannot be the reference VM")
+    elif runner == "self-hosted":
+        if flag != REFERENCE_HOST or event != "workflow_dispatch":
+            raise RuntimeError("a self-hosted runner is accepted only as the reference VM (APP_CAPACITY_SOAK_HOST=reference-vm) from a workflow_dispatch run")
+    else:
+        raise RuntimeError("the soak refuses hosts outside a disposable GitHub-hosted worker or the reference VM")
     for tool in ("losetup", "blockdev", "mkfs.xfs", "mount", "umount", "findmnt", "xfs_quota", "blkid", "docker"):
         if not which(tool, path=PATH):
             raise RuntimeError("missing explicit acceptance tool: " + tool)
+
+
+def host_identity(env, cpuinfo, meminfo, nproc):
+    """What machine the run measured, for the verdict: its kind (the reference VM or a GitHub-hosted worker), the runner's name, the CPU model from
+    /proc/cpuinfo, the CPU count and MemTotal in KiB. Anything that cannot be read is "unknown" or 0, never a guess."""
+    if env.get("RUNNER_ENVIRONMENT") == "self-hosted" and env.get("APP_CAPACITY_SOAK_HOST") == REFERENCE_HOST:
+        kind = REFERENCE_HOST
+    elif env.get("RUNNER_ENVIRONMENT") == "github-hosted":
+        kind = "github-hosted"
+    else:
+        kind = "unknown"
+    model = next((line.split(":", 1)[1].strip() for line in cpuinfo.splitlines() if line.startswith("model name") and ":" in line), "unknown")
+    memory = next((int(line.split()[1]) for line in meminfo.splitlines() if line.startswith("MemTotal:") and len(line.split()) > 1 and line.split()[1].isdigit()), 0)
+    return {"kind": kind, "runner_name": env.get("RUNNER_NAME", ""), "cpu_model": model, "nproc": nproc, "mem_total_kib": memory}
+
+
+def read_proc(path):
+    try:
+        return Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
 
 
 # ---- the run ----
@@ -1470,9 +1760,9 @@ def exit_code(verdict):
     return 0 if verdict["passed"] else 1
 
 
-def end_before_the_load(out, minutes, probe, database="postgres"):
+def end_before_the_load(out, minutes, probe, database="postgres", host_kind=""):
     """The fsync probe tripped before the load began: nothing was started, so say so and end without spending the soak's duration."""
-    precheck = disk_precheck(None, probe, database)
+    precheck = disk_precheck(None, probe, database, host_kind)
     verdict = {"result": RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "counts_as_ops08_evidence": False, "precheck": precheck,
                "evidence_blockers": ["the disk-health precheck tripped before the load: the run is inconclusive, not evidence"], "checks": []}
     run = {key: os.environ.get(key, "") for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_REPOSITORY", "GITHUB_SHA", "GITHUB_REF_NAME", "GITHUB_EVENT_NAME")}
@@ -1524,6 +1814,7 @@ def main(argv):
     # The disk-health precheck's first reading, taken before anything else runs: a short fsync probe on the device of the database the Portal
     # uses (the PostgreSQL data device, or the device that holds the SQLite file).
     postgres_data_dir, disk_probe = "", None
+    host_kind = host_identity(os.environ, read_proc("/proc/cpuinfo"), read_proc("/proc/meminfo"), os.cpu_count() or 0)["kind"]
     try:
         postgres_data_dir = run_command("runuser", "-u", "postgres", "--", "psql", "-tAXc", "SHOW data_directory").strip()
     except (RuntimeError, OSError, subprocess.SubprocessError):
@@ -1532,8 +1823,8 @@ def main(argv):
     if probe_dir:
         disk_probe = dict(fsync_probe(probe_dir), directory=str(probe_dir), data_directory=postgres_data_dir)
         print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
-        if probe_trips(disk_probe):
-            return end_before_the_load(out, minutes, disk_probe, database)
+        if probe_trips(disk_probe, host_kind):
+            return end_before_the_load(out, minutes, disk_probe, database, host_kind)
     socket = os.path.realpath("/var/run/docker.sock")
     image_id = run_command("docker", "image", "inspect", image, "--format", "{{.Id}}").strip()
     if not re.fullmatch(r"sha256:[a-f0-9]{64}", image_id):
@@ -1581,8 +1872,8 @@ def main(argv):
         if sqlite_probe_dir:
             disk_probe = dict(fsync_probe(sqlite_probe_dir), directory=sqlite_probe_dir, data_directory="")
             print("fsync probe:", json.dumps(disk_probe, sort_keys=True), file=sys.stderr)
-            if probe_trips(disk_probe):
-                return end_before_the_load(out, minutes, disk_probe, database)
+            if probe_trips(disk_probe, host_kind):
+                return end_before_the_load(out, minutes, disk_probe, database, host_kind)
         native = dict(ENV, GITHUB_ACTIONS="true", RUNNER_ENVIRONMENT="github-hosted",
                       APP_DATA_NATIVE_UUID=probe.command("blkid", "-p", "-s", "UUID", "-o", "value", loop),
                       APP_DATA_NATIVE_PHASE="prepare", APP_DATA_JOURNAL_ROOT=str(journal_root),

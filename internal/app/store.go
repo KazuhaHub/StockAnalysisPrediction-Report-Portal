@@ -83,9 +83,13 @@ type LinkGroup struct {
 }
 
 type Store struct {
-	db     *sql.DB
-	driver string     // "sqlite" | "postgres"
-	stmts  *stmtCache // prepared-statement cache; nil on PostgreSQL (see stmtCache)
+	// homeConfig* cache the home page's configuration reads (read_path.go).
+	homeConfigMu  sync.Mutex
+	homeConfigVal *homeConfigSnapshot
+	homeConfigNow func() time.Time // test seam; nil is time.Now
+	db            *sql.DB
+	driver        string     // "sqlite" | "postgres"
+	stmts         *stmtCache // prepared-statement cache; nil on PostgreSQL (see stmtCache)
 	// rp is the SQLite read pool and its statement cache: a second, read-only pool on the same file,
 	// alongside the single writer connection in db (see openReadPool). It is nil on PostgreSQL, on an
 	// in-memory database and wherever the pool is disabled, and readDB then answers with db, so a read
@@ -1458,6 +1462,7 @@ func (s *Store) KindColors() map[string]string {
 func (s *Store) SetKindColor(kind, color string) error {
 	_, err := s.exec(`INSERT INTO kind_config(kind,color) VALUES(?,?)
 		ON CONFLICT(kind) DO UPDATE SET color=excluded.color`, kind, color)
+	s.dropHomeConfig()
 	return err
 }
 
@@ -2374,6 +2379,7 @@ func (s *Store) Links() []Link {
 
 func (s *Store) AddLink(label, url, icon string, newTab bool, groupID int64, ord int) error {
 	_, err := s.exec("INSERT INTO links(label,url,icon,new_tab,ord,group_id) VALUES(?,?,?,?,?,?)", label, url, icon, boolInt(newTab), ord, groupID)
+	s.dropHomeConfig()
 	return err
 }
 
@@ -2381,16 +2387,19 @@ func (s *Store) AddLink(label, url, icon string, newTab bool, groupID int64, ord
 // are handled by the layout drag, not the edit form).
 func (s *Store) UpdateLinkFields(id int64, label, url, icon string, newTab, visible bool) error {
 	_, err := s.exec("UPDATE links SET label=?,url=?,icon=?,new_tab=?,visible=? WHERE id=?", label, url, icon, boolInt(newTab), boolInt(visible), id)
+	s.dropHomeConfig()
 	return err
 }
 
 // SetLinkGroupAndOrder persists a link's group membership + sort position on drag.
 func (s *Store) SetLinkGroupAndOrder(id, groupID int64, ord int) error {
 	_, err := s.exec("UPDATE links SET group_id=?,ord=? WHERE id=?", groupID, ord, id)
+	s.dropHomeConfig()
 	return err
 }
 func (s *Store) DeleteLink(id int64) error {
 	_, err := s.exec("DELETE FROM links WHERE id=?", id)
+	s.dropHomeConfig()
 	return err
 }
 
@@ -2415,22 +2424,26 @@ func (s *Store) LinkGroups() []LinkGroup {
 }
 
 func (s *Store) AddLinkGroup(name, mode string, showLabel bool, icon string, ord int) (int64, error) {
+	defer s.dropHomeConfig()
 	return s.insertID("INSERT INTO link_groups(name,mode,show_label,icon,ord) VALUES(?,?,?,?,?)", name, mode, boolInt(showLabel), icon, ord)
 }
 
 func (s *Store) UpdateLinkGroup(id int64, name, mode string, showLabel bool, icon string, visible bool) error {
 	_, err := s.exec("UPDATE link_groups SET name=?,mode=?,show_label=?,icon=?,visible=? WHERE id=?", name, mode, boolInt(showLabel), icon, boolInt(visible), id)
+	s.dropHomeConfig()
 	return err
 }
 
 // SetLinkGroupOrder persists a group's sort position on drag.
 func (s *Store) SetLinkGroupOrder(id int64, ord int) error {
 	_, err := s.exec("UPDATE link_groups SET ord=? WHERE id=?", ord, id)
+	s.dropHomeConfig()
 	return err
 }
 
 // DeleteLinkGroup removes a group and returns its links to the top level (ungrouped).
 func (s *Store) DeleteLinkGroup(id int64) error {
+	defer s.dropHomeConfig()
 	s.exec("UPDATE links SET group_id=0 WHERE group_id=?", id)
 	_, err := s.exec("DELETE FROM link_groups WHERE id=?", id)
 	return err
