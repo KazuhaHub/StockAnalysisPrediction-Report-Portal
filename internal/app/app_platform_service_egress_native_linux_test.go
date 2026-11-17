@@ -522,9 +522,15 @@ func (st *platformServiceEgressRestoreState) addBackgroundRun(t *testing.T, s *S
 
 // restore waits for the withdrawal goroutine, puts network.http back as it was,
 // removes the background.run row it added and the notification rows it caused,
-// then compares every grant row of the installation with the captured ones.
+// then compares every grant row of the installation with the captured ones. It
+// does that once: the steps after the egress test change the grants for good (a
+// policy revision bump), so the fallback cleanup at the end of the whole chain
+// must not compare again.
 func (st *platformServiceEgressRestoreState) restore(s *Server, installation string, withdrawal <-chan error) error {
-	if !st.restored {
+	if st.restored {
+		return nil
+	}
+	{
 		if withdrawal != nil {
 			select {
 			case <-withdrawal:
@@ -731,12 +737,19 @@ func TestPlatformServiceEgressNativeStateRestore(t *testing.T) {
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events WHERE id='egress-restore-1'`) != 0 {
 		t.Fatal("the captured notification event was kept")
 	}
-	if err := state.restore(s, installation, nil); err != nil { // idempotent
+	// Later steps change the grants for good; the fallback cleanup that calls
+	// restore again at the end of the chain must neither undo nor object to that.
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=2 WHERE installation_id=?`, installation)
+	if err := state.restore(s, installation, nil); err != nil {
 		t.Fatal("second restore", err)
 	}
-	// Something the helper never touched is a difference it reports.
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=2`, installation) == 0 {
+		t.Fatal("the second restore undid a later change")
+	}
+	// Something the helper cannot undo is a difference it reports, on the first call.
+	other := platformServiceEgressCaptureState(t, s, installation)
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision+1 WHERE installation_id=? AND capability='notifications.publish'`, installation)
-	if err := state.restore(s, installation, nil); err == nil {
+	if err := other.restore(s, installation, nil); err == nil {
 		t.Fatal("an unrestorable difference was not reported")
 	}
 }
