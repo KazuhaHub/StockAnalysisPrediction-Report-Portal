@@ -131,6 +131,9 @@ type platformServiceEgressLoad struct {
 	// any value is opened; decrypt then opens it (an admit; a check does not).
 	credential string
 	decrypt    bool
+	// admit, when set with a credential, is judged against the reviewed policy
+	// before the binding is resolved or opened.
+	admit *transport.EgressAdmit
 	// beforeCommit is a test seam: it runs with the transaction still open.
 	beforeCommit func()
 }
@@ -333,6 +336,13 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	if !slices.Contains(result.resources, platformServiceEgressSecrets) || !result.hasNetwork() {
 		return errPlatformServiceEgressDenied
 	}
+	// The destination comes first (doc 176 section 3.3): a call the reviewed
+	// policy does not allow is denied without the binding being looked at, and
+	// so never reaches the custody.
+	if o.admit != nil && (appplatform.ValidateHTTPPolicyTarget(result.policy.Policy, o.admit.Method, o.admit.URL) != nil ||
+		int64(o.admit.BodyBytes) > result.policy.Policy.RequestBytes) {
+		return errPlatformServiceEgressDenied
+	}
 	facts, err := loadPlatformSecretBindingFacts(e, installation, false)
 	if err != nil {
 		return errPlatformServiceEgressUnavailable
@@ -342,7 +352,7 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	}
 	use, sealed, err := loadPlatformSecretBindingUseFor(e, installation, o.credential, facts, platformPrincipalService)
 	if err != nil {
-		return errPlatformServiceEgressDenied
+		return platformServiceEgressCredentialError(err)
 	}
 	result.binding, result.credentialName = use, o.credential
 	if !o.decrypt {
@@ -360,6 +370,16 @@ func (s *Server) loadPlatformServiceEgressCredential(e migExec, installation str
 	}
 	result.credentialHeader, result.credentialValue = header, value
 	return nil
+}
+
+// platformServiceEgressCredentialError says what a failed binding read means for
+// a call: an unknown, revoked, unreviewed, wrong-principal or wrong-target binding
+// is a denial; a failure of the store is unavailable and writes no denied row.
+func platformServiceEgressCredentialError(err error) error {
+	if errors.Is(err, errPlatformSecretBindingStore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return errPlatformServiceEgressUnavailable
+	}
+	return errPlatformServiceEgressDenied
 }
 
 // signServiceEgressSession signs the command that opens a session. The assertion
@@ -408,7 +428,8 @@ func platformServiceEgressActorScope(sessionID string) string {
 
 // signServiceEgressCommand signs one admitted call. The reviewed policy decides
 // (target, method, size) exactly as the runner will; the command carries a fresh
-// Portal-minted request id, no credential, and expires with the session at the
+// Portal-minted request id, the credential this authority opened for the admit's
+// binding (none when the admit names none), and expires with the session at the
 // latest. sessionExpiresMS is the session's own end.
 func (a platformServiceEgressAuthority) signServiceEgressCommand(sessionID string, admit transport.EgressAdmit, nowMS, sessionExpiresMS int64) (control.NetworkHTTPRequestCommand, []byte, []byte, error) {
 	var zero control.NetworkHTTPRequestCommand
@@ -481,7 +502,22 @@ func (s *Server) loadServiceEgressForSession(ctx context.Context, state platform
 // loadServiceEgressForSessionCredential is that reading for a call that names a
 // credential binding (credential non-empty): see platformServiceEgressLoad.
 func (s *Server) loadServiceEgressForSessionCredential(ctx context.Context, state platformServiceEgressSessionState, credential string, decrypt bool) (platformServiceEgressAuthority, error) {
-	a, err := s.loadPlatformServiceEgressCurrent(ctx, state.pin.installation, platformServiceEgressLoad{identity: state.identity, resources: state.resources, credential: credential, decrypt: decrypt})
+	return s.loadServiceEgressForSessionLoad(ctx, state, platformServiceEgressLoad{credential: credential, decrypt: decrypt})
+}
+
+// loadServiceEgressForSessionAdmit is the admit's reading: a credential call has
+// its target judged first and its value opened last.
+func (s *Server) loadServiceEgressForSessionAdmit(ctx context.Context, state platformServiceEgressSessionState, admit transport.EgressAdmit) (platformServiceEgressAuthority, error) {
+	o := platformServiceEgressLoad{credential: admit.Credential, decrypt: admit.Credential != ""}
+	if admit.Credential != "" {
+		o.admit = &admit
+	}
+	return s.loadServiceEgressForSessionLoad(ctx, state, o)
+}
+
+func (s *Server) loadServiceEgressForSessionLoad(ctx context.Context, state platformServiceEgressSessionState, o platformServiceEgressLoad) (platformServiceEgressAuthority, error) {
+	o.identity, o.resources = state.identity, state.resources
+	a, err := s.loadPlatformServiceEgressCurrent(ctx, state.pin.installation, o)
 	if err != nil {
 		return a, err
 	}

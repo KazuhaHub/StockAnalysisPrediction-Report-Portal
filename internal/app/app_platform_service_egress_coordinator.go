@@ -515,7 +515,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 		}
 	}
 	load, cancel := context.WithTimeout(ctx, platformServiceEgressAdmitLoadTimeout)
-	a, err := c.server.loadServiceEgressForSessionCredential(load, l.state, admit.Credential, admit.Credential != "")
+	a, err := c.server.loadServiceEgressForSessionAdmit(load, l.state, admit)
 	cancel()
 	if err != nil {
 		code, class := transport.EgressRefusalUnavailable, transport.EgressOutcomeUnavailable

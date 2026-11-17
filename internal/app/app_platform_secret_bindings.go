@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"strings"
@@ -479,7 +480,7 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 	var policyRaw, reviewID, sealed string
 	if err := e.queryRow(`SELECT id,credential_id,credential_value_revision,operation,policy_json,policy_revision,review_plan_id,revision FROM app_platform_secret_bindings WHERE installation_id=? AND name=? AND state='active'`, installation, name).
 		Scan(&use.id, &use.credentialID, &use.credentialValueRevision, &use.operation, &policyRaw, &use.policyRevision, &reviewID, &use.revision); err != nil {
-		return use, "", errAppPlatformCredentialUnavailable
+		return use, "", platformBindingReadError(err)
 	}
 	if use.policyRevision != facts.policyRevision || !platformValidUUID(reviewID) || !platformValidUUID(use.id) || !platformValidUUID(use.credentialID) || use.credentialValueRevision < 1 || use.revision < 1 {
 		return use, "", errAppPlatformCredentialUnavailable
@@ -502,7 +503,9 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 	}
 	var raw, digest string
 	var consumed sql.NullInt64
-	if err := e.queryRow(`SELECT plan_json,plan_sha256,consumed_ms FROM app_platform_review_plans WHERE id=? AND action='update' AND installation_id=?`, reviewID, installation).Scan(&raw, &digest, &consumed); err != nil || !consumed.Valid || platformDigest([]byte(raw)) != digest {
+	if err := e.queryRow(`SELECT plan_json,plan_sha256,consumed_ms FROM app_platform_review_plans WHERE id=? AND action='update' AND installation_id=?`, reviewID, installation).Scan(&raw, &digest, &consumed); err != nil {
+		return use, "", platformBindingReadError(err)
+	} else if !consumed.Valid || platformDigest([]byte(raw)) != digest {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	plan, err := parsePlatformSecretBindingReview(raw)
@@ -511,10 +514,28 @@ func loadPlatformSecretBindingUseFor(e migExec, installation, name string, facts
 	}
 	var label, state string
 	var valueRevision, revision int64
-	if err := e.queryRow(`SELECT label,state,value_revision,revision,sealed_value FROM app_platform_credentials WHERE id=?`, use.credentialID).Scan(&label, &state, &valueRevision, &revision, &sealed); err != nil || label != plan.CredentialLabel || state != "active" || valueRevision != use.credentialValueRevision || revision != plan.CredentialRevision || sealed == "" {
+	if err := e.queryRow(`SELECT label,state,value_revision,revision,sealed_value FROM app_platform_credentials WHERE id=?`, use.credentialID).Scan(&label, &state, &valueRevision, &revision, &sealed); err != nil {
+		return use, "", platformBindingReadError(err)
+	} else if label != plan.CredentialLabel || state != "active" || valueRevision != use.credentialValueRevision || revision != plan.CredentialRevision || sealed == "" {
 		return use, "", errAppPlatformCredentialUnavailable
 	}
 	return use, sealed, nil
+}
+
+// errPlatformSecretBindingStore marks a binding read that failed for a reason of
+// the store (a database error, a cancelled or timed-out context), as opposed to
+// a binding that is absent or does not match. The first is no verdict on the
+// binding; every caller that treats a refusal as a denial must tell them apart.
+var errPlatformSecretBindingStore = errors.New("credential binding store unavailable")
+
+// platformBindingReadError classifies a failed binding query: no row is a plain
+// refusal, anything else is a store failure. Both still satisfy
+// errAppPlatformCredentialUnavailable, as every failure of this reader always did.
+func platformBindingReadError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return errAppPlatformCredentialUnavailable
+	}
+	return fmt.Errorf("%w: %w: %v", errAppPlatformCredentialUnavailable, errPlatformSecretBindingStore, err)
 }
 
 func (s *Server) resolvePlatformSecretBindingCommand(e migExec, installation, name string) (platformSecretBindingUse, string, []byte, error) {
