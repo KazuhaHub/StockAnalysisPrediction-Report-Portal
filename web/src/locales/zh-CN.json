@@ -3784,7 +3784,7 @@
   "appPlatform.settings.public.clientLimit": "每位访客每分钟请求数",
   "appPlatform.settings.public.backendLimit": "应用每秒请求数",
   "appPlatform.settings.public.hint": "默认关闭。响应内容由应用决定，应用无法识别访客。撤回在下一次请求时生效。",
-  "appPlatform.settings.public.notReady": "仅当应用已启用且就绪，并且没有安装、更新或其他操作进行中时，才能更改公开访问。",
+  "appPlatform.settings.public.notReady": "仅当应用已启用且就绪，并且没有安装、更新或其他操作进行中时，才能发布或更改公开访问。任何时候都可以撤回。",
   "appPlatform.settings.backend": "托管后端",
   "appPlatform.settings.backendRequired": "后端要求",
   "appPlatform.settings.staticOnly": "仅静态前端",

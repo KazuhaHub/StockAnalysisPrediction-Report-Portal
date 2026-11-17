@@ -3784,7 +3784,7 @@
   "appPlatform.settings.public.clientLimit": "Requests per minute per visitor",
   "appPlatform.settings.public.backendLimit": "App requests per second",
   "appPlatform.settings.public.hint": "This is off by default. The app decides what these responses contain, and visitors are never identified to it. Withdrawing takes effect on the next request.",
-  "appPlatform.settings.public.notReady": "Public access can be changed only while the app is enabled and ready and no install, update or other operation is in progress.",
+  "appPlatform.settings.public.notReady": "Public access can be published or changed only while the app is enabled and ready and no install, update or other operation is in progress. Withdrawing it is always possible.",
   "appPlatform.settings.backend": "Managed backend",
   "appPlatform.settings.backendRequired": "Backend requirement",
   "appPlatform.settings.staticOnly": "Static frontend only",

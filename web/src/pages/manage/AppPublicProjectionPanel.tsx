@@ -5,7 +5,7 @@ import { api, errText } from '../../api/client'
 
 // The administrator's side of the anonymous public projection (doc 179 section 4). The disclosure
 // is shown before anything is enabled, the choice of routes and limits narrows what the release
-// declared, and withdrawal is one click because it only removes exposure.
+// declared, and withdrawal is one click in any state because it only removes exposure.
 
 type PublicRoute = { id: string; path: string; query?: string[] | null; cache_seconds: number; response_bytes: number }
 type Preview = {
@@ -94,7 +94,7 @@ export default function AppPublicProjectionPanel({ root, installation, granted, 
     {error && !open && <Alert type="error" showIcon title={error} />}
     <Space wrap>
       <Button loading={busy && !open} disabled={!ready} onClick={() => void show()}>{granted ? t('appPlatform.settings.public.edit') : t('appPlatform.settings.public.enable')}</Button>
-      {granted && <Button loading={busy && !open} disabled={!ready} onClick={() => void withdraw()}>{t('appPlatform.settings.public.withdraw')}</Button>}
+      {granted && <Button loading={busy && !open} onClick={() => void withdraw()}>{t('appPlatform.settings.public.withdraw')}</Button>}
     </Space>
     {!ready && <Typography.Text type="secondary">{t('appPlatform.settings.public.notReady')}</Typography.Text>}
     <Modal

@@ -3784,7 +3784,7 @@
   "appPlatform.settings.public.clientLimit": "每位訪客每分鐘請求數",
   "appPlatform.settings.public.backendLimit": "應用程式每秒請求數",
   "appPlatform.settings.public.hint": "預設關閉。回應內容由應用程式決定，應用程式無法識別訪客。撤回會在下一次請求時生效。",
-  "appPlatform.settings.public.notReady": "僅當應用程式已啟用且就緒，並且沒有安裝、更新或其他作業進行中時，才能變更公開存取。",
+  "appPlatform.settings.public.notReady": "僅當應用程式已啟用且就緒，並且沒有安裝、更新或其他作業進行中時，才能發布或變更公開存取。任何時候都可以撤回。",
   "appPlatform.settings.backend": "託管後端",
   "appPlatform.settings.backendRequired": "後端要求",
   "appPlatform.settings.staticOnly": "僅靜態前端",

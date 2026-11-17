@@ -96,11 +96,10 @@ describe('public projection panel (doc 179 section 4)', () => {
     expect(changed).not.toHaveBeenCalled()
   })
 
-  it('disables both controls with an explanation while the installation is not ready', () => {
+  it('disables enabling and editing, but never withdrawal, while the installation is not ready', () => {
     mount({ granted: true, ready: false })
-    for (const name of ['appPlatform.settings.public.edit', 'appPlatform.settings.public.withdraw']) {
-      expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true)
-    }
+    expect(screen.getByRole('button', { name: 'appPlatform.settings.public.edit' }).hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'appPlatform.settings.public.withdraw' }).hasAttribute('disabled')).toBe(false)
     expect(screen.getByText('appPlatform.settings.public.notReady')).toBeTruthy()
   })
 })
