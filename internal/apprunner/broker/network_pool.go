@@ -20,13 +20,17 @@ const MaxNetworkPoolEntries = 32
 // It is in-memory scheduling state, not grants, durable replay or a service lease.
 // Reconstructing pools per request would bypass these limits and is forbidden.
 type NetworkPool struct {
-	slots    chan struct{}
-	current  CurrentNetworkAuthority
-	mu       sync.Mutex
-	entries  map[networkExecutorKey]*networkExecutorEntry
-	capacity int
-	create   func(HTTPPolicy) (*HTTP, error)
-	now      func() time.Time
+	slots chan struct{}
+	// background is the share of slots that service (no-viewer) calls may hold:
+	// active/2, nil when that is 0. Every background call takes one here and one
+	// in slots, so foreground always keeps at least half of the active slots.
+	background chan struct{}
+	current    CurrentNetworkAuthority
+	mu         sync.Mutex
+	entries    map[networkExecutorKey]*networkExecutorEntry
+	capacity   int
+	create     func(HTTPPolicy) (*HTTP, error)
+	now        func() time.Time
 }
 
 type networkExecutorKey struct {
@@ -61,14 +65,33 @@ func NewNetworkPool(active, entries int, current CurrentNetworkAuthority) (*Netw
 	if active < 1 || active > MaxNetworkPoolActive || entries < 1 || entries > MaxNetworkPoolEntries || current == nil {
 		return nil, ErrDenied
 	}
-	return &NetworkPool{slots: make(chan struct{}, active), current: current, entries: make(map[networkExecutorKey]*networkExecutorEntry), capacity: entries, now: time.Now, create: func(p HTTPPolicy) (*HTTP, error) {
+	var background chan struct{}
+	if active/2 > 0 {
+		background = make(chan struct{}, active/2)
+	}
+	return &NetworkPool{slots: make(chan struct{}, active), background: background, current: current, entries: make(map[networkExecutorKey]*networkExecutorEntry), capacity: entries, now: time.Now, create: func(p HTTPPolicy) (*HTTP, error) {
 		// Each signed invocation supplies the actual viewer-aware online check to
 		// the shared executor through NetworkCall. No authority result is cached.
 		return NewHTTP(p, func(context.Context) error { return nil })
 	}}, nil
 }
 
+// Do runs one signed foreground invocation.
 func (p *NetworkPool) Do(ctx context.Context, raw, signature, body []byte, a control.Authority) (HTTPResponse, error) {
+	return p.do(ctx, raw, signature, body, a, false)
+}
+
+// DoBackground runs one signed invocation made without a viewer (a service
+// egress session). It is the same executor, checks and per-installation budget
+// as Do; it differs only in admission: it needs a slot of the background share
+// (at most half of the active slots; none when there is only one) and reports a
+// full share, a full pool or a spent installation budget as ErrBusy, which the
+// caller may retry. A pool with no background share reports ErrUnavailable.
+func (p *NetworkPool) DoBackground(ctx context.Context, raw, signature, body []byte, a control.Authority) (HTTPResponse, error) {
+	return p.do(ctx, raw, signature, body, a, true)
+}
+
+func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a control.Authority, background bool) (HTTPResponse, error) {
 	var zero HTTPResponse
 	if p == nil || p.current == nil || p.slots == nil || ctx == nil {
 		return zero, ErrDenied
@@ -76,11 +99,24 @@ func (p *NetworkPool) Do(ctx context.Context, raw, signature, body []byte, a con
 	if ctx.Err() != nil {
 		return zero, ErrUnavailable
 	}
+	full := ErrUnavailable
+	if background {
+		if p.background == nil {
+			return zero, ErrUnavailable
+		}
+		full = ErrBusy
+		select {
+		case p.background <- struct{}{}:
+			defer func() { <-p.background }()
+		default:
+			return zero, ErrBusy
+		}
+	}
 	select {
 	case p.slots <- struct{}{}:
 		defer func() { <-p.slots }()
 	default:
-		return zero, ErrUnavailable
+		return zero, full
 	}
 	if len(raw) == 0 || len(raw) > control.MaxCommandBytes || len(signature) != 64 || len(body) > 65536 {
 		return zero, ErrDenied
@@ -121,7 +157,7 @@ func (p *NetworkPool) Do(ctx context.Context, raw, signature, body []byte, a con
 	if ctx.Err() != nil {
 		return zero, ErrUnavailable
 	}
-	lease, err := p.acquire(verified.Command())
+	lease, err := p.acquireWith(verified.Command(), full)
 	if err != nil {
 		return zero, err
 	}
@@ -134,6 +170,12 @@ func (p *NetworkPool) Do(ctx context.Context, raw, signature, body []byte, a con
 }
 
 func (p *NetworkPool) acquire(c control.NetworkHTTPRequestCommand) (*networkExecutorLease, error) {
+	return p.acquireWith(c, ErrUnavailable)
+}
+
+// acquireWith is acquire with the error reported for a spent per-installation
+// budget: ErrUnavailable for foreground, ErrBusy for background.
+func (p *NetworkPool) acquireWith(c control.NetworkHTTPRequestCommand, spent error) (*networkExecutorLease, error) {
 	policy, err := appplatform.ParseHTTPPolicy(c.PolicyRaw)
 	if err != nil || policy.SHA256 != c.PolicySHA256 {
 		return nil, ErrDenied
@@ -150,7 +192,7 @@ func (p *NetworkPool) acquire(c control.NetworkHTTPRequestCommand) (*networkExec
 		}
 	}
 	if active >= policy.Policy.Concurrency {
-		return nil, ErrUnavailable
+		return nil, spent
 	}
 	if entry := p.entries[key]; entry != nil {
 		entry.refs++

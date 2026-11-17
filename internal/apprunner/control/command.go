@@ -146,13 +146,31 @@ func strictObject(d *json.Decoder, depth int) bool {
 			return false
 		}
 		if delimiter, ok := token.(json.Delim); ok {
-			if delimiter != json.Delim('{') || !strictObject(d, depth+1) {
+			switch {
+			case delimiter == json.Delim('{') && strictObject(d, depth+1):
+			case delimiter == json.Delim('[') && strictScalarArray(d):
+			default:
 				return false
 			}
 		}
 	}
 	token, err := d.Token()
 	return err == nil && token == json.Delim('}')
+}
+
+// strictScalarArray consumes the rest of an array whose elements are all
+// scalars (the opening bracket is already read). Nested arrays and objects are
+// refused, so an array can never hide a duplicate key from strictObject. The
+// element count is bounded; a command that needs more is not a closed command.
+func strictScalarArray(d *json.Decoder) bool {
+	for count := 0; d.More(); count++ {
+		token, err := d.Token()
+		if _, nested := token.(json.Delim); err != nil || nested || count >= 32 {
+			return false
+		}
+	}
+	token, err := d.Token()
+	return err == nil && token == json.Delim(']')
 }
 func parse(raw []byte) (Command, error) {
 	var command Command

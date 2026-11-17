@@ -39,10 +39,37 @@ type networkProvider struct {
 	pool                    networkExecutor
 	stream                  networkStreamExecution
 	current                 broker.CurrentNetworkAuthority
-	mu                      sync.Mutex
-	sessions                map[string]*networkControlSession
-	streamSessions          map[string]*networkControlSession
+	// background runs signed calls made without a viewer (service egress). It is
+	// the same pool as pool, so one budget covers both; nil on a provider that was
+	// not built for egress.
+	background networkBackgroundExecutor
+	mu         sync.Mutex
+	// sessions and streamSessions map the Portal-minted request ID of a call in
+	// flight to the channel its authority checks travel on. egressChecks counts the
+	// entries of sessions that belong to background calls, so they never use up
+	// the foreground limit.
+	sessions       map[string]networkChecker
+	streamSessions map[string]networkChecker
+	egressChecks   int
 }
+
+type networkBackgroundExecutor interface {
+	DoBackground(context.Context, []byte, []byte, []byte, control.Authority) (broker.HTTPResponse, error)
+}
+
+// networkChecker is where one call's authority checks go: the executor asks
+// Portal for a fresh signed proof before lookup, before dial and before release,
+// and the checker carries each challenge to Portal and brings the proof back. A
+// foreground call's checker owns the connection it arrived on; a background
+// call's owns one call of a multiplexed egress session.
+type networkChecker interface {
+	// commandSHA256 is the hex SHA-256 of the exact signed command bytes the
+	// checker was registered for; a check for any other command is refused.
+	commandSHA256() string
+	// check sends one challenge and returns Portal's proof and signature.
+	check(ctx context.Context, challenge []byte) (proof, signature []byte, err error)
+}
+
 type networkControlSession struct {
 	conn       net.Conn
 	ctx        context.Context
@@ -59,8 +86,8 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 	}
 	p := &networkProvider{
 		store:          store,
-		sessions:       make(map[string]*networkControlSession),
-		streamSessions: make(map[string]*networkControlSession),
+		sessions:       make(map[string]networkChecker),
+		streamSessions: make(map[string]networkChecker),
 		activeLimit:    active,
 		cacheLimit:     entries,
 	}
@@ -74,6 +101,7 @@ func newNetworkProvider(store networkEnrollmentStore, active, entries int) (*net
 		return nil, err
 	}
 	p.pool = pool
+	p.background = pool
 	stream, err := broker.NewNetworkStreamPool(active, entries, current)
 	if err != nil {
 		return nil, err
@@ -100,13 +128,19 @@ func (p *networkProvider) confirm(ctx context.Context, c control.NetworkHTTPRequ
 		session = p.streamSessions[c.RequestID]
 	}
 	p.mu.Unlock()
-	if session == nil || session.requestSHA != hex.EncodeToString(digest[:]) {
+	if session == nil || session.commandSHA256() != hex.EncodeToString(digest[:]) {
 		return nil, nil, broker.ErrDenied
 	}
 	challenge, err := hex.DecodeString(nonce)
 	if err != nil || len(challenge) != 32 {
 		return nil, nil, broker.ErrDenied
 	}
+	return session.check(ctx, challenge)
+}
+
+func (session *networkControlSession) commandSHA256() string { return session.requestSHA }
+
+func (session *networkControlSession) check(ctx context.Context, challenge []byte) ([]byte, []byte, error) {
 	session.mu.Lock()
 	defer session.mu.Unlock()
 	if int(session.sequence) >= session.maxChecks || ctx.Err() != nil || session.ctx.Err() != nil {
@@ -217,7 +251,7 @@ func (p *networkProvider) serve(parent context.Context, conn net.Conn, magicCons
 	c := verified.Command()
 	session := &networkControlSession{conn: conn, ctx: ctx, requestSHA: hex.EncodeToString(requestSHA[:]), checkMagic: networkCheckMagic, maxChecks: 4}
 	p.mu.Lock()
-	if len(p.sessions) >= 8 || p.sessions[c.RequestID] != nil {
+	if len(p.sessions)-p.egressChecks >= 8 || p.sessions[c.RequestID] != nil {
 		p.mu.Unlock()
 		return
 	}
@@ -385,7 +419,7 @@ func exchangeNetworkSession(parent context.Context, conn net.Conn, raw, signatur
 			if _, err := control.VerifyNetworkHTTPRequest(raw, signature, a, time.Now().UnixMilli()); err != nil {
 				return zero, broker.ErrUncertain
 			}
-			return broker.HTTPResponse{Status: int(status), ContentType: kind, Body: bytes.Clone(content[kindSize:])}, nil
+			return broker.HTTPResponse{Status: int(status), ContentType: kind, Body: bytes.Clone(content[kindSize:]), RetryAfterSeconds: -1}, nil
 		default:
 			return zero, broker.ErrUncertain
 		}

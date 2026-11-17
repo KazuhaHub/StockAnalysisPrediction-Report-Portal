@@ -95,65 +95,22 @@ func (s *Store) ForwardServiceBackendTask(
 		return zero, ErrFenceReconciliation
 	}
 	command := verified.Command()
-	reg := initial.Command()
-	candidate := initial.Candidate()
-	parsed, err := appplatform.ParseDescriptor(descriptor)
-	if err != nil || parsed.SHA256 != candidate.Payload.ReleaseSHA256 ||
-		parsed.Manifest.Backend == nil ||
-		parsed.Manifest.ID != serviceTaskAppID(command.ServiceIdentity) {
-		return zero, ErrFenceReconciliation
-	}
-	expires, _ := strconv.ParseInt(identity.ExpiresMS, 10, 64)
-	bounded, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
-	defer cancel()
-	ctx = bounded
-	before, err := s.ReadBackendRegistrationReceipt(ctx, command.RegistrationRaw, command.RegistrationSignature)
+	prepared, err := s.prepareServiceBindingInitial(
+		ctx, initial, identity.ExpiresMS,
+		command.RegistrationRaw, command.RegistrationSignature,
+		descriptor, serviceTaskAppID(command.ServiceIdentity), native,
+		func(a control.Authority) error {
+			_, err := control.VerifyServiceBackendTask(
+				raw, signature, a, time.Now().UnixMilli())
+			return err
+		})
 	if err != nil {
 		return zero, err
 	}
-	tx, facts, err := s.beginBackendRegistration(ctx, command.RegistrationRaw, command.RegistrationSignature, "applied")
-	if err != nil {
-		return zero, err
-	}
-	stored, _ := json.Marshal(before)
-	if facts.receipt != string(stored) || !before.MatchesCommand(reg) {
-		tx.Rollback()
-		return zero, ErrFenceReconciliation
-	}
-	if _, err := control.VerifyServiceBackendTask(raw, signature, facts.source.authority, time.Now().UnixMilli()); err != nil {
-		tx.Rollback()
-		return zero, err
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, err
-	}
-	request, err := candidateNativeRequest(facts.verified.Candidate(), facts.source.data, descriptor)
-	if err != nil {
-		return zero, err
-	}
-	launch, err := native.PrepareCandidate(ctx, request)
-	if err != nil {
-		return zero, err
-	}
-	defer launch.Close()
-	snapshot, err := launch.Snapshot()
-	if err != nil || candidatePreflight(snapshot) != *facts.running.Claim.Preflight {
-		return zero, ErrFenceReconciliation
-	}
-	if _, err := s.ReadBackendRegistrationReceipt(ctx, command.RegistrationRaw, command.RegistrationSignature); err != nil {
-		return zero, err
-	}
-	if _, err := control.VerifyServiceBackendTask(raw, signature, facts.source.authority, time.Now().UnixMilli()); err != nil {
-		return zero, err
-	}
-	device, _ := strconv.ParseUint(before.Device, 10, 64)
-	inode, _ := strconv.ParseUint(before.Inode, 10, 64)
-	binding := driver.BackendRegistrationSnapshot{
-		Launch: snapshot, NativeID: before.Claim.NativeID,
-		BindingSHA256:  before.BindingSHA256,
-		DocumentSHA256: before.Claim.DocumentSHA256,
-		Device:         device, Inode: inode,
-	}
+	defer prepared.close()
+	ctx = prepared.ctx
+	facts, before, stored, launch, binding :=
+		prepared.facts, prepared.before, prepared.stored, prepared.launch, prepared.binding
 	observation, err := native.ForwardServiceTask(
 		ctx, launch, binding, body, command.ServiceIdentity, command.Handler)
 	if err != nil {
@@ -187,6 +144,119 @@ func (s *Store) ForwardServiceBackendTask(
 	}
 	encoded, _ := json.Marshal(result)
 	return ParseServiceBackendTaskResult(encoded)
+}
+
+// candidatePreparer is the one native call the preparation of an initial
+// registration makes; *driver.CandidateRuntime implements it.
+type candidatePreparer interface {
+	PrepareCandidate(context.Context, driver.CandidateLaunchRequest) (driver.CandidateLaunch, error)
+}
+
+// initialServiceBinding is an initial-registration installation, prepared for a
+// native exchange: its registration row was read and rechecked against the
+// journal, and its launch snapshot matches the one the container was started
+// with. It is shared by service tasks and service egress sessions, which differ
+// only in what they then ask the native runtime to do. close releases the launch
+// and the registration deadline.
+type initialServiceBinding struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	launch  driver.CandidateLaunch
+	binding driver.BackendRegistrationSnapshot
+	facts   backendRegistrationFacts
+	before  BackendRegistrationReceipt
+	stored  []byte
+}
+
+func (b *initialServiceBinding) close() {
+	b.launch.Close()
+	b.cancel()
+}
+
+// prepareServiceBindingInitial verifies an initial registration's journal state
+// and prepares its launch. verifyCommand re-verifies the caller's own signed
+// command against the journal's current authority, in the transaction that reads
+// the registration and again after the launch is prepared. appID, when not
+// empty, must be the application of the descriptor.
+func (s *Store) prepareServiceBindingInitial(
+	ctx context.Context,
+	initial control.VerifiedBackendRegistrationCommand,
+	expiresMS string,
+	registrationRaw, registrationSignature, descriptor []byte,
+	appID string,
+	native candidatePreparer,
+	verifyCommand func(control.Authority) error,
+) (*initialServiceBinding, error) {
+	reg := initial.Command()
+	candidate := initial.Candidate()
+	parsed, err := appplatform.ParseDescriptor(descriptor)
+	if err != nil || parsed.SHA256 != candidate.Payload.ReleaseSHA256 ||
+		parsed.Manifest.Backend == nil ||
+		(appID != "" && parsed.Manifest.ID != appID) {
+		return nil, ErrFenceReconciliation
+	}
+	expires, _ := strconv.ParseInt(expiresMS, 10, 64)
+	bounded, cancel := context.WithDeadline(ctx, time.UnixMilli(expires))
+	ok := false
+	defer func() {
+		if !ok {
+			cancel()
+		}
+	}()
+	ctx = bounded
+	before, err := s.ReadBackendRegistrationReceipt(ctx, registrationRaw, registrationSignature)
+	if err != nil {
+		return nil, err
+	}
+	tx, facts, err := s.beginBackendRegistration(ctx, registrationRaw, registrationSignature, "applied")
+	if err != nil {
+		return nil, err
+	}
+	stored, _ := json.Marshal(before)
+	if facts.receipt != string(stored) || !before.MatchesCommand(reg) {
+		tx.Rollback()
+		return nil, ErrFenceReconciliation
+	}
+	if err := verifyCommand(facts.source.authority); err != nil {
+		tx.Rollback()
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	request, err := candidateNativeRequest(facts.verified.Candidate(), facts.source.data, descriptor)
+	if err != nil {
+		return nil, err
+	}
+	launch, err := native.PrepareCandidate(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	snapshot, err := launch.Snapshot()
+	if err != nil || candidatePreflight(snapshot) != *facts.running.Claim.Preflight {
+		launch.Close()
+		return nil, ErrFenceReconciliation
+	}
+	if _, err := s.ReadBackendRegistrationReceipt(ctx, registrationRaw, registrationSignature); err != nil {
+		launch.Close()
+		return nil, err
+	}
+	if err := verifyCommand(facts.source.authority); err != nil {
+		launch.Close()
+		return nil, err
+	}
+	device, _ := strconv.ParseUint(before.Device, 10, 64)
+	inode, _ := strconv.ParseUint(before.Inode, 10, 64)
+	ok = true
+	return &initialServiceBinding{
+		ctx: ctx, cancel: cancel, launch: launch, facts: facts, before: before, stored: stored,
+		binding: driver.BackendRegistrationSnapshot{
+			Launch: snapshot, NativeID: before.Claim.NativeID,
+			BindingSHA256:  before.BindingSHA256,
+			DocumentSHA256: before.Claim.DocumentSHA256,
+			Device:         device, Inode: inode,
+		},
+	}, nil
 }
 
 func (s *Store) forwardUpdateStartServiceBackendTask(

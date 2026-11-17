@@ -326,6 +326,27 @@ jobs:
           cd internal/apprunner/driver
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE=1 PORTAL_APP_RUNNER_ACCEPTANCE_SOCKET="$probe_socket" PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE="$PORTAL_APP_RUNNER_ACCEPTANCE_IMAGE" PORTAL_APP_RUNNER_LIFECYCLE_IMAGE="$lifecycle_image" "$container_binary" -test.v -test.timeout=120s -test.run='^(TestDockerAcceptanceCandidate(Container|Lifecycle|InventoryReconciliation)|TestNativeCandidateMountPins.*)$'
 
+      - name: Verify the service broker socket through a read-only mount
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          build=$(mktemp "$RUNNER_TEMP/service-broker.XXXXXXXX")
+          # The test re-executes its binary as the application's user (65532), which cannot traverse the runner's
+          # home, so the binary runs from a root-owned directory every user can traverse.
+          bin_dir=$(sudo -n mktemp -d /tmp/service-broker.XXXXXXXX)
+          trap 'rm -f "$build"; sudo -n rm -rf "$bin_dir"' EXIT
+          go test -p 2 -race -c -o "$build" ./internal/apprunner/driver
+          sudo -n chmod 0755 "$bin_dir"
+          sudo -n install -m 0555 -o root -g root "$build" "$bin_dir/driver.test"
+          cd internal/apprunner/driver
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_CONTAINER_ACCEPTANCE=1 "$bin_dir/driver.test" -test.v -test.timeout=90s -test.run='^TestNativeServiceBrokerSocketInPinnedDir$'
+
       - name: Verify distinct controller and runner identities in isolation
         shell: bash
         env:
@@ -341,6 +362,27 @@ jobs:
           go test -p 2 -race -c -o "$identity_binary" ./internal/apprunner/transport
           chmod 0500 "$identity_binary"
           sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_IDENTITY_ACCEPTANCE=1 "$identity_binary" -test.v -test.timeout=90s -test.run='^TestControllerIdentityAcceptance$'
+
+      - name: Verify background broker egress through the root endpoint
+        shell: bash
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Linux
+          build=$(mktemp "$RUNNER_TEMP/runner-egress.XXXXXXXX")
+          # The test re-executes its binary as the application's user (65532), which cannot traverse the runner's
+          # home, so the binary runs from a root-owned directory every user can traverse.
+          bin_dir=$(sudo -n mktemp -d /tmp/runner-egress.XXXXXXXX)
+          trap 'rm -f "$build"; sudo -n rm -rf "$bin_dir"' EXIT
+          go test -p 2 -race -c -o "$build" ./internal/apprunner/transport
+          sudo -n chmod 0755 "$bin_dir"
+          sudo -n install -m 0555 -o root -g root "$build" "$bin_dir/transport.test"
+          cd internal/apprunner/transport
+          sudo -n env -i PATH=/usr/bin:/bin GOMAXPROCS=2 GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted PORTAL_APP_RUNNER_EGRESS_ACCEPTANCE=1 "$bin_dir/transport.test" -test.v -test.timeout=90s -test.run='^TestServiceEgressEndpointAcceptance$'
 
       - name: Verify Portal confirmation through the root endpoint
         shell: bash
