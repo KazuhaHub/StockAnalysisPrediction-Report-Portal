@@ -193,9 +193,11 @@ def render(raw):
             raise ValueError("regexp source requires escaped controls and no literal backticks")
         go.append(f"var {key}Pattern = regexp.MustCompile(`{value}`)")
     ts.append("export const DESCRIPTOR_PATTERNS = " + json.dumps(patterns, indent=2) + " as const;")
-    capabilities = without_null(p("Capabilities", "required"))["items"]["enum"]
-    if capabilities != without_null(p("Capabilities", "optional"))["items"]["enum"]:
-        raise ValueError("required and optional capability domains differ")
+    # The optional list is the full capability domain. The required list may name fewer: a capability
+    # that is optional only (principals.read) is absent from it, so a required declaration is refused.
+    capabilities = without_null(p("Capabilities", "optional"))["items"]["enum"]
+    if not set(without_null(p("Capabilities", "required"))["items"]["enum"]) <= set(capabilities):
+        raise ValueError("required capability domain is not inside the optional domain")
     for go_name, ts_name, values in (
         ("descriptorKnownCapabilities", "DESCRIPTOR_CAPABILITIES", capabilities),
         ("descriptorLocaleNames", "DESCRIPTOR_LOCALES", p("Presentation", "locales")["items"]["enum"]),

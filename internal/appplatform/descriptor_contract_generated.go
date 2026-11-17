@@ -3,7 +3,7 @@ package appplatform
 
 import "regexp"
 
-const descriptorContractSHA256 = "0452e028d17affe7acb9e0f8129448cefcd42e8a7ba8ca2aa35f8b1533e4b028"
+const descriptorContractSHA256 = "f24a7c8a0e71b27f162b88a65d1665515a6f5b989c681197c6b9df77d74ddf76"
 
 type Manifest struct {
 	Format        string            `json:"format"`

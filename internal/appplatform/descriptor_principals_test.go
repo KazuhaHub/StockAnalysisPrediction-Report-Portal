@@ -47,12 +47,13 @@ func TestDescriptorRefusesRequiredPrincipalsRead(t *testing.T) {
 	}
 }
 
-func TestDescriptorSchemaListsPrincipalsRead(t *testing.T) {
+func TestDescriptorSchemaListsPrincipalsReadAsOptionalOnly(t *testing.T) {
 	raw, err := os.ReadFile("contract/descriptor-v2.schema.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(raw), `"principals.read"`) != 2 || strings.Contains(string(raw), `"maxItems": 11`) {
-		t.Fatal("both capability lists must name principals.read and allow twelve entries")
+	// Only the optional list names it (doc 181 section 3.1); required keeps eleven entries.
+	if strings.Count(string(raw), `"principals.read"`) != 1 || strings.Count(string(raw), `"maxItems": 12`) < 1 || strings.Count(string(raw), `"maxItems": 11`) < 1 {
+		t.Fatal("principals.read must be in the optional list only")
 	}
 }

@@ -405,11 +405,10 @@
                   "secrets.use",
                   "secrets.read",
                   "background.run",
-                  "files.export",
-                  "principals.read"
+                  "files.export"
                 ]
               },
-              "maxItems": 12,
+              "maxItems": 11,
               "uniqueItems": true
             },
             {
