@@ -286,6 +286,13 @@ export default function AppPlatformInstallPanel() {
     pids: reviewRelease.resources.pids,
   }) : reviewRelease ? t('appPlatform.frontendOnly') : '—'
   const declined = review?.review.action === 'install' ? review.review.declined_capabilities : review?.review.action === 'update' ? review.review.declined_capabilities : []
+  // Doc 174 section 4: background egress needs no new review, so the review that grants background.run and
+  // network.http together says what that means. A capability is granted when the release declares it and the
+  // review does not decline it; only an install or an update grants.
+  const grantsCapabilities = review?.review.action === 'install' || review?.review.action === 'update'
+  const grants = (capability: string) => grantsCapabilities && !declined.includes(capability) &&
+    (reviewRelease?.required_capabilities?.includes(capability) || reviewRelease?.optional_capabilities?.includes(capability)) === true
+  const backgroundNetwork = grants('background.run') && grants('network.http')
   const lifecycleTitle = review?.review.action === 'update'
     ? 'appPlatform.confirmUpdateTitle'
     : review?.review.action === 'disable'
@@ -356,6 +363,7 @@ export default function AppPlatformInstallPanel() {
           { key: 'requiredPermissions', label: t('appPlatform.requiredPermissions'), children: permissionList(reviewRelease?.required_capabilities) },
           { key: 'optionalPermissions', label: t('appPlatform.optionalPermissions'), children: permissionList(reviewRelease?.optional_capabilities) },
           ...(declined.length ? [{ key: 'declinedPermissions', label: t('appPlatform.declinedPermissions'), children: permissionList(declined) }] : []),
+          ...(backgroundNetwork ? [{ key: 'backgroundNetwork', label: t('appPlatform.backgroundNetwork'), children: t('appPlatform.backgroundNetworkNote') }] : []),
           ...(updateDiff ? [{ key: 'permissionChanges', label: t('appPlatform.permissionDiffLabel'), children: t('appPlatform.permissionDiff', { added: permissionList(updateDiff.added), removed: permissionList(updateDiff.removed) }) }] : []),
         ]),
         { key: 'data', label: t('appPlatform.storage'), children: uninstallReview ? t(uninstallReview.managed_data_cleared ? 'appPlatform.uninstallManagedData' : 'appPlatform.uninstallPluginData') : disableReview ? t('appPlatform.disableDataRetained') : review.review.action === 'update' ? t('appPlatform.dataSchemaRetained', { schema: review.review.declared_data_schema }) : enableReview ? t('appPlatform.enableDataRetained') : t('appPlatform.noData') },

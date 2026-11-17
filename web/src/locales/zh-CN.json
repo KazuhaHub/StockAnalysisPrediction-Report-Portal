@@ -3694,6 +3694,8 @@
   "appPlatform.requiredPermissions": "必需权限",
   "appPlatform.optionalPermissions": "可选权限",
   "appPlatform.declinedPermissions": "未授予的可选权限",
+  "appPlatform.backgroundNetwork": "后台网络访问",
+  "appPlatform.backgroundNetworkNote": "此应用可以在无人登录时访问已审核的目标地址。",
   "appPlatform.permissionDiffLabel": "权限变更",
   "appPlatform.compatibility": "平台兼容性",
   "appPlatform.resources": "资源需求",
