@@ -55,4 +55,5 @@ func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformA
 	}
 	t.Log("PORTAL_NETWORK_CURRENT_GRANT_RECHECKED")
 	testNativePlatformNetworkRoundtrip(t, s, actor, installation, binding, endpoint)
+	testNativePlatformServiceEgress(t, s, installation, endpoint)
 }
