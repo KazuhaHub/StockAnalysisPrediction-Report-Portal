@@ -537,10 +537,11 @@ func (s *Server) loadServiceEgressForSessionLoad(ctx context.Context, state plat
 // not); the check resolves the binding again, without opening the value, and
 // refuses unless it is exactly that one: a revoked binding, a rotated or revoked
 // credential, a withdrawn service principal or a changed policy all differ.
-func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformServiceEgressSessionState, command control.NetworkHTTPRequestCommand, commandRaw []byte, challenge string, binding platformSecretBindingUse) ([]byte, []byte, error) {
+func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformServiceEgressSessionState, call platformServiceEgressCall, challenge string) ([]byte, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, platformServiceEgressCheckBudget)
 	defer cancel()
-	if (command.CredentialName != "") != (binding.id != "") {
+	command, binding := call.command, call.binding
+	if !call.consistent || (command.CredentialName != "") != (binding.id != "") {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
 	a, err := s.loadServiceEgressForSessionCredential(ctx, state, command.CredentialName, false)
@@ -549,15 +550,24 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 	}
 	defer a.Close()
 	now := time.Now().UnixMilli()
-	raw, err := marshalPlatformServiceEgressCommand(command)
-	if err != nil || !bytes.Equal(raw, commandRaw) || !a.hasNetwork() ||
+	// The call no longer holds the credential value. The fields are validated as
+	// signed, with a stand-in of the right shape for the value, which the
+	// metadata validation only requires to be present.
+	checked := command
+	if call.credentialHeader != "" {
+		checked.CredentialValue = []byte("Bearer x")
+		if call.credentialHeader != "Authorization" {
+			checked.CredentialValue = []byte("x")
+		}
+	}
+	if !a.hasNetwork() ||
 		command.InstallationID != a.installation ||
 		command.ActorScope != platformServiceEgressActorScope(state.sessionID) ||
 		command.ReviewPlanID != a.grant.review || command.PolicySHA256 != a.policy.SHA256 ||
-		a.binding != binding || command.CredentialHeader != binding.header || (binding.id == "") != (len(command.CredentialValue) == 0) ||
+		a.binding != binding || command.CredentialHeader != binding.header || (binding.id == "") != (call.credentialHeader == "") ||
 		command.Generation != a.facts.generation || command.PolicyRevision != a.facts.policyRevision ||
 		command.ReleaseSHA256 != a.facts.release ||
-		control.ValidateNetworkHTTPRequestMetadata(command, a.authority, now) != nil {
+		control.ValidateNetworkHTTPRequestMetadata(checked, a.authority, now) != nil {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
 	if expires, err := strconv.ParseInt(command.ExpiresMS, 10, 64); err != nil || expires > state.expiresMS {
@@ -565,14 +575,37 @@ func (s *Server) approveServiceEgressCheck(ctx context.Context, state platformSe
 	}
 	key := ed25519.NewKeyFromSeed(a.controlSeed)
 	defer clear(key)
-	proof, signature, err := control.SignNetworkHTTPCheck(command, challenge, key, a.authority, now)
+	expires, _ := strconv.ParseInt(command.ExpiresMS, 10, 64)
+	proof, signature, err := control.SignNetworkHTTPCheckDigest(call.sha, challenge, expires, key, now)
 	if err != nil || ctx.Err() != nil {
 		return nil, nil, errPlatformServiceEgressDenied
 	}
-	if control.VerifyNetworkHTTPCheck(command, challenge, proof, signature, a.authority, time.Now().UnixMilli()) != nil {
-		return nil, nil, errPlatformServiceEgressDenied
-	}
 	return proof, signature, nil
+}
+
+// platformServiceEgressCall is what a call keeps of its signed command once the
+// command has been sent: the fields the checks compare and the digest the proofs
+// bind, never the credential value and never the signed bytes (which carry it).
+type platformServiceEgressCall struct {
+	command control.NetworkHTTPRequestCommand // CredentialValue is always nil
+	sha     string
+	binding platformSecretBindingUse
+	// credentialHeader is the header the value was placed in, or "".
+	credentialHeader string
+	// consistent is whether the command's fields are exactly the signed bytes.
+	consistent bool
+}
+
+// newPlatformServiceEgressCall keeps the fields and the digest of a signed
+// command. It copies; the caller wipes its own command and bytes.
+func newPlatformServiceEgressCall(command control.NetworkHTTPRequestCommand, raw []byte, binding platformSecretBindingUse) platformServiceEgressCall {
+	kept := command
+	kept.PolicyRaw = bytes.Clone(command.PolicyRaw)
+	kept.CredentialValue = nil
+	again, err := marshalPlatformServiceEgressCommand(command)
+	consistent := err == nil && bytes.Equal(again, raw)
+	clear(again)
+	return platformServiceEgressCall{command: kept, sha: platformDigest(raw), binding: binding, credentialHeader: command.CredentialHeader, consistent: consistent}
 }
 
 func marshalPlatformServiceEgressCommand(c control.NetworkHTTPRequestCommand) ([]byte, error) {

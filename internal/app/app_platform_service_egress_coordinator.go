@@ -550,8 +550,15 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 	if err != nil {
 		return
 	}
-	defer clear(frame)
-	if call.Send(transport.EgressFrameCommand, frame) != nil {
+	sent := call.Send(transport.EgressFrameCommand, frame)
+	// From here the checks need the command's fields and digest, not the value:
+	// wipe the value, the signed bytes and the frame copy now, not at the end of a
+	// call that may wait on the upstream for its whole deadline.
+	kept := newPlatformServiceEgressCall(command, raw, binding)
+	clear(frame)
+	clear(raw)
+	clear(command.CredentialValue)
+	if sent != nil {
 		return
 	}
 	// withheld is set when Portal itself refused a proof (the authority was lost
@@ -569,7 +576,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 			if err != nil {
 				return
 			}
-			proof, proofSignature, err := c.server.approveServiceEgressCheck(ctx, l.state, command, raw, hex.EncodeToString(nonce[:]), binding)
+			proof, proofSignature, err := c.server.approveServiceEgressCheck(ctx, l.state, kept, hex.EncodeToString(nonce[:]))
 			if err != nil {
 				// A refused check is the absence of a proof: answering twice would
 				// close the session, and the runner treats silence as a denial.

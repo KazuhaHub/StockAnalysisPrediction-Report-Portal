@@ -240,11 +240,11 @@ func testPlatformServiceEgressCredentialRefusedAfterChange(t *testing.T, pg bool
 			nonce := hex.EncodeToString(bytes.Repeat([]byte{7}, 32))
 			// The call is good until something changes: every challenge is
 			// answered from current state.
-			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, nonce, binding); err != nil {
+			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, newPlatformServiceEgressCall(command, raw, binding), nonce); err != nil {
 				t.Fatal("check refused before the change:", err)
 			}
 			change(t, s, admin, installation, credential)
-			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, nonce, binding); err == nil {
+			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, newPlatformServiceEgressCall(command, raw, binding), nonce); err == nil {
 				t.Fatal("a check was answered after the change")
 			}
 		})
@@ -259,20 +259,20 @@ func testPlatformServiceEgressCheckBindsTheCallsCredential(t *testing.T, pg bool
 	ctx := context.Background()
 	// A command that names a binding is not checkable without the binding the
 	// admit resolved, and not against another one.
-	if _, _, err := s.approveServiceEgressCheck(ctx, state, command, raw, nonce, platformSecretBindingUse{}); err == nil {
+	if _, _, err := s.approveServiceEgressCheck(ctx, state, newPlatformServiceEgressCall(command, raw, platformSecretBindingUse{}), nonce); err == nil {
 		t.Fatal("credential command checked without its binding")
 	}
 	other := binding
 	other.revision++
-	if _, _, err := s.approveServiceEgressCheck(ctx, state, command, raw, nonce, other); err == nil {
+	if _, _, err := s.approveServiceEgressCheck(ctx, state, newPlatformServiceEgressCall(command, raw, other), nonce); err == nil {
 		t.Fatal("credential command checked against a different binding revision")
 	}
 	// A call without a credential is not checkable against a binding.
 	plainCommand, plainRaw, _ := platformServiceEgressSignFor(t, s, state)
-	if _, _, err := s.approveServiceEgressCheck(ctx, state, plainCommand, plainRaw, nonce, binding); err == nil {
+	if _, _, err := s.approveServiceEgressCheck(ctx, state, newPlatformServiceEgressCall(plainCommand, plainRaw, binding), nonce); err == nil {
 		t.Fatal("plain command checked against a binding")
 	}
-	if _, _, err := s.approveServiceEgressCheck(ctx, state, plainCommand, plainRaw, nonce, platformSecretBindingUse{}); err != nil {
+	if _, _, err := s.approveServiceEgressCheck(ctx, state, newPlatformServiceEgressCall(plainCommand, plainRaw, platformSecretBindingUse{}), nonce); err != nil {
 		t.Fatal("plain command refused:", err)
 	}
 }
