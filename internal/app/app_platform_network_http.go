@@ -11,7 +11,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -67,12 +66,11 @@ func readPlatformNetworkHTTPRequest(w http.ResponseWriter, r *http.Request) (pla
 			return platformNetworkHTTPRequest{}, errPlatformManagementInput
 		}
 	}
-	if !result.binding.valid() || !slices.Contains([]string{"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}, result.method) || len(result.target) == 0 || len(result.target) > 4096 || !appplatform.ValidHTTPPolicyHeaderValue(result.accept) || !appplatform.ValidHTTPPolicyHeaderValue(result.kind) || len(body) > base64.StdEncoding.EncodedLen(appplatform.MaxHTTPRequestBytes) {
+	if !result.binding.valid() || !appplatform.ValidHTTPRequestMethod(result.method) || len(result.target) == 0 || len(result.target) > appplatform.MaxHTTPTargetBytes || !appplatform.ValidHTTPPolicyHeaderValue(result.accept) || !appplatform.ValidHTTPPolicyHeaderValue(result.kind) {
 		return platformNetworkHTTPRequest{}, errPlatformManagementInput
 	}
-	decoded, err := base64.StdEncoding.Strict().DecodeString(body)
-	if err != nil || len(decoded) > appplatform.MaxHTTPRequestBytes || base64.StdEncoding.EncodeToString(decoded) != body {
-		clear(decoded)
+	decoded, err := appplatform.DecodeHTTPRequestBody(body)
+	if err != nil {
 		return platformNetworkHTTPRequest{}, errPlatformManagementInput
 	}
 	result.body = decoded

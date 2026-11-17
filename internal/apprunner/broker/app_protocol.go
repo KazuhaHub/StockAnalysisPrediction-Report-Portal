@@ -1,0 +1,258 @@
+package broker
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"io"
+	"strconv"
+	"unicode/utf8"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+)
+
+// This file is the application-facing wire of the background broker,
+// `portal.broker/1`: strict decoders for what an application sends and
+// canonical encoders for what it receives. It decides no authority. Portal and
+// the runner executor re-derive every grant; nothing here is ever sent upstream
+// before they have approved it.
+
+// AppProtocol names the application-facing broker protocol.
+const AppProtocol = "portal.broker/1"
+
+// MaxAppRequestBytes bounds one request body on the broker socket. It equals the
+// foreground gateway's limit: a 64 KiB body is 87,384 base64 bytes, and the rest
+// is room for the URL and the two header values, JSON-escaped.
+const MaxAppRequestBytes = 128 << 10
+
+// MaxAppNoticeBytes bounds one notification body (doc 152 input).
+const MaxAppNoticeBytes = 16384
+
+const maxAppRequestIDBytes = 64
+
+// ErrAppInvalid is any malformed, open-schema or out-of-bounds application input.
+var ErrAppInvalid = errors.New("broker application request invalid")
+
+// Application-visible error codes.
+const (
+	AppErrInvalid     = "invalid"
+	AppErrDenied      = "denied"
+	AppErrUnavailable = "unavailable"
+	AppErrBusy        = "busy"
+	AppErrUncertain   = "uncertain"
+	AppErrConflict    = "conflict"
+	AppErrCapacity    = "capacity"
+)
+
+// AppHTTPRequest is a decoded POST /v1/network/http body. RequestID is only for
+// the application's own correlation; it is never signed, logged as authority or
+// sent upstream. Portal mints the identifier it signs.
+type AppHTTPRequest struct {
+	RequestID, Method, URL, Accept, ContentType string
+	Body                                        []byte
+}
+
+// DecodeAppHTTPRequest accepts exactly the six fields requestId, method, url,
+// accept, contentType and bodyBase64, each a JSON string, with no duplicate,
+// unknown, differently-cased or null member. Value rules match the foreground
+// gateway (shared with it through package appplatform). On error nothing partial
+// is returned.
+func DecodeAppHTTPRequest(raw []byte) (AppHTTPRequest, error) {
+	var zero, out AppHTTPRequest
+	fields, err := decodeAppObject(raw, MaxAppRequestBytes, "requestId", "method", "url", "accept", "contentType", "bodyBase64")
+	if err != nil || len(fields) != 6 {
+		return zero, ErrAppInvalid
+	}
+	out.RequestID, out.Method, out.URL, out.Accept, out.ContentType = fields["requestId"], fields["method"], fields["url"], fields["accept"], fields["contentType"]
+	if !validAppRequestID(out.RequestID) || !appplatform.ValidHTTPRequestMethod(out.Method) || len(out.URL) == 0 || len(out.URL) > appplatform.MaxHTTPTargetBytes || !appplatform.ValidHTTPPolicyHeaderValue(out.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(out.ContentType) {
+		return zero, ErrAppInvalid
+	}
+	out.Body, err = appplatform.DecodeHTTPRequestBody(fields["bodyBase64"])
+	if err != nil {
+		return zero, ErrAppInvalid
+	}
+	return out, nil
+}
+
+func validAppRequestID(s string) bool {
+	if len(s) < 1 || len(s) > maxAppRequestIDBytes {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// AppNotice is the closed doc 152 notification input. Its values are validated
+// by Portal's central notification rules, not here; this layer only guarantees
+// the shape and size so that exactly these four strings cross to Portal.
+type AppNotice struct{ OccurrenceID, Title, Message, Severity string }
+
+// DecodeAppNotice accepts exactly occurrenceId, title, message and severity as
+// JSON strings.
+func DecodeAppNotice(raw []byte) (AppNotice, error) {
+	fields, err := decodeAppObject(raw, MaxAppNoticeBytes, "occurrenceId", "title", "message", "severity")
+	if err != nil || len(fields) != 4 {
+		return AppNotice{}, ErrAppInvalid
+	}
+	return AppNotice{OccurrenceID: fields["occurrenceId"], Title: fields["title"], Message: fields["message"], Severity: fields["severity"]}, nil
+}
+
+// JSON is the canonical encoding that crosses to Portal in a notice frame.
+func (n AppNotice) JSON() []byte {
+	out, _ := json.Marshal(struct {
+		OccurrenceID string `json:"occurrenceId"`
+		Title        string `json:"title"`
+		Message      string `json:"message"`
+		Severity     string `json:"severity"`
+	}(n))
+	return out
+}
+
+// decodeAppObject reads one JSON object whose members are all strings and all
+// named in allowed, refusing duplicates (exact, case-sensitive), nulls,
+// non-string values, trailing data, invalid UTF-8 and anything over limit bytes.
+func decodeAppObject(raw []byte, limit int, allowed ...string) (map[string]string, error) {
+	if len(raw) == 0 || len(raw) > limit || !utf8.Valid(raw) {
+		return nil, ErrAppInvalid
+	}
+	d := json.NewDecoder(bytes.NewReader(raw))
+	if token, err := d.Token(); err != nil || token != json.Delim('{') {
+		return nil, ErrAppInvalid
+	}
+	out := make(map[string]string, len(allowed))
+	for d.More() {
+		token, err := d.Token()
+		key, ok := token.(string)
+		if err != nil || !ok {
+			return nil, ErrAppInvalid
+		}
+		known := false
+		for _, name := range allowed {
+			known = known || key == name
+		}
+		if _, duplicate := out[key]; duplicate || !known {
+			return nil, ErrAppInvalid
+		}
+		var value json.RawMessage
+		if d.Decode(&value) != nil {
+			return nil, ErrAppInvalid
+		}
+		var text string
+		if len(value) == 0 || value[0] != '"' || json.Unmarshal(value, &text) != nil {
+			return nil, ErrAppInvalid
+		}
+		out[key] = text
+	}
+	if token, err := d.Token(); err != nil || token != json.Delim('}') {
+		return nil, ErrAppInvalid
+	}
+	if _, err := d.Token(); err != io.EOF {
+		return nil, ErrAppInvalid
+	}
+	return out, nil
+}
+
+// AppErrorStatus is the HTTP status of an application-visible error code. An
+// unknown code is reported as uncertain, never invented or echoed.
+func AppErrorStatus(code string) int {
+	switch code {
+	case AppErrInvalid:
+		return 400
+	case AppErrDenied:
+		return 403
+	case AppErrUnavailable:
+		return 503
+	case AppErrBusy, AppErrCapacity:
+		return 429
+	case AppErrConflict:
+		return 409
+	default:
+		return 502
+	}
+}
+
+// AppErrorRetryAfter is the Retry-After header value of a code, or "" for none.
+// Only busy sets it: the budget it reports frees within a call's lifetime. The
+// broker never retries; this is advice, and the body stays retryable:false.
+func AppErrorRetryAfter(code string) string {
+	if code == AppErrBusy {
+		return "1"
+	}
+	return ""
+}
+
+// AppErrorBody is the closed error body. retryable is always false: the
+// application owns retry policy.
+func AppErrorBody(code string) []byte {
+	switch code {
+	case AppErrInvalid, AppErrDenied, AppErrUnavailable, AppErrBusy, AppErrUncertain, AppErrConflict, AppErrCapacity:
+	default:
+		code = AppErrUncertain
+	}
+	return []byte(`{"error":"` + code + `","retryable":false}`)
+}
+
+// AppErrorFor maps an executor outcome to an application error code. ErrBusy
+// wraps ErrUnavailable, so it is tested first. Any other error, or none where a
+// response was required, is reported as uncertain: the caller must not claim an
+// effect did not happen when it cannot tell.
+func AppErrorFor(err error) string {
+	switch {
+	case errors.Is(err, ErrDenied):
+		return AppErrDenied
+	case errors.Is(err, ErrBusy):
+		return AppErrBusy
+	case errors.Is(err, ErrUnavailable):
+		return AppErrUnavailable
+	default:
+		return AppErrUncertain
+	}
+}
+
+// AppHTTPSuccessBody encodes a released upstream response. retryAfterSeconds is
+// null unless the executor released one (>= 0).
+func AppHTTPSuccessBody(r HTTPResponse) []byte {
+	contentType, _ := json.Marshal(r.ContentType)
+	out := append([]byte(`{"status":`), strconv.Itoa(r.Status)...)
+	out = append(out, `,"contentType":`...)
+	out = append(out, contentType...)
+	out = append(out, `,"bodyBase64":"`...)
+	out = base64.StdEncoding.AppendEncode(out, r.Body)
+	out = append(out, `","retryAfterSeconds":`...)
+	if r.RetryAfterSeconds >= 0 {
+		out = strconv.AppendInt(out, int64(r.RetryAfterSeconds), 10)
+	} else {
+		out = append(out, "null"...)
+	}
+	return append(out, '}')
+}
+
+// AppNoticeSuccessBody encodes the result of a published notification.
+func AppNoticeSuccessBody(eventID string, created bool) []byte {
+	id, _ := json.Marshal(eventID)
+	out := append([]byte(`{"eventId":`), id...)
+	out = append(out, `,"created":`...)
+	out = strconv.AppendBool(out, created)
+	return append(out, '}')
+}
+
+// AppStatusBody encodes GET /v1/status. resources lists what the current egress
+// session may use; it is empty when egress is unavailable.
+func AppStatusBody(available bool, resources []string) []byte {
+	state := "unavailable"
+	if available {
+		state = "available"
+	}
+	if resources == nil {
+		resources = []string{}
+	}
+	list, _ := json.Marshal(resources)
+	return []byte(`{"egress":"` + state + `","resources":` + string(list) + `}`)
+}
