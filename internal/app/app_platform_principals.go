@@ -351,4 +351,3 @@ func (s *Server) platformPrincipalAccess(ctx context.Context, session platformAc
 	})
 	return group, err
 }
-
