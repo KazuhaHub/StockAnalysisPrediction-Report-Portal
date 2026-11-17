@@ -146,6 +146,10 @@ editor, `BatchRowsEditor`) follows the same table rules plus these:
   its code wait the ring carries on instead of restarting.
 - A table's first load shows skeleton rows in the table's own shape (`CardTable`); a refresh keeps
   the rows under antd's spinner.
+- A refresh scopes its spinner to what is being replaced, not the page: switching a report tab spins
+  the report card while the tabs and the quote stay usable, and the pressed tab is selected at once.
+  A Spin over content taller than the screen adds `rp-spin-tall`, which keeps the ring in view
+  (antd centres it in the whole block, far below the fold for a long report).
 - No hand-placed large spinners (`loadingStates.test.ts`). Never render defaults as if the server
   had sent them; a failed load says so and offers a retry.
 

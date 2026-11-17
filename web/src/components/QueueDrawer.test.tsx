@@ -258,6 +258,23 @@ describe('Tasks drawer Runs tab', () => {
     expect(row.textContent).toContain('tasks.rows:{"done":2,"total":5}')
   })
 
+  it('marks a batch run\'s inputs as its first row instead of passing them off as the whole run', async () => {
+    store.jobs = [
+      job({ id: 1, status: 'finished', total: 20, succeeded: 19, failed: 1, finished_at: '2026-11-16 04:26:00', inputs: JSON.stringify({ symbol: '301001' }) }),
+      job({ id: 2, status: 'finished', total: 1, succeeded: 1, finished_at: '2026-11-16 03:00:00', inputs: JSON.stringify({ symbol: '300778' }) }),
+    ]
+    mount()
+    const [batch, single] = await waitFor(() => {
+      const r = rows('tasks.section.finished')
+      expect(r).toHaveLength(2)
+      return r
+    })
+    expect(batch.textContent).toContain('batch.inputsFirstRow:{"n":20}')
+    expect(batch.textContent).toContain('symbol=301001')
+    expect(single.textContent).toContain('symbol=300778')
+    expect(single.textContent).not.toContain('batch.inputsFirstRow')
+  })
+
   it('says how many are ahead of a queued run, and who is next', async () => {
     store.jobs = [job({ id: 2, status: 'queued', ahead: 2 }), job({ id: 3, status: 'queued', ahead: 0 })]
     mount()

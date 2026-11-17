@@ -12,6 +12,7 @@ import type { CardQuote } from '../lib/useHomeQuotes'
 // with it on every seven-figure amount.
 import { fenToYuan, signedFenToYuan } from '../lib/money'
 import { FavoriteButton } from './FavoriteButton'
+import { QuotePhaseLabel } from './QuotePhaseLabel'
 
 // How tall the price line is, in CSS pixels, whether or not there is a price in it.
 //
@@ -24,6 +25,7 @@ import { FavoriteButton } from './FavoriteButton'
 // a 22px hole would clip — so the numbers are set at 1.2 and the hole is sized for that, rather than
 // the hole being sized for whatever line-height the theme happens to ship.
 const QUOTE_LINE_H = 22
+
 const PREVIEW_REPORT_LIMIT = 3
 const PREVIEW_HOVER_DELAY_SECONDS = 0.7
 
@@ -244,11 +246,11 @@ export default function ReportCard({
                 <>
                   <span
                     data-testid="card-quote"
-                    style={{ color: moveColour, fontSize: 16, fontWeight: 600, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}
+                    style={{ color: moveColour, fontSize: 16, fontWeight: 600, lineHeight: 1.2, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}
                   >
                     {fenToYuan(quote.last)}
                   </span>
-                  <span style={{ color: moveColour, fontSize: 13, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ color: moveColour, fontSize: 13, lineHeight: 1.2, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                     {signedFenToYuan(quote.change)}
                   </span>
                   {/* Verbatim, with a '%' and nothing else — not parsed, not reformatted, not derived
@@ -256,9 +258,11 @@ export default function ReportCard({
                       ex-rights morning the exchange restates the previous close and the vendor's
                       percentage is computed against that, so our own arithmetic would print a
                       double-digit crash on a stock that opened flat. */}
-                  <span style={{ color: moveColour, fontSize: 13, lineHeight: 1.2, fontVariantNumeric: 'tabular-nums' }}>
+                  <span style={{ color: moveColour, fontSize: 13, lineHeight: 1.2, flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
                     {quote.changePct}%
                   </span>
+                  {/* What the number is; see QuotePhaseLabel for the rules. */}
+                  <QuotePhaseLabel quote={quote} />
                 </>
               )}
             </div>

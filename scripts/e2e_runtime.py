@@ -26,9 +26,10 @@ class SPAParser(HTMLParser):
 
 
 # Same-origin scripts the shell loads from the site root rather than from the hashed /assets/ bundle.
-# theme-boot.js applies the reader's stored theme before the first paint (the CSP forbids inline
-# scripts). Anything else outside /assets/ is still a sign of a broken or tampered build.
-ROOT_SCRIPTS = {'/theme-boot.js'}
+# theme-boot.js applies the reader's stored theme and locale-boot.js the reader's language (tab title,
+# splash name, <html lang>) before the first paint; the CSP forbids inline scripts, so both are files.
+# Anything else outside /assets/ is still a sign of a broken or tampered build.
+ROOT_SCRIPTS = {'/theme-boot.js', '/locale-boot.js'}
 
 
 def check_spa(base):

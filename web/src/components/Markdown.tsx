@@ -1,4 +1,4 @@
-import { isValidElement, type ReactElement, type ReactNode } from 'react'
+import { isValidElement, memo, type ReactElement, type ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
@@ -121,7 +121,12 @@ function MarkdownPre({ children, ...props }: { children?: ReactNode }) {
 }
 
 // Report body rendering: prefer markdown (react-markdown + GFM); fall back to direct rendering when an old report only has HTML.
-export default function Markdown({ md, html }: { md?: string; html?: string }) {
+//
+// Memoized on its two strings. Parsing a long report (remark, GFM tables, KaTeX) costs hundreds of
+// milliseconds on a mid-range laptop, and the pages that host it re-render for reasons that have
+// nothing to do with the body — a quote refresh, the forecast panel arriving, a loading flag. Each
+// of those used to parse the same body again: four times per report-tab switch on the stock page.
+function Markdown({ md, html }: { md?: string; html?: string }) {
   const { t } = useTranslation()
   if (md && md.trim()) {
     const normalized = normalizeDisplayMath(md)
@@ -160,3 +165,5 @@ export default function Markdown({ md, html }: { md?: string; html?: string }) {
   }
   return null
 }
+
+export default memo(Markdown)

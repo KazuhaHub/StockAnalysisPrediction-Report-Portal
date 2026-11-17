@@ -151,7 +151,7 @@ func (s *Server) sendResetEmailContext(ctx context.Context, u *User, link string
 	brand := s.brandName()
 	body := fmt.Sprintf(
 		`<p>Hi %s,</p><p>A password reset was requested for your %s account. Use the link below within the hour to set a new password:</p><p><a href="%s">%s</a></p><p>If you didn't request this, you can ignore this email — your password stays unchanged.</p>`,
-		html.EscapeString(u.Name()), html.EscapeString(brand), link, html.EscapeString(link))
+		html.EscapeString(u.Name()), html.EscapeString(brand), html.EscapeString(link), html.EscapeString(link))
 	return s.sendEmailContext(ctx, []string{u.Email}, brand+" — password reset", body)
 }
 

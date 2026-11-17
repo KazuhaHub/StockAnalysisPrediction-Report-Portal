@@ -180,9 +180,9 @@ type v1IngestRequest struct {
 	BodyHTML string `json:"body_html"`
 	// Predictions (ADR 0029): the structured claims this report makes, projected from the
 	// producer's code nodes. Kept raw rather than decoded, because the classifier has to see the
-	// bytes — an object and a string are both valid JSON, and the difference between them is the
-	// single most likely producer bug (Dify renders an object parameter from a template and
-	// passes a string when the rendered text is not valid JSON).
+	// bytes — an object and a string are both valid JSON. A string holding an object (or "null") is
+	// unwrapped by the classifier; any other string is the most likely producer bug (an unrendered
+	// Dify template or an emptied parameter) and is refused as not_object.
 	Predictions json.RawMessage      `json:"predictions"`
 	Tracking    []v1TrackingItemWire `json:"tracking"`
 }

@@ -101,6 +101,10 @@
         <div class="ring"></div>
       </div>
     </div>
+    <!-- Renames the splash and the tab title into the reader's language and sets <html lang>,
+         before the bundle loads. After the splash because it edits it; a file because the CSP has
+         no 'unsafe-inline'. -->
+    <script src="/locale-boot.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

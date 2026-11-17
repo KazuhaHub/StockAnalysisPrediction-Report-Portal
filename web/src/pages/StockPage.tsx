@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useDeferredValue, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { Alert, Button, Card, Checkbox, Empty, Result, Segmented, Select, Space, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ClockCircleOutlined, DiffOutlined, DownOutlined, UpOutlined } from '@ant-design/icons'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
@@ -16,9 +16,10 @@ import PriceChart from '../components/PriceChart'
 import { ExportMenu } from '../components/ExportButtons'
 import { useReaderPrefs } from '../reader'
 import { formatReportDateTime, isInstant } from '../lib/datetime'
-import { prefetch, readPrefetched, rememberPrefetched } from '../lib/prefetch'
+import { forgetPrefetched, prefetch, prefetchInFlight, readPrefetched, rememberPrefetched } from '../lib/prefetch'
 import { NO_ITEM_TOOLTIP } from '../lib/segmented'
 import { useLoadFailure } from '../lib/useOnReconnect'
+import { notifyError } from '../lib/notify'
 import {
   quoteErrorRefreshAdvice,
   quoteRefreshDelayMs,
@@ -40,6 +41,11 @@ import { useNarrow } from '../lib/useNarrow'
 // How stale a warmed report may be and still render without waiting. The live request goes out
 // regardless and corrects it, so this only bounds how long a re-ingested body can linger.
 const READ_WARM_MAX_AGE = 5 * 60_000
+
+// How recent a warmed report must be to stand in for the request instead of only ahead of it. The
+// common switch is "point at a tab, click it": the warm-up started a moment ago, and downloading the
+// same report again the instant it lands bought nothing but a second copy on every click.
+const READ_FRESH_MAX_AGE = 15_000
 
 // The four windows the quote endpoint accepts (internal/app/quote_api.go). They are spelled out
 // here rather than derived from the response so the control renders before the first fetch lands.
@@ -123,6 +129,13 @@ export default function StockPage() {
   const layoutVars = { '--rp-doc-max': wide ? '1440px' : '1080px' } as CSSProperties
   const [data, setData] = useState<StockResp | null>(null)
   const [dataAccess, setDataAccess] = useState('')
+  // The request URL `data` answers. The page is showing what the reader asked for exactly when this
+  // is the URL the query builds now; the response itself cannot say, because the server resolves a
+  // link by its report id and may answer with another day than the URL names.
+  const [dataFor, setDataFor] = useState('')
+  // The request URL that last failed with a real error. A failure is an answer too: the page stops
+  // waiting for it and goes back to showing the report it has.
+  const [failedFor, setFailedFor] = useState('')
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [loading, setLoading] = useState(true)
   // Which report the compare dialog is open for; null when closed.
@@ -174,39 +187,81 @@ export default function StockPage() {
   // One place builds the URL, so what gets warmed and what gets loaded cannot drift apart — a
   // prefetch under a slightly different query string is a request paid for and never used.
   const stockUrl = (q: { date?: string; kind?: string; r?: string }) => `/api/stock/${encodeURIComponent(symbol)}${qs(q)}`
+  // The access each warmed URL was asked for under. A warm answer only replaces the request when it
+  // was fetched under the access in force now: the cache is keyed by URL alone, and the same URL
+  // answers differently once a reader's forecast access changes.
+  const warmedUnder = useRef(new Map<string, string>())
+  //
+  // Recorded when a warm-up STARTS, and only by the warm-up that starts: one already on the wire was
+  // asked for under the access recorded when it began, which may not be today's. An entry kept from
+  // another access is dropped rather than relabelled.
+  const warm = (url: string) => {
+    if (prefetchInFlight(url)) return
+    if (warmedUnder.current.get(url) !== forecastKey) forgetPrefetched(url)
+    warmedUnder.current.set(url, forecastKey)
+    void prefetch(url)
+  }
 
   useEffect(() => {
     let cancelled = false
     setSummaryLoading(true)
     const url = stockUrl(query)
-    // A warm answer decides only whether this render waits. The request below goes out either way
-    // and replaces it, so a report re-ingested a minute ago still corrects itself on screen.
-    const warm = readPrefetched<StockResp>(url, READ_WARM_MAX_AGE)
-    if (warm) {
-      setData(warm)
+    setNotFound(false)
+    const sameAccess = warmedUnder.current.get(url) === forecastKey
+    // Fetched moments ago under this access: that is the answer, not a head start on it.
+    const fresh = sameAccess ? readPrefetched<StockResp>(url, READ_FRESH_MAX_AGE) : undefined
+    if (fresh) {
+      setData(fresh)
+      setDataFor(url)
+      setDataAccess(forecastKey)
+      setLoading(false)
+      setSummaryLoading(false)
+      return
+    }
+    // An older warm answer decides only whether this render waits. The request below goes out either
+    // way and replaces it, so a report re-ingested a minute ago still corrects itself on screen.
+    const warmData = readPrefetched<StockResp>(url, READ_WARM_MAX_AGE)
+    if (warmData) {
+      setData(warmData)
+      setDataFor(url)
       setDataAccess('')
       setLoading(false)
     } else {
       setLoading(true)
     }
-    setNotFound(false)
     let lost = false
-    api
-      .get<StockResp>(url)
+    // A warm-up for this very URL still on the wire — the reader pointed at the tab and clicked
+    // before it answered — is as fresh as a request sent now. Wait for it instead of downloading
+    // the report a second time; if it fails, ask for real.
+    const joined = !warmData && sameAccess ? prefetchInFlight(url) : undefined
+    // A switch the reader has already moved on from does not fall back to downloading the report.
+    const answer = joined
+      ? joined.then(() => (cancelled ? null : readPrefetched<StockResp>(url, READ_FRESH_MAX_AGE) ?? api.get<StockResp>(url)))
+      : api.get<StockResp>(url)
+    answer
       .then((d) => {
-        if (cancelled) return
+        if (cancelled || !d) return
         setData(d)
+        setDataFor(url)
         setDataAccess(forecastKey)
         // Remember what was actually read, not only what was guessed: going back to the report you
         // just left is the most predictable navigation there is.
+        warmedUnder.current.set(url, forecastKey)
         rememberPrefetched(url, d)
       })
       .catch((e) => {
         if (cancelled) return
         // A lost connection is not an answer: the page keeps its spinner (or the report it has) and
         // asks again when the connection returns.
-        if (failure(e) === null) lost = true
+        const text = failure(e)
+        if (text === null) lost = true
         else if (e instanceof ApiError && e.status === 404) setNotFound(true)
+        else {
+          // Any other error ends the wait: the strips go back to the report on screen and the
+          // reader is told the switch failed, rather than left under a spinner that never clears.
+          setFailedFor(url)
+          notifyError(text)
+        }
       })
       .finally(() => { if (!cancelled && !lost) { setLoading(false); setSummaryLoading(false) } })
     return () => { cancelled = true }
@@ -354,11 +409,20 @@ export default function StockPage() {
     const dates = data.timeline.map((n) => n.date)
     const i = dates.indexOf(data.selDate)
     if (i < 0) return
+    // This runs again whenever the report changes, and switching tabs does not change the day: a
+    // neighbour already warm is not downloaded again.
     ;[dates[i - 1], dates[i + 1]].forEach((d) => {
-      if (d) void prefetch(stockUrl({ date: d }))
+      const url = d ? stockUrl({ date: d }) : ''
+      if (url && !readPrefetched(url, READ_WARM_MAX_AGE)) warm(url)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, symbol])
+
+  // The report body renders a beat behind the rest of the page. Parsing a long body takes long enough
+  // to hold up the whole click otherwise: the tab the reader pressed did not move, and nothing said
+  // a report was on its way, until the next one had been parsed and drawn. Deferred, the tab and the
+  // loading state paint first and the body follows.
+  const shownRep = useDeferredValue(data?.rep ?? null)
 
   if (notFound) {
     return (
@@ -381,6 +445,18 @@ export default function StockPage() {
     )
   }
   if (!data) return null
+
+  // What the reader asked for, shown before the server has answered. Until the response for the
+  // current URL is in, the strips follow the URL rather than the last response, so a press moves the
+  // selection at once; anything that response does not offer falls back to what the server chose.
+  const answered = dataFor === stockUrl(query) || failedFor === stockUrl(query)
+  const sameDay = !query.date || query.date === data.selDate
+  const shownDate = !answered && query.date && data.timeline.some((n) => n.date === query.date) ? query.date : data.selDate
+  const shownKind = !answered && sameDay && query.kind && data.kinds.includes(query.kind) ? query.kind : data.selKind
+  const askedId = Number(query.r)
+  const shownId = !answered && sameDay && shownKind === data.selKind && data.subtabs.some((tab) => tab.id === askedId) ? askedId : data.selId
+  // The report card is loading until the answer to the current URL is in and its body is drawn.
+  const reportPending = loading || !answered || shownRep !== (data.rep ?? null)
 
   const setDate = (d: string) => setSp({ date: d })
   const setKind = (k: string) => setSp({ date: data.selDate, kind: k })
@@ -464,10 +540,10 @@ export default function StockPage() {
   // dropdown at every width: three labelled buttons ate a row on a phone, and on a desktop they
   // pushed the header into a wrap that made the card title compete with its own toolbar. The three
   // actions are one thing you do to a report, so they read better as one control anyway.
-  const exportControls = rep ? (
+  const exportControls = shownRep ? (
     <ExportMenu
-      id={rep.id}
-      report={{ title: rep.displayTitle, date: rep.date, source: rep.source, html: rep.html, md: rep.md }}
+      id={shownRep.id}
+      report={{ title: shownRep.displayTitle, date: shownRep.date, source: shownRep.source, html: shownRep.html, md: shownRep.md }}
       symbol={data.symbol}
       date={data.selDate}
       name={data.name}
@@ -475,177 +551,179 @@ export default function StockPage() {
   ) : null
 
   return (
-    <Spin spinning={loading}>
-      <div className={`rp-reader${wide ? ' rp-reader--wide' : ''}`} style={layoutVars}>
-        {/* Back + stock name/code lead every layout, above the timeline. */}
-        <div style={{ marginBottom: 12 }}>{navBar}</div>
+    <div className={`rp-reader${wide ? ' rp-reader--wide' : ''}`} style={layoutVars}>
+      {/* Back + stock name/code lead every layout, above the timeline. */}
+      <div style={{ marginBottom: 12 }}>{navBar}</div>
 
-        {/* Live quote (ADR 0028), deliberately COMPACT. It sits under the identity header and above
-            the timeline because it describes the STOCK, not the report being read — the report's own
-            actions live in its card header further down.
+      {/* Live quote (ADR 0028), deliberately COMPACT. It sits under the identity header and above
+          the timeline because it describes the STOCK, not the report being read — the report's own
+          actions live in its card header further down.
 
-            What it is not any more: a chart that filled the viewport and pushed the report off the
-            bottom of it. The strip stays, because a price beside a report answers "has this thesis
-            already played out"; the chart is collapsed until asked for, and the full-size one lives
-            in the Quotes app linked below. */}
-        <Card
-          size="small"
-          title={t('quote.title')}
-          style={{ marginBottom: 12 }}
-          styles={{ body: { paddingTop: 12 } }}
-          extra={
-            <Space size={4} wrap>
-              {acceptedSet && (
-                <Checkbox checked={overlay} onChange={(e) => { setOverlay(e.target.checked); writeOverlay(e.target.checked) }}>
-                  {t('forecast.chart.overlay')}
-                </Checkbox>
-              )}
-              {/* The range switcher belongs to the chart, so it appears with the chart. Chrome for
-                  something that is not on screen is not free: each press re-fetches the quote, so a
-                  collapsed panel would spend vendor requests on bars nobody is looking at. */}
-              {/* On a phone the ranges fold into a dropdown, as a dashboard's time picker does, so the
-                  title and its controls keep to one line. */}
-              {chartOpen && (phone ? (
-                <Select
-                  size="small"
-                  variant="filled"
-                  aria-label={t('quote.rangeLabel')}
-                  value={quoteRange}
-                  onChange={(v) => setQuoteRange(v)}
-                  popupMatchSelectWidth={false}
-                  options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r }))}
-                />
-              ) : (
-                <Segmented
-                  size="small"
-                  value={quoteRange}
-                  onChange={(v) => setQuoteRange(v as QuoteRange)}
-                  options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r, title: NO_ITEM_TOOLTIP }))}
-                />
-              ))}
-              <Button
-                type="text"
+          What it is not any more: a chart that filled the viewport and pushed the report off the
+          bottom of it. The strip stays, because a price beside a report answers "has this thesis
+          already played out"; the chart is collapsed until asked for, and the full-size one lives
+          in the Quotes app linked below. */}
+      <Card
+        size="small"
+        title={t('quote.title')}
+        style={{ marginBottom: 12 }}
+        styles={{ body: { paddingTop: 12 } }}
+        extra={
+          <Space size={4} wrap>
+            {acceptedSet && (
+              <Checkbox checked={overlay} onChange={(e) => { setOverlay(e.target.checked); writeOverlay(e.target.checked) }}>
+                {t('forecast.chart.overlay')}
+              </Checkbox>
+            )}
+            {/* The range switcher belongs to the chart, so it appears with the chart. Chrome for
+                something that is not on screen is not free: each press re-fetches the quote, so a
+                collapsed panel would spend vendor requests on bars nobody is looking at. */}
+            {/* On a phone the ranges fold into a dropdown, as a dashboard's time picker does, so the
+                title and its controls keep to one line. */}
+            {chartOpen && (phone ? (
+              <Select
                 size="small"
-                icon={chartOpen ? <UpOutlined /> : <DownOutlined />}
-                aria-expanded={chartOpen}
-                aria-label={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
-                title={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
-                onClick={toggleChart}
-              >
-                {/* On a phone only the chevron; its name stays in aria-label and the tooltip. */}
-                {!phone && (chartOpen ? t('quote.collapseChart') : t('quote.expandChart'))}
-              </Button>
-            </Space>
-          }
-        >
-          <QuoteStrip
-            data={quote}
-            loading={quoteLoading}
-            error={quoteError}
-            onRetry={() => setQuoteNonce((n) => n + 1)}
-          />
-          {/* Unmounted while collapsed (Expand) rather than hidden with CSS. A chart inside a display:none
-              box measures zero width, so it would sit there rendering its own placeholder and
-              observing a box it can never read — the cost of being mounted with none of the
-              drawing. Expanding costs no round trip either way: the bars arrived with the snapshot
-              in the same response (ADR 0028 §2). */}
-          <Expand open={chartOpen}>
-            <div style={{ paddingTop: 12 }}>
-              <PriceChart
-                bars={quote?.bars ?? []}
-                loading={quoteLoading}
-                unavailable={quote?.barsUnavailable}
-                height={QUOTE_CHART_H}
-                // The chart's price axis prints a unit and the strip above it prints the currency;
-                // handing it the same field is what stops one price carrying two answers.
-                currency={quote?.currency}
-                levels={overlayLevels}
-                markers={overlayMarkers}
-                windowFrom={drawOverlay ? acceptedSet?.s0_date : undefined}
-                overlayLegend={drawOverlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
+                variant="filled"
+                aria-label={t('quote.rangeLabel')}
+                value={quoteRange}
+                onChange={(v) => setQuoteRange(v)}
+                popupMatchSelectWidth={false}
+                options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r }))}
               />
-            </div>
-          </Expand>
-          {quotesOpen && (
-            <div style={{ marginTop: 8, textAlign: 'right' }}>
-              {/* What makes keeping this panel small fair: the full-size chart, the other ranges and
-                  the other markets are one click away, already pointed at the symbol being read. When
-                  the Quotes app is closed for the reader (ADR 0048) there is no such link to offer. */}
-              <Link to={`/apps/quotes${qs({ symbol: data.symbol })}`} style={{ fontSize: 12 }}>
-                {t('quote.openInApp')}
-              </Link>
-            </div>
-          )}
-        </Card>
+            ) : (
+              <Segmented
+                size="small"
+                value={quoteRange}
+                onChange={(v) => setQuoteRange(v as QuoteRange)}
+                options={QUOTE_RANGES.map((r) => ({ label: t(`quote.range.${r}`), value: r, title: NO_ITEM_TOOLTIP }))}
+              />
+            ))}
+            <Button
+              type="text"
+              size="small"
+              icon={chartOpen ? <UpOutlined /> : <DownOutlined />}
+              aria-expanded={chartOpen}
+              aria-label={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
+              title={chartOpen ? t('quote.collapseChart') : t('quote.expandChart')}
+              onClick={toggleChart}
+            >
+              {/* On a phone only the chevron; its name stays in aria-label and the tooltip. */}
+              {!phone && (chartOpen ? t('quote.collapseChart') : t('quote.expandChart'))}
+            </Button>
+          </Space>
+        }
+      >
+        <QuoteStrip
+          data={quote}
+          loading={quoteLoading}
+          error={quoteError}
+          onRetry={() => setQuoteNonce((n) => n + 1)}
+        />
+        {/* Unmounted while collapsed (Expand) rather than hidden with CSS. A chart inside a display:none
+            box measures zero width, so it would sit there rendering its own placeholder and
+            observing a box it can never read — the cost of being mounted with none of the
+            drawing. Expanding costs no round trip either way: the bars arrived with the snapshot
+            in the same response (ADR 0028 §2). */}
+        <Expand open={chartOpen}>
+          <div style={{ paddingTop: 12 }}>
+            <PriceChart
+              bars={quote?.bars ?? []}
+              loading={quoteLoading}
+              unavailable={quote?.barsUnavailable}
+              height={QUOTE_CHART_H}
+              // The chart's price axis prints a unit and the strip above it prints the currency;
+              // handing it the same field is what stops one price carrying two answers.
+              currency={quote?.currency}
+              levels={overlayLevels}
+              markers={overlayMarkers}
+              windowFrom={drawOverlay ? acceptedSet?.s0_date : undefined}
+              overlayLegend={drawOverlay && acceptedSet ? t('forecast.chart.legend', { source: overlaySource || '—' }) : undefined}
+            />
+          </div>
+        </Expand>
+        {quotesOpen && (
+          <div style={{ marginTop: 8, textAlign: 'right' }}>
+            {/* What makes keeping this panel small fair: the full-size chart, the other ranges and
+                the other markets are one click away, already pointed at the symbol being read. When
+                the Quotes app is closed for the reader (ADR 0048) there is no such link to offer. */}
+            <Link to={`/apps/quotes${qs({ symbol: data.symbol })}`} style={{ fontSize: 12 }}>
+              {t('quote.openInApp')}
+            </Link>
+          </div>
+        )}
+      </Card>
 
-        {/* Narrow / wide mode: the timeline is a horizontal strip on top; normal mode on a
-            roomy screen floats it as a left rail (container query in index.css). */}
-        <div className="rp-reader__strip">
-          <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 12 } }}>
-            <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={data.selDate} onSelect={setDate} horizontal />
+      {/* Narrow / wide mode: the timeline is a horizontal strip on top; normal mode on a
+          roomy screen floats it as a left rail (container query in index.css). */}
+      <div className="rp-reader__strip">
+        <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 12 } }}>
+          <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={shownDate} onSelect={setDate} horizontal />
+        </Card>
+      </div>
+
+      <div className="rp-reader__body">
+        {/* Wide: the timeline is a fixed left column beside the reading column. */}
+        <div className="rp-reader__rail">
+          <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 16 } }}>
+            <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={shownDate} onSelect={setDate} horizontal={false} />
           </Card>
         </div>
 
-        <div className="rp-reader__body">
-          {/* Wide: the timeline is a fixed left column beside the reading column. */}
-          <div className="rp-reader__rail">
-            <Card size="small" title={t('stock.timeline')} styles={{ body: { paddingTop: 16 } }}>
-              <TimelinePanel nodes={data.timeline.map((node) => ({ ...node, predicted: forecastFullEnabled && dataAccess === forecastKey && node.predicted }))} selected={data.selDate} onSelect={setDate} horizontal={false} />
-            </Card>
-          </div>
-
-          <div className="rp-reader__doc">
-            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-              {data.kinds.length > 1 && (
-                <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
-                  <Segmented
-                    value={data.selKind}
-                    onChange={(v) => setKind(String(v))}
-                    options={data.kinds.map((k) => ({
-                      // Pointing at a tab is the cheapest signal that it is about to be opened.
-                      label: <span onMouseEnter={() => void prefetch(stockUrl({ date: data.selDate, kind: k }))}>{k}</span>,
-                      value: k,
-                      title: NO_ITEM_TOOLTIP,
-                    }))}
-                  />
-                </div>
-              )}
-              {data.subtabs.length > 1 && (
-                // Report-type strip: a horizontal-scroll Segmented (same pattern as the
-                // category strip above) so it swipes smoothly on mobile instead of
-                // dragging the whole page.
-                <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
-                  <Segmented
-                    value={data.selId}
-                    onChange={(v) => setId(Number(v))}
-                    options={data.subtabs.map((sub) => ({
-                      label: (
-                        <span onMouseEnter={() => void prefetch(stockUrl({ date: data.selDate, kind: data.selKind, r: String(sub.id) }))}>
-                          {sub.label}
-                        </span>
-                      ),
-                      value: sub.id,
-                      // A tab is named for the report type and generator version, so hovering is
-                      // what says WHICH report it opens. Suppressed when the report is named exactly
-                      // what the tab is called, which is the case NO_ITEM_TOOLTIP exists for.
-                      title: sub.title && sub.title !== sub.label ? sub.title : NO_ITEM_TOOLTIP,
-                    }))}
-                  />
-                </div>
-              )}
+        <div className="rp-reader__doc">
+          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+            {data.kinds.length > 1 && (
+              <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
+                <Segmented
+                  value={shownKind}
+                  onChange={(v) => setKind(String(v))}
+                  options={data.kinds.map((k) => ({
+                    // Pointing at a tab is the cheapest signal that it is about to be opened.
+                    label: <span onMouseEnter={() => warm(stockUrl({ date: data.selDate, kind: k }))}>{k}</span>,
+                    value: k,
+                    title: NO_ITEM_TOOLTIP,
+                  }))}
+                />
+              </div>
+            )}
+            {data.subtabs.length > 1 && (
+              // Report-type strip: a horizontal-scroll Segmented (same pattern as the
+              // category strip above) so it swipes smoothly on mobile instead of
+              // dragging the whole page.
+              <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
+                <Segmented
+                  value={shownId}
+                  onChange={(v) => setId(Number(v))}
+                  options={data.subtabs.map((sub) => ({
+                    label: (
+                      <span onMouseEnter={() => warm(stockUrl({ date: data.selDate, kind: data.selKind, r: String(sub.id) }))}>
+                        {sub.label}
+                      </span>
+                    ),
+                    value: sub.id,
+                    // A tab is named for the report type and generator version, so hovering is
+                    // what says WHICH report it opens. Suppressed when the report is named exactly
+                    // what the tab is called, which is the case NO_ITEM_TOOLTIP exists for.
+                    title: sub.title && sub.title !== sub.label ? sub.title : NO_ITEM_TOOLTIP,
+                  }))}
+                />
+              </div>
+            )}
+            {/* Only the report waits. The tabs above and the quote describe the stock and stay usable;
+                a refreshing view keeps its content under antd's spinner (docs/frontend-guidelines.md). */}
+            <Spin spinning={reportPending} className="rp-spin-tall">
               <Card
                 className="rp-doc-card"
                 styles={{ body: { paddingTop: 8 } }}
-                title={rep?.displayTitle}
+                title={shownRep?.displayTitle}
                 // Report actions live in the card header: exports + reading settings, the
                 // two things you do to the report you're looking at.
                 extra={
-                  rep ? (
+                  shownRep ? (
                     <Space size={8} wrap>
-                      <Button icon={<DiffOutlined />} onClick={() => setCompareFor(rep.id)}>
+                      <Button icon={<DiffOutlined />} onClick={() => setCompareFor(shownRep.id)}>
                         {t('compare.button')}
                       </Button>
-                      <EditReportButton reportId={rep.id} />
+                      <EditReportButton reportId={shownRep.id} />
                       {exportControls}
                       <ReaderControls />
                     </Space>
@@ -653,64 +731,64 @@ export default function StockPage() {
                 }
                 style={readerVars}
               >
-                {rep && isInstant(rep.time) && (
+                {shownRep && isInstant(shownRep.time) && (
                   <Typography.Text
                     type="secondary"
-                    title={formatReportDateTime(rep.time)}
+                    title={formatReportDateTime(shownRep.time)}
                     style={{ fontSize: 12, display: 'block', marginBottom: 8 }}
                   >
-                    <ClockCircleOutlined /> {formatReportDateTime(rep.time)}
+                    <ClockCircleOutlined /> {formatReportDateTime(shownRep.time)}
                   </Typography.Text>
                 )}
                 {rep && forecastFullEnabled && !forecastDenied && <ForecastSummaryChip prediction={dataAccess === forecastKey ? data.prediction : undefined} loading={dataAccess !== forecastKey && summaryLoading} />}
-                {rep ? <Markdown md={rep.md} html={rep.html} /> : <Empty />}
+                {shownRep ? <Markdown md={shownRep.md} html={shownRep.html} /> : <Empty />}
               </Card>
-              {rep && predErr && (
-                <Alert
-                  type="error"
-                  showIcon
-                  style={{ marginTop: 12 }}
-                  title={predErr}
-                  action={
-                    <Button size="small" onClick={() => setPredNonce((n) => n + 1)}>
-                      {t('common.retry')}
-                    </Button>
-                  }
-                />
-              )}
-              {rep && forecastCardEnabled && !predErr && !(predCurrent && pred.unavailable) && (
-                <ForecastReadingCard
-                  sets={predSets}
-                  countedSetID={predCounted}
-                  displaySetID={predCurrent ? pred.display : undefined}
-                  settlementPaused={predCurrent ? pred.paused : undefined}
-                  covered={predCurrent ? pred.covered : undefined}
-                  otherSets={otherSets}
-                  latestClose={completedBar?.c}
-                  latestDate={completedBar?.d}
-                  pathBars={pathBars}
-                  symbol={data.symbol}
-                  reportDate={rep.date}
-                  receivedAt={rep.time}
-                  edition={selectedEdition}
-                  sibling={predCurrent ? pred.sibling : undefined}
-                  countedEdition={predCurrent ? pred.countedEdition : undefined}
-                  loading={!predCurrent || pred.loading}
-                  allowPayload={!forecast?.external}
-                  allowMembership={admin || forecast?.scope === 'all' && !forecast.external}
-                  allowOrphans={!forecast?.external}
-                  reportKind={rep.kind || data.selKind}
-                />
-              )}
-              {/* The button set this state from the day it shipped; nothing rendered the modal, so
-                  pressing it did nothing at all. */}
-              {compareFor !== null && (
-                <CompareModal reportId={compareFor} open onClose={() => setCompareFor(null)} />
-              )}
-            </Space>
-          </div>
-          </div>
+            </Spin>
+            {rep && predErr && (
+              <Alert
+                type="error"
+                showIcon
+                style={{ marginTop: 12 }}
+                title={predErr}
+                action={
+                  <Button size="small" onClick={() => setPredNonce((n) => n + 1)}>
+                    {t('common.retry')}
+                  </Button>
+                }
+              />
+            )}
+            {rep && forecastCardEnabled && !predErr && !(predCurrent && pred.unavailable) && (
+              <ForecastReadingCard
+                sets={predSets}
+                countedSetID={predCounted}
+                displaySetID={predCurrent ? pred.display : undefined}
+                settlementPaused={predCurrent ? pred.paused : undefined}
+                covered={predCurrent ? pred.covered : undefined}
+                otherSets={otherSets}
+                latestClose={completedBar?.c}
+                latestDate={completedBar?.d}
+                pathBars={pathBars}
+                symbol={data.symbol}
+                reportDate={rep.date}
+                receivedAt={rep.time}
+                edition={selectedEdition}
+                sibling={predCurrent ? pred.sibling : undefined}
+                countedEdition={predCurrent ? pred.countedEdition : undefined}
+                loading={!predCurrent || pred.loading}
+                allowPayload={!forecast?.external}
+                allowMembership={admin || forecast?.scope === 'all' && !forecast.external}
+                allowOrphans={!forecast?.external}
+                reportKind={rep.kind || data.selKind}
+              />
+            )}
+            {/* The button set this state from the day it shipped; nothing rendered the modal, so
+                pressing it did nothing at all. */}
+            {compareFor !== null && (
+              <CompareModal reportId={compareFor} open onClose={() => setCompareFor(null)} />
+            )}
+          </Space>
         </div>
-    </Spin>
+      </div>
+    </div>
   )
 }

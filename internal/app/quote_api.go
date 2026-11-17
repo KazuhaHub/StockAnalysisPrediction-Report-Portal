@@ -195,11 +195,20 @@ func (s *Server) apiQuoteMode(w http.ResponseWriter, r *http.Request, historyOnl
 	// Bars is never written after the parser returns it.
 	out := *resp
 	out.Cached = cached
+	labelPending := false
+	if !out.HistoryOnly {
+		line, pending := s.quotes.marketLine(cfg)
+		out.Phase = s.quotes.phaseFor(target.Market, line)
+		// A stale answer is never cached, so asking back for its label would not be served from the
+		// cache but would call the failing vendor for the price again; it keeps its own advice.
+		labelPending = pending && out.Phase == quotePhaseUnknown && !out.Stale
+	}
 	out.Bars = quoteVisibleBars(iv, resp.Bars)
 	advice := quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, ttl, resp)
 	if out.Stale || out.HistoryOnly {
 		advice = quoteRefreshAdviceFor(s.quotes.clockNow(), s.quoteAutoRefresh(), cfg, target, iv, 0, nil)
 	}
+	advice = withLabelRetry(s.quotes.clockNow(), s.quoteAutoRefresh(), labelPending, advice)
 	out.RefreshAfterSecs = advice.RefreshAfterSecs
 	out.RefreshAt = advice.RefreshAt
 	if iv == quoteIntervalSnapshot {
@@ -313,8 +322,12 @@ type QuoteCard struct {
 
 	AsOf    string `json:"asOf"`
 	Session string `json:"session"`
-	Source  string `json:"source"`
-	Cached  bool   `json:"cached"`
+	// Phase says what the number is: pre_open | trading | lunch_break | closed | holiday | unknown.
+	// It is finer than Session, derived per request from the vendor's market line (quote_phase.go)
+	// and never stored with the cached quote. Unknown means the card shows no label.
+	Phase  string `json:"phase"`
+	Source string `json:"source"`
+	Cached bool   `json:"cached"`
 }
 
 // apiQuotes answers many symbols at once. GET /api/quotes?symbols=601899,000001,00700
@@ -400,6 +413,10 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 	cfg := s.quoteConfigLoad()
 	now := s.quotes.clockNow()
 	autoRefresh := s.quoteAutoRefresh()
+	// The label never waits on a vendor: marketLine answers from its cache at once and refreshes in
+	// the background, so a cold or slow anchor costs this response its label and nothing else.
+	marketLine, linePending := s.quotes.marketLine(cfg)
+	labelPending := false
 	answered := s.quotes.fetchBatchUnder(r.Context(), cfg, targets)
 	advices := make([]quoteRefreshAdvice, 0, len(targets))
 	for _, target := range targets {
@@ -417,12 +434,15 @@ func (s *Server) apiQuotes(w http.ResponseWriter, r *http.Request, _ string) {
 		// markets: 000001 is 平安银行 on Shenzhen and 上证指数 on Shanghai, and a map keyed by six
 		// digits would keep whichever of the two came second. The `symbol` field inside carries the
 		// code, which is what the feed looks a card up by.
-		quotes[target.Symbol] = quoteCardOf(entry)
+		card := quoteCardOf(entry)
+		card.Phase = s.quotes.phaseFor(target.Market, marketLine)
+		labelPending = labelPending || linePending && card.Phase == quotePhaseUnknown
+		quotes[target.Symbol] = card
 		advices = append(advices, quoteRefreshAdviceFor(now, autoRefresh, cfg, target, quoteIntervalSnapshot, entry.ttl, entry.resp))
 	}
 	out["quotes"] = quotes
 	out["missing"] = missing
-	quoteAdviceMap(out, quoteAggregateAdvice(now, advices))
+	quoteAdviceMap(out, withLabelRetry(now, autoRefresh, labelPending, quoteAggregateAdvice(now, advices)))
 	// no-store rather than a max-age: this body is fifty answers with fifty different remaining
 	// lifetimes, and any single number here would be wrong for most of them. The server's own cache
 	// is what keeps the vendor call count down; the browser re-asks and is served from it.
@@ -447,6 +467,7 @@ func quoteCardOf(entry quoteBatchEntry) QuoteCard {
 		ChangePct: resp.Snapshot.ChangePct,
 		AsOf:      resp.Snapshot.AsOf,
 		Session:   resp.Snapshot.Session,
+		Phase:     quotePhaseUnknown,
 		Source:    resp.Source,
 		Cached:    entry.cached,
 	}

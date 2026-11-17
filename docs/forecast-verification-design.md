@@ -129,10 +129,12 @@ Everything else is selection:
 | `target_weight` | `risk.target_total_weight` |
 | `emitter.*` | app, `V3.16.x`, `calc.calculator_version`, `schema_version` |
 
-The ingest node gains a `predictions` **object** parameter, and
-`portal-tools/openapi.dify.ingest.json` gains the property. Dify renders object parameters from a
-template and passes a string when the rendered text is not valid JSON. The portal rejects a string
-value with reason `not_object` (§5.5).
+The ingest node gains a `predictions` parameter, and `portal-tools/openapi.dify.ingest.json` gains
+the property. The portal rejects a string value with reason `not_object` (§5.5), except a string
+whose content is itself a valid JSON object, which is unwrapped first. That exception exists because
+Dify cannot keep an object-typed parameter wired: editing the node in Studio stores it as a
+template, and an object parameter's template is sent unrendered (the literal `{{#node.var#}}`, or
+`""`). 1-6-4 therefore declares the parameter as a string and sends the object JSON-encoded.
 
 ### 5.2 Shape
 
@@ -532,8 +534,8 @@ they start at `S0`.
 
 Each states its direction.
 
-1. **Precision.** `"8.655"`, the JSON number `8.65`, and a string-valued `predictions` (reason
-   `not_object`) each produce a `rejected` set plus an audit row and a `predictions.rejected`
+1. **Precision.** `"8.655"`, the JSON number `8.65`, and a string-valued `predictions` that does not
+   hold a JSON object (reason `not_object`) each produce a `rejected` set plus an audit row and a `predictions.rejected`
    webhook. The report is stored. *Ledger fail-closed, report kept.*
 2. **Scenario sum.** 9 999 / 10 001 bp are rejected; 10 000 is accepted.
 3. **Horizon.** Equal to `made_on` → rejected, tested at 23:30 UTC with the panel tz set to UTC.

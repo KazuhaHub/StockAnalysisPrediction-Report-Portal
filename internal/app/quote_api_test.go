@@ -95,6 +95,23 @@ type quoteVendorStub struct {
 	// test assert that the reader's dates were honoured while what it actually got was the last N
 	// sessions — which is the exact defect the separate fetcher exists to prevent.
 	fetchRangeFn func(market, code, from, to string) (*QuoteResp, error)
+	// marketLine is what the stub answers to the market-wide session line. Empty means the vendor
+	// has none, which is also what every test that never thought about phases gets — and, because
+	// wireQuoteSources replaces the real fetcher unconditionally, what keeps them off the network.
+	marketLine string
+	// marketLineCalls counts the anchor requests, kept apart from calls so the batch's own
+	// one-call claim is not diluted by the label's request.
+	marketLineCalls int
+}
+
+func (v *quoteVendorStub) fetchMarketLine(ctx context.Context) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.marketLineCalls++
+	if v.marketLine == "" {
+		return "", errors.New("stub has no market line")
+	}
+	return v.marketLine, nil
 }
 
 // fetchRange is wired onto the source only when the stub sets fetchRangeFn, so a stub without one
@@ -285,6 +302,9 @@ func wireQuoteSources(s *Server, tencent, sina *quoteVendorStub) {
 			// Replaced UNCONDITIONALLY wherever the real source has one, so that a test which
 			// touches /api/quotes without thinking about batching still cannot reach the network.
 			srcs[i].fetchBatch = stub.fetchBatch
+		}
+		if srcs[i].fetchMarketLine != nil {
+			srcs[i].fetchMarketLine = stub.fetchMarketLine
 		}
 		if srcs[i].fetchRange != nil {
 			// Same rule for the windowed fetcher, and the same reason: a test that sends from= and

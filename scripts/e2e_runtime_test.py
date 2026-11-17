@@ -43,11 +43,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 3)
 
     @patch('e2e_runtime.urllib.request.urlopen')
-    def test_accepts_the_theme_boot_script_beside_built_assets(self, urlopen):
+    def test_accepts_the_boot_scripts_beside_built_assets(self, urlopen):
         responses = []
         for body, content_type in [
             (b'<script src="/theme-boot.js"></script><div id="root"></div>'
-             b'<script src="/assets/app.js"></script>', 'text/html'),
+             b'<script src="/locale-boot.js"></script><script src="/assets/app.js"></script>', 'text/html'),
+            (b'(function(){})()', 'text/javascript'),
             (b'(function(){})()', 'text/javascript'),
             (b'console.log("loaded")', 'text/javascript'),
         ]:
@@ -58,7 +59,7 @@ class RuntimeTests(unittest.TestCase):
             responses.append(response)
         urlopen.side_effect = responses
         check_spa('http://localhost:18790')
-        self.assertEqual(urlopen.call_count, 3)
+        self.assertEqual(urlopen.call_count, 4)
 
     @patch('e2e_runtime.urllib.request.urlopen')
     def test_rejects_any_other_root_level_script(self, urlopen):

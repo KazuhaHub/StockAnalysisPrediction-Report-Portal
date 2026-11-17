@@ -239,6 +239,9 @@ type quoteSource struct {
 	// than called with the count it would otherwise fall back to — which would answer the last N
 	// sessions under the reader's own chosen dates.
 	fetchRange quoteRangeFetchFunc
+	// fetchMarketLine reads the vendor's market-wide session line, or is nil for a source that has
+	// none. It feeds the card's phase label (quote_phase.go) and nothing else.
+	fetchMarketLine func(ctx context.Context) (string, error)
 	// optIn keeps a compiled-in source OUT of the shipped order (quoteShippedOrder) while leaving it
 	// in every other respect: the panel lists it, quote_source_order accepts its name, and adding it
 	// there is the whole of turning it on. It is not a second enable flag — the order remains the
@@ -423,6 +426,8 @@ func defaultQuoteSources() []quoteSource {
 			fetchBatch: fetchTencentBatch,
 			// And the same daily endpoint with its two date slots filled — see quoteTencentRangeURL.
 			fetchRange: fetchTencentRange,
+			// And the market-wide session line, which the batch endpoint above does not carry.
+			fetchMarketLine: fetchTencentMarketLine,
 			caps: []quoteCapability{
 				// Tier 1 ledger evidence is measured for mainland daily series only. Beijing
 				// has no usable history; overseas display grants do not imply ledger admission.
@@ -816,6 +821,12 @@ type quoteCache struct {
 	ledgerHealth map[string]*QuoteSourceHealth
 	traffic      quoteTraffic
 	sinaProgress sinaRangeProgress
+
+	// phaseMu guards the cached market-wide session line behind the card phase label.
+	phaseMu   sync.Mutex
+	phaseLine string
+	phaseAt   time.Time // the line is fresh until this instant; also set after a failed refresh
+	phaseBusy bool      // a background refresh is in flight
 
 	flightMu sync.Mutex // guards flights; separate from mu so a waiter never blocks a cache read
 	flights  map[string]*quoteFlight

@@ -125,13 +125,13 @@ function group(key: string, symbol: string): Group {
 }
 
 // A batch answer, in the keyed-by-symbol shape the endpoint sends. `last` and `change` are 分.
-function quoteBody(rows: Record<string, [number, number, string]>) {
+function quoteBody(rows: Record<string, [number, number, string]>, phase?: string) {
   const quotes: Record<string, unknown> = {}
   for (const [input, [last, change, changePct]] of Object.entries(rows)) {
     const symbol = input.replace(/^(sh|sz|bj|hk|us)/, '')
     const market = input.slice(0, input.length - symbol.length) || (symbol.startsWith('6') ? 'sh' : 'sz')
     const key = `${market}${symbol}`
-    quotes[key] = { symbol, market, name: `N${symbol}`, currency: 'CNY', kind: 'stock', last, change, changePct }
+    quotes[key] = { symbol, market, name: `N${symbol}`, currency: 'CNY', kind: 'stock', last, change, changePct, ...(phase ? { phase } : {}) }
   }
   return { quotes }
 }
@@ -328,6 +328,18 @@ describe('the live price on a card', () => {
     expect(line.style.height).toBe('22px')
   })
 
+  it('labels what the number is from the server\'s phase, and prints nothing without one', async () => {
+    state.resp = { ...base, groups: [group('a', '600519')], totalRuns: 1 }
+    renderHome()
+    await waitFor(() => expect(state.quotes).toHaveLength(1))
+
+    // The reported case: flat, 0.00%, before the open. The label is what stops it reading as broken.
+    await settle(state.quotes[0], quoteBody({ sh600519: [943, 0, '0.00'] }, 'pre_open'))
+    const line = await screen.findByTestId('card-quote-line')
+    expect(line.textContent).toBe('9.430.000.00%quote.phase.pre_open_prev_close')
+    expect(line.style.height).toBe('22px')
+  })
+
   it('colours a rise red and a fall green, the A-share way round', async () => {
     state.resp = { ...base, groups: [group('a', '600519'), group('b', '000001')], totalRuns: 2 }
     renderHome()
@@ -388,7 +400,7 @@ describe('the live price on a card', () => {
     // Page two, which happens to carry the same stock — so the stale answer below is not merely
     // about a card that has gone: it names a symbol that is still on screen and would paint.
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(screen.getByText('N000001')).toBeTruthy())
     await waitFor(() => expect(state.quotes).toHaveLength(2))
 
@@ -448,7 +460,7 @@ describe('the live price on a card', () => {
     await waitFor(() => expect(state.quotes).toHaveLength(1))
 
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(state.quotes).toHaveLength(2))
     await settle(state.quotes[1], quoteBody({ '600519': [3335, 12, '0.12'] }))
     expect(await screen.findByTestId('card-quote')).toBeTruthy()
@@ -472,7 +484,7 @@ describe('the live price on a card', () => {
     // …the reader steps to page two, which carries the same stock — the ordinary case, since a
     // stock with reports on three dates is three groups in this feed.
     state.resp = { ...base, groups: [group('b', '600519'), group('c', '000001')], totalRuns: 60, page: 2 }
-    await userEvent.click(screen.getByTitle('2'))
+    await userEvent.click(screen.getByRole('button', { name: 'Page 2' }))
     await waitFor(() => expect(screen.getByText('N000001')).toBeTruthy())
     await waitFor(() => expect(state.quotes).toHaveLength(2))
 

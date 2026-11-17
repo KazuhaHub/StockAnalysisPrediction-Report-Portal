@@ -127,6 +127,54 @@ func TestClassifyPredictionsAcceptsAValidPayload(t *testing.T) {
 	}
 }
 
+func stringEncoded(obj json.RawMessage) json.RawMessage {
+	enc, err := json.Marshal(string(obj))
+	if err != nil {
+		panic(err)
+	}
+	return enc
+}
+
+// TestClassifyPredictionsStringNullIsAbsent pins the producer's "no forecast": main() returns
+// json.dumps(None), which a string parameter delivers as "null". It must be absent, as the object
+// parameter's null was, or every legitimate no-forecast run would raise predictions.rejected.
+func TestClassifyPredictionsStringNullIsAbsent(t *testing.T) {
+	set, claims, errs := classify(t, json.RawMessage(`"null"`), predTestRtype)
+	if len(errs) != 0 || len(claims) != 0 {
+		t.Fatalf("errs=%+v claims=%d, want none", errs, len(claims))
+	}
+	if set == nil || set.State != predStateAbsent {
+		t.Fatalf("set = %+v, want state %q", set, predStateAbsent)
+	}
+}
+
+// TestClassifyPredictionsAcceptsAStringEncodedObject pins the form a Dify string parameter sends: the
+// same object, JSON-encoded. It must land exactly as the object form would, including the stored
+// payload and its hash, or one forecast sent both ways would be two sets on one report.
+func TestClassifyPredictionsAcceptsAStringEncodedObject(t *testing.T) {
+	obj := predWire(func(m map[string]any) {
+		m["horizon_end"] = receipt.AddDate(1, 0, 0).Format("2006-01-02")
+	})
+	enc, err := json.Marshal(string(obj))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSet, wantClaims, _ := classify(t, obj, predTestRtype)
+	set, claims, errs := classify(t, append(json.RawMessage(" "), enc...), predTestRtype)
+	if len(errs) != 0 {
+		t.Fatalf("a string-encoded valid payload was refused: %+v", errs)
+	}
+	if set.State != predStateAccepted {
+		t.Errorf("state = %q, want %q", set.State, predStateAccepted)
+	}
+	if set.Payload != wantSet.Payload || set.PayloadSHA != wantSet.PayloadSHA {
+		t.Errorf("payload/sha differ from the object form: %q/%s vs %q/%s", set.Payload, set.PayloadSHA, wantSet.Payload, wantSet.PayloadSHA)
+	}
+	if len(claims) != len(wantClaims) {
+		t.Errorf("claims = %d, want %d", len(claims), len(wantClaims))
+	}
+}
+
 // TestClassifyPredictionsAcceptsEvidenceBasedMethods pins the shape producer 1-6-4 V3.23 sends:
 // scenario probabilities from base rates updated with evidence, a null transform, and a no_trade
 // decision that still carries predictions.
@@ -181,7 +229,13 @@ func TestClassifyPredictionsRefusalReasons(t *testing.T) {
 		raw    json.RawMessage
 		reason string
 	}{
-		{"string instead of object", json.RawMessage(`"{\"schema\":\"predictions.v1\"}"`), reasonNotObject},
+		{"unrendered template string", json.RawMessage(`"{{#predictions-projection.predictions#}}"`), reasonNotObject},
+		{"empty string", json.RawMessage(`""`), reasonNotObject},
+		{"string holding an array", json.RawMessage(`"[]"`), reasonNotObject},
+		{"string holding prose", json.RawMessage(`"not JSON at all"`), reasonNotObject},
+		{"string holding an object with trailing garbage", json.RawMessage(`"{\"schema\":\"predictions.v1\"} x"`), reasonNotObject},
+		{"doubly encoded object", json.RawMessage(`"\"{\\\"schema\\\":\\\"predictions.v1\\\"}\""`), reasonNotObject},
+		{"string-encoded object with a bad enum", stringEncoded(predWire(func(m map[string]any) { m["decision_status"] = "maybe" })), reasonBadEnum},
 		{"array instead of object", json.RawMessage(`[]`), reasonNotObject},
 		{"prose", json.RawMessage(`not JSON at all`), reasonNotObject},
 		{"unknown field", predWire(func(m map[string]any) { m["surprise"] = 1 }), reasonBadSchema},

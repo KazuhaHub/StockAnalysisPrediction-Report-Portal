@@ -239,6 +239,35 @@ describe('QuoteStrip', () => {
     expect(screen.queryByTestId('quote-change')).toBeNull()
   })
 
+  it('does not call a stock suspended before the open, when nothing has traded yet', () => {
+    // Before the bell every A-share reports high 0 / low 0 — the same shape a suspension has. Only
+    // the phase tells them apart, and before the open the honest statement is "pre-open".
+    render(<QuoteStrip data={{ ...withSnapshot(BJ, { open: 0, change: 0, changePct: '0.00' }), phase: 'pre_open' }} loading={false} />)
+    expect(screen.queryByTestId('quote-suspended')).toBeNull()
+    expect(screen.getByTestId('quote-session').textContent).toBe('quote.phase.pre_open')
+    // The session's range does not exist yet: a dash, not a 0.00 that reads as a broken feed.
+    expect(screen.getByTestId('quote-stat-open').textContent).toBe('quote.open —')
+    expect(screen.getByTestId('quote-stat-high').textContent).toBe('quote.high —')
+    expect(screen.getByTestId('quote-stat-low').textContent).toBe('quote.low —')
+  })
+
+  it('still calls a stock suspended when the session is under way and it has no range', () => {
+    for (const phase of ['trading', 'lunch_break', 'closed', 'unknown']) {
+      const { unmount } = render(<QuoteStrip data={{ ...BJ, phase }} loading={false} />)
+      expect(screen.getByTestId('quote-suspended').textContent).toBe('quote.suspended')
+      unmount()
+    }
+  })
+
+  it('labels the session with the market phase when the server sent one', () => {
+    const { unmount } = render(<QuoteStrip data={{ ...SH, phase: 'lunch_break' }} loading={false} />)
+    expect(screen.getByTestId('quote-session').textContent).toBe('quote.phase.lunch_break')
+    unmount()
+    // No phase (an older server, or unknown): the two-valued session word, as before.
+    render(<QuoteStrip data={{ ...SH, phase: 'unknown' }} loading={false} />)
+    expect(screen.getByTestId('quote-session').textContent).toBe('quote.session.close')
+  })
+
   it('shows the vendor clock, the session and the source', () => {
     render(<QuoteStrip data={SH} loading={false} />)
     // The exchange's own wall clock, never re-expressed in the reader's timezone.

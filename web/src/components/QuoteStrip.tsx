@@ -6,6 +6,7 @@ import type { QuoteResp, QuoteSnapshot } from '../api/types'
 // The chart that renders with this strip prints the same 分 amounts. Two local formatters would
 // agree on 33.35 and disagree on every seven-figure 成交额, so both components call one.
 import { fenToYuan, groupDigits, signedFenToYuan } from '../lib/money'
+import { PHASE_LABEL_KEYS } from './QuotePhaseLabel'
 
 // The price strip above a stock report (ADR 0028), and the same strip at the top of the Quotes app.
 //
@@ -188,7 +189,11 @@ export default function QuoteStrip({ data, loading, error, onRetry }: Props) {
   }
 
   const s = data.snapshot
-  const suspended = isSuspended(s)
+  // Before the open nothing has traded yet, so high and low are 0 — the same shape a suspension
+  // has. The phase is the only thing that tells the two apart, and only "pre_open" overrides: in
+  // any other phase a stock with no range is suspended, and an unknown phase keeps the old reading.
+  const preOpen = data.phase === 'pre_open'
+  const suspended = isSuspended(s) && !preOpen
 
   // A-SHARE COLOUR CONVENTION: 红涨绿跌 — RED is UP and GREEN is DOWN, the reverse of US and
   // European markets. These are antd's semantic tokens rather than literals so both themes get a
@@ -198,8 +203,15 @@ export default function QuoteStrip({ data, loading, error, onRetry }: Props) {
   const direction = suspended ? 0 : Math.sign(Math.trunc(s.change))
   const moveColour = direction > 0 ? token.colorError : direction < 0 ? token.colorSuccess : token.colorText
 
-  const sessionLabel =
-    s.session === 'open' ? t('quote.session.open') : s.session === 'close' ? t('quote.session.close') : ''
+  // The phase, when the server sent one it can word, is the finer statement ("pre-open" rather than
+  // "closed" at 09:16) and uses the same keys as the home cards, so the two surfaces cannot word one
+  // state differently. Otherwise the two-valued session, as before.
+  const phaseKey = data.phase ? PHASE_LABEL_KEYS[data.phase] : undefined
+  const sessionLabel = phaseKey
+    ? t(phaseKey)
+    : s.session === 'open' ? t('quote.session.open') : s.session === 'close' ? t('quote.session.close') : ''
+  // A price of the session that has not happened yet is not 0.00: before the open it is a dash.
+  const sessionPrice = (fen: number) => (preOpen && fen === 0 ? '—' : fenToYuan(fen))
 
   // WHICH EXCHANGE AND WHICH MONEY. Neither is decoration now that one endpoint answers for
   // Shanghai, Shenzhen, Beijing, Hong Kong and US listings: 00700 and 000700 are one keystroke
@@ -236,10 +248,10 @@ export default function QuoteStrip({ data, loading, error, onRetry }: Props) {
   }
 
   const stats = [
-    { key: 'open', label: t('quote.open'), value: fenToYuan(s.open) },
+    { key: 'open', label: t('quote.open'), value: sessionPrice(s.open) },
     { key: 'prevClose', label: t('quote.prevClose'), value: fenToYuan(s.prevClose) },
-    { key: 'high', label: t('quote.high'), value: fenToYuan(s.high) },
-    { key: 'low', label: t('quote.low'), value: fenToYuan(s.low) },
+    { key: 'high', label: t('quote.high'), value: sessionPrice(s.high) },
+    { key: 'low', label: t('quote.low'), value: sessionPrice(s.low) },
     // Volume is a share count and turnover is already whole currency units — neither is 分, so
     // neither goes through fenToYuan. The unit words come from the bundle because this component is
     // rendered under three languages and a hardcoded 股 is wrong in two of them. There is

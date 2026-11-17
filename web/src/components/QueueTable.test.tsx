@@ -203,6 +203,18 @@ describe('QueueTable', () => {
     expect(preview.className).toMatch(/ant-typography-ellipsis/)
   })
 
+  it('marks a batch run\'s inputs in the workflow column as its first row', async () => {
+    store.jobs = [job({ total: 20, inputs: JSON.stringify({ symbol: '301001' }) })]
+    render(
+      <App>
+        <MemoryRouter>
+          <QueueTable showStats />
+        </MemoryRouter>
+      </App>,
+    )
+    expect(await screen.findByText('batch.inputsFirstRow:{"n":20} symbol=301001')).toBeTruthy()
+  })
+
   // The bug this guards: on a slow link the page arrived fully drawn and said "Queue is empty"
   // over five tiles reading zero, seconds before anything had been asked of the server. Both
   // halves are statements about the queue, and neither was one the server had made.

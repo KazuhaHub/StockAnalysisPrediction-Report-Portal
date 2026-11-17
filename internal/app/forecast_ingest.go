@@ -216,6 +216,7 @@ type predPayloadWire struct {
 // computable from the ledger alone (ADR 0029 §9) — the difference between "predicted nothing" and
 // "was never asked" has to be a row, or a producer that stopped sending the field is invisible.
 func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError) {
+	in.Raw = unwrapStringEncodedObject(in.Raw)
 	covered := predictionCovered(in.Rtype)
 	trimmed := bytes.TrimSpace(in.Raw)
 	empty := len(trimmed) == 0 || string(trimmed) == "null"
@@ -242,9 +243,10 @@ func classifyPredictions(in predInput) (*predSetRow, []predClaimRow, []predError
 
 	var wire predPayloadWire
 	if trimmed[0] != '{' {
-		// The single most likely producer bug, and the one the message has to name: Dify renders an
-		// object parameter from a template and passes a STRING when the rendered text is not valid
-		// JSON, so the payload arrives double-encoded or as prose.
+		// The single most likely producer bug, and the one the message has to name: a string that
+		// does not hold a JSON object. Dify sends one when a template was never rendered (the literal
+		// "{{#node.var#}}") or the parameter was left empty (""). A string that DOES hold an object
+		// was already unwrapped above, so what reaches here carries no forecast at all.
 		return rejected(base, in, reasonNotObject, "", "payload is not a JSON object (got "+firstKind(trimmed)+")")
 	}
 	dec := json.NewDecoder(bytes.NewReader(in.Raw))
@@ -645,6 +647,36 @@ func priceString(raw json.RawMessage) (string, error) {
 		return "", fmt.Errorf("value is not a valid JSON string")
 	}
 	return strings.TrimSpace(s), nil
+}
+
+// unwrapStringEncodedObject returns the object inside a JSON string, or raw unchanged.
+//
+// Dify cannot keep an object-typed tool parameter wired to an upstream variable: editing the node in
+// Studio stores it as a template, and an object parameter's template is sent unrendered. The producer
+// therefore declares predictions as a string and sends the object JSON-encoded. Only a string whose
+// content is a valid JSON object is unwrapped, so an empty string, prose or an unrendered template
+// still fails the shape check as not_object. The one other string unwrapped is "null": the producer
+// serialises "no forecast" that way, and as an object parameter it arrived as null, i.e. absent.
+// Exactly one level is unwrapped. The unwrap happens before the size cap and the hash, so both
+// measure the bytes that are stored; those bytes are whatever the producer encoded, so the same
+// forecast serialised differently (key order, escaping) still hashes differently.
+func unwrapStringEncodedObject(raw json.RawMessage) json.RawMessage {
+	t := bytes.TrimSpace(raw)
+	if len(t) == 0 || t[0] != '"' {
+		return raw
+	}
+	var s string
+	if err := json.Unmarshal(t, &s); err != nil {
+		return raw
+	}
+	inner := bytes.TrimSpace([]byte(s))
+	if string(inner) == "null" {
+		return json.RawMessage("null")
+	}
+	if len(inner) == 0 || inner[0] != '{' || !json.Valid(inner) {
+		return raw
+	}
+	return json.RawMessage(inner)
 }
 
 // firstKind names what a JSON value is, for error messages. Only the first byte is consulted, which

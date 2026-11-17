@@ -1,5 +1,6 @@
 import { errText } from '../api/client'
 import { isConnectionError } from '../api/connection'
+import type { Translate } from './translate'
 
 /**
  * Options for a load. `quiet` marks a refresh that follows a successful user action (save, delete…):
@@ -17,14 +18,14 @@ export type LoadOpts = { quiet?: boolean }
  */
 export function loadFailure(
   e: unknown,
-  t: (k: string, o?: Record<string, unknown>) => string,
+  t: Translate,
   fallbackKey?: string,
 ): string | null {
   return isConnectionError(e) ? null : errText(e, t, fallbackKey)
 }
 
 /** `.catch(onLoadFailure(t, setLoadErr))` for a load nobody needs to retry by hand (a poll runs it again). */
-export function onLoadFailure(t: (k: string, o?: Record<string, unknown>) => string, report: (text: string) => void, fallbackKey?: string) {
+export function onLoadFailure(t: Translate, report: (text: string) => void, fallbackKey?: string) {
   return (e: unknown) => {
     const text = loadFailure(e, t, fallbackKey)
     if (text !== null) report(text)

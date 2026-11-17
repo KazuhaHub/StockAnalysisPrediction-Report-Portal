@@ -11,12 +11,20 @@ import StatusTag, { type StatusTone } from '../components/StatusTag'
 // tier: a run stores "urgent" or a base number 0..100 (docs/adr/0008-multifactor-priority.md).
 
 export const BASE_MAX = 100
+// Covers both vocabularies statusTag renders: job statuses (queued..finished, expired) and item
+// outcomes (succeeded, partial, failed, untracked). A status missing here falls back to 'neutral';
+// batchUi.statusTone.test.ts keeps every labelled status mapped.
 export const JOB_STATUS_TONE: Record<string, StatusTone> = {
   queued: 'waiting',
   running: 'processing',
   cancelling: 'warning',
   cancelled: 'neutral',
   finished: 'success',
+  // A scheduled job whose window passed before it could start: it never ran, so it is no failure.
+  expired: 'neutral',
+  succeeded: 'success',
+  partial: 'warning',
+  failed: 'error',
   // 'untracked': the run reached Dify but its outcome couldn't be confirmed — a warning (not a
   // failure), and never re-run to avoid a duplicate charged run. See docs/adr/0015-reconcile-not-retry-untracked.md.
   untracked: 'warning',
@@ -201,21 +209,27 @@ export function summarizeInputs(
 // InputsPreview renders a run's inputs as a compact, clamped label: the summary (see
 // summarizeInputs) on one line, and the same entries one-per-line in the hover tooltip.
 // Returns null when there are no inputs so callers can drop the line entirely.
+//
+// A job carries only its first row's inputs. Pass the job's rowCount so a multi-row job is
+// introduced as "N rows, first row" rather than passing one row's symbol off as the whole job.
 export function InputsPreview({
   inputs,
   rows = 2,
   secondary = true,
   style,
+  rowCount,
 }: {
   inputs?: string
   rows?: number
   secondary?: boolean
   style?: CSSProperties
+  rowCount?: number
 }) {
   const { t } = useTranslation()
   const { entries, hidden } = summarizeInputs(inputs)
   if (entries.length === 0) return null
-  const lines = hidden > 0 ? [...entries, t('batch.inputsMore', { n: hidden })] : entries
+  const lead = rowCount !== undefined && rowCount > 1 ? [t('batch.inputsFirstRow', { n: rowCount })] : []
+  const lines = [...lead, ...entries, ...(hidden > 0 ? [t('batch.inputsMore', { n: hidden })] : [])]
   return (
     <Typography.Paragraph
       type={secondary ? 'secondary' : undefined}

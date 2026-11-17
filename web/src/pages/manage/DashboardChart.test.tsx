@@ -66,7 +66,7 @@ it('places the data action in the header, paginates rows and exports all filtere
   expect(container.querySelector('.rp-dashboard-chart')!.contains(action)).toBe(false)
   fireEvent.click(action)
   expect(screen.getAllByRole('row')).toHaveLength(26)
-  fireEvent.click(screen.getByTitle('2'))
+  fireEvent.click(screen.getByRole('button', { name: 'Page 2' }))
   expect(screen.getByRole('table').textContent).toContain('Item 25')
   expect(screen.getByRole('table').textContent).not.toContain('Item 0')
   fireEvent.click(screen.getByRole('button', {name:/manage.dashboard.downloadChartCSV/}))

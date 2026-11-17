@@ -34,11 +34,10 @@ import { clickable } from '../../lib/clickable'
 import { auditFilterToTree, exportLink } from '../../lib/exportFilter'
 import { clientInfoFromDetail, clientLabel } from '../../lib/clientInfo'
 import { useLoadFailure } from '../../lib/useOnReconnect'
+import type { Translate } from '../../lib/translate'
 
-// The subset of i18next's t() the detail helpers use. i18next's own type is overloaded in ways that
-// make it awkward to pass down; this is the shape it is assignable to, and the shape both need —
-// the same one runSchedule's summary helpers take.
-type TFunc = (key: string, opts?: Record<string, unknown>) => string
+// The translate function the detail helpers take: the app's shared shape of i18next's t().
+type TFunc = Translate
 
 // Actions recorded BEFORE anybody has authenticated.
 //
