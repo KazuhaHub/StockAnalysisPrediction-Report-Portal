@@ -506,16 +506,36 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 		return
 	}
 	origin := platformServiceEgressOrigin(admit.URL)
+	// record counts one finished call, and for a call that named a binding it
+	// counts the call against that binding too (the name only, never a value).
+	record := func(class byte, bytesOut int, bytesIn uint32) {
+		c.audit.recordCall(installation, l.state.sessionID, c.now(), class, origin, bytesOut, bytesIn)
+		if admit.Credential != "" {
+			c.audit.recordBinding(installation, l.state.sessionID, c.now(), admit.Credential, class)
+		}
+	}
 	load, cancel := context.WithTimeout(ctx, platformServiceEgressAdmitLoadTimeout)
-	a, err := c.server.loadServiceEgressForSession(load, l.state)
+	a, err := c.server.loadServiceEgressForSessionCredential(load, l.state, admit.Credential, admit.Credential != "")
 	cancel()
 	if err != nil {
-		c.refuse(call, transport.EgressRefusalUnavailable)
-		c.audit.recordCall(installation, l.state.sessionID, c.now(), transport.EgressOutcomeUnavailable, origin, 0, 0)
+		code, class := transport.EgressRefusalUnavailable, transport.EgressOutcomeUnavailable
+		if errors.Is(err, errPlatformServiceEgressDenied) {
+			// An unknown, revoked, unreviewed, wrong-principal or wrong-target
+			// binding: refused before anything was decrypted.
+			code, class = transport.EgressRefusalDenied, transport.EgressOutcomeDenied
+			c.recordDenied(installation, l, admit.Method, origin)
+		}
+		c.refuse(call, code)
+		record(class, 0, 0)
 		return
 	}
+	binding := a.binding
 	command, raw, signature, err := a.signServiceEgressCommand(l.state.sessionID, admit, time.Now().UnixMilli(), l.state.expiresMS)
 	a.Close()
+	// The signed command is the one place the value lives in Portal outside the
+	// transaction; it is wiped when the call ends.
+	defer clear(command.CredentialValue)
+	defer clear(raw)
 	if err != nil {
 		code, class := transport.EgressRefusalUnavailable, transport.EgressOutcomeUnavailable
 		if errors.Is(err, errPlatformServiceEgressDenied) {
@@ -523,11 +543,15 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 			c.recordDenied(installation, l, admit.Method, origin)
 		}
 		c.refuse(call, code)
-		c.audit.recordCall(installation, l.state.sessionID, c.now(), class, origin, 0, 0)
+		record(class, 0, 0)
 		return
 	}
 	frame, err := transport.EncodeEgressSigned(raw, signature)
-	if err != nil || call.Send(transport.EgressFrameCommand, frame) != nil {
+	if err != nil {
+		return
+	}
+	defer clear(frame)
+	if call.Send(transport.EgressFrameCommand, frame) != nil {
 		return
 	}
 	// withheld is set when Portal itself refused a proof (the authority was lost
@@ -545,7 +569,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 			if err != nil {
 				return
 			}
-			proof, proofSignature, err := c.server.approveServiceEgressCheck(ctx, l.state, command, raw, hex.EncodeToString(nonce[:]))
+			proof, proofSignature, err := c.server.approveServiceEgressCheck(ctx, l.state, command, raw, hex.EncodeToString(nonce[:]), binding)
 			if err != nil {
 				// A refused check is the absence of a proof: answering twice would
 				// close the session, and the runner treats silence as a denial.
@@ -561,7 +585,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 			if err != nil {
 				return
 			}
-			c.audit.recordCall(installation, l.state.sessionID, c.now(), outcome.Class, origin, admit.BodyBytes, outcome.ResponseBytes)
+			record(outcome.Class, admit.BodyBytes, outcome.ResponseBytes)
 			if outcome.Class == transport.EgressOutcomeDenied && !withheld {
 				c.recordDenied(installation, l, admit.Method, origin)
 			}

@@ -139,11 +139,11 @@ func testPlatformServiceEgressRefusesAfterRevokeDisableUninstallEpochRestore(t *
 			s, installation := platformServiceEgressFixture(t, pg, true)
 			state := platformServiceEgressState(t, s, installation, "network.http", "notifications.publish")
 			command, raw, _ := platformServiceEgressSignFor(t, s, state)
-			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, strings.Repeat("c", 64)); err != nil {
+			if _, _, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, strings.Repeat("c", 64), platformSecretBindingUse{}); err != nil {
 				t.Fatal("check before the change:", err)
 			}
 			mustExec(t, s.st, change, installation)
-			if proof, sig, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, strings.Repeat("d", 64)); err == nil || len(proof) != 0 || len(sig) != 0 {
+			if proof, sig, err := s.approveServiceEgressCheck(context.Background(), state, command, raw, strings.Repeat("d", 64), platformSecretBindingUse{}); err == nil || len(proof) != 0 || len(sig) != 0 {
 				t.Fatal("a challenge was answered after the change")
 			}
 			if a, err := s.loadServiceEgressForSession(context.Background(), state); err == nil {
@@ -215,13 +215,13 @@ func testPlatformServiceEgressActorScopeIsServiceNotViewer(t *testing.T, pg bool
 	forged := command
 	forged.RequestID = platformFixtureID(7792)
 	forgedRaw, _ := marshalPlatformServiceEgressCommand(forged)
-	if _, _, err := s.approveServiceEgressCheck(context.Background(), state, forged, raw, strings.Repeat("c", 64)); err == nil {
+	if _, _, err := s.approveServiceEgressCheck(context.Background(), state, forged, raw, strings.Repeat("c", 64), platformSecretBindingUse{}); err == nil {
 		t.Fatal("check answered for a different command than the bytes it names")
 	}
 	viewer := command
 	viewer.ActorScope = platformDigest([]byte("portal-network-viewer/v1:{}"))
 	viewerRaw, _ := marshalPlatformServiceEgressCommand(viewer)
-	if _, _, err := s.approveServiceEgressCheck(context.Background(), state, viewer, viewerRaw, strings.Repeat("c", 64)); err == nil {
+	if _, _, err := s.approveServiceEgressCheck(context.Background(), state, viewer, viewerRaw, strings.Repeat("c", 64), platformSecretBindingUse{}); err == nil {
 		t.Fatal("check answered for a viewer-scoped command")
 	}
 	_ = forgedRaw
