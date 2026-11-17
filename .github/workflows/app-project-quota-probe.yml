@@ -19,7 +19,7 @@ on:
         type: boolean
         default: false
       soak_host:
-        description: Where the capacity soak runs. github is the GitHub-hosted pool; reference-vm is the owner's fixed reference VM, an ephemeral runner labelled sec09-reference-vm (doc 171). Same bounds and checks either way; only a manual dispatch can choose it
+        description: Where the capacity soak runs. github is the GitHub-hosted pool; reference-vm is the owner's fixed reference VM, an ephemeral runner labelled sec09-reference-vm (doc 171). Same checks either way; the reference VM is judged at 1.5 times the latency bounds (owner decision 2026-11-16, doc 167); only a manual dispatch can choose it
         type: choice
         options: [github, reference-vm]
         default: github

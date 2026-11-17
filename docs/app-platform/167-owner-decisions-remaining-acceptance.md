@@ -282,6 +282,19 @@ with a typed error; Portal p95 latency for the home page and report detail
 within 1.5x of the idle baseline; batch queue dispatch latency unchanged; host
 memory and CPU stay within the runner budgets.
 
+Owner decision 2026-11-16 (reference VM bounds and size): the soak runs on the
+owner's reference VM, a 4 vCPU KVM guest of an Intel Xeon E-2236 on the shared
+development server, now with 8 GiB of memory (16 GiB left the shared host
+without room for the two desktops; the backends are sized from the runner's
+budgets, so the load scales down with it). On that VM the latency verdict is
+1.5 times the absolute bounds of 2026-11-15: home and report pooled p95 at most
+75 ms, dispatch@200 at most 37.5 ms, batch start at most 150 ms. The reason:
+the VM's idle latency alone is two to three times a GitHub-hosted AWS machine's,
+so the same absolute number measured the host's speed more than the Portal's
+behaviour under the flood. Every other host keeps 50, 50, 25 and 100 ms. The
+security and isolation checks, the load definition, the 120-minute duration and
+the disk-health precheck are unchanged on every host.
+
 Engineering note 2026-11-15 (not the owner's decision): "closes `SEC-09`" above is read as the soak's contribution to `SEC-09`.
 `SEC-09` is partial (two passes were withdrawn on review; run 43848988368 at `b4740c54` passed 35 of 35 checks but is superseded by review round 2), after the soak also ran the task worker, the event delivery coordinator and a backend-originated task flood: the 120-minute run 43825208692 at `ec21c509` passed all 34 checks, including the unchanged OPS-08 latency bounds, after the session-free task route got an admission budget and a cheap refused path (doc 171, "SEC-09: platform work under the soak"; `handoff/acceptance-checklist.csv`, `SEC-09`).
 

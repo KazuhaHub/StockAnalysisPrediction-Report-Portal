@@ -1660,7 +1660,17 @@ class ReferenceHostTests(unittest.TestCase):
         reference = evidence_verdict(evidence_environment(RUNNER_ENVIRONMENT="self-hosted", APP_CAPACITY_SOAK_HOST="reference-vm", RUNNER_NAME="sec09-ref-1", **base))
         self.assertTrue(hosted["counts_as_ops08_evidence"], hosted["evidence_blockers"])
         self.assertTrue(reference["counts_as_ops08_evidence"], reference["evidence_blockers"])
-        self.assertEqual(reference["checks"], hosted["checks"])
+        # The same checks with the same outcome; only the latency bound itself and the host kind it was judged for differ (owner decision
+        # 2026-11-16: the reference VM is judged at 1.5 times the absolute bounds).
+        def without_bounds(checks):
+            out = []
+            for check in checks:
+                detail = {k: v for k, v in check["detail"].items()
+                          if k not in ("bound_us", "threshold_us", "bound_host_kind", "window_thresholds")} if isinstance(check.get("detail"), dict) else check.get("detail")
+                out.append({**check, "detail": detail})
+            return out
+        self.assertEqual(without_bounds(reference["checks"]), without_bounds(hosted["checks"]))
+        self.assertEqual([c["passed"] for c in reference["checks"]], [c["passed"] for c in hosted["checks"]])
         self.assertEqual(reference["host_identity"]["kind"], "reference-vm")
         self.assertEqual(reference["host_identity"]["runner_name"], "sec09-ref-1")
         self.assertEqual(hosted["host_identity"]["kind"], "github-hosted")
@@ -1728,6 +1738,74 @@ class ReferenceDiskPrecheckTests(unittest.TestCase):
         slower = soak.evaluate(evidence, load_samples(120), **GOOD, disk_probe=dict(probe, p50_ms=2.5), event="workflow_dispatch", commit="a" * 40,
                                host={"kind": "reference-vm"})
         self.assertEqual(slower["result"], soak.RESULT_INCONCLUSIVE_SLOW_DISK)
+
+
+class ReferenceLatencyBoundTests(unittest.TestCase):
+    """Owner decision 2026-11-16: the reference VM (4 vCPU KVM guest of an Intel Xeon E-2236, 8 GiB) is judged at 1.5 times the absolute latency
+    bounds, because its idle latency alone is two to three times a GitHub-hosted AWS machine's; every other host keeps the bounds of 2026-11-15.
+    The security and isolation checks, the load and the duration are the same on every host."""
+
+    REFERENCE = {"home": 75_000, "report": 75_000, "dispatch": 37_500, "batch_start": 150_000}
+    ORIGINAL = {"home": 50_000, "report": 50_000, "dispatch": 25_000, "batch_start": 100_000}
+
+    def verdict(self, evidence, kind):
+        return soak.evaluate(evidence, load_samples(3), parent_passed=True, unit_tests={"TestTaskQuotasRefuseAtTheirOwnBoundary": True},
+                             event="workflow_dispatch", host={"kind": kind, "runner_name": "r", "cpu_model": "x", "nproc": 4, "mem_total_kib": 1})
+
+    def failing(self, verdict):
+        return {c["name"] for c in verdict["checks"] if not c["passed"]}
+
+    def test_the_reference_vm_bounds_are_one_and_a_half_times_the_others(self):
+        self.assertEqual(soak.absolute_bounds_us("reference-vm"), self.REFERENCE)
+        for kind in ("github-hosted", "unknown", "", None):
+            self.assertEqual(soak.absolute_bounds_us(kind), self.ORIGINAL, kind)
+        self.assertEqual(soak.ABSOLUTE_P95_BOUND_US, self.ORIGINAL, "the bounds of 2026-11-15 are unchanged")
+
+    def test_each_series_passes_at_the_reference_bound_and_fails_one_microsecond_beyond(self):
+        for series, bound in self.REFERENCE.items():
+            name = f"{series}_p95_within_absolute_bound"
+            evidence = child_evidence()
+            evidence["loaded"][series]["p95_us"] = bound
+            self.assertTrue(self.verdict(evidence, "reference-vm")["passed"], series)
+            evidence["loaded"][series]["p95_us"] = bound + 1
+            self.assertEqual(self.failing(self.verdict(evidence, "reference-vm")), {name}, series)
+
+    def test_a_github_hosted_run_is_still_judged_at_the_original_bounds(self):
+        for series, bound in self.ORIGINAL.items():
+            evidence = child_evidence()
+            evidence["loaded"][series]["p95_us"] = bound + 1
+            self.assertEqual(self.failing(self.verdict(evidence, "github-hosted")), {f"{series}_p95_within_absolute_bound"}, series)
+
+    def test_the_verdict_records_the_bound_and_the_host_kind_it_was_judged_for(self):
+        evidence = child_evidence()
+        evidence["loaded"]["report"]["p95_us"] = 60_000
+        verdict = self.verdict(evidence, "reference-vm")
+        detail = next(c for c in verdict["checks"] if c["name"] == "report_p95_within_absolute_bound")["detail"]
+        self.assertTrue(verdict["passed"], self.failing(verdict))
+        self.assertEqual((detail["bound_us"], detail["threshold_us"], detail["bound_host_kind"]), (75_000, 75_000, "reference-vm"))
+        hosted = next(c for c in self.verdict(evidence, "github-hosted")["checks"] if c["name"] == "report_p95_within_absolute_bound")["detail"]
+        self.assertEqual((hosted["bound_us"], hosted["bound_host_kind"]), (50_000, "github-hosted"))
+
+    def test_the_step_summary_states_the_bounds_the_run_was_judged_at(self):
+        evidence = child_evidence()
+        reference = soak.render_summary(evidence, self.verdict(evidence, "reference-vm"))
+        self.assertIn("at most 75 ms for home and report, 37.5 ms for dispatch@200 and 150 ms for batch start", reference)
+        self.assertIn("2026-11-16", reference)
+        hosted = soak.render_summary(evidence, self.verdict(evidence, "github-hosted"))
+        self.assertIn("at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start", hosted)
+
+    def test_a_run_that_ends_before_the_load_states_the_bounds_of_its_own_host(self):
+        slow = dict(_FAST, p50_ms=4.4)
+        for kind, text in (("reference-vm", "at most 75 ms for home and report"), ("github-hosted", "at most 50 ms for home and report")):
+            verdict = {"result": soak.RESULT_INCONCLUSIVE_SLOW_DISK, "passed": None, "checks": [],
+                       "precheck": soak.disk_precheck(None, slow, host_kind=kind)}
+            self.assertIn(text, soak.render_summary({"duration_minutes": 5}, verdict), kind)
+
+    def test_a_self_hosted_runner_that_is_not_the_reference_vm_never_gets_the_reference_bounds(self):
+        for env in ({"RUNNER_ENVIRONMENT": "self-hosted"}, {"RUNNER_ENVIRONMENT": "self-hosted", "APP_CAPACITY_SOAK_HOST": "github"},
+                    {"RUNNER_ENVIRONMENT": "github-hosted", "APP_CAPACITY_SOAK_HOST": "reference-vm"}, {"APP_CAPACITY_SOAK_HOST": "reference-vm"}):
+            kind = soak.host_identity(env, "", "", 4)["kind"]
+            self.assertEqual(soak.absolute_bounds_us(kind), self.ORIGINAL, env)
 
 
 class WorkflowHostGuardTests(unittest.TestCase):

@@ -860,16 +860,28 @@ BATCH_START_P95_BOUND_US = 100_000
 DISPATCH_P95_BOUND_US = 25_000
 ABSOLUTE_P95_BOUND_US = {"home": HOME_P95_BOUND_US, "report": REPORT_P95_BOUND_US, "dispatch": DISPATCH_P95_BOUND_US, "batch_start": BATCH_START_P95_BOUND_US}
 LATENCY_SERIES = ("home", "report", "dispatch", "batch_start")
+# Owner decision 2026-11-16: the reference VM (a 4 vCPU KVM guest of an Intel Xeon E-2236 on the owner's shared server, 8 GiB) is judged at 1.5 times
+# the absolute bounds above. Its idle latency alone is two to three times a GitHub-hosted AWS machine's (home idle p95 5 to 11 ms against about
+# 2 ms), so the same absolute number measured the host's speed more than the Portal's behaviour under the load. Every other host, an unknown one
+# included, keeps the bounds of 2026-11-15; the security and isolation checks, the load and the duration are the same on every host.
+REFERENCE_P95_BOUND_NUMERATOR, REFERENCE_P95_BOUND_DENOMINATOR = 3, 2
+
+
+def absolute_bounds_us(host_kind):
+    """The pooled p95 bound of each latency series for a host kind: 1.5 times ABSOLUTE_P95_BOUND_US on the reference VM, unchanged elsewhere."""
+    if host_kind == REFERENCE_HOST:
+        return {series: bound * REFERENCE_P95_BOUND_NUMERATOR // REFERENCE_P95_BOUND_DENOMINATOR for series, bound in ABSOLUTE_P95_BOUND_US.items()}
+    return dict(ABSOLUTE_P95_BOUND_US)
 
 
 def latency_threshold_us(idle_p95_us):
     return max(idle_p95_us * RATIO_LIMIT_NUMERATOR // RATIO_LIMIT_DENOMINATOR, idle_p95_us + LATENCY_FLOOR_US)
 
 
-def _latency_check(name, series, evidence):
+def _latency_check(name, series, evidence, host_kind=""):
     baseline = max(evidence.get("idle", {}).get(series, {}).get("p95_us", 0), 0)
     relative = latency_threshold_us(baseline)
-    bound = ABSOLUTE_P95_BOUND_US.get(series, relative)
+    bound = absolute_bounds_us(host_kind).get(series, relative)
     pooled = evidence.get("loaded", {}).get(series, {})
     pooled_p95, pooled_count = pooled.get("p95_us", 0), pooled.get("count", 0)
     rows, over, empty, worst = [], [], [], None
@@ -886,6 +898,7 @@ def _latency_check(name, series, evidence):
             worst = {"minute": window["minute"], "p95_us": p95}
     return _check(name, pooled_count > 0 and pooled_p95 <= bound and not empty, {
         "idle_p95_us": baseline, "threshold_us": bound, "bound_us": bound, "bound_kind": "absolute" if series in ABSOLUTE_P95_BOUND_US else "relative",
+        "bound_host_kind": host_kind or "unknown",
         "relative_threshold_us": relative, "within_relative_threshold": pooled_count > 0 and pooled_p95 <= relative,
         "pooled_p95_us": pooled_p95, "pooled_samples": pooled_count,
         "pooled_ratio": round(pooled_p95 / max(baseline, 1), 3), "worst_ratio": round((worst or {"p95_us": 0})["p95_us"] / max(baseline, 1), 3),
@@ -909,7 +922,18 @@ def render_summary(evidence, verdict):
     if verdict.get("result") == RESULT_INCONCLUSIVE_SLOW_DISK:
         lines += ["", "The disk-health precheck, judged only from readings taken before the load, tripped: this run says nothing about the Portal, is neither "
                   "passed nor failed and is never evidence. Rerun the job. Reasons: " + "; ".join(verdict["precheck"]["reasons"]) + "."]
-    lines += ["", "Latency verdict (owner decision 2026-11-15): pooled loaded p95 at most 50 ms for home and report, 25 ms for dispatch@200 and 100 ms for batch start. "
+    used = {c["name"].split("_p95_within_absolute_bound")[0]: c.get("detail", {}) for c in verdict.get("checks", [])
+            if c["name"].endswith("_p95_within_absolute_bound")}
+    # A run that ended before the load has no latency checks; its precheck still records the host it ran on.
+    host_kind = next((d.get("bound_host_kind") for d in used.values() if d.get("bound_host_kind")), (verdict.get("precheck") or {}).get("host_kind", ""))
+    bounds = absolute_bounds_us(host_kind)
+    for series, detail in used.items():
+        bounds[series] = detail.get("bound_us", bounds.get(series))
+    ms = {series: f"{bound / 1000:g}" for series, bound in bounds.items()}
+    decision = ("owner decisions 2026-11-15 and 2026-11-16: the reference VM is judged at 1.5 times the bounds" if host_kind == REFERENCE_HOST
+                else "owner decision 2026-11-15")
+    lines += ["", f"Latency verdict ({decision}): pooled loaded p95 at most {ms['home']} ms for home and report, {ms['dispatch']} ms for dispatch@200 "
+             f"and {ms['batch_start']} ms for batch start. "
              "The pooling is an engineering decision; windows, the relative threshold max(1.5 x idle p95, idle p95 + 5 ms) and the ratio to idle are diagnostics."]
     for series in LATENCY_SERIES:
         check = next((c for c in verdict["checks"] if c["name"].startswith(series)), None)
@@ -1448,10 +1472,11 @@ def evaluate(evidence, samples, parent_passed, failed_samples=0, unit_tests=None
                          {"windows": len(windows), "minutes": minutes}))
     checks.append(_check("session_outlives_the_run", evidence.get("session_expires_ms", 0) > evidence.get("load_finished_ms", 0) > 0,
                          {"session_expires_ms": evidence.get("session_expires_ms"), "load_finished_ms": evidence.get("load_finished_ms")}))
-    ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence),
-                    "report": _latency_check("report_p95_within_absolute_bound", "report", evidence),
-                    "dispatch": _latency_check("dispatch_p95_within_absolute_bound", "dispatch", evidence),
-                    "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence)}
+    host_kind = (host or {}).get("kind", "")
+    ratio_checks = {"home": _latency_check("home_p95_within_absolute_bound", "home", evidence, host_kind),
+                    "report": _latency_check("report_p95_within_absolute_bound", "report", evidence, host_kind),
+                    "dispatch": _latency_check("dispatch_p95_within_absolute_bound", "dispatch", evidence, host_kind),
+                    "batch_start": _latency_check("batch_start_p95_within_absolute_bound", "batch_start", evidence, host_kind)}
     checks.extend(ratio_checks.values())
     checks.extend(_flood_checks(evidence))
 
