@@ -185,8 +185,40 @@ What shipped, and where it differs from sections 3 to 5.
   again without opening the value and refuses unless it is the one the admit
   resolved (revoked or reviewed binding, rotated or revoked credential, changed
   principals or policy all differ).
+- **Order and errors.** The admit's target and method are judged against the
+  reviewed policy before the binding is read, so a wrong target never reaches the
+  custody. An unknown, revoked, unreviewed, wrong-principal or wrong-target
+  binding is `denied`; a store failure or an expired budget is `unavailable`
+  (no denied row, no spend of the denied cap).
+- **Where the value lives.** In Portal it exists in the authority transaction and
+  in the signed command; once the command is sent the call keeps its fields and
+  the digest of the signed bytes and signs its proofs from those
+  (`SignNetworkHTTPCheckDigest`), and the value, the signed bytes and the frame
+  copy are wiped. In the runner the frame payload, the decoded and verified
+  copies and the pool's clones are wiped when the call ends.
+- **Echo.** The runner withholds a response (body or content type) that gives the
+  value back as it is, in any letter case, in base64 (both alphabets, any byte
+  alignment), hex, URL-encoded or JSON-escaped, for the value and for a Bearer
+  token without its prefix, on the foreground, background and stream paths.
+  Values shorter than 8 bytes are matched as they are. This is a recognition of
+  those forms, not a guarantee against every encoding; the console says so.
 - **Audit.** The binding review audit detail carries `Principals`. The summary
-  row gains `bindings: [{binding, count, outcomes}]` only when a call named one.
+  row gains `bindings: [{binding, count, outcomes}]` for calls whose binding
+  resolved to a reviewed one, and `credential_unresolved` (outcome counts, no
+  names) for calls whose binding did not, so a name the application made up is
+  never recorded.
+- **Test plan (section 7).** Items 1 to 7 are tests. Item 4 is covered in two
+  halves that share no process: Portal's coordinator with a fake runner (log and
+  audit scan) and the real runner registry and broker with a signing stand-in
+  for Portal (log and reply scan); the per-call path does not write the runner
+  journal (the journal is written when a session is bound), which a test pins by
+  counting binds. Item 5 runs in the broker package on the background pool.
+- **Item 8, native Scheduled Digest fixture: deferred.** The native lane needs
+  root, Docker and a published Apps checkout; the Scheduled Digest probe that
+  would exercise it is the cross-repo follow-up of doc 174 (7.10), and a
+  service-principal binding for it does not exist until that app asks for one.
+  It lands with that probe. The SQLite and PostgreSQL pairs of items 1 to 3 and
+  6 to 7 run in the normal suite.
 - **Console.** The binding form has a "who may use it" field (viewer only,
   also background, background only; never offered for setup-only credentials)
   with a disclosure in the approval step, and an active binding can be reviewed
