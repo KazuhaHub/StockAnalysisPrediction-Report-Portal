@@ -123,11 +123,17 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	}
 	raw, signature, body = bytes.Clone(raw), bytes.Clone(signature), bytes.Clone(body)
 	defer clear(body)
+	// The signed bytes and every decoded copy carry the credential value, if any.
+	defer clear(raw)
 	verified, err := control.VerifyNetworkHTTPRequest(raw, signature, a, p.now().UnixMilli())
 	if err != nil || control.ValidateNetworkHTTPBody(verified, body) != nil {
 		return zero, ErrDenied
 	}
+	defer verified.Clear()
 	command := verified.Command()
+	defer clear(command.CredentialValue)
+	view := verified.Command()
+	defer clear(view.CredentialValue)
 	policy, err := appplatform.ParseHTTPPolicy(command.PolicyRaw)
 	if err != nil {
 		return zero, ErrDenied
@@ -144,7 +150,7 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	defer cancel()
 	// Refuse stale/revoked claims before allocating a cache entry. NetworkCall
 	// additionally repeats current authority at all three actual IO checkpoints.
-	current, err := p.current(ctx, verified.Command())
+	current, err := p.current(ctx, view)
 	if ctx.Err() != nil {
 		return zero, ErrUnavailable
 	}
@@ -157,7 +163,7 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	if ctx.Err() != nil {
 		return zero, ErrUnavailable
 	}
-	lease, err := p.acquireWith(verified.Command(), full)
+	lease, err := p.acquireWith(view, full)
 	if err != nil {
 		return zero, err
 	}

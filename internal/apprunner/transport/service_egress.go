@@ -458,6 +458,8 @@ func (m *EgressMux) write(t byte, id EgressCallID, payload []byte) error {
 	if err != nil {
 		return err
 	}
+	// The frame is a copy of the payload, which may carry a credential value.
+	defer clear(frame)
 	m.wmu.Lock()
 	defer m.wmu.Unlock()
 	// Per-write deadline only: SetDeadline would also cut the shared read side.

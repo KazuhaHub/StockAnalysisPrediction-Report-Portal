@@ -282,12 +282,16 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}
+	// The command frame and its decoded copy carry the credential value Portal
+	// placed: they are wiped when the call ends, as the foreground path wipes its.
+	defer clear(frame.Payload)
 	commandRaw, commandSig, err := DecodeEgressCommand(frame.Payload)
 	if err != nil {
 		session.mux.Close(EgressCloseRefused)
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}
+	defer clear(commandRaw)
 	response, runErr := in.run(ctx, session, call, commandRaw, commandSig, request.Body, admitted)
 	outcome := egressOutcomeOf(response, runErr)
 	if payload, err := EncodeEgressOutcome(outcome); err == nil {
@@ -313,7 +317,9 @@ func (in *egressInstall) run(ctx context.Context, session *egressSession, call *
 	if err != nil || control.ValidateNetworkHTTPBody(verified, body) != nil {
 		return zero, broker.ErrDenied
 	}
+	defer verified.Clear()
 	command := verified.Command()
+	defer clear(command.CredentialValue)
 	if session.checkCommand(command, admit, body) != nil || !session.claim(command.RequestID) {
 		return zero, broker.ErrDenied
 	}
