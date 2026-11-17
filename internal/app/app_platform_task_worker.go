@@ -180,5 +180,21 @@ func RunPlatformTaskWorker(ctx context.Context, cfgPath string, options Platform
 		return err
 	}
 	log.Printf("application task worker %s started", worker)
-	return scheduler.run(ctx, options.Once)
+	if options.Once {
+		return scheduler.run(ctx, true)
+	}
+	// Background egress (doc 174). The coordinator runs beside the task loop and
+	// never under --once. Only one may run: see platformServiceEgressCoordinator.
+	egress := newPlatformServiceEgressCoordinator(server, newPlatformServiceEgressRunner())
+	egressDone := make(chan struct{})
+	go func() {
+		defer close(egressDone)
+		egress.run(ctx)
+	}()
+	err = scheduler.run(ctx, false)
+	// A scheduler that stopped for any reason stops the coordinator too, which
+	// closes its sessions as shutdown before the process exits.
+	egress.stop()
+	<-egressDone
+	return err
 }

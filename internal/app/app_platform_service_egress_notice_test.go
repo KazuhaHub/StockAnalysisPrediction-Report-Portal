@@ -11,6 +11,7 @@ import (
 // idempotency and conflict rules (doc 174 section 3.2, doc 152).
 func testPlatformServiceEgressNoticeIdempotentConflictNamespace(t *testing.T, pg bool) {
 	s, installation := platformServiceIdentityFixtureWithDatabase(t, pg)
+	resetPlatformServiceEgressNotices(t, s)
 	app := scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, installation)
 	notice := func(v map[string]any) []byte {
 		raw, _ := json.Marshal(v)
@@ -55,4 +56,20 @@ func TestPlatformServiceEgressNoticeIdempotentConflictNamespaceSQLite(t *testing
 }
 func TestPlatformServiceEgressNoticeIdempotentConflictNamespacePostgres(t *testing.T) {
 	testPlatformServiceEgressNoticeIdempotentConflictNamespace(t, true)
+}
+
+// resetPlatformServiceEgressNotices empties the event table around a test that counts events: the
+// PostgreSQL database is shared between runs, and an occurrence a previous run captured would
+// otherwise read as a replay.
+func resetPlatformServiceEgressNotices(t *testing.T, s *Server) {
+	t.Helper()
+	clean := func() {
+		for _, table := range []string{"notification_attempts", "notification_deliveries", "notification_events"} {
+			if _, err := s.st.exec("DELETE FROM " + table); err != nil {
+				t.Fatalf("reset %s: %v", table, err)
+			}
+		}
+	}
+	clean()
+	t.Cleanup(clean)
 }
