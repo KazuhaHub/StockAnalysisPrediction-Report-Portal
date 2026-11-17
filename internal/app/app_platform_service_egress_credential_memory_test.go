@@ -4,7 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
-	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,9 @@ func testPlatformServiceEgressCallKeepsNoCredentialValue(t *testing.T, pg bool) 
 	if len(call.command.CredentialValue) != 0 {
 		t.Fatal("the kept call holds the value")
 	}
-	if kept, _ := json.Marshal(call); bytes.Contains(kept, value) || bytes.Contains(kept, []byte("Bearer")) {
+	// %+v prints unexported fields too; a []byte prints as numbers, so look for both.
+	if kept := fmt.Sprintf("%+v", call); strings.Contains(kept, string(value)) || strings.Contains(kept, "Bearer") ||
+		strings.Contains(kept, fmt.Sprint(value)) {
 		t.Fatal("the kept call serializes the value")
 	}
 	if !bytes.Equal(command.CredentialValue, value) || !call.consistent {
