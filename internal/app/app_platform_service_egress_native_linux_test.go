@@ -35,6 +35,11 @@ import (
 // native acceptance started; the test that starts it sets it.
 var platformNativeServiceIPCRoot string
 
+// The foreground acceptance reads up to 10 hits of the HTTPS fixture; the egress
+// calls that follow it add 3 more (the fixture is shared, so its counter is not
+// reset), which only this test is allowed to see.
+const platformServiceEgressFixtureHitCap = 16
+
 const (
 	platformServiceEgressClientSocket = "PORTAL_SERVICE_EGRESS_CLIENT_SOCKET"
 	platformServiceEgressClientMethod = "PORTAL_SERVICE_EGRESS_CLIENT_METHOD"
@@ -108,6 +113,24 @@ func platformServiceEgressErrorCode(body string) string {
 	return v.Error
 }
 
+func platformServiceEgressEventIDs(t *testing.T, s *Server) []string {
+	t.Helper()
+	rows, err := s.st.query(`SELECT id FROM notification_events`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 func testNativePlatformServiceEgress(t *testing.T, s *Server, installation string, endpoint platformRuntimeEndpoint) {
 	t.Helper()
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") != "1" || platformNativeServiceIPCRoot == "" {
@@ -118,11 +141,50 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	socket := filepath.Join(platformNativeServiceIPCRoot, installation, strconv.FormatInt(generation, 10), "broker", "broker.sock")
 	// The installation declares no background.run (the foreground fixture does not
 	// need it); give it the row the reviewed selection would, for this test only.
+	// Everything the test changes is put back by a cleanup that runs however the
+	// test ends: the original network.http state, the background.run row, and the
+	// notification events it captured.
+	grantWas := scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	eventsBefore := map[string]bool{}
+	for _, id := range platformServiceEgressEventIDs(t, s) {
+		eventsBefore[id] = true
+	}
+	var withdrawal <-chan error
+	t.Cleanup(func() {
+		if withdrawal != nil {
+			select {
+			case <-withdrawal:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=? WHERE installation_id=? AND capability='network.http'`, grantWas, installation)
+		mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
+		for _, id := range platformServiceEgressEventIDs(t, s) {
+			if eventsBefore[id] {
+				continue
+			}
+			mustExec(t, s.st, `DELETE FROM notification_attempts WHERE delivery_id IN (SELECT id FROM notification_deliveries WHERE event_id=?)`, id)
+			mustExec(t, s.st, `DELETE FROM notification_deliveries WHERE event_id=?`, id)
+			mustExec(t, s.st, `DELETE FROM notification_recipients WHERE event_id=?`, id)
+			mustExec(t, s.st, `DELETE FROM notification_events WHERE id=?`, id)
+		}
+	})
 	review := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
 	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
 	stamp := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
 	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,'background.run',1,'{}',?,?,?,?)`, installation, policy, review, stamp, stamp)
-	defer mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
+	// The fixture app (notes-writer-notify-demo) declares secrets.use but requires
+	// no setup binding, so nothing is missing; if that ever changes this says so
+	// here instead of as an opaque "no session" later.
+	appID := scalar[string](t, s.st, `SELECT app_id FROM app_platform_installations WHERE id=?`, installation)
+	if required := platformRequiredSetupBindings(appID); len(required) != 0 {
+		t.Fatal("the fixture app requires setup bindings the test does not provide", appID, required)
+	}
+	if a, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{}); err != nil || !a.hasNetwork() {
+		t.Fatal("the fixture installation has no loadable egress authority", err)
+	} else {
+		a.Close()
+	}
 
 	// Before any session the socket is not there to be connected to, or answers
 	// unavailable: the application never sees an error it could mistake for upstream.
@@ -137,13 +199,13 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if status, body := platformServiceEgressAppCall(t, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("broker status", status, body)
 	}
-	before := platformNetworkFixtureCount(t)
+	before := platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap)
 	request := func(path string) (int, string) {
 		raw, _ := json.Marshal(map[string]string{"requestId": "native-" + strconv.FormatInt(time.Now().UnixNano(), 36), "method": "GET", "url": "https://api.example.com" + path, "accept": "application/json", "contentType": "", "bodyBase64": ""})
 		return platformServiceEgressAppCall(t, socket, "POST", "/v1/network/http", string(raw))
 	}
 	status, body := request("/v1/success")
-	if status != 200 || !strings.Contains(body, `"status":200`) || platformNetworkFixtureCount(t) != before+1 {
+	if status != 200 || !strings.Contains(body, `"status":200`) || platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap) != before+1 {
 		t.Fatal("background HTTPS through the broker", status, body)
 	}
 	t.Log("PORTAL_SERVICE_EGRESS_HTTPS")
@@ -152,18 +214,19 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
 	status, body = request("/v1/success")
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.http'`, installation)
-	if code := platformServiceEgressErrorCode(body); status == 200 || (code != "denied" && code != "unavailable") || platformNetworkFixtureCount(t) != before+1 {
+	if code := platformServiceEgressErrorCode(body); status == 200 || (code != "denied" && code != "unavailable") || platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap) != before+1 {
 		t.Fatal("a withdrawn grant reached upstream", status, body)
 	}
 	t.Log("PORTAL_SERVICE_EGRESS_PRE_IO_REVOKED")
 	// Revoked after the request reached upstream: uncertain, never a body.
 	cancel, done := beginPlatformNetworkFixtureWithdrawal(t, s, installation)
+	withdrawal = done
 	defer cancel()
 	status, body = request("/v1/revoke")
 	cancel()
 	withdrawalErr := <-done
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.http'`, installation)
-	if withdrawalErr != nil || status != 502 || platformServiceEgressErrorCode(body) != "uncertain" || strings.Contains(body, `"ok"`) || platformNetworkFixtureCount(t) != before+2 {
+	if withdrawalErr != nil || status != 502 || platformServiceEgressErrorCode(body) != "uncertain" || strings.Contains(body, `"ok"`) || platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap) != before+2 {
 		t.Fatal("post-IO withdrawal released a response or was retried", withdrawalErr, status, body)
 	}
 	t.Log("PORTAL_SERVICE_EGRESS_POST_IO_UNCERTAIN")

@@ -265,6 +265,11 @@ func TestPlatformNetworkFixtureFilePublishesAtomically(t *testing.T) {
 
 func platformNetworkFixtureCount(t *testing.T) int {
 	t.Helper()
+	return platformNetworkFixtureCountUpTo(t, 10)
+}
+
+func platformNetworkFixtureCountUpTo(t *testing.T, limit int) int {
+	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(os.Getenv("TMPDIR"), "network-count"))
 	if os.IsNotExist(err) {
 		return 0
@@ -273,7 +278,7 @@ func platformNetworkFixtureCount(t *testing.T) int {
 		t.Fatal(err)
 	}
 	count, err := strconv.Atoi(string(raw))
-	if err != nil || count < 1 || count > 16 {
+	if err != nil || count < 1 || count > limit {
 		t.Fatal("invalid HTTPS fixture count", err)
 	}
 	return count
