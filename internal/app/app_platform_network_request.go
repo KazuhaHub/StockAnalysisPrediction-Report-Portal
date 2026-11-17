@@ -59,9 +59,30 @@ func (i platformNetworkRequestIntent) GoString() string { return i.String() }
 // history and exact active grant coverage. This read adds the selected policy
 // and profile; an app cannot select a review, actor scope or runtime identity.
 func loadPlatformNetworkGrant(e migExec, installation string, a platformWritableBackendAccess, capability string) (platformNetworkGrant, error) {
+	return loadPlatformNetworkGrantForIntent(e, installation, platformNetworkGrantTarget{
+		release:    platformDigest(a.intent.start.writer.descriptor),
+		generation: a.intent.generation, policy: a.policy,
+		runtime: a.intent.start.writer.runtime,
+	}, capability)
+}
+
+// platformNetworkGrantTarget is the installation tuple a network grant is read
+// against. A viewer request takes it from its writable backend access; the
+// background egress session takes it from the service tuple it is pinned to.
+// Nothing here names an actor: that is what makes the loader shareable.
+type platformNetworkGrantTarget struct {
+	release    string
+	generation int64
+	policy     int64
+	runtime    platformRuntimeRegistration
+}
+
+// loadPlatformNetworkGrantForIntent is the intent-independent half of
+// loadPlatformNetworkGrant.
+func loadPlatformNetworkGrantForIntent(e migExec, installation string, t platformNetworkGrantTarget, capability string) (platformNetworkGrant, error) {
 	var g platformNetworkGrant
 	var raw, digest, action string
-	release := platformDigest(a.intent.start.writer.descriptor)
+	release := t.release
 	if err := e.queryRow(`SELECT g.policy_json,g.review_plan_id,p.plan_json,p.plan_sha256,o.action
 		FROM app_platform_capability_grants g
 		JOIN app_platform_review_plans p ON p.id=g.review_plan_id
@@ -73,7 +94,7 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		AND o.installation_id=g.installation_id
 		AND o.stage='complete' AND o.completed_ms IS NOT NULL
 		AND o.controller_epoch=p.controller_epoch`,
-		installation, capability, a.policy, release).
+		installation, capability, t.policy, release).
 		Scan(&g.policy, &g.review, &raw, &digest, &action); err != nil {
 		return g, errAppPlatformNetworkUnavailable
 	}
@@ -87,7 +108,7 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		if json.Unmarshal([]byte(raw), &plan) != nil ||
 			plan.Format != platformWritableInstallFormat ||
 			plan.Runtime == nil || plan.ReleaseSHA256 != release ||
-			plan.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch {
+			plan.ControllerEpoch != t.runtime.controllerEpoch {
 			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 		}
 		canonical, err := json.Marshal(plan)
@@ -100,8 +121,8 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		if json.Unmarshal([]byte(raw), &plan) != nil ||
 			plan.Format != platformManagedUpdateFormat ||
 			plan.TargetReleaseSHA256 != release ||
-			plan.TargetGeneration != a.intent.generation ||
-			plan.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch {
+			plan.TargetGeneration != t.generation ||
+			plan.ControllerEpoch != t.runtime.controllerEpoch {
 			return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 		}
 		canonical, err := json.Marshal(plan)
@@ -113,11 +134,11 @@ func loadPlatformNetworkGrant(e migExec, installation string, a platformWritable
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
 	if target == nil ||
-		target.RuntimeID != a.intent.start.writer.runtime.id ||
-		target.DeploymentID != a.intent.start.writer.runtime.deploymentID ||
-		target.ControllerEpoch != a.intent.start.writer.runtime.controllerEpoch ||
-		target.ControlRevision != a.intent.start.writer.runtime.controlRevision ||
-		target.Fingerprint != a.intent.start.writer.runtime.fingerprint {
+		target.RuntimeID != t.runtime.id ||
+		target.DeploymentID != t.runtime.deploymentID ||
+		target.ControllerEpoch != t.runtime.controllerEpoch ||
+		target.ControlRevision != t.runtime.controlRevision ||
+		target.Fingerprint != t.runtime.fingerprint {
 		return platformNetworkGrant{}, errAppPlatformNetworkUnavailable
 	}
 	httpPolicy, streamPolicy, err := platformNetworkTargetPolicies(target)
