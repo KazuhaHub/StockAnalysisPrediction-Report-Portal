@@ -57,6 +57,13 @@ func testPlatformSecretBindingPrincipals(t *testing.T, pg bool) {
 		if _, _, err := loadPlatformSecretBindingUse(e, installation, "upstream-api", facts); (err == nil) != c.viewer {
 			t.Fatal("foreground loader ignored principals", c.principals)
 		}
+		// The command resolver the foreground request path calls, too: a service-only
+		// binding is never placed into a viewer's request.
+		if _, _, value, err := s.resolvePlatformSecretBindingCommand(e, installation, "upstream-api"); (err == nil) != c.viewer {
+			t.Fatal("foreground resolver ignored principals", c.principals)
+		} else {
+			clear(value)
+		}
 		list, err := s.listPlatformSecretBindings(admin, installation)
 		if err != nil || len(list) != 1 {
 			t.Fatal("list", err)
