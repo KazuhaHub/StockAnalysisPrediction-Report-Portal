@@ -592,7 +592,23 @@ func EncodeEgressAdmit(a EgressAdmit) ([]byte, error) {
 	if !validEgressAdmit(a) {
 		return nil, ErrEgressProtocol
 	}
-	return json.Marshal(a)
+	out, err := marshalEgressAdmit(a)
+	if err != nil || len(out) > egressAdmitMaxBytes {
+		return nil, ErrEgressProtocol
+	}
+	return out, nil
+}
+
+// marshalEgressAdmit is the one canonical encoding of an admit. It does not
+// HTML-escape: &, < and > are plain bytes, so a valid URL does not grow.
+func marshalEgressAdmit(a EgressAdmit) ([]byte, error) {
+	var buf bytes.Buffer
+	e := json.NewEncoder(&buf)
+	e.SetEscapeHTML(false)
+	if err := e.Encode(a); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // DecodeEgressAdmit accepts only the exact canonical encoding of a valid admit.
@@ -603,7 +619,7 @@ func DecodeEgressAdmit(payload []byte) (EgressAdmit, error) {
 	if len(payload) == 0 || len(payload) > egressAdmitMaxBytes || d.Decode(&a) != nil || !validEgressAdmit(a) {
 		return EgressAdmit{}, ErrEgressProtocol
 	}
-	if canonical, err := json.Marshal(a); err != nil || !bytes.Equal(canonical, payload) {
+	if canonical, err := marshalEgressAdmit(a); err != nil || !bytes.Equal(canonical, payload) {
 		return EgressAdmit{}, ErrEgressProtocol
 	}
 	return a, nil

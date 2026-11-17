@@ -200,6 +200,16 @@ func refusalCode(code byte) string {
 	}
 }
 
+// newCallCode maps a failure to start a call. Nothing was dispatched, so only a
+// full session is busy; a session that just closed, a protocol error or a
+// cancelled context is unavailable, never uncertain.
+func newCallCode(err error) string {
+	if errors.Is(err, broker.ErrBusy) {
+		return broker.AppErrBusy
+	}
+	return broker.AppErrUnavailable
+}
+
 // awaitPortal waits for Portal's first answer to a call. A timeout or a closed
 // session means nothing was dispatched, so the call is unavailable.
 func awaitPortal(ctx context.Context, call *EgressCall) (EgressFrame, string) {
@@ -219,6 +229,14 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		return
 	}
 	defer clear(request.Body)
+	digest := sha256.Sum256(request.Body)
+	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:])}
+	// An input no admit frame can carry is invalid, and costs no rate token.
+	admit, err := EncodeEgressAdmit(admitted)
+	if err != nil {
+		writeAppError(w, broker.AppErrInvalid)
+		return
+	}
 	session, done, code := in.begin("network.http")
 	if code != "" {
 		writeAppError(w, code)
@@ -227,18 +245,12 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 	defer done()
 	call, err := session.mux.NewCall()
 	if err != nil {
-		writeAppError(w, broker.AppErrorFor(err))
+		writeAppError(w, newCallCode(err))
 		return
 	}
 	defer call.Finish()
 	ctx, cancel := context.WithTimeout(r.Context(), egressCallTimeout)
 	defer cancel()
-	digest := sha256.Sum256(request.Body)
-	admit, err := EncodeEgressAdmit(EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:])})
-	if err != nil {
-		writeAppError(w, broker.AppErrInvalid)
-		return
-	}
 	if err := call.Send(EgressFrameAdmit, admit); err != nil {
 		writeAppError(w, broker.AppErrUnavailable)
 		return
@@ -270,7 +282,7 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}
-	response, runErr := in.run(ctx, session, call, commandRaw, commandSig, request.Body, EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:])})
+	response, runErr := in.run(ctx, session, call, commandRaw, commandSig, request.Body, admitted)
 	outcome := egressOutcomeOf(response, runErr)
 	if payload, err := EncodeEgressOutcome(outcome); err == nil {
 		_ = call.Send(EgressFrameOutcome, payload)
@@ -331,6 +343,11 @@ func (in *egressInstall) notice(w http.ResponseWriter, r *http.Request, raw []by
 		writeAppError(w, broker.AppErrInvalid)
 		return
 	}
+	payload := notice.JSON()
+	if len(payload) > egressNoticeMaxBytes {
+		writeAppError(w, broker.AppErrInvalid)
+		return
+	}
 	session, done, code := in.begin("notifications.publish")
 	if code != "" {
 		writeAppError(w, code)
@@ -339,13 +356,13 @@ func (in *egressInstall) notice(w http.ResponseWriter, r *http.Request, raw []by
 	defer done()
 	call, err := session.mux.NewCall()
 	if err != nil {
-		writeAppError(w, broker.AppErrorFor(err))
+		writeAppError(w, newCallCode(err))
 		return
 	}
 	defer call.Finish()
 	ctx, cancel := context.WithTimeout(r.Context(), egressCallTimeout)
 	defer cancel()
-	if err := call.Send(EgressFrameNotice, notice.JSON()); err != nil {
+	if err := call.Send(EgressFrameNotice, payload); err != nil {
 		writeAppError(w, broker.AppErrUnavailable)
 		return
 	}

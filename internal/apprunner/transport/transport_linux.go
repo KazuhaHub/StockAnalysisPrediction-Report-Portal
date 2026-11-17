@@ -208,6 +208,11 @@ func listenProfile(path string, controllerUID uint32, store admitter, profile en
 // Callers should cancel Serve's context to stop in-flight journal operations too.
 func (s *Server) Close() {
 	s.closeOnce.Do(func() {
+		// A server that never served still owns a registry with a sweep goroutine.
+		// Serve ends it itself, after its handlers, when it ran.
+		if s.egress != nil && !s.started.Load() {
+			s.egress.close()
+		}
 		s.listener.Close()
 		if info, err := os.Lstat(s.path); err == nil && os.SameFile(s.inode, info) {
 			os.Remove(s.path)

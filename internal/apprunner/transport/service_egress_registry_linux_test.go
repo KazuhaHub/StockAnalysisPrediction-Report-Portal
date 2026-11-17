@@ -13,7 +13,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,11 +32,13 @@ import (
 // --- fixtures --------------------------------------------------------------
 
 type egrEnrollment struct {
-	mu sync.Mutex
-	a  control.Authority
+	mu    sync.Mutex
+	a     control.Authority
+	reads atomic.Int32
 }
 
 func (e *egrEnrollment) ControllerDeployment(context.Context) (journal.Deployment, error) {
+	e.reads.Add(1)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a := e.a
@@ -102,6 +106,8 @@ type egrFixture struct {
 	peerOK                           atomic.Bool
 	policy                           appplatform.HTTPPolicy
 	executed                         atomic.Int32
+	// bindHook, when set, runs inside every bind (a place a racing close can land).
+	bindHook func(listen bool)
 }
 
 func newEgrFixture(t *testing.T) *egrFixture {
@@ -132,6 +138,9 @@ func newEgrFixture(t *testing.T) *egrFixture {
 // journal is covered by its own tests) and hands out an in-memory listener.
 func (f *egrFixture) bind(ctx context.Context, v control.VerifiedServiceEgressSession, open EgressOpen, listen bool) (EgressListener, error) {
 	f.binds.Add(1)
+	if f.bindHook != nil {
+		f.bindHook(listen)
+	}
 	if !listen {
 		return EgressListener{}, nil
 	}
@@ -1019,4 +1028,178 @@ func mustInt(t *testing.T, s string) int64 {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// A call that finds its session already closed sent nothing: it is unavailable,
+// never uncertain.
+func TestServiceEgressClosedSessionAtNewCallIsUnavailable(t *testing.T) {
+	f := newEgrFixture(t)
+	p := f.open(egrOptions{})
+	f.registry.mu.Lock()
+	in := f.registry.installs[f.installation]
+	session := in.current
+	// Holding the registry lock keeps the session attached while its mux ends, so
+	// the call is admitted and only NewCall sees the closed session.
+	session.mux.fail(ErrEgressClosed)
+	for name, tc := range map[string][3]string{
+		"network": {"/v1/network/http", egrGetRequest, ""},
+		"notice":  {"/v1/notifications", `{"occurrenceId":"o","title":"t","message":"m","severity":"info"}`, ""},
+	} {
+		req := httptest.NewRequest("POST", tc[0], strings.NewReader(tc[1]))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		in.ServeHTTP(rec, req)
+		if rec.Code != 503 || rec.Body.String() != `{"error":"unavailable","retryable":false}` {
+			t.Errorf("%s: %d %s", name, rec.Code, rec.Body.String())
+		}
+	}
+	f.registry.mu.Unlock()
+	_ = p
+}
+
+func TestServiceEgressAdmitCanonicalFormIsNotHTMLEscaped(t *testing.T) {
+	sum := sha256.Sum256(nil)
+	url := "https://api.example.com/v1/x?" + strings.Repeat("a=1&b=<2>&", 140)
+	admit := EgressAdmit{Method: "GET", URL: url, BodySHA256: hexOf(sum[:])}
+	payload, err := EncodeEgressAdmit(admit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(payload, []byte(`\u00`)) || len(payload) > egressAdmitMaxBytes {
+		t.Fatalf("escaped or oversized: %d bytes", len(payload))
+	}
+	back, err := DecodeEgressAdmit(payload)
+	if err != nil || back != admit {
+		t.Fatalf("round trip: %v", err)
+	}
+	// A URL that cannot fit a frame in any encoding is refused at encode time.
+	huge := admit
+	huge.URL = "https://api.example.com/" + strings.Repeat(`"`, 4050)
+	if _, err := EncodeEgressAdmit(huge); err == nil {
+		t.Fatal("an admit over the frame bound was encoded")
+	}
+}
+
+func TestServiceEgressUnrepresentableInputIsInvalidAndSpendsNoToken(t *testing.T) {
+	f := newEgrFixture(t)
+	p := f.open(egrOptions{})
+	// An ampersand-heavy URL and message both fit their frames once they are not
+	// HTML-escaped.
+	amp := `{"requestId":"r","method":"GET","url":"https://api.example.com/v1/x?` + strings.Repeat("&", 3000) + `","accept":"","contentType":"","bodyBase64":""}`
+	if r := f.network(t, amp); r.status != 200 {
+		t.Fatalf("ampersands: %d %s", r.status, r.body)
+	}
+	<-p.admits
+	message := strings.Repeat("&<", 7000)
+	notice := `{"occurrenceId":"o","title":"t","message":"` + message + `","severity":"info"}`
+	r, err := f.request("1", "POST", "/v1/notifications", "application/json", notice)
+	if err != nil || r.status != 200 {
+		t.Fatalf("notice with markup: %+v %v", r, err)
+	}
+	select {
+	case n := <-p.notices:
+		if n.Message != message {
+			t.Fatal("message changed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notice")
+	}
+	// Input that no frame can carry is invalid, before a rate token is taken: far
+	// more of them than the burst leave the budget untouched.
+	quotes := `{"requestId":"r","method":"GET","url":"https://api.example.com/` + strings.Repeat(`\"`, 4050) + `","accept":"","contentType":"","bodyBase64":""}`
+	separators := `{"occurrenceId":"o","title":"t","message":"` + strings.Repeat(" ", 5400) + `","severity":"info"}`
+	for i := 0; i < 30; i++ {
+		egrError(t, f.network(t, quotes), 400, "invalid")
+		r, _ := f.request("1", "POST", "/v1/notifications", "application/json", separators)
+		egrError(t, r, 400, "invalid")
+	}
+	if r := f.network(t, egrGetRequest); r.status != 200 {
+		t.Fatalf("budget spent by invalid input: %d %s", r.status, r.body)
+	}
+}
+
+// Renewing the session of an installation does not grow the steady-state count,
+// so the bound refuses only a new installation.
+func TestServiceEgressBoundRefusesNewInstallationNotRenewal(t *testing.T) {
+	f := newEgrFixture(t)
+	f.registry.maxSessions = 1
+	first := f.open(egrOptions{})
+	if first.ack != EgressAckOpen {
+		t.Fatal("first session refused")
+	}
+	renewed := f.open(egrOptions{})
+	if renewed.ack != EgressAckOpen {
+		t.Fatal("a renewal was refused at the session bound")
+	}
+	// The same registry state, seen as another installation, is refused.
+	f.registry.mu.Lock()
+	in := f.registry.installs[f.installation]
+	delete(f.registry.installs, f.installation)
+	f.registry.mu.Unlock()
+	other := f.open(egrOptions{})
+	f.registry.mu.Lock()
+	f.registry.installs[f.installation] = in // so cleanup closes it
+	f.registry.mu.Unlock()
+	if other.ack != EgressAckRefused {
+		t.Fatal("a new installation was admitted past the bound")
+	}
+}
+
+// An open that loses a race with the installation's disabled close is refused;
+// it is never acknowledged as open and then dropped.
+func TestServiceEgressOpenRacingDisabledCloseIsRefused(t *testing.T) {
+	f := newEgrFixture(t)
+	first := f.open(egrOptions{})
+	if first.ack != EgressAckOpen {
+		t.Fatal("first session refused")
+	}
+	f.bindHook = func(listen bool) {
+		if listen {
+			return
+		}
+		f.registry.mu.Lock()
+		in := f.registry.installs[f.installation]
+		f.registry.mu.Unlock()
+		f.registry.closeInstall(in, EgressCloseDisabled)
+	}
+	if second := f.open(egrOptions{}); second.ack != EgressAckRefused {
+		t.Fatalf("ack %d for an open that lost to a disabled close", second.ack)
+	}
+}
+
+// An idle registry does not read the journal's enrollment on every sweep.
+func TestServiceEgressSweepWithoutSessionsReadsNothing(t *testing.T) {
+	f := newEgrFixture(t)
+	before := f.enrollment.reads.Load()
+	for i := 0; i < 5; i++ {
+		f.registry.sweep()
+	}
+	if got := f.enrollment.reads.Load(); got != before {
+		t.Fatalf("%d enrollment reads with no sessions", got-before)
+	}
+	p := f.open(egrOptions{})
+	before = f.enrollment.reads.Load()
+	f.registry.sweep()
+	if f.enrollment.reads.Load() == before {
+		t.Fatal("a live session was swept without checking the enrollment")
+	}
+	_ = p
+}
+
+// Closing a server whose Serve never ran still ends the registry and its sweep.
+func TestServerCloseWithoutServeStopsEgressRegistry(t *testing.T) {
+	f := newEgrFixture(t)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(t.TempDir(), "s.sock"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &Server{listener: listener, egress: f.registry}
+	server.Close()
+	done := make(chan struct{})
+	go func() { f.registry.wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sweep goroutine outlived a closed server")
+	}
 }

@@ -104,15 +104,19 @@ func DecodeAppNotice(raw []byte) (AppNotice, error) {
 	return AppNotice{OccurrenceID: fields["occurrenceId"], Title: fields["title"], Message: fields["message"], Severity: fields["severity"]}, nil
 }
 
-// JSON is the canonical encoding that crosses to Portal in a notice frame.
+// JSON is the canonical encoding that crosses to Portal in a notice frame. It is
+// not HTML-escaped: escaping &, < and > would grow a valid input past the frame.
 func (n AppNotice) JSON() []byte {
-	out, _ := json.Marshal(struct {
+	var buf bytes.Buffer
+	e := json.NewEncoder(&buf)
+	e.SetEscapeHTML(false)
+	_ = e.Encode(struct {
 		OccurrenceID string `json:"occurrenceId"`
 		Title        string `json:"title"`
 		Message      string `json:"message"`
 		Severity     string `json:"severity"`
 	}(n))
-	return out
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 }
 
 // decodeAppObject reads one JSON object whose members are all strings and all

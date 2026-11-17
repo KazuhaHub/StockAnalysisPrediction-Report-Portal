@@ -21,6 +21,8 @@ const (
 	// and draining), whatever the installation count. Sessions are detached from the
 	// control endpoint's eight-connection limit, so they need a limit of their own.
 	maxEgressSessions = 64
+	// maxEgressSessionsPerInstall is the current session and one draining one.
+	maxEgressSessionsPerInstall = 2
 	// egressSweepInterval is how often sessions are compared with the enrollment
 	// and their own expiry. Every call also checks both, so this only bounds how
 	// long an idle session outlives a change.
@@ -70,6 +72,8 @@ type egressRegistry struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
+	// maxSessions is the bound on live sessions that a new installation meets.
+	maxSessions int
 
 	// openMu serialises opens, which are rare and may touch the journal.
 	openMu sync.Mutex
@@ -119,7 +123,7 @@ type egressSession struct {
 
 func newEgressRegistry(parent context.Context, provider *networkProvider, bind EgressBinder) *egressRegistry {
 	ctx, cancel := context.WithCancel(parent)
-	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall)}
+	r := &egressRegistry{provider: provider, bind: bind, now: time.Now, maxSessions: maxEgressSessions, ctx: ctx, cancel: cancel, installs: make(map[string]*egressInstall)}
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -172,9 +176,9 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		return err
 	}
 	r.mu.Lock()
-	closed, live := r.closed, r.live
+	closed := r.closed
 	r.mu.Unlock()
-	if r.provider == nil || r.bind == nil || closed || live >= maxEgressSessions {
+	if r.provider == nil || r.bind == nil || closed {
 		return refuse(broker.ErrUnavailable)
 	}
 	authority, err := r.provider.enrollment(ctx)
@@ -196,9 +200,22 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 	expires, _ := strconv.ParseInt(command.ExpiresMS, 10, 64)
 	r.mu.Lock()
 	existing := r.installs[command.InstallationID]
+	live := r.live
+	sessions := 0
+	if existing != nil {
+		existing.mu.Lock()
+		sessions = len(existing.sessions)
+		existing.mu.Unlock()
+	}
 	r.mu.Unlock()
 	if existing != nil && existing.generation > generation {
 		return refuse(broker.ErrDenied)
+	}
+	// The bound is on installations: a renewal or replacement does not raise the
+	// steady-state count, so only a new installation is refused at it. An
+	// installation holds its current session and at most one draining.
+	if existing == nil && live >= r.maxSessions || existing != nil && sessions >= maxEgressSessionsPerInstall {
+		return refuse(broker.ErrUnavailable)
 	}
 	listen := existing == nil || existing.generation < generation
 	binding, err := r.bind(ctx, verified, open, listen)
@@ -208,10 +225,23 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		}
 		return refuse(err)
 	}
-	// Acknowledge before anything is replaced; the Portal side only sends frames
-	// after it has read the acknowledgement.
+	session := &egressSession{command: command, revision: revision, concurrency: concurrency, resources: slices.Clone(command.Resources), expires: time.UnixMilli(expires), mux: NewEgressMux(conn, EgressRunner), seen: make(map[string]struct{})}
+	// The last checks and the acknowledgement happen under the registry lock, so
+	// an installation closed meanwhile (a disabled close, shutdown) is refused
+	// here instead of being acknowledged as open and dropped. The write is one
+	// small frame bounded by its deadline, and opens are serialised anyway.
+	r.mu.Lock()
+	install := r.installs[command.InstallationID]
+	if r.closed || !listen && (install == nil || install.generation != generation) {
+		r.mu.Unlock()
+		if listen {
+			_ = binding.Listener.Close()
+		}
+		return refuse(broker.ErrUnavailable)
+	}
 	_ = conn.SetWriteDeadline(r.now().Add(EgressWriteTimeout))
 	if _, err := conn.Write(EncodeEgressAck(open.FrameSHA256, EgressAckOpen)); err != nil {
+		r.mu.Unlock()
 		if listen {
 			_ = binding.Listener.Close()
 		}
@@ -219,18 +249,7 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		return err
 	}
 	_ = conn.SetWriteDeadline(time.Time{})
-	session := &egressSession{command: command, revision: revision, concurrency: concurrency, resources: slices.Clone(command.Resources), expires: time.UnixMilli(expires), mux: NewEgressMux(conn, EgressRunner), seen: make(map[string]struct{})}
-	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		if listen {
-			_ = binding.Listener.Close()
-		}
-		_ = conn.Close()
-		return broker.ErrUnavailable
-	}
 	var replaced *egressInstall
-	install := r.installs[command.InstallationID]
 	if listen {
 		bucket := broker.NewTokenBucket(120, 20, r.now)
 		if install != nil {
@@ -243,10 +262,6 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		}
 		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{})}
 		r.installs[command.InstallationID] = install
-	} else if install == nil || install.generation != generation {
-		r.mu.Unlock()
-		_ = conn.Close()
-		return broker.ErrUnavailable
 	}
 	session.install = install
 	install.mu.Lock()
@@ -262,8 +277,9 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 	if listen {
 		r.startServer(install)
 	}
-	r.mu.Unlock()
+	// Add under the lock that close() takes before it waits.
 	r.wg.Add(1)
+	r.mu.Unlock()
 	go func() {
 		defer r.wg.Done()
 		_ = session.mux.Run(r.ctx)
@@ -332,7 +348,6 @@ func (r *egressRegistry) closeInstall(in *egressInstall, reason byte) {
 // control revision). It does not re-verify the registration proof: that proof
 // is only meaningful at open, and every call is signed afresh.
 func (r *egressRegistry) sweep() {
-	authority, err := r.provider.enrollment(r.ctx)
 	r.mu.Lock()
 	var sessions []*egressSession
 	for _, in := range r.installs {
@@ -343,6 +358,10 @@ func (r *egressRegistry) sweep() {
 		in.mu.Unlock()
 	}
 	r.mu.Unlock()
+	if len(sessions) == 0 {
+		return // nothing to compare: do not read the journal for an idle runner
+	}
+	authority, err := r.provider.enrollment(r.ctx)
 	now := r.now()
 	for _, s := range sessions {
 		switch {
