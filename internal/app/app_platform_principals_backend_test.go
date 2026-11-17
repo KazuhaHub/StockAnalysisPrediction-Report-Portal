@@ -18,7 +18,9 @@ func TestPlatformPrincipalDirectoryServesABackendApp(t *testing.T) {
 		t.Cleanup(func() { platformManagedFixtureOptional = nil })
 		s, actor, lease := platformWritableAccessFixture(t, pg)
 		mustExec(t, s.st, `UPDATE users SET role='admin' WHERE username=?`, actor.username)
-		t.Cleanup(func() { mustExec(t, s.st, `DELETE FROM audit_log WHERE action LIKE 'app_platform.%principal%' OR action LIKE 'app_platform.capability_%'`) })
+		t.Cleanup(func() {
+			mustExec(t, s.st, `DELETE FROM audit_log WHERE action LIKE 'app_platform.%principal%' OR action LIKE 'app_platform.capability_%'`)
+		})
 		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_installations WHERE id=? AND runtime_id IS NOT NULL`, lease.installationID) != 1 {
 			t.Fatal("the fixture is not a backend installation")
 		}

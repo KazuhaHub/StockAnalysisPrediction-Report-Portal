@@ -120,10 +120,10 @@ func TestPlatformPrincipalResolveStaysInsideTheAudience(t *testing.T) {
 		deriver := p.deriver(t)
 		derive := func(username string) string {
 			generation, err := notificationAccountGeneration(p.s.st.poolExec(), username)
-		if err != nil {
-			t.Fatal(err)
-		}
-		value, err := deriver.Account(appplatform.ViewerAccountIdentity{Name: username, Created: p.s.st.GetUser(username).CreatedAt, Generation: generation})
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := deriver.Account(appplatform.ViewerAccountIdentity{Name: username, Created: p.s.st.GetUser(username).CreatedAt, Generation: generation})
 			if err != nil {
 				t.Fatal(err)
 			}
