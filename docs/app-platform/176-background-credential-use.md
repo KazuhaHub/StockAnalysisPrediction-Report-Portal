@@ -1,8 +1,9 @@
 # Proposal: background credential use
 
-Status: accepted 2026-11-17; implementation pending. Depends on
-[174](174-background-broker-egress.md); uses the target digest from
-[175](175-reviewed-multi-origin-and-private-network.md). Index and order: doc 174.
+Status: accepted 2026-11-17; implemented for background broker calls (section
+10). Depends on [174](174-background-broker-egress.md); uses the target digest
+from [175](175-reviewed-multi-origin-and-private-network.md) once that lands
+(section 10 says what stands in for it now). Index and order: doc 174.
 
 ## 1. Problem and evidence
 
@@ -155,3 +156,39 @@ The owner decided every question below on 2026-11-17.
 2. Should tasks (doc 153) also use credentials through the broker? Decided:
    yes, through the same egress session, with doc 153's rule narrowed to "no
    credential in task payload or result"; needed by no Status feature now.
+
+## 10. Implementation notes (2026-11-17)
+
+What shipped, and where it differs from sections 3 to 5.
+
+- **Target scope.** Doc 175 has not landed: a policy still has exactly one
+  origin and the binding binds the whole network policy digest
+  (`network_policy_sha256`) plus the installation policy revision, as v1 does.
+  Policy v2 therefore carries `network_policy_sha256` where section 3.1 shows
+  `network_target_sha256`, in the same position. A single-origin policy is one
+  target, so "the target the URL selects" is the policy the call is signed for.
+  Doc 175 renames the field and narrows the scope; that change does not alter
+  the principals list.
+- **Spelling.** A viewer-only binding keeps the v1 policy bytes and its review
+  has no `principals` member, so every binding and review made before this
+  change reads back unchanged. v2 is written only when `service` is a principal,
+  and `["viewer"]` has no v2 spelling (a v2 policy naming only the viewer is
+  refused as non-canonical).
+- **Tasks stay out.** Decision 2 of section 9 is not implemented here: a task
+  handler cannot ask for `secrets.use` and a pinned test keeps it so. Only the
+  egress session of doc 174 carries the resource.
+- **Admit.** The app's `credential` is a binding name only. It travels in the
+  admit frame as a closed optional member, Portal resolves and opens the value in
+  the same read that checks the session, and the runner accepts credential
+  fields in a command only when the admit named exactly that binding and the
+  session carries `secrets.use`. Every authority challenge resolves the binding
+  again without opening the value and refuses unless it is the one the admit
+  resolved (revoked or reviewed binding, rotated or revoked credential, changed
+  principals or policy all differ).
+- **Audit.** The binding review audit detail carries `Principals`. The summary
+  row gains `bindings: [{binding, count, outcomes}]` only when a call named one.
+- **Console.** The binding form has a "who may use it" field (viewer only,
+  also background, background only; never offered for setup-only credentials)
+  with a disclosure in the approval step, and an active binding can be reviewed
+  again to change it. The install review adds one informational sentence when
+  `background.run` and `secrets.use` are granted.
