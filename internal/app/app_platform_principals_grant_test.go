@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,4 +116,87 @@ func TestPlatformPrincipalsGrantRefusesEveryOtherCaller(t *testing.T) {
 			t.Fatal("a refused enable was audited as a grant")
 		}
 	})
+}
+
+// Grant rows are evidence for installs, enables and updates (the install resource count, the
+// frontend activation checks and the grants digest), so the grant may only change while the
+// installation is ready and nothing is unfinished.
+func TestPlatformPrincipalsGrantIsRefusedMidInstallAndTheInstallStillCompletes(t *testing.T) {
+	eachPlatformDriver(t, func(t *testing.T, pg bool) {
+		platformManagedFixtureOptional = []string{"principals.read"}
+		t.Cleanup(func() { platformManagedFixtureOptional = nil })
+		s, actor, lease := platformActivationFixture(t, pg, true)
+		for _, enabled := range []bool{true, false} {
+			if err := s.setPlatformPrincipalsGrant(context.Background(), actor, lease.installationID, enabled, "1"); !errors.Is(err, errPlatformPrincipalsGrantBusy) {
+				t.Fatal("grant change during an unrun install was not refused", enabled, err)
+			}
+		}
+		if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='principals.read' AND granted=0`, lease.installationID) != 1 {
+			t.Fatal("a refused change touched the grant")
+		}
+		result, err := s.runPlatformStaticInstall(context.Background(), lease, platformRuntimeEndpoint{})
+		if err != nil || result.activation.snapshot.Stage != appplatform.StageComplete {
+			t.Fatal("the install no longer completes", err)
+		}
+		if err := s.setPlatformPrincipalsGrant(context.Background(), actor, lease.installationID, true, "1"); err != nil {
+			t.Fatal("a ready installation refused the grant", err)
+		}
+	})
+}
+
+func TestPlatformPrincipalsGrantIsRefusedWhileAnOperationIsUnfinishedOrNotReady(t *testing.T) {
+	for name, arrange := range map[string]func(t *testing.T, p *platformPrincipalEnv){
+		"install in flight": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='activate',completed_ms=NULL WHERE installation_id=?`, p.installation)
+		},
+		"enable in flight": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_operations SET action='enable',stage='activate',completed_ms=NULL WHERE installation_id=?`, p.installation)
+		},
+		"update in flight": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_operations SET action='update',stage='activate',completed_ms=NULL WHERE installation_id=?`, p.installation)
+		},
+		"recovery required": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='recovery_required' WHERE installation_id=?`, p.installation)
+		},
+		"disabled": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, p.installation)
+		},
+		"not ready yet": func(t *testing.T, p *platformPrincipalEnv) {
+			mustExec(t, p.s.st, `UPDATE app_platform_installations SET phase='pending' WHERE id=?`, p.installation)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := platformPrincipalEnvironment(t, false)
+			arrange(t, p)
+			before := p.granted(t)
+			revision := p.policyRevision(t)
+			for _, enabled := range []string{"true", "false"} {
+				w := p.grantRoute(t, p.cookie, `{"enabled":`+enabled+`,"policyRevision":"`+revision+`"}`, nil)
+				if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "app_platform_installation_not_ready") {
+					t.Fatal(enabled, w.Code, w.Body.String())
+				}
+			}
+			if p.granted(t) != before {
+				t.Fatal("a refused change touched the grant")
+			}
+		})
+	}
+}
+
+func TestPlatformInstallationSettingsReportAPendingOperation(t *testing.T) {
+	p := platformPrincipalEnvironment(t, false)
+	read := func() bool {
+		settings, err := p.s.platformInstallationSettings(p.admin, p.installation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return settings.OperationPending
+	}
+	if read() {
+		t.Fatal("a settled installation reported a pending operation")
+	}
+	mustExec(t, p.s.st, `UPDATE app_platform_operations SET stage='activate',completed_ms=NULL WHERE installation_id=?`, p.installation)
+	if !read() {
+		t.Fatal("an unfinished operation was not reported")
+	}
 }

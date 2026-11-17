@@ -14,6 +14,10 @@ import (
 // Enable and withdraw the principals.read grant (doc 181 section 4). The capability is optional
 // and install leaves it off; an administrator turns it on after reading the disclosure, and turning
 // it off is immediate because the directory reads the grant row on every call.
+// errPlatformPrincipalsGrantBusy refuses a grant change while the installation is not ready or an
+// operation is unfinished: install, enable and update read the grant rows as evidence.
+var errPlatformPrincipalsGrantBusy = errors.New("installation is not ready for a grant change")
+
 const (
 	platformPrincipalsGrantedAudit   = "app_platform.capability_granted"
 	platformPrincipalsWithdrawnAudit = "app_platform.capability_withdrawn"
@@ -50,6 +54,10 @@ func (s *Server) apiPlatformPrincipalsGrant(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := s.setPlatformPrincipalsGrant(r.Context(), session, installation, enabled, revision); err != nil {
+		if errors.Is(err, errPlatformPrincipalsGrantBusy) {
+			jsonErrorCode(w, 409, "app_platform_installation_not_ready", "the installation must be ready with no operation in progress")
+			return
+		}
 		platformManagementError(w, err)
 		return
 	}
@@ -70,14 +78,30 @@ func (s *Server) setPlatformPrincipalsGrant(ctx context.Context, session platfor
 			lock = " FOR UPDATE"
 		}
 		var current int64
-		var desired string
-		if err := e.queryRow(`SELECT policy_revision,desired_state FROM app_platform_installations WHERE id=?`+lock, installation).Scan(&current, &desired); err != nil {
+		var desired, phase string
+		if err := e.queryRow(`SELECT policy_revision,desired_state,phase FROM app_platform_installations WHERE id=?`+lock, installation).Scan(&current, &desired, &phase); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return errPlatformInstallationMissing
 			}
 			return err
 		}
-		if current != expected || (enabled && desired == "removed") {
+		// Same transaction as the write below, and after the installation row is locked, so no
+		// operation can be admitted between this check and the update.
+		if desired != "enabled" || phase != "ready" {
+			return errPlatformPrincipalsGrantBusy
+		}
+		operations, err := platformUnresolvedOperationCount(e, installation)
+		if err != nil {
+			return err
+		}
+		effects, err := platformUnresolvedOperationEffectCount(e, installation)
+		if err != nil {
+			return err
+		}
+		if operations+effects != 0 {
+			return errPlatformPrincipalsGrantBusy
+		}
+		if current != expected {
 			return errAppPlatformPlanChanged
 		}
 		var granted int

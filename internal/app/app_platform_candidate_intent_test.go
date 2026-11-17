@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -49,9 +48,6 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 		t.Fatal(err)
 	}
 	p.Format, p.ReleaseSHA256 = platformManagedInstallFormat, release.sha256
-	if len(platformManagedFixtureOptional) > 0 {
-		p.DeclinedCapabilities = slices.Sorted(slices.Values(append(slices.Clone(p.DeclinedCapabilities), platformManagedFixtureOptional...)))
-	}
 	p.Runtime = &platformManagedInstallTarget{RuntimeID: runtime.id, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, BindingRevision: runtime.revision, ControlRevision: runtime.controlRevision, Fingerprint: runtime.fingerprint, Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol, SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(999), RootInode: "10"}}
 	encoded, err := json.Marshal(p)
 	if err != nil {
@@ -63,11 +59,6 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=?,target_release_sha256=? WHERE id=?`, string(encoded), digest, release.sha256, planID)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET managed=1,request_sha256=? WHERE id=?`, platformDigest(request), lease.id)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET runtime_id=? WHERE id=?`, runtime.id, lease.installationID)
-	// The swapped release declares optional capabilities when a test asks for them; install leaves
-	// them off, so the reviewed rows exist with granted=0.
-	for _, name := range platformManagedFixtureOptional {
-		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,0,'{}',1,?,1,1)`, lease.installationID, name, planID)
-	}
 	lease.snapshot.Managed = true
 	intent, err := s.preparePlatformInstallData(context.Background(), lease)
 	if err != nil {
