@@ -149,6 +149,10 @@ func (s *Server) executePlatformTask(ctx context.Context, task platformTaskLease
 	}
 }
 
+// newPlatformServiceEgressRunnerForWorker is the runner transport of the
+// long-running worker; tests replace it to observe whether it is asked for.
+var newPlatformServiceEgressRunnerForWorker = func() platformServiceEgressTransport { return newPlatformServiceEgressRunner() }
+
 func RunPlatformTaskWorker(ctx context.Context, cfgPath string, options PlatformTaskWorkerOptions) error {
 	cfg, err := config.EnsureConfig(cfgPath)
 	if err != nil {
@@ -185,7 +189,7 @@ func RunPlatformTaskWorker(ctx context.Context, cfgPath string, options Platform
 	}
 	// Background egress (doc 174). The coordinator runs beside the task loop and
 	// never under --once. Only one may run: see platformServiceEgressCoordinator.
-	egress := newPlatformServiceEgressCoordinator(server, newPlatformServiceEgressRunner())
+	egress := newPlatformServiceEgressCoordinator(server, newPlatformServiceEgressRunnerForWorker())
 	egressDone := make(chan struct{})
 	go func() {
 		defer close(egressDone)
