@@ -14,7 +14,10 @@ type retainingConn struct {
 	written [][]byte
 }
 
-func (c *retainingConn) Write(p []byte) (int, error) { c.written = append(c.written, p); return len(p), nil }
+func (c *retainingConn) Write(p []byte) (int, error) {
+	c.written = append(c.written, p)
+	return len(p), nil
+}
 func (c *retainingConn) SetWriteDeadline(time.Time) error { return nil }
 
 // The frame a mux encodes for a write holds a copy of the payload (a command

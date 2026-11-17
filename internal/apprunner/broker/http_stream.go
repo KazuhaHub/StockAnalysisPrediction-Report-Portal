@@ -316,25 +316,25 @@ func validHTTPStreamResponseHeaders(response *http.Response, p HTTPStreamPolicy)
 }
 
 type httpStreamEchoGuard struct {
-	header string
-	value  []byte
-	tail   []byte
+	echo *echoMatcher
+	tail []byte
 }
 
 func newHTTPStreamEchoGuard(header string, value []byte) *httpStreamEchoGuard {
-	return &httpStreamEchoGuard{header: header, value: bytes.Clone(value)}
+	return &httpStreamEchoGuard{echo: newEchoMatcher(header, value)}
 }
 
 func (g *httpStreamEchoGuard) Accept(data []byte) ([]byte, bool) {
-	if len(g.value) == 0 {
+	if g.echo.span == 0 {
 		return bytes.Clone(data), false
 	}
 	window := append(bytes.Clone(g.tail), data...)
-	if credentialResponseEcho(window, g.header, g.value) {
+	if g.echo.Match(window) {
 		clear(window)
 		return nil, true
 	}
-	keep := len(g.value) - 1
+	// Keep enough to catch any recognised form that straddles two chunks.
+	keep := g.echo.span - 1
 	if len(window) <= keep {
 		g.tail = window
 		return nil, false
@@ -346,6 +346,7 @@ func (g *httpStreamEchoGuard) Accept(data []byte) ([]byte, bool) {
 }
 
 func (g *httpStreamEchoGuard) Flush() []byte {
+	defer g.echo.Clear()
 	result := bytes.Clone(g.tail)
 	clear(g.tail)
 	g.tail = nil

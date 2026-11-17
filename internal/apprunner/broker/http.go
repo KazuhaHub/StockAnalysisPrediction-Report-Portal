@@ -228,7 +228,9 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if err != nil || int64(len(body)) > h.policy.ResponseBytes || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
-	if credentialResponseEcho(body, input.HeaderName, input.HeaderValue) {
+	echo := newEchoMatcher(input.HeaderName, input.HeaderValue)
+	defer echo.Clear()
+	if echo.Match(body) {
 		clear(body)
 		return zero, ErrUncertain
 	}
@@ -236,26 +238,13 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if !appplatform.ValidHTTPPolicyHeaderValue(contentType) || len(response.Header.Values("Content-Type")) > 1 {
 		return zero, ErrUncertain
 	}
-	if credentialResponseEcho([]byte(contentType), input.HeaderName, input.HeaderValue) {
+	if echo.Match([]byte(contentType)) {
 		return zero, ErrUncertain
 	}
 	if authorize(ctx) != nil || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
 	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body, RetryAfterSeconds: parseRetryAfter(response.StatusCode, response.Header.Values("Retry-After"))}, nil
-}
-
-func credentialResponseEcho(body []byte, header string, value []byte) bool {
-	if len(value) == 0 {
-		return false
-	}
-	if bytes.Contains(body, value) {
-		return true
-	}
-	if header == "Authorization" && bytes.HasPrefix(value, []byte("Bearer ")) && len(value) > len("Bearer ") {
-		return bytes.Contains(body, value[len("Bearer "):])
-	}
-	return false
 }
 
 var deniedPrefixes = func() []netip.Prefix {

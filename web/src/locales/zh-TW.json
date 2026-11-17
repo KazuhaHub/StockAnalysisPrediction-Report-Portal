@@ -3620,7 +3620,7 @@
   "appCredentials.affected": "{{count}} 個應用綁定需要重新稽核。",
   "appCredentials.usedBy": "使用方",
   "appCredentials.principals": "誰可以使用",
-  "appCredentials.principalsHint": "背景使用會在無人登入時把此憑證傳送到已稽核的目的地。應用本身永遠收不到憑證值。",
+  "appCredentials.principalsHint": "背景使用會在無人登入時把此憑證傳送到已稽核的目的地。應用本身不會拿到憑證值，平台會攔截以可辨識形式回顯該值的回應。",
   "appCredentials.principals.viewer": "僅在有使用者使用應用時",
   "appCredentials.principals.both": "也可由背景工作使用，無需使用者在場",
   "appCredentials.principals.service": "僅由背景工作使用",

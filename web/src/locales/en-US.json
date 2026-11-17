@@ -3620,7 +3620,7 @@
   "appCredentials.affected": "{{count}} application binding(s) will require new approval.",
   "appCredentials.usedBy": "Used by",
   "appCredentials.principals": "Who may use it",
-  "appCredentials.principalsHint": "Background use sends the credential to the reviewed destination while no user is signed in. The application itself never receives the value.",
+  "appCredentials.principalsHint": "Background use sends the credential to the reviewed destination while no user is signed in. The application itself is never given the value, and the platform withholds responses that echo it in recognised forms.",
   "appCredentials.principals.viewer": "Only while a user is using the app",
   "appCredentials.principals.both": "Also by background work, with no user present",
   "appCredentials.principals.service": "Only by background work",

@@ -3620,7 +3620,7 @@
   "appCredentials.affected": "{{count}} 个应用绑定需要重新审核。",
   "appCredentials.usedBy": "使用方",
   "appCredentials.principals": "谁可以使用",
-  "appCredentials.principalsHint": "后台使用会在无人登录时把此凭据发送到已审核的目标地址。应用本身永远收不到凭据值。",
+  "appCredentials.principalsHint": "后台使用会在无人登录时把此凭据发送到已审核的目标地址。应用本身不会拿到凭据值，平台会拦截以可识别形式回显该值的响应。",
   "appCredentials.principals.viewer": "仅在有用户使用应用时",
   "appCredentials.principals.both": "也可由后台任务使用，无需用户在场",
   "appCredentials.principals.service": "仅由后台任务使用",
