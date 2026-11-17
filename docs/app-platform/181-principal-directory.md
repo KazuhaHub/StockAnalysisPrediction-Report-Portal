@@ -1,0 +1,162 @@
+# Proposal: principal directory for app grant pickers
+
+Status: proposal, 2026-11-17. Not owner-approved. No dependency on 174–180.
+Index and order: doc [174](174-background-broker-egress.md).
+
+## 1. Problem and evidence
+
+- A v2 backend sees only the current viewer: an opaque subject, opaque OU
+  ancestors and the role, derived with HMAC from the installation's identity
+  seed (`internal/appplatform/viewer_identity.go:29-52`,
+  `internal/app/app_platform_viewer.go:54`; doc
+  [88](88-stable-viewer-identity.md)). An app therefore cannot name any other
+  user or OU, so an administrator cannot grant "OU Research can see component
+  X" before someone from that OU has opened the app.
+- The legacy extension platform solved this with an administrator-only
+  directory, `GET /api/v1/extensions/{id}/principals`
+  (`internal/app/routes.go:193`, `internal/app/extension_principals.go:12-152`):
+  `kind=ou|user`, 100 per page by offset, `principal` = `ou:`/`user:` plus an
+  opaque identity, `label` = OU name or username, all OUs and all active users.
+  It is bound to legacy app tokens and the legacy identity binding, not to v2
+  installations.
+
+Status stores grant principals as `user:<64 hex>` and `ou:<64 hex>` and matches
+them against the viewer (Apps `apps/status/service/internal/status/identity.go:28-44`,
+`model.go:201-203`). Its grant editor needs to list and search these principals
+with labels.
+
+## 2. Threat model
+
+| Threat | Control |
+| --- | --- |
+| App harvests the user list | Capability-gated, reviewed, and answered only for a current Portal administrator viewer; results limited to the installation's audience |
+| Raw identifiers leak (username as key, numeric OU ID) | Principals are the same seed-derived HMAC values the viewer carries; raw IDs never cross the bridge |
+| Cross-installation correlation | Values are per installation seed, so two apps cannot join their principals |
+| Profile data leakage | Only a display label and, for OUs, the opaque parent; no email, role, login time or status |
+| Enumeration by brute-force resolve | Resolve accepts only IDs in the response space, at most 100 per call, rate-limited |
+| Cost amplification (HMAC per account) | Audience-bounded scan, page size 50, per-installation in-memory index rebuilt on change |
+
+## 3. Contract
+
+### 3.1 Capability
+
+New capability `principals.read` (descriptor contract revision; optional; no
+backend required). It has no policy (`{}`).
+
+### 3.2 Routes (session-only, bridge only)
+
+```text
+POST /api/app-platform/installations/{installation}/principals/search
+POST /api/app-platform/installations/{installation}/principals/resolve
+```
+
+Both are registered like the other viewer routes
+(`authSession`, document headers, budget precheck; `routes.go:521-532`) and
+require the exact launch binding, as the network route does.
+
+Search request:
+
+```json
+{"kind":"ou","query":"research","after":"","limit":50}
+```
+
+`kind` `user` or `ou`; `query` 0..64 bytes, case-insensitive substring of the
+label; `after` an opaque cursor ≤ 128 bytes; `limit` 1..50.
+
+Search response:
+
+```json
+{"items":[{"principal":"ou:<64 hex>","label":"Research","parent":"ou:<64 hex>"}],"next":""}
+```
+
+`parent` is present for OUs (the nearest ancestor inside the result space, or
+`null`) and absent for users.
+
+Resolve request `{"principals":["user:<hex>","ou:<hex>"]}` (1..100, unique);
+response `{"items":[{"principal":"...","label":"..."}],"unknown":["..."]}`.
+
+### 3.3 Result space
+
+- Users: active, unexpired accounts that pass the installation's launch
+  audience check today (`internal/app/app_platform_audience.go:56-63`): users
+  granted directly, or whose current OU chain includes a granted OU.
+- OUs: granted OUs and all their current descendants.
+- Labels: user `display_name`, else username; OU `name` (`user_groups.name`).
+  A label is ≤ 160 bytes, truncated on a UTF-8 boundary.
+- Principal values: exactly `"user:" + derive("account", username, created, generation)`
+  and `"ou:" + derive("ou", id, created)` from `DeriveViewerIdentity`'s frame,
+  so they equal what the viewer later presents.
+
+### 3.4 Authority
+
+Each call, in one read transaction: current session and launch binding;
+installation enabled and ready; `principals.read` granted; the viewer is a
+Portal administrator (`role == "admin"`, the legacy rule,
+`extension_principals.go:55`) and passes the app audience. Otherwise 403
+`not_permitted`. Rate: 30 calls per minute per viewer per installation.
+
+### 3.5 SDK
+
+```ts
+const directory = useAppPrincipals();
+const page = await directory.search({ kind: "ou", query: "res" });
+const labels = await directory.resolve(["ou:...", "user:..."]);
+```
+
+The frontend sends chosen principal strings to its own backend; the backend
+stores them as today. The backend has no directory access.
+
+## 4. Review and consent
+
+`principals.read` defaults off. The install or capability policy review (doc
+[175](175-reviewed-multi-origin-and-private-network.md) §3.4) states: "The
+app's administrators can list the names of users and OUs that can use this
+app." Withdrawal is immediate.
+
+## 5. Failure and audit
+
+403 for missing authority, 400 for malformed input, 429 with `Retry-After`.
+Audit: capability grant/withdrawal (existing review audit) and one
+`app_platform.principal_directory_used` row per viewer per installation per
+hour with call counts; queries are not logged.
+
+## 6. Migration and compatibility
+
+Additive. The legacy endpoint is unchanged and keeps serving legacy apps.
+Principals remain installation-scoped: a reinstall changes them (doc 88).
+Status's v2 migration plan already re-enters grants on the fresh install; the
+directory is what makes that re-entry possible without each user first opening
+the app.
+
+## 7. Test plan (these must fail first)
+
+1. Search route returns 404 today; with `principals.read` granted and an
+   administrator viewer it returns principals that equal the `Viewer` values
+   the same users and OUs receive at launch (byte-for-byte).
+2. Non-administrator viewer, revoked capability, disabled app, wrong launch
+   binding: 403 and no query of `users`.
+3. A user outside the audience and an OU outside the granted subtrees never
+   appear, including through `resolve`.
+4. Moving a user out of a granted OU removes them from the next search.
+5. Two installations of the same app return different principals for the same
+   user.
+6. 31st call in a minute: 429. A 10,000-user fixture answers within the
+   document budget.
+7. Response contains no username when a display name exists, and no email,
+   role, numeric OU ID or creation time.
+
+## 8. Schema change (needs owner approval)
+
+None. Results are computed from `users`, `user_groups`, the installation's
+audience rows and its sealed identity seed; the capability row fits
+`app_platform_capability_grants` with `{}` policy.
+
+## 9. Open questions
+
+1. Who may call it. Recommended: Portal administrators only, matching the
+   legacy endpoint; delegating to an app-defined manager role would let any app
+   grant itself a directory.
+2. Username fallback in labels. Recommended: yes when no display name exists;
+   administrators already see usernames in Portal.
+3. Scope beyond the audience (all OUs, to pre-grant before widening the
+   audience). Recommended: no; widen the audience first.
