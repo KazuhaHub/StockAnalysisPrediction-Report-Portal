@@ -193,6 +193,21 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 		return zero, err
 	}
 
+	// The launch rule (platformAudienceChain): an OU chain with an OU that has no creation identity
+	// cannot present a viewer, so neither the OU nor an account under it is listable.
+	usableChain := func(id int64) ([]int64, bool) {
+		chain, err := graph.actualChain(id)
+		if err != nil {
+			return nil, false
+		}
+		for _, member := range chain {
+			if graph.nodes[member].created == "" {
+				return nil, false
+			}
+		}
+		return chain, true
+	}
+
 	// OUs: every granted OU that still is the same instance, and all its current descendants.
 	inSpace := map[int64]bool{}
 	for id, created := range grantedOUs {
@@ -205,7 +220,9 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 			continue
 		}
 		for _, member := range subtree {
-			inSpace[member] = true
+			if _, ok := usableChain(member); ok {
+				inSpace[member] = true
+			}
 		}
 	}
 	result := platformPrincipalDirectory{ous: make([]platformPrincipalEntry, 0, len(inSpace))}
@@ -273,18 +290,18 @@ func (s *Server) platformPrincipalSpace(e migExec, deriver appplatform.ViewerPri
 			}
 		}
 		generation := generations[notificationAccountKey(name)]
+		leaf := group.Int64
+		if leaf == 0 {
+			leaf = graph.defaultID
+		}
+		chain, ok := usableChain(leaf)
+		if !ok {
+			continue
+		}
 		allowed := grantedUsers[accountKey{name, created, generation}]
 		if !allowed {
-			leaf := group.Int64
-			if leaf == 0 {
-				leaf = graph.defaultID
-			}
-			chain, err := graph.actualChain(leaf)
-			if err != nil {
-				continue
-			}
 			for _, id := range chain {
-				if want, ok := grantedOUs[id]; ok && graph.nodes[id].created != "" && graph.nodes[id].created == want {
+				if want, ok := grantedOUs[id]; ok && graph.nodes[id].created == want {
 					allowed = true
 					break
 				}

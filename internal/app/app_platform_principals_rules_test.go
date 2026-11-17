@@ -419,3 +419,27 @@ func TestPlatformPrincipalDirectoryUseIsAuditedOncePerHour(t *testing.T) {
 		t.Fatal("audit row recorded a query or principal", row.Detail)
 	}
 }
+
+// Launch refuses an account whose OU chain holds an OU without a creation identity, even when the
+// account is granted directly (platformAudienceChain). The directory applies the same rule, so it
+// never lists a user or OU that could not present the principal at launch.
+func TestPlatformPrincipalDirectoryExcludesChainsWithoutACreationIdentity(t *testing.T) {
+	p := platformPrincipalEnvironment(t)
+	mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Research Lab"])
+	if labels := p.searchLabels(t, "ou"); !slices.Equal(labels, []string{"Research"}) {
+		t.Fatal("an OU without a creation identity is listed", labels)
+	}
+	if labels := p.searchLabels(t, "user"); slices.Contains(labels, "bob") || !slices.Contains(labels, "Alice Analyst") {
+		t.Fatal("a member of an OU without a creation identity is listed, or a healthy chain is not", labels)
+	}
+	// An ancestor without one removes the whole subtree below it.
+	mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Research"])
+	if labels := p.searchLabels(t, "ou"); len(labels) != 0 {
+		t.Fatal("OUs below an ancestor without a creation identity are listed", labels)
+	}
+	// A direct grant does not rescue an account whose own chain is unusable.
+	mustExec(t, p.s.st, `UPDATE user_groups SET created_at='' WHERE id=?`, p.groups["Other"])
+	if labels := p.searchLabels(t, "user"); slices.Contains(labels, "dave") || slices.Contains(labels, "Alice Analyst") {
+		t.Fatal("a directly granted account with an unusable chain is listed", labels)
+	}
+}
