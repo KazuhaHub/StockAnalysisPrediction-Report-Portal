@@ -161,9 +161,8 @@ type Server struct {
 	forecastViewers   forecastViewers
 
 	// platformPrincipalRate is the per viewer and installation call ceiling of the app principal
-	// directory, and platformPrincipalAudit serializes its hourly audit row (app_platform_principals.go).
-	platformPrincipalRate  rateLimiter
-	platformPrincipalAudit sync.Mutex
+	// directory (app_platform_principals.go).
+	platformPrincipalRate rateLimiter
 
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.

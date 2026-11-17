@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -469,5 +470,36 @@ func TestPlatformPrincipalRateLimitSurvivesArbitraryInstallationIDs(t *testing.T
 	}
 	if w := p.post(t, "search", body); w.Code != http.StatusTooManyRequests {
 		t.Fatal("the limit was reset by unrelated installation ids", w.Code)
+	}
+}
+
+// The hourly row is counted inside one database transaction, not under an in-process mutex alone:
+// a second server value over the same store (another process) must not lose counts either.
+func TestPlatformPrincipalAuditCountsAcrossServersWithoutLosingCalls(t *testing.T) {
+	p := platformPrincipalEnvironment(t)
+	other := &Server{st: p.s.st}
+	var wg sync.WaitGroup
+	errs := make(chan error, 80)
+	for i := 0; i < 80; i++ {
+		server := p.s
+		if i%2 == 1 {
+			server = other
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- server.recordPlatformPrincipalDirectoryUse(p.admin.username, 0, p.installation, "search", "")
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, total := p.s.st.ListAudit(AuditFilter{Action: "app_platform.principal_directory_used"})
+	if total != 1 || len(rows) != 1 || !strings.Contains(rows[0].Detail, `"search":80`) {
+		t.Fatal("audit rows", total, rows)
 	}
 }

@@ -173,15 +173,26 @@ func (s *Server) apiPlatformPrincipalResolve(w http.ResponseWriter, r *http.Requ
 // recordPlatformPrincipalDirectoryUse keeps one audit row per viewer, installation and clock hour,
 // counting calls per route. Queries and results are never recorded.
 func (s *Server) recordPlatformPrincipalDirectoryUse(username string, group int64, installation, route, ip string) error {
-	s.platformPrincipalAudit.Lock()
-	defer s.platformPrincipalAudit.Unlock()
 	now := time.Now().UTC()
 	hour := now.Truncate(time.Hour).Format(time.RFC3339)
 	const action = "app_platform.principal_directory_used"
-	e := s.st.poolExec()
+	// One transaction per call. SQLite has a single writer connection, so the transaction is the
+	// serialization; on PostgreSQL an advisory lock serializes it across processes, because
+	// there is no unique key a missing hourly row could conflict on.
+	tx, err := s.st.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	e := migExec{s: s.st, ex: tx}
+	if s.st.driver == "postgres" {
+		if _, err := e.exec(`SELECT pg_advisory_xact_lock(780721)`); err != nil {
+			return err
+		}
+	}
 	var id int64
 	var detail string
-	err := e.queryRow(`SELECT id,detail FROM audit_log WHERE action=? AND actor=? AND target_type='app_platform_installation' AND target_id=? AND at>=? ORDER BY id DESC LIMIT 1`, action, username, installation, hour).Scan(&id, &detail)
+	err = e.queryRow(`SELECT id,detail FROM audit_log WHERE action=? AND actor=? AND target_type='app_platform_installation' AND target_id=? AND at>=? ORDER BY id DESC LIMIT 1`, action, username, installation, hour).Scan(&id, &detail)
 	if err == nil {
 		counts := map[string]any{}
 		if json.Unmarshal([]byte(detail), &counts) != nil {
@@ -194,8 +205,10 @@ func (s *Server) recordPlatformPrincipalDirectoryUse(username string, group int6
 		if err != nil {
 			return err
 		}
-		_, err = e.exec(`UPDATE audit_log SET detail=? WHERE id=?`, string(updated), id)
-		return err
+		if _, err = e.exec(`UPDATE audit_log SET detail=? WHERE id=?`, string(updated), id); err != nil {
+			return err
+		}
+		return tx.Commit()
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -204,6 +217,8 @@ func (s *Server) recordPlatformPrincipalDirectoryUse(username string, group int6
 	if err != nil {
 		return err
 	}
-	_, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,'app_platform_installation',?,?,?)`, now.Format(time.RFC3339), username, group, action, installation, string(first), ip)
-	return err
+	if _, err = e.exec(`INSERT INTO audit_log(at,actor,actor_ou,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,'app_platform_installation',?,?,?)`, now.Format(time.RFC3339), username, group, action, installation, string(first), ip); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
