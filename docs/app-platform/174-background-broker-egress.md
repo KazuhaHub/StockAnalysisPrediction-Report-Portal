@@ -277,7 +277,11 @@ doc 134 (lengths checked before allocation; payload ≤ `MaxCommandBytes` + 1,02
 | 0x09 | `close` | either | reason u8 |
 
 An unknown type, an over-length frame, a duplicate or unknown `call_id`, or an
-out-of-order `seq` closes the session. The runner writes through one write
+out-of-order `seq` closes the session. So does a frame below its type's
+minimum length, and a second answer to a call: Portal answers each call exactly
+once, either a `refusal` or a `command` (a `notice-result` for a notice). After a
+command, Portal rejects a failed check by withholding the proof; a second answer
+closes the session. The runner writes through one write
 mutex, with per-write deadlines only: it never sets a deadline on the shared
 connection.
 
