@@ -7,8 +7,8 @@ import (
 )
 
 // principals.read is optional and needs no backend (doc 181 section 3.1): a
-// frontend-only descriptor may declare it, and a required declaration is still a
-// valid descriptor because the host decides what it can install.
+// frontend-only descriptor may declare it. A required declaration is refused,
+// because an administrator must enable it explicitly after seeing the disclosure.
 func TestDescriptorAcceptsPrincipalsRead(t *testing.T) {
 	for name, declare := range map[string]func(map[string]any){
 		"optional": func(d map[string]any) { d["capabilities"] = map[string]any{"optional": []string{"principals.read"}} },
@@ -27,6 +27,21 @@ func TestDescriptorAcceptsPrincipalsRead(t *testing.T) {
 			}
 			if !found {
 				t.Fatal("capability was dropped")
+			}
+		})
+	}
+}
+
+func TestDescriptorRefusesRequiredPrincipalsRead(t *testing.T) {
+	for name, declare := range map[string]func(map[string]any){
+		"required": func(d map[string]any) { d["capabilities"] = map[string]any{"required": []string{"principals.read"}} },
+		"required with others": func(d map[string]any) {
+			d["capabilities"] = map[string]any{"required": []string{"reports.read", "principals.read"}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ParseDescriptor(mutateDescriptor(t, declare)); err == nil {
+				t.Fatal("a required principals.read was accepted")
 			}
 		})
 	}

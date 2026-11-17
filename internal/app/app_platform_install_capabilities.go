@@ -37,6 +37,16 @@ func activatePlatformInstallCapabilities(e migExec, installation, operation stri
 	return nil
 }
 
+// platformGrantMatches compares a stored grant bit with the reviewed selection. principals.read is
+// optional and defaults off at install; an administrator may switch it on or off afterwards
+// (doc 181 section 4), so either bit is a valid state for it when the review left it off.
+func platformGrantMatches(capability string, stored int, reviewed bool) bool {
+	if stored == boolInt(reviewed) {
+		return true
+	}
+	return capability == "principals.read" && !reviewed && stored == 1
+}
+
 type platformSelectedCapability struct {
 	capability string
 	granted    bool
@@ -95,7 +105,7 @@ func platformInstallCapabilitySelection(m appplatform.Manifest, target *platform
 			seen[name] = true
 			grant := (name == "network.http" && policy != "") ||
 				(name == "network.stream" && streamPolicy != "") ||
-				(required && (name == "reports.read" || name == "principals.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish" || name == "tasks.schedule" || name == "events.subscribe"))
+				(required && (name == "reports.read" || name == "storage.files" || name == "secrets.use" || name == "background.run" || name == "notifications.publish" || name == "tasks.schedule" || name == "events.subscribe"))
 			if required && !grant {
 				return nil, errAppPlatformInstallUnavailable
 			}
@@ -163,7 +173,7 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 		if err := rows.Scan(&name, &granted, &restriction, &revision, &review); err != nil {
 			return err
 		}
-		if index >= len(expected) || expected[index].capability != name || granted != boolInt(active && expected[index].granted) || restriction != expected[index].policy || revision != policy || review != planID {
+		if index >= len(expected) || expected[index].capability != name || !platformGrantMatches(name, granted, active && expected[index].granted) || restriction != expected[index].policy || revision != policy || review != planID {
 			return fail
 		}
 		index++
@@ -200,7 +210,7 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 		}
 		if index >= len(expected) ||
 			expected[index].capability != name ||
-			granted != boolInt(expected[index].granted) ||
+			!platformGrantMatches(name, granted, expected[index].granted) ||
 			restriction != expected[index].policy ||
 			revision != policy || !platformValidUUID(review) {
 			return fail
@@ -219,7 +229,7 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 	seen := make(map[string]bool, len(m.Capabilities.Required))
 	for _, capability := range m.Capabilities.Required {
-		if seen[capability] || (capability != "network.http" && capability != "network.stream" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish" && capability != "tasks.schedule" && capability != "events.subscribe" && capability != "principals.read") {
+		if seen[capability] || (capability != "network.http" && capability != "network.stream" && capability != "reports.read" && capability != "storage.files" && capability != "secrets.use" && capability != "background.run" && capability != "notifications.publish" && capability != "tasks.schedule" && capability != "events.subscribe") {
 			return false
 		}
 		seen[capability] = true

@@ -68,12 +68,12 @@ func platformFrontendRequiredCapabilities(manifest appplatform.Manifest) bool {
 	required := manifest.Capabilities.Required
 	seen := make(map[string]bool, len(required))
 	for _, capability := range required {
-		if seen[capability] || (capability != "reports.read" && capability != "storage.files" && capability != "principals.read") {
+		if seen[capability] || (capability != "reports.read" && capability != "storage.files") {
 			return false
 		}
 		seen[capability] = true
 	}
-	return len(seen) <= 3
+	return len(seen) <= 2
 }
 
 func platformNoPriorInstall(e migExec, appID string) error {

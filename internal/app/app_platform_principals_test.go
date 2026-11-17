@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// platformPrincipalsFixture is a ready static installation whose install review
-// granted principals.read. Only a required capability is granted by install
-// today (an optional one stays off until the capability review of doc 175
-// exists), so the fixture declares it required.
+// platformPrincipalsFixture is a ready static installation that declares principals.read
+// optional and whose administrator has enabled it. Install leaves the optional grant off, so the
+// fixture flips the row the way the enable action does.
 func platformPrincipalsFixture(t *testing.T) (*Server, platformActorSession, string) {
 	t.Helper()
 	s, admin := platformTrustTestServer(t, false)
@@ -24,7 +23,7 @@ func platformPrincipalsFixture(t *testing.T) (*Server, platformActorSession, str
 		t.Fatal("missing compatibility fixture")
 	}
 	compatibility["platform_api"] = ">=2.0.0-0 <3.0.0"
-	manifest["capabilities"] = map[string]any{"required": []string{"principals.read"}}
+	manifest["capabilities"] = map[string]any{"optional": []string{"principals.read"}}
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +33,9 @@ func platformPrincipalsFixture(t *testing.T) (*Server, platformActorSession, str
 		t.Fatal(err)
 	}
 	s, reader, id := completePlatformLaunchFixture(t, s, admin, release.sha256)
-	// Activation flips the reviewed required rows on; the fixture completes it directly.
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='principals.read' AND granted=0`, id) != 1 {
+		t.Fatal("install must leave the optional principals.read grant off")
+	}
 	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='principals.read'`, id)
 	return s, reader, id
 }
@@ -43,7 +44,7 @@ func TestPlatformPrincipalsReadDoesNotBlockStaticLaunch(t *testing.T) {
 	s, reader, id := platformPrincipalsFixture(t)
 	platformGrantLaunchUser(t, s, reader, id)
 	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='principals.read' AND granted=1 AND policy_json='{}'`, id) != 1 {
-		t.Fatal("install did not grant the required capability with an empty policy")
+		t.Fatal("the enabled grant lost its empty policy")
 	}
 	if _, err := s.inspectPlatformLaunchAccess(reader, id); err != nil {
 		t.Fatal("a granted principals.read refused the static launch", err)
