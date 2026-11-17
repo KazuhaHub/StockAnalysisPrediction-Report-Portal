@@ -156,7 +156,8 @@ type serviceBrokerListener struct {
 // which is root-owned, read-only in the container and not writable by the
 // application, is what protects the name. A stale socket of an earlier run is
 // removed only if it is a socket owned by owner (root) with a single link;
-// anything else at the name is refused, never replaced.
+// anything else at the name is refused, never replaced. The directory itself must
+// be owned by owner and not writable by group or other.
 func bindServiceBrokerSocket(parent int, owner uint32) (*serviceBrokerListener, error) {
 	dir, err := unix.Openat(parent, ".", unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
@@ -165,6 +166,12 @@ func bindServiceBrokerSocket(parent int, owner uint32) (*serviceBrokerListener, 
 	fail := func(err error) (*serviceBrokerListener, error) {
 		_ = unix.Close(dir)
 		return nil, err
+	}
+	// The directory is what protects the name, so it must be the expected owner's
+	// and closed to group and other writers before anything is bound in it.
+	var dirStat unix.Stat_t
+	if unix.Fstat(dir, &dirStat) != nil || dirStat.Mode&unix.S_IFMT != unix.S_IFDIR || dirStat.Uid != owner || dirStat.Mode&0022 != 0 {
+		return fail(ErrUnsafeSocket)
 	}
 	var st unix.Stat_t
 	switch err := unix.Fstatat(dir, ServiceBrokerSocketName, &st, unix.AT_SYMLINK_NOFOLLOW); {

@@ -17,6 +17,9 @@ import (
 func openBrokerDir(t *testing.T) (string, int) {
 	t.Helper()
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil { // independent of the umask
+		t.Fatal(err)
+	}
 	fd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -213,5 +216,42 @@ func TestNativeServiceBrokerSocketInPinnedDir(t *testing.T) {
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65532, Gid: 65532}}
 	if out, err := child.CombinedOutput(); err != nil {
 		t.Fatalf("the application user could not connect through the read-only mount: %v\n%s", err, out)
+	}
+}
+
+// The directory the socket is bound in must be owned by the expected owner and
+// closed to group and other writers; otherwise nothing is bound.
+func TestServiceBrokerSocketRefusesAnUnsafeDirectory(t *testing.T) {
+	owner := uint32(os.Geteuid())
+	for _, mode := range []os.FileMode{0770, 0707, 0777} {
+		dir, fd := openBrokerDir(t)
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := bindServiceBrokerSocket(fd, owner); !errors.Is(err, ErrUnsafeSocket) {
+			t.Fatalf("mode %o: %v", mode, err)
+		}
+		if _, err := os.Lstat(filepath.Join(dir, ServiceBrokerSocketName)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("mode %o: a socket was created", mode)
+		}
+	}
+	dir, fd := openBrokerDir(t)
+	if _, err := bindServiceBrokerSocket(fd, owner+1); !errors.Is(err, ErrUnsafeSocket) {
+		t.Fatalf("a directory of another owner: %v", err)
+	}
+	_ = dir
+}
+
+func TestBindServiceBrokerInDirDoesNotFollowASymlink(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := BindServiceBrokerInDir(link); !errors.Is(err, ErrUnsafeSocket) {
+		t.Fatalf("a symlinked directory was followed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(real, ServiceBrokerSocketName)); err == nil {
+		t.Fatal("a socket was created through the link")
 	}
 }
