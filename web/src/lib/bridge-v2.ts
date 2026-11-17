@@ -3034,7 +3034,8 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       reject: (error: BridgeNotificationError) => void;
       dispose: () => void;
     }
-  >();  const principalRequests = new Map<
+  >();
+  const principalRequests = new Map<
     string,
     {
       resolve: (value: BridgePrincipalResponse) => void;
