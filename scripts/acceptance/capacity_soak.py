@@ -1243,18 +1243,23 @@ def _platform_work_checks(evidence):
     checks.append(_check("backend_task_flood_alive_throughout", not dead, {"maximum_heartbeat_age_ms": FLOOD_HEARTBEAT_MAX_AGE_MS, "windows_without_a_live_flood": dead[:200],
                                                                          "windows_judged_under_the_flood": len(windows)}))
 
+    # Every forgery must be refused, and the refusals must be the MAC path's: a 404 alone cannot tell a MAC refusal from an empty or
+    # unreadable header, and a window answered only 429 never reached the MAC at all. The Portal's own count of credentials it refused
+    # from memory for a wrong MAC is the evidence, and the flood must also see at least the minimum of those refusals as 404s.
     bad_forged, forged_by_window = [], []
     for w in windows:
         flood = w["backend_flood"]
-        count, classes = flood.get("forged_requests"), flood.get("forged_classes")
+        count, classes, mac_refused = flood.get("forged_requests"), flood.get("forged_classes"), flood.get("forged_mac_refused")
         ok = (isinstance(count, int) and count >= FORGED_FLOOD_MIN_PER_WINDOW and isinstance(classes, dict) and classes
-              and all(k in FORGED_FLOOD_CLASSES or not v for k, v in classes.items()) and sum(classes.values()) >= FORGED_FLOOD_MIN_PER_WINDOW)
-        forged_by_window.append({"requests": count, "classes": classes})
+              and all(k in FORGED_FLOOD_CLASSES or not v for k, v in classes.items()) and sum(classes.values()) >= FORGED_FLOOD_MIN_PER_WINDOW
+              and classes.get(FORGED_FLOOD_CLASSES[0], 0) >= FORGED_FLOOD_MIN_PER_WINDOW
+              and isinstance(mac_refused, int) and not isinstance(mac_refused, bool) and mac_refused >= FORGED_FLOOD_MIN_PER_WINDOW)
+        forged_by_window.append({"requests": count, "classes": classes, "mac_refused": mac_refused})
         if not ok:
             bad_forged.append(w["minute"])
     checks.append(_check("forged_identity_flood_refused_in_every_window", not bad_forged, {
-        "minimum_per_window": FORGED_FLOOD_MIN_PER_WINDOW, "allowed_classes": list(FORGED_FLOOD_CLASSES), "windows_failing": bad_forged[:200],
-        "by_window": forged_by_window[:500]}))
+        "minimum_per_window": FORGED_FLOOD_MIN_PER_WINDOW, "allowed_classes": list(FORGED_FLOOD_CLASSES),
+        "minimum_mac_refusals_per_window": FORGED_FLOOD_MIN_PER_WINDOW, "windows_failing": bad_forged[:200], "by_window": forged_by_window[:500]}))
 
     bad_submit, by_window = [], []
     for w in windows:

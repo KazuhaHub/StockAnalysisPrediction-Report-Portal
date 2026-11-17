@@ -54,7 +54,7 @@ type Server struct {
 	// platformServiceMaterial and platformUnverified keep a forged credential away from the database
 	// (app_platform_service_material.go).
 	platformServiceMaterial platformServiceMaterialCache
-	platformUnverified      platformDocumentBudget
+	platformUnverified      platformUnverifiedBudget
 	// platformTaskRefusals remembers credentials just refused for their installation's task quota
 	// (app_platform_task_refusal.go).
 	platformTaskRefusals    platformTaskRefusalCache
@@ -847,11 +847,13 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 		if !s.sessionStamps.fresh(id, stale) {
 			var seen int64
 			if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil {
-				if seen < stale {
-					s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale)
-					seen = now
+				// A stamp is remembered only once it is known to be written: after a failed UPDATE the next
+				// request reads and tries again.
+				if seen >= stale {
+					s.sessionStamps.set(id, seen)
+				} else if _, err := s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale); err == nil {
+					s.sessionStamps.set(id, now)
 				}
-				s.sessionStamps.set(id, seen)
 			}
 		}
 	}

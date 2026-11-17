@@ -115,32 +115,56 @@ func TestServiceIdentityRefusesTamperedOrOpenPayloads(t *testing.T) {
 	}
 }
 
-// ServiceIdentityAuthentic only ever refuses: a credential signed with the seed passes, whatever its
-// expiry, and a tampered, re-keyed or non-canonical one does not.
-func TestServiceIdentityAuthenticChecksOnlyTheCanonicalFormAndTheMAC(t *testing.T) {
+// CheckServiceIdentityInMemory only ever refuses: a credential signed with the seed is live until its expiry
+// and expired from then on, and a tampered, re-keyed or non-canonical one is forged whatever its expiry.
+func TestServiceIdentityInMemoryCheckRefusesForgedAndExpiredCredentials(t *testing.T) {
 	now := int64(1700000000000)
 	seed := bytes.Repeat([]byte{7}, 32)
-	raw, err := SignServiceIdentity(seed, serviceIdentityFixture(now), now)
+	grant := serviceIdentityFixture(now)
+	raw, err := SignServiceIdentity(seed, grant, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ServiceIdentityAuthentic(raw, seed) {
-		t.Fatal("a signed credential was refused")
+	expires := int64(1700000005000)
+	for at, want := range map[int64]ServiceIdentityMemoryVerdict{
+		now: ServiceIdentityLive, expires - 1: ServiceIdentityLive, expires: ServiceIdentityExpired, expires + 3_600_000: ServiceIdentityExpired,
+	} {
+		if got := CheckServiceIdentityInMemory(raw, seed, at); got != want {
+			t.Errorf("at %d: %v, want %v", at, got, want)
+		}
 	}
-	if ServiceIdentityAuthentic(raw, bytes.Repeat([]byte{8}, 32)) || ServiceIdentityAuthentic(raw, seed[:31]) {
+	if CheckServiceIdentityInMemory(raw, bytes.Repeat([]byte{8}, 32), now) != ServiceIdentityForged || CheckServiceIdentityInMemory(raw, seed[:31], now) != ServiceIdentityForged {
 		t.Fatal("a credential was accepted under another seed")
 	}
-	var grant ServiceIdentityGrant
-	if err := json.Unmarshal(raw, &grant); err != nil {
+	grant.LeaseID = "10000000-0000-4000-8000-000000000002"
+	signedOther, err := SignServiceIdentity(seed, grant, now)
+	if err != nil {
 		t.Fatal(err)
 	}
-	grant.LeaseID = "10000000-0000-4000-8000-000000000002"
-	forged, _ := json.Marshal(grant)
-	if ServiceIdentityAuthentic(forged, seed) {
-		t.Fatal("a forged lease id kept the MAC")
+	var other ServiceIdentityGrant
+	if err := json.Unmarshal(signedOther, &other); err != nil {
+		t.Fatal(err)
+	}
+	var original ServiceIdentityGrant
+	if err := json.Unmarshal(raw, &original); err != nil {
+		t.Fatal(err)
+	}
+	original.LeaseID = other.LeaseID
+	forged, _ := json.Marshal(original)
+	for _, at := range []int64{now, expires + 1} {
+		if got := CheckServiceIdentityInMemory(forged, seed, at); got != ServiceIdentityForged {
+			t.Fatalf("a forged lease id at %d: %v, want forged whatever the expiry", at, got)
+		}
+	}
+	// An expiry the MAC covers cannot be moved: a credential whose expiry was pushed out is forged.
+	original.LeaseID = "10000000-0000-4000-8000-000000000001"
+	original.ExpiresMS = "1700000300000"
+	extended, _ := json.Marshal(original)
+	if got := CheckServiceIdentityInMemory(extended, seed, expires); got != ServiceIdentityForged {
+		t.Fatalf("an extended expiry: %v", got)
 	}
 	for _, bad := range [][]byte{nil, []byte("{}"), append(append([]byte(nil), raw...), ' '), bytes.Replace(raw, []byte(`"format"`), []byte(`"format" `), 1)} {
-		if ServiceIdentityAuthentic(bad, seed) {
+		if CheckServiceIdentityInMemory(bad, seed, now) != ServiceIdentityForged {
 			t.Fatalf("accepted %q", bad)
 		}
 	}

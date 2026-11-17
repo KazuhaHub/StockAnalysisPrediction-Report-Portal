@@ -91,28 +91,39 @@ type homeConfigSnapshot struct {
 
 // HomeConfig is the entry buttons, their groups and the kind colours the home page shows, from memory when they
 // were read less than homeConfigTTL ago and no writer has dropped them since. Callers must not modify the result.
+//
+// A fill is stored only if no writer dropped the cache while it was being read: every drop advances
+// homeConfigGen, so a reader that started before a write and finished after it, holding the pre-write
+// configuration, returns what it read but does not store it. Writers drop after their write, so a reader that
+// sees the generation a drop left reads that write.
 func (s *Store) HomeConfig() ([]Link, []LinkGroup, map[string]string) {
 	now := time.Now
 	if s.homeConfigNow != nil {
 		now = s.homeConfigNow
 	}
 	s.homeConfigMu.Lock()
-	cached := s.homeConfigVal
+	cached, gen := s.homeConfigVal, s.homeConfigGen
 	s.homeConfigMu.Unlock()
 	if cached != nil && now().Sub(cached.at) < homeConfigTTL {
 		return cached.links, cached.groups, cached.colors
 	}
 	fresh := &homeConfigSnapshot{links: s.Links(), groups: s.LinkGroups(), colors: s.KindColors(), at: now()}
+	if s.homeFillHook != nil {
+		s.homeFillHook()
+	}
 	s.homeConfigMu.Lock()
-	s.homeConfigVal = fresh
+	if s.homeConfigGen == gen {
+		s.homeConfigVal = fresh
+	}
 	s.homeConfigMu.Unlock()
 	return fresh.links, fresh.groups, fresh.colors
 }
 
-// dropHomeConfig is called by every writer of links, link groups and kind colours.
+// dropHomeConfig is called by every writer of links, link groups and kind colours, after its write.
 func (s *Store) dropHomeConfig() {
 	s.homeConfigMu.Lock()
 	s.homeConfigVal = nil
+	s.homeConfigGen++
 	s.homeConfigMu.Unlock()
 }
 

@@ -117,6 +117,9 @@ type soakBackendFlood struct {
 	// counted apart so that Requests stays the authenticated backends' count.
 	ForgedRequests int64            `json:"forged_requests"`
 	ForgedClasses  map[string]int64 `json:"forged_classes"`
+	// ForgedMACRefused is how many credentials the Portal itself refused from memory for a wrong MAC in the window, read from its own
+	// counter. A 404 alone does not show it: a malformed or empty header is answered 404 before the MAC is ever checked.
+	ForgedMACRefused int64 `json:"forged_mac_refused"`
 }
 
 // soakWorkloadSubmit is what the workload tenants' own submissions through the task route did in one window: how each was answered and how long
@@ -425,8 +428,8 @@ func TestSoakForgedIdentityHeaderNamesTheSameInstallationWithAnotherLeaseAndIsNe
 			t.Fatalf("forgery %d names %q", n, named)
 		}
 	}
-	if soakForgedIdentityHeader("not base64!", 1) != "" {
-		t.Fatal("an unreadable header produced a forgery")
+	if soakForgedIdentityHeader("not base64!", 1) != "" || soakForgedIdentityHeader("", 1) != "" {
+		t.Fatal("an unreadable or missing header produced a forgery")
 	}
 }
 

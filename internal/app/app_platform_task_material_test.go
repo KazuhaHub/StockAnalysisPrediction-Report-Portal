@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,8 +144,9 @@ func TestPlatformServiceTaskMalformedCredentialsNeverTouchTheDatabase(t *testing
 }
 
 // Material is only ever a reason to refuse: an authentic credential of an installation that is no longer
-// enabled still goes through the live verification, is refused there and drops the material.
-func TestPlatformServiceTaskMaterialNeverAcceptsAndIsDroppedWhenTheInstallationIsRetired(t *testing.T) {
+// enabled still goes through the live verification and is refused there. The material is kept: its MAC check
+// was just proved right, and the refresh drops the material of an installation that is no longer ready.
+func TestPlatformServiceTaskMaterialNeverAcceptsAndIsKeptWhenTheLiveVerificationRefuses(t *testing.T) {
 	f := newTaskRefusalFixture(t, false)
 	f.submit(t, "warm")
 	if f.s.platformServiceMaterial.size() != 1 {
@@ -154,8 +156,161 @@ func TestPlatformServiceTaskMaterialNeverAcceptsAndIsDroppedWhenTheInstallationI
 	if code, _ := f.submit(t, "after-disable"); code != 404 {
 		t.Fatalf("a disabled installation's credential answered %d", code)
 	}
+	if f.s.platformServiceMaterial.size() != 1 {
+		t.Fatal("a live refusal of an authentic credential dropped material whose MAC check was right")
+	}
+	if err := f.s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
 	if f.s.platformServiceMaterial.size() != 0 {
-		t.Fatal("the material of a retired installation was kept")
+		t.Fatal("the refresh kept the material of a retired installation")
+	}
+}
+
+// A holder of an authentic credential the live verification refuses (a stale generation, a retired lease)
+// must not be able to evict the material and so push the installation's real backend into the Portal-wide
+// cold-verification limit: with that limit full, the refused credential keeps being answered 404 from its own
+// slots, and a forged one still never reaches the database.
+func TestPlatformServiceTaskALiveRefusalCannotPushTheInstallationIntoColdVerification(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	if code, body := f.submit(t, "warm"); code != 200 {
+		t.Fatalf("warm-up: %d %s", code, body)
+	}
+	var held []func()
+	for i := 0; i < platformUnverifiedVerifications; i++ {
+		release, ok := f.s.platformUnverified.acquire()
+		if !ok {
+			t.Fatal("slot refused")
+		}
+		held = append(held, release)
+	}
+	defer func() {
+		for _, release := range held {
+			release()
+		}
+	}()
+	mustExec(t, f.s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, f.installation)
+	for i := 0; i < 5; i++ {
+		if code, body := f.submit(t, fmt.Sprintf("refused-live-%d", i)); code != 404 {
+			t.Fatalf("refused credential %d answered %d %s, want 404 from the installation's own slots", i, code, body)
+		}
+	}
+	if statements := f.statements(func() { f.forgedSubmit(t, 1) }); len(statements) != 0 {
+		t.Fatalf("after live refusals a forged credential reached the database: %v", statements)
+	}
+}
+
+// An expired credential whose MAC is right is refused from memory, before it takes a slot or a statement. The
+// expiry is judged on the database's clock, as the live verification judges it, through the offset the refresh
+// learns.
+func TestPlatformServiceTaskExpiredCredentialIsRefusedFromMemory(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	if code, body := f.submit(t, "warm"); code != 200 {
+		t.Fatalf("warm-up: %d %s", code, body)
+	}
+	var grant appplatform.ServiceIdentityGrant
+	if err := json.Unmarshal(f.identity, &grant); err != nil {
+		t.Fatal(err)
+	}
+	expires, err := strconv.ParseInt(grant.ExpiresMS, 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forgedBefore, expiredBefore := f.s.platformServiceMaterial.refusals()
+	f.s.platformServiceMaterial.databaseOffsetMS.Store(expires - time.Now().UnixMilli())
+	var code int
+	statements := f.statements(func() { code, _ = f.submit(t, "expired") })
+	if code != 404 || len(statements) != 0 {
+		t.Fatalf("an expired credential: %d with %d statements %v", code, len(statements), statements)
+	}
+	if f.forgedSubmit(t, 1) != 404 {
+		t.Fatal("a forged credential was not refused")
+	}
+	forged, expired := f.s.platformServiceMaterial.refusals()
+	if forged-forgedBefore != 1 || expired-expiredBefore != 1 {
+		t.Fatalf("refusals counted forged %d expired %d, want 1 and 1", forged-forgedBefore, expired-expiredBefore)
+	}
+	if f.s.platformServiceMaterial.size() != 1 {
+		t.Fatal("an expired credential dropped the material")
+	}
+	f.s.platformServiceMaterial.databaseOffsetMS.Store(0)
+	if code, body := f.submit(t, "live-again"); code != 200 {
+		t.Fatalf("the credential before its expiry: %d %s", code, body)
+	}
+}
+
+// On PostgreSQL the refresh learns how far the database's clock is from the Portal's, so the in-memory expiry
+// check agrees with the live verification even when the two clocks differ.
+func TestPlatformServiceMaterialRefreshLearnsThePostgresClockOffset(t *testing.T) {
+	s := &Server{st: pgStore(t)}
+	s.platformServiceMaterial.databaseOffsetMS.Store(1 << 40)
+	if err := s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
+	if offset := s.platformServiceMaterial.databaseOffsetMS.Load(); offset > 5_000 || offset < -5_000 {
+		t.Fatalf("offset %d ms between two clocks of one host", offset)
+	}
+	// A Portal clock an hour behind is an offset of an hour.
+	s.platformServiceMaterial.now = func() time.Time { return time.Now().Add(-time.Hour) }
+	if err := s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
+	if offset := s.platformServiceMaterial.databaseOffsetMS.Load(); offset < 3_595_000 || offset > 3_605_000 {
+		t.Fatalf("offset %d ms with the Portal an hour behind", offset)
+	}
+}
+
+// A clock reading is used only when its round trip was short: a reading that waited for a pool connection would
+// put the database's clock late by half the wait, and the in-memory check would then refuse a live credential
+// before its expiry.
+func TestPlatformClockOffsetKeepsOnlyAShortReading(t *testing.T) {
+	before := time.UnixMilli(1_000_000)
+	if offset, ok := platformClockOffset(before, 1_000_510, before.Add(20*time.Millisecond)); !ok || offset != 500 {
+		t.Fatalf("a short reading: %d %v, want 500 true", offset, ok)
+	}
+	if _, ok := platformClockOffset(before, 1_000_510, before.Add(platformClockReadingMax+time.Millisecond)); ok {
+		t.Fatal("a reading that waited longer than the bound was used")
+	}
+	if _, ok := platformClockOffset(before, 1_000_510, before.Add(-time.Millisecond)); ok {
+		t.Fatal("a reading whose Portal clock ran backwards was used")
+	}
+}
+
+// On SQLite the database's clock is the Portal's own, so the offset is zero whatever a reading says.
+func TestPlatformServiceMaterialRefreshOnSQLiteKeepsNoOffset(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	if f.s.st.driver != "sqlite" {
+		t.Skip("SQLite only")
+	}
+	f.s.platformServiceMaterial.databaseOffsetMS.Store(1234)
+	f.s.platformServiceMaterial.now = func() time.Time { return time.Now().Add(-time.Hour) }
+	if err := f.s.refreshPlatformServiceMaterial(); err != nil {
+		t.Fatal(err)
+	}
+	if offset := f.s.platformServiceMaterial.databaseOffsetMS.Load(); offset != 0 {
+		t.Fatalf("offset %d on SQLite", offset)
+	}
+}
+
+// The Portal-wide limit on cold verification has the size its constant names.
+func TestPlatformUnverifiedLimitIsItsConstant(t *testing.T) {
+	f := newTaskRefusalFixture(t, false)
+	var held []func()
+	for {
+		release, ok := f.s.platformUnverified.acquire()
+		if !ok {
+			break
+		}
+		held = append(held, release)
+		if len(held) > 64 {
+			break
+		}
+	}
+	for _, release := range held {
+		release()
+	}
+	if len(held) != platformUnverifiedVerifications {
+		t.Fatalf("%d cold verifications admitted at once, the constant is %d", len(held), platformUnverifiedVerifications)
 	}
 }
 

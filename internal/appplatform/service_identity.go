@@ -115,27 +115,51 @@ func SignServiceIdentity(seed []byte, g ServiceIdentityGrant, now int64) ([]byte
 	return raw, nil
 }
 
-// ServiceIdentityAuthentic reports whether raw is a canonical service identity whose MAC is valid under
-// seed. It checks nothing else (not the expiry, the installation facts or the resources), so it can only
-// ever refuse a forged credential cheaply; every other check stays with VerifyServiceIdentity.
-func ServiceIdentityAuthentic(raw, seed []byte) bool {
+// ServiceIdentityMemoryVerdict is what CheckServiceIdentityInMemory can say about a credential.
+type ServiceIdentityMemoryVerdict int
+
+const (
+	// ServiceIdentityForged is a credential that is not a canonical identity or whose MAC is wrong.
+	ServiceIdentityForged ServiceIdentityMemoryVerdict = iota
+	// ServiceIdentityExpired is an authentic credential whose expiry has passed.
+	ServiceIdentityExpired
+	// ServiceIdentityLive is an authentic credential that has not expired. It is not yet accepted: only
+	// VerifyServiceIdentity, against the installation's live facts, accepts a credential.
+	ServiceIdentityLive
+)
+
+// CheckServiceIdentityInMemory checks what can be checked without the database: that raw is a canonical
+// service identity whose MAC is valid under seed, and that it has not expired at now. It checks nothing else
+// (not the installation facts or the resources), so it can only ever refuse cheaply; every other check stays
+// with VerifyServiceIdentity. The MAC is checked first, so a forged credential is reported as forged whatever
+// the expiry it claims.
+func CheckServiceIdentityInMemory(raw, seed []byte, now int64) ServiceIdentityMemoryVerdict {
 	if len(seed) != 32 || len(raw) == 0 || len(raw) > 8192 {
-		return false
+		return ServiceIdentityForged
 	}
 	var g ServiceIdentityGrant
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&g) != nil || decoder.Decode(&struct{}{}) != io.EOF || len(g.Mac) != 64 {
-		return false
+		return ServiceIdentityForged
 	}
 	canonical, err := json.Marshal(g)
 	if err != nil || !bytes.Equal(canonical, raw) {
-		return false
+		return ServiceIdentityForged
 	}
 	mac, err := serviceGrantMAC(seed, g)
 	expectedMAC, decodeErr := hex.DecodeString(g.Mac)
 	actualMAC, actualErr := hex.DecodeString(mac)
-	return err == nil && decodeErr == nil && actualErr == nil && hmac.Equal(expectedMAC, actualMAC)
+	if err != nil || decodeErr != nil || actualErr != nil || !hmac.Equal(expectedMAC, actualMAC) {
+		return ServiceIdentityForged
+	}
+	// The same rule as validServiceGrant: expired from expires_ms on. An expiry that does not parse was signed
+	// by no issuer, and VerifyServiceIdentity would refuse it too.
+	expires, err := strconv.ParseInt(g.ExpiresMS, 10, 64)
+	if err != nil || now >= expires {
+		return ServiceIdentityExpired
+	}
+	return ServiceIdentityLive
 }
 
 func VerifyServiceIdentity(raw, seed []byte, expected ServiceIdentityGrant, requiredResource string, now int64) (ServiceIdentityGrant, error) {
