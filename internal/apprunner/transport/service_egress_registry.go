@@ -57,7 +57,7 @@ type EgressListener struct {
 // running container, and, when listen is true, binds the broker socket of the
 // session's installation generation and returns it. With listen false it only
 // verifies, and returns the zero value.
-type EgressBinder func(ctx context.Context, v control.VerifiedServiceEgressSession, descriptor []byte, listen bool) (EgressListener, error)
+type EgressBinder func(ctx context.Context, v control.VerifiedServiceEgressSession, open EgressOpen, listen bool) (EgressListener, error)
 
 // egressRegistry holds the egress sessions of one runner. Per installation it
 // keeps one broker socket for the generation it is bound to, at most one current
@@ -201,7 +201,7 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 		return refuse(broker.ErrDenied)
 	}
 	listen := existing == nil || existing.generation < generation
-	binding, err := r.bind(ctx, verified, open.Descriptor, listen)
+	binding, err := r.bind(ctx, verified, open, listen)
 	if err != nil || listen && binding.Listener == nil {
 		if err == nil {
 			err = broker.ErrUnavailable

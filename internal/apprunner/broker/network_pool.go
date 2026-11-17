@@ -25,12 +25,12 @@ type NetworkPool struct {
 	// active/2, nil when that is 0. Every background call takes one here and one
 	// in slots, so foreground always keeps at least half of the active slots.
 	background chan struct{}
-	current  CurrentNetworkAuthority
-	mu       sync.Mutex
-	entries  map[networkExecutorKey]*networkExecutorEntry
-	capacity int
-	create   func(HTTPPolicy) (*HTTP, error)
-	now      func() time.Time
+	current    CurrentNetworkAuthority
+	mu         sync.Mutex
+	entries    map[networkExecutorKey]*networkExecutorEntry
+	capacity   int
+	create     func(HTTPPolicy) (*HTTP, error)
+	now        func() time.Time
 }
 
 type networkExecutorKey struct {

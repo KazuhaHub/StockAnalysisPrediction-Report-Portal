@@ -37,7 +37,9 @@ func newBackgroundPoolFixture(t *testing.T, active, concurrency, hold int) *back
 		_, _ = w.Write([]byte("ok"))
 	})
 	f.raw, f.sig, f.auth = signedNetworkFixture(t, h, []byte(`{}`))
-	pool, err := NewNetworkPool(active, 2, func(context.Context, control.NetworkHTTPRequestCommand) (control.Authority, error) { return f.auth, nil })
+	pool, err := NewNetworkPool(active, 2, func(context.Context, control.NetworkHTTPRequestCommand) (control.Authority, error) {
+		return f.auth, nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

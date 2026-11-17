@@ -50,6 +50,13 @@ type Server struct {
 	candidateExecution *candidateExecutionProvider
 	network            *networkProvider
 	imageBlobs         *imageBlobProvider
+	// egress hosts background egress sessions. It is set only by
+	// ListenNetworkManagedController; every narrower constructor leaves it nil, and
+	// then the open and capability frames are not answered at all.
+	egress *egressRegistry
+	// slotsInUse counts the control-endpoint sessions being handled. A detached
+	// egress session does not count: it lives on the registry's own bound.
+	slotsInUse atomic.Int32
 }
 
 type endpointProfile struct {
@@ -220,6 +227,13 @@ func (s *Server) Serve(ctx context.Context) error {
 	defer s.Close()
 	var workers sync.WaitGroup
 	defer workers.Wait()
+	// Egress sessions outlive the endpoint's own shutdown path: end them and their
+	// broker sockets last, after the handlers that may still be opening one.
+	defer func() {
+		if s.egress != nil {
+			s.egress.close()
+		}
+	}()
 	slots := make(chan struct{}, 8)
 	for {
 		conn, err := s.listener.AcceptUnix()
@@ -236,14 +250,27 @@ func (s *Server) Serve(ctx context.Context) error {
 			continue
 		}
 		workers.Add(1)
-		go func() { defer workers.Done(); defer func() { <-slots }(); defer conn.Close(); s.handle(ctx, conn) }()
+		s.slotsInUse.Add(1)
+		go func() {
+			defer workers.Done()
+			defer func() { <-slots }()
+			defer s.slotsInUse.Add(-1)
+			// A session handed to the egress registry is no longer this endpoint's
+			// connection: its slot is freed at once, and the registry closes it.
+			if !s.handle(ctx, conn) {
+				conn.Close()
+			}
+		}()
 	}
 }
-func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
+
+// handle serves one connection and reports whether it handed the connection to
+// another owner (a detached egress session), which then closes it.
+func (s *Server) handle(parent context.Context, conn *net.UnixConn) (detached bool) {
 	started := time.Now()
 	// Authenticate the kernel peer before reading even the frame header.
 	if !peerUID(conn, s.controllerUID) {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(parent, sessionTimeout)
 	defer cancel()
@@ -256,6 +283,15 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 		return
 	}
 	switch string(header[:8]) {
+	case ServiceEgressOpenMagic:
+		if s.egress == nil || ctx.Err() != nil || !stop() {
+			return false
+		}
+		cancel()
+		return s.handleServiceEgressOpen(parent, conn)
+	case ServiceEgressProfileQueryMagic:
+		s.handleServiceEgressProfile(ctx, conn)
+		return false
 	case networkRuntimeQueryMagic:
 		s.handleNetworkRuntime(ctx, conn)
 		return
@@ -424,6 +460,7 @@ func (s *Server) handle(parent context.Context, conn *net.UnixConn) {
 	reply := append([]byte(replyMagic), digest.Sum(nil)...)
 	reply = append(reply, status)
 	io.Copy(conn, bytes.NewReader(reply))
+	return false
 }
 func requestFrame(raw, sig []byte) []byte {
 	frame := make([]byte, 12, 12+len(raw)+len(sig))

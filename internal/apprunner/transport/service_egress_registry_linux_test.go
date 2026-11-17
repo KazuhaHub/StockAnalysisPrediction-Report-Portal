@@ -85,24 +85,23 @@ func (l *egrListener) dial() (net.Conn, error) {
 }
 
 type egrFixture struct {
-	t              *testing.T
-	a              control.Authority
-	key            ed25519.PrivateKey
+	t                                *testing.T
+	a                                control.Authority
+	key                              ed25519.PrivateKey
 	registrationRaw, registrationSig []byte
-	descriptor     []byte
-	installation   string
-	epoch, release string
-	enrollment     *egrEnrollment
-	provider       *networkProvider
-	real           networkBackgroundExecutor
-	registry       *egressRegistry
-	binds, listens atomic.Int32
-	listenerMu     sync.Mutex
-	listeners      map[string]*egrListener
-	peerOK         atomic.Bool
-	policy         appplatform.HTTPPolicy
-	executed       atomic.Int32
-	now            atomic.Int64
+	descriptor                       []byte
+	installation                     string
+	epoch, release                   string
+	enrollment                       *egrEnrollment
+	provider                         *networkProvider
+	real                             networkBackgroundExecutor
+	registry                         *egressRegistry
+	binds, listens                   atomic.Int32
+	listenerMu                       sync.Mutex
+	listeners                        map[string]*egrListener
+	peerOK                           atomic.Bool
+	policy                           appplatform.HTTPPolicy
+	executed                         atomic.Int32
 }
 
 func newEgrFixture(t *testing.T) *egrFixture {
@@ -131,7 +130,7 @@ func newEgrFixture(t *testing.T) *egrFixture {
 
 // bind is the fixture's EgressBinder: it verifies nothing against a journal (the
 // journal is covered by its own tests) and hands out an in-memory listener.
-func (f *egrFixture) bind(ctx context.Context, v control.VerifiedServiceEgressSession, descriptor []byte, listen bool) (EgressListener, error) {
+func (f *egrFixture) bind(ctx context.Context, v control.VerifiedServiceEgressSession, open EgressOpen, listen bool) (EgressListener, error) {
 	f.binds.Add(1)
 	if !listen {
 		return EgressListener{}, nil
@@ -762,7 +761,9 @@ func TestServiceEgressNoticeRoundTrip(t *testing.T) {
 	}
 	// Idempotent replay is Portal's answer (created:false); the runner relays it.
 	p.mu.Lock()
-	p.noticeR = func(broker.AppNotice) (byte, EgressNoticeResult) { return 0, EgressNoticeResult{EventID: "evt-1", Created: false} }
+	p.noticeR = func(broker.AppNotice) (byte, EgressNoticeResult) {
+		return 0, EgressNoticeResult{EventID: "evt-1", Created: false}
+	}
 	p.mu.Unlock()
 	if r, _ := f.request("1", "POST", "/v1/notifications", "application/json", body); r.body != `{"eventId":"evt-1","created":false}` {
 		t.Fatal(r.body)
@@ -884,7 +885,9 @@ func TestServiceEgressReplacementOnlyAfterVerification(t *testing.T) {
 		t.Fatal("same generation refused")
 	}
 	// Open rights are bound by the controller epoch.
-	wrongEpoch := f.sessionCommand(egrOptions{mutate: func(c *control.ServiceEgressSessionCommand) { c.ControllerEpoch = "20000000-0000-4000-8000-0000000000aa" }})
+	wrongEpoch := f.sessionCommand(egrOptions{mutate: func(c *control.ServiceEgressSessionCommand) {
+		c.ControllerEpoch = "20000000-0000-4000-8000-0000000000aa"
+	}})
 	if _, _, err := control.SignServiceEgressSession(wrongEpoch, f.key, f.a, time.Now().UnixMilli()); err == nil {
 		t.Fatal("signed a session for another epoch")
 	}
@@ -979,7 +982,6 @@ type egrUncertain struct{}
 func (egrUncertain) DoBackground(context.Context, []byte, []byte, []byte, control.Authority) (broker.HTTPResponse, error) {
 	return broker.HTTPResponse{Status: 307, Body: []byte("private")}, broker.ErrUncertain
 }
-
 
 // A command may not outlive the session it was signed for, whatever else it says.
 func TestServiceEgressCommandMustNotOutliveSession(t *testing.T) {

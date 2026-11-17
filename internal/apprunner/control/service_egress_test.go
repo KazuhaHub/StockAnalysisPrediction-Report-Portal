@@ -113,7 +113,10 @@ func TestServiceEgressSessionCanonicalSignedAndBounded(t *testing.T) {
 		"burst":             func(c *ServiceEgressSessionCommand) { c.Burst = "21" },
 		"too short":         func(c *ServiceEgressSessionCommand) { c.ExpiresMS = strconv.FormatInt(now+59999, 10) },
 		"too long":          func(c *ServiceEgressSessionCommand) { c.ExpiresMS = strconv.FormatInt(now+300001, 10) },
-		"not yet issued":    func(c *ServiceEgressSessionCommand) { c.IssuedMS = strconv.FormatInt(now+1, 10); c.ExpiresMS = strconv.FormatInt(now+300001, 10) },
+		"not yet issued": func(c *ServiceEgressSessionCommand) {
+			c.IssuedMS = strconv.FormatInt(now+1, 10)
+			c.ExpiresMS = strconv.FormatInt(now+300001, 10)
+		},
 		"already expired": func(c *ServiceEgressSessionCommand) {
 			c.IssuedMS = strconv.FormatInt(now-300000, 10)
 			c.ExpiresMS = strconv.FormatInt(now, 10)

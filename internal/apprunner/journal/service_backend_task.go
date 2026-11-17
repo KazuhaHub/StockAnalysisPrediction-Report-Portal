@@ -159,13 +159,13 @@ type candidatePreparer interface {
 // only in what they then ask the native runtime to do. close releases the launch
 // and the registration deadline.
 type initialServiceBinding struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	launch driver.CandidateLaunch
+	ctx     context.Context
+	cancel  context.CancelFunc
+	launch  driver.CandidateLaunch
 	binding driver.BackendRegistrationSnapshot
-	facts  backendRegistrationFacts
-	before BackendRegistrationReceipt
-	stored []byte
+	facts   backendRegistrationFacts
+	before  BackendRegistrationReceipt
+	stored  []byte
 }
 
 func (b *initialServiceBinding) close() {

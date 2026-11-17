@@ -59,6 +59,10 @@ func ListenNetworkManagedController(ctx context.Context, path string, uid, gid u
 	server.candidateExecution.checkpointRoot = checkpointRoot
 	server.candidateExecution.checkpointPin = checkpointPin
 	server.network = network
+	// Background egress is enabled here and nowhere else: this is the one
+	// constructor that has the journal, the native runtime and the network pool a
+	// session needs. The registry ends with Serve.
+	server.egress = newEgressRegistry(ctx, network, newJournalEgressBinder(store, native))
 	server.candidateExecution.images = images
 	server.imageBlobs = &imageBlobProvider{store: images, enrollment: func(ctx context.Context) (control.Authority, error) {
 		enrollment, err := store.ControllerDeployment(ctx)

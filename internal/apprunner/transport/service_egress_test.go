@@ -155,7 +155,11 @@ func TestServiceEgressUnknownFrameClosesSession(t *testing.T) {
 	}
 	for _, tc := range []step{
 		{"unknown type", func(w io.Writer) { w.Write(rawFrame(0x42, known, nil)) }},
-		{"over-length", func(w io.Writer) { f := rawFrame(EgressFrameAdmit, known, nil); binary.BigEndian.PutUint32(f[20:], 8193); w.Write(f) }},
+		{"over-length", func(w io.Writer) {
+			f := rawFrame(EgressFrameAdmit, known, nil)
+			binary.BigEndian.PutUint32(f[20:], 8193)
+			w.Write(f)
+		}},
 		{"wrong direction", func(w io.Writer) { w.Write(rawFrame(EgressFrameCommand, known, make([]byte, 69))) }},
 		{"unknown call", func(w io.Writer) {
 			w.Write(rawFrame(EgressFrameAdmit, known, admit))
