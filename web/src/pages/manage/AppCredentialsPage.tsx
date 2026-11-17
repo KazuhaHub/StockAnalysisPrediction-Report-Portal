@@ -51,7 +51,7 @@ type Principal = 'viewer' | 'service'
 // Who may use a binding, as the review form offers it.
 type Use = 'viewer' | 'both' | 'service'
 
-const useToPrincipals = (use: Use): Principal[] =>
+const principalsForUse = (use: Use): Principal[] =>
   use === 'service' ? ['service'] : use === 'both' ? ['service', 'viewer'] : ['viewer']
 
 const principalsToUse = (principals?: Principal[]): Use =>
@@ -258,7 +258,7 @@ export default function AppCredentialsPage() {
         credential_id: values.credential_id,
         operation: values.operation,
       }
-      if (values.operation !== 'raw_read') request.principals = useToPrincipals(values.use ?? 'viewer')
+      if (values.operation !== 'raw_read') request.principals = principalsForUse(values.use ?? 'viewer')
       const plan = await api.post<BindingPlan>(
         `/api/admin/app-platform/apps/${encodeURIComponent(appKey)}/secret-bindings/plan`,
         request,
