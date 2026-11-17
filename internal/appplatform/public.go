@@ -179,6 +179,9 @@ func publicMAC(key []byte, encoded string) []byte {
 	return mac.Sum(nil)
 }
 
+// PublicQueryDigest is the digest of a canonical query that a public assertion binds.
+func PublicQueryDigest(query string) string { return publicQueryDigest(query) }
+
 func publicQueryDigest(query string) string {
 	sum := sha256.Sum256([]byte(query))
 	return hex.EncodeToString(sum[:])
@@ -208,6 +211,36 @@ func SignPublicAssertion(s protocol.Signer, generation int64, routeID, path, que
 		return "", ErrPublicAssertion
 	}
 	return token, nil
+}
+
+// ParsePublicClaims decodes the claims of a public token and checks only their structure: strict
+// fields, canonical encoding, version. It does not authenticate the MAC, which only the app can;
+// the runner uses it to check that the token is consistent with the request it was signed for.
+func ParsePublicClaims(token string) (PublicClaims, error) {
+	var zero PublicClaims
+	body, ok := strings.CutPrefix(token, PublicAssertionPrefix)
+	if !ok || len(token) > maxPublicAssertionLen {
+		return zero, ErrPublicAssertion
+	}
+	encoded, _, ok := strings.Cut(body, ".")
+	if !ok {
+		return zero, ErrPublicAssertion
+	}
+	raw, err := base64.RawURLEncoding.Strict().DecodeString(encoded)
+	if err != nil {
+		return zero, ErrPublicAssertion
+	}
+	var c PublicClaims
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.DisallowUnknownFields()
+	if d.Decode(&c) != nil {
+		return zero, ErrPublicAssertion
+	}
+	again, _ := json.Marshal(c)
+	if !bytes.Equal(again, raw) || c.Version != 1 || c.Method != "GET" || c.Generation < 1 {
+		return zero, ErrPublicAssertion
+	}
+	return c, nil
 }
 
 // VerifyPublicAssertion is the reference check an app backend performs; the Portal uses it in

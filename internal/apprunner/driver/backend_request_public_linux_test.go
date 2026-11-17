@@ -18,9 +18,11 @@ import (
 // The header follows the token kind, so a viewer token never reaches the public header and a public
 // token never reaches the viewer header (doc 179, amendment C1).
 func TestForwardBackendRequestSelectsHeaderFromTokenKind(t *testing.T) {
-	dir, err := os.MkdirTemp("/home/kazuha/t6", "pub-")
+	// A unix socket path is limited to 107 bytes, so the directory is short rather than a t.TempDir
+	// named after this test.
+	dir, err := os.MkdirTemp("", "pb-")
 	if err != nil {
-		t.Skip("no short socket directory", err)
+		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
 	path := filepath.Join(dir, "app.sock")
