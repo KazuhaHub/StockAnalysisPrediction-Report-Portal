@@ -64,6 +64,26 @@ func CanonicalPublicPolicy(p PublicPolicy) string {
 	return string(raw)
 }
 
+// ValidPublicPolicyShape is the check of a stored grant row that has no descriptor at hand: the
+// canonical bytes of a well-formed policy. Whether it is a subset of the release's block is checked
+// where the release is known.
+func ValidPublicPolicyShape(raw string) bool {
+	var p PublicPolicy
+	d := json.NewDecoder(strings.NewReader(raw))
+	d.DisallowUnknownFields()
+	if len(raw) == 0 || len(raw) > 4096 || d.Decode(&p) != nil || CanonicalPublicPolicy(p) != raw || p.Format != PublicPolicyFormat ||
+		len(p.Routes) < 1 || len(p.Routes) > maxPublicRoutes || p.ClientPerMinute < 1 || p.ClientPerMinute > MaxPublicClient ||
+		p.BackendPerSecond < 1 || p.BackendPerSecond > MaxPublicBackend {
+		return false
+	}
+	for i, id := range p.Routes {
+		if !publicRouteIDPattern.MatchString(id) || (i > 0 && p.Routes[i-1] >= id) {
+			return false
+		}
+	}
+	return true
+}
+
 // ParsePublicPolicy accepts only the canonical bytes of a policy that is a subset of the descriptor's block.
 func ParsePublicPolicy(raw string, declared Public) (PublicPolicy, error) {
 	var p PublicPolicy

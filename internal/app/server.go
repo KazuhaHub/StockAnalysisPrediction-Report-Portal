@@ -30,6 +30,7 @@ import (
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -163,6 +164,11 @@ type Server struct {
 	// platformPrincipalRate is the per viewer and installation call ceiling of the app principal
 	// directory (app_platform_principals.go).
 	platformPrincipalRate rateLimiter
+
+	// platformPublic is the cache, limiters and counters of the anonymous public projection
+	// (doc 179). platformPublicFetchHook replaces the runner fetch in tests only.
+	platformPublic          platformPublicState
+	platformPublicFetchHook func(ctx context.Context, a platformPublicAuthority, route appplatform.PublicRoute, query string) (driver.BackendResponse, error)
 
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.

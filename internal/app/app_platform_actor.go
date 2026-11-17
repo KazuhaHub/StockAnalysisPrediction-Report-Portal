@@ -22,6 +22,9 @@ type platformActorSession struct {
 	username, created, sessionID string
 	sessionRevision, generation  int64
 	expires                      time.Time
+	// anonymousPublic marks the sessionless identity of a public projection read (doc 179). Only
+	// the public handlers set it; it admits no account, audience or viewer.
+	anonymousPublic bool
 }
 
 type platformActorFacts struct {

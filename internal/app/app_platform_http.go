@@ -302,7 +302,7 @@ func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user 
 		backendAvailable = m.Backend != nil && s.platformBackendEndpoint.Load() != nil
 		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
 			WHERE installation_id=? AND granted=1 AND policy_revision=?
-			AND capability IN ('network.http','network.stream','notifications.publish','principals.read','reports.read','secrets.use','storage.files')
+			AND capability IN ('network.http','network.stream','notifications.publish','principals.read','public.projection','reports.read','secrets.use','storage.files')
 			ORDER BY capability`, current.installationID, current.policyRevision)
 		if err != nil {
 			return err
