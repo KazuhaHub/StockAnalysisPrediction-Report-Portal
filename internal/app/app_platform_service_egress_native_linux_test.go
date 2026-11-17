@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,13 +14,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
 
 // Native end-to-end of background broker egress (doc 174 sections 3 and 7: items
@@ -69,64 +69,50 @@ func platformServiceEgressBrokerDir(ipcRoot, installation string, generation int
 	return filepath.Join(ipcRoot, installation, strconv.FormatInt(generation, 10), "broker")
 }
 
-// platformBindMounter is the mount(2) side of the application's view of the
-// broker directory; tests without root substitute one.
-type platformBindMounter interface {
-	mountReadOnly(source, target string) error
-	unmount(target string) error
+// platformServiceEgressTraversalGroups is a TEST-ONLY stand-in for the
+// container's read-only bind mount of the broker directory. In production the
+// application reaches the socket only through that mount and the broker still
+// checks the peer uid (65532); nothing about the host directories changes. The
+// Portal child of the acceptance can switch user but cannot mount, so the client
+// process instead joins the groups that grant it traversal of every directory on
+// the way down to the socket (where other-execute is missing). stat is injected
+// so the walk can be tested without root. It fails when a directory grants
+// neither: then only the root parent could build a view.
+func platformServiceEgressTraversalGroups(stat func(string) (os.FileMode, uint32, error), socket string) ([]uint32, error) {
+	var groups []uint32
+	dir := "/"
+	parts := strings.Split(strings.Trim(filepath.Dir(socket), "/"), "/")
+	for i := -1; i < len(parts); i++ {
+		if i >= 0 {
+			dir = filepath.Join(dir, parts[i])
+		}
+		mode, gid, err := stat(dir)
+		if err != nil {
+			return nil, err
+		}
+		switch {
+		case mode&0o001 != 0:
+		case mode&0o010 != 0:
+			if !slices.Contains(groups, gid) {
+				groups = append(groups, gid)
+			}
+		default:
+			return nil, fmt.Errorf("%s grants traversal to neither group nor other (mode %v)", dir, mode.Perm())
+		}
+	}
+	return groups, nil
 }
 
-type platformUnixMounter struct{}
-
-func (platformUnixMounter) mountReadOnly(source, target string) error {
-	if err := unix.Mount(source, target, "", unix.MS_BIND, ""); err != nil {
-		return err
-	}
-	if err := unix.Mount("", target, "", unix.MS_BIND|unix.MS_REMOUNT|unix.MS_RDONLY, ""); err != nil {
-		_ = unix.Unmount(target, 0)
-		return err
-	}
-	return nil
-}
-
-func (platformUnixMounter) unmount(target string) error {
-	if err := unix.Unmount(target, 0); err != nil {
-		return unix.Unmount(target, unix.MNT_DETACH)
-	}
-	return nil
-}
-
-// platformServiceEgressBrokerView mirrors production: the application never
-// walks the host's IPC directories (root and the runner group only), it sees the
-// generation's broker directory through a read-only bind mount. The view is a
-// fresh root-owned 0755 directory under /tmp; the mount is removed by a cleanup
-// that runs however the test ends, and the directory is removed only after a
-// successful unmount (a recursive removal under a live mount would reach the
-// runner's real directory). It returns the socket path the application dials.
-func platformServiceEgressBrokerView(t *testing.T, m platformBindMounter, brokerDir string) string {
-	t.Helper()
-	view, err := os.MkdirTemp("/tmp", "portal-egress-broker-")
+func platformServiceEgressStat(path string) (os.FileMode, uint32, error) {
+	info, err := os.Stat(path)
 	if err != nil {
-		t.Fatal(err)
+		return 0, 0, err
 	}
-	if err := os.Chmod(view, 0755); err != nil {
-		_ = os.Remove(view)
-		t.Fatal(err)
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, 0, errors.New("no ownership information for " + path)
 	}
-	if err := m.mountReadOnly(brokerDir, view); err != nil {
-		_ = os.Remove(view)
-		t.Fatal("bind-mounting the broker directory read-only for the application:", err)
-	}
-	t.Cleanup(func() {
-		if err := m.unmount(view); err != nil {
-			t.Error("unmounting the broker view; it is left in place:", view, err)
-			return
-		}
-		if err := os.Remove(view); err != nil {
-			t.Error("removing the broker view:", err)
-		}
-	})
-	return filepath.Join(view, "broker.sock")
+	return info.Mode(), st.Gid, nil
 }
 
 // The foreground acceptance reads up to 10 hits of the HTTPS fixture; the egress
@@ -171,7 +157,7 @@ func TestPlatformServiceEgressNativeClientProcess(t *testing.T) {
 
 // platformServiceEgressAppCall runs one broker request as uid 65532 and returns
 // the status and body the application saw.
-func platformServiceEgressAppCall(t *testing.T, binary, socket, method, path, body string) (int, string) {
+func platformServiceEgressAppCall(t *testing.T, binary string, groups []uint32, socket, method, path, body string) (int, string) {
 	t.Helper()
 	child := exec.Command(binary, "-test.run=^TestPlatformServiceEgressNativeClientProcess$")
 	// Uid 65532 must be able to traverse the working directory too, and the
@@ -181,7 +167,7 @@ func platformServiceEgressAppCall(t *testing.T, binary, socket, method, path, bo
 		platformServiceEgressClientSocket+"="+socket, platformServiceEgressClientMethod+"="+method,
 		platformServiceEgressClientPath+"="+path, platformServiceEgressClientBody+"="+body)
 	if os.Geteuid() == 0 { // the acceptance; an unprivileged dry run keeps its own uid
-		child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65532, Gid: 65532}}
+		child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65532, Gid: 65532, Groups: groups}}
 	}
 	out, err := child.CombinedOutput()
 	if err != nil {
@@ -273,7 +259,6 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	}
 	ctx := context.Background()
 	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation)
-	brokerDir := platformServiceEgressBrokerDir(ipcRoot, installation, generation)
 	clientBinary := platformServiceEgressClientBinary(t)
 	// The installation declares no background.run (the foreground fixture does not
 	// need it); give it the row the reviewed selection would, for this test only.
@@ -332,16 +317,18 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if live == nil || live.ended() {
 		t.Fatal("the coordinator opened no session on the real runner")
 	}
-	// The application reaches the socket the way its container does: through a
-	// read-only bind mount of the broker directory, never the host IPC parents.
-	socket := platformServiceEgressBrokerView(t, platformUnixMounter{}, brokerDir)
-	if status, body := platformServiceEgressAppCall(t, clientBinary, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
+	socket := platformServiceEgressBrokerSocket(ipcRoot, installation, generation)
+	groups, err := platformServiceEgressTraversalGroups(platformServiceEgressStat, socket)
+	if err != nil {
+		t.Fatal("the application user cannot reach the broker socket even through groups:", err)
+	}
+	if status, body := platformServiceEgressAppCall(t, clientBinary, groups, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("broker status", status, body)
 	}
 	before := platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap)
 	request := func(path string) (int, string) {
 		raw, _ := json.Marshal(map[string]string{"requestId": "native-" + strconv.FormatInt(time.Now().UnixNano(), 36), "method": "GET", "url": "https://api.example.com" + path, "accept": "application/json", "contentType": "", "bodyBase64": ""})
-		return platformServiceEgressAppCall(t, clientBinary, socket, "POST", "/v1/network/http", string(raw))
+		return platformServiceEgressAppCall(t, clientBinary, groups, socket, "POST", "/v1/network/http", string(raw))
 	}
 	status, body := request("/v1/success")
 	if status != 200 || !strings.Contains(body, `"status":200`) || platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap) != before+1 {
@@ -378,7 +365,7 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	events := scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events`)
 	notice := func(title string) (int, string) {
 		raw, _ := json.Marshal(map[string]string{"occurrenceId": "native-egress-1", "title": title, "message": "Through the broker", "severity": "info"})
-		return platformServiceEgressAppCall(t, clientBinary, socket, "POST", "/v1/notifications", string(raw))
+		return platformServiceEgressAppCall(t, clientBinary, groups, socket, "POST", "/v1/notifications", string(raw))
 	}
 	status, body = notice("Native notice")
 	if status != 200 || !strings.Contains(body, `"created":true`) {
@@ -463,44 +450,45 @@ func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
 	go func() { _ = server.Serve(listener) }()
 	defer server.Close()
 	binary := platformServiceEgressClientBinary(t)
-	if status, body := platformServiceEgressAppCall(t, binary, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
+	if status, body := platformServiceEgressAppCall(t, binary, nil, socket, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("status through the client process", status, body)
 	}
-	status, body := platformServiceEgressAppCall(t, binary, socket, "POST", "/v1/network/http", `{}`)
+	status, body := platformServiceEgressAppCall(t, binary, nil, socket, "POST", "/v1/network/http", `{}`)
 	if status != 502 || platformServiceEgressErrorCode(body) != "uncertain" {
 		t.Fatal("error through the client process", status, body)
 	}
 }
 
-type fakeBindMounter struct{ events []string }
-
-func (f *fakeBindMounter) mountReadOnly(source, target string) error {
-	f.events = append(f.events, "mount "+source)
-	return nil
-}
-func (f *fakeBindMounter) unmount(target string) error {
-	f.events = append(f.events, "unmount")
-	return nil
-}
-
-// The view of the broker directory: a root-owned-style 0755 directory under /tmp,
-// the mount taken on it, the socket named inside it, and the cleanup that
-// unmounts before it removes.
-func TestPlatformServiceEgressBrokerViewLifecycle(t *testing.T) {
-	var view string
-	var f fakeBindMounter
-	t.Run("lifecycle", func(t *testing.T) {
-		socket := platformServiceEgressBrokerView(t, &f, "/run/x/ipc/inst/1/broker")
-		view = filepath.Dir(socket)
-		info, err := os.Stat(view)
-		if err != nil || info.Mode().Perm() != 0755 || filepath.Base(socket) != "broker.sock" || !strings.HasPrefix(view, "/tmp/portal-egress-broker-") {
-			t.Fatal("view", view, info, err)
+// The group walk, with a fake stat: groups are collected only where other-execute
+// is missing, deduplicated, and a directory that grants neither is an error.
+func TestPlatformServiceEgressTraversalGroups(t *testing.T) {
+	dirs := map[string]struct {
+		mode os.FileMode
+		gid  uint32
+	}{
+		"/": {os.ModeDir | 0755, 0}, "/run": {os.ModeDir | 0755, 0},
+		"/run/svc": {os.ModeDir | 0750, 41001}, "/run/svc/ipc": {os.ModeDir | 0750, 41001},
+		"/run/svc/ipc/i": {os.ModeDir | 0710, 41002}, "/run/svc/ipc/i/1": {os.ModeDir | 0755, 0},
+	}
+	stat := func(p string) (os.FileMode, uint32, error) {
+		d, ok := dirs[p]
+		if !ok {
+			return 0, 0, os.ErrNotExist
 		}
-		if len(f.events) != 1 || f.events[0] != "mount /run/x/ipc/inst/1/broker" {
-			t.Fatal("mount", f.events)
-		}
-	})
-	if _, err := os.Stat(view); !os.IsNotExist(err) || len(f.events) != 2 || f.events[1] != "unmount" {
-		t.Fatal("cleanup did not unmount and remove", f.events, err)
+		return d.mode, d.gid, nil
+	}
+	got, err := platformServiceEgressTraversalGroups(stat, "/run/svc/ipc/i/1/broker.sock")
+	if err != nil || len(got) != 2 || got[0] != 41001 || got[1] != 41002 {
+		t.Fatal("groups", got, err)
+	}
+	dirs["/run/svc/ipc"] = struct {
+		mode os.FileMode
+		gid  uint32
+	}{os.ModeDir | 0700, 0}
+	if _, err := platformServiceEgressTraversalGroups(stat, "/run/svc/ipc/i/1/broker.sock"); err == nil {
+		t.Fatal("an owner-only directory was accepted")
+	}
+	if _, err := platformServiceEgressTraversalGroups(stat, "/run/svc/ipc/i/missing/broker.sock"); err == nil {
+		t.Fatal("a missing directory was accepted")
 	}
 }
