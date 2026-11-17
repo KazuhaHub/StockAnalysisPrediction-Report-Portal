@@ -128,6 +128,19 @@ describe('application installation settings', () => {
       expect(await screen.findByText('plan changed')).toBeTruthy()
     })
 
+    it('disables both controls with an explanation unless the installation is ready with no operation in progress', async () => {
+      for (const [name, override] of [['operation', { operation_pending: true }], ['phase', { phase: 'pending' }], ['disabled', { desired_state: 'disabled' }]] as const) {
+        for (const granted of [false, true]) {
+          serve({ ...withPrincipals(granted), ...override } as typeof settings)
+          const view = mount()
+          const button = await screen.findByRole('button', { name: granted ? 'appPlatform.settings.principals.withdraw' : 'appPlatform.settings.principals.enable' })
+          expect(button.hasAttribute('disabled'), `${name} ${granted}`).toBe(true)
+          expect(screen.getByText('appPlatform.settings.principals.notReady')).toBeTruthy()
+          view.unmount()
+        }
+      }
+    })
+
     it('offers no control for other capabilities or without the capability', async () => {
       mount()
       await screen.findByText('notes')

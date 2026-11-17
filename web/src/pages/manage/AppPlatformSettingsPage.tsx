@@ -42,6 +42,7 @@ type Settings = {
   configuration_gaps: string[]
   repair_eligible: boolean
   control_paused: boolean
+  operation_pending?: boolean
   migration_recovery?: MigrationRecovery | null
   // Present while a release this installation needs has image blobs that are gone or unreadable.
   image_delivery?: ImageDelivery | null
@@ -233,6 +234,7 @@ export default function AppPlatformSettingsPage() {
   // principals.read is optional and off after install (doc 181 section 4). An administrator enables
   // it after reading the disclosure; withdrawal needs no second step because it only removes access.
   const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
+  const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
   const changePrincipals = async (enabled: boolean) => {
     if (principalsBusy) return
     setPrincipalsBusy(true); setPrincipalsError('')
@@ -440,8 +442,9 @@ export default function AppPlatformSettingsPage() {
         <Typography.Text type="secondary">{t('appPlatform.capability.principals.read')}</Typography.Text>
         {principalsError && !principalsOpen && <Alert type="error" showIcon title={principalsError} />}
         {principals.granted
-          ? <Button loading={principalsBusy} onClick={() => void changePrincipals(false)}>{t('appPlatform.settings.principals.withdraw')}</Button>
-          : <Button disabled={settings.desired_state === 'removed'} onClick={() => { setPrincipalsError(''); setPrincipalsOpen(true) }}>{t('appPlatform.settings.principals.enable')}</Button>}
+          ? <Button loading={principalsBusy} disabled={!principalsReady} onClick={() => void changePrincipals(false)}>{t('appPlatform.settings.principals.withdraw')}</Button>
+          : <Button disabled={!principalsReady} onClick={() => { setPrincipalsError(''); setPrincipalsOpen(true) }}>{t('appPlatform.settings.principals.enable')}</Button>}
+        {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
       </Space>}
     </Card>
     <Modal
