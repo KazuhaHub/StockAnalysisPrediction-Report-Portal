@@ -49,6 +49,12 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	}
 	p.Format, p.ReleaseSHA256 = platformManagedInstallFormat, release.sha256
 	p.Runtime = &platformManagedInstallTarget{RuntimeID: runtime.id, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, BindingRevision: runtime.revision, ControlRevision: runtime.controlRevision, Fingerprint: runtime.fingerprint, Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol, SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(999), RootInode: "10"}}
+	// The managed release may declare optional capabilities the static template did not.
+	selection, err := platformInstallCapabilitySelection(manifest, p.Runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.DeclinedCapabilities = platformDeclinedCapabilities(selection)
 	encoded, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +62,10 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, lease.id)
 	digest := platformDigest(encoded)
 	request, _ := json.Marshal([]string{"portal-operation-commit/v1", planID, digest})
+	if manifest.Public != nil && scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND capability='public.projection'`, lease.installationID) == 0 {
+		// The static template had no such row; install writes one, off and with an empty policy.
+		mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) SELECT installation_id,'public.projection',0,'{}',policy_revision,review_plan_id,created_ms,updated_ms FROM app_platform_capability_grants WHERE installation_id=? LIMIT 1`, lease.installationID)
+	}
 	mustExec(t, s.st, `UPDATE app_platform_review_plans SET plan_json=?,plan_sha256=?,target_release_sha256=? WHERE id=?`, string(encoded), digest, release.sha256, planID)
 	mustExec(t, s.st, `UPDATE app_platform_operations SET managed=1,request_sha256=? WHERE id=?`, platformDigest(request), lease.id)
 	mustExec(t, s.st, `UPDATE app_platform_installations SET runtime_id=? WHERE id=?`, runtime.id, lease.installationID)
