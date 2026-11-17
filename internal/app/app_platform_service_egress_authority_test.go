@@ -306,6 +306,45 @@ func TestPlatformServiceEgressConcurrentLoadsDoNotSerializePostgres(t *testing.T
 	}
 }
 
+// The notification-only fallback is for the one documented case, a generation-1
+// managed install that cannot carry a network target (doc 174 F13). It must not
+// hide a real failure to resolve the network grant of any other install.
+func testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t *testing.T, pg bool) {
+	ctx := context.Background()
+	// The documented case: a generation-1 managed install has no network grant
+	// (its network.http is ungranted), so discovery plans notifications only.
+	s, installation := platformServiceEgressFixture(t, pg, false)
+	d, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{})
+	if err != nil || d.hasNetwork() || strings.Join(d.resources, ",") != "notifications.publish" {
+		t.Fatal("managed generation 1 was not planned notification-only", err)
+	}
+	d.Close()
+	// It cannot be made to hold network egress by granting the capability.
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.http'`, installation)
+	if a, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{}); err == nil {
+		a.Close()
+		t.Fatal("a managed install was planned with a network grant it cannot have", a.resources)
+	}
+	// A writable install whose network grant stopped resolving fails the session.
+	s, installation = platformServiceEgressFixture(t, pg, true)
+	a, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{})
+	if err != nil || !a.hasNetwork() {
+		t.Fatal("baseline", err)
+	}
+	a.Close()
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_json='{"broken":true}' WHERE installation_id=? AND capability='network.http'`, installation)
+	if a, err := s.loadPlatformServiceEgressCurrent(ctx, installation, platformServiceEgressLoad{}); err == nil {
+		a.Close()
+		t.Fatal("a network grant failure was hidden behind a notification-only session", a.resources)
+	}
+}
+
+func TestPlatformServiceEgressNotificationOnlyFallbackIsScopedSQLite(t *testing.T) {
+	testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t, false)
+}
+func TestPlatformServiceEgressNotificationOnlyFallbackIsScopedPostgres(t *testing.T) {
+	testPlatformServiceEgressNotificationOnlyFallbackIsScoped(t, true)
+}
 func TestPlatformServiceEgressRequiresBackgroundAndNetworkGrantSQLite(t *testing.T) {
 	testPlatformServiceEgressRequiresBackgroundAndNetworkGrant(t, false)
 }

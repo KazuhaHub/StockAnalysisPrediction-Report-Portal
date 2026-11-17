@@ -104,9 +104,8 @@ func (a platformServiceEgressAuthority) hasNetwork() bool {
 }
 
 // platformServiceEgressLoad says what to read. resources nil means "every egress
-// resource that is granted now" (planning a session); a notification-only
-// session is then planned for an installation whose network grant cannot be
-// resolved (a generation-1 managed install). identity nil skips the assertion
+// resource that is granted now" (planning a session); a generation-1 managed
+// install, whose network.http is ungranted, is then planned notification-only. identity nil skips the assertion
 // (planning, before one is issued). history asks for the registration proof the
 // session command carries; it is signed fresh on each read and is needed at open
 // only.
@@ -245,19 +244,15 @@ func (s *Server) loadPlatformServiceEgressCurrent(ctx context.Context, installat
 			parsed.Policy.Concurrency < 1 || parsed.Policy.Concurrency > 4) {
 			err = errPlatformServiceEgressUnavailable
 		}
-		switch {
-		case err == nil:
-			result.grant, result.policy, result.concurrency = grant, parsed, parsed.Policy.Concurrency
-		case discover:
-			// A generation-1 managed install has no network grant for its initial
-			// target (doc 174 F13): it gets a notification-only session.
-			result.resources = slices.DeleteFunc(slices.Clone(resources), func(r string) bool { return r == platformServiceEgressNetwork })
-			if len(result.resources) == 0 {
-				return zero, errPlatformServiceEgressUnavailable
-			}
-		default:
+		// A network grant that does not resolve fails the session, whatever the
+		// kind of install. The generation-1 managed install of doc 174 F13 has no
+		// network target and its network.http is ungranted, so discovery never
+		// lists the resource for it and no network grant is read at all: that case
+		// needs no fallback, and a fallback would hide real grant failures.
+		if err != nil {
 			return zero, errPlatformServiceEgressUnavailable
 		}
+		result.grant, result.policy, result.concurrency = grant, parsed, parsed.Policy.Concurrency
 	}
 	if o.history {
 		now, err := platformDatabaseNow(e)
