@@ -47,6 +47,10 @@ type EgressListener struct {
 	// PeerOK is applied to each accepted connection before any byte is read. Nil
 	// admits every peer, which only tests do.
 	PeerOK func(net.Conn) bool
+	// Intact, when set, reports whether the socket still sits at the place and
+	// with the identity it was bound with. It is checked before every call is
+	// admitted, so a replaced directory or socket makes the broker unavailable.
+	Intact func() error
 }
 
 // EgressBinder verifies a verified session against the runner's journal and the
@@ -84,6 +88,7 @@ type egressInstall struct {
 	generation int64
 	listener   net.Listener
 	peerOK     func(net.Conn) bool
+	intact     func() error
 	server     *egressServer
 
 	mu       sync.Mutex
@@ -236,7 +241,7 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 			install.mu.Unlock()
 			replaced = install
 		}
-		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, bucket: bucket, sessions: make(map[*egressSession]struct{})}
+		install = &egressInstall{registry: r, id: command.InstallationID, generation: generation, listener: binding.Listener, peerOK: binding.PeerOK, intact: binding.Intact, bucket: bucket, sessions: make(map[*egressSession]struct{})}
 		r.installs[command.InstallationID] = install
 	} else if install == nil || install.generation != generation {
 		r.mu.Unlock()

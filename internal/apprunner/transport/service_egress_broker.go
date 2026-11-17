@@ -163,7 +163,7 @@ func (in *egressInstall) begin(resource string) (*egressSession, func(), string)
 	in.mu.Lock()
 	defer in.mu.Unlock()
 	s := in.current
-	if in.closed || s == nil || s.draining || !in.registry.now().Before(s.expires) {
+	if in.closed || s == nil || s.draining || !in.registry.now().Before(s.expires) || in.intact != nil && in.intact() != nil {
 		return nil, nil, broker.AppErrUnavailable
 	}
 	if !s.allows(resource) {
