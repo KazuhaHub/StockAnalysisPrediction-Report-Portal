@@ -5,11 +5,13 @@ package transport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -220,7 +222,13 @@ func TestServiceEgressEndpointAcceptance(t *testing.T) {
 	if path := os.Getenv("PORTAL_SERVICE_EGRESS_DIAL"); path != "" {
 		// Child process, running as uid 65532.
 		client := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", path)
+			conn, err := (&net.Dialer{}).DialContext(ctx, "unix", path)
+			if err == nil {
+				// The parent tells "reached the socket and was cut off" from a
+				// failure to run at all by this line.
+				fmt.Println("CONNECTED")
+			}
+			return conn, err
 		}}, Timeout: 10 * time.Second}
 		resp, err := client.Get("http://broker/v1/status")
 		if err != nil {
@@ -270,20 +278,23 @@ func TestServiceEgressEndpointAcceptance(t *testing.T) {
 	}
 	go func() { _ = mux.Run(context.Background()) }()
 	defer mux.Close(EgressCloseShutdown)
-	run := func(uid uint32) error {
+	run := func(uid uint32) (string, error) {
 		child := exec.Command(os.Args[0], "-test.run=^TestServiceEgressEndpointAcceptance$")
 		child.Env = append(os.Environ(), "PORTAL_SERVICE_EGRESS_DIAL="+socket)
 		child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid}}
 		out, err := child.CombinedOutput()
 		if err != nil {
-			return errors.New(string(out))
+			return string(out), errors.New(string(out))
 		}
-		return nil
+		return string(out), nil
 	}
-	if err := run(65532); err != nil {
+	if out, err := run(65532); err != nil || !strings.Contains(out, "CONNECTED") {
 		t.Fatalf("the application's user was refused: %v", err)
 	}
-	if err := run(65534); err == nil {
-		t.Fatal("another user was served on the broker socket")
+	// Another user reaches the socket (the file is 0666) and is disconnected by the
+	// peer check before a byte is served; a failure to start the child would not
+	// have connected.
+	if out, err := run(65534); err == nil || !strings.Contains(out, "CONNECTED") {
+		t.Fatalf("another user was served on the broker socket, or never reached it: %v\n%s", err, out)
 	}
 }
