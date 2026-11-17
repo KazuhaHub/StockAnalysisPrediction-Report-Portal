@@ -1,6 +1,6 @@
 # Proposal: principal directory for app grant pickers
 
-Status: accepted 2026-11-17; implementation pending. No dependency on 174–180.
+Status: accepted 2026-11-17; implemented on branch `feat/app-platform-principal-directory`. No dependency on 174–180.
 Index and order: doc [174](174-background-broker-egress.md).
 
 ## 1. Problem and evidence
@@ -112,6 +112,32 @@ stores them as today. The backend has no directory access.
 [175](175-reviewed-multi-origin-and-private-network.md) §3.4) states: "The
 app's administrators can list the names of users and OUs that can use this
 app." Withdrawal is immediate.
+
+Implementation: the capability is declared optional only; a descriptor that
+lists it as required is refused. Install leaves its grant row off. A Portal
+administrator enables or withdraws it with
+`POST /api/admin/app-platform/installations/{installation}/principals-read`
+(`{"enabled":bool,"policyRevision":"N"}`, audited as
+`app_platform.capability_granted` / `app_platform.capability_withdrawn`) from
+the installation settings page, which shows the sentence above before enabling.
+The directory reads the row on every call, so withdrawal needs no cache
+invalidation. An update replaces the grant rows, so a new release starts with
+the capability off again and is reviewed again. There is no way to carry the
+grant through an update review: update reviews of frontend apps select no
+optional capability at all (network.http is selectable only in a managed
+target's reviewed policy), so an administrator enables it again from the
+settings page after the update.
+
+Enabling and withdrawing are refused with 409 `app_platform_installation_not_ready`
+unless the installation is enabled and ready and has no unfinished or
+unresolved operation, checked in the same transaction that writes the row.
+Install, enable and update read the grant rows as evidence (the install
+resource count, the frontend activation checks and the grants digest), so
+changing one mid-operation would turn a clean operation into a review. The
+settings page disables both controls with an explanation in those states.
+In the schema, `principals.read` appears only in the optional capability list. The per viewer rate is applied
+only after the caller has passed the installation, audience and administrator
+checks.
 
 ## 5. Failure and audit
 

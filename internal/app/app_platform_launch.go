@@ -233,7 +233,7 @@ func (s *Server) withPlatformStaticLaunchReadContext(ctx context.Context, sessio
 	var aggregateUnsafe int
 	if err := e.queryRow(`SELECT
  (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision<>?)+
- (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability NOT IN ('reports.read','storage.files'))`, installationID, policy, installationID).Scan(&aggregateUnsafe); err != nil {
+ (SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND granted<>0 AND capability NOT IN ('reports.read','storage.files','principals.read'))`, installationID, policy, installationID).Scan(&aggregateUnsafe); err != nil {
 		return zero, err
 	}
 	unsafe := operationUnsafe + effectUnsafe + aggregateUnsafe

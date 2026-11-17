@@ -149,6 +149,10 @@ func TestManagedInstallRequirementsDoNotGrantProviders(t *testing.T) {
 	}
 }
 
+// platformManagedFixtureOptional lists optional capabilities the managed release fixture declares.
+// A test sets it before building a fixture and restores it afterwards.
+var platformManagedFixtureOptional []string
+
 func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byte) {
 	t.Helper()
 	raw, _, archive := platformSignedReleaseFixture(t, "1.0.0-beta.3")
@@ -160,6 +164,7 @@ func platformManagedReleaseFixture(t *testing.T, platform string) ([]byte, []byt
 	m.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	m.Compatibility.RunnerProtocol = ">=1.0.0-0 <2.0.0"
 	m.Capabilities.Required = []string{}
+	m.Capabilities.Optional = append(m.Capabilities.Optional, platformManagedFixtureOptional...)
 	m.Backend = &appplatform.Backend{Kind: "oci", Image: "registry.k8s.io/pause@sha256:" + strings.Repeat("a", 64), Platforms: []string{platform}, Protocol: transport.ManagedBackendProtocol, Resources: appplatform.Resources{MemoryMiB: 256, CPUMillis: 500, PIDs: 64}}
 	raw, err := json.Marshal(m)
 	if err != nil {

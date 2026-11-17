@@ -223,6 +223,32 @@ export interface BridgeNotificationRequest {
 export interface BridgeNotificationResponse {
   readonly id: string;
 }
+export type BridgePrincipalKind = "user" | "ou";
+export type BridgePrincipalRequest =
+  | {
+      readonly action: "search";
+      readonly kind: BridgePrincipalKind;
+      readonly query: string;
+      readonly after: string;
+      readonly limit: number;
+    }
+  | { readonly action: "resolve"; readonly principals: readonly string[] };
+export interface BridgePrincipalItem {
+  readonly principal: string;
+  readonly label: string;
+  readonly parent?: string | null;
+}
+export type BridgePrincipalResponse =
+  | {
+      readonly action: "search";
+      readonly items: readonly BridgePrincipalItem[];
+      readonly next: string;
+    }
+  | {
+      readonly action: "resolve";
+      readonly items: readonly BridgePrincipalItem[];
+      readonly unknown: readonly string[];
+    };
 export type BridgeBackendFailure =
   | "not_ready"
   | "unsupported"
@@ -252,6 +278,11 @@ const notificationFailures = new Set<BridgeNotificationFailure>([
   ...backendFailures,
   "conflict",
   "capacity",
+]);
+export type BridgePrincipalFailure = BridgeBackendFailure | "not_permitted";
+const principalFailures = new Set<BridgePrincipalFailure>([
+  ...backendFailures,
+  "not_permitted",
 ]);
 export class BridgeBackendError extends Error {
   readonly retryable = false;
@@ -283,6 +314,13 @@ export class BridgeNotificationError extends Error {
   constructor(readonly code: BridgeNotificationFailure) {
     super(`Application notifications: ${code}`);
     this.name = "BridgeNotificationError";
+  }
+}
+export class BridgePrincipalError extends Error {
+  readonly retryable = false;
+  constructor(readonly code: BridgePrincipalFailure) {
+    super(`Application principals: ${code}`);
+    this.name = "BridgePrincipalError";
   }
 }
 export function parseBridgeBackendRequest(
@@ -379,6 +417,125 @@ export function parseBridgeNotificationResponse(
   )
     return null;
   return Object.freeze({ id: value.id });
+}
+const principalPattern = /^(user|ou):[0-9a-f]{64}$/;
+const principalCursorPattern = /^[A-Za-z0-9_-]*$/;
+function principalLabel(value: unknown): value is string {
+  return (
+    isString(value) &&
+    value.length <= 160 &&
+    new TextEncoder().encode(value).length <= 160
+  );
+}
+function principalList(value: unknown, max: number): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= max &&
+    value.every((item) => isString(item) && principalPattern.test(item)) &&
+    new Set(value).size === value.length
+  );
+}
+export function parseBridgePrincipalRequest(
+  value: unknown,
+): BridgePrincipalRequest | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  if (v.action === "resolve") {
+    if (!exact(v, ["action", "principals"]) || !principalList(v.principals, 100))
+      return null;
+    if (v.principals.length < 1) return null;
+    return Object.freeze({
+      action: "resolve",
+      principals: Object.freeze([...v.principals]),
+    });
+  }
+  if (
+    v.action !== "search" ||
+    !Object.keys(v).every((key) =>
+      ["action", "kind", "query", "after", "limit"].includes(key),
+    ) ||
+    (v.kind !== "user" && v.kind !== "ou")
+  )
+    return null;
+  const query = v.query === undefined ? "" : v.query;
+  const after = v.after === undefined ? "" : v.after;
+  const limit = v.limit === undefined ? 50 : v.limit;
+  if (
+    !isString(query) ||
+    query.length > 64 ||
+    new TextEncoder().encode(query).length > 64 ||
+    !isString(after) ||
+    after.length > 128 ||
+    !principalCursorPattern.test(after) ||
+    typeof limit !== "number" ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > 50
+  )
+    return null;
+  return Object.freeze({ action: "search", kind: v.kind, query, after, limit });
+}
+function parseBridgePrincipalItem(value: unknown): BridgePrincipalItem | null {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !Object.keys(value).every((key) =>
+      ["principal", "label", "parent"].includes(key),
+    )
+  )
+    return null;
+  const v = value as Record<string, unknown>;
+  if (
+    !isString(v.principal) ||
+    !principalPattern.test(v.principal) ||
+    !principalLabel(v.label)
+  )
+    return null;
+  if (v.parent === undefined)
+    return Object.freeze({ principal: v.principal, label: v.label });
+  if (
+    v.parent !== null &&
+    !(isString(v.parent) && v.parent.startsWith("ou:") && principalPattern.test(v.parent))
+  )
+    return null;
+  return Object.freeze({
+    principal: v.principal,
+    label: v.label,
+    parent: v.parent,
+  });
+}
+export function parseBridgePrincipalResponse(
+  value: unknown,
+): BridgePrincipalResponse | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const resolve = v.action === "resolve";
+  if (
+    (!resolve && v.action !== "search") ||
+    !exact(v, ["action", "items", resolve ? "unknown" : "next"]) ||
+    !Array.isArray(v.items) ||
+    v.items.length > (resolve ? 100 : 50)
+  )
+    return null;
+  const items = v.items.map(parseBridgePrincipalItem);
+  if (items.some((item) => item === null)) return null;
+  const frozen = Object.freeze(items as BridgePrincipalItem[]);
+  if (resolve) {
+    if (!principalList(v.unknown, 100)) return null;
+    return Object.freeze({
+      action: "resolve",
+      items: frozen,
+      unknown: Object.freeze([...v.unknown]),
+    });
+  }
+  if (
+    !isString(v.next) ||
+    v.next.length > 128 ||
+    !principalCursorPattern.test(v.next)
+  )
+    return null;
+  return Object.freeze({ action: "search", items: frozen, next: v.next });
 }
 const reportQueryKeys = [
   "symbol",
@@ -849,6 +1006,10 @@ export interface BridgeHostOptions extends BaseOptions {
     request: BridgeNotificationRequest,
     signal: AbortSignal,
   ) => Promise<BridgeNotificationResponse>;
+  onPrincipalRequest?: (
+    request: BridgePrincipalRequest,
+    signal: AbortSignal,
+  ) => Promise<BridgePrincipalResponse>;
   onDocumentHeight?: (height: number) => void;
   onPageChange?: (snapshot: PageActionSnapshot | null) => void;
   onDraftChange?: (dirty: boolean) => void;
@@ -1141,6 +1302,7 @@ export function createBridgeHost(
   let reportIssued = 0n;
   let objectIssued = 0n;
   let notificationIssued = 0n;
+  let principalIssued = 0n;
   let lastMeasure = 0n,
     measureWindow = 0,
     measureCount = 0;
@@ -1182,6 +1344,10 @@ export function createBridgeHost(
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
   const notificationRequests = new Map<
+    string,
+    { abort: AbortController; timer: ReturnType<typeof setTimeout> }
+  >();
+  const principalRequests = new Map<
     string,
     { abort: AbortController; timer: ReturnType<typeof setTimeout> }
   >();
@@ -1298,6 +1464,11 @@ export function createBridgeHost(
       request.abort.abort();
     }
     notificationRequests.clear();
+    for (const request of principalRequests.values()) {
+      clearTimeout(request.timer);
+      request.abort.abort();
+    }
+    principalRequests.clear();
     clearTimeout(timer);
     localWindow.removeEventListener("message", onWindow);
     closePort(port);
@@ -1956,6 +2127,112 @@ export function createBridgeHost(
     if (
       data &&
       typeof data === "object" &&
+      (data.type === "principals.request" ||
+        data.type === "principals.cancel")
+    ) {
+      const cancel = data.type === "principals.cancel";
+      if (
+        !exact(data, [
+          "type",
+          ...envelopeKeys,
+          "requestId",
+          ...(cancel ? [] : ["request"]),
+        ])
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      if (!matches(data)) return;
+      if (!decimal(data.requestId) || !announced) {
+        fail("protocol_error");
+        return;
+      }
+      const id = data.requestId;
+      if (cancel) {
+        if (BigInt(id) > principalIssued) {
+          fail("protocol_error");
+          return;
+        }
+        const active = principalRequests.get(id);
+        if (active) {
+          clearTimeout(active.timer);
+          principalRequests.delete(id);
+          active.abort.abort();
+        }
+        return;
+      }
+      if (BigInt(id) <= principalIssued) {
+        fail("protocol_error");
+        return;
+      }
+      principalIssued = BigInt(id);
+      const request = parseBridgePrincipalRequest(data.request);
+      if (!request) {
+        fail("protocol_error");
+        return;
+      }
+      const result = (value: Record<string, unknown>) => {
+        if (terminal() || !port || !currentEnvelope) return;
+        try {
+          port.postMessage({
+            type: "principals.result",
+            ...currentEnvelope,
+            requestId: id,
+            ...value,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      };
+      if (
+        !options.onPrincipalRequest ||
+        !granted?.includes("principals.read")
+      ) {
+        result({ code: "unsupported" });
+        return;
+      }
+      if (principalRequests.size >= 1) {
+        result({ code: "busy" });
+        return;
+      }
+      const controller = new AbortController();
+      const finish = (value: Record<string, unknown>) => {
+        const active = principalRequests.get(id);
+        if (!active || active.abort !== controller) return;
+        clearTimeout(active.timer);
+        principalRequests.delete(id);
+        result(value);
+      };
+      const timeout = setTimeout(() => {
+        finish({ code: "uncertain" });
+        controller.abort();
+      }, 20_000);
+      principalRequests.set(id, { abort: controller, timer: timeout });
+      Promise.resolve()
+        .then(() => {
+          if (controller.signal.aborted)
+            throw new BridgePrincipalError("uncertain");
+          return options.onPrincipalRequest!(request, controller.signal);
+        })
+        .then(
+          (value) => {
+            const response = parseBridgePrincipalResponse(value);
+            finish(response ? { response } : { code: "uncertain" });
+          },
+          (error) =>
+            finish({
+              code:
+                error instanceof BridgePrincipalError &&
+                principalFailures.has(error.code)
+                  ? error.code
+                  : "uncertain",
+            }),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
       (data.type === "objects.request" || data.type === "objects.cancel")
     ) {
       const cancel = data.type === "objects.cancel";
@@ -2566,6 +2843,10 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     request: BridgeNotificationRequest,
     signal?: AbortSignal,
   ): Promise<BridgeNotificationResponse>;
+  requestPrincipals(
+    request: BridgePrincipalRequest,
+    signal?: AbortSignal,
+  ): Promise<BridgePrincipalResponse>;
   reportFailure(code: BridgeFailure): boolean;
   describePage(
     scope: string,
@@ -2696,6 +2977,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
   let reportIssued = 0n;
   let objectIssued = 0n;
   let notificationIssued = 0n;
+  let principalIssued = 0n;
   const requests = new Map<
     string,
     {
@@ -2750,6 +3032,14 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
     {
       resolve: (value: BridgeNotificationResponse) => void;
       reject: (error: BridgeNotificationError) => void;
+      dispose: () => void;
+    }
+  >();
+  const principalRequests = new Map<
+    string,
+    {
+      resolve: (value: BridgePrincipalResponse) => void;
+      reject: (error: BridgePrincipalError) => void;
       dispose: () => void;
     }
   >();
@@ -2809,6 +3099,11 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
       request.reject(new BridgeNotificationError("uncertain"));
     }
     notificationRequests.clear();
+    for (const request of principalRequests.values()) {
+      request.dispose();
+      request.reject(new BridgePrincipalError("uncertain"));
+    }
+    principalRequests.clear();
   }
   let pageRevision = 0n,
     lastInvocation = 0n,
@@ -3167,6 +3462,59 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         pending.reject(
           new BridgeNotificationError(
             data.code as BridgeNotificationFailure,
+          ),
+        );
+      return;
+    }
+    if (
+      data &&
+      typeof data === "object" &&
+      data.type === "principals.result"
+    ) {
+      const response = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "response",
+      ]);
+      const failure = exact(data, [
+        "type",
+        ...envelopeKeys,
+        "requestId",
+        "code",
+      ]);
+      if (!response && !failure) {
+        fail("protocol_error");
+        return;
+      }
+      if (!envelopeKeys.every((key) => data[key] === envelope![key])) return;
+      if (
+        !decimal(data.requestId) ||
+        BigInt(data.requestId) > principalIssued
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const value = response
+        ? parseBridgePrincipalResponse(data.response)
+        : null;
+      if (
+        (response && !value) ||
+        (failure &&
+          !principalFailures.has(data.code as BridgePrincipalFailure))
+      ) {
+        fail("protocol_error");
+        return;
+      }
+      const pending = principalRequests.get(data.requestId);
+      if (!pending) return;
+      principalRequests.delete(data.requestId);
+      pending.dispose();
+      if (value) pending.resolve(value);
+      else
+        pending.reject(
+          new BridgePrincipalError(
+            data.code as BridgePrincipalFailure,
           ),
         );
       return;
@@ -3532,6 +3880,7 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         reportIssued = 0n;
         objectIssued = 0n;
         notificationIssued = 0n;
+        principalIssued = 0n;
         abort = new AbortController();
         connectionRevision++;
         revision = 0n;
@@ -4097,6 +4446,61 @@ export function createBridgeClient(options: BridgeClientOptions): Session & {
         try {
           port!.postMessage({
             type: "notifications.request",
+            ...envelope,
+            requestId: id,
+            request,
+          });
+        } catch {
+          fail("transport_error");
+        }
+      });
+    },
+    requestPrincipals(
+      value: BridgePrincipalRequest,
+      signal?: AbortSignal,
+    ): Promise<BridgePrincipalResponse> {
+      if (terminal() || !applied || !port || !envelope || !context)
+        return Promise.reject(new BridgePrincipalError("not_ready"));
+      if (!context.capabilities.includes("principals.read"))
+        return Promise.reject(new BridgePrincipalError("unsupported"));
+      const request = parseBridgePrincipalRequest(value);
+      if (!request)
+        return Promise.reject(new BridgePrincipalError("invalid_request"));
+      if (signal?.aborted)
+        return Promise.reject(new BridgePrincipalError("not_ready"));
+      if (
+        principalRequests.size >= 1 ||
+        principalIssued === MAX_REVISION
+      )
+        return Promise.reject(new BridgePrincipalError("busy"));
+      const id = (++principalIssued).toString();
+      return new Promise((resolve, reject) => {
+        const cancel = () => {
+          const active = principalRequests.get(id);
+          if (!active) return;
+          principalRequests.delete(id);
+          active.dispose();
+          reject(new BridgePrincipalError("uncertain"));
+          try {
+            port?.postMessage({
+              type: "principals.cancel",
+              ...envelope,
+              requestId: id,
+            });
+          } catch {
+            fail("transport_error");
+          }
+        };
+        const timeout = setTimeout(cancel, 20_000);
+        const dispose = () => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+        };
+        principalRequests.set(id, { resolve, reject, dispose });
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          port!.postMessage({
+            type: "principals.request",
             ...envelope,
             requestId: id,
             request,

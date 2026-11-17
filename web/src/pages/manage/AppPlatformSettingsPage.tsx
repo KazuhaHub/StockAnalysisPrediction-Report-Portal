@@ -42,6 +42,7 @@ type Settings = {
   configuration_gaps: string[]
   repair_eligible: boolean
   control_paused: boolean
+  operation_pending?: boolean
   migration_recovery?: MigrationRecovery | null
   // Present while a release this installation needs has image blobs that are gone or unreadable.
   image_delivery?: ImageDelivery | null
@@ -151,6 +152,9 @@ export default function AppPlatformSettingsPage() {
   const [restoring, setRestoring] = useState(false)
   const [restorePointID, setRestorePointID] = useState('')
   const [migrationBusy, setMigrationBusy] = useState('')
+  const [principalsOpen, setPrincipalsOpen] = useState(false)
+  const [principalsBusy, setPrincipalsBusy] = useState(false)
+  const [principalsError, setPrincipalsError] = useState('')
 
   useEffect(() => {
     setSettings(null)
@@ -227,6 +231,23 @@ export default function AppPlatformSettingsPage() {
   }
   const canDeleteData = !!settings.data && settings.backend.required && settings.backend.registered &&
     (settings.desired_state === 'disabled' || settings.desired_state === 'removed')
+  // principals.read is optional and off after install (doc 181 section 4). An administrator enables
+  // it after reading the disclosure; withdrawal needs no second step because it only removes access.
+  const principals = settings.capabilities.find((item) => item.capability === 'principals.read' && !item.required)
+  const principalsReady = settings.desired_state === 'enabled' && settings.phase === 'ready' && !settings.operation_pending
+  const changePrincipals = async (enabled: boolean) => {
+    if (principalsBusy) return
+    setPrincipalsBusy(true); setPrincipalsError('')
+    try {
+      await api.post(`${root}/installations/${installation}/principals-read`, { enabled, policyRevision: settings.policy_revision })
+      setPrincipalsOpen(false)
+      setRefresh((value) => value + 1)
+    } catch (failure) {
+      setPrincipalsError(errText(failure, t))
+    } finally {
+      setPrincipalsBusy(false)
+    }
+  }
   const prepareDelete = async () => {
     if (!settings.data || deleting) return
     setDeleting(true); setDeleteError('')
@@ -417,7 +438,33 @@ export default function AppPlatformSettingsPage() {
           {capabilityLabel(item.capability)} · {item.granted ? t('appPlatform.settings.granted') : t('appPlatform.settings.declined')}{item.required ? ` · ${t('appPlatform.settings.required')}` : ''}
         </StatusTag>)}</Space>
         : <Typography.Text type="secondary">{t('appPlatform.settings.noCapabilities')}</Typography.Text>}
+      {principals && <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 12 }}>
+        <Typography.Text type="secondary">{t('appPlatform.capability.principals.read')}</Typography.Text>
+        {principalsError && !principalsOpen && <Alert type="error" showIcon title={principalsError} />}
+        {principals.granted
+          ? <Button loading={principalsBusy} disabled={!principalsReady} onClick={() => void changePrincipals(false)}>{t('appPlatform.settings.principals.withdraw')}</Button>
+          : <Button disabled={!principalsReady} onClick={() => { setPrincipalsError(''); setPrincipalsOpen(true) }}>{t('appPlatform.settings.principals.enable')}</Button>}
+        {!principalsReady && <Typography.Text type="secondary">{t('appPlatform.settings.principals.notReady')}</Typography.Text>}
+      </Space>}
     </Card>
+    <Modal
+      className="rp-platform-review-modal"
+      open={principalsOpen}
+      title={t('appPlatform.settings.principals.enableTitle')}
+      okText={t('appPlatform.settings.principals.confirmEnable')}
+      cancelText={t('common.cancel')}
+      confirmLoading={principalsBusy}
+      closable={!principalsBusy}
+      mask={{ closable: false }}
+      onOk={() => void changePrincipals(true)}
+      onCancel={() => { if (!principalsBusy) { setPrincipalsOpen(false); setPrincipalsError('') } }}
+    >
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        <Alert type="info" showIcon title={t('appPlatform.capability.principals.read')} />
+        {principalsError && <Alert type="error" showIcon title={principalsError} />}
+        <Typography.Text type="secondary">{t('appPlatform.settings.principals.hint')}</Typography.Text>
+      </Space>
+    </Modal>
 
     <Card title={t('appPlatform.settings.backend')}>
       <Descriptions column={1} size="small" items={[

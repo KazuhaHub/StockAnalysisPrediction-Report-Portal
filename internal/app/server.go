@@ -159,6 +159,11 @@ type Server struct {
 	forecastGroupsGen uint64
 	forecastCompute   forecastCompute
 	forecastViewers   forecastViewers
+
+	// platformPrincipalRate is the per viewer and installation call ceiling of the app principal
+	// directory (app_platform_principals.go).
+	platformPrincipalRate rateLimiter
+
 	// forecastSignals holds the reader-surface counters until the hourly flush (forecast_signals.go).
 	// forecastSlowGroups overrides the 3 s slow-request threshold; zero means the default.
 	forecastSignals    forecastSignals

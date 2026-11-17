@@ -278,7 +278,9 @@ func validCapabilities(c Capabilities, hasBackend bool) bool {
 
 	seen, required := map[string]bool{}, map[string]bool{}
 	for _, value := range c.Required {
-		if !descriptorKnownCapabilities[value] || seen[value] {
+		// principals.read is optional only (doc 181 section 3.1): an administrator enables it
+		// after reading the disclosure, so a descriptor cannot make it a condition of install.
+		if !descriptorKnownCapabilities[value] || seen[value] || value == "principals.read" {
 			return false
 		}
 		seen[value], required[value] = true, true

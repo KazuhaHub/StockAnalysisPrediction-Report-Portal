@@ -36,22 +36,64 @@ func DeriveViewerIdentity(appID, installationID string, seed []byte, account Vie
 		!viewerIdentityText(account.Name, 320) || !viewerIdentityText(account.Created, 64) || !viewerIdentityText(account.Role, 64) || account.Generation < 0 || account.SessionRevision < 0 || len(chain) < 1 || len(chain) > 64 {
 		return zero, ErrViewerIdentity
 	}
-	derive := func(purpose string, fields ...string) string {
-		frame, _ := json.Marshal(append([]string{"portal.app-viewer-identity/1-dev.1", appID, installationID, purpose}, fields...))
-		mac := hmac.New(sha256.New, seed)
-		mac.Write(frame)
-		return hex.EncodeToString(mac.Sum(nil))
-	}
-	result := protocol.Viewer{Subject: derive("account", account.Name, account.Created, strconv.FormatInt(account.Generation, 10)), SessionRevision: account.SessionRevision, Role: account.Role, OUs: make([]string, 0, len(chain))}
+	deriver := ViewerPrincipalDeriver{appID: appID, installationID: installationID, seed: seed}
+	result := protocol.Viewer{Subject: deriver.account(account), SessionRevision: account.SessionRevision, Role: account.Role, OUs: make([]string, 0, len(chain))}
 	seen := make(map[int64]bool, len(chain))
 	for _, ou := range chain {
 		if ou.ID < 1 || seen[ou.ID] || !viewerIdentityText(ou.Created, 64) {
 			return zero, ErrViewerIdentity
 		}
 		seen[ou.ID] = true
-		result.OUs = append(result.OUs, derive("ou", strconv.FormatInt(ou.ID, 10), ou.Created))
+		result.OUs = append(result.OUs, deriver.ou(ou))
 	}
 	return result, nil
+}
+
+// ViewerPrincipalDeriver derives exactly the account and OU values a viewer
+// carries, one at a time, for the principal directory. It shares the viewer's
+// frame so a listed principal equals what the same user or OU later presents.
+// It borrows the seed: the caller owns and clears it after the last derivation.
+type ViewerPrincipalDeriver struct {
+	appID, installationID string
+	seed                  []byte
+}
+
+func NewViewerPrincipalDeriver(appID, installationID string, seed []byte) (ViewerPrincipalDeriver, error) {
+	if !slugPattern.MatchString(appID) || !backendUUID.MatchString(installationID) || installationID == "00000000-0000-0000-0000-000000000000" || len(seed) != 32 {
+		return ViewerPrincipalDeriver{}, ErrViewerIdentity
+	}
+	return ViewerPrincipalDeriver{appID: appID, installationID: installationID, seed: seed}, nil
+}
+
+// Account returns the 64 hex value of a viewer Subject; Role and SessionRevision are not inputs.
+func (d ViewerPrincipalDeriver) Account(account ViewerAccountIdentity) (string, error) {
+	if !viewerIdentityText(account.Name, 320) || !viewerIdentityText(account.Created, 64) || account.Generation < 0 {
+		return "", ErrViewerIdentity
+	}
+	return d.account(account), nil
+}
+
+// OU returns the 64 hex value of one entry of a viewer's OU chain.
+func (d ViewerPrincipalDeriver) OU(ou ViewerOUIdentity) (string, error) {
+	if ou.ID < 1 || !viewerIdentityText(ou.Created, 64) {
+		return "", ErrViewerIdentity
+	}
+	return d.ou(ou), nil
+}
+
+func (d ViewerPrincipalDeriver) account(a ViewerAccountIdentity) string {
+	return d.derive("account", a.Name, a.Created, strconv.FormatInt(a.Generation, 10))
+}
+
+func (d ViewerPrincipalDeriver) ou(o ViewerOUIdentity) string {
+	return d.derive("ou", strconv.FormatInt(o.ID, 10), o.Created)
+}
+
+func (d ViewerPrincipalDeriver) derive(purpose string, fields ...string) string {
+	frame, _ := json.Marshal(append([]string{"portal.app-viewer-identity/1-dev.1", d.appID, d.installationID, purpose}, fields...))
+	mac := hmac.New(sha256.New, d.seed)
+	mac.Write(frame)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func viewerIdentityText(s string, limit int) bool {

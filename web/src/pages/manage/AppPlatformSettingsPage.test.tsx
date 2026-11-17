@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppPlatformSettingsPage from './AppPlatformSettingsPage'
@@ -88,6 +88,64 @@ describe('application installation settings', () => {
     expect(screen.getByRole('link', { name: 'appPlatform.settings.openApplication' }).getAttribute('href')).toBe(`/apps/v2/${installation}`)
     expect(screen.getByRole('link', { name: /appPlatform\.settings\.lifecycleActions/ }).getAttribute('href')).toBe(`/manage/apps?installation=${installation}`)
     expect(apiMock.get).toHaveBeenCalledWith(`/api/admin/app-platform/installations/${installation}/settings`, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+  })
+
+  describe('principals.read grant (doc 181 section 4)', () => {
+    const route = `${root}/installations/${installation}/principals-read`
+    const withPrincipals = (granted: boolean, required = false) => ({ ...settings, capabilities: [...settings.capabilities, { capability: 'principals.read', granted, required }] })
+    const serve = (value: typeof settings) => apiMock.get.mockImplementation(async (url: string) => url.endsWith('/settings') ? value : { bindings: [] })
+
+    it('shows the disclosure before an administrator enables the grant, then sends the reviewed revision', async () => {
+      serve(withPrincipals(false))
+      apiMock.post.mockResolvedValue({ ok: true, granted: true })
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.principals.enable' }))
+      const dialog = await screen.findByRole('dialog')
+      expect(within(dialog).getByText('appPlatform.capability.principals.read')).toBeTruthy()
+      expect(apiMock.post).not.toHaveBeenCalled()
+      await user.click(within(dialog).getByRole('button', { name: 'appPlatform.settings.principals.confirmEnable' }))
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(route, { enabled: true, policyRevision: '3' }))
+      await waitFor(() => expect(apiMock.get.mock.calls.filter(([url]) => String(url).endsWith('/settings')).length).toBeGreaterThan(1))
+    })
+
+    it('withdraws immediately without a second confirmation', async () => {
+      serve(withPrincipals(true))
+      apiMock.post.mockResolvedValue({ ok: true, granted: false })
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.principals.withdraw' }))
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(route, { enabled: false, policyRevision: '3' }))
+    })
+
+    it('shows a refusal and leaves the grant alone', async () => {
+      serve(withPrincipals(false))
+      apiMock.post.mockRejectedValue(new Error('plan changed'))
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.settings.principals.enable' }))
+      await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'appPlatform.settings.principals.confirmEnable' }))
+      expect(await screen.findByText('plan changed')).toBeTruthy()
+    })
+
+    it('disables both controls with an explanation unless the installation is ready with no operation in progress', async () => {
+      for (const [name, override] of [['operation', { operation_pending: true }], ['phase', { phase: 'pending' }], ['disabled', { desired_state: 'disabled' }]] as const) {
+        for (const granted of [false, true]) {
+          serve({ ...withPrincipals(granted), ...override } as typeof settings)
+          const view = mount()
+          const button = await screen.findByRole('button', { name: granted ? 'appPlatform.settings.principals.withdraw' : 'appPlatform.settings.principals.enable' })
+          expect(button.hasAttribute('disabled'), `${name} ${granted}`).toBe(true)
+          expect(screen.getByText('appPlatform.settings.principals.notReady')).toBeTruthy()
+          view.unmount()
+        }
+      }
+    })
+
+    it('offers no control for other capabilities or without the capability', async () => {
+      mount()
+      await screen.findByText('notes')
+      expect(screen.queryByRole('button', { name: /appPlatform\.settings\.principals\./ })).toBeNull()
+    })
   })
 
   it('does not call the server for an invalid installation identifier', async () => {

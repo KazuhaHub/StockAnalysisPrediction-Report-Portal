@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import axe from 'axe-core'
 import { readFileSync } from 'node:fs'
@@ -157,6 +157,43 @@ describe('application installation confirmation', () => {
     expect(screen.getAllByText('notifications.publish').length).toBeGreaterThan(0)
     expect(screen.getByText('appPlatform.resources')).toBeTruthy()
     expect(screen.getByText('appPlatform.resourceSummary')).toBeTruthy()
+  })
+
+  describe('principals.read disclosure (doc 181 section 4)', () => {
+    const locales = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'locales')
+    const english = JSON.parse(readFileSync(join(locales, 'en-US.json'), 'utf8')) as Record<string, string>
+    const sentence = "The app's administrators can list the names of users and OUs that can use this app."
+    const principalsRelease = { release_sha256: release, app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', trust_revision: '1', installable: true, required_capabilities: [], optional_capabilities: ['principals.read'] }
+
+    it('states the disclosure in the install review', async () => {
+      mock.t = (key, options) => english[key] ?? options?.defaultValue ?? key
+      mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [principalsRelease], next_cursor: '' } : { items: [], next_cursor: '' }))
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('checkbox', { name: english['appPlatform.noAudience'] }))
+      await user.click(await screen.findByRole('button', { name: english['appPlatform.review'] }))
+      await screen.findByRole('dialog')
+      expect(within(screen.getByRole('dialog')).getAllByText(sentence).length).toBeGreaterThan(0)
+    })
+
+    it('states the disclosure in the update review', async () => {
+      mock.t = (key, options) => english[key] ?? options?.defaultValue ?? key
+      const installed = { ...principalsRelease, installable: false, reason: 'already_installed', installation_id: operation, current_release_sha256: 'c'.repeat(64), updateable: true }
+      mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installed], next_cursor: '' } : { items: [], next_cursor: '' }))
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? updateReview() : { operation_id: operation }))
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: english['appPlatform.reviewUpdate'] }))
+      await screen.findByRole('dialog')
+      expect(within(screen.getByRole('dialog')).getAllByText(sentence).length).toBeGreaterThan(0)
+    })
+
+    it('ships a faithful sentence in every locale', () => {
+      for (const name of ['en-US', 'zh-CN', 'zh-TW']) {
+        const table = JSON.parse(readFileSync(join(locales, `${name}.json`), 'utf8')) as Record<string, string>
+        expect(table['appPlatform.capability.principals.read'], name).toBeTruthy()
+      }
+    })
   })
 
   it('keeps long lifecycle metadata in bounded local scrollers', async () => {

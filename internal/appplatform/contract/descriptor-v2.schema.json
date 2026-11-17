@@ -433,10 +433,11 @@
                   "secrets.use",
                   "secrets.read",
                   "background.run",
-                  "files.export"
+                  "files.export",
+                  "principals.read"
                 ]
               },
-              "maxItems": 11,
+              "maxItems": 12,
               "uniqueItems": true
             },
             {

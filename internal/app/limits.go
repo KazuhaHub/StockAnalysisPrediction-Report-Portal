@@ -128,6 +128,9 @@ func newRateLimiter() *rateLimiter { return &rateLimiter{recs: map[string]*rateR
 func (l *rateLimiter) allow(key string, limit int, window time.Duration, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.recs == nil {
+		l.recs = map[string]*rateRec{}
+	}
 	// The same bound the login throttle keeps, for the same reason: a flood of distinct sources
 	// must not grow this table without end. Prune what has lapsed; if a live burst still exceeds
 	// the cap, drop the table rather than scan it under the lock on every insert.

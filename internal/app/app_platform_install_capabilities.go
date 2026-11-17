@@ -37,6 +37,16 @@ func activatePlatformInstallCapabilities(e migExec, installation, operation stri
 	return nil
 }
 
+// platformGrantMatches compares a stored grant bit with the reviewed selection. principals.read is
+// optional and defaults off at install; an administrator may switch it on or off afterwards
+// (doc 181 section 4), so either bit is a valid state for it when the review left it off.
+func platformGrantMatches(capability string, stored int, reviewed bool) bool {
+	if stored == boolInt(reviewed) {
+		return true
+	}
+	return capability == "principals.read" && !reviewed && stored == 1
+}
+
 type platformSelectedCapability struct {
 	capability string
 	granted    bool
@@ -163,7 +173,7 @@ func verifyPlatformSelectedCapabilityRows(e migExec, installation string, expect
 		if err := rows.Scan(&name, &granted, &restriction, &revision, &review); err != nil {
 			return err
 		}
-		if index >= len(expected) || expected[index].capability != name || granted != boolInt(active && expected[index].granted) || restriction != expected[index].policy || revision != policy || review != planID {
+		if index >= len(expected) || expected[index].capability != name || !platformGrantMatches(name, granted, active && expected[index].granted) || restriction != expected[index].policy || revision != policy || review != planID {
 			return fail
 		}
 		index++
@@ -200,7 +210,7 @@ func verifyPlatformRetainedCapabilityRows(e migExec, installation string, expect
 		}
 		if index >= len(expected) ||
 			expected[index].capability != name ||
-			granted != boolInt(expected[index].granted) ||
+			!platformGrantMatches(name, granted, expected[index].granted) ||
 			restriction != expected[index].policy ||
 			revision != policy || !platformValidUUID(review) {
 			return fail
@@ -224,5 +234,5 @@ func platformSupportedRequiredCapabilities(m appplatform.Manifest) bool {
 		}
 		seen[capability] = true
 	}
-	return len(seen) <= 9
+	return len(seen) <= 10
 }

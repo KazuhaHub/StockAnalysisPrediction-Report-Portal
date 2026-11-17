@@ -37,21 +37,32 @@ func (s *Server) platformViewerIdentity(e migExec, account platformActorAccount,
 	for _, ou := range chain {
 		ous = append(ous, appplatform.ViewerOUIdentity{ID: ou.id, Created: ou.created})
 	}
-	dek, err := s.readPlatformDEK(e)
-	defer clear(dek)
+	seed, err := s.readPlatformInstallationSeed(e, installationID, appID)
+	defer clear(seed)
 	if err != nil {
 		return zero, err
 	}
+	return appplatform.DeriveViewerIdentity(appID, installationID, seed, appplatform.ViewerAccountIdentity{Name: account.username, Created: account.created, Generation: account.generation, SessionRevision: account.sessionRevision, Role: account.role}, ous)
+}
+
+// readPlatformInstallationSeed opens the installation's sealed identity seed
+// without writing. The returned buffer is owned by the caller, who must clear it.
+func (s *Server) readPlatformInstallationSeed(e migExec, installationID, appID string) ([]byte, error) {
+	dek, err := s.readPlatformDEK(e)
+	defer clear(dek)
+	if err != nil {
+		return nil, err
+	}
 	var sealed string
 	if err := e.queryRow(`SELECT sealed_identity_seed FROM app_platform_installations WHERE id=? AND app_id=?`, installationID, appID).Scan(&sealed); err != nil || !strings.HasPrefix(sealed, sealPrefix) {
-		return zero, errAppPlatformLaunchUnavailable
+		return nil, errAppPlatformLaunchUnavailable
 	}
 	seed, err := aesOpen(dek, strings.TrimPrefix(sealed, sealPrefix), aad("app-platform", installationID))
-	defer clear(seed)
 	if err != nil {
-		return zero, errAppPlatformLaunchUnavailable
+		clear(seed)
+		return nil, errAppPlatformLaunchUnavailable
 	}
-	return appplatform.DeriveViewerIdentity(appID, installationID, seed, appplatform.ViewerAccountIdentity{Name: account.username, Created: account.created, Generation: account.generation, SessionRevision: account.sessionRevision, Role: account.role}, ous)
+	return seed, nil
 }
 
 // Never initialize, repair or rewrap keyring rows while admitting a reader.

@@ -77,6 +77,9 @@ type platformInstallationSettings struct {
 	ConfigurationGaps    []string                     `json:"configuration_gaps"`
 	RepairEligible       bool                         `json:"repair_eligible"`
 	ControlPaused        bool                         `json:"control_paused"`
+	// OperationPending is true while an operation of this installation is unfinished or unresolved;
+	// grant changes are refused until it settles.
+	OperationPending bool `json:"operation_pending"`
 	// MigrationRecovery is present while a failed data migration waits for a recovery choice.
 	MigrationRecovery *platformSettingsMigrationRecovery `json:"migration_recovery,omitempty"`
 	// ImageDelivery is present while a release the installation needs has image blobs that are gone or unreadable,
@@ -143,9 +146,18 @@ func (s *Server) platformInstallationSettings(session platformActorSession, inst
 	err := s.withAppPlatformActorRead(session, func(e migExec, actor platformActorFacts, control platformActorControl) error {
 		var runtimeID sql.NullString
 		var release, version sql.NullString
+		operations, err := platformUnresolvedOperationCount(e, installation)
+		if err != nil {
+			return err
+		}
+		effects, err := platformUnresolvedOperationEffectCount(e, installation)
+		if err != nil {
+			return err
+		}
+		result.OperationPending = operations+effects != 0
 		var descriptor []byte
 		var generation, revision, policyRevision int64
-		err := e.queryRow(`SELECT i.app_id,i.publisher_id,i.desired_state,i.phase,
+		err = e.queryRow(`SELECT i.app_id,i.publisher_id,i.desired_state,i.phase,
 			i.generation,i.revision,i.policy_revision,i.runtime_id,
 			r.sha256,r.version,r.descriptor
 			FROM app_platform_installations i

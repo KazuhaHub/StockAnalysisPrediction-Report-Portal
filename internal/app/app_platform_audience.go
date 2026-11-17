@@ -10,28 +10,33 @@ type platformAudienceOU struct {
 	created string
 }
 
-func platformAudienceChain(e migExec, account platformActorAccount) ([]platformAudienceOU, error) {
+// platformAudienceSnapshot loads the actual OU graph for audience decisions.
+func platformAudienceSnapshot(e migExec) (ouPolicySnapshot, error) {
 	// Older OU row helpers may omit the principal advisory guard. Pin their
 	// existing topology/creation identities through this read transaction too.
 	if e.s.driver == "postgres" {
 		rows, err := e.query(`SELECT id FROM user_groups ORDER BY id FOR SHARE`)
 		if err != nil {
-			return nil, err
+			return ouPolicySnapshot{}, err
 		}
 		for rows.Next() {
 			var id int64
 			if err := rows.Scan(&id); err != nil {
 				rows.Close()
-				return nil, err
+				return ouPolicySnapshot{}, err
 			}
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
-			return nil, err
+			return ouPolicySnapshot{}, err
 		}
 	}
-	snapshot, err := e.s.loadOUPolicySnapshotFrom(e.ex)
+	return e.s.loadOUPolicySnapshotFrom(e.ex)
+}
+
+func platformAudienceChain(e migExec, account platformActorAccount) ([]platformAudienceOU, error) {
+	snapshot, err := platformAudienceSnapshot(e)
 	if err != nil {
 		return nil, err
 	}

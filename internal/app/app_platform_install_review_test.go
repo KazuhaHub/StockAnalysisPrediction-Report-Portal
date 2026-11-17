@@ -23,6 +23,7 @@ func platformInstallFixture(t *testing.T, pg bool) (*Server, platformActorSessio
 	}
 	manifest.Compatibility.PlatformAPI = ">=2.0.0-0 <3.0.0"
 	manifest.Capabilities.Required = []string{}
+	manifest.Capabilities.Optional = append(manifest.Capabilities.Optional, platformManagedFixtureOptional...)
 	raw, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)

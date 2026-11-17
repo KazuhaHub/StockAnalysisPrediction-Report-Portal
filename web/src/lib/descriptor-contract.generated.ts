@@ -1,5 +1,5 @@
 // Derived from the Portal descriptor schema; edit the source contract instead.
-export const DESCRIPTOR_SCHEMA_SHA256 = "776619608942d190cdda4e4926475bd413a8dbadf6513bc7ae66a10a79d9d3e9";
+export const DESCRIPTOR_SCHEMA_SHA256 = "f24a7c8a0e71b27f162b88a65d1665515a6f5b989c681197c6b9df77d74ddf76";
 export interface Descriptor {
  format: "portal.app/v2";
  id: string;
@@ -59,7 +59,7 @@ export interface Resources {
 }
 export interface Capabilities {
  required?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
- optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export")[] | null;
+ optional?: ("reports.read" | "storage.files" | "tasks.schedule" | "events.subscribe" | "notifications.publish" | "network.http" | "network.stream" | "secrets.use" | "secrets.read" | "background.run" | "files.export" | "principals.read")[] | null;
 }
 export interface DataCompatibility {
  schema: number;
@@ -149,7 +149,8 @@ export const DESCRIPTOR_CAPABILITIES = [
   "secrets.use",
   "secrets.read",
   "background.run",
-  "files.export"
+  "files.export",
+  "principals.read"
 ] as const;
 export const DESCRIPTOR_LOCALES = [
   "en-US",
