@@ -2,7 +2,6 @@ package app
 
 import (
 	"container/list"
-	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
 	"hash/fnv"
 	"net"
 	"sort"
@@ -126,7 +125,6 @@ type platformPublicEntry struct {
 	key, installation, tuple string
 	body                     []byte
 	contentType              string
-	files                    map[string]appplatform.FrontendFile
 	verified                 *platformPublicVerified
 	extra                    int64
 	cacheSeconds             int
