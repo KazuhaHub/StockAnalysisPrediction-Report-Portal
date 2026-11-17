@@ -11,6 +11,9 @@ import {
   BridgeBackendError,
   BridgeObjectError,
   BridgeNotificationError,
+  BridgePrincipalError,
+  parseBridgePrincipalRequest,
+  parseBridgePrincipalResponse,
 } from "./bridge-v2";
 
 const cleanup: (() => void)[] = [];
@@ -1702,6 +1705,98 @@ test("notification failures remain stable and close aborts pending publishing",a
  for(const code of ["conflict","capacity"]){
   await expect(stable.client.requestNotifications(notificationRequest)).rejects.toMatchObject({code,retryable:false});
  }
+});
+const userP="user:"+"a".repeat(64);
+const ouP="ou:"+"b".repeat(64);
+const principalSearch={action:"search" as const,kind:"ou" as const,query:"res",after:"",limit:20};
+const principalSearchResponse={action:"search" as const,items:[{principal:ouP,label:"Research",parent:null}],next:"abc_-"};
+async function principalsPair(
+ onPrincipalRequest?: Parameters<typeof createBridgeHost>[0]["onPrincipalRequest"],
+ granted=true,
+) {
+ vi.stubGlobal("MessageChannel",NodeMessageChannel);
+ const w=windows();
+ const host=createBridgeHost({
+  localWindow:w.host,
+  frameWindow:w.child,
+  binding,
+  presentation,
+  capabilities:granted?["principals.read"]:[],
+  onPrincipalRequest,
+ });
+ const client=createBridgeClient({
+  localWindow:w.child,
+  parentWindow:w.host,
+  parentOrigin:"https://portal.example.invalid",
+  onPresentation:()=>{},
+ });
+ cleanup.push(()=>client.close(),()=>host.close());
+ await vi.waitFor(()=>expect(host.state()).toBe("ready"));
+ return {...w,host,client};
+}
+test("principal parsers fix the wire shape and normalise search defaults",()=>{
+ expect(parseBridgePrincipalRequest({action:"search",kind:"user"})).toEqual({action:"search",kind:"user",query:"",after:"",limit:50});
+ expect(parseBridgePrincipalRequest(principalSearch)).toEqual(principalSearch);
+ expect(parseBridgePrincipalRequest({action:"resolve",principals:[userP,ouP]})).toEqual({action:"resolve",principals:[userP,ouP]});
+ for(const bad of [
+  null,{action:"search"},{action:"search",kind:"group"},{action:"search",kind:"user",extra:1},
+  {action:"search",kind:"user",query:"x".repeat(65)},{action:"search",kind:"user",limit:0},{action:"search",kind:"user",limit:51},
+  {action:"search",kind:"user",limit:1.5},{action:"search",kind:"user",after:"a".repeat(129)},{action:"search",kind:"user",after:"a b"},
+  {action:"resolve",principals:[]},{action:"resolve",principals:[userP,userP]},{action:"resolve",principals:["user:zz"]},
+  {action:"resolve",principals:Array.from({length:101},(_,i)=>"user:"+i.toString(16).padStart(64,"0"))},
+  {action:"resolve",principals:[userP],extra:true},{action:"other"},
+ ]) expect(parseBridgePrincipalRequest(bad)).toBeNull();
+ expect(parseBridgePrincipalResponse(principalSearchResponse)).toEqual(principalSearchResponse);
+ expect(parseBridgePrincipalResponse({action:"search",items:[{principal:userP,label:"Ada"}],next:""})).toEqual({action:"search",items:[{principal:userP,label:"Ada"}],next:""});
+ expect(parseBridgePrincipalResponse({action:"resolve",items:[{principal:userP,label:"Ada"}],unknown:[ouP]})).toEqual({action:"resolve",items:[{principal:userP,label:"Ada"}],unknown:[ouP]});
+ for(const bad of [
+  null,{action:"search",items:[],next:"a b"},{action:"search",items:[{principal:"user:x",label:"A"}],next:""},
+  {action:"search",items:[{principal:userP,label:"x".repeat(161)}],next:""},{action:"search",items:[{principal:userP,label:"A",extra:1}],next:""},
+  {action:"search",items:[],next:"",extra:1},{action:"search",items:Array.from({length:51},()=>({principal:userP,label:"A"})),next:""},
+  {action:"resolve",items:[],unknown:["nope"]},{action:"resolve",items:[]},
+ ]) expect(parseBridgePrincipalResponse(bad)).toBeNull();
+});
+test("principal channel carries search and resolve through the host callback",async()=>{
+ const dispatch=vi.fn(async(request:{action:string})=>request.action==="search"
+  ?principalSearchResponse
+  :{action:"resolve" as const,items:[{principal:userP,label:"Ada"}],unknown:[]});
+ const {client}=await principalsPair(dispatch);
+ await expect(client.requestPrincipals(principalSearch)).resolves.toEqual(principalSearchResponse);
+ await expect(client.requestPrincipals({action:"resolve",principals:[userP]})).resolves.toEqual({action:"resolve",items:[{principal:userP,label:"Ada"}],unknown:[]});
+ expect(dispatch).toHaveBeenNthCalledWith(1,principalSearch,expect.any(AbortSignal));
+});
+test("principal channel refuses missing grants, unsupported transports and malformed input",async()=>{
+ const dispatch=vi.fn(async()=>principalSearchResponse);
+ const absent=await principalsPair(dispatch,false);
+ await expect(absent.client.requestPrincipals(principalSearch)).rejects.toMatchObject({code:"unsupported",retryable:false});
+ const unsupported=await principalsPair();
+ await expect(unsupported.client.requestPrincipals(principalSearch)).rejects.toMatchObject({code:"unsupported"});
+ const ready=await principalsPair(dispatch);
+ await expect(ready.client.requestPrincipals({action:"search",kind:"group"} as never)).rejects.toMatchObject({code:"invalid_request"});
+ expect(dispatch).not.toHaveBeenCalled();
+});
+test("principal failures stay stable and a malformed host answer becomes uncertain",async()=>{
+ const stable=await principalsPair(vi.fn()
+  .mockRejectedValueOnce(new BridgePrincipalError("not_permitted"))
+  .mockRejectedValueOnce(new BridgePrincipalError("busy"))
+  .mockRejectedValueOnce(new Error("raw detail"))
+  .mockResolvedValueOnce({action:"search",items:[{principal:"user:x",label:"A"}],next:""}));
+ for(const code of ["not_permitted","busy","uncertain","uncertain"]){
+  await expect(stable.client.requestPrincipals(principalSearch)).rejects.toMatchObject({code,retryable:false});
+ }
+});
+test("principal channel serialises requests and close aborts the pending call",async()=>{
+ let signal:AbortSignal|undefined;
+ const dispatch=vi.fn((_request:unknown,abort:AbortSignal)=>{signal=abort;return new Promise<never>(()=>{});});
+ const {client,host}=await principalsPair(dispatch);
+ const pending=client.requestPrincipals(principalSearch);
+ const rejected=expect(pending).rejects.toMatchObject({code:"uncertain"});
+ await expect(client.requestPrincipals(principalSearch)).rejects.toMatchObject({code:"busy"});
+ await vi.waitFor(()=>expect(dispatch).toHaveBeenCalledOnce());
+ host.close();
+ await vi.waitFor(()=>expect(signal?.aborted).toBe(true));
+ client.close();
+ await rejected;
 });
 const networkRequest=()=>({method:"GET",url:"https://api.example.com/v1",accept:"application/json",contentType:"",bodyBase64:""});
 const objectSummary={
