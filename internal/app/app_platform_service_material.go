@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
@@ -49,6 +50,18 @@ type platformServiceMaterialCache struct {
 	mu      sync.Mutex
 	entries map[string]*platformServiceMaterial
 	now     func() time.Time // test seam; nil is time.Now
+
+	// databaseOffsetMS is the database's clock minus the Portal's, in milliseconds, as the last refresh read
+	// it. The live verification judges expiry on the database's clock, so the in-memory check does too.
+	databaseOffsetMS atomic.Int64
+	// forgedRefused and expiredRefused count the credentials refused from memory, by reason.
+	forgedRefused  atomic.Int64
+	expiredRefused atomic.Int64
+}
+
+// refusals returns how many credentials were refused from memory for a wrong MAC and for their expiry.
+func (c *platformServiceMaterialCache) refusals() (forged, expired int64) {
+	return c.forgedRefused.Load(), c.expiredRefused.Load()
 }
 
 func (c *platformServiceMaterialCache) clock() time.Time {
@@ -147,16 +160,24 @@ func platformServiceCredentialInstallation(raw []byte) (string, bool) {
 	return probe.InstallationID, true
 }
 
-// authentic reports, from memory, whether a credential is a canonical identity with a valid MAC under the
-// installation's material. known is false when there is no live material, in which case nothing is said
-// about the credential.
-func (c *platformServiceMaterialCache) authentic(installation string, raw []byte) (known, ok bool) {
+// check says, from memory, whether a credential is a canonical identity with a valid MAC under the
+// installation's material and, if so, whether it has expired on the database's clock (the clock the live
+// verification judges it on). known is false when there is no live material, in which case nothing is said
+// about the credential. A refusal is counted by its reason.
+func (c *platformServiceMaterialCache) check(installation string, raw []byte) (known bool, verdict appplatform.ServiceIdentityMemoryVerdict) {
 	seed, known := c.material(installation)
 	if !known {
-		return false, false
+		return false, appplatform.ServiceIdentityForged
 	}
 	defer clear(seed[:])
-	return true, appplatform.ServiceIdentityAuthentic(raw, seed[:])
+	verdict = appplatform.CheckServiceIdentityInMemory(raw, seed[:], c.clock().UnixMilli()+c.databaseOffsetMS.Load())
+	switch verdict {
+	case appplatform.ServiceIdentityForged:
+		c.forgedRefused.Add(1)
+	case appplatform.ServiceIdentityExpired:
+		c.expiredRefused.Add(1)
+	}
+	return true, verdict
 }
 
 // platformServiceMaterialRefresh is how often the Portal re-reads the seeds of its ready installations. It
@@ -175,15 +196,30 @@ func (c *platformServiceMaterialCache) keepOnly(keep map[string]bool) {
 }
 
 // refreshPlatformServiceMaterial keeps the material warm for every enabled, ready installation, whether or
-// not a backend has made contact. Material is what lets a forged credential be refused without the
+// not a backend has made contact, and learns the database clock's offset from the Portal's. Material is what lets a forged credential be refused without the
 // database, and the limit on cold verification must never be what a real backend meets: an anonymous flood
 // that fills that limit would otherwise answer a backend's first contact, or one after a quiet half minute,
-// 429 app_platform_busy. The refresh costs two statements for each installation (at most platformServiceMaterialMax) every
+// 429 app_platform_busy. The refresh costs one statement for the clock (on PostgreSQL) and two for each installation (at most platformServiceMaterialMax) every
 // platformServiceMaterialRefresh, and nothing an unauthenticated caller does changes it. It reads no
 // authority: material is only ever a reason to refuse, and the live verification still decides. The
 // material of an installation that is no longer ready is dropped.
 func (s *Server) refreshPlatformServiceMaterial() error {
 	e := s.st.poolExec()
+	// The in-memory expiry check judges on the clock the live verification uses. On SQLite that is the Portal's
+	// own clock. On PostgreSQL the database's clock is read once a round, between two readings of the Portal's,
+	// and kept only when the round trip was short (platformClockOffset); otherwise the last offset stands.
+	if s.st.driver != "postgres" {
+		s.platformServiceMaterial.databaseOffsetMS.Store(0)
+	} else {
+		before := s.platformServiceMaterial.clock()
+		databaseNow, err := platformDatabaseNow(e)
+		if err != nil {
+			return err
+		}
+		if offset, ok := platformClockOffset(before, databaseNow, s.platformServiceMaterial.clock()); ok {
+			s.platformServiceMaterial.databaseOffsetMS.Store(offset)
+		}
+	}
 	rows, err := e.query(`SELECT id FROM app_platform_installations WHERE desired_state='enabled' AND phase='ready' ORDER BY id LIMIT ?`, platformServiceMaterialMax)
 	if err != nil {
 		return err
@@ -217,6 +253,21 @@ func (s *Server) refreshPlatformServiceMaterial() error {
 	}
 	s.platformServiceMaterial.keepOnly(keep)
 	return nil
+}
+
+// platformClockReadingMax is the longest round trip a reading of the database's clock may take to be used. A
+// reading that waited for a pool connection would put the database's clock late by about half the wait.
+const platformClockReadingMax = 50 * time.Millisecond
+
+// platformClockOffset is the database's clock minus the Portal's, from a database reading taken between two
+// readings of the Portal's clock: the midpoint bounds the error by half the round trip. ok is false when the
+// round trip was too long, or negative, to trust.
+func platformClockOffset(before time.Time, databaseMS int64, after time.Time) (offset int64, ok bool) {
+	trip := after.Sub(before)
+	if trip < 0 || trip > platformClockReadingMax {
+		return 0, false
+	}
+	return databaseMS - (before.UnixMilli()+after.UnixMilli())/2, true
 }
 
 // platformServiceMaterialLoop refreshes the material at start and then every platformServiceMaterialRefresh.

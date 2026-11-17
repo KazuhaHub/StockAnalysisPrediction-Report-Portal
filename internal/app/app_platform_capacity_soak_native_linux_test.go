@@ -1208,7 +1208,7 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 			mu.Unlock()
 		}
 	}
-	if len(taskTargets) > 0 {
+	if len(taskTargets) > 0 || len(forgedTargets) > 0 {
 		loadIdentities()
 	}
 	recordTask := func(class string) {
@@ -1285,6 +1285,8 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 	}
 	// The anonymous role: one connection per real installation sends credentials that name it with a wrong MAC, which no backend holds. Every one
 	// must be refused (404, or 429 app_platform_busy when the Portal-wide limit on cold verification is full) and none may hold anything a backend needs.
+	// A forgery is sent only once there is a real credential to forge from: an empty or unreadable header is refused 404 before the MAC is checked, and
+	// counting it would pass the check without the MAC path ever being exercised.
 	recordForged := func(class string) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -1297,12 +1299,17 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 				mu.Lock()
 				identity := identities[target.Installation]
 				mu.Unlock()
+				forged := soakForgedIdentityHeader(identity, int(sequence.Add(1)))
+				if forged == "" {
+					time.Sleep(50 * time.Millisecond)
+					continue
+				}
 				status := 0
 				var body []byte
 				request, err := http.NewRequest(http.MethodPost, target.URL, bytes.NewReader(soakBackendFloodBody("forged-"+target.Prefix, sequence.Add(1))))
 				if err == nil {
 					request.Header.Set("Content-Type", "application/json")
-					request.Header.Set(appplatform.TaskServiceIdentityHeader, soakForgedIdentityHeader(identity, int(sequence.Add(1))))
+					request.Header.Set(appplatform.TaskServiceIdentityHeader, forged)
 					var response *http.Response
 					if response, err = client.Do(request); err == nil {
 						status = response.StatusCode
@@ -1318,7 +1325,7 @@ func TestPlatformCapacitySoakFlood(t *testing.T) {
 	}
 	deadline := time.Now().Add(time.Duration(soakEnvInt(t, "PORTAL_CAPACITY_SOAK_FLOOD_MINUTES", 1)) * time.Minute)
 	for time.Now().Before(deadline) {
-		if len(taskTargets) > 0 {
+		if len(taskTargets) > 0 || len(forgedTargets) > 0 {
 			loadIdentities()
 		}
 		mu.Lock()
@@ -1445,6 +1452,7 @@ func (c *soakChild) load(minutes int) {
 	c.rec.SetLoad(started.UnixMilli(), 0, minutes)
 	c.rec.Mark("load_started")
 	var previous soakFloodCounters
+	previousMAC, _ := c.s.platformServiceMaterial.refusals()
 	var pooled soakSamples
 	for minute := 1; minute <= minutes; minute++ {
 		windowStart := started.Add(time.Duration(minute-1) * time.Minute)
@@ -1455,6 +1463,8 @@ func (c *soakChild) load(minutes int) {
 		current := read()
 		window.Flood = soakFloodWindow(previous, current, alive(), time.Now())
 		backend := soakBackendFloodWindow(previous, current, alive(), time.Now())
+		currentMAC, _ := c.s.platformServiceMaterial.refusals()
+		backend.ForgedMACRefused, previousMAC = currentMAC-previousMAC, currentMAC
 		window.BackendFlood = &backend
 		previous = current
 		tasks, events, quota, submit := work.window(windowStart, windowStart.Add(time.Minute))

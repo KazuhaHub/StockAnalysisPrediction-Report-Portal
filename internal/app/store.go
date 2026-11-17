@@ -87,6 +87,8 @@ type Store struct {
 	homeConfigMu  sync.Mutex
 	homeConfigVal *homeConfigSnapshot
 	homeConfigNow func() time.Time // test seam; nil is time.Now
+	homeConfigGen uint64           // advanced by every drop; a fill that began under another is not stored
+	homeFillHook  func()           // test seam: runs between a fill's read and its store
 	db            *sql.DB
 	driver        string     // "sqlite" | "postgres"
 	stmts         *stmtCache // prepared-statement cache; nil on PostgreSQL (see stmtCache)

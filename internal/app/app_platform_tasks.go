@@ -138,14 +138,15 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 	// Nothing below may let an unauthenticated caller make the Portal do database work, or hold what a
 	// backend needs. A credential is first checked in memory (app_platform_service_material.go): one that
 	// is malformed, or names another installation than the path, or carries a MAC that is wrong for an
-	// installation whose verification material is warm, is refused 404 with no database access at all.
+	// installation whose verification material is warm, or has expired, is refused 404 with no database
+	// access at all.
 	installation := r.PathValue("installation")
 	if named, ok := platformServiceCredentialInstallation(rawIdentity); !ok || named != installation {
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)
 		return
 	}
-	known, authentic := s.platformServiceMaterial.authentic(installation, rawIdentity)
-	if known && !authentic {
+	known, verdict := s.platformServiceMaterial.check(installation, rawIdentity)
+	if known && verdict != appplatform.ServiceIdentityLive {
 		platformTaskFailure(w, errAppPlatformServiceUnavailable)
 		return
 	}
@@ -174,9 +175,12 @@ func (s *Server) apiPlatformServiceTaskSchedule(w http.ResponseWriter, r *http.R
 		}
 		var seed []byte
 		var err error
+		// A refusal here keeps the material: the MAC was just proved right under it, and the seed is never
+		// rotated. Dropping it would let the holder of a stale or retired credential push the installation's
+		// real backend into the Portal-wide cold-verification limit, request after request. The refresh drops
+		// the material of an installation that is no longer ready.
 		if grant, seed, err = s.verifyPlatformServiceIdentityWithSeed(r.Context(), rawIdentity, "tasks.schedule"); err != nil || grant.InstallationID != installation {
 			clear(seed)
-			s.platformServiceMaterial.forget(installation)
 			platformTaskFailure(w, errAppPlatformServiceUnavailable)
 			return
 		}

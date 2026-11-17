@@ -23,7 +23,22 @@ type platformDocumentBudget struct {
 	slots chan struct{}
 }
 
-func (b *platformDocumentBudget) init() { b.once.Do(func() { b.slots = make(chan struct{}, 2) }) }
+// platformDocumentSlots is how many requests a platformDocumentBudget admits at once.
+const platformDocumentSlots = 2
+
+func (b *platformDocumentBudget) init() { b.sized(platformDocumentSlots) }
+
+// sized makes the slots on first use; the first size asked for is the budget's size from then on.
+func (b *platformDocumentBudget) sized(n int) { b.once.Do(func() { b.slots = make(chan struct{}, n) }) }
+
+// platformUnverifiedBudget is the Portal-wide limit on cold verification of service credentials: a
+// platformDocumentBudget of platformUnverifiedVerifications slots, the right size from its zero value.
+type platformUnverifiedBudget struct{ budget platformDocumentBudget }
+
+func (b *platformUnverifiedBudget) acquire() (func(), bool) {
+	b.budget.sized(platformUnverifiedVerifications)
+	return b.budget.acquire()
+}
 
 // full reports, without blocking and without taking a slot, whether every slot is held right now.
 // It is advisory: a slot can be released or taken the instant after, so it only ever short-circuits

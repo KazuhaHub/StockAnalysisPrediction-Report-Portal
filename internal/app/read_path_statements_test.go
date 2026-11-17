@@ -171,6 +171,58 @@ func TestReadPathHomeConfigurationIsCachedAndEveryWriterDropsIt(t *testing.T) {
 	}
 }
 
+// A reader that loaded the home configuration before a write must not store what it read after the write
+// dropped the cache: the next reader would be served the pre-write configuration until the time limit.
+func TestHomeConfigDiscardsAFillAWriteOvertook(t *testing.T) {
+	f := newReadPathFixture(t)
+	st := f.s.st
+	if err := st.SetKindColor("预测", "gold"); err != nil {
+		t.Fatal(err)
+	}
+	wrote := false
+	st.homeFillHook = func() {
+		if !wrote {
+			wrote = true
+			if err := st.SetKindColor("预测", "silver"); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(func() { st.homeFillHook = nil })
+	if _, _, colors := st.HomeConfig(); colors["预测"] != "gold" {
+		t.Fatalf("the overtaken reader read %q", colors["预测"])
+	}
+	if _, _, colors := st.HomeConfig(); colors["预测"] != "silver" {
+		t.Fatalf("after the write the cache served %q: an overtaken fill was stored", colors["预测"])
+	}
+}
+
+// A session stamp is remembered only when its UPDATE succeeded: after a failed write the next request reads the
+// stamp and writes it again instead of believing it fresh.
+func TestSessionStampIsRememberedOnlyWhenItsWriteSucceeded(t *testing.T) {
+	f := newReadPathFixture(t)
+	f.s.sessionStamps.reset()
+	mustExec(t, f.s.st, `UPDATE user_sessions SET last_seen=1 WHERE id=?`, f.session.sessionID)
+	mustExec(t, f.s.st, `CREATE TRIGGER refuse_session_stamp BEFORE UPDATE OF last_seen ON user_sessions BEGIN SELECT RAISE(ABORT, 'stamp refused'); END`)
+	const read, write = `^SELECT last_seen FROM user_sessions`, `^UPDATE user_sessions SET last_seen`
+	if code, first := f.get(t, "/api/home"); code != 200 || countMatching(first, write) != 1 {
+		t.Fatalf("first request: %d, %d stamp writes", code, countMatching(first, write))
+	}
+	if _, again := f.get(t, "/api/home"); countMatching(again, read) != 1 || countMatching(again, write) != 1 {
+		t.Fatalf("after a failed stamp the next request read %d and wrote %d times, want 1 and 1", countMatching(again, read), countMatching(again, write))
+	}
+	mustExec(t, f.s.st, `DROP TRIGGER refuse_session_stamp`)
+	if _, written := f.get(t, "/api/home"); countMatching(written, write) != 1 {
+		t.Fatal("the stamp was not written once the write could succeed")
+	}
+	if _, later := f.get(t, "/api/home"); countMatching(later, read) != 0 {
+		t.Fatal("a stamp that was written was not remembered")
+	}
+	if got := scalar[int64](t, f.s.st, `SELECT last_seen FROM user_sessions WHERE id=?`, f.session.sessionID); got < time.Now().Unix()-5 {
+		t.Fatalf("last_seen = %d", got)
+	}
+}
+
 // Audit records stay durable: the report-read row is the ordinary audit insert, one statement, and no
 // synchronous_commit setting is used for it, not even a statement-scoped one.
 func TestReadPathReportReadAuditIsOneSynchronousInsert(t *testing.T) {
@@ -314,6 +366,8 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 	}
 	mustExec(t, f.s.st, `UPDATE user_groups SET forecast_scope='all' WHERE id=?`, ou)
 	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,group_id) VALUES(?,?,?,?)`, "a-forecaster", "h", "user", ou)
+	// An inactive account in the granting OU: the forecast loader refuses it, so the snapshot must too.
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,group_id,active) VALUES(?,?,?,?,0)`, "a-disabled", "h", "user", ou)
 	if f.s.forecastAccess("a-forecaster").Scope != scopeAll {
 		t.Fatalf("fixture: the forecaster's OU grants %+v", f.s.forecastAccess("a-forecaster"))
 	}
@@ -321,7 +375,9 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 		user      string
 		scoped    bool
 		treeReads int
-	}{{"an-admin", false, 1}, {"a-reader", false, 1}, {"a-forecaster", false, 1}, {"a-tenant", true, 2}} {
+		loadFails bool // the account loader errors: no such account
+	}{{"an-admin", false, 1, false}, {"a-reader", false, 1, false}, {"a-forecaster", false, 1, false}, {"a-tenant", true, 2, false},
+		{"a-disabled", false, 1, false}, {"no-such-account", true, 1, true}} {
 		r := withRequestAccount(httptest.NewRequest(http.MethodGet, "/x", nil), c.user)
 		f.spy.mu.Lock()
 		f.spy.tracing, f.spy.trace = true, nil
@@ -341,11 +397,17 @@ func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
 			t.Errorf("%s: scope = %+v, want %+v", c.user, scope, f.s.viewerScope(c.user))
 		}
 		want, wantErr := f.s.st.SecuritySettings(c.user)
-		if err != nil || wantErr != nil || !reflect.DeepEqual(settings, want) {
+		if (err != nil) != c.loadFails || (wantErr != nil) != c.loadFails || !reflect.DeepEqual(settings, want) {
 			t.Errorf("%s: settings = %+v (%v), want %+v (%v)", c.user, settings, err, want, wantErr)
 		}
 		if !reflect.DeepEqual(forecast, f.s.forecastAccess(c.user)) {
 			t.Errorf("%s: forecast = %+v, want %+v", c.user, forecast, f.s.forecastAccess(c.user))
+		}
+		if (c.user == "a-disabled" || c.loadFails) && forecast.Scope != scopeNone {
+			t.Errorf("%s: forecast scope %v, want none", c.user, forecast.Scope)
+		}
+		if c.loadFails && (scope == nil || !scope.denyAll) {
+			t.Errorf("%s: scope %+v, want deny-all", c.user, scope)
 		}
 	}
 }

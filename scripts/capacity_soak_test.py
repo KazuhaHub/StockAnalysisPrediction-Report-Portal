@@ -245,7 +245,7 @@ def window_quota(**changes):
 def window_backend_flood(requests=2400, answered=120, **changes):
     value = {"requests": requests, "answered": answered, "refused": requests - answered, "alive": True, "heartbeat_age_ms": 900,
              "classes": {"200": answered, "429:task_capacity": requests - answered},
-             "forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}}
+             "forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}, "forged_mac_refused": 640}
     value.update(changes)
     return value
 
@@ -809,6 +809,15 @@ class EvaluateTests(unittest.TestCase):
             "server error": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "500:db_error": 40}},
             "transport": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 600, "transport": 40}},
             "no classes": {"forged_requests": 640},
+            # Every forgery answered 429 proves nothing about the MAC path, and a 404 alone cannot tell a MAC refusal from an empty
+            # or unreadable header: the Portal's own count of MAC refusals must show the path refused them.
+            "all busy": {"forged_requests": 640, "forged_classes": {"429:app_platform_busy": 640}, "forged_mac_refused": 0},
+            "404s the MAC path did not refuse": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}, "forged_mac_refused": 0},
+            "too few MAC refusals": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640},
+                                     "forged_mac_refused": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1},
+            "MAC refusals not a count": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": 640}, "forged_mac_refused": "640"},
+            "too few 404s": {"forged_requests": 640, "forged_classes": {"404:app_platform_task_unavailable": soak.FORGED_FLOOD_MIN_PER_WINDOW - 1,
+                                                                        "429:app_platform_busy": 640 - soak.FORGED_FLOOD_MIN_PER_WINDOW + 1}},
         }
         for label, changes in failures.items():
             evidence = child_evidence()
@@ -816,11 +825,13 @@ class EvaluateTests(unittest.TestCase):
             flood.pop("forged_classes", None)
             flood.update(changes)
             self.assertEqual(self.failing(self.verdict(evidence)), {name}, label)
+        for missing in ("forged_requests", "forged_mac_refused"):
+            evidence = child_evidence()
+            evidence["windows"][1]["backend_flood"].pop(missing)
+            self.assertEqual(self.failing(self.verdict(evidence)), {name}, missing)
         evidence = child_evidence()
-        evidence["windows"][1]["backend_flood"].pop("forged_requests")
-        self.assertEqual(self.failing(self.verdict(evidence)), {name})
-        evidence = child_evidence()
-        evidence["windows"][1]["backend_flood"].update(forged_requests=700, forged_classes={"404:app_platform_task_unavailable": 600, "429:app_platform_busy": 100})
+        evidence["windows"][1]["backend_flood"].update(forged_requests=700, forged_classes={"404:app_platform_task_unavailable": 600, "429:app_platform_busy": 100},
+                                                       forged_mac_refused=soak.FORGED_FLOOD_MIN_PER_WINDOW)
         self.assertTrue(self.verdict(evidence)["passed"], self.failing(self.verdict(evidence)))
 
     def test_a_missing_measurement_fails_instead_of_defaulting_to_zero(self):
@@ -1841,15 +1852,17 @@ class WorkflowHostGuardTests(unittest.TestCase):
         self.assertEqual(live, ["    runs-on: " + self.SANCTIONED], "self-hosted appears outside the capacity soak job's runs-on")
 
     def test_the_expression_only_selects_self_hosted_for_a_dispatch_that_asked_for_the_reference_vm(self):
-        def resolve(event, soak_host):
-            # the expression, evaluated: (event == dispatch && soak_host == reference-vm) ? self-hosted : ubuntu-24.04
-            return "self-hosted" if (event == "workflow_dispatch" and soak_host == "reference-vm") else "ubuntu-24.04"
-        for event in ("pull_request", "push", "schedule", "workflow_run", "release", ""):
-            for host in ("", "github", "reference-vm"):
-                self.assertEqual(resolve(event, host), "ubuntu-24.04")
-        self.assertEqual(resolve("workflow_dispatch", "github"), "ubuntu-24.04")
-        self.assertEqual(resolve("workflow_dispatch", "reference-vm"), "self-hosted")
-        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm'", self.SANCTIONED)
+        # The workflow's own text is pinned, character for character: a dispatch that asked for the reference VM, and nothing else, gets
+        # the self-hosted labels; every other event, and a dispatch for github, gets ubuntu-24.04. A change to the condition has to change
+        # this line too.
+        job = WORKFLOW.read_text()
+        job = job[job.index("\n  capacity-soak:"):].split("\n    steps:")[0]
+        runs_on = [line for line in job.splitlines() if line.startswith("    runs-on:")]
+        self.assertEqual(runs_on, [
+            "    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm')"
+            " && fromJSON('[\"self-hosted\",\"sec09-reference-vm\"]') || 'ubuntu-24.04' }}"])
+        self.assertEqual(job_env_line("APP_CAPACITY_SOAK_HOST"),
+                         "      APP_CAPACITY_SOAK_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm' && 'reference-vm' || '' }}")
 
     def test_the_host_input_defaults_to_github_and_the_flag_follows_the_same_condition(self):
         text = WORKFLOW.read_text()
