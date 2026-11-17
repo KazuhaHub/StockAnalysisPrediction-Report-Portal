@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/driver"
 )
 
 // privateDir is a 0700 directory, which is what a private endpoint requires of
@@ -248,20 +249,18 @@ func TestServiceEgressEndpointAcceptance(t *testing.T) {
 	if err := os.Chmod(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(dir, "broker.sock")
+	socket := filepath.Join(dir, driver.ServiceBrokerSocketName)
 	f.registry.bind = func(ctx context.Context, v control.VerifiedServiceEgressSession, open EgressOpen, listen bool) (EgressListener, error) {
 		if !listen {
 			return EgressListener{}, nil
 		}
-		l, err := net.Listen("unix", socket)
+		// The production binder: a root-owned 0666 socket made relative to the
+		// directory's descriptor.
+		broker, err := driver.BindServiceBrokerInDir(dir)
 		if err != nil {
 			return EgressListener{}, err
 		}
-		if err := os.Chmod(socket, 0666); err != nil {
-			l.Close()
-			return EgressListener{}, err
-		}
-		return EgressListener{Listener: l, PeerOK: egressPeerUID(EgressAppUID)}, nil
+		return EgressListener{Listener: broker.Listener, PeerOK: egressPeerUID(EgressAppUID), Intact: broker.Intact}, nil
 	}
 	path, _ := egressEndpoint(t, f, true)
 	raw, sig := f.signedSession(t)
