@@ -6,6 +6,7 @@ export interface AppLaunchV2 {routes:readonly BridgeRoute[];backendAvailable:boo
 const hostCapabilities=new Set([
   'network.http',
   'notifications.publish',
+  'principals.read',
   'reports.read',
   'secrets.use',
   'storage.files',
