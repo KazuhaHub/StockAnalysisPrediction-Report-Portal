@@ -113,6 +113,19 @@ stores them as today. The backend has no directory access.
 app's administrators can list the names of users and OUs that can use this
 app." Withdrawal is immediate.
 
+Implementation: the capability is declared optional only; a descriptor that
+lists it as required is refused. Install leaves its grant row off. A Portal
+administrator enables or withdraws it with
+`POST /api/admin/app-platform/installations/{installation}/principals-read`
+(`{"enabled":bool,"policyRevision":"N"}`, audited as
+`app_platform.capability_granted` / `app_platform.capability_withdrawn`) from
+the installation settings page, which shows the sentence above before enabling.
+The directory reads the row on every call, so withdrawal needs no cache
+invalidation. An update replaces the grant rows, so a new release starts with
+the capability off again and is reviewed again. The per viewer rate is applied
+only after the caller has passed the installation, audience and administrator
+checks.
+
 ## 5. Failure and audit
 
 403 for missing authority, 400 for malformed input, 429 with `Retry-After`.
