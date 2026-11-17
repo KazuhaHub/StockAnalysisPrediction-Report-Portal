@@ -200,21 +200,32 @@ func (r *egressRegistry) open(ctx context.Context, conn net.Conn, open EgressOpe
 	expires, _ := strconv.ParseInt(command.ExpiresMS, 10, 64)
 	r.mu.Lock()
 	existing := r.installs[command.InstallationID]
-	live := r.live
-	sessions := 0
-	if existing != nil {
-		existing.mu.Lock()
-		sessions = len(existing.sessions)
-		existing.mu.Unlock()
+	live, sessions := 0, 0
+	for _, in := range r.installs {
+		in.mu.Lock()
+		if in.current != nil {
+			live++
+		}
+		if in == existing {
+			sessions = len(in.sessions)
+		}
+		in.mu.Unlock()
 	}
 	r.mu.Unlock()
+	hasLive := false
+	if existing != nil {
+		existing.mu.Lock()
+		hasLive = existing.current != nil
+		existing.mu.Unlock()
+	}
 	if existing != nil && existing.generation > generation {
 		return refuse(broker.ErrDenied)
 	}
-	// The bound is on installations: a renewal or replacement does not raise the
-	// steady-state count, so only a new installation is refused at it. An
+	// The bound is on installations that hold a live session: a renewal or
+	// replacement does not raise the steady-state count, so only a new one is
+	// refused at it. An installation whose sessions all ended is new again. An
 	// installation holds its current session and at most one draining.
-	if existing == nil && live >= r.maxSessions || existing != nil && sessions >= maxEgressSessionsPerInstall {
+	if !hasLive && live >= r.maxSessions || hasLive && sessions >= maxEgressSessionsPerInstall {
 		return refuse(broker.ErrUnavailable)
 	}
 	listen := existing == nil || existing.generation < generation

@@ -1119,8 +1119,8 @@ func TestServiceEgressUnrepresentableInputIsInvalidAndSpendsNoToken(t *testing.T
 }
 
 // Renewing the session of an installation does not grow the steady-state count,
-// so the bound refuses only a new installation.
-func TestServiceEgressBoundRefusesNewInstallationNotRenewal(t *testing.T) {
+// so a renewal passes the bound (a new installation does not: see the next test).
+func TestServiceEgressBoundDoesNotBlockRenewal(t *testing.T) {
 	f := newEgrFixture(t)
 	f.registry.maxSessions = 1
 	first := f.open(egrOptions{})
@@ -1130,18 +1130,6 @@ func TestServiceEgressBoundRefusesNewInstallationNotRenewal(t *testing.T) {
 	renewed := f.open(egrOptions{})
 	if renewed.ack != EgressAckOpen {
 		t.Fatal("a renewal was refused at the session bound")
-	}
-	// The same registry state, seen as another installation, is refused.
-	f.registry.mu.Lock()
-	in := f.registry.installs[f.installation]
-	delete(f.registry.installs, f.installation)
-	f.registry.mu.Unlock()
-	other := f.open(egrOptions{})
-	f.registry.mu.Lock()
-	f.registry.installs[f.installation] = in // so cleanup closes it
-	f.registry.mu.Unlock()
-	if other.ack != EgressAckRefused {
-		t.Fatal("a new installation was admitted past the bound")
 	}
 }
 
@@ -1201,5 +1189,46 @@ func TestServerCloseWithoutServeStopsEgressRegistry(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the sweep goroutine outlived a closed server")
+	}
+}
+
+// The bound counts installations that hold a live session. One whose sessions
+// all ended is a new installation when it opens again, so it cannot lift the
+// registry past the bound.
+func TestServiceEgressBoundCountsLiveInstallationsOnly(t *testing.T) {
+	f := newEgrFixture(t)
+	f.registry.maxSessions = 1
+	p := f.open(egrOptions{})
+	if p.ack != EgressAckOpen {
+		t.Fatal("first session refused")
+	}
+	p.mux.Close(EgressCloseExpired)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		f.registry.mu.Lock()
+		in := f.registry.installs[f.installation]
+		in.mu.Lock()
+		gone := in.current == nil
+		in.mu.Unlock()
+		f.registry.mu.Unlock()
+		if gone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("session never detached")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Another installation takes the one live slot.
+	other := &egressInstall{id: "other", current: &egressSession{}, sessions: map[*egressSession]struct{}{}}
+	f.registry.mu.Lock()
+	f.registry.installs["other"] = other
+	f.registry.mu.Unlock()
+	again := f.open(egrOptions{})
+	f.registry.mu.Lock()
+	delete(f.registry.installs, "other")
+	f.registry.mu.Unlock()
+	if again.ack != EgressAckRefused {
+		t.Fatal("an installation with no live session reopened past the bound")
 	}
 }
