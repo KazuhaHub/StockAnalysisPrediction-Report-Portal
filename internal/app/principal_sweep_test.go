@@ -48,7 +48,11 @@ func principalColumnDefinitions(t *testing.T, s *Store, table string) []schemaCo
 func principalTables(t *testing.T, s *Store) []string {
 	t.Helper()
 	var out []string
-	for _, table := range s.backupTables() {
+	tables, err := s.backupTables()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range tables {
 		for _, c := range principalColumnDefinitions(t, s, table) {
 			if c.name == "principal" {
 				out = append(out, table)

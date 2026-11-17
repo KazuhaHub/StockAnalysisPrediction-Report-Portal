@@ -89,8 +89,8 @@ func (p *exportPlan) isLatest(raw []string) bool {
 // bounded by the number of distinct symbols.
 func (p *exportPlan) loadNewest(ctx context.Context) error {
 	atomic.AddInt64(&p.s.exports.queries, 1)
-	rows, err := p.s.st.db.QueryContext(ctx, p.s.st.bind("SELECT ps.symbol, ps.made_at, MAX(ps.id) FROM "+p.src.from+
-		" WHERE "+p.src.base+" AND "+p.candWhere+" GROUP BY ps.symbol, ps.made_at"), p.candArgs...)
+	rows, err := p.s.st.queryContext(ctx, "SELECT ps.symbol, ps.made_at, MAX(ps.id) FROM "+p.src.from+
+		" WHERE "+p.src.base+" AND "+p.candWhere+" GROUP BY ps.symbol, ps.made_at", p.candArgs...)
 	if err != nil {
 		return err
 	}
@@ -164,8 +164,8 @@ func (p *exportPlan) prepare(ctx context.Context) error {
 	}
 	limit := p.maxCandidates()
 	atomic.AddInt64(&p.s.exports.queries, 1)
-	rows, err := p.s.st.db.QueryContext(ctx, p.s.st.bind("SELECT DISTINCT "+p.src.symExpr+" FROM "+p.src.from+
-		" WHERE "+p.fullWhere()+" LIMIT "+strconv.Itoa(limit+1)), p.args...)
+	rows, err := p.s.st.queryContext(ctx, "SELECT DISTINCT "+p.src.symExpr+" FROM "+p.src.from+
+		" WHERE "+p.fullWhere()+" LIMIT "+strconv.Itoa(limit+1), p.args...)
 	if err != nil {
 		return err
 	}

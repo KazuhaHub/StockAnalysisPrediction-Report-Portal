@@ -1,0 +1,283 @@
+//go:build linux && (amd64 || arm64)
+
+package transport
+
+import (
+	"bytes"
+	"context"
+	"crypto/ed25519"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/data"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/journal"
+)
+
+func nativeCandidateDescriptor(t *testing.T) []byte {
+	t.Helper()
+	descriptor, err := os.ReadFile("../../appplatform/testdata/descriptors/managed.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest map[string]any
+	if err := json.Unmarshal(descriptor, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	backend := manifest["backend"].(map[string]any)
+	backend["image"], backend["platforms"] = os.Getenv("APP_CANDIDATE_NATIVE_IMAGE"), []string{"linux/" + runtime.GOARCH}
+	descriptor, err = json.Marshal(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return descriptor
+}
+
+func candidateNativeReceiptCommand(t *testing.T, e journal.ControllerEnrollment, slot int) ([]byte, []byte) {
+	t.Helper()
+	_, c, _, _ := candidateReceiptAuthority(t)
+	c.DeploymentID, c.ControllerEpoch, c.ControlRevision = e.DeploymentID, e.ControllerEpoch, strconv.FormatInt(e.ControlRevision, 10)
+	c.InstallationID, c.OperationID, c.EffectID, c.Payload.ResourceID, c.Payload.DataNamespaceID = receiptNativeID(7100+slot*10), receiptNativeID(7101+slot*10), receiptNativeID(7104+slot*10), receiptNativeID(7105+slot*10), receiptNativeID(7103+slot*10)
+	descriptor := nativeCandidateDescriptor(t)
+	var err error
+	sum := sha256.Sum256(descriptor)
+	c.Payload.ReleaseSHA256 = hex.EncodeToString(sum[:])
+	c.Payload.Platform = "linux/" + runtime.GOARCH
+	c.PayloadSHA256, err = control.CandidateLogicalDigest(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := control.Authority{DeploymentID: e.DeploymentID, ControllerEpoch: e.ControllerEpoch, ControlRevision: e.ControlRevision, PublicKey: e.PublicKey, Fingerprint: e.Fingerprint}
+	raw, sig, err := control.SignCandidate(c, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{30}, 32)), a, time.Now().UnixMilli())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw, sig
+}
+
+// Reads the same owned journal/data produced by the native execution fixture.
+// It does not create a second journal, enroll keys or reserve overlapping projects.
+func TestNativeCandidateReceiptTransport(t *testing.T) {
+	fixtureRoot := os.Getenv("APP_CANDIDATE_RECEIPT_FIXTURE")
+	if fixtureRoot == "" {
+		t.Skip("explicit disposable receipt transport fixture only")
+	}
+	if os.Geteuid() != 0 || os.Getenv("GITHUB_ACTIONS") != "true" || os.Getenv("RUNNER_ENVIRONMENT") != "github-hosted" || !filepath.IsAbs(fixtureRoot) {
+		t.Fatal("requires disposable Linux root")
+	}
+	rootPath, journalPath := os.Getenv("APP_DATA_JOURNAL_ROOT"), os.Getenv("APP_DATA_JOURNAL_CONTROL")
+	if !filepath.IsAbs(rootPath) || !filepath.IsAbs(journalPath) {
+		t.Fatal("missing owned native fixture")
+	}
+	inode, err := strconv.ParseUint(os.Getenv("APP_DATA_JOURNAL_INODE"), 10, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := data.RootIdentity{FilesystemUUID: os.Getenv("APP_DATA_NATIVE_UUID"), Inode: inode}
+	input, err := os.Open(rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer input.Close()
+	root, err := data.Open(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	store, err := journal.Open(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	deployment, err := store.ControllerDeployment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := 0
+	raw, sig := candidateNativeReceiptCommand(t, deployment.ControllerEnrollment, slot)
+	expected, err := store.ReadCandidateRunningReceipt(context.Background(), raw, sig)
+	if err != nil {
+		t.Fatal("actual native receipt read", err)
+	}
+	project, err := strconv.ParseUint(expected.Claim.Preflight.ProjectID, 10, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, err := root.Inspect(context.Background(), pin, receiptNativeID(7103+slot*10), uint32(project))
+	if err != nil || expected.Claim.Preflight.NamespaceInode != strconv.FormatUint(observed.Inode, 10) {
+		t.Fatal("receipt/native inode differs", err)
+	}
+	dir, err := os.MkdirTemp(fixtureRoot, "channel-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.Open(executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	binaryPath := filepath.Join(dir, "receipt.test")
+	target, err := os.OpenFile(binaryPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0555)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.Chmod(0555); err != nil {
+		target.Close()
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(target, source)
+	closeErr := target.Close()
+	if copyErr != nil || closeErr != nil {
+		t.Fatal("copy fixture binary")
+	}
+	endpoint := filepath.Join(dir, "control")
+	if err := os.Mkdir(endpoint, 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(endpoint, 0, int(controllerTestGID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(endpoint, 0750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(endpoint, "receipt.sock")
+	server, err := ListenController(path, controllerTestUID, controllerTestGID, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(ctx) }()
+	defer func() {
+		cancel()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	authority := control.Authority{DeploymentID: deployment.DeploymentID, ControllerEpoch: deployment.ControllerEpoch, ControlRevision: deployment.ControlRevision, PublicKey: deployment.PublicKey, Fingerprint: deployment.Fingerprint}
+	authorityJSON, _ := json.Marshal(authority)
+	run := func(uid, gid uint32, action string, command, signature []byte) {
+		t.Helper()
+		childCtx, stop := context.WithTimeout(ctx, 20*time.Second)
+		defer stop()
+		cmd := exec.CommandContext(childCtx, binaryPath, "-test.run=^TestNativeCandidateReceiptChild$", "-test.timeout=15s")
+		cmd.Env = []string{"GOMAXPROCS=2", "APP_CANDIDATE_RECEIPT_CHILD=" + action, "RECEIPT_SOCKET=" + path, "RECEIPT_COMMAND=" + base64.RawStdEncoding.EncodeToString(command), "RECEIPT_SIGNATURE=" + base64.RawStdEncoding.EncodeToString(signature), "RECEIPT_AUTHORITY=" + base64.RawStdEncoding.EncodeToString(authorityJSON), "RECEIPT_INODE=" + expected.Claim.Preflight.NamespaceInode, "RECEIPT_FORMAT=" + expected.Format, "RECEIPT_JOURNAL=" + filepath.Join(journalPath, "journal.sqlite3")}
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: gid, Groups: []uint32{gid}}}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("receipt child %s %d:%d: %v\n%s", action, uid, gid, err, out)
+		}
+	}
+	run(controllerTestUID, controllerTestGID, "accepted", raw, sig)
+	run(41002, controllerTestGID, "peer-refused", raw, sig)
+	run(controllerTestUID, 41003, "refused", raw, sig)
+	run(controllerTestUID, controllerTestGID, "server-signature-refused", raw, make([]byte, 64))
+	unknownRaw, unknownSig := candidateNativeReceiptCommand(t, deployment.ControllerEnrollment, 1)
+	run(controllerTestUID, controllerTestGID, "refused", unknownRaw, unknownSig)
+}
+func TestNativeCandidateReceiptChild(t *testing.T) {
+	action := os.Getenv("APP_CANDIDATE_RECEIPT_CHILD")
+	if action == "" {
+		t.Skip("receipt subprocess only")
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_COMMAND"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sig, err := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_SIGNATURE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_AUTHORITY"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var authority control.Authority
+	if json.Unmarshal(encoded, &authority) != nil {
+		t.Fatal("missing fixture authority")
+	}
+	path := os.Getenv("RECEIPT_SOCKET")
+	if action == "server-signature-refused" {
+		conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: path, Net: "unix"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		conn.SetDeadline(time.Now().Add(3 * time.Second))
+		frame := make([]byte, 44)
+		copy(frame, candidateReceiptQueryMagic)
+		if os.Getenv("RECEIPT_OPERATION") == "start" {
+			copy(frame, candidateExecutionQueryMagic)
+		}
+		binary.BigEndian.PutUint32(frame[40:44], uint32(len(raw)))
+		frame = append(frame, raw...)
+		frame = append(frame, sig...)
+		if os.Getenv("RECEIPT_OPERATION") == "start" {
+			descriptor, err := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_DESCRIPTOR"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame = append(frame, candidateDescriptorFrame(descriptor)...)
+		}
+		if n, err := io.Copy(conn, bytes.NewReader(frame)); err != nil || n != int64(len(frame)) {
+			t.Fatal(err)
+		}
+		conn.CloseWrite()
+		var b [1]byte
+		if n, err := conn.Read(b[:]); n != 0 || err == nil {
+			t.Fatal("server disclosed receipt for unsigned request")
+		}
+		return
+	}
+	var proof CandidateReceiptObservation
+	if os.Getenv("RECEIPT_OPERATION") == "start" {
+		descriptor, decodeErr := base64.RawStdEncoding.DecodeString(os.Getenv("RECEIPT_DESCRIPTOR"))
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		proof, err = StartControllerCandidate(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority, descriptor)
+	} else {
+		proof, err = ReadControllerCandidateReceipt(context.Background(), path, uint32(os.Geteuid()), controllerTestGID, raw, sig, authority)
+	}
+	if action != "accepted" {
+		if err == nil || !proof.ReceivedAt().IsZero() {
+			t.Fatal("unauthorized receipt received")
+		}
+		return
+	}
+	if err != nil || proof.Receipt().Claim.Preflight.NamespaceInode != os.Getenv("RECEIPT_INODE") || proof.Receipt().Format != os.Getenv("RECEIPT_FORMAT") {
+		t.Fatal("cross-UID actual receipt unavailable", err)
+	}
+	if endpoint := proof.Endpoint(); !endpoint.RootController || endpoint.RunnerUID != 0 || endpoint.ControllerUID != controllerTestUID || endpoint.ControllerGID != controllerTestGID || endpoint.Path != path {
+		t.Fatal("root/controller profile not bound to observation")
+	}
+	file, err := os.Open(os.Getenv("RECEIPT_JOURNAL"))
+	if err == nil {
+		file.Close()
+		t.Fatal("controller could read runner journal directly")
+	}
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatal("journal denial not DAC", err)
+	}
+}

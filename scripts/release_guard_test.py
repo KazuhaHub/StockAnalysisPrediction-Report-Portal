@@ -5,7 +5,7 @@ import re
 import unittest
 from unittest.mock import patch
 import subprocess
-from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target
+from release_guard import image_digest, validate_metadata, ci_ready, read_state, guard_draft, expected_assets, verify_target, licence_ready, wait_ci
 
 # CI runs `python3 -B -m unittest discover -s scripts` from the repository root, so every file
 # these tests read is found relative to this one rather than to the working directory.
@@ -109,11 +109,13 @@ class GuardTests(unittest.TestCase):
 
     def test_ci_requires_all_full_race_shards(self):
         jobs = [{'name':name, 'conclusion':'success'} for name in
-                ['go-test','web typecheck + build','web lint + typecheck + build','workflow lint',
+                ['go-test','go test (checks + other packages)','web typecheck + build','web lint + typecheck + build','workflow lint',
                  'docker image (font gate + smoke)','go race full (other packages)',
                  'release targets (cross-compile)'] + [f'web tests ({i}/3)' for i in range(1,4)]]
         self.assertFalse(ci_ready(jobs))
         jobs += [{'name':f'go race full ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
+        self.assertFalse(ci_ready(jobs))
+        jobs += [{'name':f'go test ({i}/4)', 'conclusion':'success'} for i in range(1,5)]
         self.assertTrue(ci_ready(jobs))
 
     def test_ci_ready_matches_test_workflow(self):
@@ -146,6 +148,23 @@ class GuardTests(unittest.TestCase):
         self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
         self.assertIn('test -n "$regex"', block)
 
+    def test_go_test_shards_agree_on_their_count(self):
+        # The same two-places count as the race shards, for the ordinary internal/app run that the
+        # required check "go-test" summarises. The partition must read the matrix, the shards must
+        # be numbered 1..N, a shard dealt nothing must fail, and each shard needs the database the
+        # package's PostgreSQL variants run against, or they skip and the shard passes without them.
+        block = job_block(read_workflow('test.yml'), 'go-test-shard')
+        shards = [int(s) for s in re.search(r'^\s+shard: \[([^\]]+)\]', block, re.M)[1].split(',')]
+        self.assertEqual(shards, list(range(1, len(shards) + 1)))
+        name = re.search(r'^    name: (.+?)\s*$', block, re.M)[1]
+        self.assertEqual(re.search(r'\(\$\{\{ matrix\.shard \}\}/(\d+)\)', name)[1], str(len(shards)), name)
+        partition = re.search(r'awk -v s="\$\{\{ matrix\.shard \}\}" -v m=("[^"]*"|\S+)', block)
+        self.assertIsNotNone(partition, 'the partition is no longer the awk this test reads')
+        self.assertIn(partition[1].strip('"'), ('${{ strategy.job-total }}', str(len(shards))))
+        self.assertIn('test -n "$regex"', block)
+        self.assertIn('TEST_POSTGRES_DSN', block)
+        self.assertIn('image: postgres:16', block)
+
     def test_web_test_shards_agree_on_their_count(self):
         # The same two-places count as the race shards: the matrix deals the files out through
         # vitest's --shard, and the "(N/3)" in the name is what ci_ready waits for.
@@ -161,7 +180,7 @@ class GuardTests(unittest.TestCase):
         # shards. A job whose `needs` failed is skipped unless it says always(), and a skipped
         # required check counts as passed, so each must run always() and test every result itself.
         workflow = read_workflow('test.yml')
-        for job_id in ('go-race', 'web-build'):
+        for job_id in ('go-race', 'go-test', 'web-build'):
             with self.subTest(job=job_id):
                 block = job_block(workflow, job_id)
                 self.assertRegex(re.search(r'^    if: (.+?)\s*$', block, re.M)[1], r'^always\(\)')
@@ -257,6 +276,85 @@ class GuardTests(unittest.TestCase):
         self.assertIn(f'LATEST_TARGET={tag}\n', out)
         skipped = set(re.search(r'^SKIPPED_INCOMPLETE=(.*)$', out, re.M)[1].split(','))
         self.assertEqual(skipped, set(short), {t: short[t] for t in set(short) - skipped})
+
+class LicenceGateTests(unittest.TestCase):
+    """A release needs a green licence scan on the exact commit, as well as the full test run."""
+
+    def test_licence_ready_needs_the_scan_job_green(self):
+        self.assertTrue(licence_ready([{'name': 'licence scan', 'conclusion': 'success'}]))
+        self.assertFalse(licence_ready([]))
+        for bad in ('failure', 'cancelled', 'skipped', None):
+            self.assertFalse(licence_ready([{'name': 'licence scan', 'conclusion': bad}]), bad)
+        self.assertFalse(licence_ready([{'name': 'go-test', 'conclusion': 'success'}]))
+
+    def test_licence_ready_matches_the_licence_workflow(self):
+        # The guard names the job by display name, so a rename must fail here and not at release time.
+        names = push_run_jobs(read_workflow('licence.yml'))
+        self.assertEqual(names, {'licence scan'})
+        self.assertTrue(licence_ready([{'name': n, 'conclusion': 'success'} for n in names]))
+
+    def test_licence_workflow_runs_on_main_pushes_and_can_be_dispatched(self):
+        # The guard verifies a run for the exact main commit; with no push trigger there would never be one.
+        head = read_workflow('licence.yml').split('\njobs:\n', 1)[0]
+        self.assertRegex(head, r'(?m)^  push:\n    branches: \[[^\]]*\bmain\b[^\]]*\]$')
+        self.assertRegex(head, r'(?m)^  workflow_dispatch:')
+
+    def test_licence_workflow_also_runs_on_the_integration_branch(self):
+        # The platform work merges into integration/app-platform first; the scan must run on those pushes too.
+        head = read_workflow('licence.yml').split('\njobs:\n', 1)[0]
+        self.assertRegex(head, r'(?m)^  push:\n    branches: \[[^\]]*\bintegration/app-platform\b[^\]]*\]$')
+
+    def test_licence_workflow_scans_every_release_platform(self):
+        # A module can be linked on one GOOS/GOARCH and not another, so the Go SBOM is built per release target.
+        release = read_workflow('release.yml')
+        targets = set(re.findall(r'\{ goos: (\w+), goarch: (\w+),', release))
+        self.assertEqual(len(targets), 6)
+        licence = read_workflow('licence.yml')
+        listed = set(re.findall(r'\b(linux|darwin|windows)/(amd64|arm64)\b', licence))
+        self.assertEqual(listed, targets)
+
+    def test_licence_workflow_cross_checks_the_lock_against_the_installed_tree(self):
+        # The npm SBOM comes from package-lock.json, whose licence fields its integrity hashes do not cover; the
+        # scan is given the installed node_modules so every installed package is checked against its own manifest.
+        workflow = read_workflow('licence.yml')
+        scan = workflow[workflow.index('licence_scan.py'):]
+        self.assertIn('--node-modules web/node_modules', scan)
+        self.assertLess(workflow.index('npm ci'), workflow.index('licence_scan.py'))
+
+    def runs(self, workflow, conclusion='success', jobs=None):
+        run = {'id': 1, 'event': 'push', 'status': 'completed', 'conclusion': conclusion, 'html_url': 'u/' + workflow}
+        default = {'test.yml': [{'name': n, 'conclusion': 'success'} for n in sorted(
+            push_run_jobs(read_workflow('test.yml')))], 'licence.yml': [{'name': 'licence scan', 'conclusion': 'success'}]}
+        return run, default[workflow] if jobs is None else jobs
+
+    def wait(self, licence_conclusion='success', licence_jobs=None, licence_runs=True):
+        def fake(endpoint):
+            if '/runs/1/jobs' in endpoint:
+                return {'jobs': self.current_jobs}
+            wf = 'licence.yml' if 'licence.yml' in endpoint else 'test.yml'
+            self.current_jobs = self.runs(wf, licence_conclusion if wf == 'licence.yml' else 'success',
+                                          licence_jobs if wf == 'licence.yml' else None)[1]
+            if wf == 'licence.yml' and not licence_runs:
+                return {'workflow_runs': []}
+            return {'workflow_runs': [self.runs(wf, licence_conclusion if wf == 'licence.yml' else 'success')[0]]}
+        with patch('release_guard.gh_json', side_effect=fake):
+            wait_ci('o/r', 'a' * 40)
+
+    def test_green_tests_and_green_licence_pass(self):
+        self.wait()
+
+    def test_a_failed_licence_run_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'Licence scan did not pass'):
+            self.wait(licence_conclusion='failure')
+
+    def test_a_licence_run_without_the_scan_job_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'Licence scan did not pass'):
+            self.wait(licence_jobs=[])
+
+    def test_no_licence_run_for_the_commit_blocks_the_release(self):
+        with self.assertRaisesRegex(RuntimeError, 'licence.yml'):
+            self.wait(licence_runs=False)
+
 
 if __name__ == '__main__':
     unittest.main()

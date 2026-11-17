@@ -6,6 +6,19 @@ import (
 	"strings"
 )
 
+// unrestrictedViewer reports whether the account row and the tree alone settle the viewer scope as unscoped:
+// an administrator, or an account that neither its own flag nor its OU chain restricts.
+func unrestrictedViewer(sub ouSubject, snapshot ouPolicySnapshot) (bool, error) {
+	if can(sub.Role, PermManage) {
+		return true, nil
+	}
+	policies, err := snapshot.resolve(sub.EffectiveOU)
+	if err != nil {
+		return false, err
+	}
+	return !sub.Restricted && !policies.Restricted.Effective, nil
+}
+
 // viewerScopeSnapshot resolves restriction, audience and version visibility from one read
 // transaction. Helpers receive that same transaction and never reacquire the SQLite pool.
 func (s *Store) viewerScopeSnapshot(user string) (*ownerScope, error) {
@@ -13,7 +26,7 @@ func (s *Store) viewerScopeSnapshot(user string) (*ownerScope, error) {
 	if s.driver == "postgres" {
 		opts.Isolation = sql.LevelRepeatableRead
 	}
-	tx, err := s.db.BeginTx(context.Background(), opts)
+	tx, err := s.beginRead(context.Background(), opts)
 	if err != nil {
 		return nil, err
 	}
@@ -22,14 +35,11 @@ func (s *Store) viewerScopeSnapshot(user string) (*ownerScope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if can(sub.Role, PermManage) {
-		return nil, tx.Commit()
-	}
-	policies, err := snapshot.resolve(sub.EffectiveOU)
+	settled, err := unrestrictedViewer(sub, snapshot)
 	if err != nil {
 		return nil, err
 	}
-	if !sub.Restricted && !policies.Restricted.Effective {
+	if settled {
 		return nil, tx.Commit()
 	}
 	chain, err := snapshot.graph.policyChain(sub.EffectiveOU)

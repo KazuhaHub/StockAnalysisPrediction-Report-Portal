@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -80,6 +81,47 @@ func TestNotificationWorkerCancelsReplacedDestination(t *testing.T) {
 	if reason := scalar[string](t, st, `SELECT last_error FROM notification_deliveries`); reason != "config_changed" {
 		t.Fatalf("reason=%s", reason)
 	}
+}
+
+func TestNotificationDeliveryFailureLeavesPortalBusinessAvailableSQLite(
+	t *testing.T,
+) {
+	st := platformTestStore(t, false)
+	s, actor := platformActorTestServerWithStore(t, st)
+	enableEmail(s)
+	s.mailFn = func([]string, string, string) error {
+		return errors.New("disposable SMTP unavailable")
+	}
+	channel := NotificationChannel{
+		ID: "mail-failure", Label: "Operations", Adapter: "email",
+		Config:  `{"recipients":["ops@example.com"]}`,
+		Enabled: true, Revision: 1,
+	}
+	if err := st.InsertNotificationChannel(channel); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	event := NotificationEvent{
+		ID: "event-delivery-failure", SourceKey: "delivery-failure",
+		Type:      EventBatchFinished,
+		Payload:   `{"job_id":42,"status":"finished"}`,
+		CreatedAt: now.UnixMilli(),
+	}
+	if err := st.CaptureNotification(event, []NotificationDelivery{{
+		ChannelID: channel.ID, ChannelRevision: channel.Revision,
+	}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.processNotificationOnce(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if got := scalar[string](t, st, `SELECT state
+		FROM notification_deliveries`); got != "failed" {
+		t.Fatalf("failed notification delivery state = %q", got)
+	}
+	mux, cookie := platformPortalAvailabilityHTTPFixture(t, s, actor)
+	platformRunnerUnavailableBusinessCheck(
+		t, mux, cookie, actor.username)
 }
 
 func TestNotificationWorkerRechecksAudienceAndPreferences(t *testing.T) {

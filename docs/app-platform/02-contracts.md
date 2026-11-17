@@ -52,8 +52,8 @@ and must not appear in accepted packages. It is not the legacy `app.json` format
   "version": "1.0.0",
   "publisher": "example-publisher",
   "compatibility": {
-    "platform_api": ">=2.0.0 <3.0.0",
-    "runner_protocol": ">=1.0.0 <2.0.0"
+    "platform_api": ">=2.0.0-0 <3.0.0-0",
+    "runner_protocol": ">=1.0.0-0 <2.0.0-0"
   },
   "presentation": {
     "name_key": "app.name",
@@ -77,6 +77,12 @@ and must not appear in accepted packages. It is not the legacy `app.json` format
   "data": {"schema": 1, "readable_schemas": [1], "writes_on_startup": false}
 }
 ```
+
+While the platform API and the runner protocol are development pre-releases (currently
+`2.0.0-dev.1` and `1.0.0-dev.1`), both bounds of a range need the `-0` suffix, as in the example
+above. A plain floor such as `>=1.0.0` never matches a pre-release version. Once a range carries a
+pre-release floor, a plain ceiling such as `<2.0.0` also admits `2.0.0-dev.x`, the first
+pre-release of the next breaking version; `<2.0.0-0` excludes it.
 
 No backend object means a static app. It must not secretly launch server work.
 Package limits and allowed file types are enforced before extraction, after
@@ -138,7 +144,7 @@ audit policy. A requested capability is not effective until granted.
 | `events.subscribe` | Allowlisted event types and current resource authority; no raw global event stream |
 | `notifications.publish` | Source-bound event namespace, rate limits and centrally selected recipients/routes |
 | `network.http` | Approved origins, methods/path segments and data/time limits |
-| `network.stream` | Explicit protocol/destination/port policy; disabled until adapter tests prove enforcement |
+| `network.stream` | Separate ordinary-HTTPS response-stream policy; no upgrades, tunnels or arbitrary protocols; bounded frames, duration, idle time, total bytes and per-frame current authority |
 | `secrets.use` | Specific binding and broker operation; never arbitrary vault enumeration |
 | `secrets.read` | Exceptional raw access; separately reviewed per binding with disclosure warning |
 | `background.run` | Approved service work, leases and finite authority duration; no viewer impersonation |

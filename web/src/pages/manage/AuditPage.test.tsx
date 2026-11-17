@@ -228,7 +228,9 @@ describe('AuditPage', () => {
     mount()
     await screen.findByText('客户A')
     const from = new URL(String(apiMock.get.mock.calls[0][0]), 'http://x').searchParams.get('from')
-    expect(Math.abs(Date.now() - 7 * 86_400_000 - Date.parse(from ?? ''))).toBeLessThan(60_000)
+    const expected = new Date()
+    expected.setDate(expected.getDate() - 7)
+    expect(Math.abs(expected.getTime() - Date.parse(from ?? ''))).toBeLessThan(60_000)
     expect(screen.getByRole('button', { name: 'audit.range.aria' }).textContent).toContain('audit.range.7d')
   })
 

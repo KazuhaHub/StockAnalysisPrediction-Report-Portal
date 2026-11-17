@@ -1,0 +1,33 @@
+{
+  "format": "portal.app-platform.lifecycle-concurrency/1-dev.1",
+  "captured_at": "2026-11-04T01:16:03-08:00",
+  "status": "pass-development",
+  "candidate": "fec227d3e9dca3adf426e143e2a0bea4ccb16c83",
+  "hosted_ci": {
+    "test": "41804401246",
+    "go_test_job": "126488100083",
+    "app_project_quota_probe": "41804401317",
+    "app_project_quota_job": "126487786086",
+    "app_runner_daemon_probe": "41804401242",
+    "app_runner_daemon_job": "126487875565",
+    "result": "pass"
+  },
+  "observed": {
+    "native_managed_update_enable_operator_race": true,
+    "native_managed_update_repair_operator_race": true,
+    "native_managed_enable_backend_request": true,
+    "native_managed_repair_backend_request": true
+  },
+  "coverage": [
+    "Two distinct administrator identities create update and enable reviews while the managed app is in the states required by each plan.",
+    "The native update and enable confirmations run concurrently against the real runtime observation and production review-consume paths. Update is refused as stale/conflicting; enable creates the only pending lifecycle operation.",
+    "The same pattern runs against repair: update and the normal browser repair confirmation execute concurrently. The browser repair plan is the sole consumed plan and operation; update remains unconsumed.",
+    "Both races assert exactly one pending update/enable or update/repair operation and exactly one consumed review. No live tuple or authority is changed by the losing contender.",
+    "The native matrix then executes the winning enable/repair through the real runner and completes the remaining lifecycle through uninstall, data removal and fresh reinstall."
+  ],
+  "limits": [
+    "This is disposable development acceptance with two server-side administrator sessions and the real signed runner path, not a production load or SLO claim.",
+    "The browser repair confirmation is the second operator in the repair race; the update contender is a real Portal management review from a separate administrator session.",
+    "Production deployment, external monitoring and the remaining H16-H18 release gates remain separate."
+  ]
+}

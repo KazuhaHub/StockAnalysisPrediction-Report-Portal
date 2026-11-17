@@ -1,0 +1,123 @@
+{
+  "format": "portal.dependency-review/1-dev.1",
+  "captured_at": "2026-11-04T06:45:00-08:00",
+  "status": "partial",
+  "portal_candidate": "d5b6537edc36ce9052883a49ce122f89d6501f81",
+  "apps_candidate": "917651d6bfc2dbc508d0d96f391031e806f5b99d",
+  "toolchain": {
+    "portal_go": "go1.26.10",
+    "local_node": "26.9.0",
+    "local_npm": "11.19.1",
+    "apps_ci_node": "24.15.0",
+    "apps_ci_npm": "11.6.0",
+    "cyclonedx_gomod": "v1.9.0"
+  },
+  "inputs": {
+    "portal_go_mod_sha256": "8fffcac885fe28ae6987102091fbe5ceb05bc37dde19e07e3dc65635ba93c1c7",
+    "portal_go_sum_sha256": "952979cc8c310987af4384fc90756f66871a4118e32508fbbef2ab7d2265c07c",
+    "portal_web_package_sha256": "f160e6f449e619236294574d56b61624717ddf98a2f8df9a3e2766a4c7480030",
+    "portal_web_lock_sha256": "c818a3d9fd7bb88bce8a5ec73463a7f1e15de694a6cad914a09ce96a52b73516",
+    "apps_package_sha256": "d644a62fac18c0cd89768d9e4ce2dd06550e796c72c6f7d08d9902054f780507",
+    "apps_lock_sha256": "a64ad2ac7a167ed7fabf9f23dca96f422609a20ef8cd09b6cef318eb3963081f",
+    "apps_sdk_package_sha256": "6e093d1dc5648e03e342c4f7e440869e4daad98fff7f00cf2f0ac0806a8a1f0b"
+  },
+  "sbom": {
+    "portal_go": {
+      "file": "portal-go.cdx.json.gz",
+      "compressed_sha256": "4188a5be89cee509bdaa4bdd3ec1e6b9dab0741b2b580bcebaff2e04660988f6",
+      "uncompressed_sha256": "5f21b26ebfd70e3223e31b3c05f770ef518c0746beb1afa9fef07290f99d585a",
+      "components": 50
+    },
+    "portal_web": {
+      "file": "portal-web.cdx.json.gz",
+      "compressed_sha256": "04db1697f404ce120dd44014da479036e0a4d6a083b76e62c9f48cdd74fa75a9",
+      "uncompressed_sha256": "71fa47d41b3b6e34fb8f041ff9c450491621f8beccf0f73d4bf7cfd71f40e0b2",
+      "components": 313
+    },
+    "apps_workspaces": {
+      "file": "apps-workspaces.cdx.json.gz",
+      "compressed_sha256": "41cdc0c98a3dd78cc6ee912f85210ea121558f3546e32c3d5e25253bcc677054",
+      "uncompressed_sha256": "f4e65de51f9ae95a6e6b931020f5b140a90b18600235d17faaefb24e2945da05",
+      "components": 73
+    }
+  },
+  "vulnerabilities": {
+    "portal_go_govulncheck": "pass",
+    "portal_web_production_audit": {
+      "low": 5,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "command_exit": 0
+    },
+    "apps_production_audit": {
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "command_exit": 0
+    }
+  },
+  "license_findings": {
+    "portal_go": {
+      "MIT": 19,
+      "Apache-2.0": 11,
+      "BSD-3-Clause": 8,
+      "BSD-Source-Code": 7,
+      "BSD-2-Clause": 2,
+      "0BSD": 1,
+      "AGPL-3.0-only": 1,
+      "GPL-2.0-or-later": 1
+    },
+    "portal_web": {
+      "MIT": 257,
+      "ISC": 35,
+      "Apache-2.0": 7,
+      "BSD-3-Clause": 7,
+      "0BSD": 2,
+      "(MPL-2.0 OR Apache-2.0)": 1,
+      "BSD-2-Clause": 1,
+      "EPL-2.0": 1,
+      "Unlicense": 1
+    },
+    "apps_workspaces": {
+      "MIT": 68
+    },
+    "review_flags": [
+      {
+        "component": "github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/packages/extensionprotocol",
+        "version": "v0.0.0-20261022100605-28553caad93a",
+        "license": "AGPL-3.0-only",
+        "note": "Repository-owned shared protocol dependency, but final distribution obligations still require explicit owner/legal approval."
+      },
+      {
+        "component": "github.com/golang/freetype",
+        "version": "v0.0.0-20170609003504-e2365dfdc4a0",
+        "license": "GPL-2.0-or-later",
+        "note": "Transitive Go dependency. Distribution and compatibility with the intended release license require explicit review before publication."
+      }
+    ]
+  },
+  "ci": {
+    "portal_general": "41839627687",
+    "portal_quota_browser": "41839627798",
+    "portal_runner_daemon": "41839627672",
+    "portal_codeql": "41839618971",
+    "apps_check": "41803523453",
+    "result": "pass"
+  },
+  "commands": [
+    "GOWORK=off GOTOOLCHAIN=go1.26.10 go run github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.9.0 mod -licenses -type application -json -output portal-go.cdx.json .",
+    "npm sbom --sbom-format cyclonedx --omit=dev > portal-web.cdx.json",
+    "npx --yes @cyclonedx/cyclonedx-npm@latest --package-lock-only --ignore-npm-errors --omit dev --output-format JSON --spec-version 1.6 --output-file apps-workspaces.cdx.json package.json",
+    "npm audit --omit=dev --audit-level=high --json",
+    "npm audit --package-lock-only --omit=dev --audit-level=high --json"
+  ],
+  "limits": [
+    "The Apps SBOM is lockfile-only because the built-in npm sbom rejects the versionless root/workspace manifests with EINVALIDPURLTYPE. The standard cyclonedx-npm lockfile mode accepts the lock graph. The current worktree's uncommitted package-version edits were deliberately not used.",
+    "Clean Apps candidate 917651d completes npm ci under the CI-supported Node 24.15/npm 11.6 environment. Local Node 26.9/npm 11.19.1 rejects the same workspace metadata as out of sync, so publishing a root version would improve cross-tool reproducibility but is not a CI release blocker.",
+    "No final public release artifact has been rebuilt and rescanned. These SBOMs describe the exact source and lock inputs above, not a released binary or OCI digest.",
+    "The Go integration commit has no tag reference, so cyclonedx-gomod could not infer a main-module version; dependency component identities are still present.",
+    "An explicit dependency/license policy and owner/legal approval for the AGPL and GPL findings are still required. DEV-04 therefore remains partial."
+  ]
+}

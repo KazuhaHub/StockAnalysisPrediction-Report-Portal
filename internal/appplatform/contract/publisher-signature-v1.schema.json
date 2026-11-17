@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:portal:app:publisher-signature:1-dev.1",
+  "title": "Experimental detached descriptor signature",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "algorithm",
+    "publisher",
+    "key_id",
+    "descriptor_sha256",
+    "signature"
+  ],
+  "properties": {
+    "format": {
+      "const": "portal.app.signature/1-dev.1"
+    },
+    "algorithm": {
+      "const": "Ed25519"
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])"
+    },
+    "key_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,127}(?![\\s\\S])"
+    },
+    "descriptor_sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[a-f0-9]{64}(?![\\s\\S])"
+    },
+    "signature": {
+      "type": "string",
+      "minLength": 86,
+      "maxLength": 86,
+      "pattern": "^[A-Za-z0-9_-]{85}[AQgw](?![\\s\\S])"
+    }
+  }
+}

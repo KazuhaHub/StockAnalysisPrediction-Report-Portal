@@ -15,3 +15,8 @@ Both repositories pin its exact-byte digest; `.gitattributes` forces LF checkout
 The SDK tests consume the same corpus and acceptance results. Generated schema
 validation and broader parity coverage remain open. Successful parsing is not signature verification,
 compatibility evaluation, permission admission or platform acceptance.
+
+Publisher verification uses the separately hash-pinned `publisher-signatures.json`
+corpus and an RFC 8032 test key. See
+`docs/app-platform/24-publisher-signature-verification.md` for regeneration and
+trust boundaries. These fixture keys must never be enrolled in production.

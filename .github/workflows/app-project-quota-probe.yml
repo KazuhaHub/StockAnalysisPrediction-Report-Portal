@@ -1,0 +1,663 @@
+name: app project quota probe
+on:
+  workflow_dispatch:
+    inputs:
+      skip_browser:
+        description: Skip browser fixtures for a native-only diagnostic run
+        type: boolean
+        default: false
+      event_only:
+        description: Limit a native-only diagnostic run to the event acceptance subset
+        type: boolean
+        default: true
+      duration_minutes:
+        description: Capacity soak length in minutes (1 to 140, the step timeout allows no more); only a passing run of 120 or more counts as OPS-08 evidence
+        type: string
+        default: '120'
+      soak_only:
+        description: Run only the capacity soak, not the quota and image delivery jobs
+        type: boolean
+        default: false
+      soak_host:
+        description: Where the capacity soak runs. github is the GitHub-hosted pool; reference-vm is the owner's fixed reference VM, an ephemeral runner labelled sec09-reference-vm (doc 171). Same checks either way; the reference VM is judged at 1.5 times the latency bounds (owner decision 2026-11-16, doc 167); only a manual dispatch can choose it
+        type: choice
+        options: [github, reference-vm]
+        default: github
+      soak_db:
+        description: Database of the measured Portal. postgres is the evidence shape (owner decision 2026-11-14); sqlite-file is the known-limit measurement and never counts as OPS-08 evidence
+        type: choice
+        options: [postgres, sqlite-file]
+        default: postgres
+      soak_cpu_percent:
+        description: Override of the runner CPU budget (capacity.cpu_percent, 1 to 100; empty is the runner default, 50). Backends are sized from the budget the runner reports. A run that overrides the default is never OPS-08 evidence
+        type: string
+        default: ''
+      soak_reserved_cpus:
+        description: Override of the runner's capacity.reserved_cpus (CPUs kept free of app containers; empty is the runner default, 1 on four or more CPUs). A run that overrides the default is never OPS-08 evidence
+        type: string
+        default: ''
+      soak_pin_platform:
+        description: Confine the measured Portal's scope, PostgreSQL and the runner to the reserved CPUs (AllowedCPUs). Diagnostic, never OPS-08 evidence
+        type: boolean
+        default: false
+      soak_platform_cpu_weight:
+        description: CPUWeight (1 to 10000) of the measured Portal's scope and PostgreSQL's unit; the runner's scope keeps 100. Diagnostic, never OPS-08 evidence
+        type: string
+        default: ''
+      soak_runner_profile:
+        description: Profile the runner's CPU for the loaded diagnostic minute and count the requests it relayed (turns the diagnosis on). Diagnostic, never OPS-08 evidence
+        type: boolean
+        default: false
+      soak_variant:
+        description: Diagnostic variant of the soak, never evidence (empty, or memory-db, no-batch-probes, skip-image-store, no-backend-flood and no-task-worker separated by a comma)
+        type: string
+        default: ''
+      expected_commit:
+        description: The full SHA of the reviewed commit the run must measure. When it is given and differs from the commit that ran, the run is never OPS-08 evidence
+        type: string
+        default: ''
+  pull_request:
+    paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_capability_snapshot*'
+      - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
+      - 'internal/app/app_platform_object*'
+      - 'internal/app/app_platform_storage*'
+      - 'internal/app/app_platform_managed_access.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/network-v2*'
+      - 'web/src/lib/appNetworkV2*'
+      - 'web/src/lib/appReportsV2*'
+      - 'web/src/lib/appObjectsV2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
+      - 'scripts/generate_app_contract*'
+      - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
+      - 'internal/apprunner/broker/**'
+      - 'internal/apprunner/driver/**'
+      - 'internal/apprunner/journal/**'
+      - 'internal/apprunner/transport/**'
+      - 'internal/apprunner/service/**'
+      - 'internal/apprunner/imagestore/**'
+      - 'internal/app/app_platform_network_request*'
+      - 'internal/app/app_platform_network_http*'
+      - 'internal/app/app_platform_network_install*'
+      - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_install_capabilities*'
+      - 'internal/app/app_platform_data*'
+      - 'internal/app/app_platform_checkpoint*'
+      - 'internal/app/app_platform_restore*'
+      - 'internal/app/app_platform_recovery*'
+      - 'internal/app/app_platform_update*'
+      - 'internal/app/app_platform_removal*'
+      - 'internal/app/app_platform_writer*'
+      - 'internal/app/app_platform_writable*'
+      - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
+      - 'internal/appplatform/backend_registration*'
+      - 'internal/app/app_platform_backend_identity*'
+      - 'internal/app/app_platform_backend_delivery*'
+      - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
+      - 'internal/appplatform/backend_handshake*'
+      - 'internal/app/app_platform_install_stage*'
+      - 'internal/app/app_platform_install_worker*'
+      - 'internal/app/app_platform_install_queue*'
+      - 'internal/app/app_platform_install_scheduler*'
+      - 'internal/app/app_platform_install_service*'
+      - 'internal/app/app_platform_lease*'
+      - 'internal/app/app_platform_install_review*'
+      - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_image*'
+      - 'internal/app/app_platform_market*'
+      - 'internal/appplatform/offline*'
+      - 'internal/appplatform/image*'
+      - 'internal/appplatform/catalogue*'
+      - 'internal/app/app_platform_catalogue*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/app_platform_trust*'
+      - 'internal/app/app_platform_install_audience*'
+      - 'internal/app/app_platform_activation*'
+      - 'internal/app/app_platform_frontend*'
+      - 'internal/app/app_platform_install_profile*'
+      - 'internal/app/app_platform_launch*'
+      - 'internal/app/app_platform_viewer*'
+      - 'internal/app/app_platform_audience*'
+      - 'internal/appplatform/viewer_identity*'
+      - 'scripts/acceptance/**'
+      - 'scripts/project_quota_probe_test.py'
+      - 'scripts/capacity_soak_test.py'
+      - 'internal/app/app_platform_capacity*'
+      - 'internal/apprunner/**'
+      - 'internal/app/app_platform_backend_http*'
+      - 'internal/app/app_platform_managed_access*'
+      - 'internal/app/app_platform_writable_request*'
+      - 'internal/app/store.go'
+      - 'internal/app/store_stmtcache*'
+      - 'internal/app/batch_run.go'
+      - 'internal/queue/**'
+      - 'internal/app/app_platform_installation_capacity*'
+      - 'internal/app/app_platform_image_fixture_test.go'
+      - '.github/workflows/app-project-quota-probe.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'internal/appplatform/contract/**'
+      - 'internal/appplatform/descriptor*'
+      - 'internal/appplatform/route_query.go'
+      - 'internal/app/app_platform_capability_snapshot*'
+      - 'internal/app/app_platform_launch.go'
+      - 'internal/app/app_platform_reports*'
+      - 'internal/app/app_platform_object*'
+      - 'internal/app/app_platform_storage*'
+      - 'internal/app/app_platform_managed_access.go'
+      - 'internal/app/app_platform_template_browser_test.go'
+      - 'internal/app/app_platform_http_browser_test.go'
+      - 'web/src/lib/bridge-v2*'
+      - 'web/src/lib/network-v2*'
+      - 'web/src/lib/appNetworkV2*'
+      - 'web/src/lib/appReportsV2*'
+      - 'web/src/lib/appObjectsV2*'
+      - 'web/src/lib/route-query-v2*'
+      - 'web/src/lib/page-v2*'
+      - 'web/src/lib/descriptor-contract.generated.ts'
+      - 'web/src/components/apps/**'
+      - 'web/src/pages/AppViewV2*'
+      - 'web/src/components/AppLayout*'
+      - 'scripts/generate_app_contract*'
+      - 'internal/apprunner/data/**'
+      - 'internal/apprunner/control/**'
+      - 'internal/apprunner/broker/**'
+      - 'internal/apprunner/driver/**'
+      - 'internal/apprunner/journal/**'
+      - 'internal/apprunner/transport/**'
+      - 'internal/apprunner/service/**'
+      - 'internal/apprunner/imagestore/**'
+      - 'internal/app/app_platform_network_request*'
+      - 'internal/app/app_platform_network_http*'
+      - 'internal/app/app_platform_network_install*'
+      - 'internal/app/app_platform_network_authority*'
+      - 'internal/app/app_platform_network_roundtrip*'
+      - 'internal/app/app_platform_install_capabilities*'
+      - 'internal/app/app_platform_data*'
+      - 'internal/app/app_platform_checkpoint*'
+      - 'internal/app/app_platform_restore*'
+      - 'internal/app/app_platform_recovery*'
+      - 'internal/app/app_platform_update*'
+      - 'internal/app/app_platform_removal*'
+      - 'internal/app/app_platform_writer*'
+      - 'internal/app/app_platform_writable*'
+      - 'internal/app/app_platform_managed_*'
+      - 'internal/app/app_platform_candidate*'
+      - 'internal/app/app_platform_readiness*'
+      - 'internal/appplatform/backend_readiness*'
+      - 'internal/appplatform/backend_registration*'
+      - 'internal/app/app_platform_backend_identity*'
+      - 'internal/app/app_platform_backend_delivery*'
+      - 'internal/app/app_platform_backend_boot*'
+      - 'internal/app/app_platform_backend_request*'
+      - 'internal/appplatform/backend_request*'
+      - 'internal/appplatform/backend_handshake*'
+      - 'internal/app/app_platform_install_stage*'
+      - 'internal/app/app_platform_install_worker*'
+      - 'internal/app/app_platform_install_queue*'
+      - 'internal/app/app_platform_install_scheduler*'
+      - 'internal/app/app_platform_install_service*'
+      - 'internal/app/app_platform_lease*'
+      - 'internal/app/app_platform_install_review*'
+      - 'internal/app/app_platform_release*'
+      - 'internal/app/app_platform_image*'
+      - 'internal/app/app_platform_market*'
+      - 'internal/appplatform/offline*'
+      - 'internal/appplatform/image*'
+      - 'internal/appplatform/catalogue*'
+      - 'internal/app/app_platform_catalogue*'
+      - 'internal/app/app_platform_actor*'
+      - 'internal/app/app_platform_trust*'
+      - 'internal/app/app_platform_install_audience*'
+      - 'internal/app/app_platform_activation*'
+      - 'internal/app/app_platform_frontend*'
+      - 'internal/app/app_platform_install_profile*'
+      - 'internal/app/app_platform_launch*'
+      - 'internal/app/app_platform_viewer*'
+      - 'internal/app/app_platform_audience*'
+      - 'internal/appplatform/viewer_identity*'
+      - 'go.mod'
+      - 'go.sum'
+      - 'scripts/acceptance/**'
+      - 'scripts/project_quota_probe_test.py'
+      - '.github/workflows/app-project-quota-probe.yml'
+permissions:
+  contents: read
+concurrency:
+  group: app-project-quota-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  enforce-disposable-project-quota:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.soak_only) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check out the reviewed SDK browser fixture source
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
+          ref: 8d8520d41ac609a6cff3eff2482d19a55e2ec307
+          path: .sdk-browser-apps
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Build exact Scheduled Digest package candidate for native-only probe
+        if: github.event_name == 'workflow_dispatch' && inputs.skip_browser == true
+        run: |
+          npm ci --prefix .sdk-browser-apps
+          python3 .sdk-browser-apps/scripts/build-app-v2.py scheduled-digest \
+            --output "$RUNNER_TEMP/scheduled-digest-candidate"
+      - name: Build the exact shared SDK and Portal browser fixtures
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/sdk-browser-browsers
+        run: |
+          npm ci --prefix web
+          npm run build --prefix web
+          npm ci --prefix .sdk-browser-apps
+          npm ci --prefix .sdk-browser-apps/apps/status/tests
+          cd .sdk-browser-apps/apps/status/tests
+          npx playwright install --with-deps chromium
+          cd "$GITHUB_WORKSPACE"
+          python3 .sdk-browser-apps/scripts/test-app-template.py --v2-fixture-output "$RUNNER_TEMP/v2-template-fixture"
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateCandidate$' -count=1
+          python3 scripts/acceptance/sdk_backend_browser/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/sdk-browser-fixture"
+          APP_SDK_BROWSER_BUILD_DIR="$RUNNER_TEMP/sdk-browser-fixture" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestSDKBrowserArchiveDocument$' -count=1
+          python3 scripts/acceptance/reference_apps/build.py --apps-dir "$GITHUB_WORKSPACE/.sdk-browser-apps" --output "$RUNNER_TEMP/reference-apps-fixture"
+          python3 .sdk-browser-apps/scripts/build-app-v2.py scheduled-digest --output "$RUNNER_TEMP/scheduled-digest-candidate"
+          python3 -B -m unittest discover -s scripts -p sdk_browser_public_fixture_test.py
+          sdk_public=$(python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --build "$RUNNER_TEMP/sdk-browser-fixture" --packages "$GITHUB_WORKSPACE/.sdk-browser-apps/apps/status/tests/node_modules" --browsers "$RUNNER_TEMP/sdk-browser-browsers" --runner "$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/run.cjs")
+          {
+            echo "APP_SDK_BROWSER_PUBLIC_ROOT=$sdk_public"
+            echo "APP_SDK_BROWSER_DIR=$sdk_public"
+            echo "APP_SDK_BROWSER_NODE=$(command -v node)"
+            echo "APP_SDK_BROWSER_RUNNER=$sdk_public/run.cjs"
+            echo "SDK_BROWSER_PACKAGE=$sdk_public/package.json"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$sdk_public/browsers"
+          } >> "$GITHUB_ENV"
+      - name: Exercise the generated template in the actual Portal shell
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        run: |
+          APP_V2_AUTHORING_BUILD_DIR="$RUNNER_TEMP/v2-template-fixture" APP_V2_AUTHORING_BROWSER_RUNNER="$GITHUB_WORKSPACE/scripts/acceptance/sdk_backend_browser/template.cjs" GOWORK=off GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestGeneratedV2TemplateBrowser$' -count=1 -v -timeout=90s
+      - name: Preserve generated-template browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-template-browser
+          if-no-files-found: ignore
+          path: |
+            ${{ runner.temp }}/v2-template-fixture/failure.jpg
+            ${{ runner.temp }}/v2-template-fixture/proof.jpg
+            ${{ runner.temp }}/v2-template-fixture/browser-evidence.json
+      - name: Exercise the real installation lifecycle in Chromium
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_INSTALL_BROWSER_EVIDENCE: ${{ runner.temp }}/platform-install-browser
+        run: node scripts/app-install-browser-acceptance.cjs
+      - name: Preserve installation-browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-install-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/platform-install-browser
+      - name: Exercise truthful application failure states in Chromium
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_PLATFORM_FAILURE_BROWSER_EVIDENCE: ${{ runner.temp }}/platform-failure-browser
+        run: node scripts/app-platform-failure-browser.cjs
+      - name: Preserve application failure browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-failure-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/platform-failure-browser
+      - name: Exercise both reference apps in the shared shell
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        env:
+          APP_REFERENCE_BROWSER_ROOT: ${{ runner.temp }}/reference-apps-fixture
+          APP_REFERENCE_BROWSER_EVIDENCE: ${{ runner.temp }}/reference-apps-browser
+        run: node scripts/app-reference-apps-shell-browser.cjs
+      - name: Preserve reference-app shell browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reference-apps-browser
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/reference-apps-browser
+      - name: Prepare real-runner lifecycle browser evidence
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_browser != true
+        run: |
+          install -d -m 0777 "$RUNNER_TEMP/app-platform-lifecycle-browser"
+          install -m 0555 scripts/app-platform-lifecycle-browser.cjs "$RUNNER_TEMP/app-platform-lifecycle-browser.cjs"
+          {
+            echo "APP_LIFECYCLE_BROWSER_RUNNER=$RUNNER_TEMP/app-platform-lifecycle-browser.cjs"
+            echo "APP_LIFECYCLE_BROWSER_EVIDENCE=$RUNNER_TEMP/app-platform-lifecycle-browser"
+          } >> "$GITHUB_ENV"
+      - name: Install ephemeral filesystem acceptance tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev iproute2 util-linux
+      - name: Build native data and independent UAPI probes
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-data-native.test" ./internal/apprunner/data
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-driver-native.test" ./internal/apprunner/driver
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-transport-native.test" ./internal/apprunner/transport
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-data-native.test" ./internal/app
+          GOWORK=off GOMAXPROCS=2 go test -race -p 2 ./internal/apprunner/broker ./internal/apprunner/control ./internal/appplatform ./internal/apprunner/transport ./internal/apprunner/driver
+          cc -Wall -Wextra -Werror scripts/acceptance/xfs_abi_probe.c scripts/acceptance/xfs_identity_abi_probe.c -o "$RUNNER_TEMP/xfs-abi-probe"
+          "$RUNNER_TEMP/xfs-abi-probe" > "$RUNNER_TEMP/xfs-abi.json"
+          docker pull registry.k8s.io/pause:3.10
+          candidate_image=$(docker image inspect registry.k8s.io/pause:3.10 --format '{{index .RepoDigests 0}}')
+          test -n "$candidate_image"
+          candidate_socket=$(readlink -f /var/run/docker.sock)
+          {
+            echo "APP_CANDIDATE_NATIVE_BINARY=$RUNNER_TEMP/app-driver-native.test"
+            echo "APP_CANDIDATE_NATIVE_IMAGE=$candidate_image"
+            echo "APP_CANDIDATE_DOCKER_SOCKET=$candidate_socket"
+          } >> "$GITHUB_ENV"
+      - name: Check refusal behavior without privileges
+        run: |
+          python3 -B -m unittest discover -s scripts -p project_quota_probe_test.py
+          GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/ready_app -run '^TestFixedFixtureQuotaProfiles$' -count=1
+      - name: Build owned readiness backend through disposable local registry
+        run: bash scripts/acceptance/ready_app/build-fixture.sh
+      - name: Build exact Scheduled Digest service image
+        env:
+          APP_SCHEDULED_DIGEST_APPS_ROOT: ${{ github.workspace }}/.sdk-browser-apps
+        run: bash scripts/acceptance/scheduled_digest/build-image.sh
+      - name: Export the exact Scheduled Digest image as a managed package
+        env:
+          APPS: ${{ github.workspace }}/.sdk-browser-apps
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/image-delivery-real"
+          mkdir -p "$out"
+          # The package is saved from the very image the build step produced and the next step verifies (its ID
+          # is recorded on the second line), not from a rebuild, so "exact" cannot depend on a cache hit.
+          image_id=$(sed -n 2p "$RUNNER_TEMP/scheduled-digest-exact-image.txt")
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          test "$(docker image inspect "$image_id" --format '{{.Id}}')" = "$image_id"
+          # docker save of an image ID writes an OCI layout on Docker 25+.
+          docker save "$image_id" --output "$out/image.tar"
+          python3 "$APPS/scripts/export-image-oci.py" "$out/image.tar" \
+            --platform linux/amd64 --output "$out/export"
+          python3 "$APPS/scripts/build-app-v2.py" scheduled-digest \
+            --images "$out/export/images.json" --output "$out/candidate"
+          rm -f "$out/image.tar"
+          # The package's config digest is the image's ID on the classic store; fail here if it is not.
+          config=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))[0]['config_digest'])" "$out/export/images.json")
+          test "sha256:${config#sha256:}" = "$image_id"
+          {
+            echo "APP_IMAGE_DELIVERY_CANDIDATE=$out/candidate"
+            echo "APP_IMAGE_DELIVERY_BLOBS=$out/export/blobs"
+            echo "APP_IMAGE_DELIVERY_BUILT_IMAGE_ID=$image_id"
+          } >> "$GITHUB_ENV"
+      - name: Verify exact Scheduled Digest image runtime
+        env:
+          APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE: ${{ runner.temp }}/scheduled-digest-exact-image.json
+        run: |
+          sudo --preserve-env=APP_CANDIDATE_DOCKER_SOCKET,APP_SCHEDULED_DIGEST_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE \
+            python3 scripts/acceptance/scheduled_digest_image.py \
+            --image "$APP_SCHEDULED_DIGEST_NATIVE_IMAGE" \
+            --docker-socket "$APP_CANDIDATE_DOCKER_SOCKET" \
+            --evidence "$APP_SCHEDULED_DIGEST_IMAGE_EVIDENCE"
+      - name: Preserve exact Scheduled Digest image evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scheduled-digest-exact-image
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/scheduled-digest-exact-image.json
+      - name: Enforce quotas only on the newly owned loopback image
+        shell: bash
+        env:
+          PORTAL_EVENT_ACCEPTANCE_ONLY: ${{ github.event_name == 'workflow_dispatch' && inputs.skip_browser && inputs.event_only && '1' || '0' }}
+          APP_SCHEDULED_DIGEST_CANDIDATE: ${{ runner.temp }}/scheduled-digest-candidate
+          APP_IMAGE_DELIVERY_REQUIRED: '1'
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,PORTAL_EVENT_ACCEPTANCE_ONLY,APP_CANDIDATE_NATIVE_BINARY,APP_CANDIDATE_NATIVE_IMAGE,APP_CANDIDATE_DOCKER_SOCKET,APP_READY_NATIVE_IMAGE,APP_SCHEDULED_DIGEST_CANDIDATE,APP_SCHEDULED_DIGEST_NATIVE_IMAGE,APP_IMAGE_DELIVERY_CANDIDATE,APP_IMAGE_DELIVERY_BLOBS,APP_IMAGE_DELIVERY_BUILT_IMAGE_ID,APP_IMAGE_DELIVERY_REQUIRED,APP_SDK_BROWSER_DIR,APP_SDK_BROWSER_NODE,APP_SDK_BROWSER_RUNNER,SDK_BROWSER_PACKAGE,PLAYWRIGHT_BROWSERS_PATH,APP_LIFECYCLE_BROWSER_RUNNER,APP_LIFECYCLE_BROWSER_EVIDENCE python3 scripts/acceptance/project_quota_probe.py --disposable-github-worker --native-binary "$RUNNER_TEMP/app-data-native.test" --abi-json "$RUNNER_TEMP/xfs-abi.json" --journal-binary "$RUNNER_TEMP/app-journal-native.test" --transport-binary "$RUNNER_TEMP/app-transport-native.test" --portal-binary "$RUNNER_TEMP/portal-data-native.test" | tee project-quota-evidence.json
+      - name: Preserve real-runner managed image delivery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: managed-image-real-runner
+          path: |
+            managed-image-real-runner-evidence.json
+            portal-image-delivery-failure.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Remove only the owned readiness registry
+        if: always()
+        run: bash scripts/acceptance/ready_app/cleanup-fixture.sh
+      - name: Remove only the owned public SDK browser fixture
+        if: always() && env.APP_SDK_BROWSER_PUBLIC_ROOT != ''
+        run: python3 scripts/acceptance/sdk_backend_browser/public_fixture.py --cleanup "$APP_SDK_BROWSER_PUBLIC_ROOT"
+      - name: Preserve redacted enforcement evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: project-quota-evidence
+          path: |
+            project-quota-evidence.json
+            portal-quota-failure.txt
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Preserve real-runner lifecycle browser evidence
+        if: always() && (github.event_name != 'workflow_dispatch' || inputs.skip_browser != true)
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-platform-lifecycle-browser
+          path: ${{ runner.temp }}/app-platform-lifecycle-browser
+          if-no-files-found: warn
+          retention-days: 14
+
+  deliver-managed-image-package:
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.soak_only) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check out the Apps repository tooling
+        uses: actions/checkout@v6
+        with:
+          repository: KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps
+          ref: 8d8520d41ac609a6cff3eff2482d19a55e2ec307
+          path: .sdk-browser-apps
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Export the exact Scheduled Digest image as OCI content
+        env:
+          APPS: ${{ github.workspace }}/.sdk-browser-apps
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/image-delivery"
+          mkdir -p "$out"
+          npm ci --prefix "$APPS"
+          # Default builder, as the exact-image probe does; docker save writes an OCI layout on Docker 25+.
+          docker build --file "$APPS/apps/scheduled-digest/service/Dockerfile" \
+            --tag scheduled-digest-delivery:build "$APPS"
+          image_id=$(docker image inspect scheduled-digest-delivery:build --format '{{.Id}}')
+          docker save "$image_id" --output "$out/image.tar"
+          python3 "$APPS/scripts/export-image-oci.py" "$out/image.tar" \
+            --platform linux/amd64 --output "$out/export"
+          python3 "$APPS/scripts/build-app-v2.py" scheduled-digest \
+            --images "$out/export/images.json" --output "$out/candidate"
+      - name: Install the exact image offline and from the catalogue, then run the storage scenarios
+        env:
+          APP_IMAGE_DELIVERY_CANDIDATE: ${{ runner.temp }}/image-delivery/candidate
+          APP_IMAGE_DELIVERY_BLOBS: ${{ runner.temp }}/image-delivery/export/blobs
+          APP_IMAGE_DELIVERY_EVIDENCE: ${{ runner.temp }}/image-delivery/evidence.json
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          docker image ls --all --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' | sort > "$RUNNER_TEMP/image-delivery/images-before.txt"
+          go test ./internal/app -count=1 -v \
+            -run '^(TestRealImagePackageDeliveryOfflineCatalogueAndStorageScenarios|TestOfflineManagedPackagesWithCraftedLayoutsAreRefusedAndStoreNothing|TestCatalogueInstallOfAManagedPackageIsTheOfflineInstall|TestCataloguePackageDownloadResumesFromThePartialAfterARestartWithRangeAndIfRange)$'
+          docker image ls --all --no-trunc --format '{{.ID}} {{.Repository}}:{{.Tag}}' | sort > "$RUNNER_TEMP/image-delivery/images-after.txt"
+          diff "$RUNNER_TEMP/image-delivery/images-before.txt" "$RUNNER_TEMP/image-delivery/images-after.txt"
+      - name: Prove the SEC-01 negatives
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          go test ./internal/apprunner/driver -count=1 -v \
+            -run '^(TestDockerRequestAllowListIsClosed|TestAllowListTransportStopsAPullBeforeTheSocket|TestRunnerSourceNeverPullsOrReadsDockerCredentials|TestOnlyTheDockerClientConstructorDialsTheSocket|TestDockerGuard.*)$' \
+            | tee "$RUNNER_TEMP/image-delivery/sec01.txt"
+          grep -q '^ok' "$RUNNER_TEMP/image-delivery/sec01.txt"
+      - name: Preserve managed image delivery evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: managed-image-delivery
+          path: |
+            ${{ runner.temp }}/image-delivery/evidence.json
+            ${{ runner.temp }}/image-delivery/images-before.txt
+            ${{ runner.temp }}/image-delivery/images-after.txt
+            ${{ runner.temp }}/image-delivery/sec01.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The declared-capacity soak (doc 171, PR 4b; OPS-08; SEC-09 stays partial after OPS-08 passes, because the task worker and event delivery coordinator are not exercised). The dispatch run is the acceptance run
+  # (120 minutes by default, 140 at most), started on the branch that carries this job at the reviewed commit; a pull request
+  # touching the capacity code, the code behind its latency fixes or the soak runs the same configuration for five minutes
+  # (and adds the diagnosis) so it cannot rot, and that smoke is never evidence. Both use the reference host class: a
+  # GitHub-hosted ubuntu-24.04 runner (4 vCPU, 16 GiB) and a 16 GiB XFS project-quota loop volume the harness creates and owns.
+  capacity-soak:
+    if: github.event_name != 'push'
+    runs-on: ${{ (github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm') && fromJSON('["self-hosted","sec09-reference-vm"]') || 'ubuntu-24.04' }}
+    timeout-minutes: 170
+    env:
+      APP_CAPACITY_SOAK_DB: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_db || 'postgres' }}
+      APP_CAPACITY_SOAK_POSTGRES_DSN: "postgres://portal:portal@localhost:5432/reports_soak?sslmode=disable"
+      SOAK_MINUTES: ${{ github.event_name == 'workflow_dispatch' && inputs.duration_minutes || '5' }}
+      # The pull request smoke also profiles the measured process (see the diagnosis in doc 171); the dispatch run does not.
+      APP_CAPACITY_SOAK_DIAGNOSE: ${{ (github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.soak_runner_profile)) && '1' || '' }}
+      APP_CAPACITY_SOAK_RUNNER_PROFILE: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_runner_profile && '1' || '' }}
+      APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_platform_cpu_weight || '' }}
+      APP_CAPACITY_SOAK_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_cpu_percent || '' }}
+      APP_CAPACITY_SOAK_RESERVED_CPUS: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_reserved_cpus || '' }}
+      APP_CAPACITY_SOAK_PIN_PLATFORM: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_pin_platform && 'true' || '' }}
+      APP_CAPACITY_SOAK_VARIANT: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_variant || '' }}
+      APP_CAPACITY_SOAK_EXPECTED_COMMIT: ${{ github.event_name == 'workflow_dispatch' && inputs.expected_commit || '' }}
+      APP_CAPACITY_SOAK_HOST: ${{ github.event_name == 'workflow_dispatch' && inputs.soak_host == 'reference-vm' && 'reference-vm' || '' }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Check the requested duration
+        run: |
+          if ! [[ "$SOAK_MINUTES" =~ ^[0-9]+$ ]] || (( SOAK_MINUTES < 1 || SOAK_MINUTES > 140 )); then
+            echo "duration_minutes must be 1 to 140 (the step timeout is 160 minutes), got '$SOAK_MINUTES'"
+            exit 1
+          fi
+      - name: Check the soak harness without privileges
+        run: |
+          python3 -B -m unittest discover -s scripts -p capacity_soak_test.py
+          GOWORK=off GOMAXPROCS=2 go test -p 2 ./scripts/acceptance/soak_app -count=1
+          GOWORK=off GOMAXPROCS=2 go test ./internal/app -run '^(TestSoak|TestStagingCap|TestTaskQuotasRefuse)' -count=1
+      - name: Run the unit tests the unit level probes cite
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/capacity-soak"
+          # The verdict reads this file: a unit level probe is proven by these tests, run in this job.
+          GOWORK=off GOMAXPROCS=2 go test -json -count=1 \
+            -run '^(TestTaskQuotasRefuseAtTheirOwnBoundary|TestLoadImageReservesTheDeclaredBytesOnce|TestLoadImageRefusedRunsNothingAndReplays|TestAdmissionRefusesEachDimensionByOneUnit)$' \
+            ./internal/app ./internal/apprunner/journal > "$RUNNER_TEMP/capacity-soak/unit-tests.json"
+      - name: Record the disk space before the soak
+        run: |
+          mkdir -p "$RUNNER_TEMP/capacity-soak"
+          { df -B1 / /tmp /var/lib/docker 2>&1; docker info --format 'docker root: {{.DockerRootDir}}' 2>&1; } | tee "$RUNNER_TEMP/capacity-soak/disk-before.txt"
+      - name: Start a fresh PostgreSQL 16 for the measured Portal
+        # The measured Portal runs on PostgreSQL, as production does. It is the runner image's own PostgreSQL 16, not a service
+        # container: the runner's data writer inspects every container on the host and refuses one it did not start (the first
+        # run with a postgres:16 service container failed every install at the data writer with "invalid application runtime
+        # response"). The database is dropped and created for every run.
+        run: |
+          set -euo pipefail
+          sudo systemctl start postgresql.service
+          for _ in $(seq 1 30); do sudo -u postgres pg_isready -q && break; sleep 1; done
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -q <<'SQL'
+          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'portal') THEN CREATE ROLE portal LOGIN PASSWORD 'portal'; END IF; END $$;
+          DROP DATABASE IF EXISTS reports_soak;
+          CREATE DATABASE reports_soak OWNER portal;
+          SQL
+          # The soak's own database: time the WAL syncs so the evidence can say whether commit latency rises under the disk load.
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -q -c 'ALTER SYSTEM SET track_wal_io_timing = on' -c 'SELECT pg_reload_conf()' > /dev/null
+          sudo -u postgres psql -tAc 'SHOW server_version' | tee "$RUNNER_TEMP/postgres-version.txt"
+      - name: Install ephemeral filesystem acceptance tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xfsprogs xfslibs-dev util-linux
+      - name: Build the native test binaries
+        run: |
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/app-journal-native.test" ./internal/apprunner/journal
+          GOWORK=off GOMAXPROCS=2 go test -c -o "$RUNNER_TEMP/portal-soak-native.test" ./internal/app
+      - name: Build the soak backend through a disposable local registry
+        run: bash scripts/acceptance/soak_app/build-image.sh
+      - name: Run the capacity soak
+        timeout-minutes: 160
+        run: |
+          set -euo pipefail
+          sudo --preserve-env=GITHUB_ACTIONS,RUNNER_ENVIRONMENT,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,GITHUB_SERVER_URL,GITHUB_REPOSITORY,GITHUB_SHA,GITHUB_REF,GITHUB_STEP_SUMMARY,GITHUB_REF_NAME,GITHUB_EVENT_NAME,GITHUB_WORKFLOW_REF,RUNNER_NAME,APP_CAPACITY_SOAK_HOST,APP_CAPACITY_SOAK_DIAGNOSE,APP_CAPACITY_SOAK_VARIANT,APP_CAPACITY_SOAK_DB,APP_CAPACITY_SOAK_CPU_PERCENT,APP_CAPACITY_SOAK_RESERVED_CPUS,APP_CAPACITY_SOAK_PIN_PLATFORM,APP_CAPACITY_SOAK_PLATFORM_CPU_WEIGHT,APP_CAPACITY_SOAK_RUNNER_PROFILE,APP_CAPACITY_SOAK_POSTGRES_DSN,APP_CAPACITY_SOAK_IMAGE,APP_CAPACITY_SOAK_APP_BINARY,APP_CAPACITY_SOAK_EXPECTED_COMMIT \
+            python3 scripts/acceptance/capacity_soak.py --duration-minutes "$SOAK_MINUTES" \
+            --portal-binary "$RUNNER_TEMP/portal-soak-native.test" \
+            --journal-binary "$RUNNER_TEMP/app-journal-native.test" \
+            --unit-tests "$RUNNER_TEMP/capacity-soak/unit-tests.json" \
+            --out "$RUNNER_TEMP/capacity-soak"
+      - name: Summarise the runner's CPU profile
+        if: always()
+        run: |
+          profile="$RUNNER_TEMP/capacity-soak/diag/runner-cpu.pprof"
+          if [ -s "$profile" ]; then
+            go tool pprof -top -cum -lines -nodecount=70 "$profile" > "$RUNNER_TEMP/capacity-soak/diag/runner-profile-cum.txt" 2>&1 || true
+            go tool pprof -top -lines -nodecount=40 "$profile" > "$RUNNER_TEMP/capacity-soak/diag/runner-profile-flat.txt" 2>&1 || true
+            head -60 "$RUNNER_TEMP/capacity-soak/diag/runner-profile-cum.txt"
+          fi
+      - name: Preserve the soak evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: capacity-soak-evidence
+          path: ${{ runner.temp }}/capacity-soak
+          if-no-files-found: warn
+          retention-days: ${{ github.event_name == 'workflow_dispatch' && 90 || 14 }}
+      - name: Remove only the owned soak registry
+        if: always()
+        run: bash scripts/acceptance/soak_app/cleanup-image.sh

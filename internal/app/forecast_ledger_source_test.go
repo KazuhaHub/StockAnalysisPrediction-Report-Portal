@@ -72,6 +72,9 @@ func TestPostgresEvaluatorNoSourceRemainsASourceFault(t *testing.T) {
 	if err := st.CreateToken("tok-all", "test", "all", ""); err != nil {
 		t.Fatal(err)
 	}
+	// The database is shared by every Postgres test in the package: leave no token behind for the
+	// next test that creates the same one.
+	t.Cleanup(func() { _, _ = st.exec(`DELETE FROM api_tokens WHERE token_hash=?`, tokenDigest("tok-all")) })
 	s := &Server{st: st, names: LoadNames(t.TempDir(), st)}
 	s.names.fetch = func(string) string { return "" }
 	t.Cleanup(func() {

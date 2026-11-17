@@ -1,0 +1,42 @@
+{
+  "format": "portal.application-task-crash-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T04:38:00-08:00",
+  "status": "pass-development",
+  "candidate": "b37df3ef9813ee9170c79e1cd06b3d25784998a8",
+  "hosted_ci": {
+    "general_test": "41822717633",
+    "quota_browser": "41822717553",
+    "runner_daemon": "41822717599",
+    "codeql": "41822711853",
+    "result": "pass"
+  },
+  "commands": [
+    "TEST_POSTGRES_DSN=<fresh-database> go test -p 1 ./internal/app -run '^(TestPlatformTaskExpiredLeaseBecomesUncertainAndNeverRetries(SQLite|Postgres)|TestPlatformTaskClaimCommitsAuthorityLossWithoutWork(SQLite|Postgres)|TestPlatformTaskWorkerCrashLeaseRecovery)$' -count=1"
+  ],
+  "observed": {
+    "worker_exited_by_sigkill_before_effect": true,
+    "worker_exited_by_sigkill_after_effect": true,
+    "effect_before_crash": 1,
+    "effect_after_recovery": 1,
+    "effect_after_second_claim": 1,
+    "expired_task_state": "uncertain:task_lease_expired",
+    "expired_attempt_state": "uncertain:task_lease_expired",
+    "result_released": false,
+    "worker_lease_retained": false,
+    "expired_lease_reclaimed": false,
+    "automatic_replay": false,
+    "same_occurrence_created_new_task": false,
+    "authority_loss_without_work_persisted": true
+  },
+  "scope": [
+    "A separate OS test process runs the production platformTaskScheduler.tick claim/start/execute/completion path and kills itself with SIGKILL while the handler is active.",
+    "Before-effect and after-effect cases share the same durable SQLite task, attempt, service identity and occurrence identity.",
+    "The after-effect case fsyncs one synthetic external effect before SIGKILL. Recovery closes the task and attempt as uncertain and never invokes the handler again.",
+    "The expired-lease state transition and empty-poll authority-loss commit are verified on SQLite and a fresh PostgreSQL 18 database."
+  ],
+  "limits": [
+    "The killed process is a dedicated OS test process using the real scheduler path, not the compiled cmd/app-task-worker process making a container-backed application HTTP call.",
+    "The external effect is a test-owned fsynced file, not the exact Scheduled Digest service. It proves ambiguous-effect recovery and non-replay, not exactly-once delivery.",
+    "A stale handler cannot commit after revision/fence loss because completion checks the running state and lease again; a later compiled CLI/native backend crash drill remains useful release coverage."
+  ]
+}

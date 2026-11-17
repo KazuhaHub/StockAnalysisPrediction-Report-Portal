@@ -217,7 +217,7 @@ func (p *exportPlan) count(ctx context.Context) (int64, error) {
 	if p.post == nil {
 		var n int64
 		q := "SELECT COUNT(*) FROM " + p.src.from + " WHERE " + p.fullWhere()
-		err := p.s.st.db.QueryRowContext(ctx, p.s.st.bind(q), p.args...).Scan(&n)
+		err := p.s.st.queryRowContext(ctx, q, p.args...).Scan(&n)
 		return n, err
 	}
 	var n int64
@@ -262,7 +262,7 @@ func (p *exportPlan) page(ctx context.Context, offset, limit int) ([][]string, e
 // been read (0 = no cap), reporting whether it did, so the caller can continue from the last row.
 func (p *exportPlan) readBatch(ctx context.Context, q string, args []any, maxBytes, limit int) ([][]string, bool, error) {
 	atomic.AddInt64(&p.s.exports.queries, 1)
-	rows, err := p.s.st.db.QueryContext(ctx, p.s.st.bind(q), args...)
+	rows, err := p.s.st.queryContext(ctx, q, args...)
 	if err != nil {
 		return nil, false, err
 	}

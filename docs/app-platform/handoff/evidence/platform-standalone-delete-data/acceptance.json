@@ -1,0 +1,35 @@
+{
+  "format": "portal.app-platform.standalone-delete-data-acceptance/1-dev.1",
+  "captured_at": "2026-11-03T12:43:00-08:00",
+  "status": "pass-development",
+  "candidate": "e3fb26f42c2a811748dd9463e145b53dd5f83917",
+  "workflow": {
+    "name": "app project quota probe",
+    "run": "41715252815",
+    "job": "126193456308",
+    "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/41715252815",
+    "artifact": "project-quota-evidence",
+    "artifact_sha256": "a006fce202cbc2e6b06627fed4348af9e0fb88916967b3342a10622840a8f1dd",
+    "browser_scope": "native runner tests only; Chromium skipped"
+  },
+  "observed": {
+    "native_managed_repair_start_probe_activated": true,
+    "native_managed_repair_backend_request": true,
+    "native_standalone_delete_data_namespace_absent": true,
+    "native_managed_uninstall_remove_data": true,
+    "native_managed_reinstall_fresh_namespace_and_launch": true,
+    "execution_ready": false
+  },
+  "coverage": [
+    "A real managed installation was stopped, reviewed for repair, checkpointed and restarted through the signed runner path.",
+    "The repaired generation passed probe, registration, boot and activation, then served a real current-viewer backend request while preserving the release, policy and grant tuple.",
+    "The installation was then disabled and a separate reviewed delete_data operation was admitted for its retained namespace.",
+    "The signed runner removed the actual namespace and the Portal settled the namespace as deleted with no owner and the operation at complete.",
+    "The same native flow completed managed uninstall and fresh reinstall without retaining the previous namespace."
+  ],
+  "limits": [
+    "This is disposable Linux/Docker/XFS development acceptance. It is not production deployment evidence or an execution_ready claim.",
+    "The run is native-only and deliberately skips Chromium. Browser confirmation and progress for repair/restore are recorded separately in the lifecycle runner evidence.",
+    "Broader concurrent operator acceptance across enable, update and repair remains open."
+  ]
+}

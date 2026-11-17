@@ -1,0 +1,228 @@
+{
+  "format": "portal.app-platform.package-validation/1",
+  "captured_at": "2026-11-02T21:40:58-08:00",
+  "status": "partial",
+  "candidate": {
+    "portal_package_commit": "563e8b556e0f09d197744b51af8685ad3a4c2a65",
+    "apps": "4c53f102e42ffb95377f21207d0c04e7173908b7"
+  },
+  "ci": {
+    "portal_general_and_race": "41582763189",
+    "portal_quota_browser": "41582763073",
+    "portal_runner_daemon": "41582763413",
+    "portal_codeql": "41582758211",
+    "apps_check": [
+      "41581446614",
+      "41581440281"
+    ]
+  },
+  "results": [
+    {
+      "id": "PKG-01",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagedMarketStaging(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestOfflineEnvelope' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformOfflineMarketHTTP' -count=1",
+        "python3 -m unittest scripts.tests.test_offline_envelope -v"
+      ],
+      "coverage": [
+        "A signed managed descriptor is now accepted by the market staging path and appears in the release catalogue as backend, installable metadata.",
+        "The management install plan and commit select the managed review/consumer from canonical plan bytes instead of falling through to the static path.",
+        "Without a configured or compatible runner, managed install admission fails with a bounded runtime-unavailable response and creates no installation or operation.",
+        "The development static .portalapp envelope has an exact three-member format, bounded ZIP parser, closed detached-signature syntax, exact descriptor/frontend binding and inspector output.",
+        "The Apps packer emits deterministic envelopes from already signed bytes and never reads a private key.",
+        "The administrator offline upload stages through existing trust/signature/immutable-release checks, then completes the normal review, commit, activation and launch path on SQLite and PostgreSQL.",
+        "Unknown, duplicate, traversal, symlink, executable, changed-frontend, wrong-digest, malformed and frontend-only managed envelopes are refused without state."
+      ],
+      "limits": [
+        "The static offline envelope is implemented, but managed OCI image layout/platform payloads and public envelope-format freeze remain open."
+      ]
+    },
+    {
+      "id": "PKG-02",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformStoredReleaseRefusal(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "A validly signed managed descriptor whose OCI image digest is changed afterward is refused before the staged-release callback runs.",
+        "A changed descriptor, signature, version, frontend artifact, publisher policy or namespace is refused with no durable mutation."
+      ],
+      "limits": [
+        "This is the repository admission boundary, not a replacement against a live production installation."
+      ]
+    },
+    {
+      "id": "PKG-03",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -count=1",
+        "npm test --workspace=@portal-app/sdk -- --run tests/publisher-v2.test.ts",
+        "npm run typecheck --workspace=@portal-app/sdk"
+      ],
+      "coverage": [
+        "The shared Go and TypeScript publisher corpus contains 55 cases with exact frame SHA-256 f0553de5a701b0d8f665a2e997a525c8022ba5039ab6bce4c62da18f3118d641.",
+        "Wrong key, namespace, algorithm, key revision, disabled publisher, expired key and revoked key are refused.",
+        "Catalogue discovery returns publisher_verified false; catalogue metadata alone does not establish trust."
+      ]
+    },
+    {
+      "id": "PKG-04",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestFrontendInspection.*$' -count=1",
+        "python3 -m unittest discover -s scripts/tests -v"
+      ],
+      "coverage": [
+        "Traversal, absolute and backslash paths, encoded separators, dot normalization, duplicate and case-colliding entries, file/directory conflicts, symlinks, devices, setuid entries, executables, server programs and unknown media are refused.",
+        "Archive, per-file, total-byte and entry-count limits are independent; CRC failures, forged ZIP metadata, ZIP64, multi-disk and trailing data are refused.",
+        "Inspection is in memory and returns no partial file metadata on failure; the package tools reject symlinked roots and private or non-regular assets."
+      ]
+    },
+    {
+      "id": "PKG-05",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -run '^TestCompatibility.*$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformInstallRequirements$' -count=1"
+      ],
+      "coverage": [
+        "Platform API ranges, runner protocol, runtime architecture and backend protocol mismatches are refused.",
+        "A managed package without a compatible runner is refused before installation admission.",
+        "Invalid descriptor/schema versions, missing architectures and unsupported requirements return bounded refusal results."
+      ],
+      "limits": [
+        "The compatibility target is the development host contract, not a full matrix of deployed runner versions."
+      ]
+    },
+    {
+      "id": "PKG-06",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformUpdateReviewRefusesChangesWhileReviewIsOpen(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformInstallStaleReview(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "Changing publisher trust, policy revision or the stored target package while an update review is open makes the old confirmation unusable.",
+        "The live source release remains active and no update operation is admitted after refusal.",
+        "Install reviews reject trust changes, role demotion, altered plan JSON, wrong plan digests and an older unfinished installation."
+      ],
+      "limits": [
+        "Catalogue URL metadata is discovery-only. A catalogue edit cannot replace the exact signed bytes already bound by digest."
+      ]
+    },
+    {
+      "id": "PKG-07",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformStagedRelease(SQLite|Postgres)$' -count=1"
+      ],
+      "coverage": [
+        "Replaying identical immutable bytes is idempotent and creates one release plus one frontend artifact.",
+        "Changing executable descriptor bytes for an already published app/version is refused.",
+        "Failed or refused staging leaves the old release assets and trust records unchanged."
+      ]
+    },
+    {
+      "id": "PKG-08",
+      "status": "partial",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformMarketVerifiedRemoteStaging(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformReleaseStagingDatabaseFullRollsBack$' -count=1",
+        "Disposable app-project-quota-probe run 41599541528/job 125794746175 executes interrupted managed staging and restart recovery"
+      ],
+      "coverage": [
+        "A truncated artifact response retains its bounded in-memory prefix for the same fetch. The retry sends Range and If-Range; a valid 206 continues at the exact offset, while a 200 safely restarts from zero. Redirects retain the range headers and final descriptor, signature and frontend digest checks still decide admission.",
+        "Exhausting the bounded retry budget leaves no staged release.",
+        "Replaying an already staged immutable package reuses the existing release without creating another operation.",
+        "Mutating an already staged frontend artifact is detected by the stored-release recheck before admission.",
+        "A real managed writable installation was interrupted after its side-effect-free stage boundary. A new scheduler reclaimed the same operation under a higher fence and completed real data, candidate start, readiness/registration and activation with one applied copy of every durable effect.",
+        "A file-backed SQLite database with the freelist exhausted and no page-growth allowance refuses a roughly 1 MiB package; release, frontend and staging-audit rows all roll back."
+      ],
+      "limits": [
+        "The received prefix exists only in memory for one bounded fetch. There is no persistent market cache, so request termination or process restart starts the next fetch at offset zero.",
+        "Persistent cache design and approval remain open; no cache table or unmanaged cache file has been added."
+      ]
+    },
+    {
+      "id": "PKG-10",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformTrustQuarantine(Frontend|Managed)(SQLite|Postgres)$' -count=1",
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementManagedInstallCommitRequiresRuntime$' -count=1",
+        "Disposable app-project-quota-probe run 41594944957/job 125779995923 executes the native package-revocation stop and recovery path"
+      ],
+      "coverage": [
+        "Publisher disable or key revocation verifies active signed releases and atomically queues the existing reviewed disable path for affected ready installations.",
+        "Static quarantine immediately denies launch and the existing scheduler reaches complete without dropping the dedicated plugin table.",
+        "Managed quarantine preserves runtime identity, namespace and data, advances the writer fence and queues managed stop; an unavailable runner records managed_disable_unavailable rather than claiming a stop.",
+        "A native publisher policy revocation initiated the queue and the real disposable runner reached a successful stop. Restoring trust and explicitly enabling or repairing reverified the same signed release under the current trust revision instead of accepting stale revision evidence.",
+        "Repeated revocation does not duplicate quarantine operations, and launch refusal does not read executable content."
+      ],
+      "limits": [
+        "The native stop is development evidence on the disposable GitHub Linux root runner, not production deployment approval.",
+        "Trust is deployment-local. There is no external trust fetch to make unreachable; a failed local trust read must continue to fail closed."
+      ]
+    },
+    {
+      "id": "DEV-03",
+      "status": "pass-development",
+      "commands": [
+        "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/appplatform -count=1",
+        "npm test --workspace=@portal-app/sdk -- --run tests/descriptor.test.ts tests/descriptor-schema.test.ts tests/publisher-v2.test.ts",
+        "python3 -m unittest discover -s scripts/tests -v",
+        "node scripts/validate-descriptor-v2.mjs --corpus packages/app-sdk/tests/fixtures/descriptor-v2.json"
+      ],
+      "coverage": [
+        "The descriptor corpus contains 56 exact shared cases and the publisher corpus contains 55 exact shared cases.",
+        "Go and TypeScript consume the same bytes and expect the same acceptance or refusal for each shared descriptor and signature vector.",
+        "The Python package builder now invokes the same TypeScript validator in a corpus mode pinned to the exact 56-case descriptor hash.",
+        "All 56 Python packaging and publication tests pass, including deterministic archives, path safety and signed-release provenance."
+      ],
+      "limits": [
+        "The public package format and protocol error vocabulary remain development contracts pending formal freeze."
+      ]
+    },
+    {
+      "id": "DEV-05",
+      "status": "pass-development",
+      "commands": [
+        "gh release download v2026.43.2 -R KazuhaHub/StockAnalysisPrediction-Report-Portal --pattern SHA256SUMS.txt --pattern report-portal_v2026.43.2_darwin_arm64.tar.gz",
+        "gh release download status/v0.1.0-beta.2 -R KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps --pattern SHA256SUMS --pattern release.json --pattern status.zip --pattern status-v0.1.0-beta.2-darwin-arm64.tar.gz",
+        "gh release download status/v0.1.0-beta.3 -R KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps --pattern SHA256SUMS --pattern release.json --pattern status.zip --pattern status-v0.1.0-beta.3-darwin-arm64.tar.gz",
+        "python3 scripts/status-released-lifecycle.py --portal <verified-bin> --old-artifacts <beta2> --new-artifacts <beta3> --private-address <local-private-ipv4> --receipt <new-path>",
+        "python3 -m unittest discover -s scripts/tests -p 'test_status_released_lifecycle.py' -v"
+      ],
+      "coverage": [
+        "The official immutable Portal v2026.43.2 release installed released Status Beta.2, upgraded through the normal installer to released Beta.3, rolled back through the normal installer to Beta.2, and uninstalled it.",
+        "Every selected archive and ZIP matched its official published SHA-256. Installed assets matched each ZIP, and ZIP identity/permissions remained extension.read plus extension.manage.",
+        "Three replacement cycles produced distinct backend installation identities. Old tokens were denied, and deliberate re-pairing preserved the same independent database, configured component/monitor and sealed credential fingerprints.",
+        "Uninstall revoked host registration/assets while unrelated Portal routes remained healthy and the independent service remained ready."
+      ],
+      "limits": [
+        "The executed drill used the released legacy app installer and a disposable Darwin arm64 API fixture, not the unpublished App Platform v2 production installer.",
+        "No production deployment, browser, provider credential, notification destination or public projection was used."
+      ]
+    }
+  ],
+  "uninstall_boundary": {
+    "commands": [
+      "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformManagementUninstallHTTPKeepsAnotherPluginTable(SQLite|Postgres)$' -count=1",
+      "GOWORK=off GOTOOLCHAIN=go1.26.10 GOMAXPROCS=2 go test -p 2 ./internal/app -run '^TestPlatformPluginUninstallClearsOnlyItsOwnData(SQLite|Postgres)$' -count=1"
+    ],
+    "coverage": [
+      "The normal reviewed uninstall clears the selected installation's dedicated plugin table.",
+      "When no non-removed installation of that app remains, the table, registry row and all corresponding rows are dropped in the same transaction.",
+      "Another plugin's table, rows and counters remain unchanged.",
+      "Reinstall creates the same deterministic plugin table name with zero rows."
+    ]
+  },
+  "open": [
+    "PKG-01: managed market staging and the complete static offline-envelope install path are implemented; managed OCI image payloads and public format freeze remain open.",
+    "PKG-08: same-fetch HTTP Range resume and native managed staging restart recovery are implemented; persistent cache remains open.",
+    "PKG-10 development acceptance now includes a native stop initiated by package revocation and explicit enable/repair after trust restoration. Production deployment remains in H16-H18.",
+    "DEV-01 still requires a non-implementer walkthrough. DEV-05 now has an isolated official released-byte lifecycle drill, without claiming production mutation or the unpublished App Platform v2 installer."
+  ]
+}

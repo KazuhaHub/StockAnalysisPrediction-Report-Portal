@@ -28,6 +28,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/control"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/batch"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/captcha"
 	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/config"
@@ -43,6 +45,66 @@ var tplFS embed.FS
 const cookieName = "rp_session"
 
 type Server struct {
+	platformBackendRequests platformDocumentBudget
+	platformNetworkRequests platformDocumentBudget
+	platformNetworkStreams  platformDocumentBudget
+	// platformServiceTasks holds the slots of the session-free task route, one budget per verified installation
+	// (app_platform_http.go).
+	platformServiceTasks platformInstallationBudgets
+	// platformServiceMaterial and platformUnverified keep a forged credential away from the database
+	// (app_platform_service_material.go).
+	platformServiceMaterial platformServiceMaterialCache
+	platformUnverified      platformUnverifiedBudget
+	// platformTaskRefusals remembers credentials just refused for their installation's task quota
+	// (app_platform_task_refusal.go).
+	platformTaskRefusals    platformTaskRefusalCache
+	platformBackendEndpoint atomic.Pointer[platformRuntimeEndpoint]
+	platformTaskBackend     func(context.Context, platformTaskLease, string) appplatform.TaskExecutionResult
+	// platformImportCheckpoint is the runner seam for the import-checkpoint command; nil selects the
+	// transport.
+	platformImportCheckpoint platformImportCheckpointExecutor
+	// platformMigration is the runner seam for the migration lifecycle; nil selects the transport.
+	platformMigration platformMigrationRunner
+	// platformReadStartReceipt is the runner seam for the restore-start read-receipt that recovery uses to
+	// settle an unknown resume start; nil selects the transport.
+	platformReadStartReceipt platformStartReceiptReader
+	// platformSettleStart is the runner seam of the settlement of an orphaned update-start; nil selects the
+	// transport.
+	platformSettleStart platformSettleStartRunner
+	// platformObserveRuntime and platformRecoveryTarget are the runner seams of recovery enrollment
+	// and of the resume review; nil selects the local socket. Neither accepts anything a request
+	// carries: both read what the runner itself reports.
+	platformObserveRuntime func(context.Context, platformRuntimeEndpoint) (platformRuntimeObservation, error)
+	platformRecoveryTarget func(context.Context, platformActorSession, platformRuntimeEndpoint) (*platformManagedInstallTarget, error)
+	// platformReadManagedRuntime is the runner seam of the profile read behind a managed review and commit;
+	// nil selects the local socket.
+	platformReadManagedRuntime func(context.Context, platformRuntimeEndpoint, control.Authority) (platformManagedRuntimeObserved, error)
+
+	// platformImageDir overrides the directory the managed image stores live under; empty selects the data
+	// directory next to the database. platformImageRunner is the runner seam of the blob channel and the
+	// load-image effect; nil selects the transport.
+	platformImageDir    string
+	platformImageOnce   sync.Mutex
+	platformImageStore  *platformImageStore
+	platformImageRunner platformImageRunner
+	// platformLoadCursor rotates the window of the load-image settlement driver.
+	platformLoadCursor int
+	// The keyset cursors of the settlement drivers that read their candidates in a window (platformKeysetCursor).
+	platformHeldStartCursor     platformKeysetCursor
+	platformMigrationCursor     platformKeysetCursor
+	platformRecoveryStartCursor platformKeysetCursor
+	// platformReclaimCursor rotates the window of the image removal step.
+	platformReclaimCursor int
+	// platformPruneCursor rotates the window of the recovery set pruning step. platformPruneNoted remembers the host
+	// operations whose slot exhaustion was already logged, and platformPruneLast is when the idle tick last ran the step.
+	platformPruneRunner platformPruneRunner
+	platformPruneCursor int
+	platformPruneNoted  sync.Map
+	platformPruneLast   atomic.Int64
+	platformPruneMore   atomic.Bool
+
+	platformInstaller     platformFrontendInstallRuntime
+	platformDocuments     platformDocumentBudget
 	extensions            extensionRuntime
 	mailExecMu            sync.Mutex
 	mailExec              *notification.Executor
@@ -55,6 +117,7 @@ type Server struct {
 	geoUp                 *geoUpdater                                                                // downloads the IP database; the reader notices the new file by itself
 	geo                   *geoService                                                                // IP → place for the audit log; nil-safe, empty until a .mmdb is installed
 	proxySeen             atomic.Value                                                               // bool: a forwarded request arrived from a peer not in trusted_proxies
+	sessionStamps         sessionStampCache                                                          // the last activity stamp seen for each session (read_path.go)
 	seenAt                sync.Map                                                                   // username -> time.Time of the last activity stamp WRITTEN (throttle; see touchSeen)
 	jobRuns               sync.Map                                                                   // jobID -> *jobRun; shared cancel scope for a job's in-flight runs (ADR 0011)
 	itemCancels           sync.Map                                                                   // itemID -> context.CancelFunc; per-row cancel of an in-flight run (ADR 0011)
@@ -111,7 +174,8 @@ type statusRecorder struct {
 	status int
 }
 
-func (w *statusRecorder) WriteHeader(code int) { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) WriteHeader(code int)        { w.status = code; w.ResponseWriter.WriteHeader(code) }
+func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // slowRequest is the latency at which a successful API read becomes worth a log line on its own.
 // A page that takes a second is a complaint waiting to happen, and it is the one class of problem
@@ -220,6 +284,7 @@ func RunServer(cfgPath string) {
 	}
 	s := &Server{cfg: cfg, st: st, appTok: newAppTokens(30 * time.Minute), loginThr: newLoginThrottle(), v1Rate: newRateLimiter(),
 		trustedNets: trustedNets, captchaSvc: captcha.New()}
+	configurePlatformRuntimeEndpoint(s)
 	// The failed-login ceiling and its window are settings (limits.go); handing the throttle the
 	// reader rather than the numbers is what makes a change on the settings page apply to the next
 	// attempt instead of at the next restart.
@@ -275,11 +340,16 @@ func RunServer(cfgPath string) {
 	s.runForecastRepair()
 
 	stopNotifications := s.startNotificationRuntime()
-	s.resumeBatchJobs()  // requeue items left in-flight by a restart and relaunch running jobs
-	go s.scheduleLoop()  // release one-shot 定时 jobs when their run_at passes (ADR 0007)
-	go s.cleanupLoop()   // run the admin-configured storage-retention pass on its cadence (ADR 0017)
-	go s.recurringLoop() // fire recurring tasks into the run queue on their cadence (ADR 0018)
-	go s.authSweepLoop() // drop expired pending logins + SAML replay entries (ADR 0023)
+	// The platform's operation engine: the frontend scheduler always, and, when a runner endpoint was bound
+	// above, the engine that runs managed installs, updates, repairs, enables, delete-data, uninstalls, restores,
+	// recovery imports and resumes, their settlements and image reclaim (docs/app-platform/114).
+	stopAppInstalls := s.startPlatformFrontendInstallService()
+	s.resumeBatchJobs()                // requeue items left in-flight by a restart and relaunch running jobs
+	go s.platformServiceMaterialLoop() // keep the task route's verification material warm for every ready installation
+	go s.scheduleLoop()                // release one-shot 定时 jobs when their run_at passes (ADR 0007)
+	go s.cleanupLoop()                 // run the admin-configured storage-retention pass on its cadence (ADR 0017)
+	go s.recurringLoop()               // fire recurring tasks into the run queue on their cadence (ADR 0018)
+	go s.authSweepLoop()               // drop expired pending logins + SAML replay entries (ADR 0023)
 	// The forecast evaluator (ADR 0029 §6). The loop checks its own switch every tick, so this starts
 	// a goroutine that does nothing at all until an admin turns it on — which is the same shape
 	// geo_update.go uses, and the reason the switch can be a setting rather than a build flag.
@@ -290,8 +360,9 @@ func RunServer(cfgPath string) {
 	go s.forecastViewerLoop()
 	go s.forecastSignalsLoop()
 	s.wireExportCleanup()
-	s.exportRecover() // return jobs a restart interrupted to the queue before the worker starts
-	go s.exportLoop() // the data-export task worker and its hourly expiry sweep (ADR 0045)
+	s.exportRecover()        // return jobs a restart interrupted to the queue before the worker starts
+	s.platformImageRecover() // drop what a crash left in the managed image stores before any operation uses them
+	go s.exportLoop()        // the data-export task worker and its hourly expiry sweep (ADR 0045)
 
 	mux := http.NewServeMux()
 	s.wireRoutes(mux)
@@ -308,7 +379,7 @@ func RunServer(cfgPath string) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
-	serve(srv, st, stopNotifications, s.stopTransactionalMail)
+	serve(srv, st, stopAppInstalls, stopNotifications, s.stopTransactionalMail)
 }
 
 // shutdownGrace bounds how long a stop waits for requests already in flight. Deliberately shorter
@@ -627,7 +698,7 @@ func (s *Server) verify(cookie string) (string, int64) {
 			return "", 0
 		}
 		var n int
-		if err := s.st.queryRow(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, id, user, rev, exp).Scan(&n); err != nil || n != 1 {
+		if err := s.st.readScan(`SELECT COUNT(*) FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, []any{id, user, rev, exp}, func(scan func(...any) error) error { return scan(&n) }); err != nil || n != 1 {
 			return "", 0
 		}
 		return user, rev
@@ -767,7 +838,24 @@ func (s *Server) currentActiveUser(r *http.Request) string {
 	}
 	if id := sessionID(r); id != "" {
 		now := time.Now().Unix()
-		s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, now-int64(lastSeenInterval.Seconds()))
+		stale := now - int64(lastSeenInterval.Seconds())
+		// The stamp is due once per interval, but the UPDATE used to be issued on every request, a write
+		// statement that matched nothing and still queued for the writer connection. The read says
+		// whether it is due; the UPDATE keeps its own condition, so two requests racing past the read
+		// still stamp once.
+		// The answer is remembered in memory (sessionStamps), so the requests between two stamps do not read it.
+		if !s.sessionStamps.fresh(id, stale) {
+			var seen int64
+			if err := s.st.readQueryRow(`SELECT last_seen FROM user_sessions WHERE id=? AND username=?`, id, user).Scan(&seen); err == nil {
+				// A stamp is remembered only once it is known to be written: after a failed UPDATE the next
+				// request reads and tries again.
+				if seen >= stale {
+					s.sessionStamps.set(id, seen)
+				} else if _, err := s.st.exec(`UPDATE user_sessions SET last_seen=? WHERE id=? AND username=? AND last_seen<?`, now, id, user, stale); err == nil {
+					s.sessionStamps.set(id, now)
+				}
+			}
+		}
 	}
 	return user
 }
@@ -969,7 +1057,12 @@ func seedDefaultKindColors(st *Store) int {
 }
 
 func (s *Server) orderAndDefault(members []Rep) ([]Rep, int64) {
-	cfg := s.st.TypeConfigs()
+	return s.orderAndDefaultWith(members, s.st.TypeConfigs(), s.st.Versions)
+}
+
+// orderAndDefaultWith is orderAndDefault over a type registry the caller already read, and a
+// version-registry reader it calls only when the members need version labels.
+func (s *Server) orderAndDefaultWith(members []Rep, cfg map[string]TypeConfig, versions func() []ReportVersion) ([]Rep, int64) {
 	ord := func(r Rep) int {
 		if c, ok := cfg[r.RType]; ok {
 			return c.Ord
@@ -1027,7 +1120,7 @@ func (s *Server) orderAndDefault(members []Rep) ([]Rep, int64) {
 		versioned[out[i].Label][v] = true
 	}
 	verLabel := map[string]string{}
-	for _, v := range s.st.Versions() {
+	for _, v := range versions() {
 		verLabel[v.Name] = firstNonEmpty(v.Label, v.Name)
 	}
 	// The number counts DISTINCT REPORTS sharing a label, not rows, so every written form of one
@@ -1227,6 +1320,16 @@ func (s *Server) loadRep(r *http.Request, user string, id int64) *Rep {
 	return rep
 }
 
+// recordReportReadAs is recordReportRead for a caller that already knows the reader's OU.
+func (s *Server) recordReportReadAs(r *http.Request, user string, ou int64, rep *Rep) {
+	s.st.WriteReportReadAudit(AuditEntry{
+		Actor: user, ActorOU: ou, Action: AuditReportRead,
+		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
+		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),
+		IP:     s.auditIP(r),
+	})
+}
+
 // recordReportRead logs that `user` was served this report's body.
 //
 // Only successful reads. A refusal is a different question — someone probing versus someone
@@ -1237,12 +1340,7 @@ func (s *Server) recordReportRead(r *http.Request, user string, rep *Rep) {
 	if rep == nil {
 		return
 	}
-	s.st.WriteAudit(AuditEntry{
-		Actor: user, ActorOU: s.st.PrimaryGroupOf(user), Action: AuditReportRead,
-		TargetType: "report", TargetID: strconv.FormatInt(rep.ID, 10),
-		Detail: auditJSON(map[string]any{"symbol": rep.Symbol, "date": rep.Date, "title": rep.Title}),
-		IP:     s.auditIP(r),
-	})
+	s.recordReportReadAs(r, user, s.st.PrimaryGroupOf(user), rep)
 }
 
 // ---------- Export ----------

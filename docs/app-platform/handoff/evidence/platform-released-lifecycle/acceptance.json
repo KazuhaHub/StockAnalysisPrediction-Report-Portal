@@ -1,0 +1,40 @@
+{
+  "format": "portal.released-lifecycle-acceptance/1-dev.1",
+  "time": "2026-11-03T08:25:07.016413+00:00",
+  "integration_candidate": "f314fe4b",
+  "official_portal_release": "v2026.43.2",
+  "official_portal_binary": "2026.43.2 (b07e825, 2026-10-24T01:40:09Z)",
+  "old_app_release": "status/v0.1.0-beta.2",
+  "new_app_release": "status/v0.1.0-beta.3",
+  "artifacts": {
+    "report-portal_v2026.43.2_darwin_arm64.tar.gz": "06ea85e04d28d40d79333ca2c73bab17f841eca6888acb90a4856e481e6d0546",
+    "status-beta2.zip": "504e495791ee23443353bb816dab96f9eaf124ccc8b76f91ca1b56c08db41aca",
+    "status-v0.1.0-beta.2-darwin-arm64.tar.gz": "f935ccb41abc9e07ba1594eeb1d42c5c41ad6e86de4ef412342880af49e417fb",
+    "status-beta3.zip": "c5dcbc8e328c97de799bd15b93da8df815601c176a6898c576b6e08358964a72",
+    "status-v0.1.0-beta.3-darwin-arm64.tar.gz": "93925a44c9fbef0ddd636202139e334163e63c1f4c1769cb34a9f3c096dd1595"
+  },
+  "receipt": {
+    "official_artifact_checksums": "verified",
+    "distinct_installations": 3,
+    "stale_tokens": "denied after each replacement",
+    "sealed_credentials": "unchanged",
+    "component_and_monitor_configuration": "unchanged",
+    "installed_assets": "match each release ZIP",
+    "work": "paused",
+    "public": "disabled",
+    "uninstall": "revokes host registration and assets; independent service remains ready",
+    "scope": "disposable local API fixture; no browser, provider access or production mutation"
+  },
+  "coverage": [
+    "The official released Portal installed the released Beta.2 ZIP, deliberately paired the released Beta.2 service, then preserved an administrator-only component, disabled monitor and sealed disposable credential.",
+    "The normal installer upgraded to the released Beta.3 ZIP and service. The old token was denied, old backend authority was cleared, and a deliberate new pairing retained the same store, configuration and sealed credential fingerprints.",
+    "The normal installer rolled back to the immutable Beta.2 ZIP and service with another deliberate pairing. Configuration and sealed credentials remained byte-equivalent, and safety settings remained paused/private.",
+    "Uninstall revoked the host registration and installed assets. Portal health/account/home/queue APIs remained available and the independent Status service remained ready.",
+    "All fixture processes stopped, temporary credentials/keys were removed, and the receipt was written only after complete cleanup."
+  ],
+  "limits": [
+    "The drill used the released legacy application installer and API, not the unpublished App Platform v2 production installer.",
+    "It used the published Darwin arm64 Portal and Status archives in an isolated local fixture. It did not mutate production, start a browser, contact providers or configure notification delivery.",
+    "Linux execution of the same released lifecycle helper remains covered by source tests and deployment evidence, not by this Darwin receipt."
+  ]
+}

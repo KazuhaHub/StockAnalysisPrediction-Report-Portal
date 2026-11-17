@@ -133,6 +133,15 @@ path is covered by its own integration tests behind `TEST_POSTGRES_DSN`.
   the snapshot — a table-by-table read of a moving database is not a backup of anything. Postgres has
   no such pause: its dump runs at repeatable-read alongside everything else.
 
+- **A file-level copy of a SQLite database is no longer a backup of a running portal.** The SQLite read
+  pool (doc 171, "Resolution (SQLite read pool)") switches a file-backed database to WAL on its first
+  start, permanently and without a schema change. Committed data can live in `portal.db-wal` until a
+  checkpoint, so `cp portal.db` taken while the portal runs can miss it. The dump this ADR specifies is
+  unaffected: it is one read transaction on the writer connection and sees every committed row. An
+  operator who copies files must stop the portal first and copy `portal.db`, `portal.db-wal` and
+  `portal.db-shm` together (or use SQLite's online backup). A database on a network or FUSE filesystem
+  is detected by type and left in its previous mode with no read pool; the READMEs say so beside the
+  command, and the admin storage page reports the pool state and the WAL size.
 - **A dump is about the size of your report bodies.** 50,000 reports came to 307 MiB uncompressed —
   the format adds almost nothing over the text itself, which is the intent, but it does mean an
   operator writing straight to a file gets a large one. `backup - | gzip` is the reason `-` exists,

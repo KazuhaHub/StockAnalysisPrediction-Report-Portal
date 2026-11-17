@@ -231,6 +231,11 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 	} else {
 		target = defaultID
 	}
+	platformImpacts, err := appPlatformPrincipalImpacts(owned, "", id)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	if target != 0 {
 		res, err := tx.Exec(s.bind(`UPDATE prediction_sets SET attributed_ou=? WHERE attributed_ou=?`), target, id)
 		if err != nil {
@@ -295,6 +300,9 @@ func (s *Store) DeleteUserGroup(id int64) (reattributed, target int64, err error
 		return 0, 0, err
 	}
 	if _, err := tx.Exec(s.bind(`DELETE FROM user_groups WHERE id=?`), id); err != nil {
+		return 0, 0, err
+	}
+	if err := invalidateAppPlatformPrincipal(owned, platformImpacts); err != nil {
 		return 0, 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -424,8 +432,14 @@ func (s *Store) SetPrimaryGroup(username string, groupID int64) error {
 // PrimaryGroupOf returns a user's primary group id, or 0 if they inherit the Default (a NULL
 // group_id, or a missing user, reads back as 0).
 func (s *Store) PrimaryGroupOf(username string) int64 {
+	return s.primaryGroupOfFrom(s.poolExec(), username)
+}
+
+// primaryGroupOfFrom is PrimaryGroupOf on a given executor, so a caller can run it inside a read
+// transaction.
+func (s *Store) primaryGroupOfFrom(e migExec, username string) int64 {
 	var id sql.NullInt64
-	s.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&id)
+	e.queryRow("SELECT group_id FROM users WHERE username=?", username).Scan(&id)
 	return id.Int64
 }
 

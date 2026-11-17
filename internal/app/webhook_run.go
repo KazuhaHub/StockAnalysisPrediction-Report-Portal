@@ -47,6 +47,14 @@ func (s *Server) fireEvent(kind string, payload any) {
 			event.ResourceType = "report"
 			event.ResourceID = identity.ID.String()
 		}
+	} else if kind == EventBatchFinished {
+		var identity struct {
+			JobID json.Number `json:"job_id"`
+		}
+		if json.Unmarshal(body, &identity) == nil && identity.JobID != "" {
+			event.ResourceType = "job"
+			event.ResourceID = identity.JobID.String()
+		}
 	}
 	deliveries, err := s.legacyNotificationDeliveries(kind)
 	var recipients []string

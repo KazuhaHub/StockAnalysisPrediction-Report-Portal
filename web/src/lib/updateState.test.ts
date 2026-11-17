@@ -147,6 +147,14 @@ describe('useUpdateState', () => {
     expect(result.current.kind).toBeNull()
   })
 
+  it('treats a partial version response as a failed check rather than crashing the shell', async () => {
+    get.mockResolvedValue({ ok: true })
+    const { result } = poll()
+    await waitFor(() => expect(result.current.failed).toBe(true))
+    expect(result.current.target).toBeNull()
+    expect(result.current.kind).toBeNull()
+  })
+
   it('reports a waiting service worker as a generic page update with no version attached', async () => {
     get.mockResolvedValue(a)
     workerState.ready = true

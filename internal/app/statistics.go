@@ -134,7 +134,7 @@ func (s *Server) apiStatistics(w http.ResponseWriter, r *http.Request, user stri
 	base, args := q.sql(s.panelLocation())
 	ordered := base + " ORDER BY count DESC, label ASC"
 	if r.URL.Query().Get("format") == "csv" {
-		rows, err := s.st.db.QueryContext(ctx, s.st.bind(ordered), args...)
+		rows, err := s.st.queryContext(ctx, ordered, args...)
 		if err != nil {
 			jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
 			return
@@ -166,7 +166,7 @@ func (s *Server) apiStatistics(w http.ResponseWriter, r *http.Request, user stri
 		return
 	}
 	var total, records int64
-	if err := s.st.db.QueryRowContext(ctx, s.st.bind("SELECT COUNT(*), COALESCE(SUM(count),0) FROM ("+base+") statistics_groups"), args...).Scan(&total, &records); err != nil {
+	if err := s.st.queryRowContext(ctx, "SELECT COUNT(*), COALESCE(SUM(count),0) FROM ("+base+") statistics_groups", args...).Scan(&total, &records); err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
 		return
 	}
@@ -181,7 +181,7 @@ func (s *Server) apiStatistics(w http.ResponseWriter, r *http.Request, user stri
 		}
 	}
 	pageArgs := append(append([]any{}, args...), limit, offset)
-	rows, err := s.st.db.QueryContext(ctx, s.st.bind(ordered+" LIMIT ? OFFSET ?"), pageArgs...)
+	rows, err := s.st.queryContext(ctx, ordered+" LIMIT ? OFFSET ?", pageArgs...)
 	if err != nil {
 		jsonErrorCode(w, http.StatusInternalServerError, "statistics_unavailable", "statistics unavailable")
 		return

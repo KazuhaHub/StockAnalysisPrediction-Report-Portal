@@ -1,0 +1,53 @@
+{
+  "format": "portal.reviewed-network-stream-acceptance/1-dev.1",
+  "captured_at": "2026-11-03T11:44:00-08:00",
+  "status": "pass-development",
+  "portal": {
+    "commit": "b7ce1d193334adda01e52b0944daa569afcdab70",
+    "pull_request": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/pull/364"
+  },
+  "apps": {
+    "commit": "b3a5d1ba2768c3974b53472111821f238db61ac2",
+    "pull_request": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal-Apps/pull/36"
+  },
+  "full_chromium_matrix": {
+    "workflow": "app project quota probe",
+    "run": "41706400426",
+    "job": "126162757469",
+    "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/41706400426",
+    "artifact": "project-quota-evidence",
+    "artifact_sha256": "95788c7d27d3289932377cd296c287a1a894fcd36b185a0862b10ff38c7acf9d"
+  },
+  "native_only_matrix": {
+    "workflow": "app project quota probe",
+    "run": "41693464881",
+    "job": "126117742684",
+    "commit": "d141a46dfc6f2a27e84a7c41f57b2813b0f06078",
+    "url": "https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/41693464881",
+    "scope": "native runner tests with Chromium skipped"
+  },
+  "observed": {
+    "native_sdk_network_stream": true,
+    "sdk_browser_stream_marker": "SDK_NATIVE_BROWSER_NETWORK_STREAM",
+    "real_tls_disposable_upstream": true,
+    "ordered_ndjson_response_stream": true,
+    "portal_session_ndjson": true,
+    "app_ack_backpressure": true,
+    "slow_consumer_delay": true,
+    "revoke_before_first_frame": true,
+    "revoke_after_frame": true,
+    "execution_ready": false
+  },
+  "coverage": [
+    "A disposable real HTTPS upstream delivered an application/x-ndjson response through the signed runner path and the Portal session route.",
+    "The exact Portal fixture exposed network.stream, reported both network.streamAvailable and streamReady, and completed the shared SDK browser stream with ordered binary chunks.",
+    "The browser callback paused 25 ms after each accepted chunk. The bridge sent an acknowledgement only after the callback resolved and released the next chunk only after that acknowledgement.",
+    "Revocation before the first frame and revocation after a released frame failed closed without retry. The Portal session stream produced bounded start, chunk and end records.",
+    "The successful artifact records native_sdk_network_stream=true and native_portal_network_stream_session_ndjson=true. Apps PR 36 at b3a5d1b has all checks passing."
+  ],
+  "limits": [
+    "This is disposable development acceptance. It does not enable production egress, registry authentication, credential provisioning or deployed firewall/DNS/proxy behavior.",
+    "The bridge remains tested with React and Node structured-clone MessagePorts in automated tests; the Chromium matrix covers the rendered iframe and real Portal shell but is not a cross-browser certification.",
+    "The public SDK and stream wire format remain experimental. This evidence does not claim a protocol freeze, D6 approval or production enablement."
+  ]
+}

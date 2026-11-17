@@ -143,7 +143,7 @@ func (s *Store) forecastDiagnosticsContext(ctx context.Context) (forecastShadowS
 }
 
 func (s *Store) forecastDiagnosticsOnce(ctx context.Context) (forecastShadowState, forecastCallState, error) {
-	rows, err := s.db.QueryContext(ctx, s.bind(`SELECT k,COALESCE(v,'') FROM meta WHERE k IN (?,?)`), setForecastStateCalls, setForecastStateShadow)
+	rows, err := s.queryContext(ctx, `SELECT k,COALESCE(v,'') FROM meta WHERE k IN (?,?)`, setForecastStateCalls, setForecastStateShadow)
 	if err != nil {
 		return forecastShadowState{}, forecastCallState{}, err
 	}

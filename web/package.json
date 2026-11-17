@@ -10,6 +10,7 @@
     "dev": "vite",
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "vite build",
+    "check:no-elk": "node scripts/check-no-elk.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "gen:zh-tw": "node scripts/gen-zh-tw.mjs",

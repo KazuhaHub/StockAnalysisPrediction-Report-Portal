@@ -340,14 +340,31 @@ func parseEnqueueUnix(ts string) int64 {
 // timestamp can never strand a job forever. run_at shares created_at's local
 // basis (see docs/adr/0007-run-analysis-and-scheduling.md).
 func runAtDue(runAt string, now time.Time) bool {
+	return runAtDueInLocation(runAt, now, time.Local)
+}
+
+func runAtDueInLocation(runAt string, now time.Time, loc *time.Location) bool {
 	if runAt == "" {
 		return true
 	}
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", runAt, time.Local)
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", runAt, loc)
 	if err != nil {
 		return true
 	}
-	return !t.After(now)
+	if t.After(now) {
+		return false
+	}
+	// During a backward DST transition one wall-clock value occurs twice.
+	// ParseInLocation chooses one occurrence; a scheduled job is due only after
+	// the later occurrence when the stored timestamp is ambiguous.
+	latest := t
+	for step := time.Minute; step <= 2*time.Hour; step += time.Minute {
+		next := t.Add(step)
+		if next.Format("2006-01-02 15:04:05") == runAt {
+			latest = next
+		}
+	}
+	return !latest.After(now)
 }
 
 // userUsage returns each user's decayed recent run count for the fair-share factor:
@@ -368,9 +385,11 @@ func (s *Server) userUsage(now time.Time) map[string]float64 {
 	return usage
 }
 
-// jobFactors computes a queued job's normalized priority factors at `now`. usage is the
-// precomputed decayed-usage map (see userUsage); an absent user has usage 0 → fair 1.
-func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64) queue.Factors {
+// jobFactorsWith computes a queued job's normalized priority factors at `now`. usage is the
+// precomputed decayed-usage map (see userUsage); an absent user has usage 0 → fair 1. ageHours is
+// the age-saturation setting, resolved once by the caller so a decision over many jobs reads it
+// once instead of once per job.
+func jobFactorsWith(j BatchJob, now time.Time, usage map[string]float64, ageHours float64) queue.Factors {
 	base, urgent, idle := parsePriority(j.Priority)
 	// A 定时 job "arrives" at its run_at, so it ages from then — not from when it was
 	// created — otherwise a long-scheduled job would unfairly jump ahead of runs
@@ -380,7 +399,7 @@ func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64)
 		enqueue = j.RunAt
 	}
 	wait := now.Sub(time.Unix(parseEnqueueUnix(enqueue), 0)).Seconds()
-	age := wait / (s.prioAgeHours() * 3600)
+	age := wait / (ageHours * 3600)
 	if age < 0 {
 		age = 0
 	} else if age > 1 {
@@ -398,11 +417,15 @@ func (s *Server) jobFactors(j BatchJob, now time.Time, usage map[string]float64)
 // queuedItems maps the currently-queued jobs to scored scheduler items, used both by
 // the scheduler and by the "N ahead" computation. A job scheduled for the future is
 // hidden until its run_at passes, so it is never admitted early nor counted as waiting.
-func (s *Server) queuedItems() []queue.Item {
-	now := time.Now()
+func (s *Server) queuedItems() []queue.Item { return s.queuedItemsAt(time.Now()) }
+
+// queuedItemsAt is queuedItems evaluated at an explicit instant. A decision reads each setting
+// once and issues a fixed number of queries however long the backlog is.
+func (s *Server) queuedItemsAt(now time.Time) []queue.Item {
 	loc := s.panelLocation()
 	w := s.prioWeights()
 	usage := s.userUsage(now)
+	ageHours := s.prioAgeHours()
 	jobs := s.st.QueuedJobs()
 	items := make([]queue.Item, 0, len(jobs))
 	for _, j := range jobs {
@@ -412,7 +435,7 @@ func (s *Server) queuedItems() []queue.Item {
 		if invertBlocksNow(j.RunPreset, now, loc) {
 			continue // inverted preset currently in a blocked window — not eligible to start now
 		}
-		f := s.jobFactors(j, now, usage)
+		f := jobFactorsWith(j, now, usage, ageHours)
 		items = append(items, queue.Item{ID: j.ID, Score: w.Score(f), Urgent: f.Urgent})
 	}
 	return items
@@ -508,13 +531,17 @@ type candMeta struct {
 
 // admitLocked is the body of scheduleTick; the caller holds schedMu. It fills the free
 // slots (budget − running runs) with the highest-priority runnable runs and starts them.
-func (s *Server) admitLocked() {
+func (s *Server) admitLocked() { s.admitAtLocked(time.Now()) }
+
+// admitAtLocked is admitLocked with the decision evaluated at an explicit instant. Like
+// admitLocked, the caller must hold schedMu.
+func (s *Server) admitAtLocked(now time.Time) {
 	budget := s.batchBudget()
 	running := s.st.RunningItemCount("")
 	if budget-running <= 0 {
 		return
 	}
-	cands, meta := s.itemCandidates()
+	cands, meta := s.itemCandidatesAt(now)
 	if len(cands) == 0 {
 		return
 	}
@@ -534,13 +561,27 @@ func (s *Server) admitLocked() {
 // all of a job's runs share the job's score and a higher-priority job's runs rank first.
 // Returns the scheduler items plus an id → (job, row) lookup for dispatch.
 func (s *Server) itemCandidates() ([]queue.Item, map[int64]candMeta) {
-	now := time.Now()
+	return s.itemCandidatesAt(time.Now())
+}
+
+// itemCandidatesAt is itemCandidates evaluated at an explicit instant, with the same fixed
+// query count as queuedItemsAt.
+func (s *Server) itemCandidatesAt(now time.Time) ([]queue.Item, map[int64]candMeta) {
 	loc := s.panelLocation()
 	w := s.prioWeights()
 	usage := s.userUsage(now)
+	ageHours := s.prioAgeHours()
+	// Snapshot order matches the per-job reads this replaced: the job list first, then the rows.
+	// One query fetches every job's in-flight window of queued rows, instead of one per job, so
+	// the cost of a decision does not grow with the backlog.
+	jobs := s.st.SchedulableJobs()
+	windows, err := s.st.QueuedItemWindows()
+	if err != nil {
+		return nil, map[int64]candMeta{}
+	}
 	var cands []queue.Item
 	meta := map[int64]candMeta{}
-	for _, j := range s.st.SchedulableJobs() {
+	for _, j := range jobs {
 		if !runAtDue(j.RunAt, now) {
 			continue // a not-yet-due scheduled job contributes no runs
 		}
@@ -554,11 +595,11 @@ func (s *Server) itemCandidates() ([]queue.Item, map[int64]candMeta) {
 		if window -= j.runningItems; window <= 0 {
 			continue // this job already has its share of runs in flight
 		}
-		items, err := s.st.QueuedItems(j.ID)
-		if err != nil || len(items) == 0 {
+		items := windows[j.ID]
+		if len(items) == 0 {
 			continue
 		}
-		f := s.jobFactors(j, now, usage)
+		f := jobFactorsWith(j, now, usage, ageHours)
 		score := w.Score(f)
 		for i, it := range items {
 			if i >= window {

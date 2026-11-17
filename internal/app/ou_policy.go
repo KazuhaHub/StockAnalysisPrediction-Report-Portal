@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"database/sql"
 )
 
@@ -75,50 +74,88 @@ func ouNullString(v sql.NullString) *string {
 	return &s
 }
 
+// ouGroupColumns is the column list of one organisation-tree row, with each column qualified by prefix ("" or
+// "g."); ouGroupRow scans exactly these columns, so the tree's own query and the account-and-tree query share them.
+func ouGroupColumns(p string) string {
+	return p + `id,COALESCE(` + p + `parent_id,0),COALESCE(` + p + `is_default,0),
+		COALESCE(` + p + `name,''),COALESCE(` + p + `created_at,''),COALESCE(` + p + `description,''),` + p + `weight,` + p + `urgent_unlimited,` + p + `allow_urgent,` + p + `max_queued,
+		` + p + `run_window,` + p + `restricted,` + p + `daily_run_quota,` + p + `run_quota_period,` + p + `totp_enroll,` + p + `passkey_enroll,` + p + `require_2fa,
+		` + p + `forecast_scope,` + p + `priority,` + p + `export_allowed,` + p + `export_max_reports,` + p + `export_daily_quota`
+}
+
+// ouGroupRow is one scanned organisation-tree row. Its id is null only for the account-and-tree query's row of
+// an account when the tree is empty.
+type ouGroupRow struct {
+	id                                                                      sql.NullInt64
+	parent                                                                  int64
+	isDefault                                                               int
+	name, created, description                                              string
+	weight, urgent, allow, maxQueued, restricted, quota, totp, passkey, req sql.NullInt64
+	exportAllowed, exportMax, exportQuota                                   sql.NullInt64
+	window, period, scope, priority                                         sql.NullString
+}
+
+func (r *ouGroupRow) dest() []any {
+	return []any{&r.id, &r.parent, &r.isDefault, &r.name, &r.created, &r.description, &r.weight, &r.urgent, &r.allow, &r.maxQueued,
+		&r.window, &r.restricted, &r.quota, &r.period, &r.totp, &r.passkey, &r.req, &r.scope, &r.priority,
+		&r.exportAllowed, &r.exportMax, &r.exportQuota}
+}
+
+// ouSnapshotBuilder collects scanned rows into a snapshot.
+type ouSnapshotBuilder struct {
+	nodes  map[int64]ouNode
+	values map[int64]ouPolicyValues
+}
+
+func newOUSnapshotBuilder() *ouSnapshotBuilder {
+	return &ouSnapshotBuilder{nodes: make(map[int64]ouNode), values: make(map[int64]ouPolicyValues)}
+}
+
+func (b *ouSnapshotBuilder) add(r ouGroupRow) {
+	if !r.id.Valid {
+		return
+	}
+	id := r.id.Int64
+	b.nodes[id] = ouNode{parent: r.parent, isDefault: r.isDefault == 1, name: r.name, description: r.description, created: r.created}
+	v := ouPolicyValues{weight: ouNullInt(r.weight), urgent: ouNullBool(r.urgent), allowUrgent: ouNullBool(r.allow),
+		maxQueued: ouNullInt(r.maxQueued), runWindow: ouNullString(r.window), restricted: ouNullBool(r.restricted),
+		totp: ouNullBool(r.totp), passkey: ouNullBool(r.passkey), require2FA: ouNullBool(r.req),
+		scope: ouNullString(r.scope), priority: ouNullString(r.priority),
+		exportAllowed: ouNullBool(r.exportAllowed), exportMax: ouNullInt(r.exportMax), exportDailyQuota: ouNullInt(r.exportQuota)}
+	if r.quota.Valid {
+		p := QuotaDay
+		if validQuotaPeriod(r.period.String) {
+			p = r.period.String
+		}
+		v.quota = &ouRunQuota{Limit: int(r.quota.Int64), Period: p}
+	}
+	b.values[id] = v
+}
+
+func (b *ouSnapshotBuilder) snapshot() ouPolicySnapshot {
+	return ouPolicySnapshot{graph: newOUGraph(b.nodes), values: b.values}
+}
+
 // loadOUPolicySnapshotFrom loads node identity and typed overrides in one statement. It never
 // acquires another pool connection, so it is also safe inside SQLite's sole writer transaction.
 func (s *Store) loadOUPolicySnapshotFrom(ex execer) (ouPolicySnapshot, error) {
-	rows, err := ex.Query(`SELECT id,COALESCE(parent_id,0),COALESCE(is_default,0),
-		COALESCE(name,''),COALESCE(created_at,''),COALESCE(description,''),weight,urgent_unlimited,allow_urgent,max_queued,
-		run_window,restricted,daily_run_quota,run_quota_period,totp_enroll,passkey_enroll,require_2fa,
-		forecast_scope,priority,export_allowed,export_max_reports,export_daily_quota FROM user_groups`)
+	rows, err := ex.Query(`SELECT ` + ouGroupColumns("") + ` FROM user_groups`)
 	if err != nil {
 		return ouPolicySnapshot{}, err
 	}
 	defer rows.Close()
-	nodes := make(map[int64]ouNode)
-	values := make(map[int64]ouPolicyValues)
+	b := newOUSnapshotBuilder()
 	for rows.Next() {
-		var id, parent int64
-		var isDefault int
-		var name, created, description string
-		var weight, urgent, allow, maxQueued, restricted, quota, totp, passkey, require sql.NullInt64
-		var exportAllowed, exportMax, exportQuota sql.NullInt64
-		var window, period, scope, priority sql.NullString
-		if err := rows.Scan(&id, &parent, &isDefault, &name, &created, &description, &weight, &urgent, &allow, &maxQueued,
-			&window, &restricted, &quota, &period, &totp, &passkey, &require, &scope, &priority,
-			&exportAllowed, &exportMax, &exportQuota); err != nil {
+		var r ouGroupRow
+		if err := rows.Scan(r.dest()...); err != nil {
 			return ouPolicySnapshot{}, err
 		}
-		nodes[id] = ouNode{parent: parent, isDefault: isDefault == 1, name: name, description: description, created: created}
-		v := ouPolicyValues{weight: ouNullInt(weight), urgent: ouNullBool(urgent), allowUrgent: ouNullBool(allow),
-			maxQueued: ouNullInt(maxQueued), runWindow: ouNullString(window), restricted: ouNullBool(restricted),
-			totp: ouNullBool(totp), passkey: ouNullBool(passkey), require2FA: ouNullBool(require),
-			scope: ouNullString(scope), priority: ouNullString(priority),
-			exportAllowed: ouNullBool(exportAllowed), exportMax: ouNullInt(exportMax), exportDailyQuota: ouNullInt(exportQuota)}
-		if quota.Valid {
-			p := QuotaDay
-			if validQuotaPeriod(period.String) {
-				p = period.String
-			}
-			v.quota = &ouRunQuota{Limit: int(quota.Int64), Period: p}
-		}
-		values[id] = v
+		b.add(r)
 	}
 	if err := rows.Err(); err != nil {
 		return ouPolicySnapshot{}, err
 	}
-	return ouPolicySnapshot{graph: newOUGraph(nodes), values: values}, nil
+	return b.snapshot(), nil
 }
 
 func (s *Store) loadOUPolicySubjectFrom(ex execer, username string) (ouSubject, ouPolicySnapshot, error) {
@@ -143,22 +180,44 @@ func (s *Store) loadOUPolicySubjectFrom(ex execer, username string) (ouSubject, 
 	return sub, snap, nil
 }
 
+// loadOUPolicySubject reads the account row and the whole organisation tree in one statement: one row per OU,
+// each carrying the account's columns (one row with a null OU when the tree is empty, none when the account does
+// not exist). A single statement reads one state of the database on both drivers, so the row and the tree agree
+// without an explicit transaction, and it costs one round trip instead of four on PostgreSQL. It decides exactly
+// what loadOUPolicySubjectFrom decides over a transaction, and a missing account is sql.ErrNoRows as there.
 func (s *Store) loadOUPolicySubject(username string) (ouSubject, ouPolicySnapshot, error) {
-	opts := &sql.TxOptions{ReadOnly: true}
-	if s.driver == "postgres" {
-		opts.Isolation = sql.LevelRepeatableRead
-	}
-	tx, err := s.db.BeginTx(context.Background(), opts)
+	rows, err := s.readQuery(`SELECT u.username,COALESCE(u.group_id,0),COALESCE(u.role,'user'),
+		COALESCE(u.restricted,0),COALESCE(u.active,1),COALESCE(u.created_at,''),`+ouGroupColumns("g.")+`
+		FROM users u LEFT JOIN user_groups g ON 1=1 WHERE u.username=?`, username)
 	if err != nil {
 		return ouSubject{}, ouPolicySnapshot{}, err
 	}
-	defer tx.Rollback()
-	sub, snap, err := s.loadOUPolicySubjectFrom(tx, username)
-	if err != nil {
+	defer rows.Close()
+	var sub ouSubject
+	var restricted, active int
+	found := false
+	b := newOUSnapshotBuilder()
+	for rows.Next() {
+		var r ouGroupRow
+		dest := append([]any{&sub.Username, &sub.AssignedOU, &sub.Role, &restricted, &active, &sub.Created}, r.dest()...)
+		if err := rows.Scan(dest...); err != nil {
+			return ouSubject{}, ouPolicySnapshot{}, err
+		}
+		found = true
+		b.add(r)
+	}
+	if err := rows.Err(); err != nil {
 		return ouSubject{}, ouPolicySnapshot{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return ouSubject{}, ouPolicySnapshot{}, err
+	if !found {
+		return ouSubject{}, ouPolicySnapshot{}, sql.ErrNoRows
+	}
+	snap := b.snapshot()
+	sub.Restricted = restricted != 0
+	sub.Active = active != 0
+	sub.EffectiveOU = sub.AssignedOU
+	if sub.EffectiveOU == 0 {
+		sub.EffectiveOU = snap.graph.defaultID
 	}
 	return sub, snap, nil
 }

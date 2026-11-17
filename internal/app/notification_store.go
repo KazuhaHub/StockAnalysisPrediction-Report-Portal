@@ -182,6 +182,9 @@ func (s *Store) captureNotification(event NotificationEvent, deliveries []Notifi
 	if n == 0 {
 		return nil
 	}
+	if err := s.capturePlatformEventDeliveries(e, event); err != nil {
+		return err
+	}
 	for _, d := range deliveries {
 		if d.Username != "" && !eligible[d.Username] {
 			continue

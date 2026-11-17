@@ -1,10 +1,15 @@
 # Storage and authority decision proposal
 
-Status: **not approved for implementation**. This document describes logical
+Status: logical model; the initial physical subset is approved in
+[the concrete specification](13-control-storage-spec.md). This document describes logical
 ownership and invariants. It intentionally contains no DDL, migration ID, physical
 table definition, side-store creation or baseline edit. A later concrete schema
 must be reviewed with the owner before writing any database-shape code, including
 the runner's local store or application metadata side tables.
+
+The [initial physical specification](13-control-storage-spec.md) now makes the
+first P03 control-plane/runner slice concrete. The owner approved that initial
+scope on 2026-10-24 Pacific; later business/job/event products are still separate.
 
 ## 1. Recommended ownership: Option A
 

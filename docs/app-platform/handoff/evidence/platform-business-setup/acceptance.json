@@ -1,0 +1,66 @@
+{
+  "format": "portal.business-setup-acceptance/1-dev.1",
+  "reviewed": "2026-11-04",
+  "candidates": {
+    "portal": "c2a58ea8",
+    "apps": "fa4acc03b0bc2449d627accd64e111751c6e7352"
+  },
+  "configuration": {
+    "app_id": "scheduled-digest",
+    "required_binding": "digest-feed",
+    "setup_only_operation": "raw_read",
+    "optional_network_operation": "http_bearer",
+    "new_portal_schema": false
+  },
+  "native_exact": {
+    "run": "41918062142",
+    "head": "dc2e7e8e",
+    "passed": true,
+    "image": "localhost:32768/scheduled-digest-exact@sha256:bbc3da228f4cae231299478ef37d1c1015fae4f5850b462410bd3e34c7162fc4",
+    "setup_required_and_configured": true,
+    "registration_handshake": true,
+    "managed_image": true,
+    "uninstall_and_fresh_reinstall": true
+  },
+  "native_full": {
+    "run": "41915897527",
+    "head": "11b09c79",
+    "passed": true,
+    "managed_uninstall_remove_data": true,
+    "managed_reinstall_fresh_namespace_and_launch": true
+  },
+  "hosted_ci": {
+    "general_test": "41920808343",
+    "app_project_quota_probe": "41920808163",
+    "app_runner_daemon_probe": "41920808205",
+    "codeql": "pass",
+    "result": "pass"
+  },
+  "browser": {
+    "run": "41920808163",
+    "head": "c2a58ea8",
+    "passed": true,
+    "ordinary_user_setup_required": true,
+    "setup_required_not_openable": true,
+    "configured_application_then_opened": true,
+    "serious_or_critical_axe_violations": 0,
+    "evidence": "../platform-reference-apps/acceptance.json"
+  },
+  "task_admission": {
+    "missing_setup_refused_before_persistence": true,
+    "setup_required_phase_not_claimable": true,
+    "current_task_authority_rechecks_setup": true
+  },
+  "administrator_setup": {
+    "credential_creation": true,
+    "setup_only_binding_without_network_authority": true,
+    "credential_rotation_returns_to_setup_required": true,
+    "reapproval_returns_to_ready": true,
+    "binding_revocation_returns_to_setup_required": true
+  },
+  "limitations": [
+    "This is development acceptance, not production setup or credential import.",
+    "The browser fixture preloads installation projections; it does not replace the managed install transaction.",
+    "The human screen-reader audit remains open."
+  ]
+}

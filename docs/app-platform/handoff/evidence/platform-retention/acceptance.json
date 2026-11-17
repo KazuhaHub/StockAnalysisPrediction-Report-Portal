@@ -1,0 +1,93 @@
+{
+  "format": "portal.retention-acceptance/1-dev.1",
+  "status": "partial",
+  "plan": "docs/app-platform/172-retention-plan.md",
+  "decision": "docs/app-platform/167-owner-decisions-remaining-acceptance.md section 5",
+  "note": "Filled from local runs on the branch feat/app-platform-retention (cut from integration/app-platform at f3812948). Every limit is exercised by advancing the nowMS argument of the sweep; no elapsed real time and no CI run is cited. PostgreSQL 18.6 on a throwaway local database.",
+  "environment": {
+    "sqlite": "modernc.org/sqlite, in-memory test store",
+    "postgres": "PostgreSQL 18.6 (Homebrew, aarch64), throwaway database platform_retention_20261115",
+    "go": "1.26.11",
+    "staticcheck": "2026.2.1 with GOOS=linux"
+  },
+  "implemented": {
+    "review_plan_validity": "one constant, platformReviewPlanValidityMS (15 minutes), in the 12 expiry sites and the overflow guards beside them; unconsumed plans removed 24 hours after expiry when nothing references them",
+    "operations": "app_platform_retention_operation_days, default 90, 90-365; completed operations deleted with effects and plan under the pin rule of doc 172 section 3",
+    "tasks": "terminal tasks older than 30 days, or beyond 10000 unreduced rows per installation, reduced to tombstones (payload empty, result NULL, attempts deleted; occurrence_id, payload_sha256, handler kept); tombstones deleted after the operations period",
+    "runner_logs": "json-file max-size 5m, max-file 2 (10 MiB per container); validContainerPlan refuses other options; the native log test derives its bound from the named constants",
+    "recovery_sets": "app_platform_retention_recovery_sets, default 2, 1-2, stored and clamped; sets beyond the latest N selected and reported only",
+    "uninstalled_data": "untouched; proven by test",
+    "scheduling": "platformRetentionTick from cleanupTick; hourly when idle, minute cadence while a batch bound was hit; batches of 500 per class; one audit_log row per sweep (action app_platform.retention_sweep, actor system); nothing during the restore pause; fails closed on an unreadable pause marker; each class runs in its own transaction with a 30 s deadline under the admission locks (operation classes: OU lock then publisher trust lock; tasks: advisory 780719), re-reads the pause inside, and fails independently of the others",
+    "ui": "AppPlatformRetentionCard in the storage page, GET and PUT /api/admin/app-platform/retention behind the cleanup permission"
+  },
+  "schema_change": "none",
+  "tests": {
+    "go": [
+      "TestPlatformRetentionReviewPlans",
+      "TestPlatformRetentionOperations",
+      "TestPlatformRetentionHonoursTheConfiguredPeriod",
+      "TestPlatformRetentionIdempotency",
+      "TestPlatformRetentionTasks",
+      "TestPlatformRetentionTaskCapPerInstallation",
+      "TestPlatformRetentionDefaultTaskCap",
+      "TestPlatformRetentionWorksInBoundedBatches",
+      "TestPlatformRetentionSweptTaskOccurrenceStaysDeduplicated",
+      "TestPlatformRetentionNeverTouchesRetainedData",
+      "TestPlatformRetentionWritesOneAuditRowPerSweep",
+      "TestPlatformRetentionDoesNothingWhilePaused",
+      "TestPlatformRetentionFailsClosedWhenThePauseIsUnreadable",
+      "TestPlatformRetentionConfigClampsOnRead",
+      "TestPlatformRetentionConfigAPIValidatesOnSave",
+      "TestPlatformRetentionConfigAPIReportsTheLastSweep",
+      "TestPlatformRetentionSelectsRecoverySetsBeyondTheLatestN",
+      "TestPlatformRetentionTickReachesTheSweep",
+      "TestPlatformRetentionTickWaitsAnIntervalUnlessThereIsBacklog",
+      "TestReviewPlanValidityIsOneNamedConstant",
+      "TestAppContainerLogsAreBoundedToTenMiB",
+      "TestContainerPlanWithOtherLogOptionsIsRefused",
+      "TestPlatformRetentionKeepsTheRemovalOfAnImageWhoseLoadIsPinned",
+      "TestPlatformRetentionKeepsEveryImageRecordOfABusyRuntime",
+      "TestPlatformRetentionPlanReferencedBySecretBindingIsKept",
+      "TestPlatformRetentionKeepsOperationsOfALaterGenerationOnALiveInstallation",
+      "TestPlatformRetentionCountsFromTheLatestOfCompletedAndUpdated",
+      "TestPlatformRetentionClassesRunIndependently",
+      "TestPlatformRetentionClassesRecheckThePauseInsideTheirTransaction",
+      "TestPlatformRetentionSerializesWithAdmissionOnPostgres",
+      "TestAppContainerLogConstantsAgree"
+    ],
+    "web": [
+      "src/components/AppPlatformRetentionCard.test.tsx",
+      "src/pages/manage/StoragePage.test.tsx",
+      "src/locales/locales.test.ts"
+    ],
+    "drivers": "each sweep test runs on SQLite and, with TEST_POSTGRES_DSN, on PostgreSQL; both were run and passed",
+    "mutation_checks": "removing the unresolved-effect pin, the recovery-chain pin, the capability-grant pin, the open-image pin or replacing the task reduction with a delete each failed a named test; later also the secret-binding NOT EXISTS in both queries, the busy-runtime pin, target_generation>= to =, the whole-or-none image rule and the resolution-time expression"
+  },
+  "assertions": [
+    "only eligible rows are deleted, for plans, operations with effects and plans, tasks and tombstones",
+    "every pinned row is kept, with one fixture per pin and per reader group",
+    "an idempotency key inside the period still returns the original operation; past the period it resolves to no operation",
+    "a replayed occurrence of a swept task is deduplicated, a different payload hash conflicts, and after the tombstone is removed the occurrence is a new request",
+    "the per-installation cap (an injected 3) reduces only the oldest surplus; the default cap is 10000",
+    "one audit row per sweep with counts per class in detail",
+    "no work, no audit row, while the Portal is in the restore pause",
+    "retained namespaces, their recovery sets, the installation and the holding operation are unchanged 400 days later",
+    "the clamp on read and the refusal on save of both adjustable values"
+  ],
+  "requirements": {
+    "DATA-08": "partial"
+  },
+  "known_limits": [
+    "recovery sets beyond the latest N are selected and reported, not removed: the runner has no command that deletes one checkpoint (delete-data removes a whole namespace), and marking a set deleted without its archive would leak runner disk",
+    "the 7-day runner log age is not enforceable by Docker's json-file driver; the 10 MiB size bound applies and logs go away with the container",
+    "the RUN-08 log flood evidence was measured at the previous 1 MiB policy and was not repeated at 5 MiB",
+    "no run covers the real retention periods or a production-size database; the sweep scans image-kind effects and recovery sets in full each time",
+    "an operation that is pinned (checkpoint operations through the recovery set foreign key, operations that loaded an image still on a runner) stays replayable past 90 days",
+    "the sweep was not run against concurrent live installs",
+    "an installation that has ever had an operation in recovery_required keeps its whole operation history (safe, blunt)",
+    "tombstones are outside the 10000-row cap; the status timeline no longer finds audit rows of swept operations and the task admin view of a tombstone has no result or attempts",
+    "the log-option change makes every existing app container a policy-digest conflict; the operator path (stop, docker rm of portal-app-* containers, fresh journal if needed) is procedure, not a tested path",
+    "the native 24 MiB log flood runs only in CI (enforce-disposable-project-quota)",
+    "the scans of the image ledger, receipts and per-installation task counts are not incremental"
+  ]
+}

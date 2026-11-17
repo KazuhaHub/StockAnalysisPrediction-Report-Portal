@@ -1,0 +1,411 @@
+package app
+
+import (
+	"context"
+	"crypto/hmac"
+	"database/sql"
+	"encoding/base64"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+)
+
+const platformDocumentTimeout = 5 * time.Second
+const platformDocumentErrorCSP = "sandbox; default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+
+type platformDocumentBudget struct {
+	once  sync.Once
+	slots chan struct{}
+}
+
+// platformDocumentSlots is how many requests a platformDocumentBudget admits at once.
+const platformDocumentSlots = 2
+
+func (b *platformDocumentBudget) init() { b.sized(platformDocumentSlots) }
+
+// sized makes the slots on first use; the first size asked for is the budget's size from then on.
+func (b *platformDocumentBudget) sized(n int) { b.once.Do(func() { b.slots = make(chan struct{}, n) }) }
+
+// platformUnverifiedBudget is the Portal-wide limit on cold verification of service credentials: a
+// platformDocumentBudget of platformUnverifiedVerifications slots, the right size from its zero value.
+type platformUnverifiedBudget struct{ budget platformDocumentBudget }
+
+func (b *platformUnverifiedBudget) acquire() (func(), bool) {
+	b.budget.sized(platformUnverifiedVerifications)
+	return b.budget.acquire()
+}
+
+// full reports, without blocking and without taking a slot, whether every slot is held right now.
+// It is advisory: a slot can be released or taken the instant after, so it only ever short-circuits
+// a refusal that acquire would very likely give, and acquire stays the authoritative decision.
+func (b *platformDocumentBudget) full() bool {
+	b.init()
+	return len(b.slots) == cap(b.slots)
+}
+
+func (b *platformDocumentBudget) acquire() (func(), bool) {
+	b.init()
+	select {
+	case b.slots <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-b.slots }) }, true
+	default:
+		return nil, false
+	}
+}
+
+// platformHTTPBusy and platformJSONBusy are the one 429 each family of budgeted routes answers, both
+// from the authoritative acquire and from the pre-check, so the two can never drift apart.
+func platformHTTPBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	http.Error(w, "application busy", http.StatusTooManyRequests)
+}
+func platformJSONBusy(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "1")
+	jsonErrorCode(w, 429, "app_platform_busy", "application busy")
+}
+
+// platformSessionCookieSigned reports whether the request carries a session cookie this server
+// signed and that has not expired, using only the signing key: no database read, which is the whole
+// point, since the session reads are what the pre-check below exists to avoid. It proves the cookie
+// was minted here, not that its session is still live (a revoked or disabled one still passes).
+func (s *Server) platformSessionCookieSigned(r *http.Request) bool {
+	cookie, err := r.Cookie(cookieName)
+	if err != nil || !s.hasSigningKey() {
+		return false
+	}
+	parts := strings.SplitN(cookie.Value, ".", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil || !hmac.Equal([]byte(s.hmac(string(raw))), []byte(parts[1])) {
+		return false
+	}
+	return platformSessionMessageShape(string(raw), time.Now())
+}
+
+// platformSessionMessageShape reports whether a signed message has the shape of a session cookie, and
+// is unexpired, routed the way verify routes it: the "v2|user|rev|id|exp" and "v1|user|rev|exp"
+// forms, and the legacy "user|exp" form. The signing key also signs other tokens, the owner
+// attribution token among them (injected into every workflow run's inputs), so a valid signature
+// and a future expiry alone must not qualify.
+func platformSessionMessageShape(msg string, now time.Time) bool {
+	expSep := strings.LastIndexByte(msg, '|')
+	if expSep < 0 {
+		return false
+	}
+	exp, err := strconv.ParseInt(msg[expSep+1:], 10, 64)
+	if err != nil || now.Unix() >= exp {
+		return false
+	}
+	body := msg[:expSep]
+	switch {
+	case strings.HasPrefix(msg, "v2|"):
+		idSep := strings.LastIndexByte(body, '|')
+		if idSep < 3 || idSep == len(body)-1 {
+			return false
+		}
+		revSep := strings.LastIndexByte(body[:idSep], '|')
+		if revSep < 3 {
+			return false
+		}
+		_, err := strconv.ParseInt(body[revSep+1:idSep], 10, 64)
+		return err == nil
+	case strings.HasPrefix(msg, "v1|"):
+		revSep := strings.LastIndexByte(body, '|')
+		if revSep < len("v1|") {
+			return false
+		}
+		rev, err := strconv.ParseInt(body[revSep+1:], 10, 64)
+		return err == nil && rev >= 0
+	default:
+		// Legacy "user|exp": one non-empty name and no further field, which also excludes the
+		// "ot1|ou|user|exp" owner token.
+		return body != "" && !strings.Contains(body, "|")
+	}
+}
+
+// platformBudgetPrecheck answers a budget's own 429 before the session reads when the budget is
+// already full. Under a flood the great majority of attempts end in that 429, and each used to pay
+// two session reads first; on SQLite those queue on the single connection and delay everything else
+// (capacity envelope plan, resolution "relay admission before session reads").
+//
+// It never takes a slot: a slot held before authentication could be held by an anonymous client.
+// The authoritative acquire still runs after authentication, so a request that passes the pre-check
+// and then loses the race gets the same 429 it always did.
+//
+// Anonymous clients keep their 401. The 429 is given only to a request carrying a cookie this server
+// signed (platformSessionCookieSigned), so the only thing it tells a caller is that the budget is
+// full, and only to a caller who already held a credential the server issued. Anything else falls
+// through to the unchanged authentication path. A validly signed cookie whose session was revoked
+// or whose account was disabled now sees 429 instead of 401 while the budget is full; it learns
+// nothing about the session and the next attempt after the budget frees gets the 401.
+func (s *Server) platformBudgetPrecheck(budget *platformDocumentBudget, busy func(http.ResponseWriter), next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if budget.full() && s.platformSessionCookieSigned(r) {
+			busy(w)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// platformServiceTaskSlots is how many submissions of one installation may be in the admission path at
+// once. The admission serialises on one lock anyway, so more would only queue; two keep a backend's
+// concurrent submissions flowing while one is waiting on the database.
+const platformServiceTaskSlots = 2
+
+// platformInstallationBudgets holds the slots of the session-free task route, one small budget for each
+// installation that has verified work in flight. Scoping them to the verified installation is the
+// point: a slot is taken only after the service identity is verified, so an anonymous caller can never
+// hold one, and one installation's flood or stall can never take another installation's. The map holds
+// an entry only while something is in flight, so it is bounded by the concurrent requests and empty when
+// idle; the zero value is ready to use.
+type platformInstallationBudgets struct {
+	mu   sync.Mutex
+	held map[string]int
+}
+
+func (b *platformInstallationBudgets) acquire(installation string) (func(), bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.held == nil {
+		b.held = map[string]int{}
+	}
+	if b.held[installation] >= platformServiceTaskSlots {
+		return nil, false
+	}
+	b.held[installation]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			b.mu.Lock()
+			defer b.mu.Unlock()
+			if b.held[installation]--; b.held[installation] <= 0 {
+				delete(b.held, installation)
+			}
+		})
+	}, true
+}
+
+func (b *platformInstallationBudgets) size() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.held)
+}
+
+func platformDocumentHeaders(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", platformDocumentErrorCSP)
+		next(w, r)
+	}
+}
+func (s *Server) platformHTTPReader(r *http.Request, user string) (platformActorSession, error) {
+	var zero platformActorSession
+	cookie, err := r.Cookie(cookieName)
+	if err != nil || !s.hasSigningKey() {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	current, revision := s.verify(cookie.Value)
+	if current == "" || current != user {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	account := s.st.GetUser(user)
+	if account == nil || !account.Active || account.SessionRev != revision {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	id := sessionID(r)
+	// Preserve the signed cookie lifetime, not a later mutable session-row expiry.
+	raw, err := base64.RawURLEncoding.DecodeString(strings.SplitN(cookie.Value, ".", 2)[0])
+	if err != nil {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	end := strings.LastIndexByte(string(raw), '|')
+	if end < 0 {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	signedExpiry, err := strconv.ParseInt(string(raw[end+1:]), 10, 64)
+	if err != nil {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	var expires int64
+	// Persisted managed sessions, including already migrated legacy identities.
+	// This read never creates or upgrades a browser credential.
+	if err := s.st.readScan(`SELECT expires_at FROM user_sessions WHERE id=? AND username=? AND revision=? AND expires_at=? AND revoked=0`, []any{id, user, revision, signedExpiry}, func(scan func(...any) error) error { return scan(&expires) }); err != nil {
+		return zero, errAppPlatformLaunchUnavailable
+	}
+	generation, err := notificationAccountGeneration(s.st.readExec(), user)
+	if err != nil {
+		return zero, err
+	}
+	return platformActorSession{username: user, created: account.CreatedAt, sessionID: id, sessionRevision: revision, generation: generation, expires: time.Unix(expires, 0)}, nil
+}
+func platformDocumentSource(binding platformLaunchAccess) string {
+	return "/app-documents/" + binding.installationID + "/" + binding.generation + "/" + binding.policyRevision + "/" + binding.releaseSHA + "/" + binding.frontendSHA + "/" + binding.entry
+}
+func platformHTTPPath(r *http.Request) bool {
+	return len(r.URL.Path) <= 1024 && r.URL.RawQuery == "" && !r.URL.ForceQuery && r.URL.EscapedPath() == r.URL.Path
+}
+func platformPositiveCounter(value string) bool {
+	n, err := strconv.ParseInt(value, 10, 64)
+	return err == nil && n > 0 && strconv.FormatInt(n, 10) == value
+}
+func platformDocumentFailure(w http.ResponseWriter) {
+	http.Error(w, "application unavailable", http.StatusNotFound)
+}
+func (s *Server) platformHTTPAdmission(w http.ResponseWriter, r *http.Request, user string) (platformActorSession, func(), bool) {
+	session, err := s.platformHTTPReader(r, user)
+	if err != nil {
+		http.Error(w, "session unavailable", http.StatusUnauthorized)
+		return platformActorSession{}, nil, false
+	}
+	release, ok := s.platformDocuments.acquire()
+	if !ok {
+		platformHTTPBusy(w)
+		return platformActorSession{}, nil, false
+	}
+	return session, release, true
+}
+func (s *Server) apiPlatformLaunch(w http.ResponseWriter, r *http.Request, user string) {
+	if !platformHTTPPath(r) || !platformValidUUID(r.PathValue("installation")) {
+		platformDocumentFailure(w)
+		return
+	}
+	session, release, ok := s.platformHTTPAdmission(w, r, user)
+	if !ok {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(r.Context(), platformDocumentTimeout)
+	defer cancel()
+	// Validate the complete current document profile before advertising its URL.
+	var applicationID, layout, timeZone string
+	var backendAvailable bool
+	var display *appplatform.AppDisplay
+	var routes []appplatform.Route
+	capabilities := []string{}
+	binding, err := s.withPlatformLaunchReadContext(ctx, session, r.PathValue("installation"), func(e migExec, current platformLaunchAccess, m appplatform.Manifest) error {
+		var archive []byte
+		if err := e.queryRow(`SELECT content FROM app_platform_frontend_artifacts WHERE sha256=?`, current.frontendSHA).Scan(&archive); err != nil {
+			return err
+		}
+		applicationID = m.ID
+		backendAvailable = m.Backend != nil && s.platformBackendEndpoint.Load() != nil
+		rows, err := e.query(`SELECT capability FROM app_platform_capability_grants
+			WHERE installation_id=? AND granted=1 AND policy_revision=?
+			AND capability IN ('network.http','network.stream','notifications.publish','reports.read','secrets.use','storage.files')
+			ORDER BY capability`, current.installationID, current.policyRevision)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var capability string
+			if err := rows.Scan(&capability); err != nil {
+				rows.Close()
+				return err
+			}
+			capabilities = append(capabilities, capability)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		rows.Close()
+		display = m.Presentation.Display
+		routes = append([]appplatform.Route(nil), m.Presentation.Routes...)
+		for _, route := range routes {
+			if route.Path == "/" {
+				layout = route.Layout
+				break
+			}
+		}
+		var zone sql.NullString
+		err = e.queryRow(`SELECT v FROM meta WHERE k='timezone'`).Scan(&zone)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		timeZone = zone.String
+		if timeZone == "" {
+			timeZone = time.Local.String()
+		}
+		// Local is an opaque process location, not a browser-recognized IANA name.
+		// An empty result stays explicitly unavailable to the host presentation layer.
+		if timeZone == "Local" {
+			timeZone = ""
+		}
+		_, err = appplatform.BuildFrontendDocument(m, archive)
+		return err
+	})
+	if err != nil || ctx.Err() != nil {
+		platformDocumentFailure(w)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]any{"source": platformDocumentSource(binding), "binding": map[string]string{"installationId": binding.installationID, "generation": binding.generation, "policyRevision": binding.policyRevision, "releaseSha256": binding.releaseSHA}, "capabilities": capabilities, "backendAvailable": backendAvailable, "applicationId": applicationID, "display": display, "routes": routes, "layout": layout, "timeZone": timeZone})
+}
+func (s *Server) platformAppDocument(w http.ResponseWriter, r *http.Request, user string) {
+	expected := platformLaunchAccess{installationID: r.PathValue("installation"), generation: r.PathValue("generation"), policyRevision: r.PathValue("policy"), releaseSHA: r.PathValue("release"), frontendSHA: r.PathValue("frontend"), entry: r.PathValue("entry")}
+	if !platformHTTPPath(r) || !platformValidUUID(expected.installationID) || !platformPositiveCounter(expected.generation) || !platformPositiveCounter(expected.policyRevision) || !platformValidSHA(expected.releaseSHA) || !platformValidSHA(expected.frontendSHA) || r.URL.Path != platformDocumentSource(expected) || strings.Contains(expected.entry, "..") {
+		platformDocumentFailure(w)
+		return
+	}
+	session, release, ok := s.platformHTTPAdmission(w, r, user)
+	if !ok {
+		return
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(r.Context(), platformDocumentTimeout)
+	defer cancel()
+	document, err := s.readPlatformLaunchDocumentContext(ctx, session, expected)
+	if err != nil || ctx.Err() != nil {
+		platformDocumentFailure(w)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Security-Policy", document.CSP)
+	w.Header().Set("Content-Length", strconv.Itoa(len(document.Content)))
+	if r.Method != http.MethodHead {
+		w.Write(document.Content)
+	}
+}
+
+// Bind every statement, including lifecycle/trust/resource lock acquisition, to
+// the request context. The DB transaction alone does not make Tx.Query cancelable.
+type platformContextTx struct {
+	*sql.Tx
+	ctx context.Context
+}
+
+func (t platformContextTx) Exec(q string, args ...any) (sql.Result, error) {
+	return t.Tx.ExecContext(t.ctx, q, args...)
+}
+func (t platformContextTx) Query(q string, args ...any) (*sql.Rows, error) {
+	return t.Tx.QueryContext(t.ctx, q, args...)
+}
+func (t platformContextTx) QueryRow(q string, args ...any) *sql.Row {
+	return t.Tx.QueryRowContext(t.ctx, q, args...)
+}
+
+type platformContextPool struct {
+	*sql.DB
+	ctx context.Context
+}
+
+func (p platformContextPool) Exec(q string, args ...any) (sql.Result, error) {
+	return p.DB.ExecContext(p.ctx, q, args...)
+}
+func (p platformContextPool) Query(q string, args ...any) (*sql.Rows, error) {
+	return p.DB.QueryContext(p.ctx, q, args...)
+}
+func (p platformContextPool) QueryRow(q string, args ...any) *sql.Row {
+	return p.DB.QueryRowContext(p.ctx, q, args...)
+}

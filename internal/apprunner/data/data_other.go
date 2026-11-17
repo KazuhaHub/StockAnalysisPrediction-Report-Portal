@@ -1,0 +1,63 @@
+//go:build !linux || (!amd64 && !arm64)
+
+package data
+
+import (
+	"context"
+	"os"
+)
+
+type Root struct{}
+
+func openRoot(*os.File) (*Root, error) { return nil, ErrUnsupported }
+func (*Root) Close() error             { return nil }
+func (*Root) Prepare(context.Context, RootIdentity, Request) (Observation, error) {
+	return Observation{}, ErrUnsupported
+}
+func (*Root) Inspect(context.Context, RootIdentity, string, uint32) (Observation, error) {
+	return Observation{}, ErrUnsupported
+}
+
+func (*Root) Identity(context.Context) (RootIdentity, error) { return RootIdentity{}, ErrUnsupported }
+
+func (*Root) EnableWriteAccess(context.Context, RootIdentity, Observation) (WriteAccessObservation, error) {
+	return WriteAccessObservation{}, ErrUnsupported
+}
+func (*Root) InspectWriteAccess(context.Context, RootIdentity, string, uint32) (WriteAccessObservation, error) {
+	return WriteAccessObservation{}, ErrUnsupported
+}
+func (*Root) Checkpoint(context.Context, RootIdentity, *Root, RootIdentity, CheckpointRequest) (CheckpointObservation, error) {
+	return CheckpointObservation{}, ErrUnsupported
+}
+func (*Root) VerifyCheckpoint(context.Context, RootIdentity, RootIdentity, CheckpointRequest, string) (CheckpointObservation, error) {
+	return CheckpointObservation{}, ErrUnsupported
+}
+func (*Root) Restore(context.Context, RootIdentity, *Root, RootIdentity, RestoreRequest) (RestoreObservation, error) {
+	return RestoreObservation{}, ErrUnsupported
+}
+
+func (*Root) Delete(context.Context, RootIdentity, DeleteRequest) (DeleteObservation, error) {
+	return DeleteObservation{}, ErrUnsupported
+}
+
+func (*Root) ImportCheckpoint(context.Context, RootIdentity, *Root, RootIdentity, ImportRequest) (ImportObservation, error) {
+	return ImportObservation{}, ErrUnsupported
+}
+
+func (*Root) VerifyImportedCheckpoint(context.Context, RootIdentity, *Root, RootIdentity, ImportRequest) (ImportObservation, error) {
+	return ImportObservation{}, ErrUnsupported
+}
+
+func (*Root) ReadSchemaMarker(context.Context, RootIdentity, string, uint32) (SchemaMarkerObservation, error) {
+	return SchemaMarkerObservation{}, ErrMigrationUnsupported
+}
+
+func (*Root) InspectCheckpointArchive(context.Context, RootIdentity, string) (CheckpointArchive, error) {
+	return CheckpointArchive{}, ErrUnsupported
+}
+func (*Root) RemoveCheckpointArchive(context.Context, RootIdentity, string, int64, string) (CheckpointArchive, error) {
+	return CheckpointArchive{}, ErrUnsupported
+}
+func (*Root) QuarantineSummary(context.Context, RootIdentity) (QuarantineReport, error) {
+	return QuarantineReport{}, ErrUnsupported
+}

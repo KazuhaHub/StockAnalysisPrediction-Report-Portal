@@ -36,6 +36,9 @@ export function pageBuildIdentity(): BuildIdentity {
 // The revision is optional and defaults to 0 — a tag without one is the week's first release, which
 // is deliberately a different number from that week's revision 1.
 export function parseCalVer(v: string): [number, number, number] | null {
+  // The caller receives JSON, so the TypeScript annotation is not a runtime guarantee.
+  // A partial/older version response must degrade to "cannot order", never crash render.
+  if (typeof v !== 'string') return null
   const m = /^v?(\d{4})\.(\d{1,2})(?:\.(\d{1,3}))?$/.exec(v.trim())
   if (!m) return null
   return [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)]

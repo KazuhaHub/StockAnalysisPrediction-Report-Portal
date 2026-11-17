@@ -1,0 +1,541 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync/atomic"
+	"time"
+
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/appplatform"
+	"github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/internal/apprunner/transport"
+)
+
+const platformInstallAttemptLimit = 3
+const platformInstallAttemptTimeout = 20 * time.Second
+
+// An import-checkpoint is a bulk data action. The connection that carries it is bounded at two
+// minutes by the runner, but a claimed import runs on, detached, for up to journal.ImportCheckpointBound.
+// An attempt therefore waits a little longer than the connection, ends inside the 180 second operation
+// lease, and the Portal polls: an attempt that ends because the runner is still working is not a
+// failure, and the next one reads the receipt of the same effect (platformBusyWaitLimit of them cover
+// the longest bound).
+// platformImportAttemptContext is the context a bulk attempt runs under: the parent bounded by the attempt timeout. Tests
+// replace it to end an attempt at a moment of their choosing instead of by the clock.
+var platformImportAttemptContext = func(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, platformImportAttemptTimeout)
+}
+
+var platformImportAttemptTimeout = 2*time.Minute + 20*time.Second
+
+// platformBusyWaitLimit bounds how many attempts in a row may end because the runner was still busy
+// with the same effect before they count as failures.
+const platformBusyWaitLimit = 20
+
+func platformAttemptTimeout(lease platformOperationLease) time.Duration {
+	if lease.snapshot.Action == appplatform.ActionRestoreImport && lease.snapshot.Stage == appplatform.StageRestoreData {
+		return platformImportAttemptTimeout
+	}
+	// A migration job runs on, detached, for up to its wall clock; the attempt waits like an import's.
+	if lease.snapshot.Action == appplatform.ActionUpdate && lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageMigrate {
+		return platformImportAttemptTimeout
+	}
+	// A start first loads the release image: blobs may be uploaded and the daemon may take minutes to load.
+	if lease.snapshot.Managed && lease.snapshot.Stage == appplatform.StageStart {
+		return platformImportAttemptTimeout
+	}
+	return platformInstallAttemptTimeout
+}
+
+type platformInstallWorkerStatus struct {
+	code, operationID string
+	stage             appplatform.Stage
+	attempts          int
+}
+
+// One explicitly owned service instance. Construction does not start it;
+// endpoint/worker identity come only from trusted bootstrap.
+type platformInstallScheduler struct {
+	server   *Server
+	endpoint platformRuntimeEndpoint
+	worker   string
+	interval time.Duration
+	gate     chan struct{}
+	started  atomic.Bool
+	status   atomic.Pointer[platformInstallWorkerStatus]
+	active   platformOperationLease
+	attempts int
+	waits    int
+	writable bool
+	// reconciledAt is when recovery-mode reconciliation last ran.
+	reconciledAt time.Time
+	// health tracks whether the runner answers; probe replaces the reachability probe in tests.
+	health platformRunnerHealth
+	probe  func(context.Context) error
+	// runOverride replaces the action dispatch of a tick. Only tests set it.
+	runOverride func(context.Context, platformOperationLease) (platformInstallRun, error)
+}
+
+func newPlatformInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
+	frontendOnly := endpoint == (platformRuntimeEndpoint{})
+	if s == nil || s.st == nil || !platformValidUUID(worker) || interval < 50*time.Millisecond || interval > 30*time.Second || (!frontendOnly && (!filepath.IsAbs(endpoint.path) || filepath.Clean(endpoint.path) != endpoint.path || len(endpoint.path) > 107 || strings.ContainsAny(endpoint.path, "\x00\r\n") || endpoint.controllerUID == 0 || endpoint.controllerGID == 0 || endpoint.controllerUID == ^uint32(0) || endpoint.controllerGID == ^uint32(0))) {
+		return nil, errAppPlatformRuntimeConflict
+	}
+	return &platformInstallScheduler{server: s, endpoint: endpoint, worker: worker, interval: interval, gate: make(chan struct{}, 1)}, nil
+}
+
+// newPlatformOperationEngine builds the scheduler that production starts when a trusted runner
+// endpoint is bound. It is the platform's operation engine, not only the writable install worker.
+// In one serial loop, with the runner endpoint, it runs: writable installs; managed updates,
+// repairs and enables; delete-data; managed uninstall and disable; managed restore; recovery
+// imports and resumes while a restore pause is on; and, when idle, the settlements of failed
+// migrations, held starts, image loads and image removals and the reclaim of unreferenced images.
+// Each operation keeps its fenced lease, and a runner that cannot be reached backs the loop off
+// without spending any operation's attempts (see app_platform_runner_health.go).
+// Frontend (static) operations are run by the frontend scheduler beside it.
+func newPlatformOperationEngine(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
+	return newPlatformWritableInstallScheduler(s, endpoint, worker, interval)
+}
+
+// newPlatformWritableInstallScheduler is the constructor behind the operation engine. It requires
+// an explicit runner endpoint; an empty endpoint is refused.
+func newPlatformWritableInstallScheduler(s *Server, endpoint platformRuntimeEndpoint, worker string, interval time.Duration) (*platformInstallScheduler, error) {
+	if endpoint == (platformRuntimeEndpoint{}) {
+		return nil, errAppPlatformRuntimeConflict
+	}
+	w, err := newPlatformInstallScheduler(s, endpoint, worker, interval)
+	if err != nil {
+		return nil, err
+	}
+	w.writable = true
+	return w, nil
+}
+func (w *platformInstallScheduler) currentStatus() platformInstallWorkerStatus {
+	if status := w.status.Load(); status != nil {
+		return *status
+	}
+	return platformInstallWorkerStatus{code: "stopped"}
+}
+func (w *platformInstallScheduler) publish(code, operation string, stage appplatform.Stage) {
+	w.status.Store(&platformInstallWorkerStatus{code: code, operationID: operation, stage: stage, attempts: w.attempts})
+}
+func (w *platformInstallScheduler) tick(parent context.Context) error {
+	select {
+	case w.gate <- struct{}{}:
+	case <-parent.Done():
+		return parent.Err()
+	}
+	defer func() { <-w.gate }()
+	ctx, cancel := context.WithTimeout(parent, platformInstallAttemptTimeout)
+	defer cancel()
+	bulkCtx, bulkCancel := platformImportAttemptContext(parent)
+	defer bulkCancel()
+	// The idle steps and the claimed attempt each observe their own connection attempts.
+	ctx, _ = transport.WithUnreachableWitness(ctx)
+	bulkCtx, _ = transport.WithUnreachableWitness(bulkCtx)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if w.health.down {
+		// The runner was unreachable: probe before any work. While it stays down the whole tick
+		// backs off, and an operation in flight keeps its lease (no attempt is spent).
+		probe := w.probe
+		if probe == nil {
+			probe = func(ctx context.Context) error { return probePlatformRunner(ctx, w.endpoint) }
+		}
+		if err := probe(ctx); err != nil {
+			w.health.unreachable("app-platform scheduler")
+			w.publish("runner_unreachable", w.active.id, w.active.snapshot.Stage)
+			w.keepLeaseWhileDown(ctx)
+			return err
+		}
+		w.health.reachable("app-platform scheduler")
+	}
+	if w.active.id == "" {
+		var selected platformInstallSelection
+		var err error
+		if w.endpoint.path != "" && w.server.platformRecoveryPaused(ctx) {
+			// A Portal in recovery runs restore imports and resumes and nothing else; every other selector
+			// would refuse on the pause and mask the import behind its error. The frontend-only
+			// service has no runner endpoint, so it keeps refusing on the pause as before.
+			selected, err = w.server.claimNextPlatformRestoreImport(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformRestoreResume(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" && time.Since(w.reconciledAt) >= platformRecoveryReconcileInterval {
+				// Idle: read back any import left unsettled by an earlier attempt.
+				w.reconciledAt = time.Now()
+				if _, reconcileErr := w.server.reconcilePlatformRecoveryImports(ctx, w.endpoint); reconcileErr != nil {
+					if w.idleUnreachable(ctx, reconcileErr) {
+						return reconcileErr
+					}
+					log.Printf("app-platform recovery reconcile: %v", reconcileErr)
+				}
+				// A resume whose start is settled as applied comes back as a lease at the probe stage, which
+				// the scheduler runs on like any claimed operation.
+				if resumed, reconcileErr := w.server.reconcilePlatformRecoveryResumes(ctx, w.endpoint, w.worker); reconcileErr != nil {
+					if w.idleUnreachable(ctx, reconcileErr) {
+						return reconcileErr
+					}
+					log.Printf("app-platform recovery resume reconcile: %v", reconcileErr)
+				} else {
+					selected = resumed
+				}
+			}
+		} else if w.writable {
+			selected, err = w.server.claimNextPlatformWritableInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUpdate(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRepair(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformDeleteData(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRestore(ctx, w.worker)
+			}
+		} else if w.endpoint.path == "" {
+			selected, err = w.server.claimNextPlatformFrontendInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendUpdate(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendEnable(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformFrontendUninstall(ctx, w.worker)
+			}
+		} else {
+			selected, err = w.server.claimNextPlatformStaticInstall(ctx, w.worker)
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedEnable(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedUninstall(ctx, w.worker)
+			}
+			if err == nil && !selected.reviewed && selected.lease.id == "" {
+				selected, err = w.server.claimNextPlatformManagedRestore(ctx, w.worker)
+			}
+		}
+		if err != nil {
+			w.publish("worker_unavailable", "", "")
+			return err
+		}
+		if selected.reviewed {
+			w.publish("review_required", selected.operationID, "")
+			return nil
+		}
+		if selected.lease.id == "" {
+			// Idle, in normal and in paused mode: a failed migration waiting for settlement needs no lease.
+			if w.endpoint.path != "" {
+				if _, settleErr := w.server.settlePlatformMigrations(bulkCtx, w.endpoint); settleErr != nil {
+					if w.idleUnreachable(bulkCtx, settleErr) {
+						return settleErr
+					}
+					log.Printf("app-platform migration settlement: %v", settleErr)
+				}
+				if _, settleErr := w.server.settlePlatformLoadImages(bulkCtx, w.endpoint); settleErr != nil {
+					if w.idleUnreachable(bulkCtx, settleErr) {
+						return settleErr
+					}
+					log.Printf("app-platform load-image settlement: %v", settleErr)
+				}
+				// Idle: the images of releases nothing references any more are removed, and begun removals settle.
+				if _, reclaimErr := w.server.reclaimPlatformImages(bulkCtx, w.endpoint); reclaimErr != nil {
+					if w.idleUnreachable(bulkCtx, reclaimErr) {
+						return reclaimErr
+					}
+					log.Printf("app-platform image reclaim: %v", reclaimErr)
+				}
+				// Idle: the checkpoint archives of recovery sets the Portal no longer keeps are deleted, and begun deletions settle.
+				w.server.pruneRecoverySetsOnTick(bulkCtx, w.endpoint)
+			}
+			w.publish("idle", "", "")
+			return nil
+		}
+		w.active, w.attempts, w.waits = selected.lease, 0, 0
+	}
+	if w.attempts >= platformInstallAttemptLimit {
+		return w.finish(ctx)
+	}
+	// Renewal happens only at a serial stage boundary. A heartbeat cannot race
+	// the driver's revision-changing transactions or resurrect an expired lease.
+	renewed, err := w.server.st.updatePlatformOperationLeaseContext(ctx, w.active.id, w.worker, &w.active)
+	if err != nil {
+		operation, stage := w.active.id, w.active.snapshot.Stage
+		if errors.Is(err, errAppPlatformLeaseConflict) {
+			w.active = platformOperationLease{}
+			w.attempts = 0
+		}
+		w.publish("worker_unavailable", operation, stage)
+		return err
+	}
+	w.active = renewed
+	if platformAttemptTimeout(w.active) == platformImportAttemptTimeout {
+		ctx = bulkCtx
+	}
+	w.publish("running", w.active.id, w.active.snapshot.Stage)
+	// Connection attempts under this attempt's context report to the witness, so a failure whose
+	// error was wrapped without %w by a stage can still be told from a verdict. The witness is
+	// scoped to this attempt: other goroutines' dials never touch it.
+	ctx, witness := transport.WithUnreachableWitness(ctx)
+	var result platformInstallRun
+	if w.runOverride != nil {
+		result, err = w.runOverride(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionRestoreImport {
+		result.lease, err = w.server.runPlatformRestoreImport(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedRestore(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedUpdate(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedRepair(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		w.active.snapshot.Managed {
+		result.lease, err = w.server.runPlatformManagedEnable(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionDeleteData &&
+		w.active.snapshot.Managed {
+		result, err = w.server.runPlatformDeleteData(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionDisable &&
+		w.active.snapshot.Managed {
+		result, err = w.server.runPlatformManagedUninstall(
+			ctx, w.active, w.endpoint)
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall && w.active.snapshot.Managed {
+		result, err = w.server.runPlatformManagedUninstall(ctx, w.active, w.endpoint)
+	} else if w.writable {
+		result, err = w.server.runPlatformWritableInstallMode(ctx, w.active, w.endpoint, true)
+	} else if w.active.snapshot.Action == appplatform.ActionEnable {
+		result.lease, err = w.server.runPlatformFrontendEnable(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionDisable {
+		result.lease, err = w.server.runPlatformFrontendDisable(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
+		result.lease, err = w.server.runPlatformStaticUpdate(ctx, w.active)
+	} else if w.active.snapshot.Action == appplatform.ActionUninstall {
+		result.lease, err = w.server.runPlatformFrontendUninstall(ctx, w.active)
+	} else {
+		result, err = w.server.runPlatformStaticInstall(ctx, w.active, w.endpoint)
+	}
+	if errors.Is(err, errPlatformImportEnded) || errors.Is(err, errPlatformMigrationEnded) {
+		w.publish("review_required", w.active.id, "")
+		w.active, w.attempts = platformOperationLease{}, 0
+		return nil
+	}
+	if err == nil {
+		w.health.reachable("app-platform scheduler")
+		if result.lease.id != "" &&
+			result.lease.snapshot.Stage != appplatform.StageComplete {
+			w.active, w.attempts = result.lease, 0
+			w.publish("running", w.active.id,
+				w.active.snapshot.Stage)
+			return nil
+		}
+		w.publish("complete", w.active.id, appplatform.StageComplete)
+		w.active, w.attempts = platformOperationLease{}, 0
+		// An operation ended: blobs no release pins any more may go, and so may the images of the releases it
+		// moved away from or removed.
+		w.server.sweepPlatformImages(ctx)
+		w.reclaimImages(ctx)
+		return nil
+	}
+	if result.lease.id == "" {
+		result.lease = w.active
+	}
+	w.active = result.lease
+	if parent.Err() != nil {
+		w.publish("stopped", w.active.id, w.active.snapshot.Stage)
+		return parent.Err()
+	}
+	if w.endpoint.path != "" && platformAttemptFoundRunnerDown(ctx, err, witness) {
+		// The runner could not be reached: nothing was sent, so this is not a verdict and spends
+		// no attempt. The operation keeps its lease and the tick backs off until it answers.
+		w.health.unreachable("app-platform scheduler")
+		w.publish("runner_unreachable", w.active.id, w.active.snapshot.Stage)
+		return err
+	}
+	if refusal, ok := platformCapacityRefusalOf(err); ok {
+		// A definite refusal by the runner is not retried: the operation ends with the typed outcome.
+		return w.finishCapacity(ctx, refusal)
+	}
+	if orphan, ok := platformCandidateOrphanOf(err); ok {
+		// The runner proved the start never ran: a definite end, never a retry. A receipt that disagrees with the
+		// Portal's own rows settles nothing and is treated as the ordinary failure it is.
+		if finishErr := w.finishOrphan(ctx, orphan); finishErr == nil || !errors.Is(finishErr, errAppPlatformStageEvidence) {
+			return finishErr
+		}
+	}
+	if (errors.Is(err, errPlatformImageBusy) ||
+		(w.active.snapshot.Action == appplatform.ActionRestoreImport &&
+			errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil) ||
+		(w.active.snapshot.Action == appplatform.ActionUpdate && w.active.snapshot.Stage == appplatform.StageMigrate &&
+			(errors.Is(err, errPlatformMigrationBusy) ||
+				(errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil)))) &&
+		w.waits < platformBusyWaitLimit {
+		// The wait for the runner ran out while it was still working on the import: it has not failed.
+		// The same effect is read again on the next attempt; nothing is sent under a new identity.
+		w.waits++
+		w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
+		return err
+	}
+	w.waits = 0
+	w.attempts++
+	w.publish("retry_pending", w.active.id, w.active.snapshot.Stage)
+	if w.attempts >= platformInstallAttemptLimit {
+		return w.finish(ctx)
+	}
+	return err
+}
+func (w *platformInstallScheduler) finish(ctx context.Context) error { return w.finishAs(ctx, "") }
+
+// finishAs ends the active operation by its action's review path. A capacity code, when given, becomes the
+// failure code of an installation, whose finish owns one.
+func (w *platformInstallScheduler) finishAs(ctx context.Context, capacityCode string) error {
+	operation, stage := w.active.id, w.active.snapshot.Stage
+	finish := w.server.finishPlatformInstallForReview
+	if capacityCode != "" && w.active.snapshot.Action == appplatform.ActionInstall {
+		finish = func(ctx context.Context, lease platformOperationLease) error {
+			return w.server.finishPlatformInstallWithCode(ctx, lease, capacityCode)
+		}
+	}
+	if w.active.snapshot.Action == appplatform.ActionRestoreImport {
+		finish = w.server.finishPlatformRestoreImportForReview
+	} else if w.active.snapshot.Action == appplatform.ActionUpdate {
+		finish = w.server.finishPlatformUpdateForReview
+	} else if w.active.snapshot.Action == appplatform.ActionRepair &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedRepairForReview
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedEnableForReview
+	} else if w.active.snapshot.Action == appplatform.ActionEnable &&
+		!w.active.snapshot.Managed {
+		finish = w.server.finishPlatformFrontendEnableForReview
+	} else if w.active.snapshot.Action == appplatform.ActionRestore &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedRestoreForReview
+	} else if w.active.snapshot.Action == appplatform.ActionDeleteData &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformDeleteDataForReview
+	} else if (w.active.snapshot.Action == appplatform.ActionDisable ||
+		w.active.snapshot.Action == appplatform.ActionUninstall) &&
+		w.active.snapshot.Managed {
+		finish = w.server.finishPlatformManagedUninstallForReview
+	} else if w.active.snapshot.Action == appplatform.ActionDisable ||
+		w.active.snapshot.Action == appplatform.ActionUninstall {
+		finish = w.server.finishPlatformFrontendUninstallForReview
+	}
+	if err := finish(ctx, w.active); err != nil {
+		if errors.Is(err, errAppPlatformLeaseConflict) {
+			w.active = platformOperationLease{}
+			w.attempts = 0
+		}
+		w.publish("worker_unavailable", operation, stage)
+		return err
+	}
+	w.publish("review_required", operation, "")
+	w.active, w.attempts = platformOperationLease{}, 0
+	// The settlement closure a finisher carried ended with its transaction: later calls do not inherit it.
+	ctx = withPlatformEffectSettlement(ctx, nil)
+	w.server.sweepPlatformImages(ctx)
+	w.reclaimImages(ctx)
+	return nil
+}
+
+// platformAttemptFoundRunnerDown reports whether a failed attempt failed because the runner could
+// not be reached. An attempt whose own budget is exhausted is never an outage: the stage reached the
+// runner and ran out of time, which spends an attempt (or a busy wait) as it always did.
+func platformAttemptFoundRunnerDown(ctx context.Context, err error, witness *transport.UnreachableWitness) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	return platformRunnerUnreachable(err) || witness.Seen()
+}
+
+// idleUnreachable records an idle step's failure as an unreachable runner when it is one, so the
+// step's own per-item logging stays quiet and the tick backs off.
+func (w *platformInstallScheduler) idleUnreachable(ctx context.Context, err error) bool {
+	if !platformRunnerDown(ctx, err) {
+		return false
+	}
+	w.health.unreachable("app-platform scheduler")
+	w.publish("runner_unreachable", "", "")
+	return true
+}
+
+// keepLeaseWhileDown renews the active operation's lease while the runner is down, so a long
+// outage never lets the lease lapse into a review; the next tick that reaches the runner
+// continues the same operation.
+func (w *platformInstallScheduler) keepLeaseWhileDown(ctx context.Context) {
+	if w.active.id == "" {
+		return
+	}
+	renewed, err := w.server.st.updatePlatformOperationLeaseContext(ctx, w.active.id, w.worker, &w.active)
+	if err != nil {
+		if errors.Is(err, errAppPlatformLeaseConflict) {
+			w.active, w.attempts = platformOperationLease{}, 0
+		}
+		return
+	}
+	w.active = renewed
+}
+
+// reclaimImages runs the image removal step after an operation ended. It never fails the tick: whatever it cannot
+// do is left for the idle tick, which repeats it.
+func (w *platformInstallScheduler) reclaimImages(ctx context.Context) {
+	if w.endpoint.path == "" {
+		return
+	}
+	if _, err := w.server.reclaimPlatformImages(ctx, w.endpoint); err != nil && ctx.Err() == nil {
+		log.Printf("app-platform image reclaim: %v", err)
+	}
+	// The step is throttled globally (at most once a minute, and not while another operation runs), never per ending.
+	w.server.pruneRecoverySetsOnTick(ctx, w.endpoint)
+}
+
+// Portal startup owns the frontend service and, when a trusted runner endpoint is bound, the
+// operation engine (newPlatformOperationEngine). Native execution requires that endpoint and the
+// exact Linux UID.
+// It does not enroll a runner, create OS identities, release uncertain leases or
+// reclaim data effects. Cancellation waits for its current context-bound attempt.
+func (w *platformInstallScheduler) serve(ctx context.Context) error {
+	if (w.endpoint.path != "" && (runtime.GOOS != "linux" || uint32(os.Geteuid()) != w.endpoint.controllerUID)) || !w.started.CompareAndSwap(false, true) {
+		return errAppPlatformRuntimeConflict
+	}
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	defer func() { w.status.Store(&platformInstallWorkerStatus{code: "stopped"}) }()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-timer.C:
+			if err := w.tick(ctx); err != nil && ctx.Err() == nil && !platformRunnerUnreachable(err) {
+				log.Printf("app-platform scheduler tick: %v", err)
+			}
+			if ctx.Err() != nil {
+				return nil
+			}
+			timer.Reset(w.health.delay(w.interval))
+		}
+	}
+}

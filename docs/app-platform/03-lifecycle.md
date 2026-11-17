@@ -14,9 +14,8 @@ Not installed -> Installing -> Needs configuration -> Ready
 Ready -> Updating -> Ready (new generation)
                 \-> Ready (old generation) or recovery required
 Ready -> Disabling -> Disabled -> Enabling -> Ready
-Ready / Disabled -> Uninstalling -> Removed, data retained
-Removed, data retained -> Reinstalling -> Needs review -> Ready
-Removed, data retained -> Deleting data -> Removed, no data
+Ready / Disabled -> Uninstalling -> Removed, data cleared
+Removed, no data -> Reinstalling -> Needs review -> Ready
 Any uncertain restored state -> Recovery required
 ```
 
@@ -93,12 +92,12 @@ Do not change that behavior globally to make upgrades easier. The v2 lifecycle
 requires a reviewed amendment: a normal managed update preserves installation
 identity/OU seed but changes activation generation and token authority.
 
-Uninstall revokes all live authority. Reinstall creates a new installation
-identity by default. If retained business data includes identity-bound grants,
-do not silently copy those grants into the new namespace. An explicit validated
-adoption flow must remap authoritative principals and obtain review, or keep
-those grants disabled. Account/OU deletion and recreation must never resurrect a
-grant through a reused display name or database ID.
+Uninstall revokes all live authority and clears owner-approved business data.
+Reinstall creates a new installation identity and an empty namespace. Legacy or
+recovery data that cannot be removed inline requires a separate reviewed
+`delete_data` operation; it must not be adopted silently. Account/OU deletion
+and recreation must never resurrect a grant through a reused display name or
+database ID.
 
 Restore invalidates pairing/epochs and pauses external effects as described below.
 Key rotation preserves stable identity only when the protected identity seed and
@@ -120,17 +119,20 @@ A revoked package cannot be restarted through this action.
 resources without changing user configuration or schema. Repair is not an alias
 for an unreviewed update or automatic data deletion.
 
-**Uninstall:** show an exact plan, including background effects and retained data.
-Default to retaining data. Revoke broker access, secrets bindings, schedules,
-subscriptions and notification publication before stopping/removing app code.
-Wait for runner confirmation or report pending. Do not delete unrelated app
-volumes, shared registry layers or Portal's data. Retained data has no active code,
-tasks, subscriptions or service credentials.
+**Uninstall:** show an exact plan, including background effects and the dedicated
+data table, managed namespace and project quota that will be cleared. Revoke
+broker access, secrets bindings, schedules, subscriptions and notification
+publication before stopping/removing app code. For managed apps, require a signed
+runner receipt proving stop, code removal, namespace deletion and quota cleanup
+before marking the operation complete. Wait for runner confirmation or report
+pending. Do not delete unrelated app volumes, shared registry layers or Portal's
+data.
 
-**Delete retained data:** separate destructive operation with current authority,
-explicit confirmation and bounded cleanup evidence. Describe exactly which
-snapshots/backups are included. Off-host copies need their own retention/deletion
-policy; do not claim global erasure from deleting one local volume.
+**Delete legacy/recovery data:** a separate destructive operation with current
+authority, exact namespace/version binding, explicit confirmation and bounded
+cleanup evidence. Describe exactly which recovery snapshots are included.
+Off-host copies need their own retention/deletion policy; do not claim global
+erasure from deleting one local volume.
 
 ## 6. Reconcile after restart or acknowledgement loss
 
@@ -143,6 +145,8 @@ For each nonterminal operation, read the desired revision and runtime evidence:
    stage. Never rerun a completed migration merely because a reply was lost.
 5. Fence an orphan/duplicate writer before admitting work. Stop unknown candidates
    but preserve ambiguous data for review; do not delete by guessed name prefixes.
+   Resume only the exact reviewed uninstall namespace after ownership evidence is
+   available.
 6. Surface a human recovery requirement when evidence cannot prove which schema
    or external side effects committed.
 

@@ -1,0 +1,87 @@
+{
+  "format": "portal.lifecycle-restart-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T21:26:48-0800",
+  "status": "pass-development",
+  "candidate": "8c5a4b1255d24e9273e44ed8aa867b269105be28",
+  "stages": [
+    "queued",
+    "validate",
+    "download",
+    "stage",
+    "prepare_data",
+    "quiesce",
+    "snapshot",
+    "migrate",
+    "start",
+    "probe",
+    "activate",
+    "revoke",
+    "stop",
+    "remove_code",
+    "remove_data",
+    "restore_data"
+  ],
+  "terminal_states_excluded_from_work": [
+    "complete",
+    "failed",
+    "recovery_required"
+  ],
+  "portal": {
+    "sqlite_file_restart_per_stage": true,
+    "postgres_second_connection_per_stage": true,
+    "postgres_version": "18.6",
+    "live_lease_stolen": false,
+    "replacement_fence_increment": 1,
+    "stale_owner_heartbeat_refused": true,
+    "stale_owner_effect_commit_refused": true,
+    "replacement_owner_can_renew": true,
+    "durable_stage_rewritten_during_takeover": false,
+    "effect_intent_stages": [
+      "stage",
+      "prepare_data",
+      "snapshot",
+      "start",
+      "probe",
+      "activate",
+      "stop",
+      "remove_code",
+      "remove_data",
+      "restore_data"
+    ],
+    "ambiguous_effect_preserved": true,
+    "ambiguous_effect_duplicated": false,
+    "original_admitted_fence_preserved": true
+  },
+  "runner": {
+    "journal_close_reopen": true,
+    "unknown_commands_persisted": true,
+    "unknown_commands_became_applied_without_receipt": false,
+    "automatic_replay_on_open": false,
+    "effect_identity_changed": false,
+    "admitted_fence_changed": false,
+    "duplicate_effect_identity_refused": true
+  },
+  "local_verification": {
+    "internal_app_seconds": 149.895,
+    "runner_journal_seconds": 53.555,
+    "focused_race_passed": true,
+    "go_vet_passed": true
+  },
+  "hosted_ci": {
+    "commit": "8c5a4b1255d24e9273e44ed8aa867b269105be28",
+    "general_test": "41972143589",
+    "general_job": "127062618175",
+    "app_project_quota_probe": "41972143744",
+    "app_project_quota_job": "127062617969",
+    "app_runner_daemon_probe": "41972143587",
+    "app_runner_daemon_job": "127062617154",
+    "codeql": "41972137793",
+    "result": "pass"
+  },
+  "limitations": [
+    "Portal restart is a real durable store close/reopen plus lease abandonment at every nonterminal stage, not a process-wide SIGKILL at every stage on a disposable Linux host.",
+    "Runner restart uses the production owner-only journal close/reopen path, not the compiled daemon killed at every journal stage.",
+    "Recovery reclaims permission to inspect and reconcile an operation. It is not an exactly-once guarantee and does not authorize replay of an unknown effect.",
+    "Typed native start, stop, data, registration, restore and removal boundaries retain separate disposable Linux evidence."
+  ]
+}

@@ -58,6 +58,44 @@ complete screen-reader certification from an automated result.
 | PKG-09 | Publish actual release, download externally and inspect both image architectures | Every public artifact matches descriptor/source/released executable identity |
 | PKG-10 | Revoke a running package; make trust source temporarily unreachable | Defined quarantine/deny-new-install behavior; no trust bypass or silent data deletion |
 
+### Managed image delivery status (PKG-01, PKG-08, SEC-01, DATA-05)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 3 and
+[doc 170](170-image-delivery-plan.md). Claims are limited to what the named tests prove, and each says against
+what.
+
+- **Against fakes (the general suite, no runner):** the load-image sender and its start gate run against a fake
+  runner model, so they prove Portal's behaviour (one effect id, read-back, resume, busy versus rejected, nothing
+  sent for blobs that fail their hash, an unknown load left for the settlement driver), not the runner's. The
+  storage scenarios use real files and the real SQLite database: offline and catalogue staging of the same
+  package, crafted layouts refused with no row or blob, resume after a restart with `Range` and `If-Range`,
+  corrupt blob healed by a new download, both caps, the pinned set across sweeps, recovery-bundle carry and
+  restore of blobs.
+- **Against the real runner journal (SQLite, no Docker):** every command family's admission (writer through
+  candidate claim, data reservation, registration, checkpoint, update start, managed removal) succeeds with an
+  applied and with an unknown load-image row in the installation's history.
+- **Natively, in CI only (not run on the development host):** the real Scheduled Digest image, saved with
+  `docker save`, exported by the Apps tooling and put through the offline, catalogue, corruption and cap
+  scenarios at its real size (`deliver-managed-image-package`); the daemon's image list unchanged around those
+  runs; the SEC-01 negatives in the driver tests that job runs; and the 3a native test that loads a two-layer
+  image on the real daemon.
+- **Natively, against a real root runner (PR 3c, `enforce-disposable-project-quota`, run
+  [42749515804](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/42749515804),
+  artifact `managed-image-real-runner`):** the exact Scheduled Digest image, from a `portalapp/2` package built in
+  the job, with the image removed from the Docker store by ID beforehand and the runner in the production profile.
+  The package goes through the real offline import route and the ordinary install worker; the runner loads the
+  image from the three blobs uploaded over the control socket (receipt `loaded`), starts it, and it reaches
+  readiness; the container's image ID is the package's config digest, the layer chain and platform match, the
+  image carries no name, Docker events show no pull, tag, untag, push or import, and the running app answers a
+  signed session request and runs its Scheduled Digest task at generation 1 through the writable service-task
+  registration kind. The descriptor is staged byte for byte as the Apps builder wrote it; the envelope is assembled and signed by the test with a test key registered under the builder's publisher. Only the package
+  import uses the admin HTTP route; the review uses the writable development entry point. Limits: the classic store does not retain the manifest digest, so that digest is bound
+  through the runner's signed claim and receipt, not read back; the run installs through the offline path;
+  CI uses the classic store.
+- **Not proven anywhere:** the same scenario through the catalogue with a real runner, a real-runner corrupt-blob
+  scenario for `PKG-08`, the containerd store, a restore of a bundle onto a new Linux host with the managed app
+  resumed natively, and the new Portal tests on PostgreSQL.
+
 ## 4. Authorization and isolation
 
 | ID | Steps | Required result |
@@ -105,9 +143,9 @@ complete screen-reader certification from an automated result.
 | LIFE-10 | Roll back after B has accepted new writes | Warn about restore data-loss boundary; controlled maintenance and verified recovery, never silent loss |
 | LIFE-11 | Disable during active handler and while runner unavailable | Broker denial immediate; shutdown pending truthful; no new claims |
 | LIFE-12 | Enable or repair disabled app | Same trusted release/config, health checked; no new grants or hidden schema change |
-| LIFE-13 | Uninstall and retain data | No runnable code, schedules, subscriptions, publication or secret use; retained data inspectable by admin |
-| LIFE-14 | Reinstall using retained data | Explicit compatibility/identity review; no automatic grants from old namespace |
-| LIFE-15 | Delete retained data with concurrent/stale request | Current confirmation/revision required; exact data scope cleaned; recovery copies accounted for |
+| LIFE-13 | Uninstall and clear data | No runnable code, schedules, subscriptions, publication or secret use; dedicated plugin table and managed namespace/quota are removed only with runner-backed evidence |
+| LIFE-14 | Reinstall after clear-on-uninstall | Fresh installation identity and empty namespace; no grants or payload inherited from the removed installation |
+| LIFE-15 | Delete legacy/recovery data with concurrent/stale request | Current confirmation/revision required; exact namespace scope cleaned; recovery copies accounted for |
 
 ## 6. Data, jobs and operations
 
@@ -138,6 +176,109 @@ complete screen-reader certification from an automated result.
 | OPS-07 | Present unsupported legacy app/container for managed adoption | No automatic takeover; old installation continues under legacy rules |
 | OPS-08 | Repeat test at declared maximum apps/tasks/resource envelope | Measured capacity/latency recorded, quotas reject excess and reserve host headroom |
 
+### Deployment drills status (OPS-05, OPS-06)
+
+Both rows are **partial**. They run in CI on a disposable GitHub-hosted runner (owner decision 2026-11-15: no real server is touched), by `.github/workflows/ops-deployment-drills.yml` and `scripts/acceptance/ops_deploy_drills.py` (unit tests: `python3 -B -m unittest scripts/ops_deploy_drills_test.py`). The stack is the repository's `docker-compose.yml` with only the report-portal image line replaced, not the server's own beta configuration.
+
+OPS-05 builds the platform candidate from the commit under test with `Dockerfile.release` and the release web bundle, holds it in a loopback registry, deploys it through the compose and compares what runs (image id, registry digest, running binary, reported version and commit) with the build record written before the deploy. No app runner is deployed. OPS-06 takes a recovery set (a logical dump, the config directory holding `secret_key`, the compose file) with a pinned released build, forces a failed rollout to the candidate, shows the prior build refusing a copy of the migrated database, and restores the set after integrity, dry-run compatibility and a scratch-database rehearsal that signs in a two-factor account; three negative controls each fail the matching check. The runtime half of OPS-06 (runner compatibility, journal, managed data and blobs) is not exercised: it needs a platform recovery bundle command, which does not exist. The gaps, the artifact and the run are in [the evidence file](handoff/evidence/platform-ops-deployment-drills/acceptance.json). A push-triggered run is not evidence; a `workflow_dispatch` run on the expected commit is pending the workflow reaching the default branch.
+
+**Runner and recovery-bundle follow-up (OPS-05, OPS-06).** This is the one place the follow-up is named; the CSV rows, the evidence gaps and the engineering note in [doc 167](167-owner-decisions-remaining-acceptance.md) point here. Closing the runner and runtime halves needed both of: (1) a platform recovery bundle command, **done**: `report-portal recovery-bundle write` and `restore` reach `writePlatformRecoveryBundle` and the bundle verification, read the database in one read transaction and refuse a missing or tampered checkpoint archive, an unreadable journal or a digest mismatch (doc 168, "Bundle command"; the README section "Platform recovery bundle"; tests `TestRecoveryBundleCommand*` and `TestRecoveryBundleRefusesADatabaseThatMovesWhileItIsWritten`); and (2) **still open**: a runner host with an XFS project-quota volume plus runner enrollment, so the candidate deploys with an app runner and the recovery set can carry runner compatibility, the journal, managed data and image blobs. Until then OPS-05 has no runner leg and the OPS-06 runtime half is unproven: the command is proven in-process against fixtures, not against a real runner host. Also open for OPS-05: the candidate is deployed onto an empty first-boot database, not onto the database copy doc 167 section 6 names.
+
+### Retention status (DATA-08)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 5 and [doc 172](172-retention-plan.md). **DATA-08 stays partial.**
+Implemented and tested on SQLite and PostgreSQL 18.6 with a synthetic clock: the retention sweeper (review plans, completed operations
+with their effects, terminal task and event tombstones with the per-installation cap), the two adjustable values and their page, the
+named 15-minute plan validity, and the 10 MiB runner log bound. The tests prove deletion of eligible rows only, retention of every
+pinned row (unresolved effects, recovery chains, recovery sets and their checkpoint sources, import grants, plan references, retained
+data, the live chain, the image ledger), idempotency replay inside the period and a new request after it, a swept task occurrence
+still deduplicated, one audit row per sweep, and no work during the restore pause. **Recovery-set pruning** is implemented and unit tested (doc 172 section 6): a runner `delete-checkpoint` command, folded into journal v3, claims by marking
+the checkpoint deleted before it removes the archive, and a Portal driver prunes the verified sets beyond the latest N and the leaked checkpoint
+archives of namespaces the delete-data stage already removed (the earlier statement that delete-data removed the whole namespace on the runner held for the
+namespace only). The runner journal and command tests run against a fake native seam; the native archive removal and the lifecycle socket run only in CI on a
+root runner and have not been run; the full-fixture PostgreSQL variants of the pruning tests could not be run on the development machine. **Not met:** the 7-day runner log age is not
+enforceable by Docker's `json-file` driver (the size bound applies); nothing was run for the real retention periods or against a
+production-size database, and not against live concurrent installs (the sweep takes the operation and task admission locks, and a PostgreSQL test shows it waits for them). The RUN-08 flood evidence was measured at the previous 1 MiB log policy; the native log test now bounds a 24 MiB flood at the 10 MiB policy plus 1 MiB headroom and runs only in CI.
+
+### Declared capacity envelope status (OPS-08, SEC-09)
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 4 and
+[doc 171](171-capacity-envelope-plan.md). **OPS-08 passed on 2026-11-15:** the 120-minute `workflow_dispatch` run
+[43683877826](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43683877826) of the `capacity-soak` job, at commit
+`8121574b90c9aa8110ada71dcfe8a19604608e50` (the `expected_commit` matched), PostgreSQL 16.15, passed all 25 checks with no evidence blocker.
+Pooled loaded p95: home 10.8 ms (bound 50), report 17.5 ms (50), dispatch@200 9.9 ms (25), batch start 43.7 ms (100). **SEC-09 is passed by owner acceptance (2026-11-16, run 44010587394, whose harness verdict was failed on one check; see the end of this section; two earlier passes, 43825208692 and 43848988368, were each withdrawn on review):** the soak also runs the task worker, the event delivery coordinator and a backend-originated task flood. The first 120-minute run with that work,
+[43798306468](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43798306468), passed the nine new checks but failed the unchanged OPS-08 latency bounds (home 67.0 ms, report 68.4, dispatch 34.7, batch start 110.6, against 50, 50, 25 and 100). The session-free task route then got its own admission budget and a bounded memory that answers a repeated task-quota refusal from one live statement, and the 120-minute run
+[43825208692](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43825208692) at commit `ec21c509385ddba7ea7218640955448863daec05` (the `expected_commit` matched) passed all 34 checks and counts as OPS-08 evidence: home 33.1 ms, report 35.2, dispatch 16.3, batch start 59.3, with 598257 flood requests answered or typed. That run did not measure cross-tenant starvation (the workload tenants admitted in process) and the route's budget was global and taken before the identity was verified; review withdrew the pass. The route now takes its slots per verified installation, the workload tenants submit through it, and a new check judges them; doc 171, "SEC-09: platform work under the soak", has the design, the profile and the limits. The corrected soak then passed but was superseded by a second review round (forged credentials reached the database, no slot ahead of the remembered refusal, the slot never filled in the run, and 14.6 ms of home headroom lost on the same host class; doc 171, "Review round 2"): [43848988368](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/43848988368), 120 minutes at `b4740c54`, 35 of 35 checks, counts as OPS-08 evidence: home 47.7 ms, report 43.9, dispatch 18.5, batch start 65.2, and 4316 workload-tenant submissions through the route all answered 200 (worst window p95 309 ms against 500). The margins are thin: home is within 2.3 ms of its bound. The
+job exists on the branch `feat/app-platform-capacity-soak`, which targets `integration/app-platform`, not on `main`, so the
+evidence run is a `workflow_dispatch` of that branch at the reviewed commit with `soak_only=true`; the evidence records the
+branch (`GITHUB_REF_NAME`), the commit and the event. The same configuration runs for five minutes, with a diagnosis added, on
+pull requests that touch the capacity code, the code behind the latency fixes or the soak, so it cannot rot; that smoke is never
+evidence. The run is at most 140 minutes (the step timeout is 160).
+
+**SEC-09: passed by owner acceptance, 2026-11-16 (not a harness pass).** The evidence is the 120-minute `workflow_dispatch` run
+[44010587394](https://github.com/KazuhaHub/StockAnalysisPrediction-Report-Portal/actions/runs/44010587394) of the `capacity-soak` job on the owner's
+reference VM (`soak_host=reference-vm`: libvirt KVM guest, 4 vCPU pinned to host CPUs 2-5 with host processes kept off those and their SMT siblings 8-11, 8 GiB), branch `test/app-platform-sec09-soak`,
+commit `2125bd8a91738cf4a890c2e1a3bbfd75a34aff85` (the `expected_commit` matched), PostgreSQL, 7532 s, 120 one-minute windows. **The harness verdict was `failed`
+and `counts_as_ops08_evidence` is false:** 35 of 36 checks passed. The failed check is `workload_tenants_submit_through_the_route_in_every_window` (bound per window: p95 at most 500 ms, max at most 5000 ms, at least 24 submissions):
+119 of 120 windows passed (p95 196 to 370 ms, every submission answered 200); window 13 (about 19:47 to 19:48 America/Los_Angeles) had p95 631 ms and max 648 ms. The cause was not proven (inside the guest the pressure of that minute was like the other minutes;
+on the shared host PCP recorded the run's lowest available memory, about 2.0 GB against about 3.3 GB otherwise, and CPU pressure peaks around that minute while other workloads ran). The latency bounds in force were the reference VM's, 1.5 times the 2026-11-15 bounds
+(owner decision 2026-11-16, doc 167): home 75 ms, report 75, dispatch 37.5, batch start 150. Pooled loaded p95 (idle p95): home 41.4 (5.2), report 56.1 (11.1), dispatch 26.2 (1.2), batch start 108.0 (18.5), all within them, but four one-minute windows went over the per-window bound inside checks that still passed (dispatch at minutes 111 and 112, 38.1 and 40.0 ms against 37.5; batch start at minutes 6 and 93, 169.6 and 164.9 ms against 150; peak 169.6 ms); against the original bounds
+(50, 50, 25 and 100 ms) report, dispatch and batch start would not pass. The disk precheck was healthy (fsync probe p50 1.22 ms, p95 1.51 ms). The owner accepted the run as SEC-09 evidence on 2026-11-16 with that one window recorded as a deviation, rather than rerun; no bound or check was changed.
+
+- **What the job does:** on a GitHub-hosted `ubuntu-24.04` runner (4 vCPU, 16 GiB) with a 16 GiB XFS project-quota
+  loop volume it owns, a real root runner runs fifty installations (forty-two static, eight managed backends of a
+  soak fixture image, each sized from the memory and CPU budgets the runner reports in its readiness facts). The measured
+  Portal runs on PostgreSQL (the runner image's own PostgreSQL 16, started as `postgresql.service` and recreated empty for every run, opened with `OpenStore`; owner decision 2026-11-14: the evidence shape is
+  the production one), running its real batch scheduler against a local stub Dify that answers at once. It does not run the platform task worker or the event delivery
+  coordinator, no request originates from a backend (the fixture has no outbound channel to the platform), and these are stated gaps, recorded in the evidence. The evidence records `db_driver` and the server version, and only a PostgreSQL run counts.
+- **SQLite is a recorded known limit, not evidence.** The `soak_db=sqlite-file` input measures the file-backed SQLite Portal. On it, sustained
+  app-backend relay traffic raises page and scheduler latency beyond the gate, because the single connection is occupied about a third of the time by the
+  two always-admitted relay requests (smokes 43568339184, 43570051027, 43571196806, 43590645282 and dispatch 43570060321 in doc 171, resolution 73). A
+  SQLite read pool is a tracked follow-up and blocks any claim that the SQLite envelope is proven.
+- **Backends at their limits, as achieved:** each backend holds 85% of its memory limit (the Go soft limit at 95% keeps the
+  collector ahead of the kernel), burns its CPU quota, parks threads up to its PID limit less 8, writes 1 MiB/s to its log and
+  fills its data namespace to the quota. "At the limit" is not claimed: the verdict reads each backend's own cgroup counters
+  every minute and records the achieved fractions (memory current, PIDs, CPU used against the quota) in the evidence, and the
+  dispatch run's numbers are the ones to cite.
+- **Message flood, as driven:** the relay is driven at the Portal's admission cap of 2 concurrent requests (one attempt in
+  flight per backend; at most two are admitted Portal-wide); excess attempts are refused 429 `app_platform_busy`, about 90% of the
+  attempts. Both counts, and every other outcome by status and code, are recorded for every minute.
+- **Excess probes, each refused with its typed error:** the 51st installation (HTTP 429 `installation_capacity`), a
+  ninth backend (`running_backends`), a backend over the remaining memory and over the remaining CPU (`memory`,
+  `cpu`), a third image against the 10 GiB image store (`image_store`, native when the daemon disk holds two 4 GiB images, see
+  below), a task over the installation and over the global quota (the Portal's own `admitPlatformTask`, the function the backend task
+  route calls; no backend sends it), an event subscription flooded with 64 source events past its in-flight bound (fenced
+  `review_required`, all events kept, one delivery task), a layer beyond its declaration (the Portal's import route, HTTP 400, nothing
+  stored) and a staging reservation beyond 2 GiB (store level, not through the upload route: HTTP 507 `app_platform_storage_full`).
+- **Unit level, reported separately:** a probe proven only by unit tests is recorded `level: "unit"` with `observed: null` and
+  the names of its tests; it is not in the native "every excess request refused" check, and the job runs those tests so the
+  evidence run includes their pass. Today that is the per-application task quota (1000; no application has more than one
+  installation) and, when the daemon disk cannot hold the images, the image store probe, with the measured free space as the reason.
+- **Measured:** an idle baseline of three minutes first, then for every one-minute window (100 samples spread evenly, one every
+  600 ms, so a window is not a burst) the p95 of `GET /api/home`, of the report page (`GET /api/stock/{symbol}` of a seeded
+  report) through the real handler, of the batch queue's dispatch decision over a standing backlog of 200 queued jobs (also timed at
+  50, recorded, not judged) and of the real batch scheduler's enqueue-to-start latency (a job enqueued every three seconds, the
+  time until its request reaches the stub Dify); every thirty seconds host memory and CPU, tasks, the runner and Docker log sizes,
+  XFS usage and the summed memory and CPU of the backends, with each backend's own cgroup counters.
+- **Pass:** every native probe refused with its typed error and every unit level probe's tests passed; the pooled p95 of all
+  loaded samples within 50 ms for the home page and the report page, 25 ms for the dispatch decision and 100 ms for the batch start (owner decision 2026-11-15: under full
+  declared load on the reference host the relative floor of 2026-11-13 was measured and could not be met on a 2-physical-core host at full app CPU load, doc 171; the pooling is an engineering decision, not the owner's, recorded as such
+  in doc 167; per-window p95, the relative threshold max(1.5x idle p95, idle p95 + 5 ms) and the ratio to idle are recorded as diagnostics, and the 50-job dispatch measurement is recorded, not judged and shown in the step summary); in every one-minute window, for the message flood at least 20 answered requests, every other attempt a typed busy
+  refusal (no 5xx, no transport error) and a live flood process; for each backend at least 70% of its CPU quota used, memory current at
+  least 85% of its limit and status counters (log bytes, requests) advancing; each backend's PIDs reached at least 85% of its limit;
+  at least 90% of the expected host samples taken; summed backend memory and CPU never above the runner budgets and host free memory
+  never below 10%; no backend or runner crash; the session outliving the run. The evidence is uploaded as JSON with every sample
+  (artifact `capacity-soak-evidence`).
+- **Image store:** the probe loads two images of about 4 GiB each (zero-filled layers that compress to a few MiB, the soak backend's
+  executable as the first layer) through the real offline import and install worker, their starts refused for memory so that no container is
+  created from them, then asks for a third and expects `capacity_exhausted_image_store` at its load; the three installs are retired through the
+  managed uninstall and the images reclaimed. The job measures the Docker store's free disk first and runs the probe natively only
+  when it holds 8 GiB plus 6 GiB of headroom.
+- **Proven at unit level only, by design:** the per-application task quota and the exact 2 GiB staging cap without writing a byte. The runner's
+  own refusal of an over-declared layer is covered by the blob channel unit tests; the soak drives the Portal's import route.
+- **Records:** `handoff/evidence/platform-capacity-envelope/acceptance.json` (filled from run 43683877826) and the
+  OPS-08 and SEC-09 rows of `handoff/acceptance-checklist.csv`.
+
 ## 7. Developer and delivery verification
 
 | ID | Steps | Required result |
@@ -147,6 +288,23 @@ complete screen-reader certification from an automated result.
 | DEV-03 | Compare Go/TypeScript/package validator corpus | Same acceptance/rejection and protocol error codes |
 | DEV-04 | Review declared dependencies/source provenance and publication identity | Reproducible identity and verified artifact relationships; signing isolated from PR code |
 | DEV-05 | Install actual public sample release, update, disable, uninstall and recover | Released-byte evidence, no development-only installer or database mutation shortcut |
+
+Reported against [doc 167](167-owner-decisions-remaining-acceptance.md) section 8 and [doc 173](173-licence-policy-plan.md). **DEV-04 stays partial.**
+
+- **Done:** the licence policy is a checked-in file (`scripts/licence-policy.json`) judged by `scripts/licence_scan.py` over the
+  Go SBOMs of every release platform and a production npm CycloneDX SBOM, nested components included, in
+  `.github/workflows/licence.yml` (Portal) and the `licence` job of `check.yml` (Apps). A denied, unknown or missing licence
+  fails the run. `dompurify` (Apache-2.0) and `golang/freetype` (FTL) are election records pinned to the declaration and to the SHA-256 of the licence files that state the choice. `elkjs` is aliased to a throwing stub in the Vite build; a Rollup plugin fails the build if any elkjs module
+  is bundled and a build test scans the output, both verified to fail with the alias removed; the `elkjs` exclusion is valid
+  only in a run where that test passed. Mermaid 12.1 defaults to ELK, so dagre is requested for the diagram types that would
+  reach it and mind maps keep their own layout. First-party Apps packages declare AGPL-3.0-only and a test keeps them so.
+- **Owner decisions of 2026-11-15, recorded:** `golang.org/x/*` is reviewed as BSD-3-Clause and `khroma` as MIT, as reviewed-as
+  records pinned to the SHA-256 of the licence text that ships and to the declaration reviewed; the licence job is a release
+  prerequisite (`release_guard.py` in the Portal, `status-publish.py` in Apps). The gate is green on both branches.
+- **Open:** adding `licence scan` (Portal) and `licence` (Apps) to branch protection is pending owner approval. No released
+  binary or OCI digest has been scanned, and the release-key and environment approval remain open (see the DEV-04 row and
+  `platform-dependency-review`).
+- **Records:** `handoff/evidence/platform-licence-policy/acceptance.json` and the DEV-04 row of `handoff/acceptance-checklist.csv`.
 
 ## 8. Final release gate
 

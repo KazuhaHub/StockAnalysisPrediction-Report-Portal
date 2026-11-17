@@ -1,0 +1,43 @@
+{
+  "format": "portal.install-failure-acceptance/1-dev.1",
+  "candidate": "5ae75b4f9d76ddc551df718ef701d4c8e2e88ca8",
+  "stage_failure": {
+    "validate": true,
+    "download": true,
+    "stage": true,
+    "failed_stage_ignored": false,
+    "installation_ready_after_failure": false,
+    "active_activation_rows": 0,
+    "access_grant_rows": 0,
+    "launch_http_status": 404,
+    "release_rows_at_most": 1,
+    "frontend_artifact_rows_at_most": 1
+  },
+  "download_and_verification": {
+    "descriptor_changed": true,
+    "signature_changed": true,
+    "archive_changed": true,
+    "archive_interrupted": true,
+    "publisher_trust_revoked": true,
+    "fetch_cancelled": true,
+    "invalid_release_staged": false,
+    "untrusted_descriptor_triggered_archive": false
+  },
+  "readiness": {
+    "zero_or_unstarted_commit_refused": true,
+    "malformed_state_refused": true,
+    "protocol_mismatch_refused": true,
+    "durable_state_mutated_on_refusal": false
+  },
+  "hosted_ci": {
+    "general_test": "41964920990",
+    "app_project_quota_probe": "41964921034",
+    "app_runner_daemon_probe": "41964921405",
+    "codeql": "pass",
+    "result": "pass"
+  },
+  "limitations": [
+    "The install-stage HTTP boundary and download/readiness faults are separate fixtures rather than one continuous native run.",
+    "This does not claim production rollout, production storage capacity or a neutral-operator market walkthrough."
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "format": "portal.lifecycle-browser-acceptance/1-dev.1",
+  "candidate": "ce3e07bd47ae198b0a5dd4fd914b5cd2de980941",
+  "quotaBrowserRun": "41509323922",
+  "runnerDaemonRun": "41509323798",
+  "generalTestRun": "41509323957",
+  "codeQLRun": "41509313480",
+  "physicalViewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "restore": {
+    "operationID": "c1ff46d6-efc4-4628-8518-448214967414",
+    "confirmed": true,
+    "runnerCompleted": true,
+    "ready": true
+  },
+  "repair": {
+    "operationID": "bd984b9b-ebb6-4cf9-9fbd-f644926b7bf4",
+    "confirmed": true,
+    "runnerCompleted": true,
+    "ready": true
+  },
+  "independentFlags": {
+    "native_restore_browser_confirmed": true,
+    "native_restore_browser_complete": true,
+    "native_repair_browser_confirmed": true,
+    "native_repair_browser_complete": true,
+    "native_portal_background_install_scheduler": true,
+    "native_managed_restore_from_failed_update": true
+  },
+  "evidence": [
+    "restore-review.png",
+    "restore-confirmed.png",
+    "restore-complete.png",
+    "restore-ready.png",
+    "repair-review.png",
+    "repair-confirmed.png",
+    "repair-complete.png",
+    "repair-ready.png",
+    "restore-confirm.json",
+    "restore-progress.json",
+    "repair-confirm.json",
+    "repair-progress.json"
+  ]
+}

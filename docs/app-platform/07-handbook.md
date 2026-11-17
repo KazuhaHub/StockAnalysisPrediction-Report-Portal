@@ -137,13 +137,15 @@ Disable blocks access and new work immediately at the broker and reports runner
 shutdown as pending until acknowledged. Enable rechecks the same trusted release
 and health, preserving approved settings. Neither action means uninstall.
 
-### Uninstall and data retention
+### Uninstall and data clearing
 
-Review stopped work, revoked integrations and the retained-data choice. Default
-to retain. After completion the application has no authority or background work.
-Find retained data in management; it is not an installed app icon. Reinstall with
-data only after explicit compatibility/principal review. Irreversible deletion
-has a separate confirmation and clearly states backup-copy coverage.
+Review stopped work, revoked integrations and the dedicated table/managed
+namespace that will be cleared. For managed apps, completion requires runner
+evidence for stop, code removal, namespace deletion and quota cleanup. After
+completion the application has no authority or background work. Reinstall starts
+with a new installation identity and empty data. Legacy or recovery data that
+cannot be cleared inline has a separate `delete_data` confirmation and clearly
+states backup-copy coverage.
 
 ### Restore
 

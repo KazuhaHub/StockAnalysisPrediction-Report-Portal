@@ -1,0 +1,39 @@
+{
+  "format": "portal.disable-active-work-acceptance/1-dev.1",
+  "candidate": "3199cf8273364edd60a9990dc1bccccdcd4c5930",
+  "drivers": [
+    "sqlite",
+    "postgresql"
+  ],
+  "active_handler": {
+    "running_task": true,
+    "leased_attempt": true,
+    "task_terminal_state": "uncertain:installation_disabled",
+    "attempt_terminal_state": "uncertain:installation_disabled",
+    "worker_and_lease_cleared": true,
+    "late_result_retained": false,
+    "new_claim_offered": false
+  },
+  "broker": {
+    "access_before_disable": true,
+    "access_after_disable": false,
+    "denial_is_local_authorization": true
+  },
+  "runner_unavailable": {
+    "no_intent_code": "managed_disable_unavailable",
+    "lost_receipt_phase": "recovery_required",
+    "lost_receipt_error": "managed_disable_stop_pending",
+    "stop_receipt_fabricated": false
+  },
+  "hosted_ci": {
+    "general_test": "41931370312",
+    "app_project_quota_probe": "41931370229",
+    "app_runner_daemon_probe": "41931370293",
+    "codeql": "pass",
+    "result": "pass"
+  },
+  "limitations": [
+    "This is development acceptance, not a production availability SLO.",
+    "The runner-unavailable state is durable and truthful, but the stop remains pending until an exact runner receipt is available."
+  ]
+}

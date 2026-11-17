@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App } from 'antd'
+import { App, ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import AppAccessPage from './AppAccessPage'
 import { groups, layout } from './appsAdminFixtures'
@@ -19,15 +20,17 @@ const pending = vi.hoisted(() => vi.fn())
 vi.mock('./AdminDraftBoundary', () => ({ usePendingSettings: (dirty: boolean, saving?: boolean) => pending(dirty, saving) }))
 const lastPending = () => pending.mock.calls[pending.mock.calls.length - 1]
 
-const renderAt = (path: string) =>
+const renderAt = (path: string, algorithm = theme.defaultAlgorithm) =>
   render(
-    <App>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path="/manage/apps/:key/access" element={<AppAccessPage />} />
-        </Routes>
-      </MemoryRouter>
-    </App>,
+    <ConfigProvider theme={{ algorithm }}>
+      <App>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path="/manage/apps/:key/access" element={<AppAccessPage />} />
+          </Routes>
+        </MemoryRouter>
+      </App>
+    </ConfigProvider>,
   )
 
 beforeEach(() => {
@@ -120,6 +123,19 @@ describe('App service status', () => {
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/apps/builtin%3Aquotes/access/1', { enabled: false }))
   })
 
+  it('chooses and saves an override with the keyboard', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes/access')
+    await heading('nav.quotes · Default')
+    const off = screen.getByRole('radio', { name: /apps\.access\.off$/ })
+    off.focus()
+    await user.keyboard(' ')
+    expect((off as HTMLInputElement).checked).toBe(true)
+    save().focus()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/api/admin/apps/builtin%3Aquotes/access/1', { enabled: false }))
+  })
+
   it('only promises that open sessions stop for an installed app', async () => {
     const first = renderAt('/manage/apps/builtin%3Aquotes/access')
     await heading('nav.quotes · Default')
@@ -202,6 +218,21 @@ describe('App service status', () => {
     expect(crumbs.textContent).toContain('apps.title')
     expect(crumbs.textContent).toContain('Hello')
     expect(crumbs.textContent).toContain('apps.section.status.title')
+  })
+
+  it.each([
+    ['light', theme.defaultAlgorithm],
+    ['dark', theme.darkAlgorithm],
+  ])('has no axe violations in %s mode', async (_mode, algorithm) => {
+    renderAt('/manage/apps/hello/access', algorithm)
+    await heading('Hello · Default')
+    const result = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(result.violations).toEqual([])
   })
 })
 

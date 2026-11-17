@@ -63,6 +63,16 @@ func (s *Server) notificationEvents() []string {
 			events = append(events, "extension.app."+app.ID+".notice")
 		}
 	}
+	rows, err := s.st.query(`SELECT DISTINCT i.app_id FROM app_platform_installations i JOIN app_platform_capability_grants g ON g.installation_id=i.id AND g.capability='notifications.publish' AND g.granted=1 WHERE i.desired_state='enabled' AND i.phase='ready' ORDER BY i.app_id`)
+	if err == nil {
+		for rows.Next() {
+			var appID string
+			if rows.Scan(&appID) == nil && platformDirectoryAppID.MatchString(appID) {
+				events = append(events, "extension.app."+appID+".notice")
+			}
+		}
+		rows.Close()
+	}
 	// Keep already configured selectors manageable after a publisher is revoked.
 	if routes, err := s.st.NotificationRoutes(); err == nil {
 		for _, route := range routes {
@@ -107,22 +117,28 @@ func (s *Server) v1PublishNotification(w http.ResponseWriter, r *http.Request) {
 		v1err(w, 400, "invalid_param", "one JSON object is required")
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"publisher": publisher, "title": in.Title, "message": *in.Message, "severity": in.Severity})
+	id, created, err := s.capturePublishedNotification(publisher, in.OccurrenceID, in.Title, *in.Message, in.Severity)
+	if err != nil {
+		s.notificationPublishError(w, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "id": id, "created": created})
+}
+
+func (s *Server) capturePublishedNotification(publisher, occurrenceID, title, message, severity string) (string, bool, error) {
+	payload, _ := json.Marshal(map[string]string{"publisher": publisher, "title": title, "message": message, "severity": severity})
 	id := randToken()
-	event := NotificationEvent{ID: id, SourceKey: "extension:" + publisher + ":" + in.OccurrenceID, Type: "extension." + publisher + ".notice", ResourceType: "extension", ResourceID: publisher, Payload: string(payload), CreatedAt: time.Now().UTC().UnixMilli()}
+	event := NotificationEvent{ID: id, SourceKey: "extension:" + publisher + ":" + occurrenceID, Type: "extension." + publisher + ".notice", ResourceType: "extension", ResourceID: publisher, Payload: string(payload), CreatedAt: time.Now().UTC().UnixMilli()}
 	var existing string
 	err := s.st.queryRow(`SELECT id FROM notification_events WHERE source_key=?`, event.SourceKey).Scan(&existing)
 	if err == nil {
 		if err := s.st.CaptureNotification(event, nil, nil); err != nil {
-			s.notificationPublishError(w, err)
-			return
+			return "", false, err
 		}
-		writeJSON(w, map[string]any{"ok": true, "id": existing, "created": false})
-		return
+		return existing, false, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		s.notificationPublishError(w, err)
-		return
+		return "", false, err
 	}
 	deliveries, err := s.legacyNotificationDeliveries(event.Type)
 	var recipients []string
@@ -133,15 +149,13 @@ func (s *Server) v1PublishNotification(w http.ResponseWriter, r *http.Request) {
 		err = s.st.CaptureNotification(event, deliveries, recipients)
 	}
 	if err != nil {
-		s.notificationPublishError(w, err)
-		return
+		return "", false, err
 	}
 	if err := s.st.queryRow(`SELECT id FROM notification_events WHERE source_key=?`, event.SourceKey).Scan(&existing); err != nil {
-		s.notificationPublishError(w, err)
-		return
+		return "", false, err
 	}
 	s.st.WriteAudit(AuditEntry{Action: AuditNotificationPublish, TargetType: "notification_event", TargetID: existing, Detail: `{"publisher":"` + publisher + `"}`})
-	writeJSON(w, map[string]any{"ok": true, "id": existing, "created": existing == id})
+	return existing, existing == id, nil
 }
 
 func (s *Server) notificationPublishError(w http.ResponseWriter, err error) {

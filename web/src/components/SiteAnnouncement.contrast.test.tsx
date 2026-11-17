@@ -3,13 +3,11 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { ConfigProvider, theme } from 'antd'
 import { AnnouncementRow } from './SiteAnnouncement'
 import type { AnnouncementLevel } from '../api/types'
+import { portalThemeToken } from '../theme/portal'
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }))
 
 afterEach(cleanup)
-
-// The same theme the app mounts (App.tsx), so the colours measured are the colours a reader gets.
-const APP_TOKEN = { colorPrimary: '#1677ff', borderRadius: 8 }
 
 type RGBA = [number, number, number, number]
 
@@ -52,9 +50,10 @@ describe('announcement body text contrast', () => {
   ] as const) {
     for (const level of LEVELS) {
       it(`meets WCAG AA (4.5:1) for a ${level} announcement in the ${name} theme`, () => {
-        const page = parseColour(theme.getDesignToken({ algorithm, token: APP_TOKEN }).colorBgLayout)
+        const token = portalThemeToken(name === 'dark')
+        const page = parseColour(theme.getDesignToken({ algorithm, token }).colorBgLayout)
         render(
-          <ConfigProvider theme={{ algorithm, token: APP_TOKEN }}>
+          <ConfigProvider theme={{ algorithm, token }}>
             <AnnouncementRow announcement={{ level, title: 'Title', content: 'Body text', stripDismissible: false }} />
           </ConfigProvider>,
         )

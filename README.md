@@ -79,9 +79,42 @@ zcat dump-2026-09-04.gz | docker compose exec -T report-portal /app/report-porta
 
 Backups contain password hashes and token hashes, so the files are secrets and are written with mode `0600`. The SSO keyring is encrypted in the database, but its wrapping key is derived from `secret_key` in `config.yaml`; keep the config directory with the backup.
 
+**SQLite files are in WAL mode.** On its first start, a release with the SQLite read pool switches a file-backed SQLite database to write-ahead logging (WAL). The switch is permanent for that file and is not a schema change; page reads then no longer wait for writes. Committed data can sit in `portal.db-wal` until it is checkpointed, so **copying `portal.db` alone while the portal runs can silently miss committed data**. Back up with `report-portal backup` (a consistent logical dump, unaffected), or stop the portal and copy `portal.db` together with `portal.db-wal` and `portal.db-shm`, or use SQLite's online backup. A database on a network filesystem (NFS, SMB) or a FUSE-style mount (including Docker Desktop bind mounts) is detected and left as it was, with no read pool; the startup log says so, and the admin storage page reports the state. The `-wal` file is truncated after a checkpoint once it exceeds 64 MiB. PostgreSQL is unaffected.
+
 Schema steps are applied at startup, so a deploy is a new image and a restart. Take the pre-upgrade backup with the **previous** release: the new binary's `backup`, `restore` and `adduser` open the database the way startup does and apply pending steps first. Under a moving tag with `pull_policy: always`, back up from the running container's image id before pulling (see [the upgrade notes](docs/forecast-purge-ownership-upgrade.md)). `report-portal schema-upgrade` is an optional tool: with no arguments it lists the pending steps and changes nothing, and `--apply` applies them while the portal is stopped. In a container, `docker-entrypoint.sh` does not pass arguments, so run it with `--entrypoint /app/report-portal`.
 
 See [ADR 0027](docs/adr/0027-backup-and-restore.md) for the design and operational details.
+
+#### Platform recovery bundle (moving to a fresh host)
+
+When the app platform is in use, a plain `backup` is not enough to rebuild a lost host: the retained app-data checkpoint archives live on the runner host, outside the database. `recovery-bundle` packs everything a fresh host needs into one directory, and loads it there.
+
+~~~bash
+# Old host. Stop the app runner first so its journal has no live write-ahead content.
+report-portal recovery-bundle write /backup/bundle \
+  --checkpoints /srv/runner/checkpoints \
+  --runner-journal /srv/runner/state/journal.sqlite3
+
+# Fresh host, with the ORIGINAL config.yaml (same secret_key) in place and the portal stopped.
+report-portal recovery-bundle restore /backup/bundle          # dry run: verify the bundle, parse the dump
+report-portal recovery-bundle restore /backup/bundle --force  # load it into an empty database
+~~~
+
+- `--checkpoints` names where the runner keeps its archives (`<checkpoint id>.tar`): the checkpoint root, its `.portal-checkpoints` directory, or the archive files themselves. It may be repeated. Every retained recovery set needs exactly one archive; a missing archive, an archive that is not the checkpoint the database recorded, an archive file you name that no retained recovery set owns, or an archive found in two places is refused, and nothing is left in the bundle directory. A directory may legitimately hold archives of deleted recovery sets (the runner cannot delete a checkpoint), so those found by searching a directory are left out and listed as ignored.
+- `--runner-journal` is the old runner's journal file. It is copied as bytes, as provenance, and never opened. Pass `--no-runner-journal` to state that the host has none; one of the two is required.
+- The database dump, the keyring, the retained recovery sets and the release inventory are read in a single read transaction, so a database that is being written to cannot produce a bundle that disagrees with itself. The retained sets are read again at the end; if they changed while the archives were being copied, the bundle is refused.
+- `restore` verifies the SHA-256 of every file in the bundle against its manifest, and that the `secret_key` in `config.yaml` opens the bundle's keyring (a wrong key is refused with "secret_key does not match the bundle"), all before it touches the database. It then places the managed image blobs and loads the dump exactly as `restore` does; the dump is hashed again while it is read, so a file swapped after verification is refused. Without `--force` it is a dry run: the target database is not opened and nothing is created. With `--force` the target database must be empty (as on a fresh host that has not been started); a database that holds data is refused unless you also pass `--replace-existing`. The command cannot detect a running Portal or runner, so stop both first: nothing else protects the placed image blobs from a sweep. When the dump held app platform entities the restored Portal is in recovery mode: runtime bindings are retired, and tasks, subscriptions and recovery sets wait for review.
+- **Docker.** Run the restore in a one-off container that does not start the server, against a fresh volume. `docker compose exec` needs a running Portal, and one that has started has already created the bootstrap admin, so the empty-database guard would refuse it. With the compose file's PostgreSQL service, start only the database first. The original `config.yaml` (same `secret_key`) must be in the config volume. The entrypoint is overridden because the image's default entrypoint starts the server; the container runs as root and the normal entrypoint repairs ownership of `/app/data` on the next start.
+
+  ~~~bash
+  docker compose up -d db        # only when config.yaml uses PostgreSQL
+  docker compose run --rm --no-deps -v /backup/bundle:/bundle:ro --entrypoint /app/report-portal \
+    report-portal recovery-bundle restore /bundle --force
+  docker compose up -d
+  ~~~
+
+- The command does not load the checkpoint archives or the journal. After `restore`, copy the archives it lists to the runner host and follow the import review in [doc 168](docs/app-platform/168-fresh-host-restore-plan.md).
+- The bundle does not contain `config.yaml`. Carry the original `secret_key` separately: the keyring cannot be opened without it. The directory is made owner-only (mode 0700, files 0600) and holds password and token hashes, so treat it as a secret.
 
 ### Rotating `secret_key`
 
@@ -157,6 +190,8 @@ go run ./cmd/report-portal adduser <name> <password> admin
 go run ./cmd/report-portal fetchnames
 go run ./cmd/report-portal backup <file|->
 go run ./cmd/report-portal restore <file|-> [--force]
+go run ./cmd/report-portal recovery-bundle write <dir> --checkpoints <dir-or-archive> (--runner-journal <file> | --no-runner-journal)
+go run ./cmd/report-portal recovery-bundle restore <dir> [--force [--replace-existing]]
 go run ./cmd/report-portal schema-upgrade [--apply]   # optional, offline: list pending schema steps, or apply them
 go run ./cmd/report-portal security show          # the sign-in policy, and whom a mandate is holding
 go run ./cmd/report-portal security clear-mandate # the way back in if one has locked you out

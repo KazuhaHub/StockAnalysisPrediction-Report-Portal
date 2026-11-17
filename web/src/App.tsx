@@ -1,5 +1,5 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
-import { App as AntdApp, ConfigProvider, Spin, theme } from 'antd'
+import { App as AntdApp, ConfigProvider, Spin } from 'antd'
 import { PrefsProvider, usePrefs } from './prefs'
 import { AuthProvider, useAuth } from './auth'
 import { SiteProvider } from './site'
@@ -7,7 +7,7 @@ import { AnnouncementsProvider } from './announcements'
 import { FavoritesProvider } from './favorites'
 import { AppAccessProvider, RequireAppOpen } from './appAccess'
 import { lazyRetry } from './lib/lazyRetry'
-import { RADIUS } from './theme/radius'
+import { portalTheme } from './theme/portal'
 import AppLayout from './components/AppLayout'
 import ErrorBoundary from './components/ErrorBoundary'
 import ConnectionBoundary, { ConnectionContent, ConnectionNotice } from './components/ConnectionBoundary'
@@ -61,9 +61,12 @@ const ForecastRecordPage = lazyRetry(() => import('./pages/ForecastRecordPage'))
 const QuotesApp = lazyRetry(() => import('./pages/QuotesApp'))
 const AppsHub = lazyRetry(() => import('./pages/AppsHub'))
 const AppView = lazyRetry(() => import('./pages/AppView'))
+const AppViewV2 = lazyRetry(() => import('./pages/AppViewV2'))
 const AppsAdminPage = lazyRetry(() => import('./pages/manage/AppsAdminPage'))
 const AppDetailPage = lazyRetry(() => import('./pages/manage/AppDetailPage'))
 const AppAccessPage = lazyRetry(() => import('./pages/manage/AppAccessPage'))
+const AppCredentialsPage = lazyRetry(() => import('./pages/manage/AppCredentialsPage'))
+const AppPlatformSettingsPage = lazyRetry(() => import('./pages/manage/AppPlatformSettingsPage'))
 const BatchConsole = lazyRetry(() => import('./pages/BatchConsole'))
 const RecurringConsole = lazyRetry(() => import('./pages/RecurringConsole'))
 const RecurringEditor = lazyRetry(() => import('./pages/RecurringEditor'))
@@ -175,6 +178,7 @@ function AppRoutes() {
         <Route path="/apps" element={<AppsHub />} />
         <Route path="/notifications" element={<InboxPage />} />
         <Route path="/apps/x/:id" element={<AppView />} />
+        <Route path="/apps/v2/:installation/*" element={<AppViewV2 />} />
         {/* Quotes is ungated on purpose: it reads market data and nothing about this portal, and
             every signed-in user can already see a price on a reading page. Its `perm` in
             lib/builtinApps.ts is '' to match — that file's own note asks for the two to agree. */}
@@ -261,7 +265,9 @@ function AppRoutes() {
           <Route path="assistant" element={<ChatAdminPage />} />
           <Route path="apps" element={<AppsAdminPage />} />
           <Route path="apps/:key" element={<AppDetailPage />} />
+          <Route path="apps/installations/:installation" element={<AppPlatformSettingsPage />} />
           <Route path="apps/:key/access" element={<AppAccessPage />} />
+          <Route path="apps/:key/credentials" element={<AppCredentialsPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="quotes" element={<QuoteSourcesPage />} />
@@ -289,33 +295,7 @@ function Themed() {
       // class, which SpinRing keeps); SpinRing also keeps every ring in phase, so one replacing
       // another does not restart its turn.
       spin={{ indicator: <SpinRing /> }}
-      theme={{
-        algorithm: dark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        // One radius scale for the whole portal; index.css and inline styles use these tokens rather
-        // than numbers of their own: XS 4 (hairlines, bars), SM 6 (tags, small chips), base 8
-        // (controls), LG 12 (cards, dialogs, drawers, panels). Pills and circles stay 999px / 50%.
-        token: { colorPrimary: '#1677ff', borderRadius: RADIUS.base, borderRadiusXS: RADIUS.xs, borderRadiusSM: RADIUS.sm, borderRadiusLG: RADIUS.lg },
-        // antd 6 gives a left/right-titled Divider a leading rail (orientationMargin token,
-        // default 5%) so the text floats inward. Our section headers want the title flush to
-        // the edge, so zero the token globally — the native way, no per-Divider prop or CSS.
-        // LG (12) is for surfaces. Controls keep the base radius at every size, so a large button
-        // or input does not round more than the default one beside it.
-        components: {
-          Divider: { orientationMargin: 0 },
-          Button: { borderRadiusLG: RADIUS.base },
-          Input: { borderRadiusLG: RADIUS.base },
-          InputNumber: { borderRadiusLG: RADIUS.base },
-          Select: { borderRadiusLG: RADIUS.base },
-          DatePicker: { borderRadiusLG: RADIUS.base },
-        },
-        // A cssVar key PER THEME, not the single useId `cssVar: true` gives. antd caches the
-        // generated CSS variables under this key; with one shared key, switching the algorithm at
-        // runtime does not regenerate them, so neutral tokens (default button/select/tag fills)
-        // stay stuck on the previous palette while colored tokens (colorPrimary is the same hex in
-        // both) still look right. Distinct keys give each palette its own scope, so a dark→light
-        // switch cleanly applies the light variables. See antd cssVar "unique key per theme".
-        cssVar: { key: dark ? 'rp-dark' : 'rp-light' },
-      }}
+      theme={portalTheme(dark)}
     >
       <AntdApp style={{ height: '100%' }}>
         <AuthProvider>

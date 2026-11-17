@@ -84,7 +84,9 @@ func (s *Server) requireUserJSON(h handler) http.HandlerFunc {
 			return
 		}
 		// Identity first, then the policy: an anonymous caller is told they are not signed in, not
-		// that they are at a wall they cannot see.
+		// that they are at a wall they cannot see. A safe request decides the gate and everything the
+		// handler asks of the account from one snapshot of it (requestAccount).
+		r = withRequestAccount(r, u)
 		if !s.gateEnrolment(w, r, u) {
 			return
 		}
@@ -460,7 +462,7 @@ func requestIsHTTPS(r *http.Request, trusted []*net.IPNet) bool {
 
 func (s *Server) apiHome(w http.ResponseWriter, r *http.Request, user string) {
 	f, src, size, page := s.filtersFrom(r)
-	sc := s.viewerScope(user) // restricted external viewer → own-OU + same-day internal pool; else nil
+	sc := s.viewerScopeFor(r.Context(), user) // restricted external viewer → own-OU + same-day internal pool; else nil
 	var reps []Rep
 	var newTotal, oldTotal int
 	if src == "all" || src == "new" {
@@ -484,11 +486,11 @@ func (s *Server) apiHome(w http.ResponseWriter, r *http.Request, user string) {
 	if hi > len(groups) {
 		hi = len(groups)
 	}
-	types := uniqSorted(s.st.NewTypes(sc))
+	facetTypes, kindsPresent, facetVersions := s.st.ReportFacets(sc)
+	types := uniqSorted(facetTypes)
 	// 大类 filter options: the categories actually present, in the canonical
 	// pipeline order (kindOrder), with any non-standard kinds appended.
 	present := map[string]bool{}
-	kindsPresent := s.st.ReportKinds(sc)
 	for _, k := range kindsPresent {
 		present[k] = true
 	}
@@ -504,15 +506,15 @@ func (s *Server) apiHome(w http.ResponseWriter, r *http.Request, user string) {
 			kinds = append(kinds, k)
 		}
 	}
-	homeGroups := s.st.LinkGroups()
+	homeLinks, homeGroups, kindColors := s.st.HomeConfig()
 	writeJSON(w, map[string]any{
 		"groups":   groupsJSON(groups[lo:hi]),
 		"newTotal": newTotal, "oldTotal": oldTotal, "totalRuns": totalRuns,
 		"page": page, "pages": pages, "size": size,
-		"types": types, "kinds": kinds, "versions": s.presentVersions(sc),
+		"types": types, "kinds": kinds, "versions": s.presentVersionsFrom(facetVersions),
 		// Home shows only entries/groups toggled visible; the admin manager sees them all.
-		"links": linksJSON(homeVisibleLinks(s.st.Links(), homeGroups)), "linkGroups": linkGroupsJSON(visibleGroups(homeGroups)),
-		"kindColors": s.st.KindColors(),
+		"links": linksJSON(homeVisibleLinks(homeLinks, homeGroups)), "linkGroups": linkGroupsJSON(visibleGroups(homeGroups)),
+		"kindColors": kindColors,
 	})
 }
 
@@ -533,8 +535,13 @@ func (s *Server) apiHome(w http.ResponseWriter, r *http.Request, user string) {
 // the whole table, which is a poor index that earns nothing on reads and charges every write — the
 // same reasoning that removed idx_reports_sym and idx_reports_owner (see the reports schema).
 func (s *Server) presentVersions(sc *ownerScope) []map[string]any {
+	return s.presentVersionsFrom(s.st.ReportVersionsPresent(sc))
+}
+
+// presentVersionsFrom is presentVersions for a caller that already has the versions present.
+func (s *Server) presentVersionsFrom(versions []string) []map[string]any {
 	present := map[string]bool{}
-	for _, v := range s.st.ReportVersionsPresent(sc) {
+	for _, v := range versions {
 		present[v] = true
 	}
 	if len(present) < 2 {
@@ -580,9 +587,16 @@ func groupsJSON(gs []Group) []map[string]any {
 
 func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	symbol := r.PathValue("symbol")
-	all, _ := s.st.NewBySymbol(symbol, s.viewerScope(user))
+	// The reads that decide which report is shown (the symbol's reports, the type and version
+	// registries, the report body and the reader's OU for the read audit) share one read snapshot
+	// and one connection acquisition. Nothing between here and endSnapshot may touch the pool.
+	scope := s.viewerScopeFor(r.Context(), user)
+	snap, endSnapshot := s.st.beginReadSnapshot(r.Context())
+	defer endSnapshot()
+	all, _ := s.st.newBySymbolFrom(snap, symbol, scope)
 	all = dropInternal(all) // cache/plumbing entries are not reports; see internalTypes
 	if len(all) == 0 {
+		endSnapshot()
 		jsonErrorCode(w, http.StatusNotFound, "no_reports_for_symbol", "该标的暂无报告")
 		return
 	}
@@ -650,12 +664,23 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	for i := range kindReps {
 		kindReps[i].Label = tabLabel(kindReps[i])
 	}
-	kindReps, defID := s.orderAndDefault(kindReps)
+	kindReps, defID := s.orderAndDefaultWith(kindReps, s.st.typeConfigsFrom(snap), func() []ReportVersion { return s.st.versionsFrom(snap) })
 	if !repInList(kindReps, selID) {
 		selID = defID
 	}
-	rep := s.loadRep(r, user, selID)
-	predictedDates := s.forecastTimelineDates(user, symbol, all)
+	var rep *Rep
+	var readerOU int64
+	if selID > 0 {
+		rep, _ = s.st.getNewFrom(snap, selID, scope)
+		if rep != nil {
+			readerOU = s.st.primaryGroupOfFrom(snap, user)
+		}
+	}
+	endSnapshot()
+	if rep != nil {
+		s.recordReportReadAs(r, user, readerOU, rep)
+	}
+	predictedDates := s.forecastTimelineDates(r.Context(), user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {
 		node := map[string]any{"date": d, "n": len(byDate[d])}

@@ -1,0 +1,54 @@
+{
+  "format": "portal.reference-apps-shell-browser-acceptance/1-dev.1",
+  "captured_at": "2026-11-04T14:15:00-08:00",
+  "candidate": "c2a58ea85cfa1e282a04d7753fd51802e705f379",
+  "apps_candidate": "fa4acc03b0bc2449d627accd64e111751c6e7352",
+  "hosted_ci": {
+    "app_project_quota_probe": "41920808163",
+    "app_runner_daemon_probe": "41920808205",
+    "codeql": "pass",
+    "general_test": "41920808343",
+    "result": "pass"
+  },
+  "packageDigests": {
+    "notes-sample": "1fff098f1702c56647d7893d5f9790eebc7cbb378aee44a65308cf57ce6318a3",
+    "scheduled-digest": "31b64c0812f068d69ce1dbdf728149016a226332a181fb718313c609ae024cda"
+  },
+  "assertions": {
+    "ordinaryUserSeesTruthfulSetupRequired": true,
+    "setupRequiredApplicationNotOpenable": true,
+    "myAppsListsBothReferenceApps": true,
+    "installedDirectoryEntriesOpenable": true,
+    "notesSinglePlatformTitle": true,
+    "noDuplicateVersionRow": true,
+    "noOuterApplicationFrame": true,
+    "viewportEditorInternalScroll": true,
+    "keyboardScrollableEditor": true,
+    "savedObjectSurvivesReload": true,
+    "shellContrastAA": true,
+    "desktopAxeSeriousCritical": 0,
+    "digestSinglePlatformTitle": true,
+    "singlePlatformNavigation": true,
+    "digestNoDuplicateVersionRow": true,
+    "digestNoOuterApplicationFrame": true,
+    "digestIndependentBackendBridge": true,
+    "appSwitchUnmountsPreviousFrame": true,
+    "appSwitchBackMountedExactNotesDocument": true,
+    "narrowDarkTraditionalChineseDigest": true,
+    "viewportEditorUsesHostHeight": true,
+    "narrowDarkTraditionalChineseNotes": true
+  },
+  "screenshots": [
+    "reference-apps-1440-en-light-setup-required.png",
+    "reference-apps-1440-en-light-notes.png",
+    "reference-apps-1440-en-light-scheduled-digest.png",
+    "reference-apps-320-zh-tw-dark-scheduled-digest.png",
+    "reference-apps-320-zh-tw-dark-notes-editor.png"
+  ],
+  "limitations": [
+    "The fixture preloads installation-state projections so it isolates My Apps setup, opening, switching, title and frame behavior; it does not replace the managed lifecycle install transaction.",
+    "Scheduled Digest presentation runs against a contract-compatible fixture backend, not the exact service image.",
+    "Automated axe and keyboard checks do not constitute the required human screen-reader audit."
+  ],
+  "passed": true
+}

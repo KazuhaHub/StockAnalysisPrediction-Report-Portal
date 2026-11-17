@@ -35,32 +35,48 @@ def validate_metadata(meta, tag, image, commit):
 
 
 def ci_ready(jobs):
-    required = {'go-test', 'web typecheck + build', 'web lint + typecheck + build', 'workflow lint',
+    required = {'go-test', 'go test (checks + other packages)', 'web typecheck + build', 'web lint + typecheck + build', 'workflow lint',
                 'docker image (font gate + smoke)', 'go race full (other packages)',
                 'release targets (cross-compile)'}
     required.update(f'go race full ({i}/4)' for i in range(1, 5))
+    required.update(f'go test ({i}/4)' for i in range(1, 5))
     required.update(f'web tests ({i}/3)' for i in range(1, 4))
     passed = {j['name'] for j in jobs if j.get('conclusion') == 'success'}
     return required <= passed
 
 
-def wait_ci(repo, sha):
+LICENCE_JOB = 'licence scan'
+
+
+def licence_ready(jobs):
+    """licence.yml's one job, by display name, is green: the SBOM licence gate of doc 167 section 8."""
+    return any(j['name'] == LICENCE_JOB and j.get('conclusion') == 'success' for j in jobs)
+
+
+def wait_workflow(repo, sha, workflow, ready, label):
     deadline = time.monotonic() + 1800
     while time.monotonic() < deadline:
-        runs = gh_json(f'repos/{repo}/actions/workflows/test.yml/runs?head_sha={sha}&per_page=100')['workflow_runs']
+        runs = gh_json(f'repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=100')['workflow_runs']
         runs = [r for r in runs if r['event'] in ('push', 'workflow_dispatch')]
         if not runs:
-            raise RuntimeError('No full test run for this commit; dispatch test.yml on its branch first')
+            raise RuntimeError(f'No {label} run for this commit; dispatch {workflow} on its branch first')
         run = max(runs, key=lambda r: r['id'])
         if run['status'] == 'completed':
             jobs = gh_json(f'repos/{repo}/actions/runs/{run["id"]}/jobs?per_page=100')['jobs']
-            if run['conclusion'] != 'success' or not ci_ready(jobs):
-                raise RuntimeError(f'Full CI did not pass: {run["html_url"]}')
-            print(f'Verified full CI: {run["html_url"]}')
+            if run['conclusion'] != 'success' or not ready(jobs):
+                raise RuntimeError(f'{label[0].upper()}{label[1:]} did not pass: {run["html_url"]}')
+            print(f'Verified {label}: {run["html_url"]}')
             return
-        print(f'Waiting for full CI: {run["html_url"]}', flush=True)
+        print(f'Waiting for {label}: {run["html_url"]}', flush=True)
         time.sleep(15)
-    raise RuntimeError('Timed out waiting for full CI')
+    raise RuntimeError(f'Timed out waiting for {label}')
+
+
+def wait_ci(repo, sha):
+    wait_workflow(repo, sha, 'test.yml', ci_ready, 'full CI')
+    # A separate workflow, so the test.yml job names above stay the whole of ci_ready. It runs on every
+    # push to main, so the exact commit being released has a run.
+    wait_workflow(repo, sha, 'licence.yml', licence_ready, 'licence scan')
 
 
 def expected_assets(tag):

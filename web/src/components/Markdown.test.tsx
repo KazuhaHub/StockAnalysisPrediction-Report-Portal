@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Markdown from './Markdown'
 
 const { renderMermaid, parseMermaid, initializeMermaid, loadMermaid, cacheMermaidSVG } = vi.hoisted(() => {
-  const renderMermaid = vi.fn(async (id: string) => ({ svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` }))
+  const renderMermaid = vi.fn(async (id: string, _source = '') => ({ svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` }))
   const parseMermaid = vi.fn(async () => true)
   const initializeMermaid = vi.fn()
   const loadMermaid = vi.fn(async () => ({
@@ -11,6 +11,8 @@ const { renderMermaid, parseMermaid, initializeMermaid, loadMermaid, cacheMermai
       initialize: initializeMermaid,
       parse: parseMermaid,
       render: renderMermaid,
+      // The real detector throws for source it cannot classify; this one knows the two kinds the tests use.
+      detectType: (source: string) => (source.trimStart().startsWith('mindmap') ? 'mindmap' : 'flowchart-v2'),
     },
   }))
   const cacheMermaidSVG = vi.fn(async () => undefined)
@@ -76,6 +78,9 @@ describe('Markdown', () => {
       expect.objectContaining({
         securityLevel: 'strict',
         htmlLabels: false,
+        // Mermaid 12 defaults to the ELK layout, which the build does not ship (doc 167 section 8):
+        // the portal asks for dagre explicitly, so ordinary diagrams never reach the ELK stub.
+        layout: 'dagre',
         secure: expect.arrayContaining(['htmlLabels']),
       }),
     )
@@ -89,6 +94,89 @@ describe('Markdown', () => {
         'light',
       ),
     )
+  })
+
+  it('lays a flowchart out with dagre but leaves a mind map on its own layout', async () => {
+    const flow = render(<Markdown md={'```mermaid\nflowchart LR\nA --> B\n```'} />)
+    await waitFor(() => expect(flow.container.querySelector('.md-mermaid svg')).not.toBeNull())
+    expect(initializeMermaid).toHaveBeenLastCalledWith(expect.objectContaining({ layout: 'dagre' }))
+    flow.unmount()
+
+    initializeMermaid.mockClear()
+    const mind = render(<Markdown md={'```mermaid\nmindmap\n  root\n    a\n```'} />)
+    await waitFor(() => expect(mind.container.querySelector('.md-mermaid svg')).not.toBeNull())
+    expect(initializeMermaid).toHaveBeenCalled()
+    expect(initializeMermaid.mock.calls[0][0]).not.toHaveProperty('layout')
+  })
+
+  // mermaid.initialize is global and synchronous, while parse and render are asynchronous: with a
+  // flowchart and a mind map on one page, the last initialize used to win for both renders, so either
+  // the flowchart reached the ELK layout (absent from the build, a blank chart) or the mind map was
+  // forced onto dagre. Each block's configuration must be in force for its own render.
+  describe('two diagrams on one page', () => {
+    const FLOW = '```mermaid\nflowchart LR\nA --> B\n```'
+    const MIND = '```mermaid\nmindmap\n  root\n    a\n```'
+    const defaultRender = async (id: string) => ({ svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` })
+    const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+    async function renderBoth(md: string) {
+      let config: { layout?: string } = {}
+      const seen: Record<string, { layout?: string; atEnd?: string }> = {}
+      initializeMermaid.mockImplementation((next: { layout?: string }) => {
+        config = next
+      })
+      parseMermaid.mockImplementation(async () => {
+        await tick(3)
+        return true
+      })
+      renderMermaid.mockImplementation(async (id: string, source: string) => {
+        const kind = source.startsWith('mindmap') ? 'mindmap' : 'flowchart'
+        seen[kind] = { layout: config.layout }
+        await tick(8)
+        seen[kind].atEnd = config.layout
+        return { svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` }
+      })
+      try {
+        const { container } = render(<Markdown md={md} />)
+        await waitFor(() => expect(container.querySelectorAll('.md-mermaid svg')).toHaveLength(2), { timeout: 4000 })
+      } finally {
+        initializeMermaid.mockReset()
+        parseMermaid.mockReset()
+        parseMermaid.mockResolvedValue(true)
+        renderMermaid.mockImplementation(defaultRender)
+      }
+      return seen
+    }
+
+    it('gives each its own layout when the flowchart comes first', async () => {
+      const seen = await renderBoth(`${FLOW}\n\n${MIND}`)
+      expect(seen.flowchart).toEqual({ layout: 'dagre', atEnd: 'dagre' })
+      expect(seen.mindmap).toEqual({ layout: undefined, atEnd: undefined })
+    })
+
+    it('gives each its own layout when the mind map comes first', async () => {
+      const seen = await renderBoth(`${MIND}\n\n${FLOW}`)
+      expect(seen.flowchart).toEqual({ layout: 'dagre', atEnd: 'dagre' })
+      expect(seen.mindmap).toEqual({ layout: undefined, atEnd: undefined })
+    })
+  })
+
+  it('keeps the source as a code block when its render never settles, and lets the next diagram render', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      renderMermaid.mockImplementation(async (id: string, source = '') =>
+        source.startsWith('mindmap') ? new Promise<never>(() => undefined) : { svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` },
+      )
+      const { container } = render(<Markdown md={'```mermaid\nmindmap\n  root\n    a\n```\n\n```mermaid\nflowchart LR\nA --> B\n```'} />)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(15_001)
+      })
+      await waitFor(() => expect(container.querySelectorAll('.md-mermaid svg')).toHaveLength(1))
+      expect(container.querySelector('code.language-mermaid')?.textContent).toContain('mindmap')
+    } finally {
+      vi.useRealTimers()
+      renderMermaid.mockImplementation(async (id: string) => ({ svg: `<svg data-chart-id="${id}"><text>chart</text></svg>` }))
+    }
   })
 
   it('uses parser-normalized source as the cache key for an indented mermaid fence', async () => {

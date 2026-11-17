@@ -1,0 +1,287 @@
+{
+  "gitCommit": "2142755066f19e522e7e2dbb17bd299d5298ed47",
+  "workflowHead": "14a1a3748c322896e08cdf88afdc0efb75ddf366",
+  "quotaBrowserRun": "41555201862",
+  "scenarios": [
+    {
+      "name": "install-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "install-review-320-zh-cn-dark",
+      "violations": [],
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "install-review-390-zh-tw-light",
+      "violations": [],
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "zoom": 100
+    },
+    {
+      "name": "install-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "disable-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "uninstall-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "update-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "update-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "enable-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "enable-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "progress-queued",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-queued-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "progress-paused",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-paused-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "progress-recovery",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "progress-recovery-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "settings-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-320-zh-cn-dark",
+      "violations": [],
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "settings-delete-data-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-delete-data-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "settings-repair-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-repair-review-320-zh-cn-light",
+      "violations": [],
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-repair-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "settings-restore-review-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-review-320-zh-cn-light",
+      "violations": [],
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-review-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    },
+    {
+      "name": "settings-restore-paused-1440-en-light",
+      "violations": [],
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-paused-320-zh-cn-light",
+      "violations": [],
+      "viewport": {
+        "width": 320,
+        "height": 800
+      },
+      "zoom": 100
+    },
+    {
+      "name": "settings-restore-paused-1440-en-light-zoom-200",
+      "violations": [],
+      "viewport": {
+        "width": 720,
+        "height": 450
+      },
+      "zoom": 200
+    }
+  ],
+  "install": {
+    "operation": "e9ebe85d-4dfa-4733-9394-a068ead9ae44"
+  },
+  "disable": {
+    "violations": []
+  },
+  "uninstall": {
+    "violations": []
+  },
+  "accepted": true
+}

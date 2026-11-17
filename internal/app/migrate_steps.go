@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -53,20 +54,74 @@ type execer interface {
 type migExec struct {
 	s  *Store
 	ex execer
+	// rp is set for an executor that belongs to the SQLite read pool (the pool itself or a transaction
+	// begun on it), so its statements use that pool's statement cache: a statement is bound to the pool
+	// it was prepared on and cannot be used on another. It is the pool the executor was made from, not
+	// whatever pool is current when a statement runs.
+	rp *readPool
+}
+
+// pool is the pool whose statement cache this executor uses.
+func (e migExec) pool() poolRef {
+	if e.rp != nil {
+		return poolRef{db: e.rp.db, stmts: e.rp.stmts}
+	}
+	return e.s.writerPool()
 }
 
 func (s *Store) poolExec() migExec { return migExec{s: s, ex: s.db} }
 
+// The three statement methods route through the store's statement cache when the executor is the pool
+// (plain or context-bound) or a transaction begun on it; any other executor runs as before.
 func (e migExec) exec(q string, args ...any) (sql.Result, error) {
-	return e.ex.Exec(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().execBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.execBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.pool().txExecContext(context.Background(), x, q, args...)
+	}
+	return e.ex.Exec(q, args...)
 }
 
 func (e migExec) queryRow(q string, args ...any) *sql.Row {
-	return e.ex.QueryRow(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().queryRowBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.queryRowBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.pool().txQueryRowContext(context.Background(), x, q, args...)
+	}
+	return e.ex.QueryRow(q, args...)
 }
 
 func (e migExec) query(q string, args ...any) (*sql.Rows, error) {
-	return e.ex.Query(e.s.bind(q), args...)
+	q = e.s.bind(q)
+	switch x := e.ex.(type) {
+	case *sql.DB:
+		if x == e.s.db || (e.rp != nil && x == e.rp.db) {
+			return e.pool().queryBound(context.Background(), q, args...)
+		}
+	case platformContextPool:
+		if x.DB == e.s.db {
+			return e.s.queryBound(x.ctx, q, args...)
+		}
+	case *sql.Tx:
+		return e.pool().txQueryContext(context.Background(), x, q, args...)
+	}
+	return e.ex.Query(q, args...)
 }
 
 func (e migExec) setting(k string) string {
@@ -196,6 +251,10 @@ type restoreRule struct {
 	// over the restored rows. No step declares it yet; the restore refuses such a dump rather than
 	// guessing (see checkDumpMigrations).
 	needsDataUpgrade bool
+	// upgradeOnRestore explicitly permits finishRestore to run this step's idempotent up function
+	// against rows loaded by an older dump. It is separate from needsDataUpgrade so a step that
+	// requires data work without a proven implementation still defaults to refusal.
+	upgradeOnRestore bool
 }
 
 // migration is one schema step.
@@ -207,6 +266,9 @@ type migration struct {
 	renames []colRename
 	restore restoreRule
 	up      func(migExec) error
+	// restoreSeed repairs a migration-owned default row when restoring a dump that predates
+	// this step. It never backfills user data and is not called for a dump that claims the step.
+	restoreSeed func(migExec) error
 	// verify is a shape check beyond what columns, tables, indices and renames can express (types,
 	// nullability, keys, constraints). It runs wherever the declared products are verified: inside the
 	// step's own transaction before the ledger row is written, and on every start for recorded steps.
@@ -218,7 +280,7 @@ type migration struct {
 // appended at the end (TestMigrationListKeepsItsMergeOrder).
 func (s *Store) migrations() []migration {
 	return []migration{migration0001(), migration0002(), migration0003(), migration0004(), migration0005(),
-		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014()}
+		migration0006(), migration0010(), migration0009(), migration0007(), migration0008(), migration0011(), migration0012(), migration0013(), migration0014(), migration0015(), migration0016(), migration0017(), migration0018(), migration0019(), migration0020(), migration0021()}
 }
 
 // migration0010 splits the announcement's single "readers can close it" switch in two (ADR 0042).

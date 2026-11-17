@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { App } from 'antd'
+import { App, ConfigProvider, theme } from 'antd'
+import axe from 'axe-core'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import AppDetailPage from './AppDetailPage'
 import { installed, layout } from './appsAdminFixtures'
@@ -22,18 +23,21 @@ function Where() {
   const loc = useLocation()
   return <div data-testid="where">{loc.pathname}</div>
 }
-const renderAt = (path: string) =>
+const renderAt = (path: string, algorithm = theme.defaultAlgorithm) =>
   render(
-    <App>
-      <MemoryRouter initialEntries={[path]}>
-        <Where />
-        <Routes>
-          <Route path="/manage/apps" element={<div>list</div>} />
-          <Route path="/manage/apps/:key" element={<AppDetailPage />} />
-          <Route path="/manage/apps/:key/access" element={<div>access</div>} />
-        </Routes>
-      </MemoryRouter>
-    </App>,
+    <ConfigProvider theme={{ algorithm }}>
+      <App>
+        <MemoryRouter initialEntries={[path]}>
+          <Where />
+          <Routes>
+            <Route path="/manage/apps" element={<div>list</div>} />
+            <Route path="/manage/apps/:key" element={<AppDetailPage />} />
+            <Route path="/manage/apps/:key/access" element={<div>access</div>} />
+            <Route path="/manage/apps/:key/credentials" element={<div>credentials</div>} />
+          </Routes>
+        </MemoryRouter>
+      </App>
+    </ConfigProvider>,
   )
 
 beforeEach(() => {
@@ -74,6 +78,15 @@ describe('App detail: built-in app', () => {
     await user.click(card)
     expect(await screen.findByText('access')).toBeTruthy()
     expect(screen.getByTestId('where').textContent).toBe('/manage/apps/builtin%3Aquotes/access')
+  })
+
+  it('opens the service status section from the keyboard', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/builtin%3Aquotes')
+    const card = await screen.findByRole('button', { name: /apps\.section\.status\.title/ })
+    card.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByText('access')).toBeTruthy()
   })
 
   it('names a section card by its title, its explanation and its current value', async () => {
@@ -118,6 +131,14 @@ describe('App detail: installed app', () => {
     expect(await screen.findByText('backend-modal:hello')).toBeTruthy()
   })
 
+  it('opens credential and binding management for an installed app', async () => {
+    const user = userEvent.setup()
+    renderAt('/manage/apps/hello')
+    await user.click(await screen.findByRole('button', { name: /apps\.section\.credentials\.title/ }))
+    expect(await screen.findByText('credentials')).toBeTruthy()
+    expect(screen.getByTestId('where').textContent).toBe('/manage/apps/hello/credentials')
+  })
+
   it('uninstalls only after confirmation, then returns to the list', async () => {
     const user = userEvent.setup()
     renderAt('/manage/apps/hello')
@@ -137,5 +158,20 @@ describe('App detail: installed app', () => {
     await user.click(await screen.findByRole('button', { name: 'common.cancel' }))
     expect(apiMock.del).not.toHaveBeenCalled()
     expect(screen.getByRole('heading', { name: 'Hello' })).toBeTruthy()
+  })
+
+  it.each([
+    ['light', theme.defaultAlgorithm],
+    ['dark', theme.darkAlgorithm],
+  ])('has no axe violations for an installed app in %s mode', async (_mode, algorithm) => {
+    renderAt('/manage/apps/hello', algorithm)
+    await screen.findByRole('heading', { name: 'Hello' })
+    const result = await axe.run(document.body, {
+      rules: {
+        'color-contrast': { enabled: false },
+        region: { enabled: false },
+      },
+    })
+    expect(result.violations).toEqual([])
   })
 })

@@ -1,0 +1,183 @@
+package journal
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+)
+
+// schemaVersion is the newest journal schema this binary writes. Version 1 is
+// frozen: its table SQL is reproduced here only to recognise and upgrade files
+// written by earlier binaries.
+const schemaVersion = 3
+
+type schemaProduct struct{ kind, name, sql, rowCheck string }
+
+// Closed physical declarations from the approved four-table journal scope.
+// Neither manifests nor control messages can supply SQL declarations.
+// Version 2 only widens the runner_commands kind list; every other product is
+// identical in both versions. Version 3 adds runner_reservations (doc 171) and its
+// indexes, and widens the runner_commands kind list once more with remove-image
+// (doc 171, PR 4c) and delete-checkpoint (doc 172, owner decision 2026-11-16);
+// every other version 2 product is unchanged.
+func schemaProducts(version int) []schemaProduct {
+	return buildSchemaProducts(version, len(v3AddedKinds))
+}
+
+// v3AddedKinds are the command kinds folded into the v3 declaration after it first shipped on development and CI
+// hosts, in the order they were added. A v3 journal that lacks a suffix of this list is an earlier shape.
+var v3AddedKinds = []string{"remove-image", "delete-checkpoint"}
+
+// earlierV3Shapes are the declarations a v3 journal had before each added kind joined the kind list, oldest first:
+// one without any added kind, and one without the last. They are kept only to recognise such a file and refuse it
+// with a typed error; nothing is ever created from them outside tests.
+func earlierV3Shapes() [][]schemaProduct {
+	shapes := make([][]schemaProduct, 0, len(v3AddedKinds))
+	for added := 0; added < len(v3AddedKinds); added++ {
+		shapes = append(shapes, buildSchemaProducts(3, added))
+	}
+	return shapes
+}
+
+// earlierV3CommandsSQL is the runner_commands declaration of each earlier v3 shape.
+func earlierV3CommandsSQL() []string {
+	var declarations []string
+	for _, shape := range earlierV3Shapes() {
+		for _, product := range shape {
+			if product.name == "runner_commands" {
+				declarations = append(declarations, product.sql)
+			}
+		}
+	}
+	return declarations
+}
+
+// buildSchemaProducts builds a declaration set. At version 3, addedKinds counts how many of v3AddedKinds the
+// runner_commands kind list carries; at every other version it is ignored.
+func buildSchemaProducts(version int, addedKinds int) []schemaProduct {
+	if version < 1 || version > schemaVersion {
+		panic("unknown journal schema version")
+	}
+	kinds := []string{"stage", "verify", "prepare-data", "start-candidate", "update-start", "probe", "activate", "stop", "snapshot", "restore", "remove-code", "delete-data"}
+	if version >= 2 {
+		kinds = append(kinds, "import-checkpoint", "migrate-data", "discard-migration", "load-image")
+	}
+	if version >= 3 {
+		kinds = append(kinds, v3AddedKinds[:addedKinds]...)
+	}
+	tables := []struct {
+		name, fields, keys string
+		checks             []string
+	}{
+		{"runner_deployment", "singleton:N deployment_id:ID controller_epoch:ID control_revision:R verification_algorithm:T32 verification_key:B4096 key_fingerprint:SHA revision:R created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(singleton),UNIQUE(deployment_id)", []string{"singleton=1"}},
+		{"runner_commands", "effect_id:ID operation_id:ID installation_id:ID stage:T32 effect_number:R kind:T32 payload_sha256:SHA target_generation:R controller_epoch:ID admitted_fence:R state:T16 receipt_json:J16384 ack_attempted_ms:MS? created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(effect_id),UNIQUE(operation_id,stage,effect_number)", []string{"effect_number<=32",
+				enumCondition("state", "prepared", "applied", "reverted", "unknown"),
+				enumCondition("stage", "validate", "download", "stage", "prepare_data", "quiesce", "snapshot", "migrate", "start", "probe", "activate", "revoke", "stop", "remove_code", "remove_data", "restore_data"),
+				enumCondition("kind", kinds...),
+				"ack_attempted_ms IS NULL OR state<>'prepared'"}},
+		{"runner_resources", "id:ID installation_id:ID data_namespace_id:ID? kind:T24 native_id:T512 release_sha256:SHA? generation:N controller_epoch:ID control_fence:N writer_fence:N desired_state:T16 observed_state:T24 ownership_sha256:SHA revision:R observed_ms:MS? created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(id),UNIQUE(kind,native_id)", []string{enumCondition("kind", "container", "volume", "socket", "artifact"),
+				enumCondition("desired_state", "present", "running", "stopped", "absent"),
+				enumCondition("observed_state", "unknown", "present", "running", "stopped", "absent", "failed", "quarantined")}},
+		{"runner_checkpoints", "id:ID data_namespace_id:ID installation_id:ID operation_id:ID release_sha256:SHA data_format:R writer_fence:R manifest_sha256:SHA? bytes:N state:T24 revision:R verified_ms:MS? created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(id)", []string{enumCondition("state", "preparing", "verified", "restoring", "deleted", "review_required"),
+				"state<>'verified' OR (manifest_sha256 IS NOT NULL AND verified_ms IS NOT NULL)"}},
+	}
+	if version >= 3 {
+		tables = append(tables, struct {
+			name, fields, keys string
+			checks             []string
+		}{"runner_reservations", "id:ID resource_id:T128 installation_id:ID kind:T16 memory_mib:N cpu_millis:N disk_bytes:N image_bytes:N state:T16 created_ms:MS updated_ms:MS",
+			"PRIMARY KEY(id),UNIQUE(resource_id)", []string{
+				enumCondition("kind", "backend", "migration", "namespace", "image"),
+				enumCondition("state", "held", "released"),
+				"(kind IN ('backend','migration') AND disk_bytes=0 AND image_bytes=0) OR (kind='namespace' AND memory_mib=0 AND cpu_millis=0 AND image_bytes=0) OR (kind='image' AND memory_mib=0 AND cpu_millis=0 AND disk_bytes=0)"}})
+	}
+	products := make([]schemaProduct, 0, 8)
+	for _, table := range tables {
+		columns := []string{}
+		predicates := []string{}
+		for _, field := range strings.Fields(table.fields) {
+			name, kind, _ := strings.Cut(field, ":")
+			definition, condition := columnSQL(name, kind)
+			columns = append(columns, definition)
+			predicates = append(predicates, "("+condition+")")
+		}
+		columns = append(columns, table.keys)
+		for _, condition := range table.checks {
+			columns = append(columns, "CHECK("+condition+")")
+			predicates = append(predicates, "("+condition+")")
+		}
+		products = append(products, schemaProduct{"table", table.name, "CREATE TABLE " + table.name + "(" + strings.Join(columns, ",") + ")", strings.Join(predicates, " AND ")})
+	}
+	indexes := []struct{ name, table, columns string }{
+		{"idx_runner_commands_installation", "runner_commands", "installation_id"},
+		{"idx_runner_commands_state", "runner_commands", "state,updated_ms"},
+		{"idx_runner_resources_installation", "runner_resources", "installation_id,kind"},
+		{"idx_runner_checkpoints_namespace", "runner_checkpoints", "data_namespace_id,state,created_ms"},
+	}
+	if version >= 3 {
+		indexes = append(indexes,
+			struct{ name, table, columns string }{"idx_runner_reservations_installation", "runner_reservations", "installation_id,state"},
+			struct{ name, table, columns string }{"idx_runner_reservations_state", "runner_reservations", "state,kind"})
+	}
+	for _, index := range indexes {
+		products = append(products, schemaProduct{"index", index.name, "CREATE INDEX " + index.name + " ON " + index.table + "(" + index.columns + ")", ""})
+	}
+	return products
+}
+
+func enumCondition(column string, values ...string) string {
+	quoted := make([]string, len(values))
+	for index, value := range values {
+		quoted[index] = "'" + value + "'"
+	}
+	return column + " IN (" + strings.Join(quoted, ",") + ")"
+}
+
+func columnSQL(name, kind string) (string, string) {
+	nullable := strings.HasSuffix(kind, "?")
+	kind = strings.TrimSuffix(kind, "?")
+	typ, check := "TEXT", ""
+	switch kind {
+	case "N", "R", "MS":
+		typ = "INTEGER"
+		minimum := 0
+		if kind == "R" {
+			minimum = 1
+		}
+		check = fmt.Sprintf("typeof(%s)='integer' AND %s>=%d", name, name, minimum)
+	case "ID":
+		check = fmt.Sprintf("typeof(%[1]s)='text' AND length(%[1]s)=36 AND length(CAST(%[1]s AS BLOB))=36 AND substr(%[1]s,9,1)='-' AND substr(%[1]s,14,1)='-' AND substr(%[1]s,19,1)='-' AND substr(%[1]s,24,1)='-' AND length(replace(%[1]s,'-',''))=32 AND replace(%[1]s,'-','') NOT GLOB '*[^0-9a-f]*'", name)
+	case "SHA":
+		check = fmt.Sprintf("typeof(%[1]s)='text' AND length(%[1]s)=64 AND length(CAST(%[1]s AS BLOB))=64 AND %[1]s NOT GLOB '*[^0-9a-f]*'", name)
+	default:
+		if len(kind) < 2 {
+			panic("invalid closed journal column kind")
+		}
+		limit, err := strconv.Atoi(kind[1:])
+		if err != nil || limit <= 0 {
+			panic("invalid closed journal byte bound")
+		}
+		switch kind[0] {
+		case 'T', 'J':
+			check = fmt.Sprintf("typeof(%[1]s)='text' AND length(CAST(%[1]s AS BLOB)) BETWEEN 1 AND %[2]d", name, limit)
+			if kind[0] == 'J' {
+				check += " AND json_valid(" + name + ") AND json_type(" + name + ")='object'"
+			}
+		case 'B':
+			typ = "BLOB"
+			check = fmt.Sprintf("typeof(%[1]s)='blob' AND length(%[1]s) BETWEEN 1 AND %[2]d", name, limit)
+		default:
+			panic("unknown closed journal column kind")
+		}
+	}
+	required := " NOT NULL"
+	if nullable {
+		required = ""
+		check = name + " IS NULL OR (" + check + ")"
+	}
+	return name + " " + typ + required + " CHECK(" + check + ")", check
+}

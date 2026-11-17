@@ -60,6 +60,8 @@ type gzipResponseWriter struct {
 	disabled bool // empty-body responses (304/204/1xx): pass through, don't gzip
 }
 
+func (w *gzipResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *gzipResponseWriter) WriteHeader(code int) {
 	// An SSE (streaming) response must never be gzipped: compression buffers the body, which defeats
 	// live token-by-token delivery and conflicts with X-Accel-Buffering. Detect it from the

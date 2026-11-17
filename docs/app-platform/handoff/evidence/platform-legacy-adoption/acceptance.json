@@ -1,0 +1,49 @@
+{
+  "format": "portal.legacy-adoption-boundary/1-dev.1",
+  "captured_at": "2026-11-04T22:32:01-0800",
+  "status": "pass-development",
+  "candidate": "965214ee17db9e8054774862559c72e14b5bb9a0",
+  "database": {
+    "sqlite": true,
+    "postgres_version": "18.6"
+  },
+  "legacy_app": {
+    "same_application_id_presented_to_managed_path": true,
+    "managed_package_admitted_by_legacy_consumer": false,
+    "platform_installations_created": 0,
+    "platform_operations_created": 0,
+    "manifest_preserved": true,
+    "file_bytes_preserved": true,
+    "legacy_token_path_available": true
+  },
+  "legacy_container": {
+    "foreign_installation_label": true,
+    "managed_stop_admitted": false,
+    "managed_post_count": 0,
+    "observed_state_after_refusal": "running",
+    "reason": "container-conflict"
+  },
+  "existing_native_evidence": {
+    "disposable_docker_xfs": true,
+    "stale_exact_mount_reference_observed": true,
+    "stale_resource_adopted": false,
+    "stale_resource_mutated": false,
+    "duplicate_reference_decision": "ambiguous"
+  },
+  "hosted_ci": {
+    "commit": "965214ee17db9e8054774862559c72e14b5bb9a0",
+    "general_test": "41977522768",
+    "general_job": "127080311137",
+    "app_project_quota_probe": "41977522875",
+    "app_project_quota_job": "127080318482",
+    "app_runner_daemon_probe": "41977522785",
+    "app_runner_daemon_job": "127080284878",
+    "codeql": "41977518689",
+    "result": "pass"
+  },
+  "limitations": [
+    "No package/data/key adoption is implemented by this boundary.",
+    "App-specific P14 adoption still requires an explicit reviewed migration and rollback plan.",
+    "The focused container test uses a deterministic daemon client; native discovery/non-adoption is bound to the earlier disposable Docker/XFS evidence."
+  ]
+}
