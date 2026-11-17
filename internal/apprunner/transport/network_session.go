@@ -385,7 +385,7 @@ func exchangeNetworkSession(parent context.Context, conn net.Conn, raw, signatur
 			if _, err := control.VerifyNetworkHTTPRequest(raw, signature, a, time.Now().UnixMilli()); err != nil {
 				return zero, broker.ErrUncertain
 			}
-			return broker.HTTPResponse{Status: int(status), ContentType: kind, Body: bytes.Clone(content[kindSize:])}, nil
+			return broker.HTTPResponse{Status: int(status), ContentType: kind, Body: bytes.Clone(content[kindSize:]), RetryAfterSeconds: -1}, nil
 		default:
 			return zero, broker.ErrUncertain
 		}

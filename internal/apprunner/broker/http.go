@@ -45,6 +45,39 @@ type HTTPResponse struct {
 	Status      int
 	ContentType string
 	Body        []byte
+	// RetryAfterSeconds is the single integer Retry-After of a 429 or 503
+	// response, 0..MaxRetryAfterSeconds, or -1 when absent or not acceptable.
+	// Responses built outside Do must set -1 explicitly; the zero value means
+	// "retry immediately".
+	RetryAfterSeconds int
+}
+
+// MaxRetryAfterSeconds bounds a released Retry-After (one day).
+const MaxRetryAfterSeconds = 86400
+
+// parseRetryAfter releases a Retry-After only for 429 and 503, only as exactly
+// one header holding one unsigned decimal integer (no HTTP-date, sign, space or
+// list). Anything else is dropped, never turned into an error: the response
+// body and status were already accepted.
+func parseRetryAfter(status int, values []string) int {
+	if status != http.StatusTooManyRequests && status != http.StatusServiceUnavailable || len(values) != 1 {
+		return -1
+	}
+	v := values[0]
+	if v == "" || len(v) > 6 {
+		return -1
+	}
+	n := 0
+	for i := 0; i < len(v); i++ {
+		if v[i] < '0' || v[i] > '9' {
+			return -1
+		}
+		n = n*10 + int(v[i]-'0')
+	}
+	if n > MaxRetryAfterSeconds {
+		return -1
+	}
+	return n
 }
 
 type HTTP struct {
@@ -204,7 +237,7 @@ func (h *HTTP) do(parent context.Context, input HTTPRequest, extra func(context.
 	if authorize(ctx) != nil || ctx.Err() != nil {
 		return zero, ErrUncertain
 	}
-	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body}, nil
+	return HTTPResponse{Status: response.StatusCode, ContentType: contentType, Body: body, RetryAfterSeconds: parseRetryAfter(response.StatusCode, response.Header.Values("Retry-After"))}, nil
 }
 
 func credentialResponseEcho(body []byte, header string, value []byte) bool {
