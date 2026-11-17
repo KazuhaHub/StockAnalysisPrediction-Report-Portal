@@ -230,7 +230,7 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 	}
 	defer clear(request.Body)
 	digest := sha256.Sum256(request.Body)
-	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:])}
+	admitted := EgressAdmit{Method: request.Method, URL: request.URL, Accept: request.Accept, ContentType: request.ContentType, BodyBytes: len(request.Body), BodySHA256: hex.EncodeToString(digest[:]), Credential: request.Credential}
 	// An input no admit frame can carry is invalid, and costs no rate token.
 	admit, err := EncodeEgressAdmit(admitted)
 	if err != nil {
@@ -243,6 +243,12 @@ func (in *egressInstall) network(w http.ResponseWriter, r *http.Request, raw []b
 		return
 	}
 	defer done()
+	// Naming a binding needs a session that carries secrets.use. Portal is not
+	// asked: a session that never held the resource cannot use a credential.
+	if request.Credential != "" && !session.allows("secrets.use") {
+		writeAppError(w, broker.AppErrDenied)
+		return
+	}
 	call, err := session.mux.NewCall()
 	if err != nil {
 		writeAppError(w, newCallCode(err))
