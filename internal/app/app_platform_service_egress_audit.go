@@ -17,7 +17,13 @@ import (
 //	app_platform.service_egress_opened   session, replaced session, resources, tuple, concurrency
 //	app_platform.service_egress_closed   session and the reason
 //	app_platform.service_egress_summary  one per installation per 10 minutes, from the runner's outcome frames
-//	app_platform.service_egress_denied   at most 10 per installation per 10 minutes, then counted
+//	app_platform.service_egress_denied   at most 10 per installation in any 10 minutes, then counted
+//
+// Limits, as far as they go without a schema: the denied cap slides (it holds
+// across the end of a summary window) and is seeded from the audit log, so it
+// holds across a restart. The summary windows are in memory and start at an
+// installation's first call; shutdown flushes them, a crash loses at most the
+// open window's summary (never a decision), and a restart starts a new window.
 //
 // A row never carries a path, a query, a body or a header: a denied call names
 // its method and origin only.
@@ -76,7 +82,6 @@ type platformServiceEgressWindow struct {
 	notices           int
 	bytesOut, bytesIn int64
 	origins           map[string]bool
-	deniedWritten     int
 	deniedSuppressed  int
 }
 
@@ -86,10 +91,57 @@ type platformServiceEgressWindow struct {
 type platformServiceEgressAggregator struct {
 	mu      sync.Mutex
 	windows map[string]*platformServiceEgressWindow
+	// denied is when each installation's individual denied rows were written in
+	// the last summary window (a sliding record, so the cap holds across the end
+	// of a summary window); it is seeded once from the audit log, so it holds
+	// across a restart too.
+	denied map[string][]time.Time
 }
 
 func newPlatformServiceEgressAggregator() *platformServiceEgressAggregator {
-	return &platformServiceEgressAggregator{windows: map[string]*platformServiceEgressWindow{}}
+	return &platformServiceEgressAggregator{windows: map[string]*platformServiceEgressWindow{}, denied: map[string][]time.Time{}}
+}
+
+func (a *platformServiceEgressAggregator) seeded(installation string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	_, ok := a.denied[installation]
+	return ok
+}
+
+// seed records the denied rows an earlier coordinator already wrote.
+func (a *platformServiceEgressAggregator) seed(installation string, written []time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if _, ok := a.denied[installation]; !ok {
+		if len(a.denied) >= platformServiceEgressAuditWindows {
+			return
+		}
+		a.denied[installation] = append([]time.Time{}, written...)
+	}
+}
+
+// recentPlatformServiceEgressDenied reads when the denied rows of the last
+// window were written. A failed read seeds nothing (the cap then counts from
+// this process only).
+func (s *Server) recentPlatformServiceEgressDenied(installation string, now time.Time) []time.Time {
+	rows, err := s.st.query(`SELECT at FROM audit_log WHERE action=? AND target_type='app_platform_installation' AND target_id=? AND actor='system' AND at>? ORDER BY id`,
+		platformServiceEgressAuditDenied, installation, now.Add(-platformServiceEgressSummaryWindow).UTC().Format(time.RFC3339))
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var written []time.Time
+	for rows.Next() {
+		var at string
+		if rows.Scan(&at) != nil {
+			continue
+		}
+		if t, err := time.Parse(time.RFC3339, at); err == nil {
+			written = append(written, t)
+		}
+	}
+	return written
 }
 
 func (a *platformServiceEgressAggregator) window(installation, session string, now time.Time) *platformServiceEgressWindow {
@@ -132,8 +184,9 @@ func (a *platformServiceEgressAggregator) recordNotice(installation, session str
 	}
 }
 
-// admitDenied reports whether a denied row may still be written in this
-// window; past the cap the denial is only counted, and the summary says how many.
+// admitDenied reports whether a denied row may still be written: at most
+// platformServiceEgressDeniedPerWindow in any window of the summary length ending
+// now. Past the cap the denial is only counted, and the summary says how many.
 func (a *platformServiceEgressAggregator) admitDenied(installation, session string, now time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -141,11 +194,15 @@ func (a *platformServiceEgressAggregator) admitDenied(installation, session stri
 	if w == nil {
 		return false
 	}
-	if w.deniedWritten >= platformServiceEgressDeniedPerWindow {
+	recent := slices.DeleteFunc(a.denied[installation], func(at time.Time) bool {
+		return !at.After(now.Add(-platformServiceEgressSummaryWindow))
+	})
+	if len(recent) >= platformServiceEgressDeniedPerWindow {
+		a.denied[installation] = recent
 		w.deniedSuppressed++
 		return false
 	}
-	w.deniedWritten++
+	a.denied[installation] = append(recent, now)
 	return true
 }
 

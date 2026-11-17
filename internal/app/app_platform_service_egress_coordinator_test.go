@@ -25,6 +25,7 @@ type fakeEgressRunner struct {
 	queryErr error
 	queries  int
 	opens    int
+	openErr  error
 	sessions chan *fakeEgressSession
 }
 
@@ -49,6 +50,12 @@ func (f *fakeEgressRunner) Query(context.Context, platformRuntimeEndpoint) (tran
 }
 
 func (f *fakeEgressRunner) Open(_ context.Context, _ platformRuntimeEndpoint, raw, signature []byte, a control.Authority, descriptor []byte) (*transport.EgressMux, error) {
+	f.mu.Lock()
+	err := f.openErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	verified, err := control.VerifyServiceEgressSession(raw, signature, a, time.Now().UnixMilli())
 	if err != nil {
 		return nil, transport.ErrRefused
@@ -359,6 +366,155 @@ func testPlatformServiceEgressCoordinatorBoundsDriftReloads(t *testing.T, pg boo
 	// A reload that cannot finish in time fails closed.
 	waitEgressEnded(t, first.runner, transport.EgressCloseDrift)
 	waitEgressEnded(t, second.runner, transport.EgressCloseDrift)
+}
+
+// A denial that comes from Portal withholding a proof (authority lost during the
+// call) is not a policy refusal: A8 limits denied rows to those. It is still
+// counted in the summary, and a runner-side policy denial still writes its row.
+func testPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRow(t *testing.T, pg bool) {
+	s, installation := platformServiceEgressFixture(t, pg, true)
+	f := newFakeEgressRunner()
+	c, clock := newEgressTestCoordinator(t, s, f)
+	c.tick(context.Background())
+	session := nextEgressSession(t, f)
+	runCall := func(withhold bool) {
+		payload, _ := transport.EncodeEgressAdmit(platformServiceEgressAdmit())
+		call, err := session.runner.NewCall()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer call.Finish()
+		if err := call.Send(transport.EgressFrameAdmit, payload); err != nil {
+			t.Fatal(err)
+		}
+		egressRecv(t, call, transport.EgressFrameCommand)
+		if withhold {
+			mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
+			defer mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=1 WHERE installation_id=? AND capability='network.http'`, installation)
+			var nonce [32]byte
+			if err := call.Send(transport.EgressFrameChallenge, transport.EncodeEgressChallenge(1, nonce)); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(200 * time.Millisecond) // the check is refused: no proof comes back
+		}
+		outcome, _ := transport.EncodeEgressOutcome(transport.EgressOutcome{Class: transport.EgressOutcomeDenied, RetryAfter: -1})
+		if err := call.Send(transport.EgressFrameOutcome, outcome); err != nil {
+			t.Fatal(err)
+		}
+		waitEgress(t, func() bool {
+			c.audit.mu.Lock()
+			defer c.audit.mu.Unlock()
+			w := c.audit.windows[installation]
+			return w != nil && w.counts["denied"] >= 1
+		})
+	}
+	runCall(true)
+	if rows := egressAuditRows(t, s, platformServiceEgressAuditDenied, installation); len(rows) != 0 {
+		t.Fatal("a withheld proof was recorded as a policy denial", rows)
+	}
+	runCall(false)
+	waitEgress(t, func() bool { return len(egressAuditRows(t, s, platformServiceEgressAuditDenied, installation)) == 1 })
+	clock.Advance(11 * time.Minute)
+	c.flushSummaries(clock.Now(), false)
+	rows := egressAuditRows(t, s, platformServiceEgressAuditSummary, installation)
+	if len(rows) != 1 || egressAuditField(t, rows[0], "counts").(map[string]any)["denied"] != float64(2) {
+		t.Fatal("both denials are counted in the summary", rows)
+	}
+}
+
+// The denied cap is a sliding one: it holds across the end of a summary window and
+// across a restart of the coordinator (the rows already written count).
+func testPlatformServiceEgressDeniedCapSlidesAndSurvivesRestart(t *testing.T, pg bool) {
+	s, installation := platformServiceEgressFixture(t, pg, true)
+	f := newFakeEgressRunner()
+	c, clock := newEgressTestCoordinator(t, s, f)
+	c.tick(context.Background())
+	nextEgressSession(t, f)
+	l := c.current(installation)
+	deniedRows := func() int { return len(egressAuditRows(t, s, platformServiceEgressAuditDenied, installation)) }
+	// The window opens at the first call; the ten rows come half a minute later.
+	c.audit.recordCall(installation, l.state.sessionID, clock.Now(), transport.EgressOutcomeDenied, "https://api.example.com", 0, 0)
+	clock.Advance(30 * time.Second)
+	for range 10 {
+		c.recordDenied(installation, l, "GET", "https://api.example.com")
+	}
+	if deniedRows() != 10 {
+		t.Fatal("first window", deniedRows())
+	}
+	// The summary window ends here; the cap does not reset with it.
+	clock.Advance(9*time.Minute + 30*time.Second)
+	c.flushSummaries(clock.Now(), false)
+	if len(egressAuditRows(t, s, platformServiceEgressAuditSummary, installation)) != 1 {
+		t.Fatal("the summary window did not end")
+	}
+	c.recordDenied(installation, l, "GET", "https://api.example.com")
+	if deniedRows() != 10 {
+		t.Fatal("the cap reset at a window boundary", deniedRows())
+	}
+	// A restarted coordinator counts what is already in the audit log.
+	restarted := newPlatformServiceEgressCoordinator(s, f)
+	restarted.now = clock.Now
+	t.Cleanup(restarted.shutdown)
+	restarted.recordDenied(installation, l, "GET", "https://api.example.com")
+	if deniedRows() != 10 {
+		t.Fatal("the cap reset with a restart", deniedRows())
+	}
+	// Once the rows are more than a window old, writing resumes.
+	clock.Advance(time.Minute + 5*time.Second)
+	restarted.recordDenied(installation, l, "GET", "https://api.example.com")
+	if deniedRows() != 11 {
+		t.Fatal("the cap never slid", deniedRows())
+	}
+}
+
+// "The runner is down" is logged once per installation per interval, not at every
+// retry, and the retry delay of an installation that is no longer eligible is
+// forgotten.
+func testPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerInterval(t *testing.T, pg bool) {
+	s, installation := platformServiceEgressFixture(t, pg, true)
+	f := newFakeEgressRunner()
+	f.openErr = transport.ErrRefused
+	c, clock := newEgressTestCoordinator(t, s, f)
+	var mu sync.Mutex
+	var logged []string
+	c.logf = func(format string, args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		logged = append(logged, format)
+	}
+	ctx := context.Background()
+	for range 10 { // every 16 s: ten retries in under three minutes
+		c.tick(ctx)
+		clock.Advance(16 * time.Second)
+	}
+	mu.Lock()
+	n := len(logged)
+	mu.Unlock()
+	if n != 1 {
+		t.Fatal("open failures were logged", n, "times")
+	}
+	clock.Advance(platformServiceEgressLogInterval)
+	c.tick(ctx)
+	mu.Lock()
+	n = len(logged)
+	mu.Unlock()
+	if n != 2 {
+		t.Fatal("open failures were not logged again after the interval", n)
+	}
+	// The installation stops being eligible: its retry state goes away.
+	c.mu.Lock()
+	if _, ok := c.retryAt[installation]; !ok {
+		c.mu.Unlock()
+		t.Fatal("no retry state to prune")
+	}
+	c.mu.Unlock()
+	mustExec(t, s.st, `UPDATE app_platform_installations SET desired_state='disabled' WHERE id=?`, installation)
+	c.tick(ctx)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.retryAt) != 0 || len(c.loggedAt) != 0 {
+		t.Fatal("state of an ineligible installation was kept", c.retryAt, c.loggedAt)
+	}
 }
 
 func testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t *testing.T, pg bool) {
@@ -716,6 +872,24 @@ func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsSQLite(t *testing.T) 
 }
 func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsPostgres(t *testing.T) {
 	testPlatformServiceEgressCoordinatorBoundsDriftReloads(t, true)
+}
+func TestPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRowSQLite(t *testing.T) {
+	testPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRow(t, false)
+}
+func TestPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRowPostgres(t *testing.T) {
+	testPlatformServiceEgressCoordinatorWithheldProofWritesNoDeniedRow(t, true)
+}
+func TestPlatformServiceEgressDeniedCapSlidesAndSurvivesRestartSQLite(t *testing.T) {
+	testPlatformServiceEgressDeniedCapSlidesAndSurvivesRestart(t, false)
+}
+func TestPlatformServiceEgressDeniedCapSlidesAndSurvivesRestartPostgres(t *testing.T) {
+	testPlatformServiceEgressDeniedCapSlidesAndSurvivesRestart(t, true)
+}
+func TestPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerIntervalSQLite(t *testing.T) {
+	testPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerInterval(t, false)
+}
+func TestPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerIntervalPostgres(t *testing.T) {
+	testPlatformServiceEgressCoordinatorLogsOpenFailuresOncePerInterval(t, true)
 }
 func TestPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfileSQLite(t *testing.T) {
 	testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t, false)

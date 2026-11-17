@@ -35,6 +35,7 @@ const (
 	platformServiceEgressAdmitLoadTimeout = 5 * time.Second
 	platformServiceEgressReloadTimeout    = 2 * time.Second
 	platformServiceEgressDriftParallel    = 8
+	platformServiceEgressLogInterval      = 5 * time.Minute
 	platformServiceEgressRetry            = 15 * time.Second
 	platformServiceEgressUnsupportedRetry = time.Minute
 	platformServiceEgressMaxInstallations = 256
@@ -80,6 +81,7 @@ type platformServiceEgressCoordinator struct {
 	// bounds each such reload of the drift loop. Both are seams for tests.
 	loadSession   func(context.Context, platformServiceEgressSessionState) (platformServiceEgressAuthority, error)
 	reloadTimeout time.Duration
+	logf          func(format string, args ...any)
 
 	root       context.Context
 	rootCancel context.CancelFunc
@@ -91,15 +93,16 @@ type platformServiceEgressCoordinator struct {
 	live             map[string]*platformServiceEgressLive
 	draining         map[string]*platformServiceEgressLive // replaced sessions, by session id, until the runner closes them
 	retryAt          map[string]time.Time
+	loggedAt         map[string]time.Time // last "opening a session failed" log, by installation
 	unsupportedUntil time.Time
 }
 
 func newPlatformServiceEgressCoordinator(server *Server, t platformServiceEgressTransport) *platformServiceEgressCoordinator {
 	root, cancel := context.WithCancel(context.Background())
 	return &platformServiceEgressCoordinator{
-		server: server, transport: t, loadSession: server.loadServiceEgressForSession, reloadTimeout: platformServiceEgressReloadTimeout, endpoint: server.platformRuntimeEndpoint, now: time.Now,
+		server: server, transport: t, loadSession: server.loadServiceEgressForSession, reloadTimeout: platformServiceEgressReloadTimeout, logf: log.Printf, endpoint: server.platformRuntimeEndpoint, now: time.Now,
 		audit: newPlatformServiceEgressAggregator(), root: root, rootCancel: cancel, stopped: make(chan struct{}),
-		live: map[string]*platformServiceEgressLive{}, draining: map[string]*platformServiceEgressLive{}, retryAt: map[string]time.Time{},
+		live: map[string]*platformServiceEgressLive{}, draining: map[string]*platformServiceEgressLive{}, retryAt: map[string]time.Time{}, loggedAt: map[string]time.Time{},
 	}
 }
 
@@ -167,7 +170,11 @@ func (c *platformServiceEgressCoordinator) tick(ctx context.Context) {
 	now := c.now()
 	c.checkDrift(ctx, now)
 	if endpoint, ok := c.endpoint(); ok && now.After(c.unsupportedUntil) {
-		for _, installation := range c.server.listPlatformServiceEgressInstallations(ctx) {
+		eligible, listed := c.server.listPlatformServiceEgressInstallations(ctx)
+		if listed {
+			c.pruneRetry(eligible)
+		}
+		for _, installation := range eligible {
 			if ctx.Err() != nil {
 				return
 			}
@@ -184,12 +191,18 @@ func (c *platformServiceEgressCoordinator) tick(ctx context.Context) {
 			if err := c.open(ctx, endpoint, installation, cur); err != nil {
 				c.mu.Lock()
 				c.retryAt[installation] = now.Add(platformServiceEgressRetry)
+				logIt := now.Sub(c.loggedAt[installation]) >= platformServiceEgressLogInterval
+				if logIt {
+					c.loggedAt[installation] = now
+				}
 				c.mu.Unlock()
 				if cur != nil && !cur.ended() && now.UnixMilli() >= cur.state.expiresMS {
 					c.closeLive(cur, "expired")
 				}
-				if !errors.Is(err, errPlatformServiceEgressUnavailable) && !errors.Is(err, transport.ErrServiceEgressUnsupported) {
-					log.Printf("application egress: opening a session failed: %v", err)
+				// Once per installation per interval: a runner that is down fails
+				// every retry and would otherwise fill the log.
+				if logIt && !errors.Is(err, errPlatformServiceEgressUnavailable) && !errors.Is(err, transport.ErrServiceEgressUnsupported) {
+					c.logf("application egress: opening a session for installation %s failed: %v", installation, err)
 				}
 			}
 		}
@@ -242,15 +255,16 @@ func (c *platformServiceEgressCoordinator) checkDrift(ctx context.Context, now t
 // listPlatformServiceEgressInstallations are the installations that could hold a
 // session: enabled and ready with a runtime, background.run granted and at least
 // one egress resource granted. It is a filter, not authority: opening re-reads
-// everything.
-func (s *Server) listPlatformServiceEgressInstallations(ctx context.Context) []string {
+// everything. listed is false when the query failed, which says nothing about who
+// is eligible.
+func (s *Server) listPlatformServiceEgressInstallations(ctx context.Context) ([]string, bool) {
 	rows, err := s.st.queryContext(ctx, `SELECT i.id FROM app_platform_installations i
 		WHERE i.desired_state='enabled' AND i.phase='ready' AND i.runtime_id IS NOT NULL
 		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability='background.run' AND g.granted=1)
 		AND EXISTS(SELECT 1 FROM app_platform_capability_grants g WHERE g.installation_id=i.id AND g.capability IN ('network.http','notifications.publish') AND g.granted=1)
 		ORDER BY i.id LIMIT ?`, platformServiceEgressMaxInstallations)
 	if err != nil {
-		return nil
+		return nil, false
 	}
 	defer rows.Close()
 	var ids []string
@@ -260,7 +274,21 @@ func (s *Server) listPlatformServiceEgressInstallations(ctx context.Context) []s
 			ids = append(ids, id)
 		}
 	}
-	return ids
+	return ids, rows.Err() == nil
+}
+
+// pruneRetry forgets the retry and log state of installations that are no longer
+// eligible, so the maps stay bounded by what can hold a session.
+func (c *platformServiceEgressCoordinator) pruneRetry(eligible []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, state := range []map[string]time.Time{c.retryAt, c.loggedAt} {
+		for installation := range state {
+			if !slices.Contains(eligible, installation) {
+				delete(state, installation)
+			}
+		}
+	}
 }
 
 // classifyPlatformServiceEgressLoss says why a session whose authority is gone
@@ -502,6 +530,10 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 	if err != nil || call.Send(transport.EgressFrameCommand, frame) != nil {
 		return
 	}
+	// withheld is set when Portal itself refused a proof (the authority was lost
+	// during the call): the runner then reports the call as denied, but that is
+	// not a policy refusal and writes no denied row (it is still counted).
+	withheld := false
 	for {
 		f, err := call.Recv(ctx)
 		if err != nil {
@@ -517,6 +549,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 			if err != nil {
 				// A refused check is the absence of a proof: answering twice would
 				// close the session, and the runner treats silence as a denial.
+				withheld = true
 				continue
 			}
 			payload, err := transport.EncodeEgressSigned(proof, proofSignature)
@@ -529,7 +562,7 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 				return
 			}
 			c.audit.recordCall(installation, l.state.sessionID, c.now(), outcome.Class, origin, admit.BodyBytes, outcome.ResponseBytes)
-			if outcome.Class == transport.EgressOutcomeDenied {
+			if outcome.Class == transport.EgressOutcomeDenied && !withheld {
 				c.recordDenied(installation, l, admit.Method, origin)
 			}
 			return
@@ -540,11 +573,16 @@ func (c *platformServiceEgressCoordinator) serveAdmit(ctx context.Context, l *pl
 }
 
 // recordDenied writes the individual denied row, at most
-// platformServiceEgressDeniedPerWindow per installation per window; later ones
-// are only counted in the summary. It carries method, origin and session, never
+// platformServiceEgressDeniedPerWindow per installation in any sliding window
+// (rows written before a restart count); later ones are only counted in the
+// summary. It carries method, origin and session, never
 // the path or the query.
 func (c *platformServiceEgressCoordinator) recordDenied(installation string, l *platformServiceEgressLive, method, origin string) {
-	if !c.audit.admitDenied(installation, l.state.sessionID, c.now()) {
+	now := c.now()
+	if !c.audit.seeded(installation) {
+		c.audit.seed(installation, c.server.recentPlatformServiceEgressDenied(installation, now))
+	}
+	if !c.audit.admitDenied(installation, l.state.sessionID, now) {
 		return
 	}
 	c.auditLog(platformServiceEgressAuditDenied, installation, map[string]any{"method": method, "origin": origin, "session_id": l.state.sessionID})
