@@ -157,16 +157,28 @@ func (s *Server) apiPlatformServiceNotificationPublish(w http.ResponseWriter, r 
 		return
 	}
 	defer clear(raw)
-	input, err := readPlatformNotificationInput(raw, false)
-	if err != nil {
+	id, created, err := s.publishPlatformServiceNotification(grant.AppID, raw)
+	if errors.Is(err, errPlatformManagementInput) {
 		jsonErrorCode(w, 400, "invalid_param", "invalid notification request")
 		return
 	}
-	publisher := "app." + grant.AppID
-	id, created, err := s.capturePublishedNotification(publisher, input.occurrenceID, input.title, input.message, input.severity)
 	if err != nil {
 		platformNotificationFailure(w, err)
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "id": id, "created": created})
+}
+
+// publishPlatformServiceNotification is the capture a verified background
+// identity may perform: the closed doc 152 input (errPlatformManagementInput
+// when it is anything else), published in the namespace of the application the
+// caller has verified, never one the input names. The background HTTP route and
+// the egress session's notice frame both end here, so they cannot drift apart.
+// Verifying that the caller holds notifications.publish is the caller's job.
+func (s *Server) publishPlatformServiceNotification(appID string, raw []byte) (string, bool, error) {
+	input, err := readPlatformNotificationInput(raw, false)
+	if err != nil {
+		return "", false, errPlatformManagementInput
+	}
+	return s.capturePublishedNotification("app."+appID, input.occurrenceID, input.title, input.message, input.severity)
 }
