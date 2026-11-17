@@ -84,7 +84,9 @@ func (s *Server) requireUserJSON(h handler) http.HandlerFunc {
 			return
 		}
 		// Identity first, then the policy: an anonymous caller is told they are not signed in, not
-		// that they are at a wall they cannot see.
+		// that they are at a wall they cannot see. A safe request decides the gate and everything the
+		// handler asks of the account from one snapshot of it (requestAccount).
+		r = withRequestAccount(r, u)
 		if !s.gateEnrolment(w, r, u) {
 			return
 		}
@@ -460,7 +462,7 @@ func requestIsHTTPS(r *http.Request, trusted []*net.IPNet) bool {
 
 func (s *Server) apiHome(w http.ResponseWriter, r *http.Request, user string) {
 	f, src, size, page := s.filtersFrom(r)
-	sc := s.viewerScope(user) // restricted external viewer → own-OU + same-day internal pool; else nil
+	sc := s.viewerScopeFor(r.Context(), user) // restricted external viewer → own-OU + same-day internal pool; else nil
 	var reps []Rep
 	var newTotal, oldTotal int
 	if src == "all" || src == "new" {
@@ -588,7 +590,7 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	// The reads that decide which report is shown (the symbol's reports, the type and version
 	// registries, the report body and the reader's OU for the read audit) share one read snapshot
 	// and one connection acquisition. Nothing between here and endSnapshot may touch the pool.
-	scope := s.viewerScope(user)
+	scope := s.viewerScopeFor(r.Context(), user)
 	snap, endSnapshot := s.st.beginReadSnapshot(r.Context())
 	defer endSnapshot()
 	all, _ := s.st.newBySymbolFrom(snap, symbol, scope)
@@ -678,7 +680,7 @@ func (s *Server) apiStock(w http.ResponseWriter, r *http.Request, user string) {
 	if rep != nil {
 		s.recordReportReadAs(r, user, readerOU, rep)
 	}
-	predictedDates := s.forecastTimelineDates(user, symbol, all)
+	predictedDates := s.forecastTimelineDates(r.Context(), user, symbol, all)
 	timeline := make([]map[string]any, 0, len(order)) // newest to oldest
 	for _, d := range order {
 		node := map[string]any{"date": d, "n": len(byDate[d])}

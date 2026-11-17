@@ -35,12 +35,17 @@ func (s *Store) loadOUIndexFrom(ex execer) (ouIndex, error) {
 	if err != nil {
 		return ouIndex{}, err
 	}
+	return ouIndexOf(snapshot), nil
+}
+
+// ouIndexOf is the forecast view of a tree already read.
+func ouIndexOf(snapshot ouPolicySnapshot) ouIndex {
 	ix := ouIndex{defaultID: snapshot.graph.defaultID, topology: &snapshot.graph, ous: map[int64]ouRow{}}
 	for id, node := range snapshot.graph.nodes {
 		v := snapshot.values[id]
 		ix.ous[id] = ouRow{parent: node.parent, restricted: v.restricted != nil && *v.restricted, scope: v.scope}
 	}
-	return ix, nil
+	return ix
 }
 
 func (ix ouIndex) graph() ouGraph {

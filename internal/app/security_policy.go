@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -72,6 +73,11 @@ func (s *Store) SecuritySettings(username string) (SecuritySettings, error) {
 	if err != nil {
 		return SecuritySettings{}, err
 	}
+	return securitySettingsOf(sub, snapshot)
+}
+
+// securitySettingsOf resolves an account's settings from an account row and tree already read.
+func securitySettingsOf(sub ouSubject, snapshot ouPolicySnapshot) (SecuritySettings, error) {
 	policies, err := snapshot.resolve(sub.EffectiveOU)
 	if err != nil {
 		return SecuritySettings{}, err
@@ -190,16 +196,17 @@ func (s *Server) requirePasskeyEnrolment(w http.ResponseWriter, username string)
 
 // ---------- the mandate, and the wall it puts up ----------
 
-// required2FA is whether a second factor is demanded of this account: its OU's mandate, or the
-// portal's for the roles that administer it.
+// required2FAFor is whether a second factor is demanded of this account: its OU's mandate, or the
+// portal's for the roles that administer it, decided from the request's account snapshot when ctx
+// carries one.
 //
 // The error is not decoration: the gate below refuses when this cannot be answered, and the only way
 // for it to know is for the read to say so.
-func (s *Server) required2FA(username string) (bool, error) {
+func (s *Server) required2FAFor(ctx context.Context, username string) (bool, error) {
 	if s.st == nil {
 		return false, nil
 	}
-	sts, err := s.st.SecuritySettings(username)
+	sts, err := s.securitySettingsFor(ctx, username)
 	if err != nil {
 		return false, err
 	}
@@ -220,7 +227,12 @@ func (s *Server) required2FA(username string) (bool, error) {
 // exemption is a FEDERATED account: its factors belong to its IdP, so a local wall is one it can
 // never climb.
 func (s *Server) mustEnroll(username string) (bool, error) {
-	required, err := s.required2FA(username)
+	return s.mustEnrollFor(context.Background(), username)
+}
+
+// mustEnrollFor is mustEnroll decided from the request's account snapshot when ctx carries one.
+func (s *Server) mustEnrollFor(ctx context.Context, username string) (bool, error) {
+	required, err := s.required2FAFor(ctx, username)
 	if err != nil {
 		return false, err
 	}
@@ -307,7 +319,7 @@ func (s *Server) enrolmentHolds(r *http.Request, username string) (holds bool, p
 	if username == "" || s.enrolmentReachable(r.Pattern) {
 		return false, nil
 	}
-	return s.mustEnroll(username)
+	return s.mustEnrollFor(r.Context(), username)
 }
 
 // gateEnrolment is the wall itself, called by the session helpers after they have resolved who is

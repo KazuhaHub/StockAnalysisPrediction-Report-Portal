@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -219,6 +220,128 @@ func TestReadPathReportReadAuditLeavesTheCommitModeAloneOnPostgres(t *testing.T)
 		var after string
 		if err := st.db.QueryRow(`SHOW synchronous_commit`).Scan(&after); err != nil || after != before {
 			t.Fatalf("synchronous_commit is %q, was %q: %v", after, before, err)
+		}
+	}
+}
+
+// One account snapshot per page load. The enrolment gate's policy, the viewer scope and the forecast access of
+// one request are decided from the same account row and organisation tree, read once in one snapshot; the soak's
+// trace showed the stock page loading them five times over (four statements each on PostgreSQL) and home twice.
+func TestReadPathAccountSnapshotIsReadOncePerPage(t *testing.T) {
+	f := newReadPathFixture(t)
+	if _, _, err := f.s.st.UpsertReport(Rep{Symbol: "600010", Name: "Forecast Co", Date: "2026-11-13", RType: predTestRtype, Title: "covered", MD: "body"}); err != nil {
+		t.Fatal(err)
+	}
+	const tree = `FROM user_groups$`
+	for _, path := range []string{"/api/home", "/api/stock/600010", "/api/stock/600000"} {
+		f.get(t, path) // warm the caches that are not under test
+		code, statements := f.get(t, path)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", path, code)
+		}
+		if n := countMatching(statements, tree); n != 1 {
+			t.Fatalf("%s read the organisation tree %d times, want 1: %v", path, n, statements)
+		}
+	}
+}
+
+// The snapshot lives for one request: a policy change between two requests is seen by the second.
+func TestReadPathAccountSnapshotIsNotSharedBetweenRequests(t *testing.T) {
+	f := newReadPathFixture(t)
+	_, first := f.get(t, "/api/home")
+	_, second := f.get(t, "/api/home")
+	if countMatching(first, `FROM user_groups$`) != 1 || countMatching(second, `FROM user_groups$`) != 1 {
+		t.Fatalf("each request must read the tree itself: %v / %v", first, second)
+	}
+}
+
+// Only a safe request (GET or HEAD) carries the snapshot, so a request that writes policy never decides from a
+// snapshot taken before its write; and the snapshot answers only for the account it was made for.
+func TestRequestAccountSnapshotOnlyForSafeRequestsAndItsOwnAccount(t *testing.T) {
+	f := newReadPathFixture(t)
+	user := f.session.username
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,restricted) VALUES(?,?,?,1)`, "someone-else", "h", "user")
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		r := withRequestAccount(httptest.NewRequest(method, "/x", nil), user)
+		if requestAccountOf(r.Context(), user) != nil {
+			t.Fatalf("%s carries an account snapshot", method)
+		}
+	}
+	r := withRequestAccount(httptest.NewRequest(http.MethodGet, "/x", nil), user)
+	if requestAccountOf(r.Context(), user) == nil {
+		t.Fatal("a GET carries no account snapshot")
+	}
+	if requestAccountOf(r.Context(), "someone-else") != nil {
+		t.Fatal("the snapshot answered for another account")
+	}
+	f.spy.mu.Lock()
+	f.spy.tracing, f.spy.trace = true, nil
+	f.spy.mu.Unlock()
+	for i := 0; i < 3; i++ {
+		_ = f.s.viewerScopeFor(r.Context(), user)
+		_, _ = f.s.securitySettingsFor(r.Context(), user)
+		_ = f.s.forecastAccessFor(r.Context(), user)
+	}
+	other := f.s.viewerScopeFor(r.Context(), "someone-else")
+	f.spy.mu.Lock()
+	n := countMatching(f.spy.trace, `FROM user_groups$`)
+	f.spy.tracing = false
+	f.spy.mu.Unlock()
+	if n != 2 {
+		t.Fatalf("tree reads = %d, want 1 for the request's account and 1 for the other", n)
+	}
+	if other == nil || !reflect.DeepEqual(other, f.s.viewerScope("someone-else")) {
+		t.Fatalf("the other account's scope = %+v, want its own restricted scope %+v", other, f.s.viewerScope("someone-else"))
+	}
+}
+
+// What the snapshot decides equals what each loader decides on its own, for the three kinds of account: an
+// administrator and an unrestricted account are settled by the tree alone (one read), a restricted account's scope
+// still comes from its own full snapshot, and is scoped, never widened.
+func TestRequestAccountSnapshotDecidesAsTheLoadersDo(t *testing.T) {
+	f := newReadPathFixture(t)
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role) VALUES(?,?,?)`, "an-admin", "h", "admin")
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role) VALUES(?,?,?)`, "a-reader", "h", "user")
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,restricted) VALUES(?,?,?,1)`, "a-tenant", "h", "user")
+	// An OU that grants every forecast, so the forecast comparison covers a granted scope too.
+	ou, err := f.s.st.CreateUserGroup("forecasters", "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, f.s.st, `UPDATE user_groups SET forecast_scope='all' WHERE id=?`, ou)
+	mustExec(t, f.s.st, `INSERT INTO users(username,password_hash,role,group_id) VALUES(?,?,?,?)`, "a-forecaster", "h", "user", ou)
+	if f.s.forecastAccess("a-forecaster").Scope != scopeAll {
+		t.Fatalf("fixture: the forecaster's OU grants %+v", f.s.forecastAccess("a-forecaster"))
+	}
+	for _, c := range []struct {
+		user      string
+		scoped    bool
+		treeReads int
+	}{{"an-admin", false, 1}, {"a-reader", false, 1}, {"a-forecaster", false, 1}, {"a-tenant", true, 2}} {
+		r := withRequestAccount(httptest.NewRequest(http.MethodGet, "/x", nil), c.user)
+		f.spy.mu.Lock()
+		f.spy.tracing, f.spy.trace = true, nil
+		f.spy.mu.Unlock()
+		scope := f.s.viewerScopeFor(r.Context(), c.user)
+		settings, err := f.s.securitySettingsFor(r.Context(), c.user)
+		forecast := f.s.forecastAccessFor(r.Context(), c.user)
+		_ = f.s.viewerScopeFor(r.Context(), c.user)
+		f.spy.mu.Lock()
+		reads := countMatching(f.spy.trace, `FROM user_groups$`)
+		f.spy.tracing = false
+		f.spy.mu.Unlock()
+		if reads != c.treeReads {
+			t.Errorf("%s: tree reads = %d, want %d", c.user, reads, c.treeReads)
+		}
+		if (scope != nil) != c.scoped || !reflect.DeepEqual(scope, f.s.viewerScope(c.user)) {
+			t.Errorf("%s: scope = %+v, want %+v", c.user, scope, f.s.viewerScope(c.user))
+		}
+		want, wantErr := f.s.st.SecuritySettings(c.user)
+		if err != nil || wantErr != nil || !reflect.DeepEqual(settings, want) {
+			t.Errorf("%s: settings = %+v (%v), want %+v (%v)", c.user, settings, err, want, wantErr)
+		}
+		if !reflect.DeepEqual(forecast, f.s.forecastAccess(c.user)) {
+			t.Errorf("%s: forecast = %+v, want %+v", c.user, forecast, f.s.forecastAccess(c.user))
 		}
 	}
 }
