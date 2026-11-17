@@ -324,6 +324,43 @@ func testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t *testing.
 	}
 }
 
+// A reload that never returns is bounded, and reloads of different sessions run
+// side by side, so one stuck session cannot hold up the rest of the tick.
+func testPlatformServiceEgressCoordinatorBoundsDriftReloads(t *testing.T, pg bool) {
+	s, _ := platformServiceEgressFixture(t, pg, true)
+	f := newFakeEgressRunner()
+	c, clock := newEgressTestCoordinator(t, s, f)
+	ctx := context.Background()
+	c.tick(ctx)
+	first := nextEgressSession(t, f)
+	clock.Advance(4*time.Minute + 10*time.Second)
+	c.tick(ctx)
+	second := nextEgressSession(t, f)
+	c.reloadTimeout = time.Second
+	var started sync.WaitGroup
+	started.Add(2)
+	c.loadSession = func(ctx context.Context, _ platformServiceEgressSessionState) (platformServiceEgressAuthority, error) {
+		started.Done()
+		<-ctx.Done()
+		return platformServiceEgressAuthority{}, ctx.Err()
+	}
+	begin := time.Now()
+	done := make(chan struct{})
+	go func() { c.tick(ctx); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stuck reload stalled the tick")
+	}
+	if took := time.Since(begin); took > 1800*time.Millisecond {
+		t.Fatal("reloads ran one after the other", took)
+	}
+	started.Wait()
+	// A reload that cannot finish in time fails closed.
+	waitEgressEnded(t, first.runner, transport.EgressCloseDrift)
+	waitEgressEnded(t, second.runner, transport.EgressCloseDrift)
+}
+
 func testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t *testing.T, pg bool) {
 	s, installation := platformServiceEgressFixture(t, pg, true)
 	f := newFakeEgressRunner()
@@ -673,6 +710,12 @@ func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedSQLite(t *te
 }
 func TestPlatformServiceEgressCoordinatorReplacedSessionStillGuardedPostgres(t *testing.T) {
 	testPlatformServiceEgressCoordinatorReplacedSessionStillGuarded(t, true)
+}
+func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsSQLite(t *testing.T) {
+	testPlatformServiceEgressCoordinatorBoundsDriftReloads(t, false)
+}
+func TestPlatformServiceEgressCoordinatorBoundsDriftReloadsPostgres(t *testing.T) {
+	testPlatformServiceEgressCoordinatorBoundsDriftReloads(t, true)
 }
 func TestPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfileSQLite(t *testing.T) {
 	testPlatformServiceEgressCoordinatorSkipsRunnerWithoutProfile(t, false)

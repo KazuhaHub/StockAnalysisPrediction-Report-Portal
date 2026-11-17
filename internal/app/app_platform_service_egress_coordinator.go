@@ -33,6 +33,8 @@ const (
 	platformServiceEgressOpenTimeout      = 20 * time.Second
 	platformServiceEgressCallTimeout      = 30 * time.Second
 	platformServiceEgressAdmitLoadTimeout = 5 * time.Second
+	platformServiceEgressReloadTimeout    = 2 * time.Second
+	platformServiceEgressDriftParallel    = 8
 	platformServiceEgressRetry            = 15 * time.Second
 	platformServiceEgressUnsupportedRetry = time.Minute
 	platformServiceEgressMaxInstallations = 256
@@ -74,6 +76,10 @@ type platformServiceEgressCoordinator struct {
 	endpoint  func() (platformRuntimeEndpoint, bool)
 	now       func() time.Time
 	audit     *platformServiceEgressAggregator
+	// loadSession reads the authority a session is still bound to; reloadTimeout
+	// bounds each such reload of the drift loop. Both are seams for tests.
+	loadSession   func(context.Context, platformServiceEgressSessionState) (platformServiceEgressAuthority, error)
+	reloadTimeout time.Duration
 
 	root       context.Context
 	rootCancel context.CancelFunc
@@ -91,7 +97,7 @@ type platformServiceEgressCoordinator struct {
 func newPlatformServiceEgressCoordinator(server *Server, t platformServiceEgressTransport) *platformServiceEgressCoordinator {
 	root, cancel := context.WithCancel(context.Background())
 	return &platformServiceEgressCoordinator{
-		server: server, transport: t, endpoint: server.platformRuntimeEndpoint, now: time.Now,
+		server: server, transport: t, loadSession: server.loadServiceEgressForSession, reloadTimeout: platformServiceEgressReloadTimeout, endpoint: server.platformRuntimeEndpoint, now: time.Now,
 		audit: newPlatformServiceEgressAggregator(), root: root, rootCancel: cancel, stopped: make(chan struct{}),
 		live: map[string]*platformServiceEgressLive{}, draining: map[string]*platformServiceEgressLive{}, retryAt: map[string]time.Time{},
 	}
@@ -159,25 +165,7 @@ func (c *platformServiceEgressCoordinator) tick(ctx context.Context) {
 		return
 	}
 	now := c.now()
-	// Drift: any session whose current authority is no longer the one it was
-	// opened against is closed, whatever the reason.
-	for _, l := range c.snapshot() {
-		if l.ended() {
-			continue
-		}
-		a, err := c.server.loadServiceEgressForSession(ctx, l.state)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.closeLive(l, c.server.classifyPlatformServiceEgressLoss(ctx, l.state.pin))
-			continue
-		}
-		a.Close()
-		if now.UnixMilli() >= l.state.expiresMS {
-			c.closeLive(l, "expired")
-		}
-	}
+	c.checkDrift(ctx, now)
 	if endpoint, ok := c.endpoint(); ok && now.After(c.unsupportedUntil) {
 		for _, installation := range c.server.listPlatformServiceEgressInstallations(ctx) {
 			if ctx.Err() != nil {
@@ -207,6 +195,48 @@ func (c *platformServiceEgressCoordinator) tick(ctx context.Context) {
 		}
 	}
 	c.flushSummaries(now, false)
+}
+
+// checkDrift closes every session whose current authority is no longer the one
+// it was opened against, whatever the reason, and every session whose assertion
+// has ended. Each reload has its own bounded context and the sessions are checked
+// side by side, so one reload that never returns costs one session (it fails
+// closed) and cannot hold up the renewals that follow.
+func (c *platformServiceEgressCoordinator) checkDrift(ctx context.Context, now time.Time) {
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, platformServiceEgressDriftParallel)
+	for _, l := range c.snapshot() {
+		if l.ended() {
+			continue
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			load, cancel := context.WithTimeout(ctx, c.reloadTimeout)
+			a, err := c.loadSession(load, l.state)
+			if err != nil {
+				if ctx.Err() != nil {
+					cancel()
+					return
+				}
+				// Classifying is a read too and has its own bound; when nothing
+				// observable changed (a reload that merely timed out) it says drift.
+				classify, stop := context.WithTimeout(ctx, c.reloadTimeout)
+				reason := c.server.classifyPlatformServiceEgressLoss(classify, l.state.pin)
+				stop()
+				cancel()
+				c.closeLive(l, reason)
+				return
+			}
+			cancel()
+			a.Close()
+			if now.UnixMilli() >= l.state.expiresMS {
+				c.closeLive(l, "expired")
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // listPlatformServiceEgressInstallations are the installations that could hold a
