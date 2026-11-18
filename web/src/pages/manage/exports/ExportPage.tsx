@@ -53,6 +53,7 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
   const { token } = theme.useToken()
   const labels = useExportLabels()
   const compact = !Grid.useBreakpoint().lg
+  const scrollRail = !reader && !compact
   const [params, setParams] = useSearchParams()
   const paramsRef = useRef(params)
   paramsRef.current = params
@@ -247,12 +248,12 @@ export default function ExportPage({ mode: exportMode = 'admin', policy = null }
   return (
     <LoadGate loading={!sources && !loadErr} error={loadErr} onRetry={load} title={t('export.loadFailed')}>
       {source && (
-        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={16} className={scrollRail ? 'rp-admin-export' : undefined} style={{ width: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : '260px minmax(0, 1fr)', gap: compact ? 16 : 24, alignItems: 'start' }}>
             {/* Sticks at its scroll area's own top edge. In the console that is the page body, which has
                 no top padding, so any offset would push the rail below the results before anything
                 has scrolled. The reader's page scrolls the window, under the sticky app header. */}
-            <aside style={compact ? undefined : { position: 'sticky', top: reader ? 'calc(var(--rp-header-h, 64px) + 16px)' : 0, background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
+            <aside className={scrollRail ? 'rp-admin-export-rail' : undefined} style={compact ? undefined : { position: 'sticky', top: reader ? 'calc(var(--rp-header-h, 64px) + 16px)' : 0, background: token.colorBgContainer, border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
               {rail}
             </aside>
             <main style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
