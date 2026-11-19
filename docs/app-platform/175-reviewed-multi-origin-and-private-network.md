@@ -233,3 +233,57 @@ The owner decided every question below on 2026-11-17.
 4. Whether a policy change bumps `installations.policy_revision` (reloading
    open app documents). Decided: yes, for one authority revision; the binding
    target scope removes the main cost.
+
+## 10. Amendments adopted 2026-11-19
+
+The owner adopted these corrections to the accepted text on 2026-11-19. Where
+they differ from sections 3 to 6 above, this section wins. There is still no
+schema change. Evidence is against `main` at the time of adoption.
+
+1. Capability advertising is the separate `PRNT0001`/`PRNU0001` query
+   (`portal.runner.network-targets/1-dev.1`), not new fields in the network
+   runtime profile (section 3.2). The profile is compared with `==` against the
+   stored plan (`app_platform_network_request.go:380`, `:444`), so a new field
+   would break foreground for every installation; same reason as doc 174 F1
+   (`174-background-broker-egress.md:456`).
+2. The runner allowlist is the `private_networks` block of the JSON runner
+   configuration, not YAML: the config is strict JSON
+   (`internal/apprunner/service/config.go:17-21`, `:138-204`).
+3. The v2 policy limit stays 16384 bytes (`policy_json` is `J16384`,
+   `app_platform_schema.go:45`; the command limit `control.MaxCommandBytes`
+   is 65536, `control/command.go:21`), while v1 keeps 8192
+   (`http_policy.go:19`); `http_policy.go` is not edited.
+4. Bindings move to a new format `portal.secret-binding-policy/3-dev.1` and
+   v1/2-dev.1 bindings are still read with whole-policy scope, instead of being
+   renamed in place: bindings today bind the whole policy digest and policy
+   revision (`app_platform_secret_bindings.go:427`, `:447`).
+5. A separate grant query handles capability-policy plans, instead of widening
+   the install/update switch in `loadPlatformNetworkGrantForIntent`
+   (`app_platform_network_request.go:82-163`), whose `install`/`update` cases
+   each check the plan format and release.
+6. A launch and snapshot overlay accepts a `network.http` row backed by a
+   consumed capability-policy plan, because the row validators require the row
+   to equal the install/update plan (`app_platform_install_capabilities.go:158-226`).
+7. A review bumps only `installations.policy_revision`, not `revision`, and
+   re-stamps the active activation and other grant rows, as principal
+   invalidation and restore already do
+   (`app_platform_principal.go:70-75`, `app_platform_recovery_actions.go:194-199`).
+8. Admin routes live in the admin namespace
+   (`/api/admin/app-platform/...`, `routes.go:485-487`) with an origin check,
+   not under `/api/app-platform/...` (section 3.5).
+9. The review is two calls, plan then consume, instead of one call that
+   creates and consumes (section 3.5), so the consume re-validates a plan the
+   administrator has seen.
+10. At install a v2 policy may contain public targets only; private targets
+    come through a later review, because the install-target equality check
+    (`app_platform_install_capabilities.go:60-80`) cannot carry the allowlist
+    digest (section 4).
+11. The web layer accepts `http:` URLs (`web/src/lib/network-v2.ts:73` refuses
+    them today) and the bridge becomes `portal.app.bridge/2-dev.9`, still
+    accepting 2-dev.8 (`web/src/lib/bridge-v2.ts:51`).
+12. The interim public-projection route (doc 179) moves onto this review later,
+    as a follow-up.
+
+Per-target narrowing limits are adopted: a target may carry `request_bytes`,
+`response_bytes` or `deadline_ms`, present only when strictly lower than the
+shared value; they can tighten, never loosen. The target digest covers them.
