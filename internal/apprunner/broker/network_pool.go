@@ -3,6 +3,7 @@ package broker
 import (
 	"bytes"
 	"context"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -30,7 +31,35 @@ type NetworkPool struct {
 	entries    map[networkExecutorKey]*networkExecutorEntry
 	capacity   int
 	create     func(HTTPPolicy) (*HTTP, error)
-	now        func() time.Time
+	// createPolicy builds the executor of a v2 policy from its exact bytes and the
+	// pool's private-network allowlist. v1 policies keep using create.
+	createPolicy func([]byte, []appplatform.PrivateNetwork) (*HTTP, error)
+	// networks is the runner's operator-set allowlist and networksSHA its digest;
+	// a command with a private target must name exactly this digest.
+	networks    []appplatform.PrivateNetwork
+	networksSHA string
+	now         func() time.Time
+}
+
+// NetworkPoolOption configures trusted infrastructure state of a pool. Like the
+// bounds, options are never request or package fields.
+type NetworkPoolOption func(*NetworkPool) error
+
+// WithPrivateNetworks gives the pool the runner's private-network allowlist.
+// Without it (or with an empty list) no command with a private target is served.
+func WithPrivateNetworks(networks []appplatform.PrivateNetwork) NetworkPoolOption {
+	return func(p *NetworkPool) error {
+		sum, err := appplatform.PrivateNetworksSHA256(networks)
+		if err != nil {
+			return ErrDenied
+		}
+		p.networks = slices.Clone(networks)
+		for i := range p.networks {
+			p.networks[i].Ports = slices.Clone(p.networks[i].Ports)
+		}
+		p.networksSHA = sum
+		return nil
+	}
 }
 
 type networkExecutorKey struct {
@@ -61,7 +90,7 @@ func (n *networkExecutorLease) release() {
 
 // Bounds are trusted infrastructure settings, never request/package fields.
 // Current authority is mandatory for all calls, including cached executors.
-func NewNetworkPool(active, entries int, current CurrentNetworkAuthority) (*NetworkPool, error) {
+func NewNetworkPool(active, entries int, current CurrentNetworkAuthority, options ...NetworkPoolOption) (*NetworkPool, error) {
 	if active < 1 || active > MaxNetworkPoolActive || entries < 1 || entries > MaxNetworkPoolEntries || current == nil {
 		return nil, ErrDenied
 	}
@@ -69,11 +98,22 @@ func NewNetworkPool(active, entries int, current CurrentNetworkAuthority) (*Netw
 	if active/2 > 0 {
 		background = make(chan struct{}, active/2)
 	}
-	return &NetworkPool{slots: make(chan struct{}, active), background: background, current: current, entries: make(map[networkExecutorKey]*networkExecutorEntry), capacity: entries, now: time.Now, create: func(p HTTPPolicy) (*HTTP, error) {
+	pool := &NetworkPool{slots: make(chan struct{}, active), background: background, current: current, entries: make(map[networkExecutorKey]*networkExecutorEntry), capacity: entries, now: time.Now, create: func(p HTTPPolicy) (*HTTP, error) {
 		// Each signed invocation supplies the actual viewer-aware online check to
 		// the shared executor through NetworkCall. No authority result is cached.
 		return NewHTTP(p, func(context.Context) error { return nil })
-	}}, nil
+	}, createPolicy: func(raw []byte, networks []appplatform.PrivateNetwork) (*HTTP, error) {
+		return NewHTTPPolicy(raw, networks, func(context.Context) error { return nil })
+	}}
+	if err := WithPrivateNetworks(nil)(pool); err != nil {
+		return nil, ErrDenied
+	}
+	for _, option := range options {
+		if option == nil || option(pool) != nil {
+			return nil, ErrDenied
+		}
+	}
+	return pool, nil
 }
 
 // Do runs one signed foreground invocation.
@@ -128,7 +168,11 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 		return zero, ErrDenied
 	}
 	command := verified.Command()
-	policy, err := appplatform.ParseHTTPPolicy(command.PolicyRaw)
+	policy, err := appplatform.ParseHTTPPolicyAny(command.PolicyRaw)
+	if err != nil {
+		return zero, ErrDenied
+	}
+	target, err := policy.Policy.Select(command.Method, command.URL)
 	if err != nil {
 		return zero, ErrDenied
 	}
@@ -136,7 +180,7 @@ func (p *NetworkPool) do(ctx context.Context, raw, signature, body []byte, a con
 	if err != nil {
 		return zero, ErrDenied
 	}
-	deadline := p.now().Add(policy.Policy.Deadline)
+	deadline := p.now().Add(target.Deadline)
 	if signed := time.UnixMilli(expires); signed.Before(deadline) {
 		deadline = signed
 	}
@@ -176,8 +220,14 @@ func (p *NetworkPool) acquire(c control.NetworkHTTPRequestCommand) (*networkExec
 // acquireWith is acquire with the error reported for a spent per-installation
 // budget: ErrUnavailable for foreground, ErrBusy for background.
 func (p *NetworkPool) acquireWith(c control.NetworkHTTPRequestCommand, spent error) (*networkExecutorLease, error) {
-	policy, err := appplatform.ParseHTTPPolicy(c.PolicyRaw)
+	policy, err := appplatform.ParseHTTPPolicyAny(c.PolicyRaw)
 	if err != nil || policy.SHA256 != c.PolicySHA256 {
+		return nil, ErrDenied
+	}
+	// A private target is only served against the allowlist the command was
+	// reviewed with; an empty allowlist serves none. Nothing is allocated before.
+	private := policy.Policy.HasPrivate()
+	if private && (len(p.networks) == 0 || c.PrivateNetworksSHA256 != p.networksSHA) || !private && c.PrivateNetworksSHA256 != "" {
 		return nil, ErrDenied
 	}
 	key := networkExecutorKey{c.DeploymentID, c.ControllerEpoch, c.ControlRevision, c.InstallationID, c.ReviewPlanID, c.Generation, c.PolicyRevision, c.ReleaseSHA256, c.PolicySHA256}
@@ -213,8 +263,17 @@ func (p *NetworkPool) acquireWith(c control.NetworkHTTPRequestCommand, spent err
 			return nil, ErrUnavailable
 		}
 	}
-	executor, err := p.create(policy.Policy)
-	if err != nil {
+	var executor *HTTP
+	if policy.Version == 1 {
+		v1, parseErr := appplatform.ParseHTTPPolicy(c.PolicyRaw)
+		if parseErr != nil {
+			return nil, ErrDenied
+		}
+		executor, err = p.create(v1.Policy)
+	} else {
+		executor, err = p.createPolicy(c.PolicyRaw, p.networks)
+	}
+	if err != nil || executor == nil {
 		return nil, ErrUnavailable
 	}
 	if len(p.entries) >= p.capacity {

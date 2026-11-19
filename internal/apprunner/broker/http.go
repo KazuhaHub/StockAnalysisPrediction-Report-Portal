@@ -161,6 +161,17 @@ func newHTTP(set appplatform.HTTPPolicyV2, raw []byte, networks []appplatform.Pr
 	}, dial: d.DialContext, interfaceAddrs: systemInterfaceAddrs}, nil
 }
 
+// allowlistMatches reports whether a command's private-network digest is the one
+// this executor serves: required exactly when its policy has a private target,
+// and then equal to the digest of the allowlist the executor was built with.
+func (h *HTTP) allowlistMatches(digest string) bool {
+	if !h.set.HasPrivate() {
+		return digest == ""
+	}
+	sum, err := appplatform.PrivateNetworksSHA256(h.networks)
+	return err == nil && digest == sum
+}
+
 func systemInterfaceAddrs() ([]netip.Addr, error) {
 	all, err := net.InterfaceAddrs()
 	if err != nil {
