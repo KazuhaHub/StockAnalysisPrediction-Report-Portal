@@ -22,30 +22,34 @@ const networkHTTPStreamRequestPurpose = "portal.app/runner-viewer-http-stream/v1
 // and opaque current viewer scope. It is not a service/background delegation or
 // proof of current SQL authority. The caller must recheck that authority online.
 type NetworkHTTPRequestCommand struct {
-	Format           string `json:"format"`
-	DeploymentID     string `json:"deployment_id"`
-	ControllerEpoch  string `json:"controller_epoch"`
-	ControlRevision  string `json:"control_revision"`
-	RequestID        string `json:"request_id"`
-	InstallationID   string `json:"installation_id"`
-	ReviewPlanID     string `json:"review_plan_id"`
-	Generation       string `json:"generation"`
-	PolicyRevision   string `json:"policy_revision"`
-	ReleaseSHA256    string `json:"release_sha256"`
-	ActorScope       string `json:"actor_scope"`
-	PolicyRaw        []byte `json:"policy_raw"`
-	PolicySHA256     string `json:"policy_sha256"`
-	Method           string `json:"method"`
-	URL              string `json:"url"`
-	Accept           string `json:"accept"`
-	ContentType      string `json:"content_type"`
-	BodyBytes        string `json:"body_bytes"`
-	BodySHA256       string `json:"body_sha256"`
-	CredentialName   string `json:"credential_name,omitempty"`
-	CredentialHeader string `json:"credential_header,omitempty"`
-	CredentialValue  []byte `json:"credential_value,omitempty"`
-	IssuedMS         string `json:"issued_ms"`
-	ExpiresMS        string `json:"expires_ms"`
+	Format          string `json:"format"`
+	DeploymentID    string `json:"deployment_id"`
+	ControllerEpoch string `json:"controller_epoch"`
+	ControlRevision string `json:"control_revision"`
+	RequestID       string `json:"request_id"`
+	InstallationID  string `json:"installation_id"`
+	ReviewPlanID    string `json:"review_plan_id"`
+	Generation      string `json:"generation"`
+	PolicyRevision  string `json:"policy_revision"`
+	ReleaseSHA256   string `json:"release_sha256"`
+	ActorScope      string `json:"actor_scope"`
+	PolicyRaw       []byte `json:"policy_raw"`
+	PolicySHA256    string `json:"policy_sha256"`
+	// PrivateNetworksSHA256 is the runner allowlist digest the reviewed policy
+	// was checked against. It is present exactly when the policy has a private
+	// target; every other command (v1, public-only v2, stream) omits it.
+	PrivateNetworksSHA256 string `json:"private_networks_sha256,omitempty"`
+	Method                string `json:"method"`
+	URL                   string `json:"url"`
+	Accept                string `json:"accept"`
+	ContentType           string `json:"content_type"`
+	BodyBytes             string `json:"body_bytes"`
+	BodySHA256            string `json:"body_sha256"`
+	CredentialName        string `json:"credential_name,omitempty"`
+	CredentialHeader      string `json:"credential_header,omitempty"`
+	CredentialValue       []byte `json:"credential_value,omitempty"`
+	IssuedMS              string `json:"issued_ms"`
+	ExpiresMS             string `json:"expires_ms"`
 }
 
 type VerifiedNetworkHTTPRequest struct{ command NetworkHTTPRequestCommand }
@@ -193,15 +197,26 @@ func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS 
 			return ErrInvalidCommand
 		}
 	}
-	parsed, err := appplatform.ParseHTTPPolicy(c.PolicyRaw)
-	if err != nil || parsed.SHA256 != c.PolicySHA256 || appplatform.ValidateHTTPPolicyTarget(parsed.Policy, c.Method, c.URL) != nil || !appplatform.ValidHTTPPolicyHeaderValue(c.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
+	parsed, err := appplatform.ParseHTTPPolicyAny(c.PolicyRaw)
+	if err != nil || parsed.SHA256 != c.PolicySHA256 || !appplatform.ValidHTTPPolicyHeaderValue(c.Accept) || !appplatform.ValidHTTPPolicyHeaderValue(c.ContentType) {
 		return ErrInvalidCommand
 	}
-	if !validNetworkCredential(c) {
+	target, err := parsed.Policy.Select(c.Method, c.URL)
+	if err != nil {
+		return ErrInvalidCommand
+	}
+	if !validNetworkCredential(c) || c.CredentialName != "" && target.Scheme != "https" {
+		return ErrInvalidCommand
+	}
+	if parsed.Policy.HasPrivate() {
+		if !shaPattern.MatchString(c.PrivateNetworksSHA256) || c.PrivateNetworksSHA256 == strings.Repeat("0", 64) {
+			return ErrInvalidCommand
+		}
+	} else if c.PrivateNetworksSHA256 != "" {
 		return ErrInvalidCommand
 	}
 	length, ok := counter(c.BodyBytes, false)
-	if !ok || length > parsed.Policy.RequestBytes {
+	if !ok || length > target.RequestBytes {
 		return ErrInvalidCommand
 	}
 	issued, ok := counter(c.IssuedMS, false)
@@ -209,7 +224,7 @@ func validateNetworkHTTPRequest(c NetworkHTTPRequestCommand, a Authority, nowMS 
 		return ErrInvalidCommand
 	}
 	expires, ok := counter(c.ExpiresMS, false)
-	if !ok || expires <= issued || expires-issued > 30000 || expires-issued < parsed.Policy.Deadline.Milliseconds() || issued > nowMS || nowMS >= expires {
+	if !ok || expires <= issued || expires-issued > 30000 || expires-issued < target.Deadline.Milliseconds() || issued > nowMS || nowMS >= expires {
 		return ErrInvalidCommand
 	}
 	canonical, err := json.Marshal(c)
@@ -247,6 +262,9 @@ func validateNetworkHTTPStreamRequest(c NetworkHTTPRequestCommand, a Authority, 
 		}
 	}
 	parsed, err := appplatform.ParseHTTPStreamPolicy(c.PolicyRaw)
+	if c.PrivateNetworksSHA256 != "" {
+		return ErrInvalidCommand
+	}
 	if err != nil ||
 		parsed.SHA256 != c.PolicySHA256 ||
 		appplatform.ValidateHTTPStreamPolicyTarget(parsed.Policy, c.Method, c.URL) != nil ||
