@@ -18,6 +18,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// hostInterfaces is the interface source of the startup refusal; tests replace it.
+var hostInterfaces InterfaceLister = SystemInterfaces
+
 var ErrUnsupported = errors.New("app-runner service requires native Linux amd64 or arm64")
 
 // Serve owns one already-provisioned runtime. Configuration never selects an
@@ -28,6 +31,11 @@ func Serve(ctx context.Context, configPath string, logger *log.Logger) error {
 	}
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
+		return ErrConfig
+	}
+	// An allowlisted prefix must never reach this host: refuse before anything is opened.
+	if err := CheckPrivateNetworksAgainstHost(cfg.PrivateNetworks, hostInterfaces); err != nil {
+		logger.Printf("app-runner not ready: private_networks overlap a host interface or bridge, or the interfaces could not be read")
 		return ErrConfig
 	}
 	store, err := journal.Open(cfg.JournalDir)
