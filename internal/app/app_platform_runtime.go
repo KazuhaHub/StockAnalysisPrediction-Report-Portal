@@ -153,8 +153,17 @@ type platformRuntimeRow struct {
 // of the retired rows, in id order, so a replacement can record what it replaces.
 func platformActiveRuntime(e migExec, forUpdate bool) (row platformRuntimeRow, found bool, retired []string, err error) {
 	lock := ""
-	if forUpdate && e.s.driver == "postgres" {
+	if forUpdate {
 		lock = " FOR UPDATE"
+	}
+	return platformActiveRuntimeLocked(e, lock)
+}
+
+// platformActiveRuntimeLocked is platformActiveRuntime with the row lock clause
+// chosen by the caller (" FOR SHARE" for a read-only one).
+func platformActiveRuntimeLocked(e migExec, lock string) (row platformRuntimeRow, found bool, retired []string, err error) {
+	if e.s.driver != "postgres" {
+		lock = ""
 	}
 	rows, err := e.query(`SELECT id,deployment_id,controller_epoch,control_revision,revision,enabled,verification_key_fingerprint,sealed_control_key,created_ms,updated_ms FROM app_platform_runtime_bindings ORDER BY id` + lock)
 	if err != nil {

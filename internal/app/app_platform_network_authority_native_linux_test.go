@@ -17,7 +17,7 @@ import (
 // Runs only after actual signed installation/boot/activation and a real normal
 // viewer backend request. This proves current SQL signing/check authority, not
 // an HTTPS execution or a browser network SDK call.
-func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformActorSession, installation string, endpoint platformRuntimeEndpoint) {
+func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformActorSession, installation string, endpoint platformRuntimeEndpoint, app platformServiceEgressApp) {
 	t.Helper()
 	ctx := context.Background()
 	binding := platformBackendRequestBinding{Generation: "1", PolicyRevision: "1", ReleaseSHA256: scalar[string](t, s.st, `SELECT release_sha256 FROM app_platform_activations WHERE installation_id=?`, installation)}
@@ -55,4 +55,5 @@ func testNativePlatformNetworkAuthority(t *testing.T, s *Server, actor platformA
 	}
 	t.Log("PORTAL_NETWORK_CURRENT_GRANT_RECHECKED")
 	testNativePlatformNetworkRoundtrip(t, s, actor, installation, binding, endpoint)
+	testNativePlatformServiceEgress(t, s, installation, endpoint, app)
 }

@@ -15,6 +15,13 @@ import (
 
 // Seeds repository metadata for SQL/intent tests only. The data observation is
 // synthetic; this helper cannot prove runtime admission, execution or readiness.
+// platformFixtureManifestHook and platformFixtureNetworkTarget let one test change what the shared install
+// fixtures declare (capabilities) and review (a reviewed network target, writable installs only) without a
+// fixture of its own. platformServiceEgressFixture sets and restores them; nothing else may touch them, and
+// tests that set them do not run in parallel.
+var platformFixtureManifestHook func(*appplatform.Manifest)
+var platformFixtureNetworkTarget bool
+
 func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOperationLease) {
 	t.Helper()
 	s, session, lease := platformDataIntentFixture(t, pg)
@@ -39,6 +46,9 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 		t.Fatal(err)
 	}
 	manifest.ID = p.AppID
+	if platformFixtureManifestHook != nil {
+		platformFixtureManifestHook(&manifest)
+	}
 	raw, err = json.Marshal(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -49,12 +59,37 @@ func platformCandidateIntentFixture(t *testing.T, pg bool) (*Server, platformOpe
 	}
 	p.Format, p.ReleaseSHA256 = platformManagedInstallFormat, release.sha256
 	p.Runtime = &platformManagedInstallTarget{RuntimeID: runtime.id, DeploymentID: runtime.deploymentID, ControllerEpoch: runtime.controllerEpoch, BindingRevision: runtime.revision, ControlRevision: runtime.controlRevision, Fingerprint: runtime.fingerprint, Profile: transport.ManagedRuntimeProfile{Protocol: transport.ManagedRunnerProtocol, Platform: "linux/amd64", BackendProtocol: transport.ManagedBackendProtocol, SandboxProfile: control.CandidateSandboxProfile, RootFilesystemUUID: platformFixtureID(999), RootInode: "10"}}
-	// The managed release may declare optional capabilities the static template did not.
-	selection, err := platformInstallCapabilitySelection(manifest, p.Runtime)
-	if err != nil {
-		t.Fatal(err)
+	if platformFixtureNetworkTarget {
+		// Only a writable install carries a network target, so the review is writable from here on.
+		network := platformNetworkTargetFixture(t)
+		p.Format = platformWritableInstallFormat
+		p.Runtime.Profile.WritableSandboxProfile = control.WritableCandidateSandboxProfile
+		p.Runtime.NetworkPolicy, p.Runtime.NetworkProfile = network.NetworkPolicy, network.NetworkProfile
 	}
-	p.DeclinedCapabilities = platformDeclinedCapabilities(selection)
+	if platformFixtureManifestHook != nil {
+		// The review lists what the declaration leaves ungranted; keep it exact.
+		selection, err := platformInstallCapabilitySelection(manifest, p.Runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.DeclinedCapabilities = platformDeclinedCapabilities(selection)
+		// The grant rows were written for the declaration this replaces; they stay ungranted until activation.
+		planID := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_operations WHERE id=?`, lease.id)
+		stamp := scalar[int64](t, s.st, `SELECT MIN(created_ms) FROM app_platform_capability_grants WHERE installation_id=?`, lease.installationID)
+		mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=?`, lease.installationID)
+		for _, c := range selection {
+			mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,?,?,?,1,?,?,?)`,
+				lease.installationID, c.capability, 0, c.policy, planID, stamp, stamp)
+		}
+
+	} else {
+		// The managed release may declare optional capabilities the static template did not.
+		selection, err := platformInstallCapabilitySelection(manifest, p.Runtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p.DeclinedCapabilities = platformDeclinedCapabilities(selection)
+	}
 	encoded, err := json.Marshal(p)
 	if err != nil {
 		t.Fatal(err)

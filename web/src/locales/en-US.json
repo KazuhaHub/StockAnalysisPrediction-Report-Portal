@@ -3695,6 +3695,8 @@
   "appPlatform.requiredPermissions": "Required permissions",
   "appPlatform.optionalPermissions": "Optional permissions",
   "appPlatform.declinedPermissions": "Declined optional permissions",
+  "appPlatform.backgroundNetwork": "Background network access",
+  "appPlatform.backgroundNetworkNote": "This app can call the reviewed destinations while no user is signed in.",
   "appPlatform.permissionDiffLabel": "Permission changes",
   "appPlatform.compatibility": "Platform compatibility",
   "appPlatform.resources": "Resource requirements",

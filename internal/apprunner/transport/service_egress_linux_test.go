@@ -119,9 +119,25 @@ func TestServiceEgressDetachedSessionDoesNotHoldServeSlot(t *testing.T) {
 	if r, err := f.request("1", "GET", "/v1/status", "", ""); err != nil || r.status != http.StatusOK {
 		t.Fatalf("a full endpoint disturbed a live session: %+v %v", r, err)
 	}
+	// The endpoint accepts connections on its own goroutine, so a connection
+	// dialled a moment ago may still be queued: wait (bounded) until all eight
+	// hold a slot, then close them and wait until every slot is free again.
+	// Otherwise the next open races them for a slot and is sometimes dropped.
+	waitSlots := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for server.slotsInUse.Load() != want {
+			if time.Now().After(deadline) {
+				t.Fatalf("endpoint slots in use %d, want %d", server.slotsInUse.Load(), want)
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	waitSlots(8)
 	for _, c := range idle {
 		c.Close()
 	}
+	waitSlots(0)
 	// A second open on the same installation replaces the first through the
 	// endpoint too, and the replaced session's connection is closed by the registry.
 	raw2, sig2 := f.signedSession(t)

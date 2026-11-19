@@ -364,6 +364,16 @@ body {
   padding-inline-end: 12px;
 }
 .rp-admin-page-body:has(> .rp-policy-workspace) { overflow: hidden; }
+/* Size the sticky export rail against the scrollport below the admin page header. */
+.rp-admin-page-body:has(> .rp-admin-export) { container-type: size; }
+.rp-admin-export-rail {
+  box-sizing: border-box;
+  max-height: 100cqh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+.rp-export-type-tree { max-height: 360px; overflow-y: auto; }
+.rp-admin-export-rail .rp-export-type-tree { max-height: none; overflow-y: visible; }
 .rp-admin-page-header { flex-shrink: 0; }
 .rp-policy-workspace {
   display: grid;
@@ -708,7 +718,7 @@ body {
   .rp-batch-targets-section > .ant-space-item { min-width: 0; }
   /* Wide tables no longer scroll sideways on a phone: CardTable lays their rows out as cards. */
   .rp-reader-export-policy { grid-template-columns: minmax(0, 1fr); }
-  .rp-export-type-tree { max-height: none !important; overflow: visible !important; }
+  .rp-export-type-tree { max-height: none; overflow: visible; }
   .rp-policy-scope > .ant-typography { display: none; }
 }
 /* A narrow window with a mouse has a classic 6px scrollbar that takes space. It and a 6px gap sit in

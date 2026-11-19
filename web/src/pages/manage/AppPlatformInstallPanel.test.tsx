@@ -196,6 +196,55 @@ describe('application installation confirmation', () => {
     })
   })
 
+  describe('background network access sentence', () => {
+    const sentence = 'appPlatform.backgroundNetworkNote'
+    const release_ = (required: string[], optional: string[]) => ({ release_sha256: release, app_id: 'notes', publisher_id: 'publisher', version: '1.0.0', trust_revision: '1', installable: true, backend: true, required_capabilities: required, optional_capabilities: optional, resources: { memory_mib: 256, cpu_millis: 500, pids: 128 }, platforms: ['linux/amd64'], compatibility: { platform_api: 'a', runner_protocol: 'b' }, data_schema: 1 })
+    const serve = (item: Record<string, unknown>, declined: string[]) => {
+      mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [item], next_cursor: '' } : { items: [], next_cursor: '' }))
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? { ...review(), review: { ...review().review, declined_capabilities: declined } } : { operation_id: operation }))
+    }
+
+    it('tells the administrator when both background.run and network.http are granted', async () => {
+      serve(release_(['background.run', 'network.http'], []), [])
+      mount()
+      await preview()
+      expect(screen.getByText(sentence)).toBeTruthy()
+    })
+
+    it('shows it for an optional network.http only while it is not declined', async () => {
+      serve(release_(['background.run'], ['network.http']), [])
+      mount()
+      await preview()
+      expect(screen.getByText(sentence)).toBeTruthy()
+    })
+
+    it('does not show it when network.http is declined, background.run is absent or only one is declared', async () => {
+      for (const [item, declined] of [
+        [release_(['background.run'], ['network.http']), ['network.http']],
+        [release_(['network.http'], []), []],
+        [release_(['background.run'], []), []],
+        [release_(['reports.read'], ['background.run']), ['background.run']],
+      ] as [Record<string, unknown>, string[]][]) {
+        serve(item, declined)
+        const view = mount()
+        await preview()
+        expect(screen.queryByText(sentence)).toBeNull()
+        view.unmount()
+      }
+    })
+
+    it('shows it for an update review too', async () => {
+      const installed = { ...release_(['background.run', 'network.http'], []), installable: false, reason: 'already_installed', installation_id: operation, current_release_sha256: 'c'.repeat(64), updateable: true }
+      mock.get.mockImplementation((url: string) => Promise.resolve(url === `${root}/releases` ? { items: [installed], next_cursor: '' } : { items: [], next_cursor: '' }))
+      mock.post.mockImplementation((url: string) => Promise.resolve(url.endsWith('/plans') ? updateReview() : { operation_id: operation }))
+      mount()
+      const user = userEvent.setup()
+      await user.click(await screen.findByRole('button', { name: 'appPlatform.reviewUpdate' }))
+      await screen.findByText('appPlatform.permissionDiff')
+      expect(screen.getByText(sentence)).toBeTruthy()
+    })
+  })
+
   it('keeps long lifecycle metadata in bounded local scrollers', async () => {
     mount()
     await preview()
