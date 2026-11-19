@@ -279,8 +279,21 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
 		child.Env = append(child.Env, "PORTAL_NETWORK_NAMESPACE=1", "GODEBUG=netdns=go")
 	}
-	if serviceFixture != nil {
-		child.Env = append(child.Env, platformChildServiceEnv(true, serviceFixture.ipcRoot)...)
+	// The application half of the background egress test needs root and the
+	// runner's IPC tree, which this (root) process has and the child does not:
+	// two extra pipes (child fds 6 and 7) carry its requests here.
+	var egressRequests, egressReplies [2]*os.File
+	if serviceFixture != nil && os.Getenv("PORTAL_NETWORK_NAMESPACE") == "1" {
+		var pipeErr error
+		if egressRequests[0], egressRequests[1], pipeErr = os.Pipe(); pipeErr != nil {
+			t.Fatal(pipeErr)
+		}
+		if egressReplies[0], egressReplies[1], pipeErr = os.Pipe(); pipeErr != nil {
+			t.Fatal(pipeErr)
+		}
+		defer egressRequests[0].Close()
+		defer egressReplies[1].Close()
+		child.Env = append(child.Env, platformServiceEgressChannelEnv+"=1")
 	}
 	if os.Getenv("APP_SDK_BROWSER_DIR") != "" {
 		for _, key := range []string{"APP_SDK_BROWSER_DIR", "APP_SDK_BROWSER_NODE", "APP_SDK_BROWSER_RUNNER", "SDK_BROWSER_PACKAGE", "PLAYWRIGHT_BROWSERS_PATH"} {
@@ -423,6 +436,9 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 		}()
 	}
 	child.ExtraFiles = []*os.File{publicWriter, readyReader, registrationWriter}
+	if egressRequests[0] != nil {
+		child.ExtraFiles = append(child.ExtraFiles, egressRequests[1], egressReplies[0]) // fds 6, 7
+	}
 	child.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 41001, Gid: 41001, Groups: []uint32{41001}}}
 	var output bytes.Buffer
 	child.Stdout = &output
@@ -444,6 +460,15 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	publicWriter.Close()
 	readyReader.Close()
 	registrationWriter.Close()
+	egressServed := make(chan error, 1)
+	if egressRequests[0] != nil {
+		egressRequests[1].Close()
+		egressReplies[0].Close()
+		run := platformServiceEgressParentRunner(serviceFixture.ipcRoot, platformServiceEgressClientBinary(t))
+		go func() { egressServed <- servePlatformServiceEgressApp(egressRequests[0], egressReplies[1], run) }()
+	} else {
+		egressServed <- nil
+	}
 	var message struct{ Raw, Signature []byte }
 	decoder := json.NewDecoder(io.LimitReader(publicReader, 131073))
 	decoder.DisallowUnknownFields()
@@ -470,6 +495,14 @@ func TestPlatformInstallDataEndpointAcceptance(t *testing.T) {
 	}
 	readyWriter.Close()
 	waitErr := child.Wait()
+	select {
+	case err := <-egressServed:
+		if err != nil {
+			t.Error("serving the egress application requests:", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Error("the egress application loop did not end with the child")
+	}
 	if platformLifecycleBrowserConfigured() {
 		if err := copyPlatformLifecycleBrowserEvidence(
 			lifecycleEvidence, lifecycleEvidenceTarget); err != nil {

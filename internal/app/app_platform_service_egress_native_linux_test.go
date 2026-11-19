@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -13,8 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -33,36 +36,149 @@ import (
 // It emits PORTAL_SERVICE_EGRESS_HTTPS, PORTAL_SERVICE_EGRESS_PRE_IO_REVOKED,
 // PORTAL_SERVICE_EGRESS_POST_IO_UNCERTAIN and PORTAL_SERVICE_EGRESS_NOTICE.
 
-// platformServiceIPCRootEnv carries the socket root of the runner service from
-// the acceptance parent (which starts the service) to the Portal child process
-// (which runs this test). A package variable would not cross that process
-// boundary, so the value is passed explicitly: parent environment, child
-// environment, then a parameter of every function down to the test.
-const platformServiceIPCRootEnv = "PORTAL_SERVICE_IPC_ROOT"
+// The application half of this test runs in the acceptance PARENT. The Portal
+// child is not root and the runner's IPC tree is closed to it, so it cannot reach
+// the broker socket (not even to open a descriptor on its directory). It asks the
+// parent instead, over two extra pipes (child fds 6 and 7): a request names the
+// installation, generation and broker call; the parent (root) runs the uid-65532
+// client against that generation's broker socket and answers with what the client
+// saw. The child asserts on the answers and prints the PORTAL_SERVICE_EGRESS_*
+// markers, which the parent collects from the child's output as for every other
+// marker.
+const (
+	platformServiceEgressChannelEnv     = "PORTAL_SERVICE_EGRESS_CHANNEL"
+	platformServiceEgressChannelTimeout = 90 * time.Second
+	platformServiceEgressRequestLimit   = 256 << 10
+)
 
-// platformChildServiceEnv is what the parent adds to the Portal child's
-// environment; without the service there is nothing to add.
-func platformChildServiceEnv(useService bool, ipcRoot string) []string {
-	if !useService {
+type platformServiceEgressRequest struct {
+	Installation string `json:"installation"`
+	Generation   int64  `json:"generation"`
+	Method       string `json:"method"`
+	Path         string `json:"path"`
+	Body         string `json:"body"`
+}
+
+type platformServiceEgressResponse struct {
+	Status int    `json:"status"`
+	Body   string `json:"body"`
+	Error  string `json:"error,omitempty"`
+}
+
+// platformServiceEgressApp is the child's view of the application: one broker
+// request, answered by whoever can reach the socket.
+type platformServiceEgressApp interface {
+	call(r platformServiceEgressRequest) (platformServiceEgressResponse, error)
+}
+
+// platformServiceEgressChannel is the child's end of the two pipes.
+type platformServiceEgressChannel struct {
+	mu      sync.Mutex
+	request io.Writer
+	reply   *json.Decoder
+	timeout time.Duration
+}
+
+func newPlatformServiceEgressChannel(request io.Writer, reply io.Reader, timeout time.Duration) *platformServiceEgressChannel {
+	return &platformServiceEgressChannel{request: request, reply: json.NewDecoder(io.LimitReader(reply, 64<<20)), timeout: timeout}
+}
+
+func (c *platformServiceEgressChannel) call(r platformServiceEgressRequest) (platformServiceEgressResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err := json.NewEncoder(c.request).Encode(r); err != nil {
+		return platformServiceEgressResponse{}, fmt.Errorf("sending the request to the acceptance parent: %w", err)
+	}
+	type result struct {
+		r   platformServiceEgressResponse
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out platformServiceEgressResponse
+		err := c.reply.Decode(&out)
+		done <- result{out, err}
+	}()
+	select {
+	case res := <-done:
+		if res.err != nil {
+			return platformServiceEgressResponse{}, fmt.Errorf("reading the parent's answer: %w", res.err)
+		}
+		if res.r.Error != "" {
+			return res.r, errors.New("the acceptance parent could not run the client: " + res.r.Error)
+		}
+		return res.r, nil
+	case <-time.After(c.timeout):
+		return platformServiceEgressResponse{}, fmt.Errorf("the acceptance parent did not answer %s %s within %v", r.Method, r.Path, c.timeout)
+	}
+}
+
+// platformServiceEgressAppFromChild is the child's side of the plumbing: the
+// channel on fds 6 and 7 when the parent opened it, nil otherwise.
+func platformServiceEgressAppFromChild() platformServiceEgressApp {
+	if os.Getenv(platformServiceEgressChannelEnv) != "1" {
 		return nil
 	}
-	return []string{platformServiceIPCRootEnv + "=" + ipcRoot}
+	return newPlatformServiceEgressChannel(os.NewFile(6, "egress-request"), os.NewFile(7, "egress-reply"), platformServiceEgressChannelTimeout)
 }
 
-// platformServiceIPCRootFromEnv is the child's side of it: the root is absolute
-// and clean, or there is none.
-func platformServiceIPCRootFromEnv(getenv func(string) string) string {
-	root := getenv(platformServiceIPCRootEnv)
-	if root == "" || !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return ""
+var platformServiceEgressAllowedPaths = map[string]string{
+	"/v1/status": "GET", "/v1/network/http": "POST", "/v1/notifications": "POST",
+}
+
+// servePlatformServiceEgressApp is the parent's side: it answers requests until
+// the child closes its end. run is what actually reaches the broker (the real one
+// needs root); the requests are validated first, so nothing but the three broker
+// routes of a well-formed installation and generation ever reaches it.
+func servePlatformServiceEgressApp(requests io.Reader, replies io.Writer, run func(platformServiceEgressRequest) (platformServiceEgressResponse, error)) error {
+	decoder := json.NewDecoder(io.LimitReader(requests, 1<<30))
+	decoder.DisallowUnknownFields()
+	encoder := json.NewEncoder(replies)
+	for {
+		var r platformServiceEgressRequest
+		if err := decoder.Decode(&r); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		var out platformServiceEgressResponse
+		switch {
+		case !platformValidUUID(r.Installation) || r.Generation < 1:
+			out.Error = "invalid installation or generation"
+		case platformServiceEgressAllowedPaths[r.Path] != r.Method || len(r.Body) > platformServiceEgressRequestLimit:
+			out.Error = "unsupported request"
+		default:
+			var err error
+			if out, err = run(r); err != nil {
+				out = platformServiceEgressResponse{Error: err.Error()}
+			}
+		}
+		if err := encoder.Encode(out); err != nil {
+			return err
+		}
 	}
-	return root
 }
 
-// platformServiceEgressBrokerSocket is the application broker socket the runner
-// serves for one installation generation.
-func platformServiceEgressBrokerSocket(ipcRoot, installation string, generation int64) string {
-	return filepath.Join(platformServiceEgressBrokerDir(ipcRoot, installation, generation), "broker.sock")
+// platformServiceEgressParentRunner is the real run for the parent: the broker
+// directory of the generation, checked for search permission by other users (the
+// container's uid 65532 has none other), then the client process.
+func platformServiceEgressParentRunner(ipcRoot, clientBinary string) func(platformServiceEgressRequest) (platformServiceEgressResponse, error) {
+	return func(r platformServiceEgressRequest) (platformServiceEgressResponse, error) {
+		dir := platformServiceEgressBrokerDir(ipcRoot, r.Installation, r.Generation)
+		info, err := os.Stat(dir)
+		if err != nil {
+			return platformServiceEgressResponse{}, err
+		}
+		if !platformServiceEgressClientCanSearch(info.Mode()) {
+			return platformServiceEgressResponse{}, fmt.Errorf("uid 65532 may not search the broker directory %s (mode %v); the container's user could not either", dir, info.Mode())
+		}
+		status, body, err := platformServiceEgressRunClient(clientBinary, dir, r.Method, r.Path, r.Body)
+		if err != nil {
+			return platformServiceEgressResponse{}, err
+		}
+		return platformServiceEgressResponse{Status: status, Body: body}, nil
+	}
 }
 
 func platformServiceEgressBrokerDir(ipcRoot, installation string, generation int64) string {
@@ -127,13 +243,12 @@ func TestPlatformServiceEgressNativeClientProcess(t *testing.T) {
 	fmt.Printf("RESULT %d %s\n", response.StatusCode, bytes.TrimSpace(body))
 }
 
-// platformServiceEgressAppCall runs one broker request as uid 65532 and returns
-// the status and body the application saw.
-func platformServiceEgressAppCall(t *testing.T, binary, brokerDir, method, path, body string) (int, string) {
-	t.Helper()
+// platformServiceEgressRunClient runs one broker request as uid 65532 and
+// returns the status and body the application saw.
+func platformServiceEgressRunClient(binary, brokerDir, method, path, body string) (int, string, error) {
 	fd, err := unix.Open(brokerDir, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		t.Fatal("opening the broker directory for the application:", err)
+		return 0, "", fmt.Errorf("opening the broker directory for the application: %w", err)
 	}
 	dir := os.NewFile(uintptr(fd), brokerDir)
 	defer dir.Close()
@@ -150,20 +265,19 @@ func platformServiceEgressAppCall(t *testing.T, binary, brokerDir, method, path,
 	}
 	out, err := child.CombinedOutput()
 	if err != nil {
-		t.Fatalf("application process: %v\n%s", err, out)
+		return 0, "", fmt.Errorf("application process: %w\n%s", err, out)
 	}
 	for _, line := range strings.Split(string(out), "\n") {
 		if rest, ok := strings.CutPrefix(line, "RESULT "); ok {
 			status, text, _ := strings.Cut(rest, " ")
 			code, err := strconv.Atoi(status)
 			if err != nil {
-				t.Fatal("application process answered", line)
+				return 0, "", errors.New("application process answered " + line)
 			}
-			return code, text
+			return code, text, nil
 		}
 	}
-	t.Fatalf("application process printed no result:\n%s", out)
-	return 0, ""
+	return 0, "", fmt.Errorf("application process printed no result:\n%s", out)
 }
 
 // platformServiceEgressClientBinary installs a copy of this test binary where
@@ -228,51 +342,38 @@ func platformServiceEgressEventIDs(t *testing.T, s *Server) []string {
 	return ids
 }
 
-func testNativePlatformServiceEgress(t *testing.T, s *Server, installation string, endpoint platformRuntimeEndpoint, ipcRoot string) {
+func testNativePlatformServiceEgress(t *testing.T, s *Server, installation string, endpoint platformRuntimeEndpoint, app platformServiceEgressApp) {
 	t.Helper()
 	if os.Getenv("PORTAL_NETWORK_NAMESPACE") != "1" {
 		t.Fatal("the actual HTTPS fixture is mandatory: PORTAL_NETWORK_NAMESPACE is not 1")
 	}
-	if ipcRoot == "" {
-		t.Fatal("the runner socket root is mandatory: " + platformServiceIPCRootEnv + " was not passed to this process")
+	if app == nil {
+		t.Fatal("the acceptance parent's application channel is mandatory: " + platformServiceEgressChannelEnv + " is not 1 in this process")
 	}
 	ctx := context.Background()
 	generation := scalar[int64](t, s.st, `SELECT generation FROM app_platform_installations WHERE id=?`, installation)
-	clientBinary := platformServiceEgressClientBinary(t)
+	appCall := func(method, path, body string) (int, string) {
+		t.Helper()
+		out, err := app.call(platformServiceEgressRequest{Installation: installation, Generation: generation, Method: method, Path: path, Body: body})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.Status, out.Body
+	}
 	// The installation declares no background.run (the foreground fixture does not
 	// need it); give it the row the reviewed selection would, for this test only.
-	// Everything the test changes is put back by a cleanup that runs however the
-	// test ends: the original network.http state, the background.run row, and the
-	// notification events it captured.
-	grantWas := scalar[int](t, s.st, `SELECT granted FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	eventsBefore := map[string]bool{}
-	for _, id := range platformServiceEgressEventIDs(t, s) {
-		eventsBefore[id] = true
-	}
+	// The steps that follow this one (ancestor OU access, policy changes, more
+	// launches) check the launch capability snapshot, which an extra granted
+	// capability would break, so everything the test changes is put back right at
+	// the end of this function, and again by a cleanup if the test ends early.
+	state := platformServiceEgressCaptureState(t, s, installation)
 	var withdrawal <-chan error
 	t.Cleanup(func() {
-		if withdrawal != nil {
-			select {
-			case <-withdrawal:
-			case <-time.After(5 * time.Second):
-			}
-		}
-		mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=? WHERE installation_id=? AND capability='network.http'`, grantWas, installation)
-		mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
-		for _, id := range platformServiceEgressEventIDs(t, s) {
-			if eventsBefore[id] {
-				continue
-			}
-			mustExec(t, s.st, `DELETE FROM notification_attempts WHERE delivery_id IN (SELECT id FROM notification_deliveries WHERE event_id=?)`, id)
-			mustExec(t, s.st, `DELETE FROM notification_deliveries WHERE event_id=?`, id)
-			mustExec(t, s.st, `DELETE FROM notification_recipients WHERE event_id=?`, id)
-			mustExec(t, s.st, `DELETE FROM notification_events WHERE id=?`, id)
+		if err := state.restore(s, installation, withdrawal); err != nil {
+			t.Error("restoring the installation after the egress test:", err)
 		}
 	})
-	review := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	stamp := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
-	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,'background.run',1,'{}',?,?,?,?)`, installation, policy, review, stamp, stamp)
+	state.addBackgroundRun(t, s, installation)
 	// The fixture app (notes-writer-notify-demo) declares secrets.use but requires
 	// no setup binding, so nothing is missing; if that ever changes this says so
 	// here instead of as an opaque "no session" later.
@@ -296,17 +397,13 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if live == nil || live.ended() {
 		t.Fatal("the coordinator opened no session on the real runner")
 	}
-	brokerDir := platformServiceEgressBrokerDir(ipcRoot, installation, generation)
-	if info, err := os.Stat(brokerDir); err != nil || !platformServiceEgressClientCanSearch(info.Mode()) {
-		t.Fatal("uid 65532 may not search the broker directory (the container's user could not either)", brokerDir, err, info)
-	}
-	if status, body := platformServiceEgressAppCall(t, clientBinary, brokerDir, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
+	if status, body := appCall("GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("broker status", status, body)
 	}
 	before := platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap)
 	request := func(path string) (int, string) {
 		raw, _ := json.Marshal(map[string]string{"requestId": "native-" + strconv.FormatInt(time.Now().UnixNano(), 36), "method": "GET", "url": "https://api.example.com" + path, "accept": "application/json", "contentType": "", "bodyBase64": ""})
-		return platformServiceEgressAppCall(t, clientBinary, brokerDir, "POST", "/v1/network/http", string(raw))
+		return appCall("POST", "/v1/network/http", string(raw))
 	}
 	status, body := request("/v1/success")
 	if status != 200 || !strings.Contains(body, `"status":200`) || platformNetworkFixtureCountUpTo(t, platformServiceEgressFixtureHitCap) != before+1 {
@@ -343,7 +440,7 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	events := scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events`)
 	notice := func(title string) (int, string) {
 		raw, _ := json.Marshal(map[string]string{"occurrenceId": "native-egress-1", "title": title, "message": "Through the broker", "severity": "info"})
-		return platformServiceEgressAppCall(t, clientBinary, brokerDir, "POST", "/v1/notifications", string(raw))
+		return appCall("POST", "/v1/notifications", string(raw))
 	}
 	status, body = notice("Native notice")
 	if status != 200 || !strings.Contains(body, `"created":true`) {
@@ -368,38 +465,214 @@ func testNativePlatformServiceEgress(t *testing.T, s *Server, installation strin
 	if opened := scalar[int](t, s.st, `SELECT COUNT(*) FROM audit_log WHERE action=? AND target_id=?`, platformServiceEgressAuditOpened, installation); opened < 1 {
 		t.Fatal("no opened audit")
 	}
+	// Put everything back now, and prove the grants are exactly as they were: the
+	// launch capability snapshot compares them with the reviewed selection.
+	if err := state.restore(s, installation, withdrawal); err != nil {
+		t.Fatal("restoring the installation after the egress test:", err)
+	}
 }
 
-// The plumbing of the runner socket root from the acceptance parent to the
-// Portal child is checked here, without root: what the parent puts in the
-// child's environment is what the child reads back, and a missing or unsafe
-// value reads as none (which the native test refuses with a message naming it).
-func TestPlatformServiceEgressNativeRootPlumbing(t *testing.T) {
-	env := platformChildServiceEnv(true, "/run/portal-test/ipc")
-	if len(env) != 1 || env[0] != "PORTAL_SERVICE_IPC_ROOT=/run/portal-test/ipc" {
-		t.Fatal("child environment", env)
+// platformServiceEgressRestoreState is what the egress test changes in the database and
+// how to undo it. restore is idempotent: the first call undoes, later ones only
+// re-check.
+type platformServiceEgressRestoreState struct {
+	grants        []string
+	events        map[string]bool
+	insertedBgRun bool
+	restored      bool
+}
+
+func platformServiceEgressGrantRows(t *testing.T, s *Server, installation string) []string {
+	t.Helper()
+	rows, err := s.st.query(`SELECT capability||'|'||granted||'|'||policy_json||'|'||policy_revision||'|'||review_plan_id||'|'||created_ms||'|'||updated_ms FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if platformChildServiceEnv(false, "/run/portal-test/ipc") != nil {
-		t.Fatal("a child without the service was given a root")
-	}
-	lookup := func(values ...string) func(string) string {
-		child := map[string]string{}
-		for _, kv := range values {
-			k, v, _ := strings.Cut(kv, "=")
-			child[k] = v
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
 		}
-		return func(k string) string { return child[k] }
+		out = append(out, row)
 	}
-	if got := platformServiceIPCRootFromEnv(lookup(env...)); got != "/run/portal-test/ipc" {
-		t.Fatal("the child did not read back the root", got)
+	return out
+}
+
+func platformServiceEgressCaptureState(t *testing.T, s *Server, installation string) *platformServiceEgressRestoreState {
+	t.Helper()
+	st := &platformServiceEgressRestoreState{grants: platformServiceEgressGrantRows(t, s, installation), events: map[string]bool{}}
+	for _, id := range platformServiceEgressEventIDs(t, s) {
+		st.events[id] = true
 	}
-	for _, bad := range []string{"", "relative/ipc", "/run/portal-test/../ipc", "/run/portal-test/ipc/"} {
-		if got := platformServiceIPCRootFromEnv(lookup("PORTAL_SERVICE_IPC_ROOT=" + bad)); got != "" {
-			t.Fatal("unsafe root accepted", bad, got)
+	return st
+}
+
+// addBackgroundRun gives the installation the background.run row the reviewed
+// selection would, copied from its network.http grant; restore removes it again.
+func (st *platformServiceEgressRestoreState) addBackgroundRun(t *testing.T, s *Server, installation string) {
+	t.Helper()
+	review := scalar[string](t, s.st, `SELECT review_plan_id FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	policy := scalar[int64](t, s.st, `SELECT policy_revision FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	stamp := scalar[int64](t, s.st, `SELECT created_ms FROM app_platform_capability_grants WHERE installation_id=? AND capability='network.http'`, installation)
+	mustExec(t, s.st, `INSERT INTO app_platform_capability_grants(installation_id,capability,granted,policy_json,policy_revision,review_plan_id,created_ms,updated_ms) VALUES(?,'background.run',1,'{}',?,?,?,?)`, installation, policy, review, stamp, stamp)
+	st.insertedBgRun = true
+}
+
+// restore waits for the withdrawal goroutine, puts network.http back as it was,
+// removes the background.run row it added and the notification rows it caused,
+// then compares every grant row of the installation with the captured ones. It
+// does that once: the steps after the egress test change the grants for good (a
+// policy revision bump), so the fallback cleanup at the end of the whole chain
+// must not compare again.
+func (st *platformServiceEgressRestoreState) restore(s *Server, installation string, withdrawal <-chan error) error {
+	if st.restored {
+		return nil
+	}
+	{
+		if withdrawal != nil {
+			select {
+			case <-withdrawal:
+			case <-time.After(5 * time.Second):
+			}
+		}
+		var was int
+		for _, row := range st.grants {
+			if fields := strings.Split(row, "|"); fields[0] == "network.http" {
+				was, _ = strconv.Atoi(fields[1])
+			}
+		}
+		steps := []struct {
+			q    string
+			args []any
+		}{{`UPDATE app_platform_capability_grants SET granted=? WHERE installation_id=? AND capability='network.http'`, []any{was, installation}}}
+		if st.insertedBgRun {
+			steps = append(steps, struct {
+				q    string
+				args []any
+			}{`DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, []any{installation}})
+		}
+		ids, err := platformServiceEgressEventIDsErr(s)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if st.events[id] {
+				continue
+			}
+			for _, q := range []string{
+				`DELETE FROM notification_attempts WHERE delivery_id IN (SELECT id FROM notification_deliveries WHERE event_id=?)`,
+				`DELETE FROM notification_deliveries WHERE event_id=?`,
+				`DELETE FROM notification_recipients WHERE event_id=?`,
+				`DELETE FROM notification_events WHERE id=?`,
+			} {
+				steps = append(steps, struct {
+					q    string
+					args []any
+				}{q, []any{id}})
+			}
+		}
+		for _, step := range steps {
+			if _, err := s.st.exec(step.q, step.args...); err != nil {
+				return err
+			}
+		}
+		st.restored = true
+	}
+	rows, err := s.st.query(`SELECT capability||'|'||granted||'|'||policy_json||'|'||policy_revision||'|'||review_plan_id||'|'||created_ms||'|'||updated_ms FROM app_platform_capability_grants WHERE installation_id=? ORDER BY capability`, installation)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	var now []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			return err
+		}
+		now = append(now, row)
+	}
+	if !slices.Equal(now, st.grants) {
+		return fmt.Errorf("grant rows differ from before the test:\nbefore %q\nafter  %q", st.grants, now)
+	}
+	return nil
+}
+
+func platformServiceEgressEventIDsErr(s *Server) ([]string, error) {
+	rows, err := s.st.query(`SELECT id FROM notification_events`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// The request and reply plumbing between the Portal child and the acceptance
+// parent, over pipes and without root: a request validated and answered by the
+// parent's run function, a rejected request, a run failure, the parent never
+// answering (a bounded, clear failure), and the end of the loop at EOF.
+func TestPlatformServiceEgressNativeChannelPlumbing(t *testing.T) {
+	reqR, reqW, _ := os.Pipe()
+	repR, repW, _ := os.Pipe()
+	var seen []platformServiceEgressRequest
+	served := make(chan error, 1)
+	go func() {
+		served <- servePlatformServiceEgressApp(reqR, repW, func(r platformServiceEgressRequest) (platformServiceEgressResponse, error) {
+			seen = append(seen, r)
+			if strings.Contains(r.Body, "boom") {
+				return platformServiceEgressResponse{}, errors.New("client failed")
+			}
+			return platformServiceEgressResponse{Status: 200, Body: `{"ok":true}`}, nil
+		})
+	}()
+	channel := newPlatformServiceEgressChannel(reqW, repR, 5*time.Second)
+	id := "11111111-2222-4333-8444-555555555555"
+	good := platformServiceEgressRequest{Installation: id, Generation: 1, Method: "POST", Path: "/v1/network/http", Body: "{}"}
+	if out, err := channel.call(good); err != nil || out.Status != 200 || out.Body != `{"ok":true}` {
+		t.Fatal("answered request", out, err)
+	}
+	for name, bad := range map[string]platformServiceEgressRequest{
+		"installation": {Installation: "../x", Generation: 1, Method: "GET", Path: "/v1/status"},
+		"generation":   {Installation: id, Generation: 0, Method: "GET", Path: "/v1/status"},
+		"path":         {Installation: id, Generation: 1, Method: "GET", Path: "/v1/other"},
+		"method":       {Installation: id, Generation: 1, Method: "GET", Path: "/v1/network/http"},
+	} {
+		if _, err := channel.call(bad); err == nil {
+			t.Fatal("an invalid request was run:", name)
 		}
 	}
-	if got := platformServiceEgressBrokerSocket("/run/portal-test/ipc", "inst", 3); got != "/run/portal-test/ipc/inst/3/broker/broker.sock" {
-		t.Fatal("broker socket", got)
+	boom := good
+	boom.Body = "boom"
+	if _, err := channel.call(boom); err == nil || !strings.Contains(err.Error(), "client failed") {
+		t.Fatal("a failing client was not reported", err)
+	}
+	if len(seen) != 2 {
+		t.Fatal("only the valid requests reach the run function", len(seen))
+	}
+	reqW.Close()
+	if err := <-served; err != nil {
+		t.Fatal("the serve loop did not end cleanly at EOF", err)
+	}
+	// A parent that never answers fails the child within its timeout.
+	silentReqR, silentReqW, _ := os.Pipe()
+	silentRepR, silentRepW, _ := os.Pipe()
+	defer silentReqR.Close()
+	defer silentRepW.Close()
+	silent := newPlatformServiceEgressChannel(silentReqW, silentRepR, 200*time.Millisecond)
+	if _, err := silent.call(good); err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Fatal("a silent parent was not reported", err)
+	}
+	if got := platformServiceEgressBrokerDir("/run/portal-test/ipc", "inst", 3); got != "/run/portal-test/ipc/inst/3/broker" {
+		t.Fatal("broker dir", got)
 	}
 }
 
@@ -434,11 +707,49 @@ func TestPlatformServiceEgressNativeClientDryRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := platformServiceEgressClientBinary(t)
-	if status, body := platformServiceEgressAppCall(t, binary, dir, "GET", "/v1/status", ""); status != 200 || !strings.Contains(body, `"egress":"available"`) {
+	if status, body, err := platformServiceEgressRunClient(binary, dir, "GET", "/v1/status", ""); err != nil || status != 200 || !strings.Contains(body, `"egress":"available"`) {
 		t.Fatal("status through the client process", status, body)
 	}
-	status, body := platformServiceEgressAppCall(t, binary, dir, "POST", "/v1/network/http", `{}`)
+	status, body, err := platformServiceEgressRunClient(binary, dir, "POST", "/v1/network/http", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if status != 502 || platformServiceEgressErrorCode(body) != "uncertain" {
 		t.Fatal("error through the client process", status, body)
+	}
+}
+
+// The restore helper puts back exactly what the egress test changes, leaves what
+// it did not add, is idempotent, and notices a difference it cannot undo.
+func TestPlatformServiceEgressNativeStateRestore(t *testing.T) {
+	s, installation := platformServiceEgressFixture(t, false, true)
+	// The unit fixture already grants background.run; take it away so the helper
+	// adds it the way the native fixture needs.
+	mustExec(t, s.st, `DELETE FROM app_platform_capability_grants WHERE installation_id=? AND capability='background.run'`, installation)
+	state := platformServiceEgressCaptureState(t, s, installation)
+	state.addBackgroundRun(t, s, installation)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET granted=0 WHERE installation_id=? AND capability='network.http'`, installation)
+	now := time.Now().UnixMilli()
+	mustExec(t, s.st, `INSERT INTO notification_events(id,source_key,event_type,payload,created_at,expires_at) VALUES('egress-restore-1','egress-restore-1','app.notice','{}',?,?)`, now, now+1000)
+	if err := state.restore(s, installation, nil); err != nil {
+		t.Fatal(err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM notification_events WHERE id='egress-restore-1'`) != 0 {
+		t.Fatal("the captured notification event was kept")
+	}
+	// Later steps change the grants for good; the fallback cleanup that calls
+	// restore again at the end of the chain must neither undo nor object to that.
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=2 WHERE installation_id=?`, installation)
+	if err := state.restore(s, installation, nil); err != nil {
+		t.Fatal("second restore", err)
+	}
+	if scalar[int](t, s.st, `SELECT COUNT(*) FROM app_platform_capability_grants WHERE installation_id=? AND policy_revision=2`, installation) == 0 {
+		t.Fatal("the second restore undid a later change")
+	}
+	// Something the helper cannot undo is a difference it reports, on the first call.
+	other := platformServiceEgressCaptureState(t, s, installation)
+	mustExec(t, s.st, `UPDATE app_platform_capability_grants SET policy_revision=policy_revision+1 WHERE installation_id=? AND capability='notifications.publish'`, installation)
+	if err := other.restore(s, installation, nil); err == nil {
+		t.Fatal("an unrestorable difference was not reported")
 	}
 }
